@@ -1,0 +1,21 @@
+---
+kind: pipeline
+type: docker
+name: default
+
+steps:
+
+###
+### Mirror the current repository state to Github
+###
+
+- name: github-mirror
+  image: alpine
+  environment:
+    SSH_PUBKEY:
+      from_secret: ssh_pubkey
+    SSH_PRIVKEY:
+      from_secret: ssh_privkey
+
+  commands:
+    - . .drone/github-mirror.sh
