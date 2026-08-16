@@ -1,0 +1,46 @@
+[project]
+name = "songhive"
+description = "A federated and self-hosted music sharing service"
+dynamic = ["version", "dependencies", "optional-dependencies", "entry-points"]
+authors = [
+  {name = "Fabio Manganiello", email = "fabio@manganiello.tech"},
+]
+
+classifiers=[
+    "Topic :: Utilities",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Development Status :: 4 - Beta",
+]
+
+readme = "README.md"
+requires-python = '>= 3.10'
+keywords = [
+  "music",
+  "activitypub",
+  "fediverse",
+  "indieweb",
+  "streaming",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "songhive.__version__"}
+dependencies = {file = "requirements.txt"}
+
+[project.urls]
+homepage = "https://git.platypush.tech/blacklight/songhive"
+repository = "https://git.platypush.tech/blacklight/songhive"
+
+[project.scripts]
+songhive = 'songhive:main'
+
+[tool.bumpversion]
+current_version = "0.0.1"
+commit = true
+tag = true
+
+[[tool.bumpversion.files]]
+filename = "CHANGELOG.md"
+search = "Unreleased"
+
+[[tool.bumpversion.files]]
+filename = "version.py"
