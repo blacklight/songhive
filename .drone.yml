@@ -12,7 +12,7 @@ steps:
 - name: tests
   image: python:3.12
   commands:
-    - pip install -e ".[dev]" 2>/dev/null || pip install -e . -r requirements-dev.txt
+    - pip install -e . -r requirements-dev.txt
     - python -m pytest --cov=songhive --cov-report=term-missing
 
 ###
