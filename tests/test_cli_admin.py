@@ -54,7 +54,7 @@ async def test_promote_user_handler(db_session, monkeypatch, capsys):
     """Test the promote-user handler."""
     from songhive.services.auth import create_user
 
-    user = await create_user(db_session, "alice", "alice@example.com", "secret", is_admin=False)
+    user = await create_user(db_session, "alice", "alice@example.com", "secret", role="user")
     await db_session.flush()
 
     monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))

@@ -64,10 +64,25 @@ async def test_create_user(db_session):
 
 
 @pytest.mark.asyncio
-async def test_create_user_admin_flag(db_session):
-    """Test that create_user respects the is_admin flag."""
-    user = await create_user(db_session, "admin", "admin@example.com", "secret", is_admin=True)
+async def test_create_user_admin_role(db_session):
+    """Test that create_user respects the role argument."""
+    user = await create_user(db_session, "admin", "admin@example.com", "secret", role="admin")
     assert user.is_admin is True
+
+
+@pytest.mark.asyncio
+async def test_create_user_moderator_role(db_session):
+    """Test that create_user accepts the moderator role."""
+    user = await create_user(db_session, "mod", "mod@example.com", "secret", role="moderator")
+    assert user.role == "moderator"
+    assert user.is_admin is False
+
+
+@pytest.mark.asyncio
+async def test_create_user_rejects_invalid_role(db_session):
+    """Test that create_user rejects an unknown role."""
+    with pytest.raises(ValueError, match="Invalid role"):
+        await create_user(db_session, "hacker", "hacker@example.com", "secret", role="superuser")
 
 
 @pytest.mark.asyncio
@@ -180,7 +195,7 @@ async def test_get_current_user_raises_401():
 @pytest.mark.asyncio
 async def test_require_admin_allows_admin():
     """Test that require_admin returns an admin user."""
-    user = User(username="admin", email="admin@example.com", password_hash="x", is_admin=True)
+    user = User(username="admin", email="admin@example.com", password_hash="x", role="admin")
     result = await require_admin(user)
     assert result is user
 
@@ -188,7 +203,7 @@ async def test_require_admin_allows_admin():
 @pytest.mark.asyncio
 async def test_require_admin_rejects_non_admin():
     """Test that require_admin rejects non-admin users with 403."""
-    user = User(username="user", email="user@example.com", password_hash="x", is_admin=False)
+    user = User(username="user", email="user@example.com", password_hash="x", role="user")
     with pytest.raises(HTTPException) as exc_info:
         await require_admin(user)
     assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN

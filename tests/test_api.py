@@ -2,6 +2,12 @@
 Basic API tests.
 """
 
+import pytest
+from pydantic import ValidationError
+
+from songhive.api.routes.admin import AdminUserResponse
+from songhive.models.user import UserRole
+
 
 def test_app_creates(client):
     """Test that the FastAPI app can be created and responds."""
@@ -71,3 +77,28 @@ def test_cors_preflight(client):
     assert response.status_code == 200
     assert "http://localhost:8080" in response.headers.get("Access-Control-Allow-Origin", "")
     assert response.headers.get("Access-Control-Allow-Credentials") == "true"
+
+
+def test_admin_user_response_role_enum():
+    """Test that AdminUserResponse role is a UserRole enum and serializes to a string."""
+    response = AdminUserResponse(
+        id="user-1",
+        username="alice",
+        email="alice@example.com",
+        is_active=True,
+        role="admin",
+    )
+    assert response.role == UserRole.ADMIN
+    assert response.model_dump()["role"] == "admin"
+
+
+def test_admin_user_response_rejects_invalid_role():
+    """Test that AdminUserResponse rejects an invalid role."""
+    with pytest.raises(ValidationError):
+        AdminUserResponse(
+            id="user-1",
+            username="alice",
+            email="alice@example.com",
+            is_active=True,
+            role="superuser",
+        )

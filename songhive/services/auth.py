@@ -6,7 +6,7 @@ import bcrypt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.user import User
+from ..models.user import User, VALID_ROLES
 
 
 def hash_password(password: str) -> str:
@@ -36,14 +36,17 @@ async def create_user(
     username: str,
     email: str,
     password: str,
-    is_admin: bool = False,
+    role: str = "user",
 ) -> User:
     """Create a new user."""
+    if role not in VALID_ROLES:
+        raise ValueError(f"Invalid role: {role}")
+
     user = User(
         username=username,
         email=email,
         password_hash=hash_password(password),
-        is_admin=is_admin,
+        role=role,
     )
     session.add(user)
     await session.flush()

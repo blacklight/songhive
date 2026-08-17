@@ -7,6 +7,7 @@ from typing import List
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from ...models.user import UserRole
 from ..deps import require_admin
 
 router = APIRouter(prefix="/admin")
@@ -17,7 +18,7 @@ class AdminUserResponse(BaseModel):
     username: str
     email: str
     is_active: bool
-    is_admin: bool
+    role: UserRole
 
 
 @router.get("/users", response_model=List[AdminUserResponse])

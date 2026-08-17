@@ -20,7 +20,8 @@ def test_user_model_defaults():
     assert user.email == "alice@example.com"
     assert user.id is None
     assert user.is_active is None
-    assert user.is_admin is None
+    assert user.role is None
+    assert user.is_admin is False
     assert user.display_name is None
     assert user.bio is None
     assert user.avatar_url is None
@@ -39,6 +40,10 @@ async def test_user_db_defaults(db_session):
     assert user.id is not None
     assert user.is_active is True
     assert user.is_admin is False
+    assert user.email_verified is False
+    assert user.email_verification_token is None
+    assert user.password_reset_token is None
+    assert user.password_reset_expires_at is None
 
 
 def test_user_model_with_optional_fields():
@@ -50,7 +55,7 @@ def test_user_model_with_optional_fields():
         display_name="Alice",
         bio="Hello",
         avatar_url="https://example.com/avatar.png",
-        is_admin=True,
+        role="admin",
     )
     assert user.display_name == "Alice"
     assert user.bio == "Hello"

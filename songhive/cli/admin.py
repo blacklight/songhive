@@ -35,12 +35,13 @@ def _create_admin_parser() -> argparse.ArgumentParser:
 
 async def _handle_create_user(args):
     async with get_session() as session:
+        role = "admin" if args.admin else "user"
         user = await create_user(
             session,
             username=args.username,
             email=args.email,
             password=args.password,
-            is_admin=args.admin,
+            role=role,
         )
         print(f"User '{user.username}' created successfully (id={user.id})")
 
@@ -51,7 +52,7 @@ async def _handle_promote_user(args):
         if not user:
             print(f"Error: user '{args.username}' not found", file=sys.stderr)
             sys.exit(1)
-        user.is_admin = True
+        user.role = "admin"
         await session.flush()
         print(f"User '{user.username}' promoted to admin")
 
