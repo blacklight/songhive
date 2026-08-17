@@ -25,7 +25,12 @@ VALID_ROLES = {r.value for r in UserRole}
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = CheckConstraint(f"role IN {', '.join([f"'{r}'" for r in VALID_ROLES])}")
+    __table_args__ = (
+        CheckConstraint(
+            f"role IN ({', '.join([f"'{r}'" for r in VALID_ROLES])})",
+            name="ck_users_role",
+        ),
+    )
 
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
