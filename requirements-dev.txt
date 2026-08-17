@@ -1,0 +1,16 @@
+# Testing
+pytest>=7.4
+pytest-asyncio>=0.21
+pytest-cov>=4.1
+httpx>=0.24
+
+# Linting & Formatting
+flake8>=6.0
+black>=23.0
+isort>=5.12
+
+# Type checking
+mypy>=1.5
+
+# Pre-commit
+pre-commit>=3.4

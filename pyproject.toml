@@ -1,7 +1,7 @@
 [project]
 name = "songhive"
 description = "A federated and self-hosted music sharing service"
-dynamic = ["version", "dependencies", "optional-dependencies", "entry-points"]
+dynamic = ["version", "dependencies"]
 authors = [
   {name = "Fabio Manganiello", email = "fabio@manganiello.tech"},
 ]
@@ -9,7 +9,7 @@ authors = [
 classifiers=[
     "Topic :: Utilities",
     "License :: OSI Approved :: GNU Affero General Public License v3",
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
 ]
 
 readme = "README.md"
@@ -33,6 +33,16 @@ repository = "https://git.platypush.tech/blacklight/songhive"
 [project.scripts]
 songhive = 'songhive:main'
 
+[tool.setuptools.packages.find]
+include = ["songhive*"]
+
+[tool.black]
+line-length = 120
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
 [tool.bumpversion]
 current_version = "0.0.1"
 commit = true
@@ -43,4 +53,4 @@ filename = "CHANGELOG.md"
 search = "Unreleased"
 
 [[tool.bumpversion.files]]
-filename = "version.py"
+filename = "songhive/version.py"
