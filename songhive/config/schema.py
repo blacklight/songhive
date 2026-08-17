@@ -86,17 +86,59 @@ class FederationConfig(BaseSettings):
 class AuthConfig(BaseSettings):
     """Authentication configuration."""
 
-    registration_enabled: bool = Field(
+    registration_mode: Literal["open", "invite-only", "approval-required", "closed"] = Field(
+        default="open",
+        description="How new user registration is handled",
+    )
+    require_email_verification: bool = Field(
+        default=False,
+        description="Require email verification before a registered account can log in",
+    )
+    access_token_expiry_minutes: int = Field(
+        default=15,
+        description="JWT access token expiry in minutes",
+    )
+    refresh_token_expiry_days: int = Field(
+        default=30,
+        description="Refresh token expiry in days",
+    )
+    password_reset_token_expiry_minutes: int = Field(
+        default=30,
+        description="Password reset token expiry in minutes",
+    )
+    rate_limit_enabled: bool = Field(
         default=True,
-        description="Whether new user registration is open",
+        description="Enable rate limiting on sensitive authentication endpoints",
+    )
+    rate_limit_requests: int = Field(
+        default=10,
+        description="Max requests allowed in a rate limit window",
+    )
+    rate_limit_window_seconds: int = Field(
+        default=60,
+        description="Rate limit window in seconds",
     )
     secret_key: str = Field(
         default="change-me-in-production",
         description="Secret key for JWT signing",
     )
-    token_expiry_hours: int = Field(
-        default=24,
-        description="JWT token expiry in hours",
+
+
+class EmailConfig(BaseSettings):
+    """Email (SMTP) configuration."""
+
+    smtp_host: Optional[str] = Field(default=None, description="SMTP server hostname")
+    smtp_port: int = Field(default=587, description="SMTP server port")
+    smtp_username: Optional[str] = Field(default=None, description="SMTP username")
+    smtp_password: Optional[str] = Field(
+        default=None,
+        description="SMTP password",
+        repr=False,
+    )
+    smtp_tls: bool = Field(default=True, description="Use TLS for the SMTP connection")
+    from_address: Optional[str] = Field(
+        default=None,
+        description="From address for outgoing emails",
     )
 
 
@@ -131,12 +173,10 @@ class ServerConfig(BaseSettings):
     @classmethod
     def _split_cors_origins(cls, value: str) -> list[str]:
         value = value.strip()
-        if value.startswith("[") and value.endswith("]"):
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                pass
-        return [item.strip() for item in value.split(",") if item.strip()]
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return [item.strip() for item in value.split(",") if item.strip()]
 
 
 class SonghiveConfig(BaseSettings):
@@ -162,3 +202,4 @@ class SonghiveConfig(BaseSettings):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     federation: FederationConfig = Field(default_factory=FederationConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    email: EmailConfig = Field(default_factory=EmailConfig)

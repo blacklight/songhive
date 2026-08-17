@@ -81,8 +81,20 @@ instance_domain = "music.example.com"
 instance_name = "My Music Server"
 
 [auth]
-registration_enabled = true
+registration_mode = "open"
+require_email_verification = false
 secret_key = "your-secret-key-here"
+access_token_expiry_minutes = 15
+refresh_token_expiry_days = 30
+
+[email]
+# Uncomment and configure to enable outbound email.
+# smtp_host = "smtp.example.com"
+# smtp_port = 587
+# smtp_username = ""
+# smtp_password = ""
+# smtp_tls = true
+# from_address = "songhive@example.com"
 
 [storage]
 backend = "local"

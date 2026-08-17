@@ -9,14 +9,14 @@ import jwt
 from fastapi import Request
 
 
-def create_access_token(user_id: str, secret_key: str, expires_hours: Optional[int] = 24) -> str:
+def create_access_token(user_id: str, secret_key: str, expires_minutes: Optional[int] = 15) -> str:
     """Create a JWT access token."""
-    expire = datetime.now(timezone.utc) + timedelta(hours=expires_hours) if expires_hours is not None else None
     payload = {
         "sub": user_id,
-        "exp": expire,
         "iat": datetime.now(timezone.utc),
     }
+    if expires_minutes is not None:
+        payload["exp"] = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
     return jwt.encode(payload, secret_key, algorithm="HS256")
 
 

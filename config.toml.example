@@ -39,6 +39,22 @@ instance_name = "Songhive"
 instance_description = "A federated music sharing service"
 
 [auth]
-registration_enabled = true
+registration_mode = "open"
+require_email_verification = false
 secret_key = "change-me-in-production"
-token_expiry_hours = 24
+access_token_expiry_minutes = 15
+refresh_token_expiry_days = 30
+password_reset_token_expiry_minutes = 30
+rate_limit_enabled = true
+rate_limit_requests = 10
+rate_limit_window_seconds = 60
+
+[email]
+# Uncomment and configure these to enable outbound email (verification,
+# password reset, etc.).
+# smtp_host = "smtp.example.com"
+# smtp_port = 587
+# smtp_username = ""
+# smtp_password = ""  # Prefer SONGHIVE_EMAIL__SMTP_PASSWORD for secrets.
+# smtp_tls = true
+# from_address = "songhive@example.com"
