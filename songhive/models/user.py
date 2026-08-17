@@ -4,12 +4,13 @@ User model.
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import Boolean, CheckConstraint, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from .base import Base
+from .user_link import UserLink
 
 
 class UserRole(str, Enum):
@@ -45,6 +46,12 @@ class User(Base):
     password_reset_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     password_reset_expires_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     last_login: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    links: Mapped[List["UserLink"]] = relationship(
+        "UserLink",
+        backref="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     # Federation fields
     actor_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, unique=True)
