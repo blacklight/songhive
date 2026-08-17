@@ -38,5 +38,11 @@ steps:
     SSH_PRIVKEY:
       from_secret: ssh_privkey
 
+  when:
+    branch:
+      - main
+    event:
+      - push
+
   commands:
     - . .drone/github-mirror.sh
