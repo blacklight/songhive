@@ -23,6 +23,7 @@ def make_celery(
             "songhive.tasks.import_.*": {"queue": "import"},
             "songhive.tasks.federation.*": {"queue": "federation"},
             "songhive.tasks.transcoding.*": {"queue": "transcoding"},
+            "songhive.tasks.email.*": {"queue": "email"},
         },
     )
     app.autodiscover_tasks(["songhive.tasks"])
