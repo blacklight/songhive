@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from songhive.api.deps import get_db
 from songhive.api.routes.users import UserLinkInput, UserProfileUpdate, UserResponse
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
@@ -226,15 +225,6 @@ def test_user_link_input_strips_whitespace():
     assert link.url == "https://example.com"
 
 
-def _override_db(session):
-    """Return a FastAPI dependency that yields the provided session."""
-
-    async def _db():
-        yield session
-
-    return _db
-
-
 @pytest.mark.asyncio
 async def test_me_route_not_shadowed_by_username(client):
     """Test that /api/v1/users/me resolves to the /me route, not /{username}."""
@@ -260,35 +250,27 @@ async def test_get_user_profile_endpoint_returns_links(client, db_session):
     await db_session.flush()
     await db_session.commit()
 
-    client.app.dependency_overrides[get_db] = _override_db(db_session)
-    try:
-        response = client.get("/api/v1/users/alice")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["username"] == "alice"
-        assert data["display_name"] == "Alice"
-        assert data["bio"] == "Hello"
-        assert "email" not in data
-        assert "password_hash" not in data
-        assert len(data["links"]) == 2
-        assert data["links"][0] == {"name": "Website", "url": "https://example.com"}
-        assert data["links"][1] == {
-            "name": "Mastodon",
-            "url": "https://mastodon.example.com/@alice",
-        }
-    finally:
-        client.app.dependency_overrides.pop(get_db, None)
+    response = client.get("/api/v1/users/alice")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "alice"
+    assert data["display_name"] == "Alice"
+    assert data["bio"] == "Hello"
+    assert "email" not in data
+    assert "password_hash" not in data
+    assert len(data["links"]) == 2
+    assert data["links"][0] == {"name": "Website", "url": "https://example.com"}
+    assert data["links"][1] == {
+        "name": "Mastodon",
+        "url": "https://mastodon.example.com/@alice",
+    }
 
 
 @pytest.mark.asyncio
 async def test_get_user_profile_endpoint_missing_user(client, db_session):
     """Test that the public profile endpoint returns 404 for an unknown user."""
-    client.app.dependency_overrides[get_db] = _override_db(db_session)
-    try:
-        response = client.get("/api/v1/users/nobody")
-        assert response.status_code == 404
-    finally:
-        client.app.dependency_overrides.pop(get_db, None)
+    response = client.get("/api/v1/users/nobody")
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -304,9 +286,5 @@ async def test_get_user_profile_endpoint_inactive_user(client, db_session):
     await db_session.flush()
     await db_session.commit()
 
-    client.app.dependency_overrides[get_db] = _override_db(db_session)
-    try:
-        response = client.get("/api/v1/users/inactive")
-        assert response.status_code == 404
-    finally:
-        client.app.dependency_overrides.pop(get_db, None)
+    response = client.get("/api/v1/users/inactive")
+    assert response.status_code == 404

@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import pytest
 from fastapi import FastAPI, HTTPException, Request, status
 
-from songhive.api.deps import get_config, get_current_user, require_admin
+from songhive.api.deps import get_config, get_current_user, get_db, require_admin
 from songhive.api.middleware.auth import (
     create_access_token,
     decode_access_token,
@@ -156,18 +156,6 @@ def test_extract_token_from_header():
     assert extract_token(request) == "abc123"
 
 
-def test_extract_token_from_query():
-    """Test extracting a token from the query string."""
-    request = Request(
-        {
-            "type": "http",
-            "headers": [],
-            "query_string": b"token=xyz789",
-        }
-    )
-    assert extract_token(request) == "xyz789"
-
-
 def test_extract_token_missing():
     """Test that extract_token returns None when no token is present."""
     request = Request({"type": "http", "headers": [], "query_string": b""})
@@ -183,12 +171,91 @@ def test_get_config_returns_app_config():
     assert get_config(request) is config
 
 
+def _make_request_with_token(
+    token: str | None = None,
+    config: SonghiveConfig | None = None,
+) -> Request:
+    """Build a request with the given app config and optional bearer token."""
+    if config is None:
+        config = SonghiveConfig(auth={"secret_key": SECRET_KEY})
+    app = FastAPI()
+    app.state.config = config
+    headers = []
+    if token:
+        headers.append((b"authorization", f"Bearer {token}".encode()))
+    return Request({"type": "http", "app": app, "headers": headers, "query_string": b""})
+
+
 @pytest.mark.asyncio
 async def test_get_current_user_raises_401():
-    """Test that get_current_user raises a 401 before it is implemented."""
-    request = Request({"type": "http"})
+    """Test that get_current_user raises 401 for an unauthenticated request."""
+    request = Request({"type": "http", "headers": [], "query_string": b""})
     with pytest.raises(HTTPException) as exc_info:
         await get_current_user(request)
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_with_valid_token(db_session):
+    """Test that get_current_user returns the user for a valid token."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    config = SonghiveConfig(auth={"secret_key": SECRET_KEY})
+    token = create_access_token(user.id, config.auth.secret_key)
+    request = _make_request_with_token(token, config=config)
+    result = await get_current_user(request, db=db_session)
+
+    assert result.id == user.id
+    assert result.username == "alice"
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_invalid_token(db_session):
+    """Test that get_current_user rejects an invalid token."""
+    request = _make_request_with_token("not.a.valid.token")
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(request, db=db_session)
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_expired_token(db_session):
+    """Test that get_current_user rejects an expired token."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    config = SonghiveConfig(auth={"secret_key": SECRET_KEY})
+    token = create_access_token(user.id, config.auth.secret_key, expires_minutes=-10)
+    request = _make_request_with_token(token, config=config)
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(request, db=db_session)
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_inactive_user(db_session):
+    """Test that get_current_user rejects an inactive user."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    user.is_active = False
+    await db_session.flush()
+
+    config = SonghiveConfig(auth={"secret_key": SECRET_KEY})
+    token = create_access_token(user.id, config.auth.secret_key)
+    request = _make_request_with_token(token, config=config)
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(request, db=db_session)
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_missing_user(db_session):
+    """Test that get_current_user rejects a token for a non-existent user."""
+    config = SonghiveConfig(auth={"secret_key": SECRET_KEY})
+    token = create_access_token("missing-user-id", config.auth.secret_key)
+    request = _make_request_with_token(token, config=config)
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(request, db=db_session)
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
 
 
@@ -210,9 +277,40 @@ async def test_require_admin_rejects_non_admin():
 
 
 @pytest.mark.asyncio
+async def test_me_endpoint_with_valid_token(client, db_session, config):
+    """Test that /api/v1/users/me returns the current authenticated user."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["username"] == "alice"
+    assert "email" not in data
+    assert "password_hash" not in data
+
+
+@pytest.mark.asyncio
+async def test_admin_users_endpoint_returns_403_for_non_admin(client, db_session, config):
+    """Test that admin-only routes return 403 for authenticated non-admin users."""
+    user = await create_user(db_session, "bob", "bob@example.com", "secret")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.get(
+        "/api/v1/admin/users",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
 async def test_get_db(db_session, monkeypatch):
     """Test that get_db yields a database session."""
-    from songhive.api.deps import get_db
 
     @asynccontextmanager
     async def _fake_session():

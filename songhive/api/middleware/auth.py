@@ -32,9 +32,8 @@ def decode_access_token(token: str, secret_key: str) -> Optional[str]:
 
 
 def extract_token(request: Request) -> Optional[str]:
-    """Extract a Bearer token from the Authorization header or query param."""
+    """Extract a Bearer token from the Authorization header."""
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         return auth_header[7:]
-
-    return request.query_params.get("token")
+    return None
