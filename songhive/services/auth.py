@@ -64,6 +64,7 @@ async def create_user(
     email: str,
     password: str,
     role: str = "user",
+    is_active: bool = True,
 ) -> User:
     """Create a new user."""
     if role not in VALID_ROLES:
@@ -74,6 +75,7 @@ async def create_user(
         email=email,
         password_hash=hash_password(password),
         role=role,
+        is_active=is_active,
     )
     session.add(user)
     await session.flush()

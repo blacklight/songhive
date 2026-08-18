@@ -4,7 +4,7 @@ User lifecycle management.
 
 import re
 import secrets
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import delete, func, select
@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config.schema import RegistrationMode, SonghiveConfig
 from ..models.user import User, UserRole
 from ..models.user_link import UserLink
-from ..services.auth import hash_password
+from ..services.auth import get_user_by_id, hash_password
 
 MAX_USERNAME_LENGTH = 64
 MAX_EMAIL_LENGTH = 254
@@ -27,6 +27,14 @@ _EMAIL_VALIDATOR = TypeAdapter(EmailStr)
 
 class RegistrationError(ValueError):
     """Raised when a registration request cannot be fulfilled."""
+
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class UserManagementError(ValueError):
+    """Raised when an administrative user-management action cannot be fulfilled."""
 
     def __init__(self, message: str, status_code: int = 400):
         super().__init__(message)
@@ -210,5 +218,74 @@ async def update_profile(session: AsyncSession, user: User, updates: Dict[str, A
             session.add(link)
         await session.refresh(user, attribute_names=["links"])
 
+    await session.flush()
+    return user
+
+
+async def _get_user_or_raise(session: AsyncSession, user_id: str) -> User:
+    """Fetch a user by id or raise a ``UserManagementError``."""
+    user = await get_user_by_id(session, user_id)
+    if user is None:
+        raise UserManagementError("User not found", 404)
+    return user
+
+
+async def _active_admin_count(session: AsyncSession) -> int:
+    """Return the number of currently active admin users."""
+    result = await session.execute(
+        select(func.count(User.id)).where(
+            User.is_active.is_(True),
+            User.role == UserRole.ADMIN,
+        )
+    )
+    return result.scalar() or 0
+
+
+async def list_users(session: AsyncSession, limit: int = 100, offset: int = 0) -> List[User]:
+    """List users ordered by creation date (newest first)."""
+    result = await session.execute(select(User).order_by(User.created_at.desc()).offset(offset).limit(limit))
+    return list(result.scalars().all())
+
+
+async def promote_user(session: AsyncSession, user_id: str) -> User:
+    """Promote a user to the admin role."""
+    user = await _get_user_or_raise(session, user_id)
+    user.role = UserRole.ADMIN
+    await session.flush()
+    return user
+
+
+async def demote_user(session: AsyncSession, user_id: str) -> User:
+    """Demote a user to the user role, guarding the last active admin."""
+    user = await _get_user_or_raise(session, user_id)
+    if user.role == UserRole.ADMIN and await _active_admin_count(session) <= 1:
+        raise UserManagementError("Cannot demote the last active admin", 400)
+    user.role = UserRole.USER
+    await session.flush()
+    return user
+
+
+async def approve_user(session: AsyncSession, user_id: str) -> User:
+    """Approve a user by activating their account."""
+    user = await _get_user_or_raise(session, user_id)
+    user.is_active = True
+    await session.flush()
+    return user
+
+
+async def activate_user(session: AsyncSession, user_id: str) -> User:
+    """Activate (re-enable) a user account."""
+    user = await _get_user_or_raise(session, user_id)
+    user.is_active = True
+    await session.flush()
+    return user
+
+
+async def deactivate_user_by_id(session: AsyncSession, user_id: str) -> User:
+    """Deactivate a user account, guarding the last active admin."""
+    user = await _get_user_or_raise(session, user_id)
+    if user.role == UserRole.ADMIN and user.is_active and await _active_admin_count(session) <= 1:
+        raise UserManagementError("Cannot deactivate the last active admin", 400)
+    user.is_active = False
     await session.flush()
     return user
