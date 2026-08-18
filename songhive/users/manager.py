@@ -4,15 +4,16 @@ User lifecycle management.
 
 import re
 import secrets
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import RegistrationMode, SonghiveConfig
 from ..models.user import User, UserRole
+from ..models.user_link import UserLink
 from ..services.auth import hash_password
 
 MAX_USERNAME_LENGTH = 64
@@ -180,3 +181,34 @@ async def deactivate_user(session: AsyncSession, user: User) -> None:
     """Deactivate a user account."""
     user.is_active = False
     await session.flush()
+
+
+async def update_profile(session: AsyncSession, user: User, updates: Dict[str, Any]) -> User:
+    """Update a user's profile and replace their links if supplied.
+
+    ``updates`` should only contain keys the caller explicitly intends to
+    change. A missing key leaves the corresponding field untouched. A value of
+    ``None`` or an empty/whitespace-only string clears the field.
+    """
+    if "display_name" in updates:
+        display_name = updates["display_name"]
+        user.display_name = (display_name or "").strip() or None
+
+    if "bio" in updates:
+        bio = updates["bio"]
+        user.bio = (bio or "").strip() or None
+
+    if "avatar_url" in updates:
+        avatar_url = updates["avatar_url"]
+        user.avatar_url = (avatar_url or "").strip() or None
+
+    if "links" in updates:
+        links = updates["links"] or []
+        await session.execute(delete(UserLink).where(UserLink.user_id == user.id))
+        for link in links:
+            link.user_id = user.id
+            session.add(link)
+        await session.refresh(user, attribute_names=["links"])
+
+    await session.flush()
+    return user

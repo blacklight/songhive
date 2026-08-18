@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
 
+from songhive.api.middleware.auth import create_access_token
 from songhive.api.routes.users import UserLinkInput, UserProfileUpdate, UserResponse
 from songhive.config.schema import SonghiveConfig
 from songhive.models.user import User
@@ -16,6 +17,7 @@ from songhive.users.manager import (
     change_password,
     deactivate_user,
     register_user,
+    update_profile,
 )
 
 
@@ -586,3 +588,230 @@ def test_get_user_profile_endpoint_inactive_user(client, inactive_user):
     """Test that the public profile endpoint does not expose inactive users."""
     response = client.get("/api/v1/users/inactive")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_profile_updates_scalar_fields(db_session):
+    """Test that update_profile updates display_name, bio and avatar_url."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await update_profile(
+        db_session,
+        user,
+        {
+            "display_name": "  Alice  ",
+            "bio": "  Hello world  ",
+            "avatar_url": "  https://example.com/avatar.png  ",
+        },
+    )
+    assert user.display_name == "Alice"
+    assert user.bio == "Hello world"
+    assert user.avatar_url == "https://example.com/avatar.png"
+
+
+@pytest.mark.asyncio
+async def test_update_profile_clears_fields(db_session):
+    """Test that update_profile clears fields sent as None or whitespace."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    user.display_name = "Alice"
+    user.bio = "Hello"
+    user.avatar_url = "https://example.com/avatar.png"
+    await db_session.flush()
+
+    await update_profile(
+        db_session,
+        user,
+        {
+            "display_name": "   ",
+            "bio": None,
+            "avatar_url": "",
+        },
+    )
+    assert user.display_name is None
+    assert user.bio is None
+    assert user.avatar_url is None
+
+
+@pytest.mark.asyncio
+async def test_update_profile_replaces_links(db_session):
+    """Test that update_profile replaces the user's link set."""
+    user = User(
+        username="alice",
+        email="alice@example.com",
+        password_hash="hashed",
+        links=[UserLink(name="Old", url="https://old.example.com")],
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    await update_profile(
+        db_session,
+        user,
+        {
+            "links": [
+                UserLink(name="Website", url="https://example.com"),
+                UserLink(name="Mastodon", url="https://mastodon.example.com/@alice"),
+            ],
+        },
+    )
+
+    result = await db_session.execute(select(UserLink).where(UserLink.user_id == user.id))
+    links = result.scalars().all()
+    assert len(links) == 2
+    assert {link.name for link in links} == {"Website", "Mastodon"}
+
+
+@pytest.mark.asyncio
+async def test_update_profile_clears_links(db_session):
+    """Test that update_profile clears all links when given an empty list."""
+    user = User(
+        username="alice",
+        email="alice@example.com",
+        password_hash="hashed",
+        links=[UserLink(name="Website", url="https://example.com")],
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    await update_profile(db_session, user, {"links": []})
+
+    result = await db_session.execute(select(UserLink).where(UserLink.user_id == user.id))
+    assert result.scalars().first() is None
+
+
+@pytest.mark.asyncio
+async def test_update_profile_partial(db_session):
+    """Test that update_profile only changes explicitly provided fields."""
+    user = User(
+        username="alice",
+        email="alice@example.com",
+        password_hash="hashed",
+        display_name="Old",
+        bio="Old bio",
+        avatar_url="https://old.example.com/avatar.png",
+        links=[UserLink(name="Website", url="https://example.com")],
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    await update_profile(db_session, user, {"display_name": "Alice"})
+    assert user.display_name == "Alice"
+    assert user.bio == "Old bio"
+    assert user.avatar_url == "https://old.example.com/avatar.png"
+    assert len(user.links) == 1
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint(client, db_session, config):
+    """Test that PATCH /me updates the current user's profile and links."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "display_name": "  Alice  ",
+            "bio": "Hello",
+            "avatar_url": "https://example.com/avatar.png",
+            "links": [
+                {"name": "Website", "url": "https://example.com"},
+                {"name": "Mastodon", "url": "https://mastodon.example.com/@alice"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "alice"
+    assert data["display_name"] == "Alice"
+    assert data["bio"] == "Hello"
+    assert data["avatar_url"] == "https://example.com/avatar.png"
+    assert len(data["links"]) == 2
+    assert data["links"][0] == {"name": "Website", "url": "https://example.com"}
+
+    sensitive_fields = {
+        "email",
+        "password_hash",
+        "email_verification_token",
+        "password_reset_token",
+        "password_reset_expires_at",
+        "private_key_pem",
+        "public_key_pem",
+    }
+    for field in sensitive_fields:
+        assert field not in data, f"Sensitive field {field!r} leaked into /me response"
+
+
+def test_patch_me_endpoint_unauthenticated(client):
+    """Test that PATCH /me requires authentication."""
+    response = client.patch(
+        "/api/v1/users/me",
+        json={"display_name": "Alice"},
+    )
+    assert response.status_code == 401
+
+
+def test_patch_me_endpoint_invalid_token(client):
+    """Test that PATCH /me rejects an invalid token."""
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": "Bearer not-a-real-token"},
+        json={"display_name": "Alice"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_partial(client, db_session, config):
+    """Test that a partial PATCH /me leaves unspecified fields unchanged."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    user.display_name = "Old"
+    user.bio = "Old bio"
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"display_name": "Alice"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["display_name"] == "Alice"
+    assert data["bio"] == "Old bio"
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_clears_links(client, db_session, config):
+    """Test that PATCH /me can clear all links with an empty list."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    db_session.add(UserLink(user_id=user.id, name="Website", url="https://example.com"))
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"links": []},
+    )
+    assert response.status_code == 200
+    assert response.json()["links"] == []
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_rejects_invalid_link(client, db_session, config):
+    """Test that PATCH /me rejects links with unsafe URL schemes."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "links": [
+                {"name": "Bad", "url": "javascript:alert(1)"},
+            ],
+        },
+    )
+    assert response.status_code == 422

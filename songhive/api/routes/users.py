@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.user import User
+from ...models.user_link import UserLink
 from ...services.auth import get_user_by_username
+from ...users.manager import update_profile
 from ..deps import get_current_user, get_db
 
 router = APIRouter(prefix="/users")
@@ -81,6 +83,21 @@ class UserProfileUpdate(BaseModel):
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_profile(current_user: User = Depends(get_current_user)):
     """Get the current authenticated user's profile."""
+    return UserResponse.model_validate(current_user)
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_current_user_profile(
+    update: UserProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the current authenticated user's profile."""
+    updates = update.model_dump(exclude_unset=True)
+    if "links" in updates and updates["links"] is not None:
+        updates["links"] = [UserLink(name=link["name"], url=link["url"]) for link in updates["links"]]
+
+    await update_profile(db, current_user, updates)
     return UserResponse.model_validate(current_user)
 
 
