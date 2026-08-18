@@ -24,7 +24,7 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
         # TODO: restrict origins in production
         return True
 
-    def open(self):
+    def open(self, *args: str, **kwargs: str) -> None:
         """Handle new WebSocket connection."""
         # TODO: authenticate the connection
         EventWebSocket._connections.add(self)

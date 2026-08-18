@@ -17,12 +17,14 @@ from .middleware.auth import decode_access_token, extract_token
 
 def get_config(request: Request) -> SonghiveConfig:
     """Get the application config from the request state."""
-    return request.app.state.config
+    config: SonghiveConfig = request.app.state.config
+    return config
 
 
 def get_redis(request: Request) -> Redis:
     """Get the shared async Redis client from the request state."""
-    return request.app.state.redis
+    redis: Redis = request.app.state.redis
+    return redis
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

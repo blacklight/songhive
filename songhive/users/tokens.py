@@ -181,7 +181,7 @@ async def rotate_refresh_token(token: str, config: SonghiveConfig, redis: Redis)
     return token_pair
 
 
-async def revoke_refresh_token(token: str, config: SonghiveConfig, redis: Redis) -> bool:
+async def revoke_refresh_token(token: str, redis: Redis) -> bool:
     """
     Revoke a refresh token by deleting it from Redis.
 
@@ -189,5 +189,5 @@ async def revoke_refresh_token(token: str, config: SonghiveConfig, redis: Redis)
     """
     token_hash = _hash_token(token)
     key = _refresh_key(token_hash)
-    deleted = await redis.delete(key)
+    deleted: int = await redis.delete(key)
     return deleted > 0

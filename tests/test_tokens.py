@@ -154,7 +154,7 @@ async def test_revoke_refresh_token_removes_token(db_session, token_config, fake
 
     token_pair = await issue_token_pair(user, token_config, fake_redis)
 
-    revoked = await revoke_refresh_token(token_pair.refresh_token, token_config, fake_redis)
+    revoked = await revoke_refresh_token(token_pair.refresh_token, fake_redis)
     assert revoked is True
 
     payload = await validate_refresh_token(token_pair.refresh_token, fake_redis)
@@ -162,9 +162,9 @@ async def test_revoke_refresh_token_removes_token(db_session, token_config, fake
 
 
 @pytest.mark.asyncio
-async def test_revoke_refresh_token_returns_false_for_missing_token(token_config, fake_redis):
+async def test_revoke_refresh_token_returns_false_for_missing_token(fake_redis):
     """Test that revoking a missing token returns False."""
-    revoked = await revoke_refresh_token("not-a-real-token", token_config, fake_redis)
+    revoked = await revoke_refresh_token("not-a-real-token", fake_redis)
     assert revoked is False
 
 

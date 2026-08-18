@@ -173,7 +173,7 @@ async def refresh(
 
     user = await get_user_by_id(db, payload.user_id)
     if user is None or not user.is_active:
-        await revoke_refresh_token(body.refresh_token, config, redis)
+        await revoke_refresh_token(body.refresh_token, redis)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Account is inactive or deleted",
@@ -191,13 +191,9 @@ async def refresh(
 
 
 @router.post("/logout", response_model=LogoutResponse)
-async def logout(
-    body: LogoutRequest,
-    config: SonghiveConfig = Depends(get_config),
-    redis: Redis = Depends(get_redis),
-):
+async def logout(body: LogoutRequest, redis: Redis = Depends(get_redis)):
     """Revoke a refresh token."""
-    await revoke_refresh_token(body.refresh_token, config, redis)
+    await revoke_refresh_token(body.refresh_token, redis)
     return LogoutResponse()
 
 

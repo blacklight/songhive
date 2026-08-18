@@ -184,7 +184,8 @@ class ServerConfig(BaseSettings):
     def _split_cors_origins(cls, value: str) -> list[str]:
         value = value.strip()
         try:
-            return json.loads(value)
+            parsed = json.loads(value)
+            return list(parsed) if isinstance(parsed, list) else [value]
         except json.JSONDecodeError:
             return [item.strip() for item in value.split(",") if item.strip()]
 
