@@ -16,6 +16,14 @@ from songhive.models.user import User  # noqa: F401
 
 
 @pytest.fixture
+def fake_redis():
+    """Create a fresh async fake Redis client for each test."""
+    from fakeredis.aioredis import FakeRedis
+
+    return FakeRedis(decode_responses=True)
+
+
+@pytest.fixture
 def config(tmp_path):
     """Create a test configuration backed by a fresh SQLite database."""
     return SonghiveConfig(

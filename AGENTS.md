@@ -32,6 +32,10 @@
   python -m black .
   ```
 
+- On an externally managed system Python, install dev dependencies (including
+  `fakeredis`) in a virtual environment and run the verification commands with
+  that environment activated.
+
 ## Notes
 
 - `setup.cfg` configures `flake8` with a max line length of 120, ignores
