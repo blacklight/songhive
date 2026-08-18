@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 def _client_ip(request: Request) -> str:
     """Return the client IP address from headers or the request scope."""
-    forwarded = request.headers.get("X-Forwarded-For")
+    forwarded: str | None = request.headers.get("X-Forwarded-For")
     if forwarded:
         return forwarded.split(",")[0].strip()
 
-    real_ip = request.headers.get("X-Real-IP")
+    real_ip: str | None = request.headers.get("X-Real-IP")
     if real_ip:
         return real_ip.strip()
 

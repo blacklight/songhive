@@ -4,7 +4,7 @@ User lifecycle management.
 
 import re
 import secrets
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import delete, func, select
@@ -51,7 +51,7 @@ def _normalize_username(username: str) -> str:
 def _normalize_and_validate_email(email: str) -> str:
     """Validate, strip and lower-case an email address."""
     try:
-        return _EMAIL_VALIDATOR.validate_python(email).lower()
+        return cast(str, _EMAIL_VALIDATOR.validate_python(email)).lower()
     except ValidationError as exc:
         raise RegistrationError("Invalid email address") from exc
 
