@@ -3,6 +3,7 @@ Configuration schema for Songhive, defined as a Pydantic settings model.
 """
 
 import json
+from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -83,11 +84,20 @@ class FederationConfig(BaseSettings):
     )
 
 
+class RegistrationMode(str, Enum):
+    """Allowed user registration modes."""
+
+    OPEN = "open"
+    INVITE_ONLY = "invite-only"
+    APPROVAL_REQUIRED = "approval-required"
+    CLOSED = "closed"
+
+
 class AuthConfig(BaseSettings):
     """Authentication configuration."""
 
-    registration_mode: Literal["open", "invite-only", "approval-required", "closed"] = Field(
-        default="open",
+    registration_mode: RegistrationMode = Field(
+        default=RegistrationMode.OPEN,
         description="How new user registration is handled",
     )
     require_email_verification: bool = Field(

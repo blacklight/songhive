@@ -2,11 +2,13 @@
 Configuration loading tests.
 """
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
 from songhive.config.loader import _deep_merge, load_config
-from songhive.config.schema import SonghiveConfig
+from songhive.config.schema import RegistrationMode, SonghiveConfig
 
 
 def test_default_config():
@@ -168,3 +170,11 @@ def test_load_config_from_toml(tmp_path):
     assert config.email.smtp_host == "smtp.test"
     assert config.email.smtp_port == 465
     assert config.email.from_address == "test@example.com"
+
+
+def test_registration_mode_serializes_as_string():
+    """Test that the registration mode enum behaves as a plain string when serialized."""
+    config = SonghiveConfig(auth={"registration_mode": "open"})
+    assert config.auth.registration_mode == "open"
+    assert config.auth.registration_mode == RegistrationMode.OPEN
+    assert json.dumps(config.auth.registration_mode) == '"open"'

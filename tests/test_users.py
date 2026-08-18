@@ -7,10 +7,11 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from songhive.api.routes.users import UserLinkInput, UserProfileUpdate, UserResponse
+from songhive.config.schema import SonghiveConfig
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
 from songhive.services.auth import create_user, verify_password
-from songhive.users.manager import change_password, deactivate_user, register_user
+from songhive.users.manager import RegistrationError, change_password, deactivate_user, register_user
 
 
 def test_user_model_defaults():
@@ -68,10 +69,11 @@ def test_user_model_with_optional_fields():
 
 
 @pytest.mark.asyncio
-async def test_register_user(db_session):
+async def test_register_user(db_session, config):
     """Test registering a new user."""
     user = await register_user(
         db_session,
+        config,
         username="alice",
         email="alice@example.com",
         password="secret",
@@ -81,23 +83,269 @@ async def test_register_user(db_session):
     assert user.email == "alice@example.com"
     assert user.display_name == "Alice"
     assert user.is_active is True
+    assert user.role == "user"
+    assert user.email_verified is True
+    assert user.email_verification_token is None
     assert verify_password("secret", user.password_hash)
 
 
 @pytest.mark.asyncio
-async def test_register_user_without_display_name(db_session):
+async def test_register_user_without_display_name(db_session, config):
     """Test registering a user without a display name."""
-    user = await register_user(db_session, "bob", "bob@example.com", "secret")
+    user = await register_user(db_session, config, "bob", "bob@example.com", "secret")
     assert user.username == "bob"
+    assert user.display_name is None
+    assert user.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_register_user_duplicate_username(db_session, config):
+    """Test that duplicate usernames are rejected with 409."""
+    await register_user(db_session, config, "alice", "alice@example.com", "secret")
+    with pytest.raises(RegistrationError, match="already taken") as exc_info:
+        await register_user(db_session, config, "alice", "other@example.com", "secret")
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_register_user_duplicate_email(db_session, config):
+    """Test that duplicate emails are rejected with 409."""
+    await register_user(db_session, config, "alice", "alice@example.com", "secret")
+    with pytest.raises(RegistrationError, match="already taken") as exc_info:
+        await register_user(db_session, config, "bob", "alice@example.com", "secret")
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_register_user_closed_rejects(db_session, config):
+    """Test that closed registration mode rejects new users."""
+    closed_config = SonghiveConfig(
+        database={"url": config.database.url},
+        federation={"enabled": False},
+        auth={"registration_mode": "closed", "secret_key": config.auth.secret_key},
+    )
+    with pytest.raises(RegistrationError, match="Registration is closed"):
+        await register_user(db_session, closed_config, "alice", "alice@example.com", "secret")
+
+
+@pytest.mark.asyncio
+async def test_register_user_approval_required_creates_inactive(db_session, config):
+    """Test that approval-required mode creates an inactive user."""
+    approval_config = SonghiveConfig(
+        database={"url": config.database.url},
+        federation={"enabled": False},
+        auth={"registration_mode": "approval-required", "secret_key": config.auth.secret_key},
+    )
+    user = await register_user(db_session, approval_config, "alice", "alice@example.com", "secret")
+    assert user.is_active is False
+    assert user.email_verified is True
+    assert user.role == "user"
+
+
+@pytest.mark.asyncio
+async def test_register_user_invite_only_rejects(db_session, config):
+    """Test that invite-only mode rejects registration without a valid invite."""
+    invite_config = SonghiveConfig(
+        database={"url": config.database.url},
+        federation={"enabled": False},
+        auth={"registration_mode": "invite-only", "secret_key": config.auth.secret_key},
+    )
+    with pytest.raises(RegistrationError, match="Invalid or missing invite code"):
+        await register_user(db_session, invite_config, "alice", "alice@example.com", "secret")
+
+    with pytest.raises(RegistrationError, match="Invalid or missing invite code"):
+        await register_user(
+            db_session,
+            invite_config,
+            "bob",
+            "bob@example.com",
+            "secret",
+            invite_code="not-a-real-code",
+        )
+
+
+@pytest.mark.asyncio
+async def test_register_user_email_verification_token(db_session, config):
+    """Test that email verification creates an inactive user with a token."""
+    verify_config = SonghiveConfig(
+        database={"url": config.database.url},
+        federation={"enabled": False},
+        auth={
+            "registration_mode": "open",
+            "require_email_verification": True,
+            "secret_key": config.auth.secret_key,
+        },
+    )
+    user = await register_user(db_session, verify_config, "alice", "alice@example.com", "secret")
+    assert user.is_active is False
+    assert user.email_verified is False
+    assert user.email_verification_token is not None
+    assert len(user.email_verification_token) >= 32
+
+
+@pytest.mark.asyncio
+async def test_register_user_no_email_verification_when_disabled(db_session, config):
+    """Test that email is marked verified when verification is not required."""
+    no_verify_config = SonghiveConfig(
+        database={"url": config.database.url},
+        federation={"enabled": False},
+        auth={
+            "registration_mode": "open",
+            "require_email_verification": False,
+            "secret_key": config.auth.secret_key,
+        },
+    )
+    user = await register_user(db_session, no_verify_config, "alice", "alice@example.com", "secret")
+    assert user.email_verified is True
+    assert user.email_verification_token is None
+
+
+@pytest.mark.asyncio
+async def test_register_user_approval_and_verification(db_session, config):
+    """Test approval-required with email verification still sets a token."""
+    approval_verify_config = SonghiveConfig(
+        database={"url": config.database.url},
+        federation={"enabled": False},
+        auth={
+            "registration_mode": "approval-required",
+            "require_email_verification": True,
+            "secret_key": config.auth.secret_key,
+        },
+    )
+    user = await register_user(db_session, approval_verify_config, "alice", "alice@example.com", "secret")
+    assert user.is_active is False
+    assert user.email_verified is False
+    assert user.email_verification_token is not None
+
+
+@pytest.mark.asyncio
+async def test_register_user_normalizes_username_and_email(db_session, config):
+    """Test that usernames and emails are normalized before storage."""
+    user = await register_user(
+        db_session,
+        config,
+        username="  Alice  ",
+        email="  Alice@Example.COM  ",
+        password="secret",
+    )
+    assert user.username == "alice"
+    assert user.email == "alice@example.com"
+
+
+@pytest.mark.asyncio
+async def test_register_user_rejects_invalid_username(db_session, config):
+    """Test that invalid usernames are rejected."""
+    with pytest.raises(RegistrationError, match="invalid characters"):
+        await register_user(db_session, config, "alice@bad", "alice@example.com", "secret")
+
+
+@pytest.mark.asyncio
+async def test_register_user_rejects_invalid_email(db_session, config):
+    """Test that obviously invalid emails are rejected."""
+    with pytest.raises(RegistrationError, match="Invalid email address"):
+        await register_user(db_session, config, "alice", "not-an-email", "secret")
+
+
+@pytest.mark.asyncio
+async def test_register_user_rejects_too_long_password(db_session, config):
+    """Test that passwords longer than bcrypt's 72-byte limit are rejected."""
+    long_password = "a" * 80
+    with pytest.raises(RegistrationError, match="too long"):
+        await register_user(db_session, config, "alice", "alice@example.com", long_password)
+
+
+@pytest.mark.asyncio
+async def test_register_user_rejects_email_with_trailing_dot(db_session, config):
+    """Test that Pydantic-style email validation rejects a trailing dot."""
+    with pytest.raises(RegistrationError, match="Invalid email address"):
+        await register_user(db_session, config, "alice", "a@b.", "secret")
+
+
+@pytest.mark.asyncio
+async def test_register_user_whitespace_display_name_becomes_none(db_session, config):
+    """Test that whitespace-only display names are stored as None."""
+    user = await register_user(
+        db_session,
+        config,
+        "alice",
+        "alice@example.com",
+        "secret",
+        display_name="   ",
+    )
     assert user.display_name is None
 
 
 @pytest.mark.asyncio
-async def test_register_user_duplicate_username(db_session):
-    """Test that duplicate usernames are rejected."""
-    await register_user(db_session, "alice", "alice@example.com", "secret")
-    with pytest.raises(ValueError, match="already taken"):
-        await register_user(db_session, "alice", "other@example.com", "secret")
+async def test_register_user_accepts_72_byte_password(db_session, config):
+    """Test that a password of exactly 72 bytes is accepted."""
+    password = "🎵" * 18  # 72 bytes in UTF-8
+    user = await register_user(db_session, config, "alice", "alice@example.com", password)
+    assert user is not None
+    assert verify_password(password, user.password_hash)
+
+
+@pytest.mark.asyncio
+async def test_register_user_rejects_non_ascii_password_over_bcrypt_limit(db_session, config):
+    """Test that byte length, not character length, enforces the 72-byte limit."""
+    password = "🎵" * 19  # 76 bytes in UTF-8
+    with pytest.raises(RegistrationError, match="too long"):
+        await register_user(db_session, config, "alice", "alice@example.com", password)
+
+
+@pytest.mark.asyncio
+async def test_register_user_invite_only_checks_invite_before_duplicates(db_session, config):
+    """Test that invite-only mode rejects an invalid invite before duplicate checks."""
+    await register_user(db_session, config, "alice", "alice@example.com", "secret")
+    invite_config = SonghiveConfig(
+        database={"url": config.database.url},
+        federation={"enabled": False},
+        auth={"registration_mode": "invite-only", "secret_key": config.auth.secret_key},
+    )
+    with pytest.raises(RegistrationError, match="Invalid or missing invite code"):
+        await register_user(
+            db_session,
+            invite_config,
+            "alice",
+            "other@example.com",
+            "secret",
+            invite_code="not-a-real-code",
+        )
+
+
+@pytest.mark.asyncio
+async def test_register_user_duplicate_race_returns_409(db_session, config, monkeypatch):
+    """Test that database-level unique constraint violations are translated to 409."""
+    await register_user(db_session, config, "alice", "alice@example.com", "secret")
+    await db_session.commit()
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("songhive.users.manager._check_for_duplicates", _noop)
+
+    with pytest.raises(RegistrationError, match="already taken") as exc_info:
+        await register_user(db_session, config, "alice", "other@example.com", "secret")
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_register_user_unverified_account_not_public(db_session, config, client):
+    """Test that email-verified users are inactive and hidden from public profiles."""
+    verify_config = SonghiveConfig(
+        database={"url": config.database.url},
+        federation={"enabled": False},
+        auth={
+            "registration_mode": "open",
+            "require_email_verification": True,
+            "secret_key": config.auth.secret_key,
+        },
+    )
+    user = await register_user(db_session, verify_config, "alice", "alice@example.com", "secret")
+    assert user.is_active is False
+    await db_session.commit()
+
+    response = client.get("/api/v1/users/alice")
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio
