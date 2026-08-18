@@ -2,11 +2,14 @@
 User lifecycle management.
 """
 
+import hashlib
 import re
 import secrets
-from typing import Any, Dict, List, Optional, cast
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from pydantic import EmailStr, TypeAdapter, ValidationError
+from redis.asyncio import Redis
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config.schema import RegistrationMode, SonghiveConfig
 from ..models.user import User, UserRole
 from ..models.user_link import UserLink
-from ..services.auth import get_user_by_id, hash_password
+from ..services.auth import (
+    get_user_by_email_verification_token,
+    get_user_by_id,
+    get_user_by_password_reset_token,
+    get_user_by_username_or_email,
+    hash_password,
+)
 from ..users.invites import get_invite, is_invite_valid
+from ..users.tokens import revoke_all_user_refresh_tokens
 
 MAX_USERNAME_LENGTH = 64
 MAX_EMAIL_LENGTH = 254
@@ -143,17 +153,16 @@ async def register_user(
     if invite is not None:
         invite.uses += 1
 
-    is_active = True
-    email_verified = True
+    # Approval-required users start inactive; every other mode is active.
+    is_active = config.auth.registration_mode != RegistrationMode.APPROVAL_REQUIRED
+    email_verified = not config.auth.require_email_verification
     email_verification_token: Optional[str] = None
-
-    if config.auth.registration_mode == RegistrationMode.APPROVAL_REQUIRED:
-        is_active = False
+    email_verification_token_raw: Optional[str] = None
 
     if config.auth.require_email_verification:
-        is_active = False
         email_verified = False
-        email_verification_token = secrets.token_urlsafe(32)
+        email_verification_token_raw = secrets.token_urlsafe(32)
+        email_verification_token = hashlib.sha256(email_verification_token_raw.encode("utf-8")).hexdigest()
 
     user = User(
         username=username,
@@ -173,6 +182,10 @@ async def register_user(
             await session.rollback()
             raise RegistrationError("Username or email already taken", status_code=409) from exc
         raise
+
+    if config.auth.require_email_verification:
+        user.email_verification_token_raw = email_verification_token_raw
+
     return user
 
 
@@ -286,3 +299,83 @@ async def deactivate_user_by_id(session: AsyncSession, user_id: str) -> User:
     user.is_active = False
     await session.flush()
     return user
+
+
+async def verify_email(session: AsyncSession, token: str) -> User | None:
+    """
+    Verify a user's email address using the raw verification token.
+
+    On success the user's ``email_verified`` is set to ``True`` and the
+    ``email_verification_token`` is cleared. The account ``is_active`` status
+    is not modified, so approval-required accounts still require an admin
+    approval step.
+    """
+    user = await get_user_by_email_verification_token(session, token)
+    if user is None:
+        return None
+
+    user.email_verified = True
+    user.email_verification_token = None
+    await session.flush()
+    return user
+
+
+async def request_password_reset(
+    session: AsyncSession,
+    config: SonghiveConfig,
+    username_or_email: str,
+) -> Tuple[Optional[User], Optional[str]]:
+    """
+    Generate a single-use password-reset token for a user if one exists.
+
+    The raw token is returned so a caller can send it to the user; only a
+    SHA-256 hash of the token is stored in the database.
+    """
+    user = await get_user_by_username_or_email(session, username_or_email)
+    if user is None:
+        return None, None
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    user.password_reset_token = token_hash
+    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=config.auth.password_reset_token_expiry_minutes
+    )
+    await session.flush()
+    return user, raw_token
+
+
+async def confirm_password_reset(
+    session: AsyncSession,
+    redis: Redis,
+    token: str,
+    new_password: str,
+) -> bool:
+    """
+    Set a new password using a reset token.
+
+    Returns ``True`` if the token is valid and not expired, otherwise ``False``.
+    The token and expiry are cleared on success, and all active refresh tokens
+    for the user are revoked as a security hardening measure.
+    """
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    user = await get_user_by_password_reset_token(session, token_hash)
+    if user is None or user.password_reset_expires_at is None:
+        return False
+
+    now = datetime.now(timezone.utc)
+    expires_at = user.password_reset_expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    else:
+        expires_at = expires_at.astimezone(timezone.utc)
+
+    if now > expires_at:
+        return False
+
+    user.password_hash = hash_password(new_password)
+    user.password_reset_token = None
+    user.password_reset_expires_at = None
+    await session.flush()
+    await revoke_all_user_refresh_tokens(redis, user.id)
+    return True

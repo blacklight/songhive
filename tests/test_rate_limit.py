@@ -283,3 +283,63 @@ async def test_rate_limit_disabled_allows_requests(client):
             },
         )
         assert response.status_code == status.HTTP_201_CREATED
+
+
+@pytest.mark.asyncio
+async def test_verify_email_endpoint_rate_limited(client):
+    """Test that repeated verification attempts are blocked with 429."""
+    client.app.state.config.auth.rate_limit_requests = 2
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    for _ in range(2):
+        response = client.post(
+            "/api/v1/auth/verify-email",
+            json={"token": "some-token"},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    response = client.post(
+        "/api/v1/auth/verify-email",
+        json={"token": "some-token"},
+    )
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_password_reset_request_endpoint_rate_limited(client):
+    """Test that repeated password reset requests are blocked with 429."""
+    client.app.state.config.auth.rate_limit_requests = 2
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    for _ in range(2):
+        response = client.post(
+            "/api/v1/auth/password-reset/request",
+            json={"username": "nobody@example.com"},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+    response = client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"username": "nobody@example.com"},
+    )
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_password_reset_confirm_endpoint_rate_limited(client):
+    """Test that repeated password reset confirmations are blocked with 429."""
+    client.app.state.config.auth.rate_limit_requests = 2
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    for _ in range(2):
+        response = client.post(
+            "/api/v1/auth/password-reset/confirm",
+            json={"token": "some-token", "new_password": "secret"},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    response = client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": "some-token", "new_password": "secret"},
+    )
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS

@@ -54,6 +54,7 @@ async def test_user_db_defaults(db_session):
     assert user.is_admin is False
     assert user.email_verified is False
     assert user.email_verification_token is None
+    assert user.email_verification_token_raw is None
     assert user.password_reset_token is None
     assert user.password_reset_expires_at is None
 
@@ -93,6 +94,7 @@ async def test_register_user(db_session, config):
     assert user.role == "user"
     assert user.email_verified is True
     assert user.email_verification_token is None
+    assert user.email_verification_token_raw is None
     assert verify_password("secret", user.password_hash)
 
 
@@ -184,10 +186,13 @@ async def test_register_user_email_verification_token(db_session, config):
         },
     )
     user = await register_user(db_session, verify_config, "alice", "alice@example.com", "secret")
-    assert user.is_active is False
+    assert user.is_active is True
     assert user.email_verified is False
     assert user.email_verification_token is not None
-    assert len(user.email_verification_token) >= 32
+    assert len(user.email_verification_token) == 64
+    assert user.email_verification_token_raw is not None
+    assert len(user.email_verification_token_raw) >= 32
+    assert user.email_verification_token != user.email_verification_token_raw
 
 
 @pytest.mark.asyncio
@@ -205,6 +210,7 @@ async def test_register_user_no_email_verification_when_disabled(db_session, con
     user = await register_user(db_session, no_verify_config, "alice", "alice@example.com", "secret")
     assert user.email_verified is True
     assert user.email_verification_token is None
+    assert user.email_verification_token_raw is None
 
 
 @pytest.mark.asyncio
@@ -223,6 +229,10 @@ async def test_register_user_approval_and_verification(db_session, config):
     assert user.is_active is False
     assert user.email_verified is False
     assert user.email_verification_token is not None
+    assert len(user.email_verification_token) == 64
+    assert user.email_verification_token_raw is not None
+    assert len(user.email_verification_token_raw) >= 32
+    assert user.email_verification_token != user.email_verification_token_raw
 
 
 @pytest.mark.asyncio
@@ -336,8 +346,8 @@ async def test_register_user_duplicate_race_returns_409(db_session, config, monk
 
 
 @pytest.mark.asyncio
-async def test_register_user_unverified_account_not_public(db_session, config, client):
-    """Test that email-verified users are inactive and hidden from public profiles."""
+async def test_register_user_unverified_account_is_public(db_session, config, client):
+    """Test that open-mode unverified users are active and visible in public profiles."""
     verify_config = SonghiveConfig(
         database={"url": config.database.url},
         federation={"enabled": False},
@@ -348,11 +358,11 @@ async def test_register_user_unverified_account_not_public(db_session, config, c
         },
     )
     user = await register_user(db_session, verify_config, "alice", "alice@example.com", "secret")
-    assert user.is_active is False
+    assert user.is_active is True
     await db_session.commit()
 
     response = client.get("/api/v1/users/alice")
-    assert response.status_code == 404
+    assert response.status_code == 200
 
 
 @pytest.mark.asyncio

@@ -16,7 +16,14 @@ from ...services.auth import (
     get_user_by_username_or_email,
     verify_password,
 )
-from ...users.manager import RegistrationError, register_user
+from ...tasks.email import send_password_reset_email, send_verification_email
+from ...users.manager import (
+    RegistrationError,
+    confirm_password_reset,
+    register_user,
+    request_password_reset,
+    verify_email,
+)
 from ...users.tokens import (
     TokenPair,
     issue_token_pair,
@@ -88,6 +95,43 @@ class LogoutResponse(BaseModel):
     success: bool = True
 
 
+class VerifyEmailRequest(BaseModel):
+    """Request body for confirming an email verification token."""
+
+    token: str
+
+
+class VerifyEmailResponse(BaseModel):
+    """Response returned after a successful email verification."""
+
+    success: bool = True
+
+
+class PasswordResetInitRequest(BaseModel):
+    """Request body for requesting a password reset."""
+
+    username: str
+
+
+class PasswordResetInitResponse(BaseModel):
+    """Generic response returned after a password reset request."""
+
+    success: bool = True
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    """Request body for confirming a password reset."""
+
+    token: str
+    new_password: str = Field(..., min_length=1)
+
+
+class PasswordResetConfirmResponse(BaseModel):
+    """Response returned after a successful password reset."""
+
+    success: bool = True
+
+
 @router.post(
     "/register",
     response_model=RegisterResponse,
@@ -112,6 +156,10 @@ async def register(
         )
     except RegistrationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    if config.auth.require_email_verification and user.email_verification_token_raw:
+        send_verification_email.delay(user.email, user.username, user.email_verification_token_raw)
+
     return RegisterResponse.model_validate(user)
 
 
@@ -195,6 +243,84 @@ async def logout(body: LogoutRequest, redis: Redis = Depends(get_redis)):
     """Revoke a refresh token."""
     await revoke_refresh_token(body.refresh_token, redis)
     return LogoutResponse()
+
+
+@router.post(
+    "/verify-email",
+    response_model=VerifyEmailResponse,
+    dependencies=[Depends(rate_limit)],
+    summary="Verify an email address",
+    description=(
+        "Confirm an email address using a verification token sent to the user's "
+        "inbox. The token is single-use and is cleared after a successful "
+        "verification."
+    ),
+)
+async def verify_email_endpoint(
+    body: VerifyEmailRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm an email address using a verification token sent by email."""
+    user = await verify_email(db, body.token)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token",
+        )
+    return VerifyEmailResponse()
+
+
+@router.post(
+    "/password-reset/request",
+    response_model=PasswordResetInitResponse,
+    dependencies=[Depends(rate_limit)],
+    summary="Request a password reset",
+    description=(
+        "Start the password reset flow for an account. A reset token is sent to "
+        "the user's email address if the account exists. The endpoint always "
+        "returns a generic success response to avoid revealing whether an account "
+        "exists for a given username or email."
+    ),
+)
+async def password_reset_request(
+    body: PasswordResetInitRequest,
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Request a password reset for an account.
+
+    Always returns a generic success response to avoid revealing whether an
+    account exists for a given username or email.
+    """
+    user, token = await request_password_reset(db, config, body.username)
+    if user is not None and token is not None:
+        send_password_reset_email.delay(user.email, user.username, token)
+    return PasswordResetInitResponse()
+
+
+@router.post(
+    "/password-reset/confirm",
+    response_model=PasswordResetConfirmResponse,
+    dependencies=[Depends(rate_limit)],
+    summary="Confirm a password reset",
+    description=(
+        "Set a new password using a password-reset token received by email. On "
+        "success, all active refresh tokens for the user are revoked."
+    ),
+)
+async def password_reset_confirm(
+    body: PasswordResetConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Set a new password using a password-reset token."""
+    success = await confirm_password_reset(db, redis, body.token, body.new_password)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+    return PasswordResetConfirmResponse()
 
 
 def _token_pair_response(token_pair: TokenPair) -> TokenPairResponse:

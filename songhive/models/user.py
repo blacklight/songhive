@@ -33,6 +33,7 @@ class User(Base):
             name="ck_users_role",
         ),
     )
+    __allow_unmapped__ = True
 
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
@@ -44,6 +45,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(32), insert_default="user", default="user", index=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, insert_default=False, default=False)
     email_verification_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email_verification_token_raw: Optional[str] = None
     password_reset_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     password_reset_expires_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     last_login: Mapped[Optional[datetime]] = mapped_column(nullable=True)

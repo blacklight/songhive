@@ -2,7 +2,9 @@
 Authentication service and middleware tests.
 """
 
+import hashlib
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request, status
@@ -626,3 +628,316 @@ async def test_logout_endpoint(client, config, fake_redis):
         json={"refresh_token": tokens["refresh_token"]},
     )
     assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+class _MockCeleryTask:
+    """Stand-in for a Celery task that records ``.delay()`` calls."""
+
+    def __init__(self):
+        self.calls: list[tuple] = []
+
+    def delay(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+
+
+@pytest.mark.asyncio
+async def test_register_sends_verification_email_when_required(client, db_session, monkeypatch):
+    """Test that registration queues a verification email when required."""
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_verification_email", mock_task)
+    client.app.state.config.auth.require_email_verification = True
+
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "verify-alice",
+            "email": "verify-alice@example.com",
+            "password": "secret",
+        },
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["is_active"] is True
+    assert data["email_verified"] is False
+
+    assert len(mock_task.calls) == 1
+    to_address, username, token = mock_task.calls[0][0]
+    assert to_address == "verify-alice@example.com"
+    assert username == "verify-alice"
+    assert len(token) >= 32
+
+    user = await get_user_by_username(db_session, "verify-alice")
+    assert user is not None
+    assert user.email_verification_token != token
+    assert len(user.email_verification_token) == 64
+
+
+@pytest.mark.asyncio
+async def test_register_does_not_send_verification_email_when_disabled(client, monkeypatch):
+    """Test that registration does not queue an email when verification is disabled."""
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_verification_email", mock_task)
+    client.app.state.config.auth.require_email_verification = False
+
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "no-verify-alice",
+            "email": "no-verify-alice@example.com",
+            "password": "secret",
+        },
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["email_verified"] is True
+    assert len(mock_task.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_verify_email_with_valid_token(client, db_session, monkeypatch):
+    """Test that a valid verification token marks the email as verified."""
+    client.app.state.config.auth.require_email_verification = True
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_verification_email", mock_task)
+
+    register_response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "verify-me",
+            "email": "verify-me@example.com",
+            "password": "secret",
+        },
+    )
+    assert register_response.status_code == status.HTTP_201_CREATED
+
+    assert len(mock_task.calls) == 1
+    token = mock_task.calls[0][0][2]
+
+    response = client.post(
+        "/api/v1/auth/verify-email",
+        json={"token": token},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["success"] is True
+
+    user = await get_user_by_username(db_session, "verify-me")
+    assert user is not None
+    await db_session.refresh(user)
+    assert user.email_verified is True
+    assert user.email_verification_token is None
+
+
+@pytest.mark.asyncio
+async def test_verify_email_with_invalid_token(client):
+    """Test that an unknown verification token is rejected."""
+    response = client.post(
+        "/api/v1/auth/verify-email",
+        json={"token": "not-a-real-token"},
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_verify_email_cannot_reuse_token(client, monkeypatch):
+    """Test that a verification token can only be used once."""
+    client.app.state.config.auth.require_email_verification = True
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_verification_email", mock_task)
+
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "reuse-me",
+            "email": "reuse-me@example.com",
+            "password": "secret",
+        },
+    )
+
+    assert len(mock_task.calls) == 1
+    token = mock_task.calls[0][0][2]
+
+    first = client.post("/api/v1/auth/verify-email", json={"token": token})
+    assert first.status_code == status.HTTP_200_OK
+
+    second = client.post("/api/v1/auth/verify-email", json={"token": token})
+    assert second.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_login_blocks_unverified_user_until_verified(client, monkeypatch):
+    """Test that unverified open-mode users cannot log in until verified."""
+    client.app.state.config.auth.require_email_verification = True
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_verification_email", mock_task)
+
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "blocked-alice",
+            "email": "blocked-alice@example.com",
+            "password": "secret",
+        },
+    )
+
+    assert len(mock_task.calls) == 1
+    token = mock_task.calls[0][0][2]
+
+    login_before = client.post(
+        "/api/v1/auth/login",
+        json={"username": "blocked-alice", "password": "secret"},
+    )
+    assert login_before.status_code == status.HTTP_403_FORBIDDEN
+
+    client.post("/api/v1/auth/verify-email", json={"token": token})
+
+    login_after = client.post(
+        "/api/v1/auth/login",
+        json={"username": "blocked-alice", "password": "secret"},
+    )
+    assert login_after.status_code == status.HTTP_200_OK
+    assert "access_token" in login_after.json()
+
+
+@pytest.mark.asyncio
+async def test_password_reset_request_sends_email_for_existing_user(client, db_session, monkeypatch):
+    """Test that a reset request queues an email for a real user."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "reset-alice",
+            "email": "reset-alice@example.com",
+            "password": "secret",
+        },
+    )
+
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_password_reset_email", mock_task)
+
+    response = client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"username": "reset-alice"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["success"] is True
+
+    assert len(mock_task.calls) == 1
+    to_address, username, token = mock_task.calls[0][0]
+    assert to_address == "reset-alice@example.com"
+    assert username == "reset-alice"
+    assert len(token) >= 32
+
+    user = await get_user_by_username(db_session, "reset-alice")
+    assert user is not None
+    assert user.password_reset_token is not None
+    assert user.password_reset_token != token
+    assert user.password_reset_expires_at is not None
+
+
+@pytest.mark.asyncio
+async def test_password_reset_request_returns_generic_success_for_missing_user(client, monkeypatch):
+    """Test that reset requests for unknown users still return success."""
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_password_reset_email", mock_task)
+
+    response = client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"username": "nobody@example.com"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["success"] is True
+    assert len(mock_task.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_password_reset_confirm_with_valid_token(client, db_session, monkeypatch):
+    """Test that a valid reset token changes the password and revokes refresh tokens."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "reset-bob",
+            "email": "reset-bob@example.com",
+            "password": "old-secret",
+        },
+    )
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "reset-bob", "password": "old-secret"},
+    )
+    assert login.status_code == status.HTTP_200_OK
+    old_refresh_token = login.json()["refresh_token"]
+
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_password_reset_email", mock_task)
+    client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"username": "reset-bob"},
+    )
+    _, _, token = mock_task.calls[0][0]
+
+    response = client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": token, "new_password": "new-secret"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["success"] is True
+
+    user = await get_user_by_username(db_session, "reset-bob")
+    assert user is not None
+    assert user.password_reset_token is None
+    assert user.password_reset_expires_at is None
+
+    old_login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "reset-bob", "password": "old-secret"},
+    )
+    assert old_login.status_code == status.HTTP_401_UNAUTHORIZED
+
+    old_refresh = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": old_refresh_token},
+    )
+    assert old_refresh.status_code == status.HTTP_401_UNAUTHORIZED
+
+    new_login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "reset-bob", "password": "new-secret"},
+    )
+    assert new_login.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.asyncio
+async def test_password_reset_confirm_with_invalid_token(client):
+    """Test that an unknown reset token is rejected."""
+    response = client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": "not-a-real-token", "new_password": "new-secret"},
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_password_reset_confirm_with_expired_token(client, db_session):
+    """Test that an expired reset token is rejected."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "reset-expired",
+            "email": "reset-expired@example.com",
+            "password": "secret",
+        },
+    )
+
+    user = await get_user_by_username(db_session, "reset-expired")
+    assert user is not None
+    raw_token = "expired-token"
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    user.password_reset_token = token_hash
+    user.password_reset_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    await db_session.flush()
+
+    response = client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": raw_token, "new_password": "new-secret"},
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST

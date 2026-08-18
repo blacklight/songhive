@@ -2,6 +2,7 @@
 Authentication service: user registration, login, password hashing.
 """
 
+import hashlib
 from typing import Optional, cast
 
 import bcrypt
@@ -46,6 +47,24 @@ async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
 async def get_user_by_id(session: AsyncSession, user_id: str) -> User | None:
     """Fetch a user by primary key id."""
     result = await session.execute(select(User).where(User.id == user_id))
+    return cast(Optional[User], result.scalar_one_or_none())
+
+
+async def get_user_by_email_verification_token(session: AsyncSession, token: str) -> User | None:
+    """
+    Fetch a user by their raw email verification token.
+
+    The provided token is hashed before the database lookup because only a
+    SHA-256 hash is stored for verification tokens.
+    """
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    result = await session.execute(select(User).where(User.email_verification_token == token_hash))
+    return cast(Optional[User], result.scalar_one_or_none())
+
+
+async def get_user_by_password_reset_token(session: AsyncSession, token_hash: str) -> User | None:
+    """Fetch a user by the SHA-256 hash of their password reset token."""
+    result = await session.execute(select(User).where(User.password_reset_token == token_hash))
     return cast(Optional[User], result.scalar_one_or_none())
 
 

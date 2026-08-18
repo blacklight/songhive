@@ -11,7 +11,10 @@ from songhive.api.middleware.auth import decode_access_token
 from songhive.config.schema import AuthConfig
 from songhive.services.auth import create_user
 from songhive.users.tokens import (
+    _hash_token,
+    _user_refresh_set_key,
     issue_token_pair,
+    revoke_all_user_refresh_tokens,
     revoke_refresh_token,
     rotate_refresh_token,
     validate_refresh_token,
@@ -175,12 +178,21 @@ async def test_refresh_token_not_stored_raw(db_session, token_config, fake_redis
     await db_session.flush()
 
     token_pair = await issue_token_pair(user, token_config, fake_redis)
+    token_hash = _hash_token(token_pair.refresh_token)
 
-    keys = [key async for key in fake_redis.scan_iter(match="*")]
+    # Token values are hashed and stored as strings.
+    keys = [key async for key in fake_redis.scan_iter("auth:refresh:*")]
     for key in keys:
         assert token_pair.refresh_token not in key
         value = await fake_redis.get(key)
         assert token_pair.refresh_token not in value
+
+    # The per-user index is a set containing token hashes, not raw tokens.
+    set_key = _user_refresh_set_key(user.id)
+    assert await fake_redis.type(set_key) == "set"
+    members = await fake_redis.smembers(set_key)
+    assert token_hash in members
+    assert token_pair.refresh_token not in members
 
 
 @pytest.mark.asyncio
@@ -274,6 +286,18 @@ async def test_rotate_refresh_token_returns_none_on_watch_error(db_session, toke
             self._pipeline.set(*args, **kwargs)
             return self
 
+        def sadd(self, *args):
+            self._pipeline.sadd(*args)
+            return self
+
+        def srem(self, *args):
+            self._pipeline.srem(*args)
+            return self
+
+        def expire(self, *args, **kwargs):
+            self._pipeline.expire(*args, **kwargs)
+            return self
+
         async def execute(self, *_, **__):
             raise WatchError("Watched variable changed")
 
@@ -288,3 +312,72 @@ async def test_rotate_refresh_token_returns_none_on_watch_error(db_session, toke
 
     result = await rotate_refresh_token(original.refresh_token, token_config, fake_redis)
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_issue_token_pair_adds_to_user_set(db_session, token_config, fake_redis):
+    """Test that issuing a token adds its hash to the per-user refresh set."""
+    user = await create_user(db_session, "index-alice", "index-alice@example.com", "secret")
+    await db_session.flush()
+
+    token_pair = await issue_token_pair(user, token_config, fake_redis)
+    token_hash = _hash_token(token_pair.refresh_token)
+    set_key = _user_refresh_set_key(user.id)
+
+    members = await fake_redis.smembers(set_key)
+    assert token_hash in members
+
+
+@pytest.mark.asyncio
+async def test_revoke_refresh_token_removes_from_user_set(db_session, token_config, fake_redis):
+    """Test that revoking a token removes it from the per-user set."""
+    user = await create_user(db_session, "index-bob", "index-bob@example.com", "secret")
+    await db_session.flush()
+
+    token_pair = await issue_token_pair(user, token_config, fake_redis)
+    set_key = _user_refresh_set_key(user.id)
+    assert len(await fake_redis.smembers(set_key)) == 1
+
+    revoked = await revoke_refresh_token(token_pair.refresh_token, fake_redis)
+    assert revoked is True
+    assert len(await fake_redis.smembers(set_key)) == 0
+
+
+@pytest.mark.asyncio
+async def test_rotate_refresh_token_updates_user_set(db_session, token_config, fake_redis):
+    """Test that rotation swaps token hashes in the per-user set."""
+    user = await create_user(db_session, "index-carol", "index-carol@example.com", "secret")
+    await db_session.flush()
+
+    original = await issue_token_pair(user, token_config, fake_redis)
+    original_hash = _hash_token(original.refresh_token)
+    set_key = _user_refresh_set_key(user.id)
+    assert original_hash in await fake_redis.smembers(set_key)
+
+    rotated = await rotate_refresh_token(original.refresh_token, token_config, fake_redis)
+    assert rotated is not None
+    rotated_hash = _hash_token(rotated.refresh_token)
+
+    members = await fake_redis.smembers(set_key)
+    assert original_hash not in members
+    assert rotated_hash in members
+
+
+@pytest.mark.asyncio
+async def test_revoke_all_user_refresh_tokens(db_session, token_config, fake_redis):
+    """Test that all refresh tokens for a user can be bulk revoked."""
+    user = await create_user(db_session, "index-dave", "index-dave@example.com", "secret")
+    await db_session.flush()
+
+    first = await issue_token_pair(user, token_config, fake_redis)
+    second = await issue_token_pair(user, token_config, fake_redis)
+
+    assert await validate_refresh_token(first.refresh_token, fake_redis) is not None
+    assert await validate_refresh_token(second.refresh_token, fake_redis) is not None
+
+    deleted = await revoke_all_user_refresh_tokens(fake_redis, user.id)
+    assert deleted > 0
+
+    assert await validate_refresh_token(first.refresh_token, fake_redis) is None
+    assert await validate_refresh_token(second.refresh_token, fake_redis) is None
+    assert len(await fake_redis.smembers(_user_refresh_set_key(user.id))) == 0

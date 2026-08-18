@@ -8,7 +8,7 @@ import json
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Awaitable, Optional, cast
 
 from redis.asyncio import Redis
 from redis.exceptions import WatchError
@@ -24,6 +24,7 @@ __all__ = [
     "validate_refresh_token",
     "rotate_refresh_token",
     "revoke_refresh_token",
+    "revoke_all_user_refresh_tokens",
 ]
 
 
@@ -53,6 +54,17 @@ def _hash_token(token: str) -> str:
 def _refresh_key(token_hash: str) -> str:
     """Build the Redis key for a refresh token."""
     return f"auth:refresh:{token_hash}"
+
+
+def _user_refresh_set_key(user_id: str) -> str:
+    """Build the Redis key for a user's refresh token index set."""
+    return f"auth:refresh-user:{user_id}"
+
+
+async def _set_members(redis: Redis, key: str) -> set[str]:
+    """Return the members of a Redis set as a set of strings."""
+    members = await cast(Awaitable[set[str]], redis.smembers(key))
+    return members
 
 
 def _token_ttl(config: SonghiveConfig) -> int:
@@ -119,13 +131,21 @@ async def issue_token_pair(user: User, config: SonghiveConfig, redis: Redis) -> 
 
     The refresh token is stored in Redis keyed by its SHA-256 hash, with the
     user's id as the payload and a TTL set by ``config.auth.refresh_token_expiry_days``.
+    A hash is also added to the per-user refresh token set for bulk revocation.
     """
     token_pair = _issue_token_pair_for_user_id(user.id, config)
     token_hash = _hash_token(token_pair.refresh_token)
     key = _refresh_key(token_hash)
+    user_set_key = _user_refresh_set_key(user.id)
     ttl = _token_ttl(config)
     value = _encode_value(user.id, ttl)
-    await redis.set(key, value, ex=ttl)
+
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.set(key, value, ex=ttl)
+        pipe.sadd(user_set_key, token_hash)
+        pipe.expire(user_set_key, ttl)
+        await pipe.execute()
+
     return token_pair
 
 
@@ -169,10 +189,14 @@ async def rotate_refresh_token(token: str, config: SonghiveConfig, redis: Redis)
         new_hash = _hash_token(token_pair.refresh_token)
         new_key = _refresh_key(new_hash)
         new_value = _encode_value(payload.user_id, ttl)
+        user_set_key = _user_refresh_set_key(payload.user_id)
 
         pipe.multi()
         pipe.delete(old_key)
         pipe.set(new_key, new_value, ex=ttl)
+        pipe.srem(user_set_key, old_hash)
+        pipe.sadd(user_set_key, new_hash)
+        pipe.expire(user_set_key, ttl)
         try:
             await pipe.execute()
         except WatchError:
@@ -183,11 +207,45 @@ async def rotate_refresh_token(token: str, config: SonghiveConfig, redis: Redis)
 
 async def revoke_refresh_token(token: str, redis: Redis) -> bool:
     """
-    Revoke a refresh token by deleting it from Redis.
+    Revoke a refresh token by deleting it from Redis and removing it from the
+    per-user refresh token index.
 
     Returns ``True`` if a token was deleted, ``False`` if it was not present.
     """
     token_hash = _hash_token(token)
     key = _refresh_key(token_hash)
-    deleted: int = await redis.delete(key)
+    value = await redis.get(key)
+    payload = _decode_value(value)
+
+    if payload is None:
+        # The token is absent or malformed. Try to delete the key anyway to
+        # clean up stale data, but we cannot remove it from a user set.
+        stale_deleted = await redis.delete(key)
+        return stale_deleted > 0
+
+    user_set_key = _user_refresh_set_key(payload.user_id)
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.delete(key)
+        pipe.srem(user_set_key, token_hash)
+        results = await pipe.execute()
+        deleted: int = results[0]
+
     return deleted > 0
+
+
+async def revoke_all_user_refresh_tokens(redis: Redis, user_id: str) -> int:
+    """
+    Revoke every refresh token issued for a user by deleting the per-user set
+    and all token keys it indexes.
+
+    Returns the number of Redis keys deleted.
+    """
+    set_key = _user_refresh_set_key(user_id)
+    token_hashes = await _set_members(redis, set_key)
+    if not token_hashes:
+        return 0
+
+    keys = [_refresh_key(h) for h in token_hashes]
+    keys.append(set_key)
+    deleted: int = await redis.delete(*keys)
+    return deleted
