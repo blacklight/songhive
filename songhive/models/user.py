@@ -10,6 +10,7 @@ from sqlalchemy import Boolean, CheckConstraint, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from .base import Base
+from .invite import Invite
 from .user_link import UserLink
 
 
@@ -49,6 +50,12 @@ class User(Base):
     links: Mapped[List["UserLink"]] = relationship(
         "UserLink",
         back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    invites: Mapped[List["Invite"]] = relationship(
+        "Invite",
+        back_populates="creator",
         cascade="all, delete-orphan",
         lazy="selectin",
     )

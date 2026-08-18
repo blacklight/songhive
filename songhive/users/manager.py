@@ -15,6 +15,7 @@ from ..config.schema import RegistrationMode, SonghiveConfig
 from ..models.user import User, UserRole
 from ..models.user_link import UserLink
 from ..services.auth import get_user_by_id, hash_password
+from ..users.invites import get_invite, is_invite_valid
 
 MAX_USERNAME_LENGTH = 64
 MAX_EMAIL_LENGTH = 254
@@ -39,16 +40,6 @@ class UserManagementError(ValueError):
     def __init__(self, message: str, status_code: int = 400):
         super().__init__(message)
         self.status_code = status_code
-
-
-async def _validate_invite_code(_session: AsyncSession, _invite_code: Optional[str]) -> bool:
-    """
-    Placeholder invite-code validation.
-
-    Section 12 (Invite model and invite service) will replace this with a real
-    check against persisted invite codes. Until then, no invite code is valid.
-    """
-    return False
 
 
 def _normalize_username(username: str) -> str:
@@ -133,10 +124,13 @@ async def register_user(
     if config.auth.registration_mode == RegistrationMode.CLOSED:
         raise RegistrationError("Registration is closed")
 
-    if config.auth.registration_mode == RegistrationMode.INVITE_ONLY and (
-        not invite_code or not await _validate_invite_code(session, invite_code)
-    ):
-        raise RegistrationError("Invalid or missing invite code")
+    invite = None
+    if config.auth.registration_mode == RegistrationMode.INVITE_ONLY:
+        if not invite_code:
+            raise RegistrationError("Invalid or missing invite code")
+        invite = await get_invite(session, invite_code)
+        if invite is None or not is_invite_valid(invite):
+            raise RegistrationError("Invalid or missing invite code")
 
     username = _normalize_username(username)
     email = _normalize_and_validate_email(email)
@@ -145,6 +139,9 @@ async def register_user(
 
     _validate_registration_input(username, email, password, display_name)
     await _check_for_duplicates(session, username, email)
+
+    if invite is not None:
+        invite.uses += 1
 
     is_active = True
     email_verified = True
