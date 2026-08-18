@@ -3,11 +3,14 @@ FastAPI application factory.
 """
 
 import logging
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..config.schema import SonghiveConfig
+from ..services.redis import close_redis_client, get_redis_client
 from .routes import (
     admin,
     albums,
@@ -34,11 +37,18 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     """
     from ..version import __version__
 
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        app.state.redis = get_redis_client(config)
+        yield
+        await close_redis_client()
+
     app = FastAPI(
         title="Songhive",
         description="A federated and self-hosted music sharing service",
         version=__version__,
         debug=config.server.debug,
+        lifespan=_lifespan,
     )
 
     # Store config in app state for dependency injection
