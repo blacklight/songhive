@@ -138,6 +138,14 @@ def test_user_link_model_rejects_whitespace_only():
         UserLink(name="Example", url="   ")
 
 
+def test_user_link_model_rejects_unsafe_url_scheme():
+    """Test that UserLink rejects URLs with unsafe schemes."""
+    with pytest.raises(ValueError, match="Link URL must start with http:// or https://"):
+        UserLink(name="Example", url="javascript:alert(1)")
+    with pytest.raises(ValueError, match="Link URL must start with http:// or https://"):
+        UserLink(name="Example", url="data:text/html,<script>alert(1)</script>")
+
+
 @pytest.mark.asyncio
 async def test_user_links_cascade_on_delete(db_session):
     """Test that deleting a user also deletes their profile links."""
@@ -225,16 +233,25 @@ def test_user_link_input_strips_whitespace():
     assert link.url == "https://example.com"
 
 
-@pytest.mark.asyncio
-async def test_me_route_not_shadowed_by_username(client):
-    """Test that /api/v1/users/me resolves to the /me route, not /{username}."""
-    response = client.get("/api/v1/users/me")
-    assert response.status_code == 401
+def test_user_link_input_rejects_unsafe_url_scheme():
+    """Test that UserLinkInput rejects URLs with unsafe schemes after stripping."""
+    with pytest.raises(ValidationError):
+        UserLinkInput(name="Example", url="   javascript:alert(1)   ")
+    with pytest.raises(ValidationError):
+        UserProfileUpdate(links=[UserLinkInput(name="Example", url="data:text/html,<script>alert(1)</script>")])
 
 
-@pytest.mark.asyncio
-async def test_get_user_profile_endpoint_returns_links(client, db_session):
-    """Test that the public profile endpoint serializes a user with links."""
+def test_user_link_input_accepts_http_and_https():
+    """Test that UserLinkInput accepts http:// and https:// URLs."""
+    https_link = UserLinkInput(name="Website", url="https://example.com")
+    assert https_link.url == "https://example.com"
+    http_link = UserLinkInput(name="Website", url="http://example.com")
+    assert http_link.url == "http://example.com"
+
+
+@pytest.fixture
+async def profile_user(db_session):
+    """Create a user with profile links for public profile tests."""
     user = User(
         username="alice",
         email="alice@example.com",
@@ -249,33 +266,12 @@ async def test_get_user_profile_endpoint_returns_links(client, db_session):
     db_session.add(user)
     await db_session.flush()
     await db_session.commit()
-
-    response = client.get("/api/v1/users/alice")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["username"] == "alice"
-    assert data["display_name"] == "Alice"
-    assert data["bio"] == "Hello"
-    assert "email" not in data
-    assert "password_hash" not in data
-    assert len(data["links"]) == 2
-    assert data["links"][0] == {"name": "Website", "url": "https://example.com"}
-    assert data["links"][1] == {
-        "name": "Mastodon",
-        "url": "https://mastodon.example.com/@alice",
-    }
+    return user
 
 
-@pytest.mark.asyncio
-async def test_get_user_profile_endpoint_missing_user(client, db_session):
-    """Test that the public profile endpoint returns 404 for an unknown user."""
-    response = client.get("/api/v1/users/nobody")
-    assert response.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_get_user_profile_endpoint_inactive_user(client, db_session):
-    """Test that the public profile endpoint does not expose inactive users."""
+@pytest.fixture
+async def inactive_user(db_session):
+    """Create an inactive user for public profile tests."""
     user = User(
         username="inactive",
         email="inactive@example.com",
@@ -285,6 +281,55 @@ async def test_get_user_profile_endpoint_inactive_user(client, db_session):
     db_session.add(user)
     await db_session.flush()
     await db_session.commit()
+    return user
 
+
+def test_me_route_not_shadowed_by_username(client):
+    """Test that /api/v1/users/me resolves to the /me route, not /{username}."""
+    response = client.get("/api/v1/users/me")
+    assert response.status_code == 401
+
+
+def test_get_user_profile_endpoint_returns_links(client, profile_user):
+    """Test that the public profile endpoint serializes a user with links."""
+    response = client.get("/api/v1/users/alice")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "alice"
+    assert data["display_name"] == "Alice"
+    assert data["bio"] == "Hello"
+    assert len(data["links"]) == 2
+    assert data["links"][0] == {"name": "Website", "url": "https://example.com"}
+    assert data["links"][1] == {
+        "name": "Mastodon",
+        "url": "https://mastodon.example.com/@alice",
+    }
+
+    expected_fields = {"username", "display_name", "bio", "avatar_url", "links"}
+    assert set(data.keys()) == expected_fields
+
+    sensitive_fields = {
+        "id",
+        "email",
+        "password_hash",
+        "email_verification_token",
+        "password_reset_token",
+        "password_reset_expires_at",
+        "private_key_pem",
+        "public_key_pem",
+        "actor_url",
+    }
+    for field in sensitive_fields:
+        assert field not in data, f"Sensitive field {field!r} leaked into public response"
+
+
+def test_get_user_profile_endpoint_missing_user(client):
+    """Test that the public profile endpoint returns 404 for an unknown user."""
+    response = client.get("/api/v1/users/nobody")
+    assert response.status_code == 404
+
+
+def test_get_user_profile_endpoint_inactive_user(client, inactive_user):
+    """Test that the public profile endpoint does not expose inactive users."""
     response = client.get("/api/v1/users/inactive")
     assert response.status_code == 404

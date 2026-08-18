@@ -48,7 +48,7 @@ class User(Base):
     last_login: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     links: Mapped[List["UserLink"]] = relationship(
         "UserLink",
-        backref="user",
+        back_populates="user",
         cascade="all, delete-orphan",
         lazy="selectin",
     )
