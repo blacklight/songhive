@@ -22,7 +22,7 @@ steps:
 - name: lint
   image: python:3.12
   commands:
-    - pip install flake8 black
+    - pip install flake8 black isort
     - python -m flake8 songhive tests
     - python -m black --check .
     - python -m isort songhive tests
