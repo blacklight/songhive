@@ -2,12 +2,15 @@
 Admin user management API tests.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi import status
 
 from songhive.api.middleware.auth import create_access_token
 from songhive.models.user import UserRole
 from songhive.services.auth import create_user
+from songhive.users.invites import create_invite
 
 
 async def _make_user(db_session, *args, **kwargs):
@@ -232,3 +235,142 @@ async def test_admin_action_returns_404_for_missing_user(client, db_session, con
     ]:
         response = client.post(path, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == status.HTTP_404_NOT_FOUND, path
+
+
+@pytest.mark.asyncio
+async def test_admin_list_invites_requires_authentication(client):
+    """Test that listing invites requires authentication."""
+    response = client.get("/api/v1/admin/invites")
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_admin_list_invites_forbids_non_admin(client, db_session, config):
+    """Test that non-admin users cannot list invites."""
+    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
+    token = await _admin_token(user, config)
+
+    response = client.get(
+        "/api/v1/admin/invites",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_admin_list_invites_returns_invites(client, db_session, config):
+    """Test that admins can list invite codes."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    invite = await create_invite(db_session, created_by=admin.id, max_uses=5)
+    await db_session.flush()
+    token = await _admin_token(admin, config)
+
+    response = client.get(
+        "/api/v1/admin/invites",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["code"] == invite.code
+    assert data[0]["created_by"] == admin.id
+    assert data[0]["max_uses"] == 5
+    assert data[0]["uses"] == 0
+    assert "X-Total-Count" in response.headers
+    assert response.headers["X-Total-Count"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_admin_create_invite(client, db_session, config):
+    """Test that an admin can create an invite code."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    token = await _admin_token(admin, config)
+
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    response = client.post(
+        "/api/v1/admin/invites",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"max_uses": 10, "expires_at": expires_at},
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["created_by"] == admin.id
+    assert data["max_uses"] == 10
+    assert data["uses"] == 0
+    assert data["code"]
+    assert data["expires_at"]
+
+
+@pytest.mark.asyncio
+async def test_admin_create_invite_rejects_invalid_max_uses(client, db_session, config):
+    """Test that invalid invite parameters are rejected."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    token = await _admin_token(admin, config)
+
+    response = client.post(
+        "/api/v1/admin/invites",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"max_uses": 0},
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_admin_create_invite_forbids_non_admin(client, db_session, config):
+    """Test that non-admin users cannot create invites."""
+    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
+    token = await _admin_token(user, config)
+
+    response = client.post(
+        "/api/v1/admin/invites",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"max_uses": 1},
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_invite(client, db_session, config):
+    """Test that an admin can revoke an invite code."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    invite = await create_invite(db_session, created_by=admin.id)
+    await db_session.flush()
+    token = await _admin_token(admin, config)
+
+    response = client.delete(
+        f"/api/v1/admin/invites/{invite.code}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+
+    list_response = client.get(
+        "/api/v1/admin/invites",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert list_response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_invite_missing(client, db_session, config):
+    """Test that deleting a missing invite returns 404."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    token = await _admin_token(admin, config)
+
+    response = client.delete(
+        "/api/v1/admin/invites/not-a-real-code",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_invite_forbids_non_admin(client, db_session, config):
+    """Test that non-admin users cannot delete invites."""
+    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
+    token = await _admin_token(user, config)
+
+    response = client.delete(
+        "/api/v1/admin/invites/not-a-real-code",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN

@@ -4,6 +4,7 @@ Admin CLI command tests.
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,8 @@ from songhive.cli import admin as cli_admin
 from songhive.config.schema import SonghiveConfig
 from songhive.models.base import Base
 from songhive.models.user import User  # noqa: F401
+from songhive.services.auth import create_user
+from songhive.users.invites import create_invite
 
 
 @asynccontextmanager
@@ -183,3 +186,138 @@ def test_admin_main_promote_user(tmp_path, monkeypatch):
     user = asyncio.run(_get_user_by_username(db_url, "alice"))
     assert user is not None
     assert user.is_admin is True
+
+
+@pytest.mark.asyncio
+async def test_create_invite_handler(db_session, monkeypatch, capsys):
+    """Test the create-invite handler."""
+    await create_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args(created_by="admin", max_uses=5, expires_at=None)
+    await cli_admin._handle_create_invite(args)
+    captured = capsys.readouterr()
+    assert "Invite code:" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_create_invite_handler_with_expires_at(db_session, monkeypatch, capsys):
+    """Test the create-invite handler with an expiration."""
+    await create_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    args = _make_args(created_by="admin", max_uses=5, expires_at=expires_at)
+    await cli_admin._handle_create_invite(args)
+    captured = capsys.readouterr()
+    assert "Invite code:" in captured.out
+    assert "expires_at" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_create_invite_handler_missing_user(db_session, monkeypatch, capsys):
+    """Test that create-invite fails when the creator does not exist."""
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args(created_by="nobody", max_uses=None, expires_at=None)
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_create_invite(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "not found" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_create_invite_handler_invalid_expires_at(db_session, monkeypatch, capsys):
+    """Test that create-invite fails for an invalid expiration."""
+    await create_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args(created_by="admin", max_uses=None, expires_at="not-a-date")
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_create_invite(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "invalid expires_at" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_list_invites_handler(db_session, monkeypatch, capsys):
+    """Test the list-invites handler."""
+    admin = await create_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    await db_session.flush()
+    await create_invite(db_session, created_by=admin.id, max_uses=3)
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args()
+    await cli_admin._handle_list_invites(args)
+    captured = capsys.readouterr()
+    assert "max_uses=3" in captured.out
+    assert "uses=0" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_list_invites_handler_empty(db_session, monkeypatch, capsys):
+    """Test the list-invites handler when no invites exist."""
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args()
+    await cli_admin._handle_list_invites(args)
+    captured = capsys.readouterr()
+    assert "No invite codes found" in captured.out
+
+
+def test_admin_main_create_invite(tmp_path, monkeypatch):
+    """Test the full create-invite CLI command."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'admin.db'}"
+    monkeypatch.setattr(
+        cli_admin,
+        "load_config",
+        lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
+    )
+    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
+
+    cli_admin.admin_main(
+        ["create-user", "--username", "admin", "--email", "admin@example.com", "--password", "secret", "--admin"]
+    )
+    cli_admin.admin_main(["create-invite", "--created-by", "admin", "--max-uses", "5"])
+
+    def _count_invites(database_url: str) -> int:
+        from songhive.users.invites import count_invites
+
+        engine = create_async_engine(database_url)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async def _run():
+            async with factory() as session:
+                return await count_invites(session)
+
+        result = asyncio.run(_run())
+        return result
+
+    assert _count_invites(db_url) == 1
+
+
+def test_admin_main_list_invites(tmp_path, monkeypatch, capsys):
+    """Test the full list-invites CLI command."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'admin.db'}"
+    monkeypatch.setattr(
+        cli_admin,
+        "load_config",
+        lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
+    )
+    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
+
+    cli_admin.admin_main(
+        ["create-user", "--username", "admin", "--email", "admin@example.com", "--password", "secret", "--admin"]
+    )
+    cli_admin.admin_main(["create-invite", "--created-by", "admin", "--max-uses", "2"])
+    cli_admin.admin_main(["list-invites"])
+
+    captured = capsys.readouterr()
+    assert "max_uses=2" in captured.out
+    assert "uses=0" in captured.out

@@ -7,9 +7,9 @@ used for invite-only registration.
 
 import secrets
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.invite import Invite
@@ -22,6 +22,8 @@ __all__ = [
     "validate_invite",
     "consume_invite",
     "revoke_invite",
+    "list_invites",
+    "count_invites",
 ]
 
 
@@ -145,3 +147,20 @@ async def revoke_invite(session: AsyncSession, code: str) -> bool:
     await session.delete(invite)
     await session.flush()
     return True
+
+
+async def list_invites(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+    offset: int = 0,
+) -> List[Invite]:
+    """List invite codes ordered by creation date (newest first)."""
+    result = await session.execute(select(Invite).order_by(Invite.created_at.desc()).offset(offset).limit(limit))
+    return list(result.scalars().all())
+
+
+async def count_invites(session: AsyncSession) -> int:
+    """Return the total number of invite codes."""
+    result = await session.execute(select(func.count(Invite.id)))
+    return result.scalar() or 0
