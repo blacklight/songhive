@@ -86,7 +86,7 @@ def get_or_create_private_key(private_key_path: Optional[Path] = None) -> Path:
         a default path under ``~/.local/share/songhive/federation/`` is used.
     :returns: Resolved path to the PEM private key.
     """
-    from pubby.crypto import generate_rsa_keypair, export_private_key_pem
+    from pubby.crypto import export_private_key_pem, generate_rsa_keypair
 
     key_path = private_key_path if private_key_path is not None else _default_private_key_path()
     key_path = key_path.expanduser().resolve()

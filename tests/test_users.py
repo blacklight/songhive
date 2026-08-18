@@ -11,7 +11,12 @@ from songhive.config.schema import SonghiveConfig
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
 from songhive.services.auth import create_user, verify_password
-from songhive.users.manager import RegistrationError, change_password, deactivate_user, register_user
+from songhive.users.manager import (
+    RegistrationError,
+    change_password,
+    deactivate_user,
+    register_user,
+)
 
 
 def test_user_model_defaults():

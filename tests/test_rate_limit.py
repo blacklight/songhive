@@ -1,0 +1,285 @@
+"""
+Tests for the Redis-backed fixed-window rate limiter.
+"""
+
+import logging
+from unittest.mock import MagicMock
+
+import pytest
+from fastapi import HTTPException, Request, status
+
+from songhive.api.middleware.rate_limit import (
+    _client_ip,
+    _rate_limit_key,
+    check_rate_limit,
+)
+from songhive.config.schema import SonghiveConfig
+
+
+def _request(
+    path: str = "/api/v1/auth/login",
+    headers: list[tuple[bytes, bytes]] | None = None,
+    client: tuple[str, int] | None = None,
+) -> Request:
+    """Build a minimal ASGI request scope for unit tests."""
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "query_string": b"",
+        "headers": headers or [],
+        "server": ("testserver", 80),
+    }
+    if client:
+        scope["client"] = client
+    return Request(scope)
+
+
+def test_client_ip_from_x_forwarded_for():
+    """Test that X-Forwarded-For is preferred when present."""
+    request = _request(
+        headers=[(b"x-forwarded-for", b"203.0.113.1, 70.0.0.1")],
+    )
+    assert _client_ip(request) == "203.0.113.1"
+
+
+def test_client_ip_from_real_ip():
+    """Test that X-Real-IP is used when X-Forwarded-For is absent."""
+    request = _request(
+        headers=[(b"x-real-ip", b"192.0.2.1")],
+    )
+    assert _client_ip(request) == "192.0.2.1"
+
+
+def test_client_ip_from_request_client():
+    """Test that request.client is used as a fallback."""
+    request = _request(client=("127.0.0.1", 12345))
+    assert _client_ip(request) == "127.0.0.1"
+
+
+def test_client_ip_returns_unknown_when_missing():
+    """Test that an unknown IP is returned when nothing else is available."""
+    request = _request()
+    assert _client_ip(request) == "unknown"
+
+
+def test_rate_limit_key_without_identifier():
+    """Test the rate limit key for IP + path."""
+    assert _rate_limit_key("1.2.3.4", "/api/v1/auth/login") == "rate:1.2.3.4:/api/v1/auth/login"
+
+
+def test_rate_limit_key_with_identifier():
+    """Test the rate limit key including an optional identifier."""
+    assert _rate_limit_key("1.2.3.4", "/api/v1/auth/login", "alice") == ("rate:1.2.3.4:/api/v1/auth/login:alice")
+
+
+@pytest.mark.asyncio
+async def test_check_rate_limit_allows_requests_under_limit(fake_redis):
+    """Test that requests under the limit are allowed."""
+    config = SonghiveConfig(
+        auth={
+            "rate_limit_enabled": True,
+            "rate_limit_requests": 2,
+            "rate_limit_window_seconds": 60,
+        }
+    )
+    request = _request()
+
+    await check_rate_limit(request, config, fake_redis)
+    await check_rate_limit(request, config, fake_redis)
+
+
+@pytest.mark.asyncio
+async def test_check_rate_limit_rejects_over_limit(fake_redis):
+    """Test that the request over the limit is rejected with 429."""
+    config = SonghiveConfig(
+        auth={
+            "rate_limit_enabled": True,
+            "rate_limit_requests": 2,
+            "rate_limit_window_seconds": 60,
+        }
+    )
+    request = _request()
+
+    await check_rate_limit(request, config, fake_redis)
+    await check_rate_limit(request, config, fake_redis)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await check_rate_limit(request, config, fake_redis)
+
+    assert exc_info.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert "Rate limit exceeded" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_check_rate_limit_disabled_ignores_limit(fake_redis):
+    """Test that rate limiting is skipped when disabled in config."""
+    config = SonghiveConfig(
+        auth={
+            "rate_limit_enabled": False,
+            "rate_limit_requests": 1,
+            "rate_limit_window_seconds": 60,
+        }
+    )
+    request = _request()
+
+    await check_rate_limit(request, config, fake_redis)
+    await check_rate_limit(request, config, fake_redis)
+    await check_rate_limit(request, config, fake_redis)
+
+
+@pytest.mark.asyncio
+async def test_check_rate_limit_uses_identifier(fake_redis):
+    """Test that an identifier produces a separate rate limit bucket."""
+    config = SonghiveConfig(
+        auth={
+            "rate_limit_enabled": True,
+            "rate_limit_requests": 1,
+            "rate_limit_window_seconds": 60,
+        }
+    )
+    request = _request()
+
+    await check_rate_limit(request, config, fake_redis, identifier="alice")
+    # A different identifier should still be allowed.
+    await check_rate_limit(request, config, fake_redis, identifier="bob")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await check_rate_limit(request, config, fake_redis, identifier="alice")
+
+    assert exc_info.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_check_rate_limit_fails_open_on_redis_error(caplog):
+    """Test that Redis errors fail open and log a warning."""
+    config = SonghiveConfig(
+        auth={
+            "rate_limit_enabled": True,
+            "rate_limit_requests": 1,
+            "rate_limit_window_seconds": 60,
+        }
+    )
+    request = _request()
+    broken_redis = MagicMock()
+    broken_redis.incr = MagicMock(side_effect=ConnectionError("redis down"))
+
+    with caplog.at_level(logging.WARNING, logger="songhive.api.middleware.rate_limit"):
+        await check_rate_limit(request, config, broken_redis)
+
+    assert "Rate limiting unavailable" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_register_endpoint_rate_limited(client):
+    """Test that repeated registration requests are blocked with 429."""
+    client.app.state.config.auth.rate_limit_requests = 2
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    for i in range(2):
+        response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": f"rate-user-{i}",
+                "email": f"rate-user-{i}@example.com",
+                "password": "secret",
+            },
+        )
+        assert response.status_code == status.HTTP_201_CREATED
+
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "rate-user-blocked",
+            "email": "rate-user-blocked@example.com",
+            "password": "secret",
+        },
+    )
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert "Rate limit exceeded" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint_rate_limited(client):
+    """Test that repeated login requests are blocked with 429."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "alice@example.com",
+            "password": "secret",
+        },
+    )
+    client.app.state.config.auth.rate_limit_requests = 2
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    for _ in range(2):
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "alice", "password": "secret"},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "secret"},
+    )
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_refresh_endpoint_rate_limited(client):
+    """Test that repeated refresh requests are blocked with 429."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "refresh-alice",
+            "email": "refresh-alice@example.com",
+            "password": "secret",
+        },
+    )
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "refresh-alice", "password": "secret"},
+    )
+    refresh_token = login_response.json()["refresh_token"]
+
+    client.app.state.config.auth.rate_limit_requests = 2
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    for _ in range(2):
+        response = client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": refresh_token},
+        )
+        if response.status_code == status.HTTP_200_OK:
+            refresh_token = response.json()["refresh_token"]
+
+    # The next request should be rate limited. By this point the original token
+    # may have been rotated out, so an invalid token is acceptable for the 429
+    # check; the limiter runs before the route handler.
+    response = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": refresh_token},
+    )
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_disabled_allows_requests(client):
+    """Test that disabling rate limiting prevents 429 responses."""
+    client.app.state.config.auth.rate_limit_enabled = False
+    client.app.state.config.auth.rate_limit_requests = 1
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    for i in range(3):
+        response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": f"no-limit-{i}",
+                "email": f"no-limit-{i}@example.com",
+                "password": "secret",
+            },
+        )
+        assert response.status_code == status.HTTP_201_CREATED

@@ -9,7 +9,7 @@ from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.user import User, VALID_ROLES
+from ..models.user import VALID_ROLES, User
 
 _EMAIL_VALIDATOR = TypeAdapter(EmailStr)
 

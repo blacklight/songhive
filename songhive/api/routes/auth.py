@@ -5,13 +5,17 @@ Authentication routes: registration, login, token refresh and logout.
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
-from ...services.auth import get_user_by_id, get_user_by_username_or_email, verify_password
+from ...services.auth import (
+    get_user_by_id,
+    get_user_by_username_or_email,
+    verify_password,
+)
 from ...users.manager import RegistrationError, register_user
 from ...users.tokens import (
     TokenPair,
@@ -21,6 +25,7 @@ from ...users.tokens import (
     validate_refresh_token,
 )
 from ..deps import get_config, get_db, get_redis
+from ..middleware.rate_limit import check_rate_limit, rate_limit
 
 router = APIRouter(prefix="/auth")
 
@@ -87,6 +92,7 @@ class LogoutResponse(BaseModel):
     "/register",
     response_model=RegisterResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit)],
 )
 async def register(
     body: RegisterRequest,
@@ -112,11 +118,13 @@ async def register(
 @router.post("/login", response_model=TokenPairResponse)
 async def login(
     body: LoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
     redis: Redis = Depends(get_redis),
 ):
     """Authenticate with a username/email and password."""
+    await check_rate_limit(request, config, redis, identifier=body.username)
     user = await get_user_by_username_or_email(db, body.username)
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(
@@ -143,7 +151,11 @@ async def login(
     return _token_pair_response(token_pair)
 
 
-@router.post("/refresh", response_model=TokenPairResponse)
+@router.post(
+    "/refresh",
+    response_model=TokenPairResponse,
+    dependencies=[Depends(rate_limit)],
+)
 async def refresh(
     body: RefreshRequest,
     db: AsyncSession = Depends(get_db),
