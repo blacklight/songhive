@@ -5,6 +5,7 @@ FastAPI dependency injection helpers.
 from typing import AsyncGenerator
 
 from fastapi import Depends, HTTPException, Request, status
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
@@ -17,6 +18,11 @@ from .middleware.auth import decode_access_token, extract_token
 def get_config(request: Request) -> SonghiveConfig:
     """Get the application config from the request state."""
     return request.app.state.config
+
+
+def get_redis(request: Request) -> Redis:
+    """Get the shared async Redis client from the request state."""
+    return request.app.state.redis
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

@@ -2,7 +2,10 @@
 Tests for the refresh token service.
 """
 
+import asyncio
+
 import pytest
+from redis.exceptions import WatchError
 
 from songhive.api.middleware.auth import decode_access_token
 from songhive.config.schema import AuthConfig
@@ -44,16 +47,16 @@ async def test_issue_token_pair(db_session, token_config, fake_redis):
     assert decode_access_token(token_pair.access_token, SECRET_KEY) == user.id
     assert len(token_pair.refresh_token) >= 32
 
-    payload = await validate_refresh_token(token_pair.refresh_token, token_config, fake_redis)
+    payload = await validate_refresh_token(token_pair.refresh_token, fake_redis)
     assert payload is not None
     assert payload.user_id == user.id
     assert payload.expires_at is not None
 
 
 @pytest.mark.asyncio
-async def test_validate_refresh_token_returns_none_for_unknown_token(token_config, fake_redis):
+async def test_validate_refresh_token_returns_none_for_unknown_token(fake_redis):
     """Test that validating an unknown refresh token returns None."""
-    payload = await validate_refresh_token("not-a-real-token", token_config, fake_redis)
+    payload = await validate_refresh_token("not-a-real-token", fake_redis)
     assert payload is None
 
 
@@ -67,7 +70,7 @@ async def test_validate_refresh_token_returns_none_for_malformed_value(db_sessio
     keys = [k async for k in fake_redis.scan_iter("auth:refresh:*")]
     await fake_redis.set(keys[0], "not-json")
 
-    payload = await validate_refresh_token(token_pair.refresh_token, token_config, fake_redis)
+    payload = await validate_refresh_token(token_pair.refresh_token, fake_redis)
     assert payload is None
 
 
@@ -81,7 +84,7 @@ async def test_validate_refresh_token_returns_none_for_non_object_value(db_sessi
     keys = [k async for k in fake_redis.scan_iter("auth:refresh:*")]
     await fake_redis.set(keys[0], "[1, 2, 3]")
 
-    payload = await validate_refresh_token(token_pair.refresh_token, token_config, fake_redis)
+    payload = await validate_refresh_token(token_pair.refresh_token, fake_redis)
     assert payload is None
 
 
@@ -95,7 +98,7 @@ async def test_validate_refresh_token_returns_none_for_missing_user_id(db_sessio
     keys = [k async for k in fake_redis.scan_iter("auth:refresh:*")]
     await fake_redis.set(keys[0], '{"created_at": "2024-01-01T00:00:00+00:00"}')
 
-    payload = await validate_refresh_token(token_pair.refresh_token, token_config, fake_redis)
+    payload = await validate_refresh_token(token_pair.refresh_token, fake_redis)
     assert payload is None
 
 
@@ -109,7 +112,7 @@ async def test_validate_refresh_token_ignores_invalid_expires_at(db_session, tok
     keys = [k async for k in fake_redis.scan_iter("auth:refresh:*")]
     await fake_redis.set(keys[0], f'{{"user_id": "{user.id}", "expires_at": "not-a-date"}}')
 
-    payload = await validate_refresh_token(token_pair.refresh_token, token_config, fake_redis)
+    payload = await validate_refresh_token(token_pair.refresh_token, fake_redis)
     assert payload is not None
     assert payload.user_id == user.id
     assert payload.expires_at is None
@@ -128,10 +131,10 @@ async def test_rotate_refresh_token_issues_new_pair_and_invalidates_old(db_sessi
     assert rotated.refresh_token != original.refresh_token
     assert decode_access_token(rotated.access_token, SECRET_KEY) == user.id
 
-    old_payload = await validate_refresh_token(original.refresh_token, token_config, fake_redis)
+    old_payload = await validate_refresh_token(original.refresh_token, fake_redis)
     assert old_payload is None
 
-    new_payload = await validate_refresh_token(rotated.refresh_token, token_config, fake_redis)
+    new_payload = await validate_refresh_token(rotated.refresh_token, fake_redis)
     assert new_payload is not None
     assert new_payload.user_id == user.id
 
@@ -154,7 +157,7 @@ async def test_revoke_refresh_token_removes_token(db_session, token_config, fake
     revoked = await revoke_refresh_token(token_pair.refresh_token, token_config, fake_redis)
     assert revoked is True
 
-    payload = await validate_refresh_token(token_pair.refresh_token, token_config, fake_redis)
+    payload = await validate_refresh_token(token_pair.refresh_token, fake_redis)
     assert payload is None
 
 
@@ -206,3 +209,82 @@ async def test_rotate_refresh_token_replay_returns_none(db_session, token_config
 
     replay = await rotate_refresh_token(original.refresh_token, token_config, fake_redis)
     assert replay is None
+
+
+@pytest.mark.asyncio
+async def test_rotate_refresh_token_concurrent_rotation_succeeds_once(db_session, token_config, fake_redis):
+    """Test that concurrent rotation attempts for the same token succeed at most once."""
+    user = await create_user(db_session, "gina", "gina@example.com", "secret")
+    await db_session.flush()
+
+    original = await issue_token_pair(user, token_config, fake_redis)
+
+    async def rotate():
+        return await rotate_refresh_token(original.refresh_token, token_config, fake_redis)
+
+    results = await asyncio.gather(*[rotate() for _ in range(10)])
+    successful = [r for r in results if r is not None]
+    assert len(successful) == 1
+
+    winner = successful[0]
+    assert decode_access_token(winner.access_token, token_config.auth.secret_key) == user.id
+    assert await validate_refresh_token(original.refresh_token, fake_redis) is None
+    assert await validate_refresh_token(winner.refresh_token, fake_redis) is not None
+
+    # Only the single new refresh token should remain in Redis.
+    keys = [k async for k in fake_redis.scan_iter("auth:refresh:*")]
+    assert len(keys) == 1
+
+
+@pytest.mark.asyncio
+async def test_rotate_refresh_token_returns_none_on_watch_error(db_session, token_config, fake_redis, monkeypatch):
+    """Test that a WatchError during rotation is treated as a failed rotation."""
+    user = await create_user(db_session, "hank", "hank@example.com", "secret")
+    await db_session.flush()
+
+    original = await issue_token_pair(user, token_config, fake_redis)
+    real_pipeline = fake_redis.pipeline
+
+    class FailingPipeline:
+        """Pipeline wrapper that raises WatchError on EXEC to simulate a race."""
+
+        def __init__(self, pipeline):
+            self._pipeline = pipeline
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return await self._pipeline.__aexit__(*exc)
+
+        async def watch(self, *args, **kwargs):
+            return await self._pipeline.watch(*args, **kwargs)
+
+        async def get(self, *args, **kwargs):
+            return await self._pipeline.get(*args, **kwargs)
+
+        def multi(self):
+            return self._pipeline.multi()
+
+        def delete(self, *args):
+            self._pipeline.delete(*args)
+            return self
+
+        def set(self, *args, **kwargs):
+            self._pipeline.set(*args, **kwargs)
+            return self
+
+        async def execute(self, *_, **__):
+            raise WatchError("Watched variable changed")
+
+        async def reset(self):
+            return await self._pipeline.reset()
+
+    monkeypatch.setattr(
+        fake_redis,
+        "pipeline",
+        lambda **kwargs: FailingPipeline(real_pipeline(**kwargs)),
+    )
+
+    result = await rotate_refresh_token(original.refresh_token, token_config, fake_redis)
+    assert result is None

@@ -65,10 +65,11 @@ def app(config, engine):
 
 
 @pytest.fixture
-def client(app, db_session):
-    """Create a test client with get_db overridden to the test session."""
+def client(app, db_session, fake_redis):
+    """Create a test client with the test session and a fake Redis client."""
     with TestClient(app) as client:
         client.app.dependency_overrides[get_db] = _override_db(db_session)
+        client.app.state.redis = fake_redis
         yield client
         client.app.dependency_overrides.pop(get_db, None)
 

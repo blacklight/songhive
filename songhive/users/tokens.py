@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from redis.asyncio import Redis
+from redis.exceptions import WatchError
 
 from ..api.middleware.auth import create_access_token
 from ..config.schema import SonghiveConfig
@@ -128,7 +129,7 @@ async def issue_token_pair(user: User, config: SonghiveConfig, redis: Redis) -> 
     return token_pair
 
 
-async def validate_refresh_token(token: str, config: SonghiveConfig, redis: Redis) -> Optional[RefreshTokenPayload]:
+async def validate_refresh_token(token: str, redis: Redis) -> Optional[RefreshTokenPayload]:
     """
     Validate an opaque refresh token.
 
@@ -145,25 +146,37 @@ async def rotate_refresh_token(token: str, config: SonghiveConfig, redis: Redis)
     """
     Validate a refresh token and, if valid, issue a new pair and revoke the old one.
 
-    The old token is revoked atomically with the new token being stored. The
-    returned pair contains the new raw refresh token the client should use.
-    """
-    payload = await validate_refresh_token(token, config, redis)
-    if payload is None:
-        return None
+    The entire read-validate-claim-delete-set cycle runs inside a watched Redis
+    transaction so concurrent callers can never rotate the same refresh token
+    twice: exactly one caller's ``EXEC`` succeeds; the others receive a
+    ``WatchError`` and ``None`` is returned.
 
-    token_pair = _issue_token_pair_for_user_id(payload.user_id, config)
-    new_hash = _hash_token(token_pair.refresh_token)
+    The returned pair contains the new raw refresh token the client should use.
+    """
     old_hash = _hash_token(token)
-    new_key = _refresh_key(new_hash)
     old_key = _refresh_key(old_hash)
     ttl = _token_ttl(config)
-    value = _encode_value(payload.user_id, ttl)
 
     async with redis.pipeline(transaction=True) as pipe:
+        await pipe.watch(old_key)
+        value = await pipe.get(old_key)
+        payload = _decode_value(value)
+        if payload is None:
+            await pipe.reset()
+            return None
+
+        token_pair = _issue_token_pair_for_user_id(payload.user_id, config)
+        new_hash = _hash_token(token_pair.refresh_token)
+        new_key = _refresh_key(new_hash)
+        new_value = _encode_value(payload.user_id, ttl)
+
+        pipe.multi()
         pipe.delete(old_key)
-        pipe.set(new_key, value, ex=ttl)
-        await pipe.execute()
+        pipe.set(new_key, new_value, ex=ttl)
+        try:
+            await pipe.execute()
+        except WatchError:
+            return None
 
     return token_pair
 

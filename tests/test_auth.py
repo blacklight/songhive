@@ -13,12 +13,13 @@ from songhive.api.middleware.auth import (
     decode_access_token,
     extract_token,
 )
-from songhive.config.schema import SonghiveConfig
+from songhive.config.schema import RegistrationMode, SonghiveConfig
 from songhive.models.user import User
 from songhive.services.auth import (
     create_user,
     get_user_by_email,
     get_user_by_username,
+    get_user_by_username_or_email,
     hash_password,
     verify_password,
 )
@@ -319,3 +320,309 @@ async def test_get_db(db_session, monkeypatch):
     monkeypatch.setattr("songhive.api.deps.get_session", _fake_session)
     sessions = [s async for s in get_db()]
     assert sessions == [db_session]
+
+
+@pytest.mark.asyncio
+async def test_get_user_by_username_or_email_matches_username(db_session):
+    """Test that a username lookup is case-insensitive."""
+    await create_user(db_session, "alice", "alice@example.com", "secret")
+    found = await get_user_by_username_or_email(db_session, "ALICE")
+    assert found is not None
+    assert found.username == "alice"
+
+
+@pytest.mark.asyncio
+async def test_get_user_by_username_or_email_matches_email(db_session):
+    """Test that an email lookup is case-insensitive."""
+    await create_user(db_session, "bob", "bob@example.com", "secret")
+    found = await get_user_by_username_or_email(db_session, "BOB@EXAMPLE.COM")
+    assert found is not None
+    assert found.username == "bob"
+
+
+@pytest.mark.asyncio
+async def test_get_user_by_username_or_email_missing(db_session):
+    """Test that a missing value returns None."""
+    assert await get_user_by_username_or_email(db_session, "nobody") is None
+    assert await get_user_by_username_or_email(db_session, "nobody@example.com") is None
+
+
+@pytest.mark.asyncio
+async def test_register_endpoint(client):
+    """Test that the register endpoint creates a user in open mode."""
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "alice@example.com",
+            "password": "secret",
+            "display_name": "Alice",
+        },
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["username"] == "alice"
+    assert data["email"] == "alice@example.com"
+    assert data["display_name"] == "Alice"
+    assert data["is_active"] is True
+    assert data["email_verified"] is True
+    assert data["role"] == "user"
+    assert "id" in data
+
+
+@pytest.mark.asyncio
+async def test_register_endpoint_closed_mode(client):
+    """Test that registration is rejected when the registration mode is closed."""
+    client.app.state.config.auth.registration_mode = RegistrationMode.CLOSED
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "bob",
+            "email": "bob@example.com",
+            "password": "secret",
+        },
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_register_endpoint_duplicate_username(client, db_session):
+    """Test that duplicate usernames are rejected with 409."""
+    await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "other@example.com",
+            "password": "secret",
+        },
+    )
+    assert response.status_code == status.HTTP_409_CONFLICT
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint(client):
+    """Test that login returns a token pair for valid credentials."""
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "alice@example.com",
+            "password": "secret",
+        },
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "secret"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert "access_token" in data
+    assert "refresh_token" in data
+    assert data["token_type"] == "bearer"
+    assert data["expires_in"] == 900
+    assert decode_access_token(data["access_token"], SECRET_KEY) is not None
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint_with_email(client):
+    """Test that login accepts an email address as the username."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "alice@example.com",
+            "password": "secret",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "ALICE@EXAMPLE.COM", "password": "secret"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert "access_token" in response.json()
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint_invalid_password(client):
+    """Test that login rejects an incorrect password."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "alice@example.com",
+            "password": "secret",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "wrong"},
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint_inactive_user(client, db_session, config):
+    """Test that inactive users cannot log in."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    user.is_active = False
+    user.email_verified = True
+    await db_session.flush()
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "secret"},
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint_unverified_email(client, db_session, config):
+    """Test that unverified users cannot log in when verification is required."""
+    client.app.state.config.auth.require_email_verification = True
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    user.is_active = True
+    user.email_verified = False
+    await db_session.flush()
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "secret"},
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_login_updates_last_login(client, db_session):
+    """Test that a successful login updates the user's last_login timestamp."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "alice@example.com",
+            "password": "secret",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "secret"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+
+    user = await get_user_by_username(db_session, "alice")
+    assert user is not None
+    assert user.last_login is not None
+
+
+@pytest.mark.asyncio
+async def test_refresh_endpoint(client, config):
+    """Test that the refresh endpoint returns a new token pair."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "alice@example.com",
+            "password": "secret",
+        },
+    )
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "secret"},
+    )
+    original = login_response.json()
+
+    response = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": original["refresh_token"]},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["refresh_token"] != original["refresh_token"]
+    assert decode_access_token(data["access_token"], config.auth.secret_key) is not None
+    assert decode_access_token(data["access_token"], config.auth.secret_key) == decode_access_token(
+        original["access_token"], config.auth.secret_key
+    )
+
+    replay = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": original["refresh_token"]},
+    )
+    assert replay.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_refresh_endpoint_invalid_token(client):
+    """Test that an invalid refresh token is rejected."""
+    response = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": "not-a-real-token"},
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_refresh_endpoint_inactive_user(client, db_session):
+    """Test that an inactive user cannot refresh tokens."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "alice@example.com",
+            "password": "secret",
+        },
+    )
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "secret"},
+    )
+    original = login_response.json()
+
+    user = await get_user_by_username(db_session, "alice")
+    assert user is not None
+    user.is_active = False
+    await db_session.flush()
+
+    response = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": original["refresh_token"]},
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.json()["detail"] == "Account is inactive or deleted"
+
+
+@pytest.mark.asyncio
+async def test_logout_endpoint(client, config, fake_redis):
+    """Test that logout revokes the refresh token and prevents refresh."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "alice@example.com",
+            "password": "secret",
+        },
+    )
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "secret"},
+    )
+    tokens = login_response.json()
+
+    logout_response = client.post(
+        "/api/v1/auth/logout",
+        json={"refresh_token": tokens["refresh_token"]},
+    )
+    assert logout_response.status_code == status.HTTP_200_OK
+    assert logout_response.json()["success"] is True
+
+    refresh_response = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
+    )
+    assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
