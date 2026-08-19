@@ -84,10 +84,12 @@ def _encode_value(user_id: str, ttl: int) -> str:
     )
 
 
-def _decode_value(value: Optional[str]) -> Optional[RefreshTokenPayload]:
+def _decode_value(value: Optional[str | bytes]) -> Optional[RefreshTokenPayload]:
     """Decode a JSON refresh token payload."""
     if not value:
         return None
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
     try:
         data = json.loads(value)
     except json.JSONDecodeError:

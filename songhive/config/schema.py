@@ -60,6 +60,7 @@ class StorageConfig(BaseSettings):
     s3_access_key: Optional[str] = Field(default=None, description="S3 access key")
     s3_secret_key: Optional[str] = Field(default=None, description="S3 secret key")
     s3_region: Optional[str] = Field(default=None, description="S3 region")
+    cdn_prefix: Optional[str] = Field(default=None, description="CDN URL prefix for serving files")
 
 
 class FederationConfig(BaseSettings):

@@ -82,3 +82,11 @@ class S3Storage(StorageBackend):
             return True
         except Exception:
             return False
+
+    async def url(self, path: str, cdn_prefix: Optional[str] = None) -> str:
+        """Return the public URL for a stored S3 path."""
+        if cdn_prefix:
+            return f"{cdn_prefix.rstrip('/')}/{path}"
+        if self.endpoint_url:
+            return f"{self.endpoint_url.rstrip('/')}/{self.bucket}/{path}"
+        return f"https://{self.bucket}.s3.{self.region or 'us-east-1'}.amazonaws.com/{path}"

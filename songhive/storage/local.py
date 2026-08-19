@@ -14,9 +14,10 @@ class LocalStorage(StorageBackend):
 
     def __init__(self, base_path: Path):
         self.base_path = base_path
-        self.base_path.mkdir(parents=True, exist_ok=True)
+        self._resolved_base = self.base_path.resolve()
+        self._resolved_base.mkdir(parents=True, exist_ok=True)
 
-    async def store(self, file: BinaryIO, path: str, content_type: Optional[str] = None) -> str:
+    async def store(self, file: BinaryIO, path: str, *_, **__) -> str:
         """Store a file on the local filesystem."""
         full_path = self.base_path / path
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,3 +46,9 @@ class LocalStorage(StorageBackend):
     async def exists(self, path: str) -> bool:
         """Check if a file exists in local storage."""
         return (self.base_path / path).exists()
+
+    async def url(self, path: str, cdn_prefix: Optional[str] = None) -> str:
+        """Return the public URL for a stored path."""
+        if cdn_prefix:
+            return f"{cdn_prefix.rstrip('/')}/{path}"
+        return str((self._resolved_base / path).resolve())

@@ -43,3 +43,7 @@ class StorageBackend(ABC):
     @abstractmethod
     async def exists(self, path: str) -> bool:
         """Check if a file exists in storage."""
+
+    @abstractmethod
+    async def url(self, path: str, cdn_prefix: Optional[str] = None) -> str:
+        """Return the public URL for a stored path, optionally prefixed with a CDN URL."""

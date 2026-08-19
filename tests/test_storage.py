@@ -7,6 +7,7 @@ import io
 import pytest
 
 from songhive.storage.local import LocalStorage
+from songhive.storage.s3 import S3Storage
 
 
 @pytest.fixture
@@ -48,3 +49,41 @@ async def test_local_delete(local_storage):
     assert await local_storage.delete("to_delete.mp3") is True
     assert await local_storage.exists("to_delete.mp3") is False
     assert await local_storage.delete("nonexistent.mp3") is False
+
+
+@pytest.mark.asyncio
+async def test_local_url(local_storage):
+    """Test that url() returns an absolute path without a CDN prefix."""
+    url = await local_storage.url("test/audio.mp3")
+    assert url.endswith("/test/audio.mp3")
+    assert url.startswith("/")
+
+
+@pytest.mark.asyncio
+async def test_local_url_with_cdn(local_storage):
+    """Test that url() returns a CDN-prefixed URL when cdn_prefix is set."""
+    url = await local_storage.url("test/audio.mp3", cdn_prefix="https://cdn.example.com/")
+    assert url == "https://cdn.example.com/test/audio.mp3"
+
+
+@pytest.mark.asyncio
+async def test_s3_url():
+    """Test that S3 url() returns the configured endpoint URL or a fallback."""
+    storage = S3Storage("my-bucket", endpoint_url="https://s3.example.com")
+    url = await storage.url("test/audio.mp3")
+    assert url == "https://s3.example.com/my-bucket/test/audio.mp3"
+
+    cdn_url = await storage.url("test/audio.mp3", cdn_prefix="https://cdn.example.com/")
+    assert cdn_url == "https://cdn.example.com/test/audio.mp3"
+
+
+@pytest.mark.asyncio
+async def test_s3_url_default():
+    """Test that S3 url() falls back to the AWS-style URL when endpoint_url is absent."""
+    storage = S3Storage("my-bucket", region="eu-west-1")
+    url = await storage.url("test/audio.mp3")
+    assert url == "https://my-bucket.s3.eu-west-1.amazonaws.com/test/audio.mp3"
+
+    storage_no_region = S3Storage("my-bucket")
+    url_no_region = await storage_no_region.url("test/audio.mp3")
+    assert url_no_region == "https://my-bucket.s3.us-east-1.amazonaws.com/test/audio.mp3"
