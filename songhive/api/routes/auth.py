@@ -280,7 +280,6 @@ async def verify_email_endpoint(
 @router.post(
     "/password-reset/request",
     response_model=PasswordResetInitResponse,
-    dependencies=[Depends(rate_limit)],
     summary="Request a password reset",
     description=(
         "Start the password reset flow for an account. A reset token is sent to "
@@ -291,14 +290,17 @@ async def verify_email_endpoint(
 )
 async def password_reset_request(
     body: PasswordResetInitRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
+    redis: Redis = Depends(get_redis),
 ):
     """Request a password reset for an account.
 
     Always returns a generic success response to avoid revealing whether an
     account exists for a given username or email.
     """
+    await check_rate_limit(request, config, redis, identifier=body.username)
     user, token = await request_password_reset(db, config, body.username)
     if user is not None and token is not None:
         send_password_reset_email.delay(user.email, user.username, token)

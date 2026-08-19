@@ -941,3 +941,111 @@ async def test_password_reset_confirm_with_expired_token(client, db_session):
         json={"token": raw_token, "new_password": "new-secret"},
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_password_reset_confirm_cannot_reuse_token(client, db_session, monkeypatch):
+    """Test that a password reset token can only be used once."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "reset-reuse",
+            "email": "reset-reuse@example.com",
+            "password": "old-secret",
+        },
+    )
+
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_password_reset_email", mock_task)
+    client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"username": "reset-reuse"},
+    )
+    _, _, token = mock_task.calls[0][0]
+
+    first = client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": token, "new_password": "new-secret"},
+    )
+    assert first.status_code == status.HTTP_200_OK
+
+    second = client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": token, "new_password": "another-secret"},
+    )
+    assert second.status_code == status.HTTP_400_BAD_REQUEST
+
+    user = await get_user_by_username(db_session, "reset-reuse")
+    assert user is not None
+    assert user.password_reset_token is None
+    assert user.password_reset_expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_password_reset_request_sends_email_for_inactive_user(client, db_session, monkeypatch):
+    """Test that inactive users can request a password reset."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "reset-inactive",
+            "email": "reset-inactive@example.com",
+            "password": "secret",
+        },
+    )
+    user = await get_user_by_username(db_session, "reset-inactive")
+    assert user is not None
+    user.is_active = False
+    await db_session.flush()
+
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_password_reset_email", mock_task)
+    response = client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"username": "reset-inactive"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["success"] is True
+    assert len(mock_task.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_password_reset_confirm_for_inactive_user_sets_password_but_blocks_login(client, db_session, monkeypatch):
+    """Test that resetting an inactive user's password does not activate the account."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "reset-still-inactive",
+            "email": "reset-still-inactive@example.com",
+            "password": "old-secret",
+        },
+    )
+    user = await get_user_by_username(db_session, "reset-still-inactive")
+    assert user is not None
+    user.is_active = False
+    await db_session.flush()
+
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_password_reset_email", mock_task)
+    client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"username": "reset-still-inactive"},
+    )
+    _, _, token = mock_task.calls[0][0]
+
+    response = client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": token, "new_password": "new-secret"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+
+    user = await get_user_by_username(db_session, "reset-still-inactive")
+    assert user is not None
+    assert verify_password("new-secret", user.password_hash)
+    assert user.is_active is False
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "reset-still-inactive", "password": "new-secret"},
+    )
+    assert login.status_code == status.HTTP_401_UNAUTHORIZED
+    assert login.json()["detail"] == "Account is inactive"

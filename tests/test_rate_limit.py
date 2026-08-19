@@ -474,3 +474,29 @@ async def test_admin_invite_creation_rate_limited(client, db_session):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_password_reset_request_rate_limited_per_username(client):
+    """Test that password reset throttling is keyed by username, not just by IP."""
+    client.app.state.config.auth.rate_limit_requests = 1
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    response = client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"username": "reset-alice@example.com"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+
+    blocked = client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"username": "reset-alice@example.com"},
+    )
+    assert blocked.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+    # A different username/email from the same IP should not be throttled.
+    other = client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"username": "reset-bob@example.com"},
+    )
+    assert other.status_code == status.HTTP_200_OK
