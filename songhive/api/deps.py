@@ -12,6 +12,8 @@ from ..config.schema import SonghiveConfig
 from ..models.base import get_session
 from ..models.user import User
 from ..services.auth import get_user_by_id
+from ..services.storage import StorageService
+from ..storage import get_storage
 from .middleware.auth import decode_access_token, extract_token
 
 
@@ -63,6 +65,13 @@ async def get_current_user(
         raise exc
 
     return user
+
+
+def get_storage_service(request: Request) -> StorageService:
+    """Create a storage service for the current request."""
+    config = get_config(request)
+    backend = get_storage(config.storage)
+    return StorageService(backend, config.storage)
 
 
 async def require_admin(current_user: User = Depends(get_current_user)):
