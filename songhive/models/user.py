@@ -73,6 +73,17 @@ class User(Base):
             raise ValueError(f"Invalid role: {value}")
         return value
 
+    @validates("avatar_url")
+    def _validate_avatar_url(self, _key: str, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        value = value.strip()
+        if not value:
+            return None
+        if not value.startswith(("https://", "http://")):
+            raise ValueError("Avatar URL must start with http:// or https://")
+        return value
+
     @property
     def is_admin(self) -> bool:
         """Convenience property for backward compatibility."""

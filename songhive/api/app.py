@@ -55,10 +55,18 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.state.config = config
 
     # CORS middleware
+    allow_credentials = True
+    if "*" in config.server.cors_origins:
+        logger.warning(
+            "Wildcard CORS origin (['*']) cannot be used with credentials; "
+            "disabling allow_credentials. Specify explicit origins to enable credentials."
+        )
+        allow_credentials = False
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=config.server.cors_origins,
-        allow_credentials=True,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )

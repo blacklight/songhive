@@ -129,9 +129,21 @@ class AuthConfig(BaseSettings):
         description="Rate limit window in seconds",
     )
     secret_key: str = Field(
-        default="change-me-in-production",
         description="Secret key for JWT signing",
     )
+
+    @field_validator("secret_key", mode="after")
+    @classmethod
+    def _validate_secret_key(cls, value: str) -> str:
+        if value in {"change-me-in-production", "your-secret-key-here"}:
+            raise ValueError(
+                "JWT secret_key is set to a known placeholder. "
+                "Generate a strong random key and set it explicitly, e.g.:\n"
+                'python -c "import secrets; print(secrets.token_urlsafe(64))"'
+            )
+        if len(value.encode("utf-8")) < 32:
+            raise ValueError("JWT secret_key must be at least 32 bytes long")
+        return value
 
 
 class EmailConfig(BaseSettings):
@@ -160,7 +172,7 @@ class ServerConfig(BaseSettings):
     num_workers: int = Field(default=1, description="Number of worker processes")
     debug: bool = Field(default=False, description="Enable debug mode")
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["*"],
+        default_factory=list,
         description=(
             'Allowed CORS origins. Use ["*"] to allow all origins. '
             "A comma-separated string or JSON list is also accepted from environment variables."
@@ -190,6 +202,15 @@ class ServerConfig(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _require_auth_secret_key() -> AuthConfig:
+    """Raise a clear error when no JWT secret key has been configured."""
+    raise ValueError(
+        "JWT auth.secret_key is not configured. "
+        "Set SONGHIVE_AUTH__SECRET_KEY or add auth.secret_key to config.toml. "
+        'Generate a key with: python -c "import secrets; print(secrets.token_urlsafe(64))"'
+    )
+
+
 class SonghiveConfig(BaseSettings):
     """
     Root configuration for Songhive.
@@ -212,5 +233,5 @@ class SonghiveConfig(BaseSettings):
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     federation: FederationConfig = Field(default_factory=FederationConfig)
-    auth: AuthConfig = Field(default_factory=AuthConfig)
+    auth: AuthConfig = Field(default_factory=_require_auth_secret_key)
     email: EmailConfig = Field(default_factory=EmailConfig)

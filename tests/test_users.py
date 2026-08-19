@@ -518,6 +518,39 @@ def test_user_link_input_accepts_http_and_https():
     assert http_link.url == "http://example.com"
 
 
+def test_user_profile_update_rejects_unsafe_avatar_url():
+    """Test that UserProfileUpdate rejects avatar URLs with unsafe schemes."""
+    with pytest.raises(ValidationError):
+        UserProfileUpdate(avatar_url="javascript:alert(1)")
+    with pytest.raises(ValidationError):
+        UserProfileUpdate(avatar_url="data:text/html,<script>alert(1)</script>")
+
+
+def test_user_profile_update_strips_avatar_url():
+    """Test that UserProfileUpdate strips whitespace from the avatar URL."""
+    update = UserProfileUpdate(avatar_url="  https://example.com/avatar.png  ")
+    assert update.avatar_url == "https://example.com/avatar.png"
+
+
+def test_user_profile_update_accepts_http_and_https_avatar_urls():
+    """Test that UserProfileUpdate accepts http:// and https:// avatar URLs."""
+    https_update = UserProfileUpdate(avatar_url="https://example.com/avatar.png")
+    assert https_update.avatar_url == "https://example.com/avatar.png"
+    http_update = UserProfileUpdate(avatar_url="http://example.com/avatar.png")
+    assert http_update.avatar_url == "http://example.com/avatar.png"
+
+
+def test_user_model_rejects_unsafe_avatar_url():
+    """Test that the User model rejects avatar URLs with unsafe schemes."""
+    with pytest.raises(ValueError, match="Avatar URL must start with http:// or https://"):
+        User(
+            username="alice",
+            email="alice@example.com",
+            password_hash="hashed",
+            avatar_url="javascript:alert(1)",
+        )
+
+
 @pytest.fixture
 async def profile_user(db_session):
     """Create a user with profile links for public profile tests."""

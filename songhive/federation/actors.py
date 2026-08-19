@@ -85,7 +85,7 @@ def user_to_actor_document(user: User, domain: str) -> dict:
         },
     }
 
-    if user.avatar_url:
+    if user.avatar_url and user.avatar_url.startswith(("https://", "http://")):
         document["icon"] = {"type": "Image", "url": user.avatar_url}
 
     attachment = _build_attachment(user)

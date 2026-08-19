@@ -2,10 +2,14 @@
 Basic API tests.
 """
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
+from songhive.api.app import create_app
 from songhive.api.routes.admin import AdminUserResponse
+from songhive.config.schema import SonghiveConfig
 from songhive.models.user import UserRole
 
 
@@ -77,6 +81,19 @@ def test_cors_preflight(client):
     assert response.status_code == 200
     assert "http://localhost:8080" in response.headers.get("Access-Control-Allow-Origin", "")
     assert response.headers.get("Access-Control-Allow-Credentials") == "true"
+
+
+def test_cors_wildcard_origin_disables_credentials(caplog, monkeypatch):
+    """Test that a wildcard CORS origin logs a warning and disables credentials."""
+    monkeypatch.delenv("SONGHIVE_AUTH__SECRET_KEY", raising=False)
+    config = SonghiveConfig(
+        server={"cors_origins": ["*"]},
+        auth={"secret_key": "a" * 32},
+        federation={"enabled": False},
+    )
+    with caplog.at_level(logging.WARNING, logger="songhive.api.app"):
+        create_app(config)
+    assert "Wildcard CORS origin" in caplog.text
 
 
 def test_admin_user_response_role_enum():

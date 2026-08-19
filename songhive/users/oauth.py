@@ -7,6 +7,7 @@ implementation.
 """
 
 import hashlib
+import ipaddress
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,7 @@ from authlib.oauth2.rfc7636.challenge import (
     compare_s256_code_challenge,
 )
 from redis.asyncio import Redis
+from redis.exceptions import WatchError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,7 +48,20 @@ __all__ = [
 VALID_GRANT_TYPES = {"authorization_code", "client_credentials", "refresh_token"}
 MAX_NAME_LENGTH = 128
 MAX_REDIRECT_URI_LENGTH = 512
-ALLOWED_REDIRECT_SCHEMES = {"http", "https"}
+ALLOWED_REDIRECT_SCHEMES = {"https"}
+
+
+def _is_loopback_host(host: Optional[str]) -> bool:
+    """Return True if the host is a loopback address or localhost."""
+    if not host:
+        return False
+    normalized = host.lower().strip("[]")
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 class OAuthClientError(ValueError):
@@ -86,10 +101,13 @@ def _validate_redirect_uris(uris: List[str]) -> List[str]:
         parsed = urlparse(uri)
         if not parsed.scheme:
             raise OAuthClientError(f"Invalid redirect_uri: {uri}")
-        if parsed.scheme not in ALLOWED_REDIRECT_SCHEMES:
+        if parsed.scheme == "http" and not _is_loopback_host(parsed.hostname):
+            raise OAuthClientError(f"HTTP redirect_uri is only allowed for localhost/loopback: {uri}")
+        if parsed.scheme not in ALLOWED_REDIRECT_SCHEMES | {"http"}:
             raise OAuthClientError(
                 f"Invalid redirect_uri scheme for {uri!r}; "
-                f"allowed schemes: {', '.join(sorted(ALLOWED_REDIRECT_SCHEMES))}"
+                f"allowed schemes: {', '.join(sorted(ALLOWED_REDIRECT_SCHEMES))} "
+                "(http is allowed for localhost/loopback)"
             )
         if not parsed.netloc:
             raise OAuthClientError(f"Invalid redirect_uri: {uri}")
@@ -516,24 +534,6 @@ async def create_authorization_code(
     return code, state
 
 
-async def _get_authorization_code(
-    redis: Redis,
-    code: str,
-) -> Optional[Dict[str, Any]]:
-    """Load and validate an authorization code from Redis."""
-    value = await redis.get(_authz_code_key(code))
-    data = _decode_json(value)
-    if data is None:
-        return None
-
-    expires_at = _parse_expires_at(data.get("expires_at"))
-    if expires_at is None or _utc_now() > expires_at:
-        await redis.delete(_authz_code_key(code))
-        return None
-
-    return data
-
-
 async def _get_oauth_token(
     redis: Redis,
     token: str,
@@ -605,6 +605,94 @@ async def _issue_oauth_token_pair(
     }
 
 
+async def _consume_authorization_code(
+    redis: Redis,
+    client: OAuth2Client,
+    code: str,
+    redirect_uri: str,
+    code_verifier: str,
+) -> Dict[str, Any]:
+    """Atomically load, validate and delete an authorization code."""
+    key = _authz_code_key(code)
+
+    async with redis.pipeline(transaction=True) as pipe:
+        await pipe.watch(key)
+        value = await pipe.get(key)
+        data = _decode_json(value)
+        if data is None:
+            await pipe.reset()
+            raise OAuth2ProviderError("Invalid authorization code", error="invalid_grant")
+
+        expires_at = _parse_expires_at(data.get("expires_at"))
+        if expires_at is None or _utc_now() > expires_at:
+            await pipe.reset()
+            await redis.delete(key)
+            raise OAuth2ProviderError("Invalid authorization code", error="invalid_grant")
+        if data.get("client_id") != client.client_id:
+            await pipe.reset()
+            raise OAuth2ProviderError("Invalid authorization code", error="invalid_grant")
+        if data.get("redirect_uri") != redirect_uri:
+            await pipe.reset()
+            raise OAuth2ProviderError("Invalid redirect URI", error="invalid_grant")
+
+        try:
+            _verify_pkce(
+                data["code_challenge"],
+                data["code_challenge_method"],
+                code_verifier,
+            )
+        except OAuth2ProviderError:
+            await pipe.reset()
+            raise
+
+        pipe.multi()
+        pipe.delete(key)
+        try:
+            await pipe.execute()
+        except WatchError:
+            raise OAuth2ProviderError("Invalid authorization code", error="invalid_grant") from None
+
+    return data
+
+
+async def _consume_refresh_token(
+    redis: Redis,
+    client: OAuth2Client,
+    refresh_token: str,
+) -> Dict[str, Any]:
+    """Atomically load, validate and delete a refresh token."""
+    key = _refresh_token_key(refresh_token)
+
+    async with redis.pipeline(transaction=True) as pipe:
+        await pipe.watch(key)
+        value = await pipe.get(key)
+        data = _decode_json(value)
+        if data is None:
+            await pipe.reset()
+            raise OAuth2ProviderError("Invalid refresh token", error="invalid_grant")
+
+        expires_at = _parse_expires_at(data.get("expires_at"))
+        if expires_at is None or _utc_now() > expires_at:
+            await pipe.reset()
+            await redis.delete(key)
+            raise OAuth2ProviderError("Invalid refresh token", error="invalid_grant")
+        if data.get("client_id") != client.client_id:
+            await pipe.reset()
+            raise OAuth2ProviderError("Invalid refresh token", error="invalid_grant")
+        if data.get("token_type") != "refresh_token":
+            await pipe.reset()
+            raise OAuth2ProviderError("Invalid refresh token", error="invalid_grant")
+
+        pipe.multi()
+        pipe.delete(key)
+        try:
+            await pipe.execute()
+        except WatchError:
+            raise OAuth2ProviderError("Invalid refresh token", error="invalid_grant") from None
+
+    return data
+
+
 async def _create_token_from_authorization_code(
     session: AsyncSession,
     redis: Redis,
@@ -623,21 +711,13 @@ async def _create_token_from_authorization_code(
     if not code_verifier:
         raise OAuth2ProviderError("Missing code verifier", error="invalid_request")
 
-    data = await _get_authorization_code(redis, code)
-    if data is None:
-        raise OAuth2ProviderError("Invalid authorization code", error="invalid_grant")
-    if data.get("client_id") != client.client_id:
-        raise OAuth2ProviderError("Invalid authorization code", error="invalid_grant")
-    if data.get("redirect_uri") != redirect_uri:
-        raise OAuth2ProviderError("Invalid redirect URI", error="invalid_grant")
-
-    _verify_pkce(
-        data["code_challenge"],
-        data["code_challenge_method"],
+    data = await _consume_authorization_code(
+        redis,
+        client,
+        code,
+        redirect_uri,
         code_verifier,
     )
-
-    await redis.delete(_authz_code_key(code))
 
     user_id = data["user_id"]
     user = await get_user_by_id(session, user_id)
@@ -660,20 +740,12 @@ async def _create_token_from_refresh_token(
     if not refresh_token:
         raise OAuth2ProviderError("Missing refresh token", error="invalid_request")
 
-    data = await _get_oauth_token(redis, refresh_token, "refresh_token")
-    if data is None:
-        raise OAuth2ProviderError("Invalid refresh token", error="invalid_grant")
-    if data.get("client_id") != client.client_id:
-        raise OAuth2ProviderError("Invalid refresh token", error="invalid_grant")
-    if data.get("token_type") != "refresh_token":
-        raise OAuth2ProviderError("Invalid refresh token", error="invalid_grant")
+    data = await _consume_refresh_token(redis, client, refresh_token)
 
     user_id = data["user_id"]
     user = await get_user_by_id(session, user_id)
     if user is None or not user.is_active:
         raise OAuth2ProviderError("User not active", error="invalid_grant")
-
-    await redis.delete(_refresh_token_key(refresh_token))
 
     final_scope = scope or data.get("scope")
     return await _issue_oauth_token_pair(redis, config, client, user_id, final_scope)
@@ -785,25 +857,17 @@ async def introspect_token(
     """
     Return the active status and metadata for an OAuth2 token.
 
-    If client credentials are supplied, only tokens issued to that client are
-    considered active; this prevents one client from introspecting another's
-    tokens.
+    Client authentication is required: the caller must prove they are the
+    client to whom the token was issued before any metadata is returned.
     """
+    client = await _authenticate_client(session, client_id, client_secret)
+
     data = await _get_oauth_token(redis, token, token_type_hint)
     if data is None:
         return {"active": False}
 
-    if client_id:
-        client = await get_oauth_client_by_client_id(session, client_id)
-        if client is None:
-            return {"active": False}
-        if client.is_confidential:
-            if not client_secret or not check_client_secret(client, client_secret):
-                return {"active": False}
-        elif client_secret:
-            return {"active": False}
-        if data.get("client_id") != client.client_id:
-            return {"active": False}
+    if data.get("client_id") != client.client_id:
+        return {"active": False}
 
     user_id = data.get("user_id")
     if not user_id:
@@ -813,7 +877,7 @@ async def introspect_token(
         return {"active": False}
 
     expires_at = _parse_expires_at(data.get("expires_at"))
-    if expires_at is None:
+    if expires_at is None or _utc_now() > expires_at:
         return {"active": False}
 
     return {

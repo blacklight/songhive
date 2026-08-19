@@ -82,6 +82,22 @@ class UserProfileUpdate(BaseModel):
     avatar_url: Optional[str] = Field(None, max_length=512)
     links: Optional[List[UserLinkInput]] = None
 
+    @field_validator("avatar_url", mode="before")
+    @classmethod
+    def _strip_avatar_url(cls, value):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("avatar_url")
+    @classmethod
+    def _validate_avatar_url_scheme(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        if not value.startswith(("https://", "http://")):
+            raise ValueError("Avatar URL must start with http:// or https://")
+        return value
+
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_profile(current_user: User = Depends(get_current_user)):

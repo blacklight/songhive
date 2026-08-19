@@ -229,6 +229,48 @@ async def test_oauth_create_client_rejects_invalid_redirect_uri(client, db_sessi
 
 
 @pytest.mark.asyncio
+async def test_oauth_create_client_rejects_http_non_loopback(client, db_session, config, make_user, auth_headers):
+    """Test that plain-HTTP redirect URIs are only allowed for localhost/loopback."""
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
+
+    response = client.post(
+        "/api/v1/admin/oauth/clients",
+        headers=headers,
+        json={
+            "name": "Bad Client",
+            "redirect_uris": ["http://example.com/callback"],
+        },
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_oauth_create_client_allows_http_localhost(client, db_session, config, make_user, auth_headers):
+    """Test that HTTP redirect URIs are allowed for localhost."""
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
+
+    response = client.post(
+        "/api/v1/admin/oauth/clients",
+        headers=headers,
+        json={
+            "name": "Local Client",
+            "redirect_uris": [
+                "http://localhost:8080/callback",
+                "http://127.0.0.1:8080/callback",
+            ],
+        },
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["redirect_uris"] == [
+        "http://localhost:8080/callback",
+        "http://127.0.0.1:8080/callback",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_oauth_create_client_rejects_invalid_grant_type(client, db_session, config, make_user, auth_headers):
     """Test that unknown grant types are rejected."""
     admin = await make_user("admin", role="admin")
@@ -824,3 +866,52 @@ async def test_oauth_token_rejects_refresh_without_refresh_grant(client, db_sess
     )
     assert refresh_response.status_code == status.HTTP_400_BAD_REQUEST
     assert refresh_response.json() == {"detail": "unsupported_grant_type"}
+
+
+@pytest.mark.asyncio
+async def test_oauth_introspect_requires_client_authentication(client, db_session, config, make_user, auth_headers):
+    """Test that the introspection endpoint rejects unauthenticated requests."""
+    admin = await make_user("admin", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Test Client",
+        redirect_uris=["https://example.com/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+    )
+    await db_session.flush()
+
+    user = await make_user("alice")
+    user_headers = auth_headers(user)
+    verifier, challenge = _pkce_pair()
+
+    authorize_response = client.get(
+        f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
+        f"&redirect_uri=https://example.com/callback&code_challenge={challenge}"
+        f"&code_challenge_method=S256",
+        headers=user_headers,
+        follow_redirects=False,
+    )
+    auth_code = parse_qs(urlparse(authorize_response.headers["Location"]).query)["code"][0]
+
+    token_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": auth_code,
+            "redirect_uri": "https://example.com/callback",
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+            "code_verifier": verifier,
+        },
+    )
+    token_data = token_response.json()
+
+    introspect_response = client.post(
+        "/api/v1/auth/oauth/introspect",
+        data={
+            "token": token_data["access_token"],
+            "token_type_hint": "access_token",
+        },
+    )
+    assert introspect_response.status_code == status.HTTP_401_UNAUTHORIZED

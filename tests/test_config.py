@@ -46,9 +46,9 @@ def test_cli_overrides():
 
 
 def test_cors_origins_default():
-    """Test that CORS origins default to all origins."""
+    """Test that CORS origins default to an empty allow-list."""
     config = SonghiveConfig()
-    assert config.server.cors_origins == ["*"]
+    assert config.server.cors_origins == []
 
 
 def test_cors_origins_from_list():
@@ -93,7 +93,9 @@ def test_auth_config_defaults():
     assert config.auth.rate_limit_enabled is True
     assert config.auth.rate_limit_requests == 10
     assert config.auth.rate_limit_window_seconds == 60
-    assert config.auth.secret_key == "change-me-in-production"
+    assert config.auth.secret_key
+    assert config.auth.secret_key != "change-me-in-production"
+    assert len(config.auth.secret_key.encode("utf-8")) >= 32
 
 
 @pytest.mark.parametrize(
@@ -110,6 +112,20 @@ def test_invalid_registration_mode():
     """Test that an unknown registration mode is rejected."""
     with pytest.raises(ValidationError):
         SonghiveConfig(auth={"registration_mode": "disabled"})
+
+
+def test_auth_config_rejects_placeholder_secret(monkeypatch):
+    """Test that a placeholder JWT secret is rejected."""
+    monkeypatch.delenv("SONGHIVE_AUTH__SECRET_KEY", raising=False)
+    with pytest.raises(ValidationError):
+        SonghiveConfig(auth={"secret_key": "change-me-in-production"})
+
+
+def test_auth_config_rejects_short_secret(monkeypatch):
+    """Test that a JWT secret shorter than 32 bytes is rejected."""
+    monkeypatch.delenv("SONGHIVE_AUTH__SECRET_KEY", raising=False)
+    with pytest.raises(ValidationError):
+        SonghiveConfig(auth={"secret_key": "short"})
 
 
 def test_auth_config_from_env(monkeypatch):

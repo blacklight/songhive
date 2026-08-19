@@ -20,6 +20,12 @@ from songhive.models.user import User  # noqa: F401
 from songhive.services.auth import create_user
 
 
+@pytest.fixture(autouse=True)
+def _ensure_test_secret_key(monkeypatch):
+    """Provide a fallback JWT secret key so tests can build a SonghiveConfig."""
+    monkeypatch.setenv("SONGHIVE_AUTH__SECRET_KEY", "a" * 64)
+
+
 @pytest.fixture
 def fake_redis():
     """Create a fresh async fake Redis client for each test."""
@@ -32,7 +38,12 @@ def fake_redis():
 def config(tmp_path):
     """Create a test configuration backed by a fresh SQLite database."""
     return SonghiveConfig(
-        server={"host": "127.0.0.1", "port": 8000, "debug": True},
+        server={
+            "host": "127.0.0.1",
+            "port": 8000,
+            "debug": True,
+            "cors_origins": ["http://localhost:8080"],
+        },
         database={"url": f"sqlite+aiosqlite:///{tmp_path / 'songhive.db'}"},
         federation={"enabled": False},
         auth={"secret_key": "a" * 32},

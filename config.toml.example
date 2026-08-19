@@ -6,10 +6,10 @@ host = "0.0.0.0"
 port = 8000
 num_workers = 1
 debug = false
-# Allowed CORS origins. Use ["*"] to allow all origins (not recommended in
-# production when allow_credentials is enabled). A comma-separated string or
-# JSON list is also accepted from environment variables.
-cors_origins = ["*"]
+# Allowed CORS origins. Use an explicit allow-list in production; wildcard ("*")
+# with allow_credentials is insecure and will be ignored. A comma-separated
+# string or JSON list is also accepted from environment variables.
+cors_origins = []
 
 [database]
 url = "postgresql+asyncpg://songhive:songhive@localhost:5432/songhive"
@@ -41,7 +41,9 @@ instance_description = "A federated music sharing service"
 [auth]
 registration_mode = "open"
 require_email_verification = false
-secret_key = "change-me-in-production"
+# JWT signing secret. Generate a strong random key and never commit it:
+# python -c "import secrets; print(secrets.token_urlsafe(64))"
+# secret_key = ""
 access_token_expiry_minutes = 15
 refresh_token_expiry_days = 30
 password_reset_token_expiry_minutes = 30
