@@ -61,6 +61,7 @@ class StorageConfig(BaseSettings):
     s3_secret_key: Optional[str] = Field(default=None, description="S3 secret key")
     s3_region: Optional[str] = Field(default=None, description="S3 region")
     cdn_prefix: Optional[str] = Field(default=None, description="CDN URL prefix for serving files")
+    max_upload_size: Optional[int] = Field(default=None, description="Maximum upload size in bytes; unset by default")
 
 
 class FederationConfig(BaseSettings):

@@ -32,6 +32,7 @@ local_path = "/var/lib/songhive/media"
 # s3_secret_key = ""
 # s3_region = "us-east-1"
 # cdn_prefix = "https://cdn.example.com"
+# max_upload_size = 524288000
 
 [federation]
 enabled = true

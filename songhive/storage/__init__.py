@@ -21,5 +21,6 @@ def get_storage(config: "StorageConfig") -> StorageBackend:
             access_key=config.s3_access_key,
             secret_key=config.s3_secret_key,
             region=config.s3_region,
+            max_upload_size=config.max_upload_size,
         )
-    return LocalStorage(base_path=config.local_path)
+    return LocalStorage(base_path=config.local_path, max_upload_size=config.max_upload_size)
