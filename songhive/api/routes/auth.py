@@ -1,16 +1,20 @@
 """
-Authentication routes: registration, login, token refresh and logout.
+Authentication routes: registration, login, token refresh, logout, and OAuth2.
 """
 
+import base64
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Dict, Optional, Tuple
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
+from ...models.user import User
 from ...services.auth import (
     get_user_by_id,
     get_user_by_username_or_email,
@@ -24,6 +28,13 @@ from ...users.manager import (
     request_password_reset,
     verify_email,
 )
+from ...users.oauth import (
+    OAuth2ProviderError,
+    create_authorization_code,
+    create_token,
+    introspect_token,
+    revoke_token,
+)
 from ...users.tokens import (
     TokenPair,
     issue_token_pair,
@@ -31,7 +42,7 @@ from ...users.tokens import (
     rotate_refresh_token,
     validate_refresh_token,
 )
-from ..deps import get_config, get_db, get_redis
+from ..deps import get_config, get_current_user, get_db, get_redis
 from ..middleware.rate_limit import check_rate_limit, rate_limit
 
 router = APIRouter(prefix="/auth")
@@ -130,6 +141,28 @@ class PasswordResetConfirmResponse(BaseModel):
     """Response returned after a successful password reset."""
 
     success: bool = True
+
+
+class OAuth2TokenResponse(BaseModel):
+    """OAuth2 token endpoint response."""
+
+    access_token: str
+    token_type: str
+    expires_in: int
+    refresh_token: Optional[str] = None
+    scope: Optional[str] = None
+
+
+class OAuth2IntrospectionResponse(BaseModel):
+    """OAuth2 token introspection response."""
+
+    active: bool
+    client_id: Optional[str] = None
+    username: Optional[str] = None
+    token_type: Optional[str] = None
+    scope: Optional[str] = None
+    exp: Optional[int] = None
+    sub: Optional[str] = None
 
 
 @router.post(
@@ -330,6 +363,219 @@ async def password_reset_confirm(
             detail="Invalid or expired reset token",
         )
     return PasswordResetConfirmResponse()
+
+
+def _extract_client_credentials(
+    request: Request,
+    client_id: Optional[str],
+    client_secret: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    """Extract client credentials from HTTP Basic auth or form fields."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(auth[6:].encode()).decode()
+            basic_client_id, _, basic_client_secret = decoded.partition(":")
+            client_id = basic_client_id or client_id
+            client_secret = basic_client_secret or client_secret
+        except ValueError:
+            pass
+    return client_id, client_secret
+
+
+def _build_redirect_url(redirect_uri: str, params: Dict[str, Optional[str]]) -> str:
+    """Append query parameters to a redirect URI, preserving existing query."""
+    parsed = urlparse(redirect_uri)
+    query = dict(parse_qsl(parsed.query))
+    for key, value in params.items():
+        if value is not None:
+            query[key] = value
+    return urlunparse(parsed._replace(query=urlencode(query)))
+
+
+def _handle_oauth_error(exc: OAuth2ProviderError) -> HTTPException:
+    """Convert an OAuth2 provider error into an HTTPException."""
+    headers = None
+    if exc.error == "invalid_client":
+        headers = {"WWW-Authenticate": "Basic"}
+    return HTTPException(status_code=exc.status_code, detail=exc.error, headers=headers)
+
+
+async def _oauth_authorize(
+    db: AsyncSession,
+    redis: Redis,
+    current_user: User,
+    response_type: str,
+    client_id: str,
+    redirect_uri: str,
+    code_challenge: Optional[str],
+    code_challenge_method: str,
+    scope: Optional[str],
+    state: Optional[str],
+) -> RedirectResponse:
+    """Validate and create an OAuth2 authorization code for the current user."""
+    try:
+        code, echo_state = await create_authorization_code(
+            db,
+            redis,
+            current_user,
+            response_type,
+            client_id,
+            redirect_uri,
+            code_challenge,
+            code_challenge_method,
+            scope,
+            state,
+        )
+    except OAuth2ProviderError as exc:
+        raise _handle_oauth_error(exc)
+
+    location = _build_redirect_url(redirect_uri, {"code": code, "state": echo_state})
+    return RedirectResponse(location, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/oauth/authorize")
+async def oauth_authorize_get(
+    response_type: str = Query(...),
+    client_id: str = Query(...),
+    redirect_uri: str = Query(...),
+    code_challenge: Optional[str] = Query(None),
+    code_challenge_method: str = Query("S256"),
+    scope: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> RedirectResponse:
+    """Issue an OAuth2 authorization code for an authenticated resource owner."""
+    return await _oauth_authorize(
+        db,
+        redis,
+        current_user,
+        response_type,
+        client_id,
+        redirect_uri,
+        code_challenge,
+        code_challenge_method,
+        scope,
+        state,
+    )
+
+
+@router.post("/oauth/authorize")
+async def oauth_authorize_post(
+    response_type: str = Query(...),
+    client_id: str = Query(...),
+    redirect_uri: str = Query(...),
+    code_challenge: Optional[str] = Query(None),
+    code_challenge_method: str = Query("S256"),
+    scope: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> RedirectResponse:
+    """Issue an OAuth2 authorization code for an authenticated resource owner."""
+    return await _oauth_authorize(
+        db,
+        redis,
+        current_user,
+        response_type,
+        client_id,
+        redirect_uri,
+        code_challenge,
+        code_challenge_method,
+        scope,
+        state,
+    )
+
+
+@router.post("/oauth/token", response_model=OAuth2TokenResponse)
+async def oauth_token(
+    request: Request,
+    grant_type: str = Form(...),
+    code: Optional[str] = Form(None),
+    redirect_uri: Optional[str] = Form(None),
+    client_id: Optional[str] = Form(None),
+    client_secret: Optional[str] = Form(None),
+    code_verifier: Optional[str] = Form(None),
+    refresh_token: Optional[str] = Form(None),
+    scope: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+    redis: Redis = Depends(get_redis),
+) -> OAuth2TokenResponse:
+    """Exchange an authorization code or refresh token for an access token."""
+    client_id, client_secret = _extract_client_credentials(request, client_id, client_secret)
+    try:
+        token_result = await create_token(
+            db,
+            redis,
+            config,
+            grant_type,
+            client_id,
+            client_secret,
+            code=code,
+            redirect_uri=redirect_uri,
+            code_verifier=code_verifier,
+            refresh_token=refresh_token,
+            scope=scope,
+        )
+        return OAuth2TokenResponse.model_validate(token_result)
+    except OAuth2ProviderError as exc:
+        raise _handle_oauth_error(exc)
+
+
+@router.post("/oauth/revoke")
+async def oauth_revoke(
+    request: Request,
+    token: str = Form(...),
+    token_type_hint: Optional[str] = Form(None),
+    client_id: Optional[str] = Form(None),
+    client_secret: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> Response:
+    """Revoke an OAuth2 access or refresh token."""
+    client_id, client_secret = _extract_client_credentials(request, client_id, client_secret)
+    try:
+        await revoke_token(
+            db,
+            redis,
+            token,
+            token_type_hint,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+    except OAuth2ProviderError as exc:
+        raise _handle_oauth_error(exc)
+    return Response(status_code=status.HTTP_200_OK)
+
+
+@router.post("/oauth/introspect", response_model=OAuth2IntrospectionResponse)
+async def oauth_introspect(
+    request: Request,
+    token: str = Form(...),
+    token_type_hint: Optional[str] = Form(None),
+    client_id: Optional[str] = Form(None),
+    client_secret: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> OAuth2IntrospectionResponse:
+    """Return the active status and metadata for an OAuth2 token."""
+    client_id, client_secret = _extract_client_credentials(request, client_id, client_secret)
+    try:
+        introspect_result = await introspect_token(
+            db,
+            redis,
+            token,
+            token_type_hint,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+        return OAuth2IntrospectionResponse.model_validate(introspect_result)
+    except OAuth2ProviderError as exc:
+        raise _handle_oauth_error(exc)
 
 
 def _token_pair_response(token_pair: TokenPair) -> TokenPairResponse:

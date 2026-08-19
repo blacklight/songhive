@@ -1,8 +1,12 @@
 """
-OAuth2 client registration and admin API tests.
+OAuth2 client registration, admin API, and provider flow tests.
 """
 
+import base64
+import hashlib
+import secrets
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi import status
@@ -12,6 +16,13 @@ from songhive.api.middleware.auth import create_access_token
 from songhive.models.oauth_client import OAuth2Client
 from songhive.services.auth import create_user
 from songhive.users import oauth as oauth_client_service
+
+
+def _pkce_pair():
+    """Return a PKCE verifier and the matching S256 challenge."""
+    verifier = secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("utf-8")).digest()).decode().rstrip("=")
+    return verifier, challenge
 
 
 async def _make_user(db_session, *args, **kwargs):
@@ -423,3 +434,407 @@ async def test_oauth_client_secret_not_in_list(client, db_session, config):
     result = await db_session.execute(select(OAuth2Client).where(OAuth2Client.client_id == data[0]["client_id"]))
     client_obj = result.scalar_one()
     assert client_obj.client_secret_hash is not None
+
+
+@pytest.mark.asyncio
+async def test_oauth_authorize_and_token_flow(client, db_session, config):
+    """Test the full authorization-code + PKCE flow, introspection and revocation."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Test Client",
+        redirect_uris=["https://example.com/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+    )
+    await db_session.flush()
+
+    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
+    user_token = _admin_token(user, config)
+    verifier, challenge = _pkce_pair()
+
+    authorize_response = client.get(
+        f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
+        f"&redirect_uri=https://example.com/callback&state=xyz"
+        f"&code_challenge={challenge}&code_challenge_method=S256",
+        headers={"Authorization": f"Bearer {user_token}"},
+        follow_redirects=False,
+    )
+    assert authorize_response.status_code == status.HTTP_302_FOUND
+    location = authorize_response.headers["Location"]
+    parsed = urlparse(location)
+    assert parsed.netloc == "example.com"
+    assert parsed.path == "/callback"
+    params = parse_qs(parsed.query)
+    assert "code" in params
+    assert params.get("state") == ["xyz"]
+    auth_code = params["code"][0]
+
+    token_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": auth_code,
+            "redirect_uri": "https://example.com/callback",
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+            "code_verifier": verifier,
+        },
+    )
+    assert token_response.status_code == status.HTTP_200_OK
+    token_data = token_response.json()
+    assert "access_token" in token_data
+    assert token_data["token_type"] == "Bearer"
+    assert token_data["expires_in"] == 900
+    assert "refresh_token" in token_data
+
+    introspect_response = client.post(
+        "/api/v1/auth/oauth/introspect",
+        data={
+            "token": token_data["access_token"],
+            "token_type_hint": "access_token",
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+        },
+    )
+    assert introspect_response.status_code == status.HTTP_200_OK
+    introspect_data = introspect_response.json()
+    assert introspect_data["active"] is True
+    assert introspect_data["client_id"] == client_obj.client_id
+    assert introspect_data["username"] == "alice"
+    assert introspect_data["token_type"] == "access_token"
+
+    revoke_response = client.post(
+        "/api/v1/auth/oauth/revoke",
+        data={
+            "token": token_data["access_token"],
+            "token_type_hint": "access_token",
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+        },
+    )
+    assert revoke_response.status_code == status.HTTP_200_OK
+
+    introspect_after_revoke = client.post(
+        "/api/v1/auth/oauth/introspect",
+        data={
+            "token": token_data["access_token"],
+            "token_type_hint": "access_token",
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+        },
+    )
+    assert introspect_after_revoke.json()["active"] is False
+
+    refresh_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": token_data["refresh_token"],
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+        },
+    )
+    assert refresh_response.status_code == status.HTTP_200_OK
+    refresh_data = refresh_response.json()
+    assert "access_token" in refresh_data
+    assert refresh_data["refresh_token"] != token_data["refresh_token"]
+
+    old_refresh_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": token_data["refresh_token"],
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+        },
+    )
+    assert old_refresh_response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_oauth_public_client_flow(client, db_session, config):
+    """Test the OAuth2 flow for a public client without a client secret."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Public Client",
+        redirect_uris=["https://example.com/callback"],
+        is_confidential=False,
+    )
+    await db_session.flush()
+
+    user = await _make_user(db_session, "bob", "bob@example.com", "secret")
+    user_token = _admin_token(user, config)
+    verifier, challenge = _pkce_pair()
+
+    authorize_response = client.get(
+        f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
+        f"&redirect_uri=https://example.com/callback&code_challenge={challenge}"
+        f"&code_challenge_method=S256",
+        headers={"Authorization": f"Bearer {user_token}"},
+        follow_redirects=False,
+    )
+    assert authorize_response.status_code == status.HTTP_302_FOUND
+    auth_code = parse_qs(urlparse(authorize_response.headers["Location"]).query)["code"][0]
+
+    token_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": auth_code,
+            "redirect_uri": "https://example.com/callback",
+            "client_id": client_obj.client_id,
+            "code_verifier": verifier,
+        },
+    )
+    assert token_response.status_code == status.HTTP_200_OK
+    assert "access_token" in token_response.json()
+
+
+@pytest.mark.asyncio
+async def test_oauth_authorize_requires_authentication(client, db_session, config):
+    """Test that the authorization endpoint requires a logged-in resource owner."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Test Client",
+        redirect_uris=["https://example.com/callback"],
+    )
+    await db_session.flush()
+    verifier, challenge = _pkce_pair()
+
+    response = client.get(
+        f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
+        f"&redirect_uri=https://example.com/callback&code_challenge={challenge}"
+        f"&code_challenge_method=S256",
+        follow_redirects=False,
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_oauth_authorize_rejects_invalid_redirect_uri(client, db_session, config):
+    """Test that an unauthorized redirect URI is rejected at the authorize endpoint."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Test Client",
+        redirect_uris=["https://example.com/callback"],
+    )
+    await db_session.flush()
+
+    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
+    user_token = _admin_token(user, config)
+    verifier, challenge = _pkce_pair()
+
+    response = client.get(
+        f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
+        f"&redirect_uri=https://other.com/callback&code_challenge={challenge}"
+        f"&code_challenge_method=S256",
+        headers={"Authorization": f"Bearer {user_token}"},
+        follow_redirects=False,
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_oauth_authorize_rejects_missing_code_challenge(client, db_session, config):
+    """Test that PKCE is required at the authorization endpoint."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Test Client",
+        redirect_uris=["https://example.com/callback"],
+    )
+    await db_session.flush()
+
+    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
+    user_token = _admin_token(user, config)
+
+    response = client.get(
+        f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
+        f"&redirect_uri=https://example.com/callback",
+        headers={"Authorization": f"Bearer {user_token}"},
+        follow_redirects=False,
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_oauth_token_rejects_wrong_pkce_verifier(client, db_session, config):
+    """Test that a mismatched PKCE verifier is rejected at the token endpoint."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Test Client",
+        redirect_uris=["https://example.com/callback"],
+    )
+    await db_session.flush()
+
+    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
+    user_token = _admin_token(user, config)
+    _, challenge = _pkce_pair()
+
+    authorize_response = client.get(
+        f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
+        f"&redirect_uri=https://example.com/callback&code_challenge={challenge}"
+        f"&code_challenge_method=S256",
+        headers={"Authorization": f"Bearer {user_token}"},
+        follow_redirects=False,
+    )
+    auth_code = parse_qs(urlparse(authorize_response.headers["Location"]).query)["code"][0]
+
+    wrong_verifier = secrets.token_urlsafe(64)
+    token_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": auth_code,
+            "redirect_uri": "https://example.com/callback",
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+            "code_verifier": wrong_verifier,
+        },
+    )
+    assert token_response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_oauth_authorization_code_single_use(client, db_session, config):
+    """Test that an authorization code can only be exchanged once."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Test Client",
+        redirect_uris=["https://example.com/callback"],
+    )
+    await db_session.flush()
+
+    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
+    user_token = _admin_token(user, config)
+    verifier, challenge = _pkce_pair()
+
+    authorize_response = client.get(
+        f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
+        f"&redirect_uri=https://example.com/callback&code_challenge={challenge}"
+        f"&code_challenge_method=S256",
+        headers={"Authorization": f"Bearer {user_token}"},
+        follow_redirects=False,
+    )
+    auth_code = parse_qs(urlparse(authorize_response.headers["Location"]).query)["code"][0]
+
+    data = {
+        "grant_type": "authorization_code",
+        "code": auth_code,
+        "redirect_uri": "https://example.com/callback",
+        "client_id": client_obj.client_id,
+        "client_secret": client_secret,
+        "code_verifier": verifier,
+    }
+    first = client.post("/api/v1/auth/oauth/token", data=data)
+    assert first.status_code == status.HTTP_200_OK
+
+    second = client.post("/api/v1/auth/oauth/token", data=data)
+    assert second.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_oauth_token_rejects_invalid_client(client, db_session, config):
+    """Test that the token endpoint rejects an unknown client."""
+    token_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": "fake-code",
+            "redirect_uri": "https://example.com/callback",
+            "client_id": "not-a-real-client",
+            "client_secret": "secret",
+            "code_verifier": secrets.token_urlsafe(64),
+        },
+    )
+    assert token_response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_oauth_token_rejects_unsupported_grant_type(client, db_session, config):
+    """Test that unsupported grant types are rejected at the token endpoint."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Test Client",
+        redirect_uris=["https://example.com/callback"],
+    )
+    await db_session.flush()
+
+    token_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "implicit",
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+        },
+    )
+    assert token_response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_oauth_token_rejects_refresh_without_refresh_grant(client, db_session, config):
+    """Test that a client with only authorization_code cannot use the refresh_token grant."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="No Refresh Client",
+        redirect_uris=["https://example.com/callback"],
+        grant_types=["authorization_code"],
+    )
+    await db_session.flush()
+
+    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
+    user_token = _admin_token(user, config)
+    verifier, challenge = _pkce_pair()
+
+    authorize_response = client.get(
+        f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
+        f"&redirect_uri=https://example.com/callback&code_challenge={challenge}"
+        f"&code_challenge_method=S256",
+        headers={"Authorization": f"Bearer {user_token}"},
+        follow_redirects=False,
+    )
+    assert authorize_response.status_code == status.HTTP_302_FOUND
+    auth_code = parse_qs(urlparse(authorize_response.headers["Location"]).query)["code"][0]
+
+    token_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": auth_code,
+            "redirect_uri": "https://example.com/callback",
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+            "code_verifier": verifier,
+        },
+    )
+    assert token_response.status_code == status.HTTP_200_OK
+    token_data = token_response.json()
+    assert "refresh_token" in token_data
+
+    refresh_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": token_data["refresh_token"],
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+        },
+    )
+    assert refresh_response.status_code == status.HTTP_400_BAD_REQUEST
+    assert refresh_response.json() == {"detail": "unsupported_grant_type"}
