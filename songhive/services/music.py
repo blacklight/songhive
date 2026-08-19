@@ -2,7 +2,7 @@
 Music service: CRUD operations for artists, albums, tracks.
 """
 
-from typing import List, Optional
+from typing import List, Optional, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +29,7 @@ async def list_artists(
 
 async def get_artist(session: AsyncSession, artist_id: str) -> Optional[Artist]:
     """Get an artist by ID."""
-    return await session.get(Artist, artist_id)
+    return cast(Optional[Artist], await session.get(Artist, artist_id))
 
 
 async def list_albums(
@@ -52,7 +52,7 @@ async def list_albums(
 
 async def get_album(session: AsyncSession, album_id: str) -> Optional[Album]:
     """Get an album by ID."""
-    return await session.get(Album, album_id)
+    return cast(Optional[Album], await session.get(Album, album_id))
 
 
 async def list_tracks(
@@ -78,4 +78,4 @@ async def list_tracks(
 
 async def get_track(session: AsyncSession, track_id: str) -> Optional[Track]:
     """Get a track by ID."""
-    return await session.get(Track, track_id)
+    return cast(Optional[Track], await session.get(Track, track_id))

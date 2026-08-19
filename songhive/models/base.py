@@ -5,7 +5,7 @@ SQLAlchemy base configuration and session management.
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from sqlalchemy import DateTime, func
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -33,12 +33,24 @@ _engine = None
 _session_factory = None
 
 
-def init_db(database_url: str, **kwargs):
-    """Initialize the database engine and session factory."""
+def init_db(database_url: Optional[str] = None, *, engine=None, force: bool = False, **kwargs):
+    """Initialize the database engine and session factory.
+
+    Accepts either a database URL or a pre-constructed async engine. The
+    ``force`` flag is intended for tests that need to re-initialize the shared
+    engine between test cases.
+    """
     global _engine, _session_factory
-    if _engine is not None:
+    if not force and _engine is not None:
         return
-    _engine = create_async_engine(database_url, **kwargs)
+
+    if engine is not None:
+        _engine = engine
+    elif database_url is not None:
+        _engine = create_async_engine(database_url, **kwargs)
+    else:
+        raise ValueError("Provide either database_url or engine")
+
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
 
 

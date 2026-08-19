@@ -19,6 +19,7 @@ from typing import Any, Awaitable, Callable, cast
 
 from .config import load_config
 from .models.base import init_db
+from .services.redis import close_redis_client, get_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,10 @@ def _run_tornado(config):
     from .ws.events import EventWebSocket
 
     fastapi_app = create_app(config)
+    fastapi_app.state.redis = get_redis_client(config)
+
     wsgi_app = ASGIMiddleware(cast(Callable[[Any, Any, Any], Awaitable[None]], fastapi_app))
-    container = WSGIContainer(cast(Callable[[dict[str, Any], Any], Iterable[bytes]], wsgi_app))
+    container = WSGIContainer(cast(Callable[[dict[str, Any], Any], Iterable[bytes]], cast(object, wsgi_app)))
 
     tornado_app = Application(
         [
@@ -63,12 +66,17 @@ def _run_tornado(config):
         server.stop()
         loop.stop()
 
-    signal.signal(signal.SIGINT, lambda *_: _shutdown())
-    signal.signal(signal.SIGTERM, lambda *_: _shutdown())
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _shutdown)
+        except (RuntimeError, OSError):
+            # Fallback for platforms that don't support add_signal_handler.
+            signal.signal(sig, lambda *_: _shutdown())
 
     try:
         loop.run_forever()
     finally:
+        loop.run_until_complete(close_redis_client())
         loop.close()
         logger.info("Server stopped.")
 

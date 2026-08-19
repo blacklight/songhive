@@ -19,7 +19,7 @@ def test_user_model():
         username="testuser",
         email="test@example.com",
         password_hash="hashed",
-        is_admin=False,
+        role="user",
     )
     assert user.username == "testuser"
     assert user.is_admin is False

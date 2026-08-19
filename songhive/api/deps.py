@@ -5,15 +5,26 @@ FastAPI dependency injection helpers.
 from typing import AsyncGenerator
 
 from fastapi import Depends, HTTPException, Request, status
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
 from ..models.base import get_session
+from ..models.user import User
+from ..services.auth import get_user_by_id
+from .middleware.auth import decode_access_token, extract_token
 
 
 def get_config(request: Request) -> SonghiveConfig:
     """Get the application config from the request state."""
-    return request.app.state.config
+    config: SonghiveConfig = request.app.state.config
+    return config
+
+
+def get_redis(request: Request) -> Redis:
+    """Get the shared async Redis client from the request state."""
+    redis: Redis = request.app.state.redis
+    return redis
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -22,19 +33,39 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def get_current_user(request: Request):
+async def get_current_user(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> User:
     """
     Extract and validate the current user from the request.
-    Returns the User model instance or raises 401.
+
+    Returns the User model instance or raises 401 for missing, invalid,
+    inactive, or deleted users.
     """
-    # TODO: implement JWT/OAuth2 token validation
-    raise HTTPException(
+    token = extract_token(request)
+    exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
     )
 
+    if not token:
+        raise exc
 
-async def require_admin(current_user=Depends(get_current_user)):
+    config = get_config(request)
+    user_id = decode_access_token(token, config.auth.secret_key)
+    if user_id is None:
+        raise exc
+
+    user = await get_user_by_id(db, user_id)
+    if user is None or not user.is_active:
+        raise exc
+
+    return user
+
+
+async def require_admin(current_user: User = Depends(get_current_user)):
     """Require admin privileges."""
     if not current_user.is_admin:
         raise HTTPException(

@@ -22,9 +22,11 @@ steps:
 - name: lint
   image: python:3.12
   commands:
-    - pip install flake8 black
+    - pip install flake8 black isort mypy
     - python -m flake8 songhive tests
     - python -m black --check .
+    - python -m isort songhive tests
+    - python -m mypy songhive
 
 ###
 ### Mirror the current repository state to Github
@@ -37,6 +39,12 @@ steps:
       from_secret: ssh_pubkey
     SSH_PRIVKEY:
       from_secret: ssh_privkey
+
+  when:
+    branch:
+      - main
+    event:
+      - push
 
   commands:
     - . .drone/github-mirror.sh

@@ -38,7 +38,8 @@ def _load_toml(path: Path) -> Dict[str, Any]:
         import tomli as tomllib  # type: ignore[no-redef]
 
     with open(path, "rb") as f:
-        return tomllib.load(f)
+        data: Dict[str, Any] = tomllib.load(f)
+        return data
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:

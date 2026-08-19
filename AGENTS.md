@@ -20,6 +20,24 @@
   python -m flake8 songhive tests
   ```
 
+- Run import sorting checks:
+
+  ```bash
+  python -m isort --check-only songhive tests
+  ```
+
+- Apply automatic import sorting:
+
+  ```bash
+  python -m isort songhive tests
+  ```
+
+- Run type checking:
+
+  ```bash
+  python -m mypy songhive
+  ```
+
 - Run formatting checks:
 
   ```bash
@@ -31,6 +49,10 @@
   ```bash
   python -m black .
   ```
+
+- On an externally managed system Python, install dev dependencies (including
+  `fakeredis`) in a virtual environment and run the verification commands with
+  that environment activated.
 
 ## Notes
 

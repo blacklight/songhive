@@ -3,6 +3,8 @@ pytest>=7.4
 pytest-asyncio>=0.21
 pytest-cov>=4.1
 httpx>=0.24
+aiosqlite>=0.19
+fakeredis>=2.0
 
 # Linting & Formatting
 flake8>=6.0

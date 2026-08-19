@@ -3,7 +3,7 @@ Music file importer: processes uploaded audio files.
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,7 +77,7 @@ async def import_file(
 async def _find_or_create_artist(session: AsyncSession, name: str) -> Artist:
     """Find an artist by name, or create one."""
     result = await session.execute(select(Artist).where(Artist.name == name).limit(1))
-    artist = result.scalar_one_or_none()
+    artist = cast(Optional[Artist], result.scalar_one_or_none())
     if artist:
         return artist
 
@@ -95,7 +95,7 @@ async def _find_or_create_album(
 ) -> Album:
     """Find an album by title+artist, or create one."""
     result = await session.execute(select(Album).where(Album.title == title, Album.artist_id == artist_id).limit(1))
-    album = result.scalar_one_or_none()
+    album = cast(Optional[Album], result.scalar_one_or_none())
     if album:
         return album
 

@@ -42,7 +42,7 @@ def process_upload(upload_id: str, file_path: str, library_id: str) -> str:
                 storage,
                 config.storage.backend,
             )
-            return upload.id
+            return str(upload.id)
 
     return asyncio.run(_run())
 

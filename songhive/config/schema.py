@@ -3,6 +3,7 @@ Configuration schema for Songhive, defined as a Pydantic settings model.
 """
 
 import json
+from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -83,20 +84,83 @@ class FederationConfig(BaseSettings):
     )
 
 
+class RegistrationMode(str, Enum):
+    """Allowed user registration modes."""
+
+    OPEN = "open"
+    INVITE_ONLY = "invite-only"
+    APPROVAL_REQUIRED = "approval-required"
+    CLOSED = "closed"
+
+
 class AuthConfig(BaseSettings):
     """Authentication configuration."""
 
-    registration_enabled: bool = Field(
+    registration_mode: RegistrationMode = Field(
+        default=RegistrationMode.OPEN,
+        description="How new user registration is handled",
+    )
+    require_email_verification: bool = Field(
+        default=False,
+        description="Require email verification before a registered account can log in",
+    )
+    access_token_expiry_minutes: int = Field(
+        default=15,
+        description="JWT access token expiry in minutes",
+    )
+    refresh_token_expiry_days: int = Field(
+        default=30,
+        description="Refresh token expiry in days",
+    )
+    password_reset_token_expiry_minutes: int = Field(
+        default=30,
+        description="Password reset token expiry in minutes",
+    )
+    rate_limit_enabled: bool = Field(
         default=True,
-        description="Whether new user registration is open",
+        description="Enable rate limiting on sensitive authentication endpoints",
+    )
+    rate_limit_requests: int = Field(
+        default=10,
+        description="Max requests allowed in a rate limit window",
+    )
+    rate_limit_window_seconds: int = Field(
+        default=60,
+        description="Rate limit window in seconds",
     )
     secret_key: str = Field(
-        default="change-me-in-production",
         description="Secret key for JWT signing",
     )
-    token_expiry_hours: int = Field(
-        default=24,
-        description="JWT token expiry in hours",
+
+    @field_validator("secret_key", mode="after")
+    @classmethod
+    def _validate_secret_key(cls, value: str) -> str:
+        if value in {"change-me-in-production", "your-secret-key-here"}:
+            raise ValueError(
+                "JWT secret_key is set to a known placeholder. "
+                "Generate a strong random key and set it explicitly, e.g.:\n"
+                'python -c "import secrets; print(secrets.token_urlsafe(64))"'
+            )
+        if len(value.encode("utf-8")) < 32:
+            raise ValueError("JWT secret_key must be at least 32 bytes long")
+        return value
+
+
+class EmailConfig(BaseSettings):
+    """Email (SMTP) configuration."""
+
+    smtp_host: Optional[str] = Field(default=None, description="SMTP server hostname")
+    smtp_port: int = Field(default=587, description="SMTP server port")
+    smtp_username: Optional[str] = Field(default=None, description="SMTP username")
+    smtp_password: Optional[str] = Field(
+        default=None,
+        description="SMTP password",
+        repr=False,
+    )
+    smtp_tls: bool = Field(default=True, description="Use TLS for the SMTP connection")
+    from_address: Optional[str] = Field(
+        default=None,
+        description="From address for outgoing emails",
     )
 
 
@@ -108,7 +172,7 @@ class ServerConfig(BaseSettings):
     num_workers: int = Field(default=1, description="Number of worker processes")
     debug: bool = Field(default=False, description="Enable debug mode")
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["*"],
+        default_factory=list,
         description=(
             'Allowed CORS origins. Use ["*"] to allow all origins. '
             "A comma-separated string or JSON list is also accepted from environment variables."
@@ -131,12 +195,20 @@ class ServerConfig(BaseSettings):
     @classmethod
     def _split_cors_origins(cls, value: str) -> list[str]:
         value = value.strip()
-        if value.startswith("[") and value.endswith("]"):
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                pass
-        return [item.strip() for item in value.split(",") if item.strip()]
+        try:
+            parsed = json.loads(value)
+            return list(parsed) if isinstance(parsed, list) else [value]
+        except json.JSONDecodeError:
+            return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _require_auth_secret_key() -> AuthConfig:
+    """Raise a clear error when no JWT secret key has been configured."""
+    raise ValueError(
+        "JWT auth.secret_key is not configured. "
+        "Set SONGHIVE_AUTH__SECRET_KEY or add auth.secret_key to config.toml. "
+        'Generate a key with: python -c "import secrets; print(secrets.token_urlsafe(64))"'
+    )
 
 
 class SonghiveConfig(BaseSettings):
@@ -161,4 +233,5 @@ class SonghiveConfig(BaseSettings):
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     federation: FederationConfig = Field(default_factory=FederationConfig)
-    auth: AuthConfig = Field(default_factory=AuthConfig)
+    auth: AuthConfig = Field(default_factory=_require_auth_secret_key)
+    email: EmailConfig = Field(default_factory=EmailConfig)
