@@ -12,9 +12,7 @@ import pytest
 from fastapi import status
 from sqlalchemy import select
 
-from songhive.api.middleware.auth import create_access_token
 from songhive.models.oauth_client import OAuth2Client
-from songhive.services.auth import create_user
 from songhive.users import oauth as oauth_client_service
 
 
@@ -25,18 +23,6 @@ def _pkce_pair():
     return verifier, challenge
 
 
-async def _make_user(db_session, *args, **kwargs):
-    """Helper to create a user and flush it to the test session."""
-    user = await create_user(db_session, *args, **kwargs)
-    await db_session.flush()
-    return user
-
-
-def _admin_token(user, config):
-    """Return an access token for the given user."""
-    return create_access_token(user.id, config.auth.secret_key)
-
-
 @pytest.mark.asyncio
 async def test_oauth_list_clients_requires_authentication(client):
     """Test that listing OAuth clients requires authentication."""
@@ -45,22 +31,22 @@ async def test_oauth_list_clients_requires_authentication(client):
 
 
 @pytest.mark.asyncio
-async def test_oauth_list_clients_forbids_non_admin(client, db_session, config):
+async def test_oauth_list_clients_forbids_non_admin(client, db_session, config, make_user, auth_headers):
     """Test that non-admin users cannot list OAuth clients."""
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = _admin_token(user, config)
+    user = await make_user("alice")
+    headers = auth_headers(user)
 
     response = client.get(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio
-async def test_oauth_list_clients_returns_clients(client, db_session, config):
+async def test_oauth_list_clients_returns_clients(client, db_session, config, make_user, auth_headers):
     """Test that admins can list OAuth clients."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, _ = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -68,11 +54,11 @@ async def test_oauth_list_clients_returns_clients(client, db_session, config):
         redirect_uris=["https://example.com/callback"],
     )
     await db_session.flush()
-    token = _admin_token(admin, config)
+    headers = auth_headers(admin)
 
     response = client.get(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -90,9 +76,9 @@ async def test_oauth_list_clients_returns_clients(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_oauth_list_clients_paginates(client, db_session, config):
+async def test_oauth_list_clients_paginates(client, db_session, config, make_user, auth_headers):
     """Test that the OAuth client list supports limit and offset."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     for i in range(3):
         await oauth_client_service.create_oauth_client(
             db_session,
@@ -101,32 +87,32 @@ async def test_oauth_list_clients_paginates(client, db_session, config):
             redirect_uris=[f"https://example{i}.com/callback"],
         )
     await db_session.flush()
-    token = _admin_token(admin, config)
+    headers = auth_headers(admin)
 
     response = client.get(
         "/api/v1/admin/oauth/clients?limit=2&offset=0",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     assert len(response.json()) == 2
 
     response = client.get(
         "/api/v1/admin/oauth/clients?limit=2&offset=2",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     assert len(response.json()) == 1
 
 
 @pytest.mark.asyncio
-async def test_oauth_create_client(client, db_session, config):
+async def test_oauth_create_client(client, db_session, config, make_user, auth_headers):
     """Test that an admin can create an OAuth2 client."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={
             "name": "Test Client",
             "redirect_uris": ["https://example.com/callback"],
@@ -149,14 +135,14 @@ async def test_oauth_create_client(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_oauth_create_client_secret_hashed(client, db_session, config):
+async def test_oauth_create_client_secret_hashed(client, db_session, config, make_user, auth_headers):
     """Test that client secrets are stored as a hash, not plaintext."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={
             "name": "Test Client",
             "redirect_uris": ["https://example.com/callback"],
@@ -177,14 +163,14 @@ async def test_oauth_create_client_secret_hashed(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_oauth_create_client_custom_grant_types(client, db_session, config):
+async def test_oauth_create_client_custom_grant_types(client, db_session, config, make_user, auth_headers):
     """Test that admins can create a client with multiple valid grant types."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={
             "name": "Custom Client",
             "redirect_uris": ["https://example.com/callback"],
@@ -201,14 +187,14 @@ async def test_oauth_create_client_custom_grant_types(client, db_session, config
 
 
 @pytest.mark.asyncio
-async def test_oauth_create_public_client(client, db_session, config):
+async def test_oauth_create_public_client(client, db_session, config, make_user, auth_headers):
     """Test that a public client does not receive a client secret."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={
             "name": "Public Client",
             "redirect_uris": ["https://example.com/callback"],
@@ -226,14 +212,14 @@ async def test_oauth_create_public_client(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_oauth_create_client_rejects_invalid_redirect_uri(client, db_session, config):
+async def test_oauth_create_client_rejects_invalid_redirect_uri(client, db_session, config, make_user, auth_headers):
     """Test that invalid redirect URIs are rejected."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={
             "name": "Bad Client",
             "redirect_uris": ["not-a-valid-uri"],
@@ -243,14 +229,14 @@ async def test_oauth_create_client_rejects_invalid_redirect_uri(client, db_sessi
 
 
 @pytest.mark.asyncio
-async def test_oauth_create_client_rejects_invalid_grant_type(client, db_session, config):
+async def test_oauth_create_client_rejects_invalid_grant_type(client, db_session, config, make_user, auth_headers):
     """Test that unknown grant types are rejected."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={
             "name": "Bad Client",
             "redirect_uris": ["https://example.com/callback"],
@@ -261,14 +247,14 @@ async def test_oauth_create_client_rejects_invalid_grant_type(client, db_session
 
 
 @pytest.mark.asyncio
-async def test_oauth_create_client_forbids_non_admin(client, db_session, config):
+async def test_oauth_create_client_forbids_non_admin(client, db_session, config, make_user, auth_headers):
     """Test that non-admin users cannot create OAuth clients."""
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = _admin_token(user, config)
+    user = await make_user("alice")
+    headers = auth_headers(user)
 
     response = client.post(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={
             "name": "Test Client",
             "redirect_uris": ["https://example.com/callback"],
@@ -278,9 +264,9 @@ async def test_oauth_create_client_forbids_non_admin(client, db_session, config)
 
 
 @pytest.mark.asyncio
-async def test_oauth_delete_client(client, db_session, config):
+async def test_oauth_delete_client(client, db_session, config, make_user, auth_headers):
     """Test that an admin can delete an OAuth client."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, _ = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -288,51 +274,51 @@ async def test_oauth_delete_client(client, db_session, config):
         redirect_uris=["https://example.com/callback"],
     )
     await db_session.flush()
-    token = _admin_token(admin, config)
+    headers = auth_headers(admin)
 
     response = client.delete(
         f"/api/v1/admin/oauth/clients/{client_obj.client_id}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_204_NO_CONTENT
 
     list_response = client.get(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert list_response.json() == []
 
 
 @pytest.mark.asyncio
-async def test_oauth_delete_client_missing(client, db_session, config):
+async def test_oauth_delete_client_missing(client, db_session, config, make_user, auth_headers):
     """Test that deleting a missing OAuth client returns 404."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.delete(
         "/api/v1/admin/oauth/clients/not-a-real-client-id",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 @pytest.mark.asyncio
-async def test_oauth_delete_client_forbids_non_admin(client, db_session, config):
+async def test_oauth_delete_client_forbids_non_admin(client, db_session, config, make_user, auth_headers):
     """Test that non-admin users cannot delete OAuth clients."""
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = _admin_token(user, config)
+    user = await make_user("alice")
+    headers = auth_headers(user)
 
     response = client.delete(
         "/api/v1/admin/oauth/clients/not-a-real-client-id",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio
-async def test_oauth_get_client(client, db_session, config):
+async def test_oauth_get_client(client, db_session, config, make_user, auth_headers):
     """Test that an admin can retrieve a single OAuth2 client."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, _ = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -340,11 +326,11 @@ async def test_oauth_get_client(client, db_session, config):
         redirect_uris=["https://example.com/callback"],
     )
     await db_session.flush()
-    token = _admin_token(admin, config)
+    headers = auth_headers(admin)
 
     response = client.get(
         f"/api/v1/admin/oauth/clients/{client_obj.client_id}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -362,40 +348,40 @@ async def test_oauth_get_client_requires_authentication(client):
 
 
 @pytest.mark.asyncio
-async def test_oauth_get_client_forbids_non_admin(client, db_session, config):
+async def test_oauth_get_client_forbids_non_admin(client, db_session, config, make_user, auth_headers):
     """Test that non-admin users cannot retrieve OAuth2 client details."""
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = _admin_token(user, config)
+    user = await make_user("alice")
+    headers = auth_headers(user)
 
     response = client.get(
         "/api/v1/admin/oauth/clients/not-a-real-client-id",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio
-async def test_oauth_get_client_missing(client, db_session, config):
+async def test_oauth_get_client_missing(client, db_session, config, make_user, auth_headers):
     """Test that retrieving a missing OAuth2 client returns 404."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.get(
         "/api/v1/admin/oauth/clients/not-a-real-client-id",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 @pytest.mark.asyncio
-async def test_oauth_create_client_validates_owner(client, db_session, config):
+async def test_oauth_create_client_validates_owner(client, db_session, config, make_user, auth_headers):
     """Test that an invalid owner_id is rejected."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={
             "name": "Test Client",
             "redirect_uris": ["https://example.com/callback"],
@@ -406,14 +392,14 @@ async def test_oauth_create_client_validates_owner(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_oauth_client_secret_not_in_list(client, db_session, config):
+async def test_oauth_client_secret_not_in_list(client, db_session, config, make_user, auth_headers):
     """Test that created client secrets are not exposed when listing clients."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     create_response = client.post(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={
             "name": "Test Client",
             "redirect_uris": ["https://example.com/callback"],
@@ -423,7 +409,7 @@ async def test_oauth_client_secret_not_in_list(client, db_session, config):
 
     list_response = client.get(
         "/api/v1/admin/oauth/clients",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert list_response.status_code == status.HTTP_200_OK
     data = list_response.json()
@@ -437,9 +423,9 @@ async def test_oauth_client_secret_not_in_list(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_oauth_authorize_and_token_flow(client, db_session, config):
+async def test_oauth_authorize_and_token_flow(client, db_session, config, make_user, auth_headers):
     """Test the full authorization-code + PKCE flow, introspection and revocation."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, client_secret = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -449,15 +435,15 @@ async def test_oauth_authorize_and_token_flow(client, db_session, config):
     )
     await db_session.flush()
 
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    user_token = _admin_token(user, config)
+    user = await make_user("alice")
+    user_headers = auth_headers(user)
     verifier, challenge = _pkce_pair()
 
     authorize_response = client.get(
         f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
         f"&redirect_uri=https://example.com/callback&state=xyz"
         f"&code_challenge={challenge}&code_challenge_method=S256",
-        headers={"Authorization": f"Bearer {user_token}"},
+        headers=user_headers,
         follow_redirects=False,
     )
     assert authorize_response.status_code == status.HTTP_302_FOUND
@@ -553,9 +539,9 @@ async def test_oauth_authorize_and_token_flow(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_oauth_public_client_flow(client, db_session, config):
+async def test_oauth_public_client_flow(client, db_session, config, make_user, auth_headers):
     """Test the OAuth2 flow for a public client without a client secret."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, _ = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -565,15 +551,15 @@ async def test_oauth_public_client_flow(client, db_session, config):
     )
     await db_session.flush()
 
-    user = await _make_user(db_session, "bob", "bob@example.com", "secret")
-    user_token = _admin_token(user, config)
+    user = await make_user("bob")
+    user_headers = auth_headers(user)
     verifier, challenge = _pkce_pair()
 
     authorize_response = client.get(
         f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
         f"&redirect_uri=https://example.com/callback&code_challenge={challenge}"
         f"&code_challenge_method=S256",
-        headers={"Authorization": f"Bearer {user_token}"},
+        headers=user_headers,
         follow_redirects=False,
     )
     assert authorize_response.status_code == status.HTTP_302_FOUND
@@ -594,9 +580,9 @@ async def test_oauth_public_client_flow(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_oauth_authorize_requires_authentication(client, db_session, config):
+async def test_oauth_authorize_requires_authentication(client, db_session, config, make_user, auth_headers):
     """Test that the authorization endpoint requires a logged-in resource owner."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, _ = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -616,9 +602,9 @@ async def test_oauth_authorize_requires_authentication(client, db_session, confi
 
 
 @pytest.mark.asyncio
-async def test_oauth_authorize_rejects_invalid_redirect_uri(client, db_session, config):
+async def test_oauth_authorize_rejects_invalid_redirect_uri(client, db_session, config, make_user, auth_headers):
     """Test that an unauthorized redirect URI is rejected at the authorize endpoint."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, _ = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -627,24 +613,24 @@ async def test_oauth_authorize_rejects_invalid_redirect_uri(client, db_session, 
     )
     await db_session.flush()
 
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    user_token = _admin_token(user, config)
+    user = await make_user("alice")
+    user_headers = auth_headers(user)
     verifier, challenge = _pkce_pair()
 
     response = client.get(
         f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
         f"&redirect_uri=https://other.com/callback&code_challenge={challenge}"
         f"&code_challenge_method=S256",
-        headers={"Authorization": f"Bearer {user_token}"},
+        headers=user_headers,
         follow_redirects=False,
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 @pytest.mark.asyncio
-async def test_oauth_authorize_rejects_missing_code_challenge(client, db_session, config):
+async def test_oauth_authorize_rejects_missing_code_challenge(client, db_session, config, make_user, auth_headers):
     """Test that PKCE is required at the authorization endpoint."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, _ = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -653,22 +639,22 @@ async def test_oauth_authorize_rejects_missing_code_challenge(client, db_session
     )
     await db_session.flush()
 
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    user_token = _admin_token(user, config)
+    user = await make_user("alice")
+    user_headers = auth_headers(user)
 
     response = client.get(
         f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
         f"&redirect_uri=https://example.com/callback",
-        headers={"Authorization": f"Bearer {user_token}"},
+        headers=user_headers,
         follow_redirects=False,
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 @pytest.mark.asyncio
-async def test_oauth_token_rejects_wrong_pkce_verifier(client, db_session, config):
+async def test_oauth_token_rejects_wrong_pkce_verifier(client, db_session, config, make_user, auth_headers):
     """Test that a mismatched PKCE verifier is rejected at the token endpoint."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, client_secret = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -677,15 +663,15 @@ async def test_oauth_token_rejects_wrong_pkce_verifier(client, db_session, confi
     )
     await db_session.flush()
 
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    user_token = _admin_token(user, config)
+    user = await make_user("alice")
+    user_headers = auth_headers(user)
     _, challenge = _pkce_pair()
 
     authorize_response = client.get(
         f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
         f"&redirect_uri=https://example.com/callback&code_challenge={challenge}"
         f"&code_challenge_method=S256",
-        headers={"Authorization": f"Bearer {user_token}"},
+        headers=user_headers,
         follow_redirects=False,
     )
     auth_code = parse_qs(urlparse(authorize_response.headers["Location"]).query)["code"][0]
@@ -706,9 +692,9 @@ async def test_oauth_token_rejects_wrong_pkce_verifier(client, db_session, confi
 
 
 @pytest.mark.asyncio
-async def test_oauth_authorization_code_single_use(client, db_session, config):
+async def test_oauth_authorization_code_single_use(client, db_session, config, make_user, auth_headers):
     """Test that an authorization code can only be exchanged once."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, client_secret = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -717,15 +703,15 @@ async def test_oauth_authorization_code_single_use(client, db_session, config):
     )
     await db_session.flush()
 
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    user_token = _admin_token(user, config)
+    user = await make_user("alice")
+    user_headers = auth_headers(user)
     verifier, challenge = _pkce_pair()
 
     authorize_response = client.get(
         f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
         f"&redirect_uri=https://example.com/callback&code_challenge={challenge}"
         f"&code_challenge_method=S256",
-        headers={"Authorization": f"Bearer {user_token}"},
+        headers=user_headers,
         follow_redirects=False,
     )
     auth_code = parse_qs(urlparse(authorize_response.headers["Location"]).query)["code"][0]
@@ -746,7 +732,7 @@ async def test_oauth_authorization_code_single_use(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_oauth_token_rejects_invalid_client(client, db_session, config):
+async def test_oauth_token_rejects_invalid_client(client, db_session, config, make_user, auth_headers):
     """Test that the token endpoint rejects an unknown client."""
     token_response = client.post(
         "/api/v1/auth/oauth/token",
@@ -763,9 +749,9 @@ async def test_oauth_token_rejects_invalid_client(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_oauth_token_rejects_unsupported_grant_type(client, db_session, config):
+async def test_oauth_token_rejects_unsupported_grant_type(client, db_session, config, make_user, auth_headers):
     """Test that unsupported grant types are rejected at the token endpoint."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, client_secret = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -786,9 +772,9 @@ async def test_oauth_token_rejects_unsupported_grant_type(client, db_session, co
 
 
 @pytest.mark.asyncio
-async def test_oauth_token_rejects_refresh_without_refresh_grant(client, db_session, config):
+async def test_oauth_token_rejects_refresh_without_refresh_grant(client, db_session, config, make_user, auth_headers):
     """Test that a client with only authorization_code cannot use the refresh_token grant."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     client_obj, client_secret = await oauth_client_service.create_oauth_client(
         db_session,
         created_by=admin.id,
@@ -798,15 +784,15 @@ async def test_oauth_token_rejects_refresh_without_refresh_grant(client, db_sess
     )
     await db_session.flush()
 
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    user_token = _admin_token(user, config)
+    user = await make_user("alice")
+    user_headers = auth_headers(user)
     verifier, challenge = _pkce_pair()
 
     authorize_response = client.get(
         f"/api/v1/auth/oauth/authorize?response_type=code&client_id={client_obj.client_id}"
         f"&redirect_uri=https://example.com/callback&code_challenge={challenge}"
         f"&code_challenge_method=S256",
-        headers={"Authorization": f"Bearer {user_token}"},
+        headers=user_headers,
         follow_redirects=False,
     )
     assert authorize_response.status_code == status.HTTP_302_FOUND

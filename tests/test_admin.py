@@ -7,22 +7,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import status
 
-from songhive.api.middleware.auth import create_access_token
 from songhive.models.user import UserRole
-from songhive.services.auth import create_user
 from songhive.users.invites import create_invite
-
-
-async def _make_user(db_session, *args, **kwargs):
-    """Helper to create a user and flush it to the test session."""
-    user = await create_user(db_session, *args, **kwargs)
-    await db_session.flush()
-    return user
-
-
-async def _admin_token(user, config):
-    """Return an access token for the given user."""
-    return create_access_token(user.id, config.auth.secret_key)
 
 
 @pytest.mark.asyncio
@@ -33,28 +19,28 @@ async def test_admin_list_users_requires_authentication(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_list_users_forbids_non_admin(client, db_session, config):
+async def test_admin_list_users_forbids_non_admin(client, db_session, config, make_user, auth_headers):
     """Test that non-admin users cannot list users."""
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = await _admin_token(user, config)
+    user = await make_user("alice")
+    headers = auth_headers(user)
 
     response = client.get(
         "/api/v1/admin/users",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio
-async def test_admin_list_users_returns_users(client, db_session, config):
+async def test_admin_list_users_returns_users(client, db_session, config, make_user, auth_headers):
     """Test that admins can list users."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    await make_user("alice")
+    headers = auth_headers(admin)
 
     response = client.get(
         "/api/v1/admin/users",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -77,38 +63,38 @@ async def test_admin_list_users_returns_users(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_admin_list_users_paginates(client, db_session, config):
+async def test_admin_list_users_paginates(client, db_session, config, make_user, auth_headers):
     """Test that the user list supports limit and offset."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    await _make_user(db_session, "alice", "alice@example.com", "secret")
-    await _make_user(db_session, "bob", "bob@example.com", "secret")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    await make_user("alice")
+    await make_user("bob")
+    headers = auth_headers(admin)
 
     response = client.get(
         "/api/v1/admin/users?limit=2&offset=0",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     assert len(response.json()) == 2
 
     response = client.get(
         "/api/v1/admin/users?limit=2&offset=2",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     assert len(response.json()) == 1
 
 
 @pytest.mark.asyncio
-async def test_admin_promote_user(client, db_session, config):
+async def test_admin_promote_user(client, db_session, config, make_user, auth_headers):
     """Test that an admin can promote a user to admin."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    user = await make_user("alice")
+    headers = auth_headers(admin)
 
     response = client.post(
         f"/api/v1/admin/users/{user.id}/promote",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -117,97 +103,97 @@ async def test_admin_promote_user(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_admin_demote_user(client, db_session, config):
+async def test_admin_demote_user(client, db_session, config, make_user, auth_headers):
     """Test that an admin can demote another admin to user."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    other_admin = await _make_user(db_session, "alice", "alice@example.com", "secret", role="admin")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    other_admin = await make_user("alice", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         f"/api/v1/admin/users/{other_admin.id}/demote",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["role"] == UserRole.USER
 
 
 @pytest.mark.asyncio
-async def test_admin_cannot_demote_last_admin(client, db_session, config):
+async def test_admin_cannot_demote_last_admin(client, db_session, config, make_user, auth_headers):
     """Test that the last active admin cannot be demoted."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         f"/api/v1/admin/users/{admin.id}/demote",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 @pytest.mark.asyncio
-async def test_admin_approve_user(client, db_session, config):
+async def test_admin_approve_user(client, db_session, config, make_user, auth_headers):
     """Test that an admin can approve an inactive user."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret", is_active=False)
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    user = await make_user("alice", is_active=False)
+    headers = auth_headers(admin)
 
     response = client.post(
         f"/api/v1/admin/users/{user.id}/approve",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["is_active"] is True
 
 
 @pytest.mark.asyncio
-async def test_admin_deactivate_user(client, db_session, config):
+async def test_admin_deactivate_user(client, db_session, config, make_user, auth_headers):
     """Test that an admin can deactivate a user."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    user = await make_user("alice")
+    headers = auth_headers(admin)
 
     response = client.post(
         f"/api/v1/admin/users/{user.id}/deactivate",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["is_active"] is False
 
 
 @pytest.mark.asyncio
-async def test_admin_cannot_deactivate_last_admin(client, db_session, config):
+async def test_admin_cannot_deactivate_last_admin(client, db_session, config, make_user, auth_headers):
     """Test that the last active admin cannot be deactivated."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         f"/api/v1/admin/users/{admin.id}/deactivate",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 @pytest.mark.asyncio
-async def test_admin_activate_user(client, db_session, config):
+async def test_admin_activate_user(client, db_session, config, make_user, auth_headers):
     """Test that an admin can reactivate a deactivated user."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret", is_active=False)
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    user = await make_user("alice", is_active=False)
+    headers = auth_headers(admin)
 
     response = client.post(
         f"/api/v1/admin/users/{user.id}/activate",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["is_active"] is True
 
 
 @pytest.mark.asyncio
-async def test_admin_action_forbids_non_admin(client, db_session, config):
+async def test_admin_action_forbids_non_admin(client, db_session, config, make_user, auth_headers):
     """Test that non-admin users cannot use admin lifecycle endpoints."""
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    target = await _make_user(db_session, "bob", "bob@example.com", "secret")
-    token = await _admin_token(user, config)
+    user = await make_user("alice")
+    target = await make_user("bob")
+    headers = auth_headers(user)
 
     for path in [
         f"/api/v1/admin/users/{target.id}/promote",
@@ -216,15 +202,15 @@ async def test_admin_action_forbids_non_admin(client, db_session, config):
         f"/api/v1/admin/users/{target.id}/activate",
         f"/api/v1/admin/users/{target.id}/deactivate",
     ]:
-        response = client.post(path, headers={"Authorization": f"Bearer {token}"})
+        response = client.post(path, headers=headers)
         assert response.status_code == status.HTTP_403_FORBIDDEN, path
 
 
 @pytest.mark.asyncio
-async def test_admin_action_returns_404_for_missing_user(client, db_session, config):
+async def test_admin_action_returns_404_for_missing_user(client, db_session, config, make_user, auth_headers):
     """Test that admin actions return 404 for unknown users."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     for path in [
         "/api/v1/admin/users/missing-id/promote",
@@ -233,7 +219,7 @@ async def test_admin_action_returns_404_for_missing_user(client, db_session, con
         "/api/v1/admin/users/missing-id/activate",
         "/api/v1/admin/users/missing-id/deactivate",
     ]:
-        response = client.post(path, headers={"Authorization": f"Bearer {token}"})
+        response = client.post(path, headers=headers)
         assert response.status_code == status.HTTP_404_NOT_FOUND, path
 
 
@@ -245,29 +231,29 @@ async def test_admin_list_invites_requires_authentication(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_list_invites_forbids_non_admin(client, db_session, config):
+async def test_admin_list_invites_forbids_non_admin(client, db_session, config, make_user, auth_headers):
     """Test that non-admin users cannot list invites."""
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = await _admin_token(user, config)
+    user = await make_user("alice")
+    headers = auth_headers(user)
 
     response = client.get(
         "/api/v1/admin/invites",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio
-async def test_admin_list_invites_returns_invites(client, db_session, config):
+async def test_admin_list_invites_returns_invites(client, db_session, config, make_user, auth_headers):
     """Test that admins can list invite codes."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     invite = await create_invite(db_session, created_by=admin.id, max_uses=5)
     await db_session.flush()
-    token = await _admin_token(admin, config)
+    headers = auth_headers(admin)
 
     response = client.get(
         "/api/v1/admin/invites",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -281,15 +267,15 @@ async def test_admin_list_invites_returns_invites(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_admin_create_invite(client, db_session, config):
+async def test_admin_create_invite(client, db_session, config, make_user, auth_headers):
     """Test that an admin can create an invite code."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
     response = client.post(
         "/api/v1/admin/invites",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={"max_uses": 10, "expires_at": expires_at},
     )
     assert response.status_code == status.HTTP_201_CREATED
@@ -302,75 +288,75 @@ async def test_admin_create_invite(client, db_session, config):
 
 
 @pytest.mark.asyncio
-async def test_admin_create_invite_rejects_invalid_max_uses(client, db_session, config):
+async def test_admin_create_invite_rejects_invalid_max_uses(client, db_session, config, make_user, auth_headers):
     """Test that invalid invite parameters are rejected."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.post(
         "/api/v1/admin/invites",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={"max_uses": 0},
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 @pytest.mark.asyncio
-async def test_admin_create_invite_forbids_non_admin(client, db_session, config):
+async def test_admin_create_invite_forbids_non_admin(client, db_session, config, make_user, auth_headers):
     """Test that non-admin users cannot create invites."""
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = await _admin_token(user, config)
+    user = await make_user("alice")
+    headers = auth_headers(user)
 
     response = client.post(
         "/api/v1/admin/invites",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         json={"max_uses": 1},
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio
-async def test_admin_delete_invite(client, db_session, config):
+async def test_admin_delete_invite(client, db_session, config, make_user, auth_headers):
     """Test that an admin can revoke an invite code."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    admin = await make_user("admin", role="admin")
     invite = await create_invite(db_session, created_by=admin.id)
     await db_session.flush()
-    token = await _admin_token(admin, config)
+    headers = auth_headers(admin)
 
     response = client.delete(
         f"/api/v1/admin/invites/{invite.code}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_204_NO_CONTENT
 
     list_response = client.get(
         "/api/v1/admin/invites",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert list_response.json() == []
 
 
 @pytest.mark.asyncio
-async def test_admin_delete_invite_missing(client, db_session, config):
+async def test_admin_delete_invite_missing(client, db_session, config, make_user, auth_headers):
     """Test that deleting a missing invite returns 404."""
-    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
-    token = await _admin_token(admin, config)
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
 
     response = client.delete(
         "/api/v1/admin/invites/not-a-real-code",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 @pytest.mark.asyncio
-async def test_admin_delete_invite_forbids_non_admin(client, db_session, config):
+async def test_admin_delete_invite_forbids_non_admin(client, db_session, config, make_user, auth_headers):
     """Test that non-admin users cannot delete invites."""
-    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
-    token = await _admin_token(user, config)
+    user = await make_user("alice")
+    headers = auth_headers(user)
 
     response = client.delete(
         "/api/v1/admin/invites/not-a-real-code",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
