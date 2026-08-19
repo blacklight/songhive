@@ -66,8 +66,12 @@ def _run_tornado(config):
         server.stop()
         loop.stop()
 
-    signal.signal(signal.SIGINT, lambda *_: _shutdown())
-    signal.signal(signal.SIGTERM, lambda *_: _shutdown())
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _shutdown)
+        except (RuntimeError, OSError):
+            # Fallback for platforms that don't support add_signal_handler.
+            signal.signal(sig, lambda *_: _shutdown())
 
     try:
         loop.run_forever()
