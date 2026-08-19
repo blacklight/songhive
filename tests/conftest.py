@@ -16,6 +16,7 @@ from songhive.config.schema import SonghiveConfig
 from songhive.models.base import Base, init_db
 from songhive.models.invite import Invite  # noqa: F401
 from songhive.models.oauth_client import OAuth2Client  # noqa: F401
+from songhive.models.stored_file import StoredFile  # noqa: F401
 from songhive.models.user import User  # noqa: F401
 from songhive.services.auth import create_user
 

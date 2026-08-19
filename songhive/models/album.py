@@ -19,5 +19,7 @@ class Album(Base):
     release_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     cover_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cover_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
 
     artist = relationship("Artist", backref="albums", lazy="selectin")
+    cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")

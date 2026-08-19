@@ -2,6 +2,9 @@
 Model tests - verify model instantiation and relationships.
 """
 
+import pytest
+from sqlalchemy import select
+
 from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.favorite import Favorite
@@ -9,7 +12,9 @@ from songhive.models.history import ListeningHistory
 from songhive.models.library import Library
 from songhive.models.playlist import Playlist
 from songhive.models.radio import Radio
+from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
+from songhive.models.upload import Upload
 from songhive.models.user import User
 
 
@@ -72,3 +77,65 @@ def test_radio_model():
     """Test Radio model instantiation."""
     radio = Radio(name="My Radio", owner_id="user-1")
     assert radio.name == "My Radio"
+
+
+def test_stored_file_model():
+    """Test StoredFile model instantiation."""
+    stored_file = StoredFile(
+        storage_path="files/aa/bb/cc",
+        storage_backend="local",
+        content_type="audio/mpeg",
+        size=12345,
+        sha256="a" * 64,
+        original_filename="song.mp3",
+    )
+    assert stored_file.storage_path == "files/aa/bb/cc"
+    assert stored_file.storage_backend == "local"
+    assert stored_file.content_type == "audio/mpeg"
+    assert stored_file.size == 12345
+    assert stored_file.sha256 == "a" * 64
+    assert stored_file.original_filename == "song.mp3"
+
+
+def test_track_audio_file_id():
+    """Test Track accepts the optional audio_file_id foreign key."""
+    track = Track(title="Test Track", artist_id="artist-1", audio_file_id="file-1")
+    assert track.audio_file_id == "file-1"
+
+
+def test_album_cover_file_id():
+    """Test Album accepts the optional cover_file_id foreign key."""
+    album = Album(title="Test Album", artist_id="artist-1", cover_file_id="file-1")
+    assert album.cover_file_id == "file-1"
+
+
+def test_upload_stored_file_id():
+    """Test Upload accepts the optional stored_file_id foreign key."""
+    upload = Upload(
+        track_id="track-1",
+        library_id="library-1",
+        storage_path="tracks/track-1/audio.mp3",
+        storage_backend="local",
+        mimetype="audio/mpeg",
+        stored_file_id="file-1",
+    )
+    assert upload.stored_file_id == "file-1"
+
+
+@pytest.mark.asyncio
+async def test_stored_file_persistence(db_session):
+    """Test StoredFile can be persisted and queried."""
+    stored_file = StoredFile(
+        storage_path="files/aa/bb/cc",
+        storage_backend="local",
+        content_type="audio/mpeg",
+        size=12345,
+        sha256="a" * 64,
+        original_filename="song.mp3",
+    )
+    db_session.add(stored_file)
+    await db_session.flush()
+
+    assert stored_file.id is not None
+    result = await db_session.execute(select(StoredFile).where(StoredFile.sha256 == "a" * 64))
+    assert result.scalar_one() is stored_file

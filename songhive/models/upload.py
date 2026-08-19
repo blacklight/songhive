@@ -21,6 +21,8 @@ class Upload(Base):
     size: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     bitrate: Mapped[Optional[int]] = mapped_column(nullable=True)
     checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    stored_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
 
     track = relationship("Track", backref="uploads", lazy="selectin")
     library = relationship("Library", backref="uploads", lazy="selectin")
+    stored_file = relationship("StoredFile", foreign_keys=[stored_file_id], lazy="selectin")
