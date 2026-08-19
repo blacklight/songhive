@@ -22,15 +22,15 @@ def _free_port() -> int:
 def _write_config(tmp_path: Path, port: int) -> Path:
     """Create a minimal temporary config for the server subprocess."""
     config = tmp_path / "config.toml"
-    config.write_text(
-        f"""[server]
+    secret_key = "a" * 64
+    config_text = f"""[server]
 host = "127.0.0.1"
 port = {port}
 debug = false
 cors_origins = []
 
 [database]
-url = "sqlite+aiosqlite:///{tmp_path / "songhive.db"}"
+url = "sqlite+aiosqlite:///{tmp_path / 'songhive.db'}"
 pool_size = 1
 max_overflow = 1
 
@@ -41,9 +41,9 @@ url = "redis://localhost:6379/0"
 enabled = false
 
 [auth]
-secret_key = "{"a" * 64}"
+secret_key = "{secret_key}"
 """
-    )
+    config.write_text(config_text)
     return config
 
 

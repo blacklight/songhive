@@ -38,6 +38,7 @@ include = ["songhive*"]
 
 [tool.black]
 line-length = 120
+target-version = ['py310']
 
 [tool.bumpversion]
 current_version = "0.0.1"
