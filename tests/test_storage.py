@@ -87,3 +87,47 @@ async def test_s3_url_default():
     storage_no_region = S3Storage("my-bucket")
     url_no_region = await storage_no_region.url("test/audio.mp3")
     assert url_no_region == "https://my-bucket.s3.us-east-1.amazonaws.com/test/audio.mp3"
+
+
+@pytest.mark.asyncio
+async def test_local_store_large_streaming(local_storage):
+    """Test that store streams files larger than one 64 KB chunk."""
+    content = b"x" * (200 * 1024)
+    file = io.BytesIO(content)
+
+    path = await local_storage.store(file, "files/aa/bb/large.bin")
+    assert path == "files/aa/bb/large.bin"
+
+    retrieved = await local_storage.retrieve("files/aa/bb/large.bin")
+    assert retrieved is not None
+    assert retrieved.read_bytes() == content
+
+
+@pytest.mark.asyncio
+async def test_local_path_traversal(local_storage, tmp_path):
+    """Test that path traversal attempts are rejected and never escape base_path."""
+    bad_paths = [
+        ("../evil", tmp_path / "evil"),
+        (str(tmp_path / "abs_evil.bin"), tmp_path / "abs_evil.bin"),
+    ]
+    content = b"evil"
+
+    for bad_path, outside_file in bad_paths:
+        file = io.BytesIO(content)
+
+        with pytest.raises(ValueError):
+            await local_storage.store(file, bad_path)
+
+        with pytest.raises(ValueError):
+            await local_storage.retrieve(bad_path)
+
+        with pytest.raises(ValueError):
+            await local_storage.delete(bad_path)
+
+        with pytest.raises(ValueError):
+            await local_storage.exists(bad_path)
+
+        with pytest.raises(ValueError):
+            await local_storage.url(bad_path)
+
+        assert not outside_file.exists()

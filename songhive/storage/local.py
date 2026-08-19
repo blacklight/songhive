@@ -1,10 +1,12 @@
 """
-Local filesystem storage backend.
+Local filesystem storage backend using aiofiles for non-blocking I/O.
 """
 
-import os
 from pathlib import Path
 from typing import BinaryIO, Optional
+
+import aiofiles
+import aiofiles.os
 
 from .base import StorageBackend
 
@@ -17,38 +19,52 @@ class LocalStorage(StorageBackend):
         self._resolved_base = self.base_path.resolve()
         self._resolved_base.mkdir(parents=True, exist_ok=True)
 
+    def _resolve(self, path: str) -> Path:
+        """Resolve a relative path under base_path, rejecting escapes."""
+        if Path(path).is_absolute():
+            raise ValueError(f"Absolute storage paths are not allowed: {path!r}")
+        if ".." in Path(path).parts:
+            raise ValueError(f"Storage paths may not contain '..' segments: {path!r}")
+
+        full_path = (self.base_path / path).resolve()
+        if not full_path.is_relative_to(self._resolved_base):
+            raise ValueError(f"Storage path escapes base directory: {path!r}")
+
+        return full_path
+
     async def store(self, file: BinaryIO, path: str, *_, **__) -> str:
         """Store a file on the local filesystem."""
-        full_path = self.base_path / path
+        full_path = self._resolve(path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(full_path, "wb") as dest:
+        async with aiofiles.open(full_path, "wb") as dest:
             while chunk := file.read(64 * 1024):
-                dest.write(chunk)
+                await dest.write(chunk)
 
         return path
 
     async def retrieve(self, path: str) -> Optional[Path]:
         """Retrieve a file path from local storage."""
-        full_path = self.base_path / path
-        if full_path.exists():
+        full_path = self._resolve(path)
+        if await aiofiles.os.path.exists(full_path):
             return full_path
         return None
 
     async def delete(self, path: str) -> bool:
         """Delete a file from local storage."""
-        full_path = self.base_path / path
-        if full_path.exists():
-            os.remove(full_path)
+        full_path = self._resolve(path)
+        if await aiofiles.os.path.exists(full_path):
+            await aiofiles.os.remove(full_path)
             return True
         return False
 
     async def exists(self, path: str) -> bool:
         """Check if a file exists in local storage."""
-        return (self.base_path / path).exists()
+        full_path = self._resolve(path)
+        return await aiofiles.os.path.exists(full_path)
 
     async def url(self, path: str, cdn_prefix: Optional[str] = None) -> str:
         """Return the public URL for a stored path."""
         if cdn_prefix:
             return f"{cdn_prefix.rstrip('/')}/{path}"
-        return str((self._resolved_base / path).resolve())
+        return str(self._resolve(path))
