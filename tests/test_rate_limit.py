@@ -14,6 +14,7 @@ from songhive.api.middleware.rate_limit import (
     check_rate_limit,
 )
 from songhive.config.schema import SonghiveConfig
+from songhive.services.auth import create_user
 
 
 def _request(
@@ -341,5 +342,135 @@ async def test_password_reset_confirm_endpoint_rate_limited(client):
     response = client.post(
         "/api/v1/auth/password-reset/confirm",
         json={"token": "some-token", "new_password": "secret"},
+    )
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_logout_endpoint_rate_limited(client):
+    """Test that repeated logout requests are blocked with 429."""
+    client.app.state.config.auth.rate_limit_requests = 2
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    for _ in range(2):
+        response = client.post(
+            "/api/v1/auth/logout",
+            json={"refresh_token": "some-token"},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+    response = client.post(
+        "/api/v1/auth/logout",
+        json={"refresh_token": "some-token"},
+    )
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint_rate_limited_per_username(client):
+    """Test that login throttling is keyed by username, not just by IP."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "per-user-alice",
+            "email": "per-user-alice@example.com",
+            "password": "secret",
+        },
+    )
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "per-user-bob",
+            "email": "per-user-bob@example.com",
+            "password": "secret",
+        },
+    )
+
+    client.app.state.config.auth.rate_limit_requests = 1
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "per-user-alice", "password": "secret"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+
+    blocked = client.post(
+        "/api/v1/auth/login",
+        json={"username": "per-user-alice", "password": "secret"},
+    )
+    assert blocked.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+    # A different username should not be throttled by alice's bucket.
+    other = client.post(
+        "/api/v1/auth/login",
+        json={"username": "per-user-bob", "password": "wrong-password"},
+    )
+    assert other.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_rate_limited(client, db_session):
+    """Test that repeated PATCH /me requests are blocked with 429."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "patch-alice",
+            "email": "patch-alice@example.com",
+            "password": "secret",
+        },
+    )
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "patch-alice", "password": "secret"},
+    )
+    token = login.json()["access_token"]
+
+    client.app.state.config.auth.rate_limit_requests = 2
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    for _ in range(2):
+        response = client.patch(
+            "/api/v1/users/me",
+            json={"display_name": "Alice"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+    response = client.patch(
+        "/api/v1/users/me",
+        json={"display_name": "Alice"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_admin_invite_creation_rate_limited(client, db_session):
+    """Test that repeated admin invite creations are blocked with 429."""
+    await create_user(db_session, "admin-rate", "admin-rate@example.com", "secret", role="admin")
+    await db_session.flush()
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin-rate", "password": "secret"},
+    )
+    token = login.json()["access_token"]
+
+    client.app.state.config.auth.rate_limit_requests = 2
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    for _ in range(2):
+        response = client.post(
+            "/api/v1/admin/invites",
+            json={},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == status.HTTP_201_CREATED
+
+    response = client.post(
+        "/api/v1/admin/invites",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS

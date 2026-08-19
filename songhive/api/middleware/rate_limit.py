@@ -12,7 +12,8 @@ from fastapi import Depends, HTTPException, Request, status
 from redis.asyncio import Redis
 
 from ...config.schema import SonghiveConfig
-from ..deps import get_config, get_redis
+from ...models.user import User
+from ..deps import get_config, get_current_user, get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -88,3 +89,13 @@ async def rate_limit(
 ) -> None:
     """FastAPI dependency for IP + endpoint path based rate limiting."""
     await check_rate_limit(request, config, redis)
+
+
+async def rate_limit_account(
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+    redis: Redis = Depends(get_redis),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """FastAPI dependency for per-account rate limiting by the current user."""
+    await check_rate_limit(request, config, redis, identifier=current_user.username)

@@ -238,8 +238,15 @@ async def refresh(
     return _token_pair_response(token_pair)
 
 
-@router.post("/logout", response_model=LogoutResponse)
-async def logout(body: LogoutRequest, redis: Redis = Depends(get_redis)):
+@router.post(
+    "/logout",
+    response_model=LogoutResponse,
+    dependencies=[Depends(rate_limit)],
+)
+async def logout(
+    body: LogoutRequest,
+    redis: Redis = Depends(get_redis),
+):
     """Revoke a refresh token."""
     await revoke_refresh_token(body.refresh_token, redis)
     return LogoutResponse()

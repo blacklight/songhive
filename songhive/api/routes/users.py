@@ -13,6 +13,7 @@ from ...models.user_link import UserLink
 from ...services.auth import get_user_by_username
 from ...users.manager import update_profile
 from ..deps import get_current_user, get_db
+from ..middleware.rate_limit import rate_limit_account
 
 router = APIRouter(prefix="/users")
 
@@ -86,7 +87,11 @@ async def get_current_user_profile(current_user: User = Depends(get_current_user
     return UserResponse.model_validate(current_user)
 
 
-@router.patch("/me", response_model=UserResponse)
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
 async def update_current_user_profile(
     update: UserProfileUpdate,
     current_user: User = Depends(get_current_user),
