@@ -39,10 +39,6 @@ include = ["songhive*"]
 [tool.black]
 line-length = 120
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
-
 [tool.bumpversion]
 current_version = "0.0.1"
 commit = true
