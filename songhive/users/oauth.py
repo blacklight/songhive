@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.oauth_client import OAuth2Client
+from ..models.oauth_client import DEFAULT_GRANT_TYPES, OAuth2Client
 from ..services.auth import get_user_by_id, hash_password, verify_password
 
 __all__ = [
@@ -37,11 +37,6 @@ class OAuthClientError(ValueError):
     def __init__(self, message: str, status_code: int = 400):
         super().__init__(message)
         self.status_code = status_code
-
-
-def _default_grant_types() -> List[str]:
-    """Return the default grant types for a new OAuth2 client."""
-    return ["authorization_code"]
 
 
 def _validate_name(name: str) -> str:
@@ -91,7 +86,7 @@ def _validate_redirect_uris(uris: List[str]) -> List[str]:
 def _validate_grant_types(grant_types: Optional[List[str]]) -> List[str]:
     """Validate and normalize a list of grant types."""
     if grant_types is None or not grant_types:
-        return _default_grant_types()
+        return list(DEFAULT_GRANT_TYPES)
 
     normalized = []
     for grant in grant_types:
@@ -105,7 +100,7 @@ def _validate_grant_types(grant_types: Optional[List[str]]) -> List[str]:
         normalized.append(grant)
 
     if not normalized:
-        return _default_grant_types()
+        return list(DEFAULT_GRANT_TYPES)
 
     return normalized
 

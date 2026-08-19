@@ -267,6 +267,22 @@ async def list_oauth_clients(
     return [AdminOAuthClientResponse.model_validate(client) for client in clients]
 
 
+@router.get(
+    "/oauth/clients/{client_id}",
+    response_model=AdminOAuthClientResponse,
+    dependencies=[Depends(require_admin)],
+)
+async def get_oauth_client(
+    client_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a single OAuth2 client (admin only)."""
+    client = await oauth_client_service.get_oauth_client_by_client_id(db, client_id)
+    if client is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth client not found")
+    return AdminOAuthClientResponse.model_validate(client)
+
+
 @router.post(
     "/oauth/clients",
     response_model=AdminOAuthClientCreateResponse,

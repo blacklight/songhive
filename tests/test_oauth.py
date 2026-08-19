@@ -2,6 +2,8 @@
 OAuth2 client registration and admin API tests.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi import status
 from sqlalchemy import select
@@ -129,6 +131,11 @@ async def test_oauth_create_client(client, db_session, config):
     assert data["client_secret"]
     assert data["client_id"]
 
+    created_at = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
+    updated_at = datetime.fromisoformat(data["updated_at"].replace("Z", "+00:00"))
+    assert updated_at >= created_at
+    assert (datetime.now(timezone.utc) - updated_at).total_seconds() < 60
+
 
 @pytest.mark.asyncio
 async def test_oauth_create_client_secret_hashed(client, db_session, config):
@@ -156,6 +163,30 @@ async def test_oauth_create_client_secret_hashed(client, db_session, config):
     assert client_obj.client_secret_hash.startswith("$2b$")
     assert oauth_client_service.check_client_secret(client_obj, raw_secret) is True
     assert oauth_client_service.check_client_secret(client_obj, "wrong-secret") is False
+
+
+@pytest.mark.asyncio
+async def test_oauth_create_client_custom_grant_types(client, db_session, config):
+    """Test that admins can create a client with multiple valid grant types."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    token = _admin_token(admin, config)
+
+    response = client.post(
+        "/api/v1/admin/oauth/clients",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "name": "Custom Client",
+            "redirect_uris": ["https://example.com/callback"],
+            "grant_types": ["authorization_code", "refresh_token"],
+        },
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["name"] == "Custom Client"
+    assert data["grant_types"] == ["authorization_code", "refresh_token"]
+    assert data["is_confidential"] is True
+    assert data["client_secret"]
+    assert data["client_id"]
 
 
 @pytest.mark.asyncio
@@ -285,6 +316,64 @@ async def test_oauth_delete_client_forbids_non_admin(client, db_session, config)
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_oauth_get_client(client, db_session, config):
+    """Test that an admin can retrieve a single OAuth2 client."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Single Client",
+        redirect_uris=["https://example.com/callback"],
+    )
+    await db_session.flush()
+    token = _admin_token(admin, config)
+
+    response = client.get(
+        f"/api/v1/admin/oauth/clients/{client_obj.client_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["client_id"] == client_obj.client_id
+    assert data["name"] == "Single Client"
+    assert "client_secret" not in data
+    assert "client_secret_hash" not in data
+
+
+@pytest.mark.asyncio
+async def test_oauth_get_client_requires_authentication(client):
+    """Test that retrieving a single OAuth2 client requires authentication."""
+    response = client.get("/api/v1/admin/oauth/clients/not-a-real-client-id")
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_oauth_get_client_forbids_non_admin(client, db_session, config):
+    """Test that non-admin users cannot retrieve OAuth2 client details."""
+    user = await _make_user(db_session, "alice", "alice@example.com", "secret")
+    token = _admin_token(user, config)
+
+    response = client.get(
+        "/api/v1/admin/oauth/clients/not-a-real-client-id",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_oauth_get_client_missing(client, db_session, config):
+    """Test that retrieving a missing OAuth2 client returns 404."""
+    admin = await _make_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    token = _admin_token(admin, config)
+
+    response = client.get(
+        "/api/v1/admin/oauth/clients/not-a-real-client-id",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 @pytest.mark.asyncio

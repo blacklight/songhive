@@ -12,10 +12,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
 
+DEFAULT_GRANT_TYPES: list[str] = ["authorization_code"]
+
 
 def _default_grant_types() -> list[str]:
     """Return the default grant types for a new OAuth2 client."""
-    return ["authorization_code"]
+    return list(DEFAULT_GRANT_TYPES)
 
 
 class OAuth2Client(Base):
