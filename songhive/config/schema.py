@@ -42,6 +42,10 @@ class CeleryConfig(BaseSettings):
         default="redis://localhost:6379/2",
         description="Celery result backend URL",
     )
+    cleanup_orphaned_files_schedule: str = Field(
+        default="0 3 * * *",
+        description="Crontab expression for the orphaned-files cleanup task",
+    )
 
 
 class StorageConfig(BaseSettings):
