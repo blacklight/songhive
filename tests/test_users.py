@@ -2,13 +2,17 @@
 User model and lifecycle management tests.
 """
 
+import asyncio
+
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from songhive.api.middleware.auth import create_access_token
 from songhive.api.routes.users import UserLinkInput, UserProfileUpdate, UserResponse
 from songhive.config.schema import SonghiveConfig
+from songhive.federation.actors import get_actor_url, get_federation_storage
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
 from songhive.services.auth import create_user, verify_password
@@ -752,6 +756,37 @@ async def test_patch_me_endpoint(client, db_session, config):
         assert field not in data, f"Sensitive field {field!r} leaked into /me response"
 
 
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_commits_profile_changes(client, db_session, config, engine):
+    """Test that PATCH /me commits profile changes so they are visible in a new session."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "display_name": "Alice",
+            "bio": "Hello",
+            "avatar_url": "https://example.com/avatar.png",
+            "links": [
+                {"name": "Website", "url": "https://example.com"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as new_session:
+        result = await new_session.execute(select(User).where(User.id == user.id))
+        user_db = result.scalar_one()
+        assert user_db.display_name == "Alice"
+        assert user_db.bio == "Hello"
+        assert user_db.avatar_url == "https://example.com/avatar.png"
+        assert [link.name for link in user_db.links] == ["Website"]
+
+
 def test_patch_me_endpoint_unauthenticated(client):
     """Test that PATCH /me requires authentication."""
     response = client.patch(
@@ -825,3 +860,43 @@ async def test_patch_me_endpoint_rejects_invalid_link(client, db_session, config
         },
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_syncs_federation_actor(client, db_session, config):
+    """Test that PATCH /me refreshes the user's ActivityPub actor document."""
+    client.app.state.config.federation.enabled = True
+    client.app.state.config.federation.instance_domain = "music.example.com"
+
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.commit()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "display_name": "Alice Synced",
+            "bio": "Hello fediverse",
+            "avatar_url": "https://example.com/avatar.png",
+            "links": [
+                {"name": "Website", "url": "https://example.com"},
+                {"name": "Mastodon", "url": "https://mastodon.example.com/@alice"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["display_name"] == "Alice Synced"
+
+    storage = get_federation_storage(config.database.url)
+    actor_url = get_actor_url("music.example.com", "alice")
+    cached = await asyncio.to_thread(storage.get_cached_actor, actor_url)
+
+    assert cached is not None
+    assert cached["name"] == "Alice Synced"
+    assert cached["summary"] == "Hello fediverse"
+    assert cached["icon"] == {"type": "Image", "url": "https://example.com/avatar.png"}
+    assert cached["attachment"] == [
+        {"type": "PropertyValue", "name": "Website", "value": "https://example.com"},
+        {"type": "PropertyValue", "name": "Mastodon", "value": "https://mastodon.example.com/@alice"},
+    ]

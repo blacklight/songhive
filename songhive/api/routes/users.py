@@ -8,11 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config.schema import SonghiveConfig
+from ...federation.actors import sync_user_actor
 from ...models.user import User
 from ...models.user_link import UserLink
 from ...services.auth import get_user_by_username
 from ...users.manager import update_profile
-from ..deps import get_current_user, get_db
+from ..deps import get_config, get_current_user, get_db
 from ..middleware.rate_limit import rate_limit_account
 
 router = APIRouter(prefix="/users")
@@ -96,6 +98,7 @@ async def update_current_user_profile(
     update: UserProfileUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
 ):
     """Update the current authenticated user's profile."""
     updates = update.model_dump(exclude_unset=True)
@@ -103,6 +106,11 @@ async def update_current_user_profile(
         updates["links"] = [UserLink(name=link["name"], url=link["url"]) for link in updates["links"]]
 
     await update_profile(db, current_user, updates)
+    await db.commit()  # Persist profile changes before optional actor sync
+
+    if config.federation.enabled:
+        await sync_user_actor(current_user, config)
+
     return UserResponse.model_validate(current_user)
 
 
