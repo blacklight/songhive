@@ -47,4 +47,19 @@ steps:
   image: python:3.12
   commands:
     - pip install -e . -r requirements-dev.txt
-    - python -m pytest --cov=songhive --cov-report=term-missing
+    - python -m pytest --cov=songhive --cov-report=term-missing --cov-report=xml
+
+- name: codacy-coverage
+  image: python:3.12
+  depends_on:
+    - tests
+  when:
+    branch:
+      - main
+    event:
+      - push
+  environment:
+    CODACY_PROJECT_TOKEN:
+      from_secret: codacy_project_token
+  commands:
+    - bash <(curl -Ls https://coverage.codacy.com/get.sh) report -r coverage.xml --commit-uuid "$DRONE_COMMIT_SHA"
