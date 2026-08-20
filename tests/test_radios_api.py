@@ -98,3 +98,23 @@ def test_get_missing_radio_returns_404(client):
     """Requesting a missing radio returns 404."""
     response = client.get("/api/v1/radios/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 404
+
+
+def test_get_private_radio_with_share_token(client, sample_radios, regular_user, auth_headers):
+    """A share URL token grants anonymous access to a private radio."""
+    radio = next(r for r in sample_radios if r["visibility"] == "private")
+
+    create = client.post(
+        "/api/v1/share-urls",
+        json={"item_type": "radio", "item_id": radio["id"]},
+        headers=auth_headers(regular_user),
+    )
+    assert create.status_code == 201
+    token = create.json()["token"]
+
+    response = client.get(f"/api/v1/radios/{radio['id']}?token={token}")
+    assert response.status_code == 200
+    assert response.json()["id"] == radio["id"]
+
+    no_token = client.get(f"/api/v1/radios/{radio['id']}")
+    assert no_token.status_code == 403

@@ -448,3 +448,52 @@ def test_upload_duplicate_returns_canonical_row_and_header(files_client, regular
     second_data = second.json()
     assert second.headers.get("X-Duplicate") == "true"
     assert second_data["id"] == first_data["id"]
+
+
+async def test_derived_file_download_through_public_track(files_client, regular_user, db_session):
+    """An anonymous user can download a private file through a public track."""
+    from io import BytesIO
+
+    from songhive.models._enums import Visibility
+    from songhive.models.artist import Artist
+    from songhive.models.track import Track
+    from songhive.services.storage import StorageService
+    from songhive.storage import get_storage
+
+    config = files_client.app.state.config.storage
+    storage = StorageService(get_storage(config), config)
+
+    file_like = BytesIO(b"audio content")
+    stored_file = await storage.store_file(
+        db_session,
+        file_like,
+        content_type="audio/mpeg",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(stored_file)
+    await db_session.flush()
+
+    artist = Artist(name="Derived Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Derived Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        audio_file_id=stored_file.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    public_download = files_client.get(f"/api/v1/files/{stored_file.id}/download")
+    assert public_download.status_code == 200
+    assert public_download.content == b"audio content"
+
+    track.visibility = Visibility.PRIVATE.value
+    await db_session.commit()
+
+    private_download = files_client.get(f"/api/v1/files/{stored_file.id}/download")
+    assert private_download.status_code == 403

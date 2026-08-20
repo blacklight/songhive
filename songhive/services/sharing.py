@@ -217,6 +217,9 @@ async def get_valid_share_token(
     if token is None:
         return None
 
+    if not secrets.compare_digest(token_hash, token.token_hash):
+        return None
+
     if token.revoked_at is not None:
         return None
 

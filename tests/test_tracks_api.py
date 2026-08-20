@@ -81,3 +81,23 @@ def test_get_missing_track_returns_404(client):
     """Requesting a missing track returns 404."""
     response = client.get("/api/v1/tracks/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 404
+
+
+def test_get_private_track_with_share_token(client, sample_tracks, regular_user, auth_headers):
+    """A share URL token grants anonymous access to a private track."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+
+    create = client.post(
+        "/api/v1/share-urls",
+        json={"item_type": "track", "item_id": str(track.id)},
+        headers=auth_headers(regular_user),
+    )
+    assert create.status_code == 201
+    token = create.json()["token"]
+
+    response = client.get(f"/api/v1/tracks/{track.id}?token={token}")
+    assert response.status_code == 200
+    assert response.json()["id"] == str(track.id)
+
+    no_token = client.get(f"/api/v1/tracks/{track.id}")
+    assert no_token.status_code == 403

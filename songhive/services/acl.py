@@ -6,7 +6,7 @@ augmented with per-user share grants and revocable share URL tokens.  It is
 designed to be used by the FastAPI route layer and by federation serializers.
 """
 
-from typing import Any, Dict, List, NamedTuple, Optional, Type
+from typing import Any, Dict, NamedTuple, Optional, Type
 
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -242,27 +242,3 @@ async def can_manage(
         return False
 
     return owner_id == user.id
-
-
-async def filter_accessible_ids(
-    session: AsyncSession,
-    user: Optional[User],
-    item_type: str,
-    item_ids: List[str],
-) -> List[str]:
-    """Return the subset of ``item_ids`` that ``user`` is permitted to access.
-
-    The check is pushed into a single SQL query using the same predicate that
-    list endpoints use.
-    """
-    if not item_ids:
-        return []
-
-    entry = _ITEM_REGISTRY.get(item_type)
-    if entry is None:
-        raise ValueError(f"Unknown item type: {item_type!r}")
-
-    stmt = select(entry.model.id).where(entry.model.id.in_(item_ids))
-    stmt = apply_access_filter(stmt, entry.model, user, item_type)
-    result = await session.execute(stmt)
-    return [str(row) for row in result.scalars().all()]

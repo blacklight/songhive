@@ -15,7 +15,7 @@ from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.services import sharing
-from songhive.services.acl import can_access, can_manage, filter_accessible_ids
+from songhive.services.acl import can_access, can_manage
 
 
 async def _make_artist(session, name: str = "Test Artist") -> Artist:
@@ -313,41 +313,3 @@ async def test_can_access_unknown_item_type(db_session, regular_user):
     """Unknown item types raise ValueError."""
     with pytest.raises(ValueError):
         await can_access(db_session, regular_user, "unknown", "some-id")
-
-
-@pytest.mark.asyncio
-async def test_filter_accessible_ids(db_session, regular_user, make_user):
-    """filter_accessible_ids returns the subset of visible items."""
-    other_user = await make_user("other", email_verified=True)
-
-    public_track = await _make_track(db_session, owner=regular_user, visibility=Visibility.PUBLIC.value)
-    local_track = await _make_track(db_session, owner=regular_user, visibility=Visibility.LOCAL.value)
-    private_track = await _make_track(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
-    ownerless_track = await _make_track(db_session, owner=None, visibility=Visibility.PRIVATE.value)
-
-    ids = [public_track.id, local_track.id, private_track.id, ownerless_track.id]
-
-    # Anonymous sees only public.
-    assert await filter_accessible_ids(db_session, None, "track", ids) == [public_track.id]
-
-    # Owner sees all but also ownerless (which is local-equivalent).
-    owner_visible = await filter_accessible_ids(db_session, regular_user, "track", ids)
-    assert public_track.id in owner_visible
-    assert local_track.id in owner_visible
-    assert private_track.id in owner_visible
-    assert ownerless_track.id in owner_visible
-
-    # Another authenticated user sees public, local, and ownerless, but not private.
-    other_visible = await filter_accessible_ids(db_session, other_user, "track", ids)
-    assert public_track.id in other_visible
-    assert local_track.id in other_visible
-    assert private_track.id not in other_visible
-    assert ownerless_track.id in other_visible
-
-
-@pytest.mark.asyncio
-async def test_filter_accessible_ids_missing_items(db_session, regular_user):
-    """Missing item ids are silently omitted from the result."""
-    track = await _make_track(db_session, owner=regular_user, visibility=Visibility.PUBLIC.value)
-    ids = [track.id, "missing-id"]
-    assert await filter_accessible_ids(db_session, None, "track", ids) == [track.id]

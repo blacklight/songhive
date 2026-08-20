@@ -98,3 +98,23 @@ def test_get_missing_library_returns_404(client):
     """Requesting a missing library returns 404."""
     response = client.get("/api/v1/libraries/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 404
+
+
+def test_get_private_library_with_share_token(client, sample_libraries, regular_user, auth_headers):
+    """A share URL token grants anonymous access to a private library."""
+    library = next(lib for lib in sample_libraries if lib["visibility"] == "private")
+
+    create = client.post(
+        "/api/v1/share-urls",
+        json={"item_type": "library", "item_id": library["id"]},
+        headers=auth_headers(regular_user),
+    )
+    assert create.status_code == 201
+    token = create.json()["token"]
+
+    response = client.get(f"/api/v1/libraries/{library['id']}?token={token}")
+    assert response.status_code == 200
+    assert response.json()["id"] == library["id"]
+
+    no_token = client.get(f"/api/v1/libraries/{library['id']}")
+    assert no_token.status_code == 403
