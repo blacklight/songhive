@@ -9,6 +9,9 @@ from . import (
     libraries,
     playlists,
     radios,
+    share,
+    share_urls,
+    shares,
     tracks,
     users,
 )
@@ -24,6 +27,9 @@ __all__ = [
     "libraries",
     "playlists",
     "radios",
+    "share",
+    "share_urls",
+    "shares",
     "tracks",
     "users",
 ]

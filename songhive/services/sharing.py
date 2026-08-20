@@ -31,7 +31,7 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _make_aware(dt: Optional[datetime]) -> Optional[datetime]:
+def make_aware(dt: Optional[datetime]) -> Optional[datetime]:
     """Treat a timezone-naive datetime as UTC for comparisons."""
     if dt is not None and dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
@@ -121,6 +121,17 @@ async def revoke_share_grant(
     return True
 
 
+async def revoke_share_grant_by_id(session: AsyncSession, grant_id: str) -> bool:
+    """Revoke a share grant by id.  Returns ``True`` if the grant existed."""
+    grant = await session.get(ShareGrant, grant_id)
+    if grant is None:
+        return False
+
+    await session.delete(grant)
+    await session.flush()
+    return True
+
+
 async def list_share_grants(
     session: AsyncSession,
     item_type: str,
@@ -191,6 +202,33 @@ async def list_share_tokens(
     return list(result.scalars().all())
 
 
+async def get_valid_share_token(
+    session: AsyncSession,
+    raw_token: str,
+) -> Optional[ShareToken]:
+    """Return the matching ``ShareToken`` row if ``raw_token`` is valid.
+
+    A missing, revoked, or expired token returns ``None``.
+    """
+    token_hash = _hash_token(raw_token)
+
+    result = await session.execute(select(ShareToken).where(ShareToken.token_hash == token_hash))
+    token = result.scalar_one_or_none()
+    if token is None:
+        return None
+
+    if token.revoked_at is not None:
+        return None
+
+    if token.expires_at is not None:
+        expires_at = make_aware(token.expires_at)
+        assert expires_at is not None
+        if _now_utc() > expires_at:
+            return None
+
+    return token
+
+
 async def validate_share_token(
     session: AsyncSession,
     item_type: str,
@@ -198,29 +236,8 @@ async def validate_share_token(
     raw_token: str,
 ) -> bool:
     """Return whether ``raw_token`` is valid for ``(item_type, item_id)``."""
-    token_hash = _hash_token(raw_token)
-
-    result = await session.execute(
-        select(ShareToken).where(
-            ShareToken.token_hash == token_hash,
-            ShareToken.item_type == item_type,
-            ShareToken.item_id == item_id,
-        )
-    )
-    token = result.scalar_one_or_none()
+    token = await get_valid_share_token(session, raw_token)
     if token is None:
         return False
 
-    if not secrets.compare_digest(token.token_hash, token_hash):
-        return False
-
-    if token.revoked_at is not None:
-        return False
-
-    if token.expires_at is not None:
-        expires_at = _make_aware(token.expires_at)
-        assert expires_at is not None
-        if _now_utc() > expires_at:
-            return False
-
-    return True
+    return token.item_type == item_type and token.item_id == item_id

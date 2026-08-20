@@ -12,7 +12,7 @@ from ...models._enums import Visibility
 from ...models.user import User
 from ...services import music
 from ..deps import get_current_user_optional, get_db, require_access
-from ._common import _HasOwnerId, redact_owner
+from ._common import HasOwnerId, redact_owner
 
 router = APIRouter(prefix="/albums")
 
@@ -58,7 +58,7 @@ async def list_albums(
             musicbrainz_id=a.musicbrainz_id,
             release_year=a.release_year,
             cover_url=a.cover_url,
-            owner_id=redact_owner(cast(_HasOwnerId, a), user),
+            owner_id=redact_owner(cast(HasOwnerId, a), user),
             visibility=a.visibility,
         )
         for a in rows
@@ -87,6 +87,6 @@ async def get_album(
         musicbrainz_id=album.musicbrainz_id,
         release_year=album.release_year,
         cover_url=album.cover_url,
-        owner_id=redact_owner(cast(_HasOwnerId, album), user),
+        owner_id=redact_owner(cast(HasOwnerId, album), user),
         visibility=album.visibility,
     )

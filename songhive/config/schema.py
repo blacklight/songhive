@@ -73,8 +73,8 @@ class FederationConfig(BaseSettings):
 
     enabled: bool = Field(default=True, description="Enable federation")
     instance_domain: str = Field(
-        default="localhost",
-        description="Public domain of this instance",
+        default="",
+        description="Public domain of this instance; when empty, share URLs fall back to the request base URL",
     )
     instance_name: str = Field(
         default="Songhive",

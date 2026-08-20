@@ -12,7 +12,7 @@ from ...models._enums import Visibility
 from ...models.user import User
 from ...services import music
 from ..deps import get_current_user_optional, get_db, require_access
-from ._common import _HasOwnerId, redact_owner
+from ._common import HasOwnerId, redact_owner
 
 router = APIRouter(prefix="/tracks")
 
@@ -62,7 +62,7 @@ async def list_tracks(
             track_number=t.track_number,
             duration=t.duration,
             genre=t.genre,
-            owner_id=redact_owner(cast(_HasOwnerId, t), user),
+            owner_id=redact_owner(cast(HasOwnerId, t), user),
             visibility=t.visibility,
         )
         for t in rows
@@ -92,6 +92,6 @@ async def get_track(
         track_number=track.track_number,
         duration=track.duration,
         genre=track.genre,
-        owner_id=redact_owner(cast(_HasOwnerId, track), user),
+        owner_id=redact_owner(cast(HasOwnerId, track), user),
         visibility=track.visibility,
     )

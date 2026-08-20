@@ -18,7 +18,7 @@ from ...services.storage import StorageService
 from ...storage import FileSizeLimitExceededError
 from ..deps import get_current_user, get_current_user_optional, get_db, get_storage_service, require_access
 from ..middleware.rate_limit import rate_limit
-from ._common import _HasOwnerId, redact_owner
+from ._common import HasOwnerId, redact_owner
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/files")
@@ -85,7 +85,7 @@ async def upload_file(
         content_type=stored_file.content_type,
         size=stored_file.size,
         sha256=stored_file.sha256,
-        owner_id=redact_owner(cast(_HasOwnerId, stored_file), current_user),
+        owner_id=redact_owner(cast(HasOwnerId, stored_file), current_user),
         visibility=stored_file.visibility,
         original_filename=stored_file.original_filename,
         url=url,
@@ -116,7 +116,7 @@ async def get_file_metadata(
         content_type=stored_file.content_type,
         size=stored_file.size,
         sha256=stored_file.sha256,
-        owner_id=redact_owner(cast(_HasOwnerId, stored_file), user),
+        owner_id=redact_owner(cast(HasOwnerId, stored_file), user),
         visibility=stored_file.visibility,
         original_filename=stored_file.original_filename,
         url=url,

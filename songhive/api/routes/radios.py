@@ -13,7 +13,7 @@ from ...models.radio import Radio
 from ...models.user import User
 from ...services import music
 from ..deps import get_current_user, get_current_user_optional, get_db, require_access
-from ._common import _HasOwnerId, redact_owner
+from ._common import HasOwnerId, redact_owner
 
 router = APIRouter(prefix="/radios")
 
@@ -52,7 +52,7 @@ async def list_radios(
             id=str(r.id),
             name=r.name,
             description=r.description,
-            owner_id=redact_owner(cast(_HasOwnerId, r), user),
+            owner_id=redact_owner(cast(HasOwnerId, r), user),
             visibility=r.visibility,
         )
         for r in rows
@@ -105,7 +105,7 @@ async def get_radio(
         id=str(radio.id),
         name=radio.name,
         description=radio.description,
-        owner_id=redact_owner(cast(_HasOwnerId, radio), user),
+        owner_id=redact_owner(cast(HasOwnerId, radio), user),
         visibility=radio.visibility,
     )
 

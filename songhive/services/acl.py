@@ -24,23 +24,33 @@ from . import sharing
 
 
 class _ItemType(NamedTuple):
-    """Registry entry pairing an item type with its model and URL id key."""
+    """Registry entry pairing an item type with its model, id key, and API plural."""
 
     model: Type[Any]
     id_key: str
+    plural: str
 
 
 _ITEM_REGISTRY: Dict[str, _ItemType] = {
-    "track": _ItemType(Track, "track_id"),
-    "album": _ItemType(Album, "album_id"),
-    "playlist": _ItemType(Playlist, "playlist_id"),
-    "library": _ItemType(Library, "library_id"),
-    "radio": _ItemType(Radio, "radio_id"),
-    "file": _ItemType(StoredFile, "file_id"),
+    "track": _ItemType(Track, "track_id", "tracks"),
+    "album": _ItemType(Album, "album_id", "albums"),
+    "playlist": _ItemType(Playlist, "playlist_id", "playlists"),
+    "library": _ItemType(Library, "library_id", "libraries"),
+    "radio": _ItemType(Radio, "radio_id", "radios"),
+    "file": _ItemType(StoredFile, "file_id", "files"),
 }
 
 ITEM_TYPES = set(_ITEM_REGISTRY)
 ITEM_ID_KEYS = {item_type: entry.id_key for item_type, entry in _ITEM_REGISTRY.items()}
+
+
+def get_item_plural(item_type: str) -> Optional[str]:
+    """Return the public API plural path segment for ``item_type`` or ``None`` if unknown."""
+    entry = _ITEM_REGISTRY.get(item_type)
+    if entry is None:
+        return None
+    return entry.plural
+
 
 _MAX_DERIVED_DEPTH = 1
 

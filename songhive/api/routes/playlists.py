@@ -13,7 +13,7 @@ from ...models.playlist import Playlist
 from ...models.user import User
 from ...services import music
 from ..deps import get_current_user, get_current_user_optional, get_db, require_access
-from ._common import _HasOwnerId, redact_owner
+from ._common import HasOwnerId, redact_owner
 
 router = APIRouter(prefix="/playlists")
 
@@ -50,7 +50,7 @@ async def list_playlists(
         PlaylistResponse(
             id=str(p.id),
             name=p.name,
-            owner_id=redact_owner(cast(_HasOwnerId, p), user),
+            owner_id=redact_owner(cast(HasOwnerId, p), user),
             description=p.description,
             visibility=p.visibility,
         )
@@ -102,7 +102,7 @@ async def get_playlist(
     return PlaylistResponse(
         id=str(playlist.id),
         name=playlist.name,
-        owner_id=redact_owner(cast(_HasOwnerId, playlist), user),
+        owner_id=redact_owner(cast(HasOwnerId, playlist), user),
         description=playlist.description,
         visibility=playlist.visibility,
     )
