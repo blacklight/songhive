@@ -11,7 +11,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -192,11 +192,17 @@ async def list_share_tokens(
     item_type: str,
     item_id: str,
 ) -> List[ShareToken]:
-    """List all share tokens for ``(item_type, item_id)``."""
+    """List non-revoked, non-expired share tokens for ``(item_type, item_id)``."""
+    now = _now_utc()
     result = await session.execute(
         select(ShareToken).where(
             ShareToken.item_type == item_type,
             ShareToken.item_id == item_id,
+            ShareToken.revoked_at.is_(None),
+            or_(
+                ShareToken.expires_at.is_(None),
+                ShareToken.expires_at > now,
+            ),
         )
     )
     return list(result.scalars().all())
@@ -215,9 +221,6 @@ async def get_valid_share_token(
     result = await session.execute(select(ShareToken).where(ShareToken.token_hash == token_hash))
     token = result.scalar_one_or_none()
     if token is None:
-        return None
-
-    if not secrets.compare_digest(token_hash, token.token_hash):
         return None
 
     if token.revoked_at is not None:

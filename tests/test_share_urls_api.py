@@ -132,14 +132,15 @@ def test_expired_share_url(client, regular_user, auth_headers, private_file):
 
 
 def test_public_resolver_redirects(client, regular_user, auth_headers, private_file):
-    """The public resolver 302-redirects to the item URL for a valid token."""
+    """The public resolver 302-redirects to the item URL and sets a short-lived cookie."""
     data = _create_share_url(client, regular_user, auth_headers, private_file)
     token = data["token"]
 
     response = client.get(f"/api/v1/share/{token}", follow_redirects=False)
     assert response.status_code == 302
-    expected = f"/api/v1/files/{private_file['id']}?token={token}"
-    assert expected in response.headers["Location"]
+    assert response.headers["Location"] == f"/api/v1/files/{private_file['id']}"
+    assert "share_token" in response.cookies
+    assert response.cookies["share_token"] == token
 
 
 def test_public_resolver_invalid_token(client):

@@ -30,8 +30,6 @@ class StoredFileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    storage_path: str
-    storage_backend: str
     content_type: str
     size: int
     sha256: str
@@ -41,7 +39,11 @@ class StoredFileResponse(BaseModel):
     url: str
 
 
-@router.post("/upload", response_model=StoredFileResponse)
+@router.post(
+    "/upload",
+    response_model=StoredFileResponse,
+    dependencies=[Depends(rate_limit)],
+)
 async def upload_file(
     response: Response,
     file: UploadFile,
@@ -80,8 +82,6 @@ async def upload_file(
     url = await storage.get_url(stored_file)
     return StoredFileResponse(
         id=stored_file.id,
-        storage_path=stored_file.storage_path,
-        storage_backend=stored_file.storage_backend,
         content_type=stored_file.content_type,
         size=stored_file.size,
         sha256=stored_file.sha256,
@@ -111,8 +111,6 @@ async def get_file_metadata(
     url = await storage.get_url(stored_file)
     return StoredFileResponse(
         id=stored_file.id,
-        storage_path=stored_file.storage_path,
-        storage_backend=stored_file.storage_backend,
         content_type=stored_file.content_type,
         size=stored_file.size,
         sha256=stored_file.sha256,
@@ -125,14 +123,33 @@ async def get_file_metadata(
 
 _DOWNLOAD_FALLBACK_FILENAME = "file"
 
+# Explicit allowlist of MIME types that can be served inline. SVG and broad
+# audio/image/video wildcards are excluded to prevent content-sniffing attacks.
+_SAFE_INLINE_TYPES = {
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/wav",
+    "audio/flac",
+    "audio/webm",
+    "audio/aac",
+    "audio/mp4",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+    "video/mp4",
+    "video/webm",
+    "video/ogg",
+    "video/avi",
+}
+
 
 def _safe_inline_types(content_type: str) -> bool:
-    """Return True if the content type can be safely served inline."""
+    """Return True if the content type is in the explicit inline allowlist."""
     if not content_type:
         return False
-    if content_type.split(";")[0].strip() in ("image/svg+xml", "image/svg"):
-        return False
-    return content_type.startswith(("audio/", "image/", "video/"))
+    return content_type.split(";")[0].strip() in _SAFE_INLINE_TYPES
 
 
 def _sanitize_filename(filename: Optional[str]) -> str:

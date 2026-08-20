@@ -149,9 +149,9 @@ async def test_can_access_admin_override(db_session, regular_user, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_can_access_ownerless_private_track(db_session, make_user):
-    """Ownerless private items are visible to authenticated users but not anonymous."""
-    track = await _make_track(db_session, owner=None, visibility=Visibility.PRIVATE.value)
+async def test_can_access_ownerless_local_track(db_session, make_user):
+    """Ownerless local items are visible to authenticated users but not anonymous."""
+    track = await _make_track(db_session, owner=None, visibility=Visibility.LOCAL.value)
     user = await make_user("authenticated", email_verified=True)
     assert await can_access(db_session, user, "track", track.id) is True
     assert await can_access(db_session, None, "track", track.id) is False

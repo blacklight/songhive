@@ -7,6 +7,8 @@ through multipart to avoid unbounded memory growth. Retrieval streams from S3
 into a temporary local file.
 """
 
+import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import BinaryIO, Optional
@@ -160,9 +162,10 @@ class S3Storage(StorageBackend):
                 raise
 
             body = response["Body"]
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=Path(path).suffix)
-            tmp_path = Path(tmp.name)
-            tmp.close()
+            fd, tmp_name = tempfile.mkstemp(suffix=Path(path).suffix)
+            os.close(fd)
+            os.chmod(tmp_name, stat.S_IRUSR | stat.S_IWUSR)
+            tmp_path = Path(tmp_name)
 
             try:
                 async with body:
@@ -176,18 +179,22 @@ class S3Storage(StorageBackend):
 
     async def delete(self, path: str) -> bool:
         """Delete a file from S3."""
-        async with self._get_client() as client:
+        async with self._get_client() as client:  # type: ignore
             try:
                 await client.delete_object(Bucket=self.bucket, Key=path)
                 return True
             except client.exceptions.NoSuchBucket:
                 raise
-            except (ClientError, BotoCoreError):
-                return False
+            except ClientError as exc:
+                if self._is_missing_error(exc):
+                    return False
+                raise
+            except BotoCoreError:
+                raise
 
     async def exists(self, path: str) -> bool:
         """Check if a file exists in S3."""
-        async with self._get_client() as client:
+        async with self._get_client() as client:  # type: ignore
             try:
                 await client.head_object(Bucket=self.bucket, Key=path)
                 return True
@@ -195,8 +202,12 @@ class S3Storage(StorageBackend):
                 return False
             except client.exceptions.NoSuchBucket:
                 raise
-            except (ClientError, BotoCoreError):
-                return False
+            except ClientError as exc:
+                if self._is_missing_error(exc):
+                    return False
+                raise
+            except BotoCoreError:
+                raise
 
     async def url(self, path: str, cdn_prefix: Optional[str] = None) -> str:
         """Return the public URL for a stored S3 path."""

@@ -7,6 +7,8 @@ import logging
 
 import pytest
 
+from songhive.models._enums import Visibility
+
 
 @pytest.fixture
 def files_client(client, tmp_path):
@@ -46,10 +48,9 @@ def test_upload_file(files_client, regular_user, auth_headers):
     assert data["size"] == len(content)
     assert data["sha256"] == hashlib.sha256(content).hexdigest()
     assert data["original_filename"] == "test.txt"
-    assert data["storage_backend"] == "local"
-    assert data["storage_path"] == (f"files/{data['sha256'][:2]}/{data['sha256'][2:4]}/{data['sha256']}")
-    assert data["url"].endswith(data["storage_path"])
-    assert data["url"].startswith(str(files_client.app.state.config.storage.local_path))
+    assert "storage_backend" not in data
+    assert "storage_path" not in data
+    assert data["url"] == f"/api/v1/files/{data['id']}/download"
 
 
 def test_upload_file_requires_auth(files_client):
@@ -72,8 +73,9 @@ def test_get_file_metadata(files_client, regular_user, auth_headers, upload_txt)
     metadata = response.json()
     assert metadata["id"] == data["id"]
     assert metadata["sha256"] == data["sha256"]
-    assert metadata["storage_path"] == data["storage_path"]
-    assert metadata["url"] == data["url"]
+    assert "storage_path" not in metadata
+    assert "storage_backend" not in metadata
+    assert metadata["url"] == f"/api/v1/files/{data['id']}/download"
 
 
 def test_get_file_metadata_missing(files_client, regular_user, auth_headers):
@@ -239,6 +241,8 @@ async def test_download_empty_or_whitespace_filename_uses_fallback(
         file_like,
         content_type="text/plain",
         original_filename=None,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.LOCAL.value,
     )
     db_session.add(stored_none)
     await db_session.commit()
@@ -257,6 +261,8 @@ async def test_download_empty_or_whitespace_filename_uses_fallback(
         file_like2,
         content_type="text/plain",
         original_filename="   ",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.LOCAL.value,
     )
     db_session.add(stored_ws)
     await db_session.commit()
@@ -284,7 +290,9 @@ def test_download_orphaned_record_returns_404(files_client, regular_user, auth_h
 
     # Delete the backing file while leaving the database row intact.
     base_path = files_client.app.state.config.storage.local_path
-    backing_file = base_path / data["storage_path"]
+    sha = hashlib.sha256(content).hexdigest()
+    storage_path = f"files/{sha[:2]}/{sha[2:4]}/{sha}"
+    backing_file = base_path / storage_path
     backing_file.unlink()
 
     response = files_client.get(

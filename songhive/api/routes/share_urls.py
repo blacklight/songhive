@@ -12,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config.schema import SonghiveConfig
 from ...models.share_token import ShareToken
 from ...models.user import User
-from ...services import sharing
+from ...services import acl, sharing
 from ..deps import get_config, get_current_user, get_db
+from ..middleware.rate_limit import rate_limit_account
 from ._common import load_and_authorize, validate_item_type
 
 router = APIRouter(prefix="/share-urls")
@@ -63,7 +64,12 @@ def _build_share_url(request: Request, config: SonghiveConfig, raw_token: str) -
     return f"{base}/api/v1/share/{raw_token}"
 
 
-@router.post("/", response_model=ShareTokenCreated, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=ShareTokenCreated,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
 async def create_share_url(
     body: ShareTokenCreate,
     request: Request,
@@ -111,15 +117,17 @@ async def delete_share_url(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Revoke a share URL token by id."""
+    """
+    Revoke a share URL token by id.
+
+    Missing and unauthorized requests both return 404 to avoid ID enumeration.
+    """
     token = await db.get(ShareToken, token_id)
-    if token is None:
+    if token is None or not await acl.can_manage(db, current_user, token.item_type, token.item_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Not found",
         )
-
-    await load_and_authorize(db, current_user, token.item_type, token.item_id)
 
     await sharing.revoke_share_token(db, token_id)
     await db.commit()

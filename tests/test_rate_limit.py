@@ -38,11 +38,20 @@ def _request(
 
 
 def test_client_ip_from_x_forwarded_for():
-    """Test that X-Forwarded-For is preferred when present."""
+    """Test that X-Forwarded-For is parsed when at least one hop is trusted."""
     request = _request(
         headers=[(b"x-forwarded-for", b"203.0.113.1, 70.0.0.1")],
     )
-    assert _client_ip(request) == "203.0.113.1"
+    assert _client_ip(request, trusted_hops=1) == "203.0.113.1"
+
+
+def test_client_ip_ignores_x_forwarded_for_without_trusted_hops():
+    """Test that X-Forwarded-For is ignored when no proxy hops are trusted."""
+    request = _request(
+        headers=[(b"x-forwarded-for", b"203.0.113.1, 70.0.0.1")],
+        client=("127.0.0.1", 12345),
+    )
+    assert _client_ip(request, trusted_hops=0) == "127.0.0.1"
 
 
 def test_client_ip_from_real_ip():

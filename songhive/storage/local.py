@@ -77,6 +77,8 @@ class LocalStorage(StorageBackend):
 
     async def url(self, path: str, cdn_prefix: Optional[str] = None) -> str:
         """Return the public URL for a stored path."""
+        # Validate the path without disclosing the resolved filesystem location.
+        self._resolve(path)
         if cdn_prefix:
             return f"{cdn_prefix.rstrip('/')}/{path}"
-        return str(self._resolve(path))
+        return f"/{path.lstrip('/')}"

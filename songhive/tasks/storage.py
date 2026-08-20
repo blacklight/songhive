@@ -22,7 +22,7 @@ async def _cleanup_orphaned_files(storage: StorageBackend, session: AsyncSession
     :param session: An active async SQLAlchemy session.
     :returns: The number of orphaned files removed.
     """
-    from sqlalchemy import select
+    from sqlalchemy import delete, select
 
     from ..models.album import Album
     from ..models.artist import Artist  # noqa: F401
@@ -36,25 +36,27 @@ async def _cleanup_orphaned_files(storage: StorageBackend, session: AsyncSession
     referenced_by_album = select(Album.cover_file_id).where(Album.cover_file_id.is_not(None))
     referenced_by_upload = select(Upload.stored_file_id).where(Upload.stored_file_id.is_not(None))
 
-    stmt = select(StoredFile).where(
-        ~StoredFile.id.in_(referenced_by_track),
-        ~StoredFile.id.in_(referenced_by_album),
-        ~StoredFile.id.in_(referenced_by_upload),
+    stmt = (
+        delete(StoredFile)
+        .where(
+            ~StoredFile.id.in_(referenced_by_track),
+            ~StoredFile.id.in_(referenced_by_album),
+            ~StoredFile.id.in_(referenced_by_upload),
+        )
+        .returning(StoredFile.id, StoredFile.storage_path)
     )
 
     result = await session.execute(stmt)
-    orphans = result.scalars().all()
+    rows = result.mappings().all()
 
-    _count = -1
-    for _count, stored_file in enumerate(orphans):
-        logger.info("Deleting orphaned stored file %s at %s", stored_file.id, stored_file.storage_path)
+    for row in rows:
+        logger.info("Deleting orphaned stored file %s at %s", row["id"], row["storage_path"])
         try:
-            await storage.delete(stored_file.storage_path)
+            await storage.delete(row["storage_path"])
         except Exception:
-            logger.exception("Failed to delete backing file for %s", stored_file.id)
-        await session.delete(stored_file)
+            logger.exception("Failed to delete backing file for %s", row["id"])
 
-    return _count + 1
+    return len(rows)
 
 
 @celery_app.task(name="songhive.tasks.storage.cleanup_orphaned_files")

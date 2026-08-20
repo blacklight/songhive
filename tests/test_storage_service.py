@@ -161,7 +161,7 @@ async def test_store_file_large_streaming(storage_service, db_session):
 
 @pytest.mark.asyncio
 async def test_get_url_no_cdn(storage_service, db_session):
-    """Test get_url returns an absolute local path when no CDN is configured."""
+    """Test get_url returns a stable API-relative download URL."""
     content = b"url test"
     file = io.BytesIO(content)
 
@@ -170,13 +170,12 @@ async def test_get_url_no_cdn(storage_service, db_session):
     await db_session.flush()
 
     url = await storage_service.get_url(stored_file)
-    assert url.endswith(stored_file.storage_path)
-    assert url.startswith(str(storage_service.config.local_path))
+    assert url == f"/api/v1/files/{stored_file.id}/download"
 
 
 @pytest.mark.asyncio
 async def test_get_url_with_cdn(cdn_storage_service, db_session):
-    """Test get_url returns a CDN-prefixed URL when configured."""
+    """Test get_url still returns an API-relative URL when a CDN is configured."""
     content = b"url test"
     file = io.BytesIO(content)
 
@@ -184,7 +183,7 @@ async def test_get_url_with_cdn(cdn_storage_service, db_session):
     db_session.add(stored_file)
     await db_session.flush()
     url = await cdn_storage_service.get_url(stored_file)
-    assert url == f"https://cdn.example.com/{stored_file.storage_path}"
+    assert url == f"/api/v1/files/{stored_file.id}/download"
 
 
 @pytest.mark.asyncio

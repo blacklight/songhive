@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.share_grant import ShareGrant
 from ...models.user import User
-from ...services import sharing
+from ...services import acl, sharing
 from ..deps import get_current_user, get_db
+from ..middleware.rate_limit import rate_limit_account
 from ._common import load_and_authorize, validate_item_type
 
 router = APIRouter(prefix="/shares")
@@ -43,7 +44,12 @@ class ShareGrantResponse(BaseModel):
     created_at: datetime
 
 
-@router.post("/", response_model=ShareGrantResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=ShareGrantResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
 async def create_share_grant(
     body: ShareGrantCreate,
     current_user: User = Depends(get_current_user),
@@ -84,15 +90,18 @@ async def delete_share_grant(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Revoke a share grant by id."""
+    """
+    Revoke a share grant by id.
+
+    Missing and unauthorized requests both return 404 to avoid ID enumeration.
+    """
     grant = await db.get(ShareGrant, share_id)
-    if grant is None:
+    if grant is None or not await acl.can_manage(db, current_user, grant.item_type, grant.item_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Not found",
         )
 
-    await load_and_authorize(db, current_user, grant.item_type, grant.item_id)
     await sharing.revoke_share_grant_by_id(db, share_id)
     await db.commit()
     return None

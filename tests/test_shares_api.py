@@ -118,7 +118,7 @@ def test_delete_share_grant(client, regular_user, other_user, auth_headers, priv
 
 
 def test_delete_share_grant_non_owner_forbidden(client, regular_user, other_user, auth_headers, private_file):
-    """A non-owner cannot delete someone else's share grant."""
+    """A non-owner cannot enumerate or delete someone else's share grant."""
     created = client.post(
         "/api/v1/shares",
         json={"item_type": "file", "item_id": private_file["id"], "user_id": str(other_user.id)},
@@ -126,7 +126,7 @@ def test_delete_share_grant_non_owner_forbidden(client, regular_user, other_user
     ).json()
 
     response = client.delete(f"/api/v1/shares/{created['id']}", headers=auth_headers(other_user))
-    assert response.status_code == 403
+    assert response.status_code == 404
 
 
 def test_delete_share_grant_missing(client, regular_user, auth_headers):

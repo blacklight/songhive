@@ -6,9 +6,10 @@ augmented with per-user share grants and revocable share URL tokens.  It is
 designed to be used by the FastAPI route layer and by federation serializers.
 """
 
+import logging
 from typing import Any, Dict, NamedTuple, Optional, Type
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models._enums import Visibility
@@ -21,6 +22,8 @@ from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..models.user import User
 from . import sharing
+
+logger = logging.getLogger(__name__)
 
 
 class _ItemType(NamedTuple):
@@ -68,7 +71,6 @@ def _list_access_predicate(model, user: Optional[User], item_type: str):
         model.owner_id == user.id,
         model.visibility == Visibility.PUBLIC.value,
         model.visibility == Visibility.LOCAL.value,
-        and_(model.owner_id.is_(None), model.visibility == Visibility.PRIVATE.value),
         exists().where(
             ShareGrant.item_type == item_type,
             ShareGrant.item_id == model.id,
@@ -135,15 +137,7 @@ async def _can_access(  # pylint: disable=too-many-return-statements,too-many-br
     if getattr(item, "visibility", None) == Visibility.PUBLIC.value:
         return True
 
-    # Rule 4: ownerless items are treated as local-equivalent for legacy data.
-    if (
-        getattr(item, "owner_id", None) is None
-        and user is not None
-        and getattr(item, "visibility", None) == Visibility.PRIVATE.value
-    ):
-        return True
-
-    # Rule 5: local items are visible to any authenticated user.
+    # Rule 4: local items are visible to any authenticated user.
     if user is not None and getattr(item, "visibility", None) == Visibility.LOCAL.value:
         return True
 
@@ -242,3 +236,23 @@ async def can_manage(
         return False
 
     return owner_id == user.id
+
+
+async def audit_ownerless_private(session: AsyncSession) -> int:
+    """Log a warning and return the count of ownerless private items.
+
+    Ownerless private rows are not accessible under the current ACL rules and
+    should be migrated to an explicit owner or ``LOCAL`` visibility.
+    """
+    from sqlalchemy import func
+
+    result = await session.execute(
+        select(func.count(StoredFile.id)).where(
+            StoredFile.owner_id.is_(None),
+            StoredFile.visibility == Visibility.PRIVATE.value,
+        )
+    )
+    count = result.scalar_one()
+    if count:
+        logger.warning("Found %d ownerless private StoredFile row(s); migrate to an owner or LOCAL visibility", count)
+    return count

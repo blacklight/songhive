@@ -4,6 +4,8 @@ Storage service: content-addressable media file management.
 
 import asyncio
 import hashlib
+import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import BinaryIO, Literal, Optional, Union, overload
@@ -11,6 +13,7 @@ from typing import BinaryIO, Literal, Optional, Union, overload
 import aiofiles
 import aiofiles.os
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import StorageConfig
@@ -28,6 +31,13 @@ class StorageService:
     """  # noqa: E501
 
     CHUNK_SIZE = 64 * 1024
+
+    @staticmethod
+    def _is_unique_constraint_error(exc: IntegrityError) -> bool:
+        """Return True when an IntegrityError is a uniqueness constraint violation."""
+        cause = getattr(exc, "orig", None)
+        message = str(cause) if cause is not None else str(exc)
+        return "unique" in message.lower()
 
     def __init__(self, backend: StorageBackend, config: StorageConfig):
         self.backend = backend
@@ -105,19 +115,20 @@ class StorageService:
         """
         Store a file in a content-addressable layout and return a ``StoredFile``.
 
-        The returned instance is *uncommitted*; the caller is responsible for
-        adding it to the session and flushing/committing.
+        The returned instance is added to the session and flushed.  Callers are
+        still responsible for committing.  ``owner_id`` and ``visibility`` only
+        apply to newly created rows.  If the content already exists, the
+        existing ``StoredFile`` is returned without modification.
 
-        ``owner_id`` and ``visibility`` only apply to newly created rows.  If
-        the content already exists, the existing ``StoredFile`` is returned
-        without modification.  Set ``return_duplicate=True`` to also receive a
-        boolean that is ``True`` when the existing row was returned.
+        Set ``return_duplicate=True`` to also receive a boolean that is ``True``
+        when the existing row was returned.
         """
         self._rewind(file)
 
-        tmp = tempfile.NamedTemporaryFile(delete=False)
-        tmp.close()
-        tmp_path = Path(tmp.name)
+        fd, tmp_name = tempfile.mkstemp()
+        os.close(fd)
+        os.chmod(tmp_name, stat.S_IRUSR | stat.S_IWUSR)
+        tmp_path = Path(tmp_name)
 
         try:
             hash_hex, size = await self._write_and_hash(file, tmp_path)
@@ -143,6 +154,21 @@ class StorageService:
                 owner_id=owner_id,
                 visibility=visibility,
             )
+
+            try:
+                async with session.begin_nested():
+                    session.add(stored_file)
+                    await session.flush()
+            except IntegrityError as exc:
+                if not self._is_unique_constraint_error(exc):
+                    raise
+                existing = await session.scalar(select(StoredFile).where(StoredFile.sha256 == hash_hex))
+                if existing is not None:
+                    if return_duplicate:
+                        return existing, True
+                    return existing
+                raise
+
             if return_duplicate:
                 return stored_file, False
             return stored_file
@@ -151,8 +177,8 @@ class StorageService:
                 await aiofiles.os.remove(tmp_path)
 
     async def get_url(self, stored_file: StoredFile) -> str:
-        """Return the public URL for a stored file."""
-        return await self.backend.url(stored_file.storage_path, cdn_prefix=self.config.cdn_prefix)
+        """Return a stable API-relative download URL for a stored file."""
+        return f"/api/v1/files/{stored_file.id}/download"
 
     async def delete_file(self, stored_file: StoredFile) -> bool:
         """Delete a stored file's backing object."""

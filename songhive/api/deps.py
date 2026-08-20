@@ -4,7 +4,7 @@ FastAPI dependency injection helpers.
 
 from typing import AsyncGenerator, Optional
 
-from fastapi import Depends, HTTPException, Query, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,6 +82,17 @@ async def get_current_user_optional(
     return await _get_current_user(request, db)
 
 
+def _get_share_token(request: Request) -> Optional[str]:
+    """Read a share token from the header, cookie, or query string (legacy)."""
+    token = request.headers.get("X-Share-Token")
+    if token:
+        return token
+    token = request.cookies.get("share_token")
+    if token:
+        return token
+    return request.query_params.get("token")
+
+
 def require_access(item_type: str):
     """Return a FastAPI dependency that enforces access to ``item_type`` resources."""
     id_key = acl.ITEM_ID_KEYS.get(item_type)
@@ -92,7 +103,7 @@ def require_access(item_type: str):
         request: Request,
         db: AsyncSession = Depends(get_db),
         user: Optional[User] = Depends(get_current_user_optional),
-        token: Optional[str] = Query(None),
+        token: Optional[str] = Depends(_get_share_token),
     ) -> bool:
         """Load the requested item and verify the requester may access it."""
         item_id = request.path_params.get(id_key)

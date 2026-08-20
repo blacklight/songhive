@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..config.schema import SonghiveConfig
+from ..models.base import get_session
+from ..services.acl import audit_ownerless_private
 from ..services.redis import close_redis_client, get_redis_client
 from .routes import (
     admin,
@@ -44,6 +46,13 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.redis = get_redis_client(config)
+
+        try:
+            async with get_session() as session:
+                await audit_ownerless_private(session)
+        except Exception:
+            logger.exception("Failed to run ownerless private item audit")
+
         yield
         await close_redis_client()
 

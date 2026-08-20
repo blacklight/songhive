@@ -206,9 +206,9 @@ def test_storage_config_cdn_prefix():
 
 
 def test_storage_config_max_upload_size():
-    """Test that max_upload_size is optional and defaults to None."""
+    """Test that max_upload_size defaults to 500 MiB and can be overridden."""
     config = SonghiveConfig()
-    assert config.storage.max_upload_size is None
+    assert config.storage.max_upload_size == 500 * 1024 * 1024
 
     config = SonghiveConfig(storage={"max_upload_size": 104857600})
     assert config.storage.max_upload_size == 104857600

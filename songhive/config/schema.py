@@ -66,7 +66,8 @@ class StorageConfig(BaseSettings):
     s3_region: Optional[str] = Field(default=None, description="S3 region")
     cdn_prefix: Optional[str] = Field(default=None, description="CDN URL prefix for serving files")
     max_upload_size: Optional[int] = Field(
-        default=500 * 1024 * 1024, description="Maximum upload size in bytes; unset by default"
+        default=500 * 1024 * 1024,
+        description="Maximum upload size in bytes; defaults to 500 MiB",
     )
 
 
@@ -135,6 +136,10 @@ class AuthConfig(BaseSettings):
     rate_limit_window_seconds: int = Field(
         default=60,
         description="Rate limit window in seconds",
+    )
+    trusted_proxy_hops: int = Field(
+        default=0,
+        description="Number of trusted proxy hops for X-Forwarded-For parsing; 0 disables header trust",
     )
     secret_key: str = Field(
         description="Secret key for JWT signing",
