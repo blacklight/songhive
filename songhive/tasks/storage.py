@@ -45,7 +45,7 @@ async def _cleanup_orphaned_files(storage: StorageBackend, session: AsyncSession
     result = await session.execute(stmt)
     orphans = result.scalars().all()
 
-    _count = 0
+    _count = -1
     for _count, stored_file in enumerate(orphans):
         logger.info("Deleting orphaned stored file %s at %s", stored_file.id, stored_file.storage_path)
         try:
@@ -54,7 +54,7 @@ async def _cleanup_orphaned_files(storage: StorageBackend, session: AsyncSession
             logger.exception("Failed to delete backing file for %s", stored_file.id)
         await session.delete(stored_file)
 
-    return _count
+    return _count + 1
 
 
 @celery_app.task(name="songhive.tasks.storage.cleanup_orphaned_files")
