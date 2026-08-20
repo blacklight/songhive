@@ -8,7 +8,7 @@ designed to be used by the FastAPI route layer and by federation serializers.
 
 from typing import Any, Dict, List, NamedTuple, Optional, Type
 
-from sqlalchemy import select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models._enums import Visibility
@@ -43,6 +43,44 @@ ITEM_TYPES = set(_ITEM_REGISTRY)
 ITEM_ID_KEYS = {item_type: entry.id_key for item_type, entry in _ITEM_REGISTRY.items()}
 
 _MAX_DERIVED_DEPTH = 1
+
+
+def _list_access_predicate(model, user: Optional[User], item_type: str):
+    """Return a SQL WHERE clause for the ACL rules used by list queries.
+
+    This predicate intentionally covers only visibility, ownership, and
+    explicit share grants.  Share-token and derived-file access are handled
+    by `can_access` for single-item lookups and are not needed for lists.
+    """
+    if user is None:
+        return model.visibility == Visibility.PUBLIC.value
+    return or_(
+        model.owner_id == user.id,
+        model.visibility == Visibility.PUBLIC.value,
+        model.visibility == Visibility.LOCAL.value,
+        and_(model.owner_id.is_(None), model.visibility == Visibility.PRIVATE.value),
+        exists().where(
+            ShareGrant.item_type == item_type,
+            ShareGrant.item_id == model.id,
+            ShareGrant.user_id == user.id,
+        ),
+    )
+
+
+def apply_access_filter(
+    stmt,
+    model,
+    user: Optional[User],
+    item_type: str,
+):
+    """Add ACL filtering to ``stmt`` for the given ``model`` and ``user``.
+
+    Admins bypass the filter.  The predicate is applied before ``offset`` and
+    ``limit`` so list pagination returns the expected number of rows.
+    """
+    if user is not None and user.is_admin:
+        return stmt
+    return stmt.where(_list_access_predicate(model, user, item_type))
 
 
 async def get_item(
@@ -202,12 +240,10 @@ async def filter_accessible_ids(
     item_type: str,
     item_ids: List[str],
 ) -> List[str]:
-    """
-    Return the subset of ``item_ids`` that ``user`` is permitted to access.
+    """Return the subset of ``item_ids`` that ``user`` is permitted to access.
 
-    The current implementation evaluates the access rules per row.  This is
-    acceptable for list-page sizes (<= 100); a future SQL-level rewrite can
-    push more of the logic into a single query.
+    The check is pushed into a single SQL query using the same predicate that
+    list endpoints use.
     """
     if not item_ids:
         return []
@@ -216,12 +252,7 @@ async def filter_accessible_ids(
     if entry is None:
         raise ValueError(f"Unknown item type: {item_type!r}")
 
-    result = await session.execute(select(entry.model).where(entry.model.id.in_(item_ids)))
-    items = list(result.scalars().all())
-
-    accessible: List[str] = []
-    for item in items:
-        if await _can_access(session, user, item_type, str(item.id)):
-            accessible.append(str(item.id))
-
-    return accessible
+    stmt = select(entry.model.id).where(entry.model.id.in_(item_ids))
+    stmt = apply_access_filter(stmt, entry.model, user, item_type)
+    result = await session.execute(stmt)
+    return [str(row) for row in result.scalars().all()]

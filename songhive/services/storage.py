@@ -2,10 +2,11 @@
 Storage service: content-addressable media file management.
 """
 
+import asyncio
 import hashlib
 import tempfile
 from pathlib import Path
-from typing import BinaryIO, Optional
+from typing import BinaryIO, Literal, Optional, Union, overload
 
 import aiofiles
 import aiofiles.os
@@ -32,33 +33,75 @@ class StorageService:
         self.backend = backend
         self.config = config
 
+    def _rewind(self, file: BinaryIO) -> None:
+        """Seek the stream back to the start when possible."""
+        try:
+            file.seek(0)
+        except (OSError, AttributeError):
+            pass
+
     async def _write_and_hash(self, file: BinaryIO, dest_path: Path) -> tuple[str, int]:
         """
         Stream ``file`` to ``dest_path`` in chunks while computing SHA-256.
 
-        Returns the hex digest and total number of bytes written.
+        The source read is offloaded to a worker thread so the event loop is
+        not blocked by synchronous I/O. Returns the hex digest and total number
+        of bytes written.
         """
         hasher = hashlib.sha256()
         total = 0
 
         async with aiofiles.open(dest_path, "wb") as dest:
-            while chunk := file.read(self.CHUNK_SIZE):
+            while True:
+                chunk = await asyncio.to_thread(file.read, self.CHUNK_SIZE)
+                if not chunk:
+                    break
                 total += len(chunk)
                 hasher.update(chunk)
                 await dest.write(chunk)
 
         return hasher.hexdigest(), total
 
+    @overload
     async def store_file(
         self,
         session: AsyncSession,
         file: BinaryIO,
         content_type: str,
+        *,
         original_filename: Optional[str] = None,
         prefix: str = "files",
         owner_id: Optional[str] = None,
         visibility: str = Visibility.PRIVATE.value,
-    ) -> StoredFile:
+        return_duplicate: Literal[False] = False,
+    ) -> StoredFile: ...
+
+    @overload
+    async def store_file(
+        self,
+        session: AsyncSession,
+        file: BinaryIO,
+        content_type: str,
+        *,
+        original_filename: Optional[str] = None,
+        prefix: str = "files",
+        owner_id: Optional[str] = None,
+        visibility: str = Visibility.PRIVATE.value,
+        return_duplicate: Literal[True] = True,
+    ) -> tuple[StoredFile, bool]: ...
+
+    async def store_file(
+        self,
+        session: AsyncSession,
+        file: BinaryIO,
+        content_type: str,
+        *,
+        original_filename: Optional[str] = None,
+        prefix: str = "files",
+        owner_id: Optional[str] = None,
+        visibility: str = Visibility.PRIVATE.value,
+        return_duplicate: bool = False,
+    ) -> Union[StoredFile, tuple[StoredFile, bool]]:
         """
         Store a file in a content-addressable layout and return a ``StoredFile``.
 
@@ -67,8 +110,11 @@ class StorageService:
 
         ``owner_id`` and ``visibility`` only apply to newly created rows.  If
         the content already exists, the existing ``StoredFile`` is returned
-        without modification.
+        without modification.  Set ``return_duplicate=True`` to also receive a
+        boolean that is ``True`` when the existing row was returned.
         """
+        self._rewind(file)
+
         tmp = tempfile.NamedTemporaryFile(delete=False)
         tmp.close()
         tmp_path = Path(tmp.name)
@@ -78,14 +124,16 @@ class StorageService:
             path = f"{prefix}/{hash_hex[:2]}/{hash_hex[2:4]}/{hash_hex}"
 
             existing = await session.scalar(select(StoredFile).where(StoredFile.sha256 == hash_hex))
-            if existing:
+            if existing is not None:
+                if return_duplicate:
+                    return existing, True
                 return existing
 
             if not await self.backend.exists(path):
                 with open(tmp_path, "rb") as f:
                     await self.backend.store(f, path, content_type=content_type)
 
-            return StoredFile(
+            stored_file = StoredFile(
                 storage_path=path,
                 storage_backend=self.config.backend,
                 content_type=content_type,
@@ -95,6 +143,9 @@ class StorageService:
                 owner_id=owner_id,
                 visibility=visibility,
             )
+            if return_duplicate:
+                return stored_file, False
+            return stored_file
         finally:
             if await aiofiles.os.path.exists(tmp_path):
                 await aiofiles.os.remove(tmp_path)

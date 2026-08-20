@@ -149,6 +149,12 @@ async def regular_user(make_user):
 
 
 @pytest.fixture
+async def other_user(make_user):
+    """Create a second regular, active, email-verified user."""
+    return await make_user("other", email_verified=True)
+
+
+@pytest.fixture
 async def moderator_user(make_user):
     """Create a user with the moderator role."""
     return await make_user("moderator", role="moderator", email_verified=True)

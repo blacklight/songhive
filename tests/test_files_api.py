@@ -85,11 +85,11 @@ def test_get_file_metadata_missing(files_client, regular_user, auth_headers):
     assert response.status_code == 404
 
 
-def test_get_file_metadata_requires_auth(files_client, upload_txt):
-    """File metadata endpoints require authentication."""
+def test_get_file_metadata_private_denied_anonymous(files_client, upload_txt):
+    """Private file metadata is denied (403) for anonymous requesters."""
     data, _ = upload_txt
     response = files_client.get(f"/api/v1/files/{data['id']}")
-    assert response.status_code == 401
+    assert response.status_code == 403
 
 
 def test_download_file(files_client, regular_user, auth_headers, upload_txt):
@@ -135,11 +135,11 @@ def test_download_file_missing(files_client, regular_user, auth_headers):
     assert response.status_code == 404
 
 
-def test_download_file_requires_auth(files_client, upload_txt):
-    """Download endpoints require authentication."""
+def test_download_file_private_denied_anonymous(files_client, upload_txt):
+    """Private file downloads are denied (403) for anonymous requesters."""
     data, _ = upload_txt
     response = files_client.get(f"/api/v1/files/{data['id']}/download")
-    assert response.status_code == 401
+    assert response.status_code == 403
 
 
 def test_download_safe_inline_disposition(files_client, regular_user, auth_headers):
@@ -310,3 +310,141 @@ def test_upload_logs_stored_file(files_client, regular_user, auth_headers, caplo
     data = response.json()
     assert f"Uploaded file {data['id']}" in caplog.text
     assert str(data["size"]) in caplog.text
+
+
+def test_upload_sets_owner_and_visibility(files_client, regular_user, auth_headers):
+    """Uploading with a visibility query parameter sets owner and visibility."""
+    content = b"public content"
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("public.txt", content, "text/plain")},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["owner_id"] == str(regular_user.id)
+    assert data["visibility"] == "public"
+
+
+def test_public_file_accessible_anonymously(files_client, regular_user, auth_headers):
+    """Public files can be accessed and downloaded without authentication."""
+    content = b"public data"
+    headers = auth_headers(regular_user)
+
+    upload = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("anon.txt", content, "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+    data = upload.json()
+
+    metadata = files_client.get(f"/api/v1/files/{data['id']}")
+    assert metadata.status_code == 200
+    assert metadata.json()["visibility"] == "public"
+    assert metadata.json()["owner_id"] is None
+
+    download = files_client.get(f"/api/v1/files/{data['id']}/download")
+    assert download.status_code == 200
+    assert download.content == content
+
+
+def test_local_file_accessible_to_other_users(files_client, regular_user, other_user, auth_headers):
+    """Local files are accessible to any authenticated user; owner_id is redacted."""
+    content = b"local data"
+    headers = auth_headers(regular_user)
+
+    upload = files_client.post(
+        "/api/v1/files/upload?visibility=local",
+        files={"file": ("local.txt", content, "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+    data = upload.json()
+
+    other_headers = auth_headers(other_user)
+    metadata = files_client.get(f"/api/v1/files/{data['id']}", headers=other_headers)
+    assert metadata.status_code == 200
+    assert metadata.json()["visibility"] == "local"
+    assert metadata.json()["owner_id"] is None
+
+    download = files_client.get(f"/api/v1/files/{data['id']}/download", headers=other_headers)
+    assert download.status_code == 200
+    assert download.content == content
+
+
+def test_private_file_denied_for_other_user(files_client, regular_user, other_user, auth_headers):
+    """Private files are denied (403) for other authenticated users."""
+    content = b"private data"
+    headers = auth_headers(regular_user)
+
+    upload = files_client.post(
+        "/api/v1/files/upload",
+        files={"file": ("private.txt", content, "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+    data = upload.json()
+
+    other_headers = auth_headers(other_user)
+    assert files_client.get(f"/api/v1/files/{data['id']}", headers=other_headers).status_code == 403
+    assert files_client.get(f"/api/v1/files/{data['id']}/download", headers=other_headers).status_code == 403
+
+
+def test_owner_id_redacted_for_non_owner(files_client, regular_user, other_user, auth_headers):
+    """Non-owners see a null owner_id in file metadata for local files."""
+    content = b"local data"
+    headers = auth_headers(regular_user)
+
+    upload = files_client.post(
+        "/api/v1/files/upload?visibility=local",
+        files={"file": ("redacted.txt", content, "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+    data = upload.json()
+
+    other_headers = auth_headers(other_user)
+    metadata = files_client.get(f"/api/v1/files/{data['id']}", headers=other_headers)
+    assert metadata.status_code == 200
+    assert metadata.json()["owner_id"] is None
+
+
+def test_upload_invalid_visibility_returns_422(files_client, regular_user, auth_headers):
+    """Uploading with an unknown visibility value returns 422."""
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=publick",
+        files={"file": ("bad.txt", b"data", "text/plain")},
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+def test_upload_duplicate_returns_canonical_row_and_header(files_client, regular_user, auth_headers):
+    """Uploading duplicate content returns the canonical row with X-Duplicate: true."""
+    content = b"duplicate content"
+    headers = auth_headers(regular_user)
+
+    first = files_client.post(
+        "/api/v1/files/upload",
+        files={"file": ("first.txt", content, "text/plain")},
+        headers=headers,
+    )
+    assert first.status_code == 200
+    first_data = first.json()
+    assert first.headers.get("X-Duplicate") is None
+
+    second = files_client.post(
+        "/api/v1/files/upload",
+        files={"file": ("second.txt", content, "text/plain")},
+        headers=headers,
+    )
+    assert second.status_code == 200
+    second_data = second.json()
+    assert second.headers.get("X-Duplicate") == "true"
+    assert second_data["id"] == first_data["id"]

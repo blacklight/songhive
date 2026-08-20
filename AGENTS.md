@@ -50,6 +50,15 @@
   python -m black .
   ```
 
+- Note: running the full suite of tests takes time. You don't have to run the
+  full suite of tests in the following cases:
+  - If nothing has been modified since the beginning of the current
+    conversation.
+  - If only isort/black/flake8 changes have been applied - they don't impact
+    the business logic.
+  - If the changes you made are likely to only impact a small subset of tests,
+    and only those tests should be run.
+
 - On an externally managed system Python, install dev dependencies (including
   `fakeredis`) in a virtual environment and run the verification commands with
   that environment activated.
