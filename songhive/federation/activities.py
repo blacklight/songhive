@@ -4,37 +4,40 @@ Activity creation and processing for federation.
 
 from typing import Optional
 
+from ..models._enums import Visibility
+from ..models.artist import Artist
+from ..models.track import Track
+from ._common import get_stream_url
+from .serializers import track_to_audio_object
+
 
 def create_audio_activity(
     actor_url: str,
-    track_url: str,
-    stream_url: str,
-    title: str,
+    track: Track,
+    artist: Artist,
+    domain: str,
     *,
     description: Optional[str] = None,
     duration: Optional[float] = None,
-) -> dict:
+) -> Optional[dict]:
     """
     Create a Create(Audio) activity for publishing a track.
 
-    When rendered on Mastodon/compatible software, this should appear as
-    a post with an embedded audio element and a link to the track.
+    Non-public tracks produce no activity. The audio stream URL points to the
+    public download endpoint for the track's audio file.
     """
-    audio_object = {
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Audio",
-        "id": track_url,
-        "name": title,
-        "url": [
-            {"type": "Link", "href": stream_url, "mediaType": "audio/mpeg"},
-            {"type": "Link", "href": track_url, "mediaType": "text/html"},
-        ],
-    }
+    if track.visibility != Visibility.PUBLIC.value:
+        return None
+
+    stream_url = get_stream_url(track=track, domain=domain)
+    audio_object = track_to_audio_object(track, artist, domain, stream_url)
+    if audio_object is None:
+        return None
 
     if description:
         audio_object["content"] = description
-    if duration:
-        # ISO 8601 duration
+
+    if duration is not None:
         minutes = int(duration // 60)
         seconds = int(duration % 60)
         audio_object["duration"] = f"PT{minutes}M{seconds}S"
