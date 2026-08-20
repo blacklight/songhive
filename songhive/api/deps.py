@@ -2,15 +2,16 @@
 FastAPI dependency injection helpers.
 """
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
 from ..models.base import get_session
 from ..models.user import User
+from ..services import acl
 from ..services.auth import get_user_by_id
 from ..services.storage import StorageService
 from ..storage import get_storage
@@ -35,6 +36,24 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def _get_current_user(request: Request, db: AsyncSession) -> Optional[User]:
+    """Extract and validate the current user, returning ``None`` on any failure."""
+    token = extract_token(request)
+    if not token:
+        return None
+
+    config = get_config(request)
+    user_id = decode_access_token(token, config.auth.secret_key)
+    if user_id is None:
+        return None
+
+    user = await get_user_by_id(db, user_id)
+    if user is None or not user.is_active:
+        return None
+
+    return user
+
+
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -45,26 +64,60 @@ async def get_current_user(
     Returns the User model instance or raises 401 for missing, invalid,
     inactive, or deleted users.
     """
-    token = extract_token(request)
-    exc = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    if not token:
-        raise exc
-
-    config = get_config(request)
-    user_id = decode_access_token(token, config.auth.secret_key)
-    if user_id is None:
-        raise exc
-
-    user = await get_user_by_id(db, user_id)
-    if user is None or not user.is_active:
-        raise exc
-
+    user = await _get_current_user(request, db)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
+
+
+async def get_current_user_optional(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    """Extract and validate the current user, returning ``None`` when unauthenticated."""
+    return await _get_current_user(request, db)
+
+
+def require_access(item_type: str):
+    """Return a FastAPI dependency that enforces access to ``item_type`` resources."""
+    id_key = acl.ITEM_ID_KEYS.get(item_type)
+    if id_key is None:
+        raise RuntimeError(f"Unknown item type: {item_type!r}")
+
+    async def _dep(
+        request: Request,
+        db: AsyncSession = Depends(get_db),
+        user: Optional[User] = Depends(get_current_user_optional),
+        token: Optional[str] = Query(None),
+    ) -> bool:
+        """Load the requested item and verify the requester may access it."""
+        item_id = request.path_params.get(id_key)
+        if not item_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Not found",
+            )
+
+        item = await acl.get_item(db, item_type, item_id)
+        if item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Not found",
+            )
+
+        if not await acl.can_access(db, user, item_type, item_id, share_token=token):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied",
+            )
+
+        return True
+
+    return _dep
 
 
 def get_storage_service(request: Request) -> StorageService:

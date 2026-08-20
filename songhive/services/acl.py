@@ -6,7 +6,7 @@ augmented with per-user share grants and revocable share URL tokens.  It is
 designed to be used by the FastAPI route layer and by federation serializers.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Type
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,16 +22,39 @@ from ..models.track import Track
 from ..models.user import User
 from . import sharing
 
-ITEM_TYPES = {"track", "album", "playlist", "library", "radio", "file"}
-_MODEL_MAP = {
-    "track": Track,
-    "album": Album,
-    "playlist": Playlist,
-    "library": Library,
-    "radio": Radio,
-    "file": StoredFile,
+
+class _ItemType(NamedTuple):
+    """Registry entry pairing an item type with its model and URL id key."""
+
+    model: Type[Any]
+    id_key: str
+
+
+_ITEM_REGISTRY: Dict[str, _ItemType] = {
+    "track": _ItemType(Track, "track_id"),
+    "album": _ItemType(Album, "album_id"),
+    "playlist": _ItemType(Playlist, "playlist_id"),
+    "library": _ItemType(Library, "library_id"),
+    "radio": _ItemType(Radio, "radio_id"),
+    "file": _ItemType(StoredFile, "file_id"),
 }
+
+ITEM_TYPES = set(_ITEM_REGISTRY)
+ITEM_ID_KEYS = {item_type: entry.id_key for item_type, entry in _ITEM_REGISTRY.items()}
+
 _MAX_DERIVED_DEPTH = 1
+
+
+async def get_item(
+    session: AsyncSession,
+    item_type: str,
+    item_id: str,
+) -> Optional[Any]:
+    """Return the model instance for ``(item_type, item_id)`` or ``None`` if missing."""
+    entry = _ITEM_REGISTRY.get(item_type)
+    if entry is None:
+        raise ValueError(f"Unknown item type: {item_type!r}")
+    return await session.get(entry.model, item_id)
 
 
 async def _can_access(  # pylint: disable=too-many-return-statements,too-many-branches
@@ -44,11 +67,11 @@ async def _can_access(  # pylint: disable=too-many-return-statements,too-many-br
     depth: int = 0,
 ) -> bool:
     """Internal access check with a depth guard for derived file access."""
-    if item_type not in ITEM_TYPES:
+    entry = _ITEM_REGISTRY.get(item_type)
+    if entry is None:
         raise ValueError(f"Unknown item type: {item_type!r}")
 
-    model_class = _MODEL_MAP[item_type]
-    item = await session.get(model_class, item_id)
+    item = await session.get(entry.model, item_id)
     if item is None:
         return False
 
@@ -156,11 +179,11 @@ async def can_manage(
     if user is None:
         return False
 
-    if item_type not in ITEM_TYPES:
+    entry = _ITEM_REGISTRY.get(item_type)
+    if entry is None:
         raise ValueError(f"Unknown item type: {item_type!r}")
 
-    model_class = _MODEL_MAP[item_type]
-    item = await session.get(model_class, item_id)
+    item = await session.get(entry.model, item_id)
     if item is None:
         return False
     if user.is_admin:
@@ -189,11 +212,11 @@ async def filter_accessible_ids(
     if not item_ids:
         return []
 
-    if item_type not in ITEM_TYPES:
+    entry = _ITEM_REGISTRY.get(item_type)
+    if entry is None:
         raise ValueError(f"Unknown item type: {item_type!r}")
 
-    model_class = _MODEL_MAP[item_type]
-    result = await session.execute(select(model_class).where(model_class.id.in_(item_ids)))
+    result = await session.execute(select(entry.model).where(entry.model.id.in_(item_ids)))
     items = list(result.scalars().all())
 
     accessible: List[str] = []
