@@ -16,6 +16,7 @@ from songhive.federation.actors import (
     user_to_actor_document,
 )
 from songhive.federation.serializers import track_to_audio_object
+from songhive.models import Visibility
 from songhive.models.album import Album  # noqa: F401
 from songhive.models.artist import Artist
 from songhive.models.track import Track
@@ -51,38 +52,61 @@ def test_user_to_actor_document():
 
 
 def test_create_audio_activity():
-    """Test creating a Create(Audio) activity."""
+    """Test creating a Create(Audio) activity for a public track."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        duration=195.5,
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-123"
+
     activity = create_audio_activity(
         actor_url="https://music.example.com/users/alice",
-        track_url="https://music.example.com/tracks/123",
-        stream_url="https://music.example.com/api/v1/stream/123",
-        title="My Song",
+        track=track,
+        artist=artist,
+        domain="music.example.com",
         description="A great track",
-        duration=195.5,
     )
+    assert activity is not None
     assert activity["type"] == "Create"
     assert activity["object"]["type"] == "Audio"
     assert activity["object"]["name"] == "My Song"
+    assert activity["object"]["content"] == "A great track"
     assert "PT3M15S" in activity["object"]["duration"]
+    assert any(
+        link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
+        for link in activity["object"]["url"]
+    )
 
 
 def test_track_to_audio_object():
-    """Test serializing a Track to an AP Audio object."""
+    """Test serializing a public Track to an AP Audio object."""
     artist = Artist(name="TestArtist")
     artist.id = "artist-1"
-    track = Track(title="TestTrack", artist_id="artist-1", duration=120.0, genre="Rock")
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        duration=120.0,
+        genre="Rock",
+        visibility=Visibility.PUBLIC.value,
+    )
     track.id = "track-1"
 
-    obj = track_to_audio_object(
-        track,
-        artist,
-        "music.example.com",
-        "https://music.example.com/api/v1/stream/track-1",
-    )
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
     assert obj["type"] == "Audio"
     assert obj["name"] == "TestTrack"
     assert obj["duration"] == "PT2M0S"
     assert obj["tag"][0]["name"] == "#Rock"
+    assert any(
+        link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
+        for link in obj["url"]
+    )
 
 
 def test_federation_app_setup(tmp_path):

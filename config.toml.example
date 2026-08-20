@@ -22,6 +22,8 @@ url = "redis://localhost:6379/0"
 [celery]
 broker_url = "redis://localhost:6379/1"
 result_backend = "redis://localhost:6379/2"
+# Crontab expression for the orphaned-files cleanup task (default: 03:00 UTC).
+# cleanup_orphaned_files_schedule = "0 3 * * *"
 
 [storage]
 backend = "local"
@@ -31,6 +33,8 @@ local_path = "/var/lib/songhive/media"
 # s3_access_key = ""
 # s3_secret_key = ""
 # s3_region = "us-east-1"
+# cdn_prefix = "https://cdn.example.com"
+# max_upload_size = 524288000
 
 [federation]
 enabled = true

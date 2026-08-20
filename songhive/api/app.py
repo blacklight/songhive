@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..config.schema import SonghiveConfig
+from ..models.base import get_session
+from ..services.acl import audit_ownerless_private
 from ..services.redis import close_redis_client, get_redis_client
 from .routes import (
     admin,
@@ -17,10 +19,14 @@ from .routes import (
     artists,
     auth,
     favorites,
+    files,
     history,
     libraries,
     playlists,
     radios,
+    share,
+    share_urls,
+    shares,
     tracks,
     users,
 )
@@ -40,6 +46,13 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.redis = get_redis_client(config)
+
+        try:
+            async with get_session() as session:
+                await audit_ownerless_private(session)
+        except Exception:
+            logger.exception("Failed to run ownerless private item audit")
+
         yield
         await close_redis_client()
 
@@ -53,6 +66,8 @@ def create_app(config: SonghiveConfig) -> FastAPI:
 
     # Store config in app state for dependency injection
     app.state.config = config
+    app.state.storage_service = None
+    app.state.storage_service_config = None
 
     # CORS middleware
     allow_credentials = True
@@ -84,9 +99,13 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(history.router, prefix=api_prefix, tags=["history"])
     app.include_router(radios.router, prefix=api_prefix, tags=["radios"])
     app.include_router(admin.router, prefix=api_prefix, tags=["admin"])
+    app.include_router(files.router, prefix=api_prefix, tags=["files"])
+    app.include_router(shares.router, prefix=api_prefix, tags=["shares"])
+    app.include_router(share_urls.router, prefix=api_prefix, tags=["share-urls"])
+    app.include_router(share.router, prefix=api_prefix, tags=["share"])
 
     # Federation routes (pubby)
-    if config.federation.enabled:
+    if config.federation.enabled and config.federation.instance_domain:
         _setup_federation(app, config)
 
     return app

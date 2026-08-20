@@ -42,6 +42,10 @@ class CeleryConfig(BaseSettings):
         default="redis://localhost:6379/2",
         description="Celery result backend URL",
     )
+    cleanup_orphaned_files_schedule: str = Field(
+        default="0 3 * * *",
+        description="Crontab expression for the orphaned-files cleanup task",
+    )
 
 
 class StorageConfig(BaseSettings):
@@ -60,6 +64,11 @@ class StorageConfig(BaseSettings):
     s3_access_key: Optional[str] = Field(default=None, description="S3 access key")
     s3_secret_key: Optional[str] = Field(default=None, description="S3 secret key")
     s3_region: Optional[str] = Field(default=None, description="S3 region")
+    cdn_prefix: Optional[str] = Field(default=None, description="CDN URL prefix for serving files")
+    max_upload_size: Optional[int] = Field(
+        default=500 * 1024 * 1024,
+        description="Maximum upload size in bytes; defaults to 500 MiB",
+    )
 
 
 class FederationConfig(BaseSettings):
@@ -67,8 +76,8 @@ class FederationConfig(BaseSettings):
 
     enabled: bool = Field(default=True, description="Enable federation")
     instance_domain: str = Field(
-        default="localhost",
-        description="Public domain of this instance",
+        default="",
+        description="Public domain of this instance; when empty, share URLs fall back to the request base URL",
     )
     instance_name: str = Field(
         default="Songhive",
@@ -127,6 +136,10 @@ class AuthConfig(BaseSettings):
     rate_limit_window_seconds: int = Field(
         default=60,
         description="Rate limit window in seconds",
+    )
+    trusted_proxy_hops: int = Field(
+        default=0,
+        description="Number of trusted proxy hops for X-Forwarded-For parsing; 0 disables header trust",
     )
     secret_key: str = Field(
         description="Secret key for JWT signing",

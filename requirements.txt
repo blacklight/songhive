@@ -20,6 +20,8 @@ celery>=5.3
 redis>=5.0
 
 # Storage
+aiofiles>=23.2.1
+aioboto3>=12.4.0
 boto3>=1.28
 
 # Audio

@@ -194,3 +194,21 @@ def test_registration_mode_serializes_as_string():
     assert config.auth.registration_mode == "open"
     assert config.auth.registration_mode == RegistrationMode.OPEN
     assert json.dumps(config.auth.registration_mode) == '"open"'
+
+
+def test_storage_config_cdn_prefix():
+    """Test that the storage CDN prefix is optional and defaults to None."""
+    config = SonghiveConfig()
+    assert config.storage.cdn_prefix is None
+
+    config = SonghiveConfig(storage={"cdn_prefix": "https://cdn.example.com"})
+    assert config.storage.cdn_prefix == "https://cdn.example.com"
+
+
+def test_storage_config_max_upload_size():
+    """Test that max_upload_size defaults to 500 MiB and can be overridden."""
+    config = SonghiveConfig()
+    assert config.storage.max_upload_size == 500 * 1024 * 1024
+
+    config = SonghiveConfig(storage={"max_upload_size": 104857600})
+    assert config.storage.max_upload_size == 104857600

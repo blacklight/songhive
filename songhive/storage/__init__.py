@@ -1,13 +1,14 @@
 from typing import TYPE_CHECKING
 
 from .base import StorageBackend
+from .exc import FileSizeLimitExceededError
 from .local import LocalStorage
 from .s3 import S3Storage
 
 if TYPE_CHECKING:
     from ..config.schema import StorageConfig
 
-__all__ = ["StorageBackend", "LocalStorage", "S3Storage", "get_storage"]
+__all__ = ["FileSizeLimitExceededError", "StorageBackend", "LocalStorage", "S3Storage", "get_storage"]
 
 
 def get_storage(config: "StorageConfig") -> StorageBackend:
@@ -21,5 +22,6 @@ def get_storage(config: "StorageConfig") -> StorageBackend:
             access_key=config.s3_access_key,
             secret_key=config.s3_secret_key,
             region=config.s3_region,
+            max_upload_size=config.max_upload_size,
         )
-    return LocalStorage(base_path=config.local_path)
+    return LocalStorage(base_path=config.local_path, max_upload_size=config.max_upload_size)

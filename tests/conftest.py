@@ -13,9 +13,18 @@ from songhive.api.app import create_app
 from songhive.api.deps import get_db
 from songhive.api.middleware.auth import create_access_token
 from songhive.config.schema import SonghiveConfig
+from songhive.models.album import Album  # noqa: F401
+from songhive.models.artist import Artist  # noqa: F401
 from songhive.models.base import Base, init_db
 from songhive.models.invite import Invite  # noqa: F401
+from songhive.models.library import Library  # noqa: F401
 from songhive.models.oauth_client import OAuth2Client  # noqa: F401
+from songhive.models.playlist import Playlist  # noqa: F401
+from songhive.models.radio import Radio  # noqa: F401
+from songhive.models.share_grant import ShareGrant  # noqa: F401
+from songhive.models.share_token import ShareToken  # noqa: F401
+from songhive.models.stored_file import StoredFile  # noqa: F401
+from songhive.models.track import Track  # noqa: F401
 from songhive.models.user import User  # noqa: F401
 from songhive.services.auth import create_user
 
@@ -137,6 +146,12 @@ def make_user(db_session):
 async def regular_user(make_user):
     """Create a regular, active, email-verified user."""
     return await make_user("regular", email_verified=True)
+
+
+@pytest.fixture
+async def other_user(make_user):
+    """Create a second regular, active, email-verified user."""
+    return await make_user("other", email_verified=True)
 
 
 @pytest.fixture

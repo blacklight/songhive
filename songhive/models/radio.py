@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from ._enums import Visibility
 from .base import Base
 
 
@@ -16,6 +17,11 @@ class Radio(Base):
     name: Mapped[str] = mapped_column(String(256))
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    visibility: Mapped[str] = mapped_column(
+        String(16),
+        default=Visibility.PRIVATE.value,
+        index=True,
+    )
     # JSON-encoded filter configuration
     config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

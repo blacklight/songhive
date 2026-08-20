@@ -18,11 +18,13 @@ from ..deps import get_config, get_current_user, get_redis
 logger = logging.getLogger(__name__)
 
 
-def _client_ip(request: Request) -> str:
-    """Return the client IP address from headers or the request scope."""
+def _client_ip(request: Request, trusted_hops: int = 0) -> str:
+    """Return the client IP address, honoring trusted X-Forwarded-For hops."""
     forwarded: str | None = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    if forwarded and trusted_hops > 0:
+        parts = [ip.strip() for ip in forwarded.split(",")]
+        if len(parts) > trusted_hops:
+            return parts[-(trusted_hops + 1)]
 
     real_ip: str | None = request.headers.get("X-Real-IP")
     if real_ip:
@@ -61,7 +63,7 @@ async def check_rate_limit(
     if not config.auth.rate_limit_enabled:
         return
 
-    ip = _client_ip(request)
+    ip = _client_ip(request, trusted_hops=config.auth.trusted_proxy_hops)
     path = request.url.path
     key = _rate_limit_key(ip, path, identifier)
     window = config.auth.rate_limit_window_seconds
