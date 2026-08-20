@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import BinaryIO, Optional
 
+from .exc import FileSizeLimitExceededError
+
 
 class StorageBackend(ABC):
     """Abstract base class for media storage backends."""
@@ -35,7 +37,7 @@ class StorageBackend(ABC):
     def _check_upload_size(self, size: Optional[int]) -> None:
         """Raise ValueError if the discovered size exceeds the configured limit."""
         if self._max_upload_size is not None and size is not None and size > self._max_upload_size:
-            raise ValueError(f"Upload exceeds the maximum allowed size of {self._max_upload_size} bytes")
+            raise FileSizeLimitExceededError(max_size=self._max_upload_size, actual_size=size)
 
     @abstractmethod
     async def store(self, file: BinaryIO, path: str, content_type: Optional[str] = None) -> str:

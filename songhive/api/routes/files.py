@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models.stored_file import StoredFile
 from ...services.storage import StorageService
 from ..deps import get_current_user, get_db, get_storage_service
+from ...storage import FileSizeLimitExceededError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/files")
@@ -41,12 +42,16 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a file and store it in the configured backend."""
-    stored_file = await storage.store_file(
-        db,
-        file.file,
-        content_type=file.content_type or "application/octet-stream",
-        original_filename=file.filename,
-    )
+    try:
+        stored_file = await storage.store_file(
+            db,
+            file.file,
+            content_type=file.content_type or "application/octet-stream",
+            original_filename=file.filename,
+        )
+    except FileSizeLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large") from exc
+
     db.add(stored_file)
     await db.commit()
 
@@ -95,7 +100,7 @@ def _safe_inline_types(content_type: str) -> bool:
     """Return True if the content type can be safely served inline."""
     if not content_type:
         return False
-    if content_type in ("image/svg+xml", "image/svg"):
+    if content_type.split(";")[0].strip() in ("image/svg+xml", "image/svg"):
         return False
     return content_type.startswith(("audio/", "image/", "video/"))
 
