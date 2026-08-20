@@ -6,29 +6,6 @@ name: default
 steps:
 
 ###
-### Run tests
-###
-
-- name: tests
-  image: python:3.12
-  commands:
-    - pip install -e . -r requirements-dev.txt
-    - python -m pytest --cov=songhive --cov-report=term-missing
-
-###
-### Lint
-###
-
-- name: lint
-  image: python:3.12
-  commands:
-    - pip install flake8 black isort mypy
-    - python -m flake8 songhive tests
-    - python -m black --check .
-    - python -m isort songhive tests
-    - python -m mypy songhive
-
-###
 ### Mirror the current repository state to Github
 ###
 
@@ -48,3 +25,26 @@ steps:
 
   commands:
     - . .drone/github-mirror.sh
+
+###
+### Lint
+###
+
+- name: lint
+  image: python:3.12
+  commands:
+    - pip install flake8 black isort mypy
+    - python -m flake8 songhive tests
+    - python -m black --check .
+    - python -m isort songhive tests
+    - python -m mypy songhive
+
+###
+### Run tests
+###
+
+- name: tests
+  image: python:3.12
+  commands:
+    - pip install -e . -r requirements-dev.txt
+    - python -m pytest --cov=songhive --cov-report=term-missing
