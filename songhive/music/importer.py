@@ -22,6 +22,7 @@ async def import_file(
     library_id: str,
     storage: StorageBackend,
     storage_backend: str,
+    owner_id: Optional[str] = None,
 ) -> Upload:
     """
     Import an audio file into the library.
@@ -34,13 +35,15 @@ async def import_file(
     6. Create Upload record
 
     :param storage_backend: Configured storage backend identifier (e.g. ``local`` or ``s3``).
+    :param owner_id: Optional owner to set on the created track and any newly
+        created album.  Existing albums are not mutated.
     """
     metadata = extract_metadata(file_path)
 
     artist = await _find_or_create_artist(session, metadata.artist or "Unknown Artist")
     album = None
     if metadata.album:
-        album = await _find_or_create_album(session, metadata.album, artist.id, metadata.year)
+        album = await _find_or_create_album(session, metadata.album, artist.id, metadata.year, owner_id=owner_id)
 
     track = Track(
         title=metadata.title or file_path.stem,
@@ -50,6 +53,7 @@ async def import_file(
         disc_number=metadata.disc_number,
         duration=metadata.duration,
         genre=metadata.genre,
+        owner_id=owner_id,
     )
     session.add(track)
     await session.flush()
@@ -92,6 +96,7 @@ async def _find_or_create_album(
     title: str,
     artist_id: str,
     year: Optional[int] = None,
+    owner_id: Optional[str] = None,
 ) -> Album:
     """Find an album by title+artist, or create one."""
     result = await session.execute(select(Album).where(Album.title == title, Album.artist_id == artist_id).limit(1))
@@ -99,7 +104,7 @@ async def _find_or_create_album(
     if album:
         return album
 
-    album = Album(title=title, artist_id=artist_id, release_year=year)
+    album = Album(title=title, artist_id=artist_id, release_year=year, owner_id=owner_id)
     session.add(album)
     await session.flush()
     return album

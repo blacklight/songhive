@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import StorageConfig
+from ..models._enums import Visibility
 from ..models.stored_file import StoredFile
 from ..storage.base import StorageBackend
 
@@ -55,12 +56,18 @@ class StorageService:
         content_type: str,
         original_filename: Optional[str] = None,
         prefix: str = "files",
+        owner_id: Optional[str] = None,
+        visibility: str = Visibility.PRIVATE.value,
     ) -> StoredFile:
         """
         Store a file in a content-addressable layout and return a ``StoredFile``.
 
         The returned instance is *uncommitted*; the caller is responsible for
         adding it to the session and flushing/committing.
+
+        ``owner_id`` and ``visibility`` only apply to newly created rows.  If
+        the content already exists, the existing ``StoredFile`` is returned
+        without modification.
         """
         tmp = tempfile.NamedTemporaryFile(delete=False)
         tmp.close()
@@ -85,6 +92,8 @@ class StorageService:
                 size=size,
                 sha256=hash_hex,
                 original_filename=original_filename,
+                owner_id=owner_id,
+                visibility=visibility,
             )
         finally:
             if await aiofiles.os.path.exists(tmp_path):

@@ -10,6 +10,7 @@ import pytest
 
 from songhive.api.deps import get_storage_service
 from songhive.config.schema import StorageConfig
+from songhive.models._enums import Visibility
 from songhive.services.storage import StorageService
 from songhive.storage import get_storage
 
@@ -86,6 +87,57 @@ async def test_store_file_dedup(storage_service, db_session):
     media_root = storage_service.config.local_path
     files = [p for p in media_root.rglob("*") if p.is_file()]
     assert len(files) == 1
+
+
+@pytest.mark.asyncio
+async def test_store_file_sets_owner_and_visibility(storage_service, db_session, regular_user):
+    """store_file records owner_id and visibility on newly created files."""
+    content = b"owned content"
+    file = io.BytesIO(content)
+
+    stored_file = await storage_service.store_file(
+        db_session,
+        file,
+        "text/plain",
+        original_filename="owned.txt",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.LOCAL.value,
+    )
+    db_session.add(stored_file)
+    await db_session.flush()
+
+    assert stored_file.owner_id == str(regular_user.id)
+    assert stored_file.visibility == Visibility.LOCAL.value
+
+
+@pytest.mark.asyncio
+async def test_store_file_dedup_preserves_existing_owner_and_visibility(storage_service, db_session, regular_user):
+    """Storing duplicate content returns the existing file without applying new owner/visibility."""
+    content = b"dedup content"
+    file1 = io.BytesIO(content)
+
+    stored_file1 = await storage_service.store_file(
+        db_session,
+        file1,
+        "text/plain",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(stored_file1)
+    await db_session.flush()
+
+    file2 = io.BytesIO(content)
+    stored_file2 = await storage_service.store_file(
+        db_session,
+        file2,
+        "text/plain",
+        owner_id="someone-else",
+        visibility=Visibility.LOCAL.value,
+    )
+
+    assert stored_file2 is stored_file1
+    assert stored_file2.owner_id == str(regular_user.id)
+    assert stored_file2.visibility == Visibility.PUBLIC.value
 
 
 @pytest.mark.asyncio
