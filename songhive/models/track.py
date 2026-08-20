@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy import Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from ._enums import Visibility
 from .base import Base
 
 
@@ -22,6 +23,16 @@ class Track(Base):
     musicbrainz_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, unique=True, index=True)
     genre: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     audio_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
+    owner_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    visibility: Mapped[str] = mapped_column(
+        String(16),
+        default=Visibility.PRIVATE.value,
+        index=True,
+    )
 
     artist = relationship("Artist", backref="tracks", lazy="selectin")
     album = relationship("Album", backref="tracks", lazy="selectin")
