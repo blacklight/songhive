@@ -13,7 +13,7 @@ websockets>=11.0
 bcrypt>=4.0
 PyJWT>=2.13.0
 authlib>=1.6.12
-python-multipart>=0.0.30
+python-multipart>=0.0.31
 
 # Tasks
 celery>=5.3
