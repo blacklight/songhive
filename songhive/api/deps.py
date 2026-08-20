@@ -68,10 +68,25 @@ async def get_current_user(
 
 
 def get_storage_service(request: Request) -> StorageService:
-    """Create a storage service for the current request."""
+    """
+    Get or create a cached StorageService, recreating it when storage config
+    changes.
+    """
     config = get_config(request)
-    backend = get_storage(config.storage)
-    return StorageService(backend, config.storage)
+    current = config.storage
+    cached = getattr(request.app.state, "storage_service", None)
+    cached_config = getattr(request.app.state, "storage_service_config", None)
+
+    # Compare against a deep copy so runtime config mutations (e.g. in tests) force a
+    # fresh backend and prevent a cached service from using stale connection state.
+    if cached is not None and cached_config == current:
+        return cached
+
+    backend = get_storage(current)
+    service = StorageService(backend, current)
+    request.app.state.storage_service = service
+    request.app.state.storage_service_config = current.model_copy(deep=True)
+    return service
 
 
 async def require_admin(current_user: User = Depends(get_current_user)):

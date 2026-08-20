@@ -17,6 +17,7 @@ from .routes import (
     artists,
     auth,
     favorites,
+    files,
     history,
     libraries,
     playlists,
@@ -53,6 +54,8 @@ def create_app(config: SonghiveConfig) -> FastAPI:
 
     # Store config in app state for dependency injection
     app.state.config = config
+    app.state.storage_service = None
+    app.state.storage_service_config = None
 
     # CORS middleware
     allow_credentials = True
@@ -84,6 +87,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(history.router, prefix=api_prefix, tags=["history"])
     app.include_router(radios.router, prefix=api_prefix, tags=["radios"])
     app.include_router(admin.router, prefix=api_prefix, tags=["admin"])
+    app.include_router(files.router, prefix=api_prefix, tags=["files"])
 
     # Federation routes (pubby)
     if config.federation.enabled:
