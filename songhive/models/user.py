@@ -23,13 +23,14 @@ class UserRole(str, Enum):
 
 
 VALID_ROLES = {r.value for r in UserRole}
+_ROLE_CHECK = f"role IN ({', '.join(repr(r) for r in VALID_ROLES)})"
 
 
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint(
-            f"role IN ({', '.join([f"'{r}'" for r in VALID_ROLES])})",
+            _ROLE_CHECK,
             name="ck_users_role",
         ),
     )

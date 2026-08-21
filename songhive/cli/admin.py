@@ -2,6 +2,7 @@
 Admin CLI commands.
 
 Usage:
+    songhive admin init-db
     songhive admin create-user --username <name> --email <email> --password <pw> [--admin | --role <role>]
     songhive admin promote-user --username <name>
     songhive admin demote-user --username <name>
@@ -16,7 +17,7 @@ import sys
 from datetime import datetime, timezone
 
 from ..config import load_config
-from ..models.base import get_session, init_db
+from ..models.base import create_all_tables, get_session, init_db
 from ..models.user import UserRole
 from ..services.auth import create_user, get_user_by_username
 from ..users import manager as user_manager
@@ -26,6 +27,9 @@ from ..users.invites import InviteError, create_invite, list_invites
 def _create_admin_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="songhive admin")
     subparsers = parser.add_subparsers(dest="command")
+
+    # init-db
+    subparsers.add_parser("init-db", help="Create database tables if they do not exist")
 
     # create-user
     create_user_parser = subparsers.add_parser("create-user", help="Create a new user")
@@ -76,6 +80,11 @@ def _parse_iso_datetime(value: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+async def _handle_init_db(*_, **__):
+    await create_all_tables()
+    print("Database tables initialized successfully")
 
 
 async def _handle_create_user(args):
@@ -191,6 +200,7 @@ def admin_main(argv=None):
     init_db(config.database.url)
 
     handlers = {
+        "init-db": _handle_init_db,
         "create-user": _handle_create_user,
         "promote-user": _handle_promote_user,
         "demote-user": _handle_demote_user,

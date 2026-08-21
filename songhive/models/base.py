@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import AsyncGenerator, Optional
 
 from sqlalchemy import DateTime, func
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -52,6 +52,31 @@ def init_db(database_url: Optional[str] = None, *, engine=None, force: bool = Fa
         raise ValueError("Provide either database_url or engine")
 
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
+
+
+async def create_all_tables(
+    database_url: Optional[str] = None,
+    engine: Optional[AsyncEngine] = None,
+) -> None:
+    """Create all SQLAlchemy tables if they do not already exist.
+
+    Uses the global engine by default, or a provided engine/database URL.
+    When a database URL is provided, the engine is disposed after use.
+    """
+    if engine is None and database_url is None:
+        if _engine is None:
+            raise RuntimeError("Database not initialized. Call init_db() first or provide a database URL/engine.")
+        engine = _engine
+    elif engine is None:
+        if database_url is None:
+            raise ValueError("Provide either database_url or engine")
+        engine = create_async_engine(database_url)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    if database_url is not None:
+        await engine.dispose()
 
 
 @asynccontextmanager

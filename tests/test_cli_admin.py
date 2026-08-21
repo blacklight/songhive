@@ -486,3 +486,18 @@ def test_admin_main_approve_user(tmp_path, monkeypatch):
     user = asyncio.run(_get_user_by_username(db_url, "pending"))
     assert user is not None
     assert user.is_active is True
+
+
+def test_admin_main_init_db(tmp_path, monkeypatch, capsys):
+    """Test the full init-db CLI command."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'init.db'}"
+    monkeypatch.setattr(
+        cli_admin,
+        "load_config",
+        lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
+    )
+
+    cli_admin.admin_main(["init-db"])
+
+    captured = capsys.readouterr()
+    assert "Database tables initialized successfully" in captured.out
