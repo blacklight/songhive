@@ -26,6 +26,7 @@ boto3>=1.28
 
 # Audio
 mutagen>=1.47
+musicbrainzngs>=0.7.1
 
 # Federation
 pubby>=0.2.10

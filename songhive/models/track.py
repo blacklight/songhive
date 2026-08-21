@@ -1,10 +1,14 @@
 """
 Track model.
+
+``source`` documents where the track came from. Allowed values are:
+``"upload"`` (user upload), ``"import"`` (bulk/directory import), and
+``"federation"`` ( ActivityPub / federation).
 """
 
 from typing import Optional
 
-from sqlalchemy import Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._enums import Visibility
@@ -23,6 +27,8 @@ class Track(Base):
     musicbrainz_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, unique=True, index=True)
     genre: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     audio_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
+    raw_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
     owner_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,

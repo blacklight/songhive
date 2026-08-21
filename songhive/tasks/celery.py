@@ -72,6 +72,7 @@ def make_celery(
             "songhive.tasks.transcoding.*": {"queue": "transcoding"},
             "songhive.tasks.email.*": {"queue": "email"},
             "songhive.tasks.storage.*": {"queue": "storage"},
+            "songhive.tasks.musicbrainz.*": {"queue": "musicbrainz"},
         },
         beat_schedule={
             "cleanup-orphaned-files": {

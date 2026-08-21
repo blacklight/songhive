@@ -11,6 +11,12 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
+def _app_short_version() -> str:
+    from ..version import __version__
+
+    return ".".join(__version__.split("+", maxsplit=1)[0].split(".")[:2])
+
+
 class DatabaseConfig(BaseSettings):
     """Database configuration."""
 
@@ -215,6 +221,53 @@ class ServerConfig(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
 
 
+class MusicBrainzConfig(BaseSettings):
+    """MusicBrainz enrichment configuration."""
+
+    enabled: bool = Field(default=False, description="Enable MusicBrainz enrichment")
+    user_agent: str = Field(
+        default=f"Songhive/{_app_short_version()} ( https://git.fabiomanganiello.com/songhive )",
+        description="User-Agent sent to MusicBrainz",
+    )
+    rate_limit_per_second: float = Field(
+        default=1.0,
+        description="Maximum MusicBrainz requests per second",
+    )
+    fetch_cover_art: bool = Field(
+        default=True,
+        description="Fetch cover art from the Cover Art Archive",
+    )
+
+
+class ImportConfig(BaseSettings):
+    """Bulk/directory import configuration."""
+
+    scan_roots: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Allowed filesystem roots for directory scans. "
+            "A comma-separated string or JSON list is also accepted from environment variables."
+        ),
+    )
+    bulk_import_sync_threshold: int = Field(
+        default=20,
+        description="Maximum number of files handled synchronously in a bulk upload",
+    )
+
+    @field_validator("scan_roots", mode="before")
+    @classmethod
+    def _parse_scan_roots(cls, value):
+        if isinstance(value, str):
+            return ServerConfig._split_cors_origins(value)
+        if isinstance(value, list):
+            return [
+                item
+                for sub in (ServerConfig._split_cors_origins(v) if isinstance(v, str) else [v] for v in value)
+                for item in sub
+            ]
+        return value
+
+
 def _require_auth_secret_key() -> AuthConfig:
     """Raise a clear error when no JWT secret key has been configured."""
     raise ValueError(
@@ -248,3 +301,5 @@ class SonghiveConfig(BaseSettings):
     federation: FederationConfig = Field(default_factory=FederationConfig)
     auth: AuthConfig = Field(default_factory=_require_auth_secret_key)
     email: EmailConfig = Field(default_factory=EmailConfig)
+    musicbrainz: MusicBrainzConfig = Field(default_factory=MusicBrainzConfig)
+    imports: ImportConfig = Field(default_factory=ImportConfig)

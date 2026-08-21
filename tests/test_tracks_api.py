@@ -101,3 +101,31 @@ def test_get_private_track_with_share_token(client, sample_tracks, regular_user,
 
     no_token = client.get(f"/api/v1/tracks/{track.id}")
     assert no_token.status_code == 403
+
+
+def test_update_track(client, sample_tracks, regular_user, auth_headers):
+    """Owners can partially update a track."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"title": "Updated Title", "genre": "Rock"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["title"] == "Updated Title"
+    assert data["genre"] == "Rock"
+
+
+def test_delete_track(client, sample_tracks, regular_user, auth_headers):
+    """Owners can delete a track."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    response = client.delete(f"/api/v1/tracks/{track.id}", headers=headers)
+    assert response.status_code == 204
+
+    get_response = client.get(f"/api/v1/tracks/{track.id}", headers=headers)
+    assert get_response.status_code == 404

@@ -56,6 +56,10 @@ def config(tmp_path):
         database={"url": f"sqlite+aiosqlite:///{tmp_path / 'songhive.db'}"},
         federation={"enabled": False},
         auth={"secret_key": "a" * 32},
+        storage={
+            "local_path": str(tmp_path / "media"),
+            "backend": "local",
+        },
     )
 
 
