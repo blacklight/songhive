@@ -101,3 +101,32 @@ def test_get_private_album_with_share_token(client, sample_albums, regular_user,
 
     no_token = client.get(f"/api/v1/albums/{album.id}")
     assert no_token.status_code == 403
+
+
+def test_update_album(client, sample_albums, regular_user, auth_headers):
+    """Owners can partially update an album."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"title": "Updated Album", "release_year": 2024, "visibility": "public"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["title"] == "Updated Album"
+    assert data["release_year"] == 2024
+    assert data["visibility"] == "public"
+
+
+def test_delete_album(client, sample_albums, regular_user, auth_headers):
+    """Owners can delete an album."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    response = client.delete(f"/api/v1/albums/{album.id}", headers=headers)
+    assert response.status_code == 204
+
+    get_response = client.get(f"/api/v1/albums/{album.id}", headers=headers)
+    assert get_response.status_code == 404

@@ -1,5 +1,8 @@
 """
-Library model - a collection of uploads owned by a user.
+Library model - a collection of tracks owned by a user.
+
+Visibility uses the standard ``Visibility`` enum. The prompt's
+"followers-only" semantics map to ``Visibility.LOCAL``.
 """
 
 from typing import Optional
@@ -24,3 +27,10 @@ class Library(Base):
     )
 
     owner = relationship("User", backref="libraries", lazy="selectin")
+    tracks = relationship(
+        "Track",
+        secondary="library_tracks",
+        backref="libraries",
+        lazy="selectin",
+        viewonly=True,
+    )

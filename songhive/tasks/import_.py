@@ -5,62 +5,145 @@ Import tasks: process uploaded audio files in the background.
 import asyncio
 import logging
 from pathlib import Path
+from typing import BinaryIO, Optional
 
 from .celery import celery_app
 
 logger = logging.getLogger(__name__)
 
+_AUDIO_EXTENSIONS = {".mp3", ".flac", ".ogg", ".opus", ".m4a", ".wav"}
+
 
 @celery_app.task(name="songhive.tasks.import_.process_upload")
-def process_upload(upload_id: str, file_path: str, library_id: str) -> str:
+def process_upload(
+    library_id: str,
+    owner_id: Optional[str] = None,
+    *,
+    stored_file_id: Optional[str] = None,
+    file_path: Optional[str] = None,
+    filename: Optional[str] = None,
+    visibility: str = "private",
+    force: bool = False,
+    enrich: bool = True,
+    source: str = "upload",
+) -> str:
     """
-    Process an uploaded audio file:
-    1. Extract metadata
-    2. Create/update library entries
-    3. Generate thumbnails if album art is embedded
+    Process a stored audio file or a filesystem path and import it into a library.
 
-    The library's owner is propagated to the created track and any newly
-    created album.  If the library cannot be found, the track and album are
-    created without an owner and fall back to the ownerless (local-equivalent)
-    access rule.
+    Exactly one of ``stored_file_id`` or ``file_path`` must be provided.
 
-    :returns: The ID of the created Upload record.
+    :returns: The ID of the created Upload record, or the existing track ID on
+        duplicate detection (when ``force`` is ``False``).
     """
+    if (stored_file_id is None) == (file_path is None):
+        raise ValueError("Provide exactly one of stored_file_id or file_path")
+
     from ..config import load_config
     from ..models.base import get_session, init_db
-    from ..music.importer import import_file
+    from ..models.stored_file import StoredFile
+    from ..services.import_ import DuplicateTrackError, import_audio_file
+    from ..services.storage import StorageService
     from ..storage import get_storage
-
-    logger.info("Processing upload %s for library %s", upload_id, library_id)
+    from ..ws.events import EventWebSocket
 
     config = load_config([])
     init_db(config.database.url)
 
     storage = get_storage(config.storage)
+    storage_service = StorageService(storage, config.storage)
 
     async def _run() -> str:
         async with get_session() as session:
-            from ..models.library import Library
+            file: Optional[BinaryIO] = None
+            actual_filename = filename or "audio.mp3"
 
-            library = await session.get(Library, library_id)
-            owner_id = library.owner_id if library is not None else None
+            if stored_file_id:
+                stored_file = await session.get(StoredFile, stored_file_id)
+                if stored_file is None:
+                    raise ValueError(f"StoredFile {stored_file_id} not found")
+                actual_filename = filename or stored_file.original_filename or "audio.mp3"
+                local_path = await storage_service.backend.retrieve(stored_file.storage_path)
+                if local_path is None:
+                    raise ValueError(f"Could not retrieve stored file: {stored_file.storage_path}")
+                file = open(local_path, "rb")
+            else:
+                assert file_path is not None
+                path = Path(file_path)
+                actual_filename = filename or path.name
+                file = open(path, "rb")
 
-            upload = await import_file(
-                session,
-                Path(file_path),
-                library_id,
-                storage,
-                config.storage.backend,
-                owner_id=owner_id,
+            try:
+                result = await import_audio_file(
+                    session,
+                    storage_service=storage_service,
+                    file=file,
+                    filename=actual_filename,
+                    library_id=library_id,
+                    owner_id=owner_id,
+                    visibility=visibility,
+                    force=force,
+                    enrich=enrich,
+                    source=source,
+                )
+            finally:
+                if file is not None:
+                    file.close()
+
+            EventWebSocket.broadcast(
+                "import.completed",
+                {
+                    "library_id": library_id,
+                    "track_id": str(result.track.id),
+                    "upload_id": str(result.upload.id),
+                },
             )
-            return str(upload.id)
+            return str(result.upload.id)
 
-    return asyncio.run(_run())
+    try:
+        return asyncio.run(_run())
+    except DuplicateTrackError as exc:
+        logger.info("Duplicate upload for library %s: %s", library_id, exc.existing_track_id)
+        EventWebSocket.broadcast(
+            "import.duplicate",
+            {
+                "library_id": library_id,
+                "existing_track_id": exc.existing_track_id,
+            },
+        )
+        return exc.existing_track_id
 
 
-@celery_app.task(name="songhive.tasks.import_.fetch_musicbrainz_metadata")
-def fetch_musicbrainz_metadata(track_id: str):
+@celery_app.task(name="songhive.tasks.import_.scan_directory")
+def scan_directory(
+    path: str,
+    library_id: str,
+    owner_id: Optional[str] = None,
+) -> int:
     """
-    Fetch additional metadata from MusicBrainz for a track.
+    Recursively scan ``path`` for audio files and enqueue an import per file.
+
+    :returns: The number of files enqueued.
     """
-    # TODO: implement MusicBrainz lookup
+    from ..config import load_config
+
+    config = load_config([])
+
+    resolved = Path(path).expanduser().resolve()
+    allowed_roots = [Path(r).expanduser().resolve() for r in config.imports.scan_roots]
+    if not allowed_roots:
+        raise ValueError("directory scanning is not configured")
+    if not any(resolved.is_relative_to(root) for root in allowed_roots):
+        raise ValueError(f"Path {resolved} is outside configured scan roots")
+
+    count = 0
+    for file_path in resolved.rglob("*"):
+        if file_path.is_file() and file_path.suffix.lower() in _AUDIO_EXTENSIONS:
+            process_upload.delay(  # type: ignore
+                library_id,
+                owner_id,
+                file_path=str(file_path),
+                source="import",
+            )
+            count += 1
+
+    return count

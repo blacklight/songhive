@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models._enums import Visibility
 from ..models.album import Album
+from ..models.artist import Artist
 from ..models.library import Library
 from ..models.playlist import Playlist
 from ..models.radio import Radio
@@ -37,6 +38,7 @@ class _ItemType(NamedTuple):
 _ITEM_REGISTRY: Dict[str, _ItemType] = {
     "track": _ItemType(Track, "track_id", "tracks"),
     "album": _ItemType(Album, "album_id", "albums"),
+    "artist": _ItemType(Artist, "artist_id", "artists"),
     "playlist": _ItemType(Playlist, "playlist_id", "playlists"),
     "library": _ItemType(Library, "library_id", "libraries"),
     "radio": _ItemType(Radio, "radio_id", "radios"),

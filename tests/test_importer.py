@@ -40,7 +40,7 @@ async def test_import_file_sets_owner_on_track_and_new_album(
 ):
     """import_file sets owner_id on the created track and a new album."""
     monkeypatch.setattr(
-        "songhive.music.importer.extract_metadata",
+        "songhive.services.import_.extract_metadata",
         lambda _: fake_metadata(),
     )
 
@@ -76,7 +76,7 @@ async def test_import_file_does_not_overwrite_existing_album_owner(
 ):
     """import_file does not change the owner of an existing album."""
     monkeypatch.setattr(
-        "songhive.music.importer.extract_metadata",
+        "songhive.services.import_.extract_metadata",
         lambda _: fake_metadata(album="Shared Album"),
     )
 
@@ -120,7 +120,7 @@ async def test_import_file_defaults_to_ownerless(
 ):
     """import_file without an owner_id creates ownerless tracks and albums."""
     monkeypatch.setattr(
-        "songhive.music.importer.extract_metadata",
+        "songhive.services.import_.extract_metadata",
         lambda _: fake_metadata(),
     )
 
