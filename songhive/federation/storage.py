@@ -41,14 +41,14 @@ def get_sync_database_url(database_url: str) -> str:
         "postgresql+psycopg2",
         "postgresql+psycopg",
     ):
-        return str(url)
+        return url.render_as_string(hide_password=False)
     else:
         raise ValueError(
             f"Unsupported database URL for pubby storage: {database_url}. "
             "Only sqlite+aiosqlite and postgresql+asyncpg are currently supported."
         )
 
-    return str(url)
+    return url.render_as_string(hide_password=False)
 
 
 def create_activitypub_storage(database_url: str):
