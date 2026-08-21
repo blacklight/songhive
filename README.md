@@ -38,100 +38,164 @@ federating with other instances (including Mastodon) via ActivityPub.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
 
-## Quick Start
+## Quickstart
 
-### Requirements
+Songhive can be run either as a complete Docker stack or installed locally with
+`pip`.
+
+### With Docker (recommended)
+
+The Docker Compose setup builds the frontend and backend images, starts
+PostgreSQL and Redis, and wires everything together behind an Nginx reverse
+proxy. The `songhive`, `worker`, `postgres` and `redis` services all run as the
+same non-root UID/GID as the host user, so the files in `./volumes` are owned by
+you and are easy to access from the host.
+
+Prerequisites:
+
+- Docker and Docker Compose
+- git
+
+```bash
+# Clone the repository
+git clone https://git.fabiomanganiello.com/songhive
+# Or from GitHub: git clone https://github.com/blacklight/songhive
+cd songhive
+
+# Set the UID/GID to match the host user (the same value is used by all
+# rootless services and by the setup step that fixes volume permissions).
+export PUID=$(id -u)
+export PGID=$(id -g)
+
+# Build and start all services
+docker compose up -d --build
+
+# Create the first admin user
+docker compose exec songhive songhive admin create-user \
+    --username admin \
+    --email admin@example.com \
+    --password secret \
+    --admin
+```
+
+Then open:
+
+- Web UI: http://localhost/
+- Swagger UI: http://localhost/swagger-ui/
+- OpenAPI spec: http://localhost/openapi.json
+
+Stop the stack with `docker compose down`.
+
+The Docker entrypoint initializes the database tables and persists a JWT signing
+secret in `volumes/data/secret_key`, so no manual database setup is required. A
+one-off `setup` container creates and `chown`s the `./volumes` directories to
+`$PUID:$PGID` before the main services start. If you prefer to prepare the
+volumes yourself, you can also run `PUID=$(id -u) PGID=$(id -g) ./scripts/setup-volumes.sh`.
+
+### With pip (local)
+
+This path is useful for local development or running on an existing Python host.
+
+Prerequisites:
 
 - Python >= 3.10
 - PostgreSQL
 - Redis
-- ffmpeg (for transcoding)
-
-### Installation
+- ffmpeg
+- Node.js and npm (optional, for the web UI)
 
 ```bash
 # Clone the repository
 git clone https://git.fabiomanganiello.com/songhive.git
-# Or from GitHub mirror:
-# git clone https://github.com/blacklight/songhive.git
 cd songhive
 
-# Install Python dependencies
+# Optional: create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install the package
 pip install -e .
 
-# Install dev dependencies
-pip install -r requirements-dev.txt
+# Optional: build the web UI (outputs to songhive/static/)
+cd frontend
+npm install
+npm run build
+cd ..
 ```
 
-### Configuration
-
-Configuration is loaded from (in priority order):
-
-1. Environment variables (prefixed `SONGHIVE_`)
-2. CLI arguments
-3. `config.toml` file
-
-Create a `config.toml`:
-
-```toml
-[server]
-host = "0.0.0.0"
-port = 8000
-cors_origins = ["*"]
-
-[database]
-url = "postgresql+asyncpg://songhive:songhive@localhost:5432/songhive"
-
-[redis]
-url = "redis://localhost:6379/0"
-
-[federation]
-enabled = true
-instance_domain = "music.example.com"
-instance_name = "My Music Server"
-
-[auth]
-registration_mode = "open"
-require_email_verification = false
-secret_key = "your-secret-key-here"
-access_token_expiry_minutes = 15
-refresh_token_expiry_days = 30
-
-[email]
-# Uncomment and configure to enable outbound email.
-# smtp_host = "smtp.example.com"
-# smtp_port = 587
-# smtp_username = ""
-# smtp_password = ""
-# smtp_tls = true
-# from_address = "songhive@example.com"
-
-[storage]
-backend = "local"
-local_path = "/var/lib/songhive/media"
-```
-
-Or see the [full configuration example](./config.toml.example).
-
-CORS origins are configured with `server.cors_origins`. In production, replace the
-`["*"]` wildcard with a list of trusted frontend origins, set the
-`SONGHIVE_SERVER__CORS_ORIGINS` environment variable, or pass `--cors-origins` on
-the command line.
-
-### Running
+Create a database and user in PostgreSQL (adjust to match your setup):
 
 ```bash
-# Start the server
-songhive
-
-# Or with CLI options
-songhive --port 9000 --debug
-
-# Admin commands
-songhive admin create-user --username admin --email admin@example.com --password secret --admin
+sudo -u postgres psql <<'SQL'
+CREATE USER songhive WITH PASSWORD 'songhive';
+CREATE DATABASE songhive OWNER songhive;
+SQL
 ```
 
-### Development
+Copy the example configuration file and edit it:
+
+```bash
+cp config.toml.example config.toml
+```
+
+Set at least the following values in `config.toml`:
+
+```toml
+[auth]
+secret_key = "..."  # Generate with: python -c "import secrets; print(secrets.token_urlsafe(64))"
+
+[storage]
+local_path = "/path/to/writable/media"  # e.g. ./data/media
+
+[server]
+cors_origins = ["*"]  # Replace with your frontend origin(s) in production
+
+[federation]
+enabled = false  # Set a real instance_domain to enable federation
+```
+
+Create the storage directory:
+
+```bash
+mkdir -p /path/to/writable/media
+```
+
+Initialize the database tables (one-time):
+
+```bash
+songhive admin init-db
+```
+
+Start the Celery worker in a second terminal:
+
+```bash
+celery -A songhive.tasks worker -B -l info
+```
+
+Start the Songhive server:
+
+```bash
+songhive
+```
+
+Create the first admin user in another terminal:
+
+```bash
+songhive admin create-user \
+    --username admin \
+    --email admin@example.com \
+    --password secret \
+    --admin
+```
+
+The API is available at http://localhost:8000/api/v1/ and the interactive API
+docs (Swagger) at http://localhost:8000/docs.
+
+For UI development, run `npm run dev` from the `frontend/` directory instead of
+`npm run build`. If you use the Vite dev server (http://localhost:5173 by
+default), add it to `server.cors_origins`.
+
+## Development
 
 ```bash
 # Run tests
