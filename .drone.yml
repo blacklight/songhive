@@ -63,4 +63,4 @@ steps:
       from_secret: codacy_project_token
   commands:
     - curl -fsSL https://coverage.codacy.com/get.sh -o /tmp/codacy-coverage.sh
-    - bash /tmp/codacy-coverage.sh report -r coverage.xml --commit-uuid "$DRONE_COMMIT_SHA"
+    - bash /tmp/codacy-coverage.sh report -r coverage.xml
