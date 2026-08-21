@@ -4,7 +4,8 @@ FastAPI dependency injection helpers.
 
 from typing import AsyncGenerator, Optional
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,23 @@ from ..services.auth import get_user_by_id
 from ..services.storage import StorageService
 from ..storage import get_storage
 from .middleware.auth import decode_access_token, extract_token
+
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="BearerAuth",
+    bearerFormat="JWT",
+    description="JWT access token obtained from /api/v1/auth/login or /api/v1/auth/refresh",
+)
+
+
+def _token_from_credentials_or_request(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials],
+) -> Optional[str]:
+    """Extract the bearer token from resolved credentials or the request header."""
+    if isinstance(credentials, HTTPAuthorizationCredentials):
+        return credentials.credentials
+    return extract_token(request)
 
 
 def get_config(request: Request) -> SonghiveConfig:
@@ -36,9 +54,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def _get_current_user(request: Request, db: AsyncSession) -> Optional[User]:
+async def _get_current_user(
+    request: Request,
+    db: AsyncSession,
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+) -> Optional[User]:
     """Extract and validate the current user, returning ``None`` on any failure."""
-    token = extract_token(request)
+    token = _token_from_credentials_or_request(request, credentials)
     if not token:
         return None
 
@@ -57,6 +79,7 @@ async def _get_current_user(request: Request, db: AsyncSession) -> Optional[User
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
 ) -> User:
     """
     Extract and validate the current user from the request.
@@ -64,7 +87,7 @@ async def get_current_user(
     Returns the User model instance or raises 401 for missing, invalid,
     inactive, or deleted users.
     """
-    user = await _get_current_user(request, db)
+    user = await _get_current_user(request, db, credentials)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -77,9 +100,10 @@ async def get_current_user(
 async def get_current_user_optional(
     request: Request,
     db: AsyncSession = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
 ) -> Optional[User]:
     """Extract and validate the current user, returning ``None`` when unauthenticated."""
-    return await _get_current_user(request, db)
+    return await _get_current_user(request, db, credentials)
 
 
 def _get_share_token(request: Request) -> Optional[str]:
