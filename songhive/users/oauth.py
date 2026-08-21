@@ -471,6 +471,7 @@ async def create_authorization_code(
     response_type: str,
     client_id: str,
     redirect_uri: str,
+    *,
     code_challenge: Optional[str],
     code_challenge_method: str = "S256",
     scope: Optional[str] = None,
@@ -758,6 +759,7 @@ async def create_token(
     grant_type: str,
     client_id: Optional[str],
     client_secret: Optional[str],
+    *,
     code: Optional[str] = None,
     redirect_uri: Optional[str] = None,
     code_verifier: Optional[str] = None,
@@ -797,6 +799,28 @@ async def create_token(
     )
 
 
+async def _revoke_token_by_client_id(
+    session: AsyncSession,
+    redis: Redis,
+    token: str,
+    client_id: str,
+    *,
+    token_type_hint: Optional[str] = None,
+    client_secret: Optional[str] = None,
+) -> None:
+    try:
+        client = await _authenticate_client(session, client_id, client_secret)
+    except OAuth2ProviderError:
+        return
+    data = await _get_oauth_token(redis, token, token_type_hint)
+    if data is not None and data.get("client_id") == client.client_id:
+        token_type = data.get("token_type")
+        if token_type == "access_token":
+            await redis.delete(_access_token_key(token))
+        elif token_type == "refresh_token":
+            await redis.delete(_refresh_token_key(token))
+
+
 async def revoke_token(
     session: AsyncSession,
     redis: Redis,
@@ -815,18 +839,14 @@ async def revoke_token(
         return
 
     if client_id:
-        try:
-            client = await _authenticate_client(session, client_id, client_secret)
-        except OAuth2ProviderError:
-            return
-        data = await _get_oauth_token(redis, token, token_type_hint)
-        if data is not None and data.get("client_id") == client.client_id:
-            token_type = data.get("token_type")
-            if token_type == "access_token":
-                await redis.delete(_access_token_key(token))
-            elif token_type == "refresh_token":
-                await redis.delete(_refresh_token_key(token))
-        # If the token does not belong to the client, succeed silently.
+        await _revoke_token_by_client_id(
+            session,
+            redis,
+            token=token,
+            token_type_hint=token_type_hint,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
         return
 
     data = await _get_oauth_token(redis, token, token_type_hint)

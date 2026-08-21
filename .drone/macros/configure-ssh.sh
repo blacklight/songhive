@@ -25,7 +25,7 @@ if [ -z "$(which ssh)" ]; then
 fi
 
 mkdir -p ~/.ssh
-echo $SSH_PUBKEY > ~/.ssh/id_rsa.pub
+echo "$SSH_PUBKEY" > ~/.ssh/id_rsa.pub
 
 cat <<EOF > ~/.ssh/id_rsa
 $SSH_PRIVKEY

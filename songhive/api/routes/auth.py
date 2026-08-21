@@ -408,6 +408,7 @@ async def _oauth_authorize(
     response_type: str,
     client_id: str,
     redirect_uri: str,
+    *,
     code_challenge: Optional[str],
     code_challenge_method: str,
     scope: Optional[str],

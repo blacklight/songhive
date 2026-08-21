@@ -32,7 +32,6 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
     def on_message(self, message):
         """Handle incoming WebSocket messages."""
         # TODO: handle client messages (e.g., subscribe to specific events)
-        pass
 
     def on_close(self):
         """Handle WebSocket connection close."""

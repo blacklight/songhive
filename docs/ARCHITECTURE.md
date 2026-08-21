@@ -307,5 +307,6 @@ REST API under `/api/v1/`:
 ```
 
 Compatibility layers:
+
 - `/api/subsonic/` — Subsonic API compatibility
 - ActivityPub endpoints via pubby (`.well-known/webfinger`, actor, inbox, outbox)

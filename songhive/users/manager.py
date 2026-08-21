@@ -202,7 +202,8 @@ async def deactivate_user(session: AsyncSession, user: User) -> None:
 
 
 async def update_profile(session: AsyncSession, user: User, updates: Dict[str, Any]) -> User:
-    """Update a user's profile and replace their links if supplied.
+    """
+    Update a user's profile and replace their links if supplied.
 
     ``updates`` should only contain keys the caller explicitly intends to
     change. A missing key leaves the corresponding field untouched. A value of
