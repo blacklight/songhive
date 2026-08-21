@@ -110,3 +110,48 @@ frontend/          # Vue.js 3 + TypeScript SPA
 tests/             # pytest test suite
 docs/              # Architecture & feature documentation
 ```
+
+## Docker
+
+- Build and start all services (set `PUID`/`PGID` to the host user so
+  containers and volumes are owned by the same UID/GID):
+
+  ```bash
+  export PUID=$(id -u)
+  export PGID=$(id -g)
+  docker compose up -d --build
+  ```
+
+- Stop all services:
+
+  ```bash
+  docker compose down
+  ```
+
+- Prepare volume directories manually (otherwise the `setup` service does it
+  automatically at startup):
+
+  ```bash
+  PUID=$(id -u) PGID=$(id -g) ./scripts/setup-volumes.sh
+  ```
+
+- Restart after source changes:
+
+  ```bash
+  docker compose up -d --build songhive worker
+  ```
+
+- View logs:
+
+  ```bash
+  docker compose logs -f
+  ```
+
+- The stack exposes:
+  - Web UI and API: http://localhost/
+  - OpenAPI JSON: http://localhost/openapi.json
+  - Swagger UI: http://localhost/swagger-ui/
+
+- The Nginx reverse proxy resolves backend service hostnames through Docker's
+  embedded DNS (`127.0.0.11`) so it keeps working when containers are
+  recreated.

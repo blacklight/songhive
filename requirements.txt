@@ -4,6 +4,7 @@ pydantic>=2.4.0
 pydantic-settings>=2.4.0
 sqlalchemy[asyncio]>=2.0
 asyncpg>=0.28
+psycopg2-binary>=2.9
 uvicorn>=0.23
 tornado>=6.5.7
 a2wsgi>=1.7

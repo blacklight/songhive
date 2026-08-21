@@ -1,0 +1,44 @@
+# Git and local environment
+.git
+.gitignore
+.venv
+venv/
+env/
+
+# Python cache and artifacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Songhive runtime data and config
+config.toml
+.env
+.envrc
+*.db
+*.sqlite
+songhive/static/
+
+# IDE and CI
+.idea/
+.vscode/
+.drone/
+.benchmarks/
+
+# Docs build
+docs/_build/
+
+# Volumes
+volumes/

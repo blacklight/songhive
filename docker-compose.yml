@@ -1,0 +1,131 @@
+services:
+  setup:
+    image: alpine:latest
+    container_name: songhive-setup
+    user: "0:0"
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    volumes:
+      - ./volumes:/volumes
+      - ./scripts/setup-volumes.sh:/setup-volumes.sh:ro
+    command:
+      - /bin/sh
+      - /setup-volumes.sh
+      - /volumes
+    restart: "no"
+
+  songhive:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_ID: ${PUID:-1000}
+        GROUP_ID: ${PGID:-1000}
+    container_name: songhive-app
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment: &songhive-env
+      SONGHIVE_DATABASE__URL: postgresql+asyncpg://songhive:songhive@postgres:5432/songhive
+      SONGHIVE_REDIS__URL: redis://redis:6379/0
+      SONGHIVE_CELERY__BROKER_URL: redis://redis:6379/1
+      SONGHIVE_CELERY__RESULT_BACKEND: redis://redis:6379/2
+      SONGHIVE_STORAGE__BACKEND: local
+      SONGHIVE_STORAGE__LOCAL_PATH: /data/media
+      SONGHIVE_FEDERATION__ENABLED: "true"
+      SONGHIVE_FEDERATION__INSTANCE_DOMAIN: ${SONGHIVE_FEDERATION__INSTANCE_DOMAIN:-localhost}
+      SONGHIVE_FEDERATION__INSTANCE_NAME: ${SONGHIVE_FEDERATION__INSTANCE_NAME:-Songhive}
+      SONGHIVE_FEDERATION__INSTANCE_DESCRIPTION: ${SONGHIVE_FEDERATION__INSTANCE_DESCRIPTION:-A federated music sharing service}
+      SONGHIVE_FEDERATION__PRIVATE_KEY_PATH: /data/federation/actor.pem
+      SONGHIVE_AUTH__REGISTRATION_MODE: ${SONGHIVE_AUTH__REGISTRATION_MODE:-open}
+      SONGHIVE_SERVER__HOST: 0.0.0.0
+      SONGHIVE_SERVER__PORT: "8000"
+      SONGHIVE_SERVER__CORS_ORIGINS: '["*"]'
+      HOME: /home/songhive
+    volumes:
+      - ./volumes/config:/etc/songhive:ro
+      - ./volumes/data:/data
+      - ./volumes/static:/var/www/songhive
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_ID: ${PUID:-1000}
+        GROUP_ID: ${PGID:-1000}
+    container_name: songhive-worker
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      <<: *songhive-env
+    command: celery -A songhive.tasks worker -B -l info -s /data/celerybeat-schedule
+    volumes:
+      - ./volumes/config:/etc/songhive
+      - ./volumes/data:/data
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:stable-alpine
+    container_name: songhive-nginx
+    ports:
+      - "${SONGHIVE_HTTP_PORT:-80}:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./volumes/static:/usr/share/nginx/html:ro
+    depends_on:
+      - songhive
+      - swagger-ui
+    restart: unless-stopped
+
+  swagger-ui:
+    image: swaggerapi/swagger-ui:v5.17.14
+    container_name: songhive-swagger-ui
+    environment:
+      URL: "../openapi.json"
+      BASE_URL: /swagger-ui
+      PERSIST_AUTHORIZATION: "true"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: songhive-postgres
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      POSTGRES_USER: songhive
+      POSTGRES_PASSWORD: songhive
+      POSTGRES_DB: songhive
+    volumes:
+      - ./volumes/db:/var/lib/postgresql/data
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: songhive-redis
+    user: ${PUID:-1000}:${PGID:-1000}
+    volumes:
+      - ./volumes/redis:/data
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+networks:
+  default:
+    name: songhive

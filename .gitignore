@@ -226,3 +226,6 @@ frontend/dist/
 
 # Temporary documentation and prompts
 docs/features
+
+# Docker volumes
+volumes/

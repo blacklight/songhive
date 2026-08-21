@@ -13,8 +13,10 @@ Usage:
 
 import argparse
 import asyncio
+import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 from ..config import load_config
 from ..models.base import create_all_tables, get_session, init_db
@@ -194,6 +196,14 @@ def admin_main(argv=None):
     if not args.command:
         parser.print_help()
         sys.exit(1)
+
+    # If no auth secret is configured, try to load the one persisted by the
+    # Docker entrypoint so that `docker compose exec ... songhive admin ...`
+    # works without an explicit SONGHIVE_AUTH__SECRET_KEY variable.
+    if not os.environ.get("SONGHIVE_AUTH__SECRET_KEY"):
+        secret_file = Path(os.environ.get("SONGHIVE_SECRET_FILE", "/data/secret_key"))
+        if secret_file.exists():
+            os.environ["SONGHIVE_AUTH__SECRET_KEY"] = secret_file.read_text().strip()
 
     # Load config and init DB
     config = load_config([])
