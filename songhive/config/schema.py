@@ -6,9 +6,21 @@ import json
 from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
+from urllib.parse import urlparse, urlunparse
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_serializer, field_validator
 from pydantic_settings import BaseSettings
+
+
+def _redact_database_url(url: str) -> str:
+    """Return a copy of a database URL with the password component redacted."""
+    parsed = urlparse(url)
+    if not parsed.password:
+        return url
+    netloc = f"{parsed.username or ''}:***@{parsed.hostname or ''}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
 
 
 def _app_short_version() -> str:
@@ -26,6 +38,17 @@ class DatabaseConfig(BaseSettings):
     )
     pool_size: int = Field(default=5, description="Connection pool size")
     max_overflow: int = Field(default=10, description="Max overflow connections")
+
+    @field_serializer("url", when_used="always")
+    def _redact_url(self, value: str, *_, **__) -> str:
+        return _redact_database_url(value)
+
+    def __repr_args__(self):
+        for name, value in super().__repr_args__():
+            if name == "url" and isinstance(value, str):
+                yield name, _redact_database_url(value)
+            else:
+                yield name, value
 
 
 class RedisConfig(BaseSettings):
@@ -68,7 +91,12 @@ class StorageConfig(BaseSettings):
     s3_endpoint: Optional[str] = Field(default=None, description="S3 endpoint URL")
     s3_bucket: Optional[str] = Field(default=None, description="S3 bucket name")
     s3_access_key: Optional[str] = Field(default=None, description="S3 access key")
-    s3_secret_key: Optional[str] = Field(default=None, description="S3 secret key")
+    s3_secret_key: Optional[str] = Field(
+        default=None,
+        description="S3 secret key",
+        repr=False,
+        exclude=True,
+    )
     s3_region: Optional[str] = Field(default=None, description="S3 region")
     cdn_prefix: Optional[str] = Field(default=None, description="CDN URL prefix for serving files")
     max_upload_size: Optional[int] = Field(
@@ -149,6 +177,8 @@ class AuthConfig(BaseSettings):
     )
     secret_key: str = Field(
         description="Secret key for JWT signing",
+        repr=False,
+        exclude=True,
     )
 
     @field_validator("secret_key", mode="after")
@@ -175,6 +205,7 @@ class EmailConfig(BaseSettings):
         default=None,
         description="SMTP password",
         repr=False,
+        exclude=True,
     )
     smtp_tls: bool = Field(default=True, description="Use TLS for the SMTP connection")
     from_address: Optional[str] = Field(
@@ -281,10 +312,13 @@ class SonghiveConfig(BaseSettings):
     """
     Root configuration for Songhive.
 
-    Loaded from (in priority order):
+    When built through :func:`songhive.config.loader.load_config`, sources are
+    applied in the following priority order (highest first):
+
     1. Environment variables (SONGHIVE_ prefix)
     2. CLI arguments
     3. config.toml
+    4. Field defaults
     """
 
     model_config = {

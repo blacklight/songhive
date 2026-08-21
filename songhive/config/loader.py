@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from pydantic_settings import TomlConfigSettingsSource
+
 from .schema import SonghiveConfig
 
 _CONFIG_SEARCH_PATHS = [
@@ -28,18 +30,6 @@ def _find_config_file(explicit_path: Optional[str] = None) -> Optional[Path]:
         if path.exists():
             return path
     return None
-
-
-def _load_toml(path: Path) -> Dict[str, Any]:
-    """Load a TOML file and return it as a dict."""
-    try:
-        import tomllib
-    except ImportError:
-        import tomli as tomllib  # type: ignore[no-redef]
-
-    with open(path, "rb") as f:
-        data: Dict[str, Any] = tomllib.load(f)
-        return data
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:
@@ -144,27 +134,51 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 
 def load_config(argv: Optional[list] = None) -> SonghiveConfig:
     """
-    Load configuration by merging (in order of increasing priority):
-    1. Defaults (from schema)
-    2. TOML config file
-    3. Environment variables (handled by pydantic-settings)
-    4. CLI arguments
+    Load configuration by merging (in order of decreasing priority):
+    1. Environment variables (SONGHIVE_ prefix)
+    2. CLI arguments
+    3. TOML config file
+    4. Defaults (from schema)
 
     :param argv: Optional list of CLI arguments (defaults to sys.argv[1:]).
     :returns: A fully resolved SonghiveConfig instance.
     """
     parser = _build_cli_parser()
     args = parser.parse_args(argv if argv is not None else None)
-
-    # Load TOML
     config_file = _find_config_file(args.config)
-    toml_data: Dict[str, Any] = {}
-    if config_file:
-        toml_data = _load_toml(config_file)
-
-    # Apply CLI overrides on top of TOML
     cli_data = _cli_overrides(args)
-    merged = _deep_merge(toml_data, cli_data)
 
-    # Pydantic-settings will layer env vars on top
-    return SonghiveConfig(**merged)
+    class _SonghiveConfig(SonghiveConfig):
+        """
+        SonghiveConfig variant that loads the discovered TOML file and orders
+        sources so that environment variables > CLI > TOML > defaults.
+        """
+
+        model_config = SonghiveConfig.model_config.copy()
+        model_config["toml_file"] = str(config_file) if config_file else None
+
+        @classmethod
+        def settings_customise_sources(
+            cls,
+            settings_cls,
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        ):
+            """Order sources with env first, then CLI, then TOML, then defaults."""
+            toml_file = settings_cls.model_config.get("toml_file")
+            toml_settings = TomlConfigSettingsSource(
+                settings_cls,
+                toml_file=toml_file,
+                deep_merge=True,
+            )
+            return (
+                env_settings,
+                init_settings,
+                toml_settings,
+                dotenv_settings,
+                file_secret_settings,
+            )
+
+    return _SonghiveConfig(**cli_data)

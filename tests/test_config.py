@@ -212,3 +212,91 @@ def test_storage_config_max_upload_size():
 
     config = SonghiveConfig(storage={"max_upload_size": 104857600})
     assert config.storage.max_upload_size == 104857600
+
+
+def test_env_overrides_toml(monkeypatch, tmp_path):
+    """Test that environment variables override TOML config values."""
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text(
+        "\n".join(
+            [
+                "[server]",
+                'host = "toml.host"',
+                "port = 1111",
+                "",
+                "[email]",
+                'smtp_host = "smtp.toml"',
+            ]
+        )
+    )
+    monkeypatch.setenv("SONGHIVE_SERVER__PORT", "2222")
+    monkeypatch.setenv("SONGHIVE_EMAIL__SMTP_HOST", "smtp.env")
+    config = load_config(["--config", str(toml_file)])
+    assert config.server.port == 2222
+    assert config.server.host == "toml.host"
+    assert config.email.smtp_host == "smtp.env"
+
+
+def test_env_overrides_cli_and_toml(monkeypatch, tmp_path):
+    """Test that environment variables override both CLI arguments and TOML."""
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text(
+        "\n".join(
+            [
+                "[server]",
+                "port = 1111",
+            ]
+        )
+    )
+    monkeypatch.setenv("SONGHIVE_SERVER__PORT", "2222")
+    config = load_config(["--config", str(toml_file), "--port", "3333"])
+    assert config.server.port == 2222
+
+
+def test_cli_overrides_toml(tmp_path):
+    """Test that CLI arguments override TOML config when no env var is set."""
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text(
+        "\n".join(
+            [
+                "[server]",
+                "port = 1111",
+            ]
+        )
+    )
+    config = load_config(["--config", str(toml_file), "--port", "3333"])
+    assert config.server.port == 3333
+
+
+def test_config_repr_masks_secrets():
+    """Test that repr does not expose raw secrets or the database URL password."""
+    config = SonghiveConfig(
+        auth={"secret_key": "super-secret-key-that-is-long-enough-to-pass"},
+        storage={"s3_secret_key": "s3-secret"},
+        email={"smtp_password": "email-secret"},
+        database={"url": "postgresql://user:db-secret@localhost:5432/songhive"},
+    )
+    text = repr(config)
+    assert "super-secret-key" not in text
+    assert "s3-secret" not in text
+    assert "email-secret" not in text
+    assert ":db-secret@" not in text
+    assert "postgresql://user:***@localhost:5432/songhive" in text
+
+
+def test_config_dump_masks_secrets():
+    """Test that model_dump and model_dump_json redact secrets."""
+    config = SonghiveConfig(
+        auth={"secret_key": "super-secret-key-that-is-long-enough-to-pass"},
+        storage={"s3_secret_key": "s3-secret"},
+        email={"smtp_password": "email-secret"},
+        database={"url": "postgresql://user:db-secret@localhost:5432/songhive"},
+    )
+    data = config.model_dump()
+    json_text = config.model_dump_json()
+    for export in (data, json_text):
+        assert "super-secret-key" not in str(export)
+        assert "s3-secret" not in str(export)
+        assert "email-secret" not in str(export)
+        assert ":db-secret@" not in str(export)
+    assert data["database"]["url"] == "postgresql://user:***@localhost:5432/songhive"

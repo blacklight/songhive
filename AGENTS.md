@@ -75,7 +75,7 @@
 - Tornado handles WebSocket connections (`/ws/events`) and audio streaming
   (`/api/v1/stream/{track_id}`) natively; all other routes fall through to
   FastAPI.
-- Configuration priority: env vars > CLI args > config.toml > defaults.
+- Configuration priority: env vars (SONGHIVE_*) > CLI args > config.toml > defaults.
 - The `pubby` library provides ActivityPub federation (FastAPI adapter).
 - Tests use `pytest-asyncio` for async tests and `TestClient` for API tests.
 - Frontend is a Vue.js 3 + TypeScript SPA in `frontend/`; builds to
