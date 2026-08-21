@@ -423,10 +423,10 @@ async def _oauth_authorize(
             response_type,
             client_id,
             redirect_uri,
-            code_challenge,
-            code_challenge_method,
-            scope,
-            state,
+            code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method,
+            scope=scope,
+            state=state,
         )
     except OAuth2ProviderError as exc:
         raise _handle_oauth_error(exc)
@@ -456,10 +456,10 @@ async def oauth_authorize_get(
         response_type,
         client_id,
         redirect_uri,
-        code_challenge,
-        code_challenge_method,
-        scope,
-        state,
+        code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
+        scope=scope,
+        state=state,
     )
 
 
@@ -484,10 +484,10 @@ async def oauth_authorize_post(
         response_type,
         client_id,
         redirect_uri,
-        code_challenge,
-        code_challenge_method,
-        scope,
-        state,
+        code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
+        scope=scope,
+        state=state,
     )
 
 
