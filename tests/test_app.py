@@ -6,13 +6,22 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 from songhive.api.app import create_app
 from songhive.app import _build_tornado_app
+
+_PORT_LOCK_PATH = Path(tempfile.gettempdir()) / "songhive_test_tornado_port.lock"
 
 
 def _free_port() -> int:
@@ -20,6 +29,22 @@ def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+@contextmanager
+def _port_lock():
+    """Advisory lock that serializes server startup across xdist workers."""
+    if fcntl is None:
+        yield
+        return
+
+    _PORT_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _PORT_LOCK_PATH.open("a+") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 def _write_config(tmp_path: Path, port: int) -> Path:
@@ -69,6 +94,15 @@ def _send_probe(host: str, port: int, timeout: float = 5.0) -> None:
         s.recv(4096)
 
 
+def _raise_with_output(exc: Exception, log_file: Path) -> None:
+    """Re-raise *exc*, appending captured server output if available."""
+    if log_file.exists():
+        output = log_file.read_text(encoding="utf-8", errors="replace")
+        if output:
+            raise AssertionError(f"{exc}\n\nServer output:\n{output}") from exc
+    raise exc
+
+
 def test_build_tornado_app_settings(config, fake_redis):
     """_build_tornado_app passes config and redis through Tornado settings."""
     fastapi_app = create_app(config)
@@ -83,29 +117,35 @@ def test_build_tornado_app_settings(config, fake_redis):
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
 def test_tornado_stops_promptly_on_signal(tmp_path, sig):
     """The Tornado server should exit quickly on SIGINT and SIGTERM."""
-    port = _free_port()
-    config = _write_config(tmp_path, port)
-
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "songhive", "--config", str(config)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
+    log_file = tmp_path / "server.log"
+    proc = None
     try:
-        _wait_for_listen("127.0.0.1", port)
+        with _port_lock():
+            port = _free_port()
+            config = _write_config(tmp_path, port)
+            with log_file.open("w", encoding="utf-8") as log:
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", "songhive", "--config", str(config)],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                )
+            _wait_for_listen("127.0.0.1", port)
+
         _send_probe("127.0.0.1", port)
 
         sent = time.monotonic()
         proc.send_signal(sig)
         try:
             proc.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            raise AssertionError(f"Server did not exit on signal {sig}") from None
+        except subprocess.TimeoutExpired as exc:
+            raise AssertionError(f"Server did not exit on signal {sig}") from exc
 
         elapsed = time.monotonic() - sent
         assert elapsed < 1.0, f"Server took {elapsed:.2f}s to stop"
         assert proc.returncode == 0, f"Server exited with code {proc.returncode}"
+    except (AssertionError, subprocess.TimeoutExpired) as exc:
+        _raise_with_output(exc, log_file)
     finally:
-        if proc.poll() is None:
+        if proc is not None and proc.poll() is None:
             proc.kill()
             proc.wait()
