@@ -4,7 +4,7 @@ Playlist routes.
 
 from typing import List, Optional, cast
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,7 @@ from ...models._enums import Visibility
 from ...models.playlist import Playlist
 from ...models.user import User
 from ...services import music
+from .._common import Pagination, get_pagination
 from ..deps import get_current_user, get_current_user_optional, get_db, require_access
 from ._common import HasOwnerId, redact_owner
 
@@ -39,13 +40,15 @@ class PlaylistCreate(BaseModel):
 
 @router.get("/", response_model=List[PlaylistResponse])
 async def list_playlists(
+    response: Response,
     user: Optional[User] = Depends(get_current_user_optional),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
 ):
     """List playlists visible to the requester."""
-    rows = await music.list_playlists(db, user=user, limit=limit, offset=offset)
+    total = await music.count_playlists(db, user=user)
+    rows = await music.list_playlists(db, user=user, limit=pagination.limit, offset=pagination.offset)
+    pagination.set_total(response, total)
     return [
         PlaylistResponse(
             id=str(p.id),

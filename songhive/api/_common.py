@@ -2,9 +2,10 @@
 
 import ipaddress
 import logging
+from dataclasses import dataclass
 from typing import Optional
 
-from fastapi import Request
+from fastapi import Query, Request, Response
 
 logger = logging.getLogger(__name__)
 
@@ -77,3 +78,23 @@ def _is_valid_ip(value: str) -> bool:
         logger.debug("Ignoring invalid IP address %r", value)
         return False
     return True
+
+
+@dataclass
+class Pagination:
+    """Pagination parameters and helper to set the ``X-Total-Count`` header."""
+
+    limit: int
+    offset: int
+
+    def set_total(self, response: Response, total: int) -> None:
+        """Set the ``X-Total-Count`` header on ``response``."""
+        response.headers["X-Total-Count"] = str(total)
+
+
+async def get_pagination(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> Pagination:
+    """FastAPI dependency that parses ``limit``/``offset`` query params."""
+    return Pagination(limit=limit, offset=offset)

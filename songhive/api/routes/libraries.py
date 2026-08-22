@@ -28,6 +28,7 @@ from ...services import acl, music
 from ...services.import_ import DuplicateTrackError, ImportResult, import_audio_file
 from ...services.storage import StorageService
 from ...tasks.import_ import process_upload, scan_directory
+from .._common import Pagination, get_pagination
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -87,13 +88,15 @@ class BulkUploadResult(BaseModel):
 
 @router.get("/", response_model=List[LibraryResponse])
 async def list_libraries(
+    response: Response,
     user: Optional[User] = Depends(get_current_user_optional),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
 ):
     """List libraries visible to the requester."""
-    rows = await music.list_libraries(db, user=user, limit=limit, offset=offset)
+    total = await music.count_libraries(db, user=user)
+    rows = await music.list_libraries(db, user=user, limit=pagination.limit, offset=pagination.offset)
+    pagination.set_total(response, total)
     return [
         LibraryResponse(
             id=str(lib.id),
@@ -440,10 +443,10 @@ async def scan_library(
 
 @router.get("/{library_id}/tracks", response_model=List[TrackResponse])
 async def list_library_tracks_route(
+    response: Response,
     library_id: str,
     user: Optional[User] = Depends(get_current_user_optional),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
 ):
@@ -457,7 +460,11 @@ async def list_library_tracks_route(
             detail="Access denied",
         )
 
-    rows = await music.list_library_tracks(db, library_id=library_id, user=user, limit=limit, offset=offset)
+    total = await music.count_library_tracks(db, library_id=library_id, user=user)
+    rows = await music.list_library_tracks(
+        db, library_id=library_id, user=user, limit=pagination.limit, offset=pagination.offset
+    )
+    pagination.set_total(response, total)
     return [await _track_response(storage, row, user) for row in rows]
 
 

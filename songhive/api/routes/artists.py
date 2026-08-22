@@ -4,12 +4,13 @@ Artist routes.
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...services import music
 from ...services.storage import StorageService
+from .._common import Pagination, get_pagination
 from ..deps import get_db, get_storage_service
 
 router = APIRouter(prefix="/artists")
@@ -37,14 +38,16 @@ async def _image_url(artist, storage: StorageService) -> Optional[str]:
 
 @router.get("/", response_model=List[ArtistResponse])
 async def list_artists(
+    response: Response,
     q: Optional[str] = Query(None, description="Search query"),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
 ):
     """List or search artists."""
-    rows = await music.list_artists(db, query=q, limit=limit, offset=offset)
+    total = await music.count_artists(db, query=q)
+    rows = await music.list_artists(db, query=q, limit=pagination.limit, offset=pagination.offset)
+    pagination.set_total(response, total)
     return [
         ArtistResponse(
             id=str(a.id),

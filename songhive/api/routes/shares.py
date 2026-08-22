@@ -5,13 +5,14 @@ Share-grant routes: owner/admin CRUD for giving specific users access to items.
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.share_grant import ShareGrant
 from ...models.user import User
 from ...services import acl, sharing
+from .._common import Pagination, get_pagination
 from ..deps import get_current_user, get_db
 from ..middleware.rate_limit import rate_limit_account
 from ._common import load_and_authorize, validate_item_type
@@ -72,15 +73,19 @@ async def create_share_grant(
 
 @router.get("/", response_model=List[ShareGrantResponse])
 async def list_share_grants(
+    response: Response,
     item_type: str = Query(...),
     item_id: str = Query(...),
     current_user: User = Depends(get_current_user),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
 ):
     """List all share grants for an item."""
     await load_and_authorize(db, current_user, item_type, item_id)
 
+    total = await sharing.count_share_grants(db, item_type, item_id)
     grants = await sharing.list_share_grants(db, item_type, item_id)
+    pagination.set_total(response, total)
     return [ShareGrantResponse.model_validate(g) for g in grants]
 
 

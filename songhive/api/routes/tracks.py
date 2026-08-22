@@ -12,7 +12,7 @@ from ...models._enums import Visibility
 from ...models.user import User
 from ...services import acl, audit, music
 from ...services.storage import StorageService
-from .._common import client_ip
+from .._common import Pagination, client_ip, get_pagination
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -55,6 +55,7 @@ class TrackUpdate(BaseModel):
 
 @router.get("/", response_model=List[TrackResponse])
 async def list_tracks(
+    response: Response,
     q: Optional[str] = Query(None, description="Search query"),
     artist_id: Optional[str] = Query(None),
     album_id: Optional[str] = Query(None),
@@ -63,12 +64,22 @@ async def list_tracks(
     year_to: Optional[int] = Query(None),
     library_id: Optional[str] = Query(None),
     user: Optional[User] = Depends(get_current_user_optional),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
 ):
     """List or search tracks visible to the requester."""
+    total = await music.count_tracks(
+        db,
+        query=q,
+        artist_id=artist_id,
+        album_id=album_id,
+        genre=genre,
+        year_from=year_from,
+        year_to=year_to,
+        library_id=library_id,
+        user=user,
+    )
     rows = await music.list_tracks(
         db,
         query=q,
@@ -79,9 +90,10 @@ async def list_tracks(
         year_to=year_to,
         library_id=library_id,
         user=user,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
     )
+    pagination.set_total(response, total)
     return [
         TrackResponse(
             id=str(t.id),

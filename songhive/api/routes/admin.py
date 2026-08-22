@@ -23,7 +23,7 @@ from ...users import invites as invite_service
 from ...users import manager as user_manager
 from ...users import oauth as oauth_client_service
 from ...users.tokens import revoke_all_user_refresh_tokens
-from .._common import client_ip
+from .._common import Pagination, client_ip, get_pagination
 from ..deps import get_config, get_db, get_redis, require_admin
 from ..middleware.rate_limit import rate_limit_account
 
@@ -65,18 +65,17 @@ class AuditLogResponse(BaseModel):
 async def list_users(
     response: Response,
     q: Optional[str] = Query(None, min_length=1, max_length=128),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
 ):
     """List all users (admin only), optionally filtering by username or email."""
     if q:
-        users, total = await user_manager.search_users(db, q, limit=limit, offset=offset)
+        users, total = await user_manager.search_users(db, q, limit=pagination.limit, offset=pagination.offset)
     else:
-        users = await user_manager.list_users(db, limit=limit, offset=offset)
+        users = await user_manager.list_users(db, limit=pagination.limit, offset=pagination.offset)
         total = await user_manager.count_users(db)
 
-    response.headers["X-Total-Count"] = str(total)
+    pagination.set_total(response, total)
     return [AdminUserResponse.model_validate(user) for user in users]
 
 
@@ -317,7 +316,7 @@ async def list_audit_logs(
         limit=limit,
         offset=offset,
     )
-    response.headers["X-Total-Count"] = str(total)
+    Pagination(limit=limit, offset=offset).set_total(response, total)
     return [AuditLogResponse.model_validate(log) for log in logs]
 
 
@@ -349,14 +348,13 @@ class AdminInviteCreateRequest(BaseModel):
 )
 async def list_invites(
     response: Response,
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
 ):
     """List invite codes (admin only)."""
     total = await invite_service.count_invites(db)
-    invites = await invite_service.list_invites(db, limit=limit, offset=offset)
-    response.headers["X-Total-Count"] = str(total)
+    invites = await invite_service.list_invites(db, limit=pagination.limit, offset=pagination.offset)
+    pagination.set_total(response, total)
     return [AdminInviteResponse.model_validate(invite) for invite in invites]
 
 
@@ -476,14 +474,13 @@ class AdminOAuthClientCreateRequest(BaseModel):
 )
 async def list_oauth_clients(
     response: Response,
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
 ):
     """List OAuth2 clients (admin only)."""
     total = await oauth_client_service.count_oauth_clients(db)
-    clients = await oauth_client_service.list_oauth_clients(db, limit=limit, offset=offset)
-    response.headers["X-Total-Count"] = str(total)
+    clients = await oauth_client_service.list_oauth_clients(db, limit=pagination.limit, offset=pagination.offset)
+    pagination.set_total(response, total)
     return [AdminOAuthClientResponse.model_validate(client) for client in clients]
 
 
@@ -597,11 +594,14 @@ class SettingUpdateRequest(BaseModel):
     dependencies=[Depends(require_admin)],
 )
 async def list_settings(
+    response: Response,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     """List all runtime settings (admin only)."""
-    return await settings_service.list_settings(db, redis)
+    settings = await settings_service.list_settings(db, redis)
+    response.headers["X-Total-Count"] = str(len(settings))
+    return settings
 
 
 @router.put(

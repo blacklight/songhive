@@ -14,6 +14,7 @@ from ...models.track import Track
 from ...models.user import User
 from ...services import acl, music
 from ...services.storage import StorageService
+from .._common import Pagination, get_pagination
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -60,17 +61,25 @@ async def _cover_url(storage: StorageService, album) -> Optional[str]:
 
 @router.get("/", response_model=List[AlbumResponse])
 async def list_albums(
+    response: Response,
     q: Optional[str] = Query(None, description="Search query"),
     artist_id: Optional[str] = Query(None),
     year_from: Optional[int] = Query(None),
     year_to: Optional[int] = Query(None),
     user: Optional[User] = Depends(get_current_user_optional),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
 ):
     """List or search albums visible to the requester."""
+    total = await music.count_albums(
+        db,
+        query=q,
+        artist_id=artist_id,
+        year_from=year_from,
+        year_to=year_to,
+        user=user,
+    )
     rows = await music.list_albums(
         db,
         query=q,
@@ -78,9 +87,10 @@ async def list_albums(
         year_from=year_from,
         year_to=year_to,
         user=user,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
     )
+    pagination.set_total(response, total)
     return [
         AlbumResponse(
             id=str(a.id),

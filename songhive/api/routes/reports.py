@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models.user import User
 from ...services import audit
 from ...services import reports as report_service
-from .._common import client_ip
+from .._common import Pagination, client_ip, get_pagination
 from ..deps import get_current_user, get_db, require_admin
 
 router = APIRouter()
@@ -91,8 +91,7 @@ async def list_reports(
     response: Response,
     status: Optional[str] = Query(None),
     target_type: Optional[str] = Query(None),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
 ):
     """List content reports (admin only)."""
@@ -100,10 +99,10 @@ async def list_reports(
         db,
         status=status,
         target_type=target_type,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
     )
-    response.headers["X-Total-Count"] = str(total)
+    pagination.set_total(response, total)
     return [ReportResponse.model_validate(report) for report in reports]
 
 
