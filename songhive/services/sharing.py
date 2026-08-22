@@ -11,7 +11,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -147,6 +147,21 @@ async def list_share_grants(
     return list(result.scalars().all())
 
 
+async def count_share_grants(
+    session: AsyncSession,
+    item_type: str,
+    item_id: str,
+) -> int:
+    """Return the total number of share grants for ``(item_type, item_id)``."""
+    result = await session.execute(
+        select(func.count(ShareGrant.id)).where(
+            ShareGrant.item_type == item_type,
+            ShareGrant.item_id == item_id,
+        )
+    )
+    return result.scalar() or 0
+
+
 async def create_share_token(
     session: AsyncSession,
     item_type: str,
@@ -187,6 +202,19 @@ async def revoke_share_token(session: AsyncSession, token_id: str) -> bool:
     return True
 
 
+def _share_tokens_where(item_type: str, item_id: str, now: datetime):
+    """Build the common WHERE clause for share-token list/count queries."""
+    return (
+        ShareToken.item_type == item_type,
+        ShareToken.item_id == item_id,
+        ShareToken.revoked_at.is_(None),
+        or_(
+            ShareToken.expires_at.is_(None),
+            ShareToken.expires_at > now,
+        ),
+    )
+
+
 async def list_share_tokens(
     session: AsyncSession,
     item_type: str,
@@ -194,18 +222,21 @@ async def list_share_tokens(
 ) -> List[ShareToken]:
     """List non-revoked, non-expired share tokens for ``(item_type, item_id)``."""
     now = _now_utc()
-    result = await session.execute(
-        select(ShareToken).where(
-            ShareToken.item_type == item_type,
-            ShareToken.item_id == item_id,
-            ShareToken.revoked_at.is_(None),
-            or_(
-                ShareToken.expires_at.is_(None),
-                ShareToken.expires_at > now,
-            ),
-        )
-    )
+    result = await session.execute(select(ShareToken).where(*_share_tokens_where(item_type, item_id, now)))
     return list(result.scalars().all())
+
+
+async def count_share_tokens(
+    session: AsyncSession,
+    item_type: str,
+    item_id: str,
+) -> int:
+    """Return the total number of non-revoked, non-expired share tokens."""
+    now = _now_utc()
+    result = await session.execute(
+        select(func.count(ShareToken.id)).where(*_share_tokens_where(item_type, item_id, now))
+    )
+    return result.scalar() or 0
 
 
 async def get_valid_share_token(

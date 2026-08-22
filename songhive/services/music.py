@@ -3,9 +3,9 @@ Music service: CRUD operations for artists, albums, tracks, playlists,
 libraries, and radios.
 """
 
-from typing import List, Optional, cast
+from typing import Any, List, Optional, cast
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,6 +20,14 @@ from ..models.user import User
 from .acl import apply_access_filter
 
 
+def _build_artists_stmt(query: Optional[str] = None) -> Select[Any]:
+    """Build a statement for listing/counting artists."""
+    stmt = select(Artist)
+    if query:
+        stmt = stmt.where(Artist.name.ilike(f"%{query}%"))
+    return stmt
+
+
 async def list_artists(
     session: AsyncSession,
     query: Optional[str] = None,
@@ -27,12 +35,22 @@ async def list_artists(
     offset: int = 0,
 ) -> List[Artist]:
     """List artists with optional search."""
-    stmt = select(Artist).options(selectinload(Artist.image_file))
-    if query:
-        stmt = stmt.where(Artist.name.ilike(f"%{query}%"))
+    stmt = _build_artists_stmt(query=query).options(selectinload(Artist.image_file))
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def count_artists(
+    session: AsyncSession,
+    query: Optional[str] = None,
+) -> int:
+    """Return the total number of artists matching the optional search."""
+    stmt = select(func.count(Artist.id))
+    if query:
+        stmt = stmt.where(Artist.name.ilike(f"%{query}%"))
+    result = await session.execute(stmt)
+    return result.scalar() or 0
 
 
 async def get_artist(session: AsyncSession, artist_id: str) -> Optional[Artist]:
@@ -41,6 +59,25 @@ async def get_artist(session: AsyncSession, artist_id: str) -> Optional[Artist]:
         select(Artist).options(selectinload(Artist.image_file)).where(Artist.id == artist_id)
     )
     return cast(Optional[Artist], result.scalar_one_or_none())
+
+
+def _build_albums_stmt(
+    query: Optional[str] = None,
+    artist_id: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+) -> Select[Any]:
+    """Build a statement for listing/counting albums."""
+    stmt = select(Album)
+    if query:
+        stmt = stmt.where(Album.title.ilike(f"%{query}%"))
+    if artist_id:
+        stmt = stmt.where(Album.artist_id == artist_id)
+    if year_from is not None:
+        stmt = stmt.where(Album.release_year >= year_from)
+    if year_to is not None:
+        stmt = stmt.where(Album.release_year <= year_to)
+    return stmt
 
 
 async def list_albums(
@@ -54,19 +91,36 @@ async def list_albums(
     offset: int = 0,
 ) -> List[Album]:
     """List albums with optional filters, honouring the requester's ACL."""
-    stmt = select(Album).options(selectinload(Album.artist), selectinload(Album.cover_file))
-    if query:
-        stmt = stmt.where(Album.title.ilike(f"%{query}%"))
-    if artist_id:
-        stmt = stmt.where(Album.artist_id == artist_id)
-    if year_from is not None:
-        stmt = stmt.where(Album.release_year >= year_from)
-    if year_to is not None:
-        stmt = stmt.where(Album.release_year <= year_to)
+    stmt = _build_albums_stmt(
+        query=query,
+        artist_id=artist_id,
+        year_from=year_from,
+        year_to=year_to,
+    ).options(selectinload(Album.artist), selectinload(Album.cover_file))
     stmt = apply_access_filter(stmt, Album, user, "album")
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def count_albums(
+    session: AsyncSession,
+    query: Optional[str] = None,
+    artist_id: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    user: Optional[User] = None,
+) -> int:
+    """Return the total number of albums matching the filters and ACL."""
+    stmt = _build_albums_stmt(
+        query=query,
+        artist_id=artist_id,
+        year_from=year_from,
+        year_to=year_to,
+    )
+    stmt = apply_access_filter(stmt, Album, user, "album")
+    result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    return result.scalar() or 0
 
 
 async def get_album(session: AsyncSession, album_id: str) -> Optional[Album]:
@@ -77,7 +131,7 @@ async def get_album(session: AsyncSession, album_id: str) -> Optional[Album]:
     return cast(Optional[Album], result.scalar_one_or_none())
 
 
-def _apply_list_filters(
+def _build_tracks_stmt(
     session: AsyncSession,
     query: Optional[str] = None,
     artist_id: Optional[str] = None,
@@ -86,13 +140,9 @@ def _apply_list_filters(
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
-):
-    """List tracks with optional filters, honouring the requester's ACL."""
-    stmt = select(Track).options(
-        selectinload(Track.artist),
-        selectinload(Track.album),
-        selectinload(Track.audio_file),
-    )
+) -> Select[Any]:
+    """Build a statement for listing/counting tracks."""
+    stmt = select(Track)
     if artist_id:
         stmt = stmt.where(Track.artist_id == artist_id)
     if album_id:
@@ -149,7 +199,39 @@ async def list_tracks(
     offset: int = 0,
 ) -> List[Track]:
     """List tracks with optional filters, honouring the requester's ACL."""
-    stmt = _apply_list_filters(
+    stmt = _build_tracks_stmt(
+        session,
+        query=query,
+        artist_id=artist_id,
+        album_id=album_id,
+        genre=genre,
+        year_from=year_from,
+        year_to=year_to,
+        library_id=library_id,
+    ).options(
+        selectinload(Track.artist),
+        selectinload(Track.album),
+        selectinload(Track.audio_file),
+    )
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    stmt = stmt.offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def count_tracks(
+    session: AsyncSession,
+    query: Optional[str] = None,
+    artist_id: Optional[str] = None,
+    album_id: Optional[str] = None,
+    genre: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    library_id: Optional[str] = None,
+    user: Optional[User] = None,
+) -> int:
+    """Return the total number of tracks matching the filters and ACL."""
+    stmt = _build_tracks_stmt(
         session,
         query=query,
         artist_id=artist_id,
@@ -160,9 +242,8 @@ async def list_tracks(
         library_id=library_id,
     )
     stmt = apply_access_filter(stmt, Track, user, "track")
-    stmt = stmt.offset(offset).limit(limit)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    return result.scalar() or 0
 
 
 async def get_track(session: AsyncSession, track_id: str) -> Optional[Track]:
@@ -203,6 +284,20 @@ async def list_library_tracks(
     return list(result.scalars().all())
 
 
+async def count_library_tracks(
+    session: AsyncSession,
+    library_id: str,
+    user: Optional[User] = None,
+) -> int:
+    """Return the total number of tracks in ``library_id`` visible to ``user``."""
+    stmt = (
+        select(Track).join(LibraryTrack, LibraryTrack.track_id == Track.id).where(LibraryTrack.library_id == library_id)
+    )
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    return result.scalar() or 0
+
+
 async def list_playlists(
     session: AsyncSession,
     user: Optional[User] = None,
@@ -215,6 +310,17 @@ async def list_playlists(
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def count_playlists(
+    session: AsyncSession,
+    user: Optional[User] = None,
+) -> int:
+    """Return the total number of playlists visible to ``user``."""
+    stmt = select(Playlist)
+    stmt = apply_access_filter(stmt, Playlist, user, "playlist")
+    result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    return result.scalar() or 0
 
 
 async def get_playlist(session: AsyncSession, playlist_id: str) -> Optional[Playlist]:
@@ -236,6 +342,17 @@ async def list_libraries(
     return list(result.scalars().all())
 
 
+async def count_libraries(
+    session: AsyncSession,
+    user: Optional[User] = None,
+) -> int:
+    """Return the total number of libraries visible to ``user``."""
+    stmt = select(Library)
+    stmt = apply_access_filter(stmt, Library, user, "library")
+    result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    return result.scalar() or 0
+
+
 async def get_library(session: AsyncSession, library_id: str) -> Optional[Library]:
     """Get a library by ID."""
     return cast(Optional[Library], await session.get(Library, library_id))
@@ -253,6 +370,17 @@ async def list_radios(
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def count_radios(
+    session: AsyncSession,
+    user: Optional[User] = None,
+) -> int:
+    """Return the total number of radios visible to ``user``."""
+    stmt = select(Radio)
+    stmt = apply_access_filter(stmt, Radio, user, "radio")
+    result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    return result.scalar() or 0
 
 
 async def get_radio(session: AsyncSession, radio_id: str) -> Optional[Radio]:
