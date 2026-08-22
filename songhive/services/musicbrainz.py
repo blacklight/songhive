@@ -187,14 +187,55 @@ class MusicBrainzService:
         if not self.config.enabled:
             return False
 
+        track, artist, album = await self._load_track_context(session, track_id)
+        if track is None:
+            return False
+
+        recording = await self._find_best_recording(track, artist, album)
+        if recording is None:
+            return False
+
+        recording_id = recording.get("id")
+        if not recording_id:
+            return False
+
+        details = await self._fetch_recording_details(recording_id, recording)
+        release_id = self._apply_musicbrainz_ids(track, artist, album, recording, details)
+        if storage_service and album and release_id:
+            await self._maybe_store_cover_art(
+                session,
+                album,
+                release_id,
+                storage_service,
+                owner_id=track.owner_id,
+            )
+
+        self._store_raw_metadata(track, recording, details)
+        await session.commit()
+        return True
+
+    async def _load_track_context(
+        self,
+        session,
+        track_id: str,
+    ) -> tuple[Optional[Track], Optional[Artist], Optional[Album]]:
+        """Fetch the track and its associated artist and album."""
         track = await session.get(Track, track_id)
         if track is None:
             logger.warning("Track %s not found for MusicBrainz enrichment", track_id)
-            return False
+            return None, None, None
 
         artist = await session.get(Artist, track.artist_id) if track.artist_id else None
         album = await session.get(Album, track.album_id) if track.album_id else None
+        return track, artist, album
 
+    async def _find_best_recording(
+        self,
+        track: Track,
+        artist: Optional[Artist],
+        album: Optional[Album],
+    ) -> Optional[Dict[str, Any]]:
+        """Search MusicBrainz and return the best matching recording."""
         results = await self.search_recordings(
             artist=artist.name if artist else None,
             title=track.title,
@@ -202,21 +243,31 @@ class MusicBrainzService:
             limit=5,
         )
         recordings = results.get("recording-list", [])
-        if not recordings:
-            return False
+        return recordings[0] if recordings else None
 
-        recording = recordings[0]
-        recording_id = recording.get("id")
-        if not recording_id:
-            return False
-
+    async def _fetch_recording_details(
+        self,
+        recording_id: str,
+        recording: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Fetch recording details, falling back to the search result on error."""
         try:
-            details = await self.fetch_recording(recording_id, include_releases=True)
+            return await self.fetch_recording(recording_id, include_releases=True)
         except Exception as exc:
             logger.debug("Could not fetch recording %s: %s", recording_id, exc)
-            details = {"recording": recording}
+            return {"recording": recording}
 
-        if track.musicbrainz_id is None:
+    def _apply_musicbrainz_ids(
+        self,
+        track: Track,
+        artist: Optional[Artist],
+        album: Optional[Album],
+        recording: Dict[str, Any],
+        details: Dict[str, Any],
+    ) -> Optional[str]:
+        """Populate MusicBrainz IDs on the track, artist, and album."""
+        recording_id = recording.get("id")
+        if recording_id and track.musicbrainz_id is None:
             track.musicbrainz_id = recording_id
 
         if track.artist_id and artist and artist.musicbrainz_id is None:
@@ -228,21 +279,38 @@ class MusicBrainzService:
         if album and album.musicbrainz_id is None and release_id:
             album.musicbrainz_id = release_id
 
-        if storage_service and album and album.cover_file_id is None and release_id:
-            await self._store_cover_art(
-                session,
-                album,
-                release_id,
-                storage_service,
-                owner_id=track.owner_id,
-            )
+        return release_id
 
+    async def _maybe_store_cover_art(
+        self,
+        session,
+        album: Album,
+        release_id: str,
+        storage_service: StorageService,
+        owner_id: Optional[str] = None,
+    ) -> None:
+        """Store cover art for an album when it is missing and a release ID is known."""
+        if album.cover_file_id is not None:
+            return
+
+        await self._store_cover_art(
+            session,
+            album,
+            release_id,
+            storage_service,
+            owner_id=owner_id,
+        )
+
+    @staticmethod
+    def _store_raw_metadata(
+        track: Track,
+        recording: Dict[str, Any],
+        details: Dict[str, Any],
+    ) -> None:
+        """Store the MusicBrainz recording details in the track's raw metadata."""
         raw = track.raw_metadata or {}
         raw["mb_recording"] = details.get("recording", recording)
         track.raw_metadata = raw
-
-        await session.commit()
-        return True
 
 
 def _first_artist_id(recording: Dict[str, Any]) -> Optional[str]:

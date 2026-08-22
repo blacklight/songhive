@@ -3,6 +3,7 @@ Configuration schema for Songhive, defined as a Pydantic settings model.
 """
 
 import json
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
@@ -308,6 +309,65 @@ def _require_auth_secret_key() -> AuthConfig:
     )
 
 
+class StreamingConfig(BaseSettings):
+    """Streaming and transcoding configuration."""
+
+    ffmpeg_path: Optional[str] = Field(
+        default=None,
+        description="Path to the ffmpeg binary; auto-detected from PATH when None",
+    )
+    max_bitrate: str = Field(
+        default="320k",
+        description="Instance-wide maximum bitrate ceiling",
+    )
+    max_bitrate_by_role: dict[str, str] = Field(
+        default_factory=lambda: {"user": "192k", "moderator": "256k", "admin": "320k"},
+        description="Per-role bitrate ceiling keyed by User.role",
+    )
+    default_bitrate: str = Field(
+        default="192k",
+        description="Default bitrate for transcoded streams",
+    )
+    chunk_size: int = Field(
+        default=64 * 1024,
+        description="Chunk size in bytes for stream responses",
+    )
+    transcode_cache_enabled: bool = Field(
+        default=True,
+        description="Whether to cache transcoded output files",
+    )
+
+
+def _bitrate_to_bits(value: str) -> int:
+    """Parse a bitrate string such as '192k' or '1.5M' into bits per second.
+
+    Returns 0 for empty or unparseable values so callers can fall back safely.
+    """
+    value = (value or "").strip().lower()
+    if not value:
+        return 0
+    match = re.match(r"^(\d+(?:\.\d+)?)\s*(k|m|g)?$", value)
+    if not match:
+        return 0
+    number = float(match.group(1))
+    multiplier = {"k": 1_000, "m": 1_000_000, "g": 1_000_000_000}.get(match.group(2), 1)
+    return int(number * multiplier)
+
+
+def effective_bitrate(cfg: StreamingConfig, role: str, requested: Optional[str]) -> str:
+    """Return the lowest of the requested, default, role, and instance bitrates."""
+    role_max = cfg.max_bitrate_by_role.get(role, cfg.max_bitrate)
+    candidates = [
+        requested if requested is not None else cfg.default_bitrate,
+        cfg.max_bitrate,
+        role_max,
+    ]
+    valid = [(c, _bitrate_to_bits(c)) for c in candidates if _bitrate_to_bits(c) > 0]
+    if not valid:
+        return cfg.default_bitrate
+    return min(valid, key=lambda pair: pair[1])[0]
+
+
 class SonghiveConfig(BaseSettings):
     """
     Root configuration for Songhive.
@@ -337,3 +397,4 @@ class SonghiveConfig(BaseSettings):
     email: EmailConfig = Field(default_factory=EmailConfig)
     musicbrainz: MusicBrainzConfig = Field(default_factory=MusicBrainzConfig)
     imports: ImportConfig = Field(default_factory=ImportConfig)
+    streaming: StreamingConfig = Field(default_factory=StreamingConfig)

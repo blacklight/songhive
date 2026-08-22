@@ -229,75 +229,90 @@ async def upload_track(
     }
 
 
-@router.post("/{library_id}/tracks/bulk")
-async def bulk_upload_tracks(
+async def _import_single_sync_file(
+    db: AsyncSession,
+    storage: StorageService,
+    upload_file: UploadFile,
     library_id: str,
-    request: Request,
-    files: List[UploadFile] = File(...),
-    force: bool = Query(False),
-    visibility: Visibility = Query(Visibility.PRIVATE),
-    enrich: bool = Query(True),
-    user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db),
-    storage: StorageService = Depends(get_storage_service),
-):
-    """Upload many audio files into a library."""
-    library = await music.get_library(db, library_id)
-    if library is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    if user is None or not await acl.can_manage(db, user, "library", library_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied",
+    user: Optional[User],
+    visibility: Visibility,
+    force: bool,
+    enrich: bool,
+) -> BulkUploadResult:
+    """Import a single uploaded audio file and return a per-file result."""
+    filename = upload_file.filename or "audio.mp3"
+    try:
+        result: ImportResult = await import_audio_file(
+            db,
+            storage_service=storage,
+            file=upload_file.file,
+            filename=filename,
+            library_id=library_id,
+            owner_id=str(user.id) if user else None,
+            visibility=visibility.value,
+            force=force,
+            enrich=enrich,
+        )
+        await db.commit()
+        return BulkUploadResult(
+            filename=filename,
+            status="created",
+            track_id=str(result.track.id),
+            upload_id=str(result.upload.id),
+        )
+    except DuplicateTrackError as exc:
+        return BulkUploadResult(
+            filename=filename,
+            status="duplicate",
+            existing_track_id=exc.existing_track_id,
+        )
+    except Exception as exc:
+        return BulkUploadResult(
+            filename=filename,
+            status="error",
+            error=str(exc),
         )
 
-    config = request.app.state.config
-    threshold = config.imports.bulk_import_sync_threshold
 
-    if len(files) <= threshold:
-        results: List[BulkUploadResult] = []
-        for upload_file in files:
-            filename = upload_file.filename or "audio.mp3"
-            try:
-                result = await import_audio_file(
-                    db,
-                    storage_service=storage,
-                    file=upload_file.file,
-                    filename=filename,
-                    library_id=library_id,
-                    owner_id=str(user.id) if user else None,
-                    visibility=visibility.value,
-                    force=force,
-                    enrich=enrich,
-                )
-                await db.commit()
-                results.append(
-                    BulkUploadResult(
-                        filename=filename,
-                        status="created",
-                        track_id=str(result.track.id),
-                        upload_id=str(result.upload.id),
-                    )
-                )
-            except DuplicateTrackError as exc:
-                results.append(
-                    BulkUploadResult(
-                        filename=filename,
-                        status="duplicate",
-                        existing_track_id=exc.existing_track_id,
-                    )
-                )
-            except Exception as exc:
-                results.append(
-                    BulkUploadResult(
-                        filename=filename,
-                        status="error",
-                        error=str(exc),
-                    )
-                )
-        return results
+async def _upload_sync_batch(
+    db: AsyncSession,
+    storage: StorageService,
+    files: List[UploadFile],
+    library_id: str,
+    user: Optional[User],
+    visibility: Visibility,
+    force: bool,
+    enrich: bool,
+) -> List[BulkUploadResult]:
+    """Import a small batch of audio files synchronously."""
+    results: List[BulkUploadResult] = []
+    for upload_file in files:
+        results.append(
+            await _import_single_sync_file(
+                db,
+                storage,
+                upload_file,
+                library_id,
+                user,
+                visibility,
+                force,
+                enrich,
+            )
+        )
+    return results
 
-    # Offload large batches to Celery: store files, then enqueue processing.
+
+async def _upload_async_batch(
+    db: AsyncSession,
+    storage: StorageService,
+    files: List[UploadFile],
+    library_id: str,
+    user: Optional[User],
+    visibility: Visibility,
+    force: bool,
+    enrich: bool,
+) -> JSONResponse:
+    """Store a large batch of files and enqueue background processing."""
     stored_files = []
     for upload_file in files:
         content_type = upload_file.content_type or "application/octet-stream"
@@ -329,6 +344,53 @@ async def bulk_upload_tracks(
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
         content={"job_id": job_id, "enqueued": _enqueued + 1},
+    )
+
+
+@router.post("/{library_id}/tracks/bulk")
+async def bulk_upload_tracks(
+    library_id: str,
+    request: Request,
+    files: List[UploadFile] = File(...),
+    force: bool = Query(False),
+    visibility: Visibility = Query(Visibility.PRIVATE),
+    enrich: bool = Query(True),
+    user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+):
+    """Upload many audio files into a library."""
+    library = await music.get_library(db, library_id)
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if user is None or not await acl.can_manage(db, user, "library", library_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    threshold = request.app.state.config.imports.bulk_import_sync_threshold
+    if len(files) <= threshold:
+        return await _upload_sync_batch(
+            db,
+            storage,
+            files,
+            library_id,
+            user,
+            visibility,
+            force,
+            enrich,
+        )
+
+    return await _upload_async_batch(
+        db,
+        storage,
+        files,
+        library_id,
+        user,
+        visibility,
+        force,
+        enrich,
     )
 
 

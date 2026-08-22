@@ -17,38 +17,47 @@ import sys
 from collections.abc import Iterable
 from typing import Any, Awaitable, Callable, cast
 
-from .config import load_config
+from .config import SonghiveConfig, load_config
 from .models.base import init_db
 from .services.redis import close_redis_client, get_redis_client
 
 logger = logging.getLogger(__name__)
 
 
-def _run_tornado(config):
-    """Run with Tornado as the top-level server (preferred)."""
+def _build_tornado_app(config: SonghiveConfig, fastapi_app) -> Any:
+    """Build the Tornado application without binding a socket."""
     from a2wsgi import ASGIMiddleware
-    from tornado.httpserver import HTTPServer
     from tornado.web import Application, FallbackHandler
     from tornado.wsgi import WSGIContainer
 
-    from .api.app import create_app
     from .streaming.handler import StreamHandler
     from .ws.events import EventWebSocket
-
-    fastapi_app = create_app(config)
-    fastapi_app.state.redis = get_redis_client(config)
 
     wsgi_app = ASGIMiddleware(cast(Callable[[Any, Any, Any], Awaitable[None]], fastapi_app))
     container = WSGIContainer(cast(Callable[[dict[str, Any], Any], Iterable[bytes]], cast(object, wsgi_app)))
 
-    tornado_app = Application(
+    return Application(
         [
             (r"/ws/events", EventWebSocket),
             (r"/api/v1/stream/(?P<track_id>[^/]+)", StreamHandler),
             (r".*", FallbackHandler, {"fallback": container}),
         ],
         debug=config.server.debug,
+        config=config,
+        redis=fastapi_app.state.redis,
     )
+
+
+def _run_tornado(config: SonghiveConfig):
+    """Run with Tornado as the top-level server (preferred)."""
+    from tornado.httpserver import HTTPServer
+
+    from .api.app import create_app
+
+    fastapi_app = create_app(config)
+    fastapi_app.state.redis = get_redis_client(config)
+
+    tornado_app = _build_tornado_app(config, fastapi_app)
 
     server = HTTPServer(tornado_app)
     server.listen(config.server.port, address=config.server.host)

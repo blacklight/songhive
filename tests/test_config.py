@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from songhive.config.loader import _deep_merge, load_config
-from songhive.config.schema import RegistrationMode, SonghiveConfig
+from songhive.config.schema import RegistrationMode, SonghiveConfig, effective_bitrate
 
 
 def test_default_config():
@@ -300,3 +300,34 @@ def test_config_dump_masks_secrets():
         assert "email-secret" not in str(export)
         assert ":db-secret@" not in str(export)
     assert data["database"]["url"] == "postgresql://user:***@localhost:5432/songhive"
+
+
+def test_streaming_config_defaults():
+    """Streaming configuration has the expected defaults."""
+    config = SonghiveConfig(auth={"secret_key": "a" * 64})
+    assert config.streaming.max_bitrate == "320k"
+    assert config.streaming.default_bitrate == "192k"
+    assert config.streaming.chunk_size == 64 * 1024
+    assert config.streaming.transcode_cache_enabled is True
+    assert config.streaming.max_bitrate_by_role == {
+        "user": "192k",
+        "moderator": "256k",
+        "admin": "320k",
+    }
+
+
+def test_streaming_config_from_env(monkeypatch):
+    """SONGHIVE_STREAMING__* environment variables override streaming config."""
+    monkeypatch.setenv("SONGHIVE_STREAMING__MAX_BITRATE", "128k")
+    config = SonghiveConfig(auth={"secret_key": "a" * 64})
+    assert config.streaming.max_bitrate == "128k"
+
+
+def test_effective_bitrate():
+    """effective_bitrate returns the lowest valid ceiling and falls back safely."""
+    config = SonghiveConfig(auth={"secret_key": "a" * 64})
+    assert effective_bitrate(config.streaming, "user", None) == "192k"
+    assert effective_bitrate(config.streaming, "user", "500k") == "192k"
+    assert effective_bitrate(config.streaming, "admin", "256k") == "256k"
+    assert effective_bitrate(config.streaming, "admin", "500k") == "320k"
+    assert effective_bitrate(config.streaming, "unknown", "96k") == "96k"

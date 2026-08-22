@@ -24,6 +24,12 @@ class Track(Base):
     track_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     disc_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     duration: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    play_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        insert_default=0,
+        server_default="0",
+    )
     musicbrainz_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, unique=True, index=True)
     genre: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     audio_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
