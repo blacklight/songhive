@@ -18,7 +18,10 @@ class Library(Base):
     __tablename__ = "libraries"
 
     name: Mapped[str] = mapped_column(String(256))
-    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     visibility: Mapped[str] = mapped_column(
         String(16),

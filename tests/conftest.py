@@ -16,12 +16,15 @@ from songhive.api.middleware.auth import create_access_token
 from songhive.config.schema import SonghiveConfig
 from songhive.models.album import Album  # noqa: F401
 from songhive.models.artist import Artist  # noqa: F401
+from songhive.models.audit_log import AuditLog  # noqa: F401
 from songhive.models.base import Base, init_db, reset_db
 from songhive.models.invite import Invite  # noqa: F401
 from songhive.models.library import Library  # noqa: F401
 from songhive.models.oauth_client import OAuth2Client  # noqa: F401
 from songhive.models.playlist import Playlist  # noqa: F401
 from songhive.models.radio import Radio  # noqa: F401
+from songhive.models.report import Report  # noqa: F401
+from songhive.models.setting import Setting  # noqa: F401
 from songhive.models.share_grant import ShareGrant  # noqa: F401
 from songhive.models.share_token import ShareToken  # noqa: F401
 from songhive.models.stored_file import StoredFile  # noqa: F401
@@ -51,11 +54,19 @@ def _fast_password_hashing(monkeypatch):
 
 
 @pytest.fixture
-def fake_redis():
-    """Create a fresh async fake Redis client for each test."""
+def fake_redis_server():
+    """Provide a shared in-memory fake Redis server for per-loop clients."""
+    from fakeredis import FakeServer
+
+    return FakeServer()
+
+
+@pytest.fixture
+def fake_redis(fake_redis_server):
+    """Create a fresh async fake Redis client for the test loop."""
     from fakeredis.aioredis import FakeRedis
 
-    return FakeRedis(decode_responses=True)
+    return FakeRedis(server=fake_redis_server, decode_responses=True)
 
 
 @pytest.fixture
@@ -110,15 +121,21 @@ def app(config, engine):
 
 
 @pytest.fixture
-def client(app, db_session, fake_redis, monkeypatch):
+def client(app, db_session, fake_redis_server, monkeypatch):
     """Create a test client with the test session and a fake Redis client."""
-    # Ensure the application lifespan uses the per-test fake Redis instead of
-    # trying to connect to a real Redis server.
-    monkeypatch.setattr("songhive.api.app.get_redis_client", lambda _config: fake_redis)
+    from fakeredis.aioredis import FakeRedis
+
+    def _get_redis_client(_config):
+        # Create a fresh client bound to the ASGI event loop so the test's
+        # loop and the app's loop never share the same async connection.
+        return FakeRedis(server=fake_redis_server, decode_responses=True)
+
+    # Ensure the application lifespan uses a fake Redis client bound to its
+    # own event loop while sharing state with the test's client via FakeServer.
+    monkeypatch.setattr("songhive.api.app.get_redis_client", _get_redis_client)
 
     with TestClient(app) as client:
         client.app.dependency_overrides[get_db] = _override_db(db_session)
-        client.app.state.redis = fake_redis
         yield client
         client.app.dependency_overrides.pop(get_db, None)
 

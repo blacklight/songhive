@@ -14,7 +14,10 @@ class Upload(Base):
     __tablename__ = "uploads"
 
     track_id: Mapped[str] = mapped_column(ForeignKey("tracks.id"), index=True)
-    library_id: Mapped[str] = mapped_column(ForeignKey("libraries.id"), index=True)
+    library_id: Mapped[str] = mapped_column(
+        ForeignKey("libraries.id", ondelete="CASCADE"),
+        index=True,
+    )
     storage_path: Mapped[str] = mapped_column(String(1024))
     storage_backend: Mapped[str] = mapped_column(String(16))  # "local" or "s3"
     mimetype: Mapped[str] = mapped_column(String(64))

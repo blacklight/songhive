@@ -11,7 +11,10 @@ from .base import Base
 class ListeningHistory(Base):
     __tablename__ = "listening_history"
 
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
     track_id: Mapped[str] = mapped_column(ForeignKey("tracks.id"), index=True)
 
     user = relationship("User", backref="listening_history", lazy="selectin")
