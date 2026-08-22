@@ -77,7 +77,7 @@ async def get_album(session: AsyncSession, album_id: str) -> Optional[Album]:
     return cast(Optional[Album], result.scalar_one_or_none())
 
 
-async def list_tracks(
+def _apply_list_filters(
     session: AsyncSession,
     query: Optional[str] = None,
     artist_id: Optional[str] = None,
@@ -86,10 +86,7 @@ async def list_tracks(
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
-    user: Optional[User] = None,
-    limit: int = 20,
-    offset: int = 0,
-) -> List[Track]:
+):
     """List tracks with optional filters, honouring the requester's ACL."""
     stmt = select(Track).options(
         selectinload(Track.artist),
@@ -135,6 +132,33 @@ async def list_tracks(
                 )
             )
 
+    return stmt
+
+
+async def list_tracks(
+    session: AsyncSession,
+    query: Optional[str] = None,
+    artist_id: Optional[str] = None,
+    album_id: Optional[str] = None,
+    genre: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    library_id: Optional[str] = None,
+    user: Optional[User] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> List[Track]:
+    """List tracks with optional filters, honouring the requester's ACL."""
+    stmt = _apply_list_filters(
+        session,
+        query=query,
+        artist_id=artist_id,
+        album_id=album_id,
+        genre=genre,
+        year_from=year_from,
+        year_to=year_to,
+        library_id=library_id,
+    )
     stmt = apply_access_filter(stmt, Track, user, "track")
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)

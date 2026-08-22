@@ -61,7 +61,8 @@ _MAX_DERIVED_DEPTH = 1
 
 
 def _list_access_predicate(model, user: Optional[User], item_type: str):
-    """Return a SQL WHERE clause for the ACL rules used by list queries.
+    """
+    Return a SQL WHERE clause for the ACL rules used by list queries.
 
     This predicate intentionally covers only visibility, ownership, and
     explicit share grants.  Share-token and derived-file access are handled
@@ -87,7 +88,8 @@ def apply_access_filter(
     user: Optional[User],
     item_type: str,
 ):
-    """Add ACL filtering to ``stmt`` for the given ``model`` and ``user``.
+    """
+    Add ACL filtering to ``stmt`` for the given ``model`` and ``user``.
 
     Admins bypass the filter.  The predicate is applied before ``offset`` and
     ``limit`` so list pagination returns the expected number of rows.
@@ -241,7 +243,8 @@ async def can_manage(
 
 
 async def audit_ownerless_private(session: AsyncSession) -> int:
-    """Log a warning and return the count of ownerless private items.
+    """
+    Log a warning and return the count of ownerless private items.
 
     Ownerless private rows are not accessible under the current ACL rules and
     should be migrated to an explicit owner or ``LOCAL`` visibility.

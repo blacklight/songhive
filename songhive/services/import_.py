@@ -60,6 +60,7 @@ async def _find_or_create_artist(
 
 async def _find_or_create_album(
     session: AsyncSession,
+    *,
     title: str,
     artist_id: str,
     year: Optional[int] = None,
@@ -144,6 +145,191 @@ async def _find_duplicate_by_metadata(
     return cast(Optional[Track], result.scalar_one_or_none())
 
 
+def _guess_content_type(filename: str) -> str:
+    """Guess a MIME type from a filename, falling back to a binary default."""
+    return mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+
+async def _store_uploaded_file(
+    session: AsyncSession,
+    storage_service: StorageService,
+    file: BinaryIO,
+    content_type: str,
+    filename: str,
+    owner_id: Optional[str],
+    visibility: str,
+) -> Tuple[StoredFile, bool]:
+    """Store the uploaded audio file and return it with a duplicate flag."""
+    return cast(
+        Tuple[StoredFile, bool],
+        await storage_service.store_file(
+            session,
+            file,
+            content_type,
+            original_filename=filename,
+            owner_id=owner_id,
+            visibility=visibility,
+            return_duplicate=True,
+        ),
+    )
+
+
+async def _extract_metadata_from_file(storage_service: StorageService, stored_file: StoredFile) -> AudioMetadata:
+    """
+    Materialise a local copy of the stored file and extract audio metadata.
+
+    Temporary files returned by non-local backends are removed after extraction.
+    """
+    local_path = await storage_service.backend.retrieve(stored_file.storage_path)
+    if local_path is None:
+        raise RuntimeError(f"Could not retrieve stored file: {stored_file.storage_path}")
+
+    should_remove = True
+    base_path = getattr(storage_service.backend, "base_path", None)
+    if isinstance(base_path, Path):
+        try:
+            if local_path.resolve().is_relative_to(base_path.resolve()):
+                should_remove = False
+        except (OSError, ValueError):
+            pass
+
+    try:
+        return extract_metadata(Path(local_path))
+    finally:
+        if should_remove and os.path.exists(local_path):
+            os.remove(local_path)
+
+
+async def _resolve_artist_and_album(
+    session: AsyncSession,
+    metadata: AudioMetadata,
+    owner_id: Optional[str],
+    visibility: str,
+) -> Tuple[Artist, Optional[Album]]:
+    """Find or create the artist and album for the incoming metadata."""
+    artist = await _find_or_create_artist(session, metadata.artist or "Unknown Artist")
+
+    album = None
+    if metadata.album:
+        album = await _find_or_create_album(
+            session,
+            title=metadata.album,
+            artist_id=str(artist.id),
+            year=metadata.year,
+            owner_id=owner_id,
+            visibility=visibility,
+        )
+
+    return artist, album
+
+
+async def _maybe_store_cover_art(
+    session: AsyncSession,
+    *,
+    storage_service: StorageService,
+    album: Optional[Album],
+    metadata: AudioMetadata,
+    owner_id: Optional[str],
+    visibility: str,
+) -> None:
+    """Store embedded cover art and attach it to the album when appropriate."""
+    if not metadata.cover_art or album is None or album.cover_file_id is not None:
+        return
+
+    cover_file, _ = cast(
+        Tuple[StoredFile, bool],
+        await storage_service.store_file(
+            session,
+            io.BytesIO(metadata.cover_art),
+            metadata.cover_art_mime or "image/jpeg",
+            prefix="covers",
+            owner_id=owner_id,
+            visibility=visibility,
+            return_duplicate=True,
+        ),
+    )
+    album.cover_file_id = str(cover_file.id)
+
+
+async def _create_track_record(
+    session: AsyncSession,
+    *,
+    metadata: AudioMetadata,
+    stored_file: StoredFile,
+    artist: Artist,
+    album: Optional[Album],
+    filename: str,
+    owner_id: Optional[str],
+    visibility: str,
+    source: str,
+) -> Track:
+    """Create and persist a Track record from extracted metadata."""
+    track = Track(
+        title=metadata.title or Path(filename).stem,
+        artist_id=str(artist.id),
+        album_id=album.id if album else None,
+        track_number=metadata.track_number,
+        disc_number=metadata.disc_number,
+        duration=metadata.duration,
+        genre=metadata.genre,
+        audio_file_id=str(stored_file.id),
+        raw_metadata=metadata.raw_tags,
+        source=source,
+        owner_id=owner_id,
+        visibility=visibility,
+    )
+    session.add(track)
+    await session.flush()
+    return track
+
+
+async def _register_upload_and_library_track(
+    session: AsyncSession,
+    *,
+    track: Track,
+    stored_file: StoredFile,
+    library_id: str,
+    owner_id: Optional[str],
+    metadata: AudioMetadata,
+    content_type: str,
+) -> Tuple[Upload, LibraryTrack]:
+    """Create the Upload and LibraryTrack records that link a track to a library."""
+    upload = Upload(
+        track_id=str(track.id),
+        library_id=library_id,
+        storage_path=stored_file.storage_path,
+        storage_backend=stored_file.storage_backend,
+        mimetype=metadata.mimetype or content_type,
+        size=stored_file.size,
+        bitrate=metadata.bitrate,
+        checksum=stored_file.sha256,
+        stored_file_id=str(stored_file.id),
+    )
+    session.add(upload)
+
+    library_track = LibraryTrack(
+        library_id=library_id,
+        track_id=str(track.id),
+        added_by_id=owner_id,
+    )
+    session.add(library_track)
+    await session.flush()
+    return upload, library_track
+
+
+def _maybe_enqueue_enrichment(track: Track, enrich: bool) -> None:
+    """Enqueue a MusicBrainz enrichment task when requested."""
+    if not enrich:
+        return
+
+    try:
+        from ..tasks.musicbrainz import enrich_track
+
+        enrich_track.delay(str(track.id))  # type: ignore
+    except Exception:
+        pass
+
+
 async def import_audio_file(
     session: AsyncSession,
     *,
@@ -175,129 +361,64 @@ async def import_audio_file(
     :raises DuplicateTrackError: When a duplicate is detected and ``force`` is
         ``False``.
     """
-    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-
-    stored_file, is_dup = cast(
-        Tuple[StoredFile, bool],
-        await storage_service.store_file(
-            session,
-            file,
-            content_type,
-            original_filename=filename,
-            owner_id=owner_id,
-            visibility=visibility,
-            return_duplicate=True,
-        ),
+    content_type = _guess_content_type(filename)
+    stored_file, was_duplicate = await _store_uploaded_file(
+        session,
+        storage_service,
+        file,
+        content_type,
+        filename,
+        owner_id,
+        visibility,
     )
 
-    if is_dup:
+    if was_duplicate and not force:
         existing = await _find_duplicate_by_bytes(session, str(stored_file.id), owner_id)
-        if existing and not force:
+        if existing:
             raise DuplicateTrackError(str(existing.id))
 
-    # Materialise a local copy for mutagen and clean up temporary files.
-    local_path = await storage_service.backend.retrieve(stored_file.storage_path)
-    if local_path is None:
-        raise RuntimeError(f"Could not retrieve stored file: {stored_file.storage_path}")
-
-    should_remove = True
-    if hasattr(storage_service.backend, "base_path"):
-        base_path: Path = storage_service.backend.base_path  # type: ignore
-        try:
-            if local_path.resolve().is_relative_to(base_path.resolve()):
-                should_remove = False
-        except (OSError, ValueError):
-            pass
-
-    try:
-        metadata = extract_metadata(Path(local_path))
-    finally:
-        if should_remove and os.path.exists(local_path):
-            os.remove(local_path)
+    metadata = await _extract_metadata_from_file(storage_service, stored_file)
 
     existing_meta = await _find_duplicate_by_metadata(session, library_id, metadata)
     if existing_meta and not force:
         raise DuplicateTrackError(str(existing_meta.id))
 
-    artist = await _find_or_create_artist(session, metadata.artist or "Unknown Artist")
-
-    album = None
-    if metadata.album:
-        album = await _find_or_create_album(
-            session,
-            metadata.album,
-            str(artist.id),
-            metadata.year,
-            owner_id=owner_id,
-            visibility=visibility,
-        )
-
-    track = Track(
-        title=metadata.title or Path(filename).stem,
-        artist_id=str(artist.id),
-        album_id=album.id if album else None,
-        track_number=metadata.track_number,
-        disc_number=metadata.disc_number,
-        duration=metadata.duration,
-        genre=metadata.genre,
-        audio_file_id=str(stored_file.id),
-        raw_metadata=metadata.raw_tags,
+    artist, album = await _resolve_artist_and_album(session, metadata, owner_id, visibility)
+    track = await _create_track_record(
+        session,
+        metadata=metadata,
+        stored_file=stored_file,
+        artist=artist,
+        album=album,
+        filename=filename,
+        owner_id=owner_id,
+        visibility=visibility,
         source=source,
+    )
+
+    await _maybe_store_cover_art(
+        session,
+        storage_service=storage_service,
+        album=album,
+        metadata=metadata,
         owner_id=owner_id,
         visibility=visibility,
     )
-    session.add(track)
-    await session.flush()
-
-    if metadata.cover_art and album and album.cover_file_id is None:
-        cover_file, _ = cast(
-            Tuple[StoredFile, bool],
-            await storage_service.store_file(
-                session,
-                io.BytesIO(metadata.cover_art),
-                metadata.cover_art_mime or "image/jpeg",
-                prefix="covers",
-                owner_id=owner_id,
-                visibility=visibility,
-                return_duplicate=True,
-            ),
-        )
-        album.cover_file_id = str(cover_file.id)
-
-    upload = Upload(
-        track_id=str(track.id),
+    upload, library_track = await _register_upload_and_library_track(
+        session,
+        track=track,
+        stored_file=stored_file,
         library_id=library_id,
-        storage_path=stored_file.storage_path,
-        storage_backend=stored_file.storage_backend,
-        mimetype=metadata.mimetype or content_type,
-        size=stored_file.size,
-        bitrate=metadata.bitrate,
-        checksum=stored_file.sha256,
-        stored_file_id=str(stored_file.id),
+        owner_id=owner_id,
+        metadata=metadata,
+        content_type=content_type,
     )
-    session.add(upload)
-    await session.flush()
 
-    library_track = LibraryTrack(
-        library_id=library_id,
-        track_id=str(track.id),
-        added_by_id=owner_id,
-    )
-    session.add(library_track)
-    await session.flush()
-
-    if enrich:
-        try:
-            from ..tasks.musicbrainz import enrich_track
-
-            enrich_track.delay(str(track.id))  # type: ignore
-        except Exception:
-            pass
-
+    _maybe_enqueue_enrichment(track, enrich)
     return ImportResult(
         track=track,
         upload=upload,
         library_track=library_track,
         stored_file=stored_file,
-        was_duplicate=is_dup,
+        was_duplicate=was_duplicate,
     )

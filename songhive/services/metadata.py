@@ -76,21 +76,19 @@ def _guess_image_mime(data: bytes) -> str:
     return "image/jpeg"
 
 
-def _extract_cover_art(audio) -> tuple[Optional[bytes], Optional[str]]:
-    """Return ``(data, mime)`` for the first embedded cover art, if any."""
-    if audio is None:
-        return None, None
-
-    tags = getattr(audio, "tags", None)
-
-    # FLAC / Ogg FLAC store pictures in the ``pictures`` attribute.
+def _extract_pictures_attr(audio) -> Optional[tuple[Optional[bytes], Optional[str]]]:
+    """FLAC / Ogg FLAC store pictures in the ``pictures`` attribute."""
     pictures = getattr(audio, "pictures", None)
     if pictures:
         pic = pictures[0]
         return pic.data, pic.mime
 
-    # Ogg Vorbis / Opus encode a picture in the ``METADATA_BLOCK_PICTURE``
-    # vorbis comment as base64.
+    return None
+
+
+def _extract_metadata_block_picture(audio) -> Optional[tuple[Optional[bytes], Optional[str]]]:
+    """Ogg Vorbis / Opus store pictures in the ``METADATA_BLOCK_PICTURE`` tag."""
+    tags = getattr(audio, "tags", None)
     if tags is not None and "METADATA_BLOCK_PICTURE" in tags:
         try:
             from mutagen.flac import Picture
@@ -101,12 +99,22 @@ def _extract_cover_art(audio) -> tuple[Optional[bytes], Optional[str]]:
         except Exception:
             pass
 
-    # MP4 cover atom.
+    return None
+
+
+def _extract_covr_atom(audio) -> Optional[tuple[Optional[bytes], Optional[str]]]:
+    """MP4 cover atom."""
+    tags = getattr(audio, "tags", None)
     if tags is not None and "covr" in tags:
         data = bytes(tags["covr"][0])
         return data, _guess_image_mime(data)
 
-    # MP3 ID3 APIC frames.
+    return None
+
+
+def _extract_apic_frame(audio) -> Optional[tuple[Optional[bytes], Optional[str]]]:
+    """MP3 ID3 APIC frame."""
+    tags = getattr(audio, "tags", None)
     try:
         from mutagen.id3 import ID3
 
@@ -117,6 +125,21 @@ def _extract_cover_art(audio) -> tuple[Optional[bytes], Optional[str]]:
     except Exception:
         pass
 
+    return None
+
+
+def _extract_cover_art(audio) -> tuple[Optional[bytes], Optional[str]]:
+    """Return ``(data, mime)`` for the first embedded cover art, if any."""
+    if audio is None:
+        return None, None
+    if pictures := _extract_pictures_attr(audio):
+        return pictures
+    if metadata_block_picture := _extract_metadata_block_picture(audio):
+        return metadata_block_picture
+    if covr_atom := _extract_covr_atom(audio):
+        return covr_atom
+    if apic_frame := _extract_apic_frame(audio):
+        return apic_frame
     return None, None
 
 
@@ -131,17 +154,9 @@ def _stringify(value) -> Optional[str]:
     return str(value)
 
 
-def _extract_raw_tags(audio) -> dict:
-    """Build a JSON-safe ``{tag: [values]}`` dictionary from raw tags."""
+def _extract_id3_tags(raw_tags) -> dict:
+    """MP3 ID3 tags: iterate frames and convert text fields."""
     tags: dict = {}
-    if audio is None:
-        return tags
-
-    raw_tags = getattr(audio, "tags", None)
-    if raw_tags is None:
-        return tags
-
-    # MP3 ID3 tags: iterate frames and convert text fields.
     if hasattr(raw_tags, "getall"):
         for key in raw_tags.keys():
             for frame in raw_tags.getall(key):
@@ -153,9 +168,13 @@ def _extract_raw_tags(audio) -> dict:
                     s = _stringify(frame)
                     if s:
                         tags[key] = [s]
-        return tags
 
-    # Vorbis/FLAC comments and MP4 atoms: values are lists.
+    return tags
+
+
+def _extract_vorbis_tags(raw_tags) -> dict:
+    """Vorbis/FLAC comments and MP4 atoms: values are lists."""
+    tags: dict = {}
     for key, values in raw_tags.items():
         if key == "covr":
             continue
@@ -168,6 +187,22 @@ def _extract_raw_tags(audio) -> dict:
             tags[str(key)] = out
 
     return tags
+
+
+def _extract_raw_tags(audio) -> dict:
+    """Build a JSON-safe ``{tag: [values]}`` dictionary from raw tags."""
+    tags: dict = {}
+    if audio is None:
+        return tags
+
+    raw_tags = getattr(audio, "tags", None)
+    if raw_tags is None:
+        return tags
+
+    if tags := _extract_id3_tags(raw_tags):
+        return tags
+
+    return _extract_vorbis_tags(raw_tags)
 
 
 def extract_metadata(file_path: Path) -> AudioMetadata:
