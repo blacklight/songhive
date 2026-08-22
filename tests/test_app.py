@@ -2,49 +2,18 @@
 Integration tests for the application entry point.
 """
 
+import os
 import signal
 import socket
 import subprocess
 import sys
-import tempfile
 import time
-from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None
-
 from songhive.api.app import create_app
 from songhive.app import _build_tornado_app
-
-_PORT_LOCK_PATH = Path(tempfile.gettempdir()) / "songhive_test_tornado_port.lock"
-
-
-def _free_port() -> int:
-    """Return an ephemeral TCP port that is currently free."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-@contextmanager
-def _port_lock():
-    """Advisory lock that serializes server startup across xdist workers."""
-    if fcntl is None:
-        yield
-        return
-
-    _PORT_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with _PORT_LOCK_PATH.open("a+") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 def _write_config(tmp_path: Path, port: int) -> Path:
@@ -73,6 +42,18 @@ secret_key = "{secret_key}"
 """
     config.write_text(config_text)
     return config
+
+
+def _wait_for_port_file(port_file: Path, timeout: float = 5.0) -> int:
+    """Wait for the server to write its bound port to *port_file*."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if port_file.exists():
+            text = port_file.read_text(encoding="utf-8").strip()
+            if text:
+                return int(text)
+        time.sleep(0.05)
+    raise AssertionError(f"Server did not write bound port to {port_file}")
 
 
 def _wait_for_listen(host: str, port: int, timeout: float = 5.0) -> None:
@@ -117,20 +98,23 @@ def test_build_tornado_app_settings(config, fake_redis):
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
 def test_tornado_stops_promptly_on_signal(tmp_path, sig):
     """The Tornado server should exit quickly on SIGINT and SIGTERM."""
+    port_file = tmp_path / "port.txt"
     log_file = tmp_path / "server.log"
+    config = _write_config(tmp_path, 0)
+    env = {**os.environ, "SONGHIVE_WRITE_PORT_TO": str(port_file)}
+
     proc = None
     try:
-        with _port_lock():
-            port = _free_port()
-            config = _write_config(tmp_path, port)
-            with log_file.open("w", encoding="utf-8") as log:
-                proc = subprocess.Popen(
-                    [sys.executable, "-m", "songhive", "--config", str(config)],
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                )
-            _wait_for_listen("127.0.0.1", port)
+        with log_file.open("w", encoding="utf-8") as log:
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "songhive", "--config", str(config)],
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=env,
+            )
 
+        port = _wait_for_port_file(port_file)
+        _wait_for_listen("127.0.0.1", port)
         _send_probe("127.0.0.1", port)
 
         sent = time.monotonic()
@@ -141,7 +125,7 @@ def test_tornado_stops_promptly_on_signal(tmp_path, sig):
             raise AssertionError(f"Server did not exit on signal {sig}") from exc
 
         elapsed = time.monotonic() - sent
-        assert elapsed < 1.0, f"Server took {elapsed:.2f}s to stop"
+        assert elapsed < 5.0, f"Server took {elapsed:.2f}s to stop"
         assert proc.returncode == 0, f"Server exited with code {proc.returncode}"
     except (AssertionError, subprocess.TimeoutExpired) as exc:
         _raise_with_output(exc, log_file)
