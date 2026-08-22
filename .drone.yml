@@ -52,6 +52,7 @@ steps:
 - name: codacy-coverage
   image: python:3.12
   depends_on:
+    - github-mirror
     - tests
   when:
     branch:
