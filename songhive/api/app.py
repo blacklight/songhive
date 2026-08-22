@@ -15,6 +15,7 @@ from ..models.base import get_session
 from ..services.acl import audit_ownerless_private
 from ..services.redis import close_redis_client, get_redis_client
 from ..services.settings import apply_settings_overrides
+from .errors import install_error_handlers
 from .routes import (
     admin,
     albums,
@@ -130,6 +131,9 @@ def create_app(config: SonghiveConfig) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Register RFC 7807 problem detail exception handlers
+    install_error_handlers(app)
 
     # Register API routes
     api_prefix = "/api/v1"
