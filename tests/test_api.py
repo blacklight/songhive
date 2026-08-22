@@ -48,11 +48,10 @@ def test_favorites_endpoint(client):
     assert response.json() == []
 
 
-def test_history_endpoint(client):
-    """Test the history listing endpoint."""
+def test_history_endpoint_requires_auth(client):
+    """GET /history without authentication returns 401."""
     response = client.get("/api/v1/history/")
-    assert response.status_code == 200
-    assert response.json() == []
+    assert response.status_code == 401
 
 
 def test_radios_endpoint(client):
@@ -87,9 +86,9 @@ def test_cors_wildcard_origin_disables_credentials(caplog, monkeypatch):
     """Test that a wildcard CORS origin logs a warning and disables credentials."""
     monkeypatch.delenv("SONGHIVE_AUTH__SECRET_KEY", raising=False)
     config = SonghiveConfig(
-        server={"cors_origins": ["*"]},
-        auth={"secret_key": "a" * 32},
-        federation={"enabled": False},
+        server={"cors_origins": ["*"]},  # type: ignore
+        auth={"secret_key": "a" * 32},  # type: ignore
+        federation={"enabled": False},  # type: ignore
     )
     with caplog.at_level(logging.WARNING, logger="songhive.api.app"):
         create_app(config)
@@ -103,7 +102,7 @@ def test_admin_user_response_role_enum():
         username="alice",
         email="alice@example.com",
         is_active=True,
-        role="admin",
+        role="admin",  # type: ignore
     )
     assert response.role == UserRole.ADMIN
     assert response.model_dump()["role"] == "admin"
@@ -117,5 +116,5 @@ def test_admin_user_response_rejects_invalid_role():
             username="alice",
             email="alice@example.com",
             is_active=True,
-            role="superuser",
+            role="superuser",  # type: ignore
         )

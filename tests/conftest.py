@@ -8,6 +8,7 @@ from typing import Optional
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from songhive.api.app import create_app
 from songhive.api.deps import get_db
@@ -15,7 +16,7 @@ from songhive.api.middleware.auth import create_access_token
 from songhive.config.schema import SonghiveConfig
 from songhive.models.album import Album  # noqa: F401
 from songhive.models.artist import Artist  # noqa: F401
-from songhive.models.base import Base, init_db
+from songhive.models.base import Base, init_db, reset_db
 from songhive.models.invite import Invite  # noqa: F401
 from songhive.models.library import Library  # noqa: F401
 from songhive.models.oauth_client import OAuth2Client  # noqa: F401
@@ -25,6 +26,7 @@ from songhive.models.share_grant import ShareGrant  # noqa: F401
 from songhive.models.share_token import ShareToken  # noqa: F401
 from songhive.models.stored_file import StoredFile  # noqa: F401
 from songhive.models.track import Track  # noqa: F401
+from songhive.models.transcoded_file import TranscodedFile  # noqa: F401
 from songhive.models.user import User  # noqa: F401
 from songhive.services.auth import create_user
 
@@ -67,7 +69,7 @@ def config(tmp_path):
 def engine(tmp_path):
     """Create an async SQLAlchemy engine backed by a fresh SQLite database."""
     url = f"sqlite+aiosqlite:///{tmp_path / 'songhive.db'}"
-    engine = create_async_engine(url)
+    engine = create_async_engine(url, poolclass=NullPool)
 
     async def _create_tables():
         async with engine.begin() as conn:
@@ -76,6 +78,7 @@ def engine(tmp_path):
     asyncio.run(_create_tables())
     yield engine
     asyncio.run(engine.dispose())
+    reset_db()
 
 
 @pytest.fixture

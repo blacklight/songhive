@@ -4,6 +4,7 @@ Model tests - verify model instantiation and relationships.
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from songhive.models._enums import Visibility
 from songhive.models.album import Album
@@ -17,6 +18,7 @@ from songhive.models.share_grant import ShareGrant
 from songhive.models.share_token import ShareToken
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
+from songhive.models.transcoded_file import TranscodedFile
 from songhive.models.upload import Upload
 from songhive.models.user import User
 
@@ -270,3 +272,75 @@ async def test_share_models_persistence(db_session):
 
     result = await db_session.execute(select(ShareToken).where(ShareToken.token_hash == "b" * 64))
     assert result.scalar_one() is token
+
+
+@pytest.mark.asyncio
+async def test_transcoded_file_unique_constraint(db_session, regular_user):
+    """TranscodedFile enforces a unique (track_id, format, bitrate) triple."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    stored1 = StoredFile(
+        storage_path="transcoded/aa/bb/01",
+        storage_backend="local",
+        content_type="audio/opus",
+        size=10,
+        sha256="a" * 64,
+    )
+    stored2 = StoredFile(
+        storage_path="transcoded/aa/bb/02",
+        storage_backend="local",
+        content_type="audio/opus",
+        size=10,
+        sha256="b" * 64,
+    )
+    db_session.add_all([stored1, stored2])
+    await db_session.flush()
+
+    first = TranscodedFile(
+        track_id=track.id,
+        format="opus",
+        bitrate="128k",
+        stored_file_id=stored1.id,
+    )
+    db_session.add(first)
+    await db_session.flush()
+
+    second = TranscodedFile(
+        track_id=track.id,
+        format="opus",
+        bitrate="128k",
+        stored_file_id=stored2.id,
+    )
+    db_session.add(second)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+
+
+@pytest.mark.asyncio
+async def test_track_play_count_defaults_to_zero(db_session, regular_user):
+    """A new track has play_count defaulted to 0."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    assert track.play_count == 0

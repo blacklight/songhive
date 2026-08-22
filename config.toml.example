@@ -55,6 +55,16 @@ rate_limit_enabled = true
 rate_limit_requests = 10
 rate_limit_window_seconds = 60
 
+[streaming]
+# Path to the ffmpeg binary. When omitted, Songhive searches PATH.
+# ffmpeg_path = "/usr/bin/ffmpeg"
+max_bitrate = "320k"
+# Per-role bitrate ceilings. Uncomment to override defaults.
+# max_bitrate_by_role = { user = "192k", moderator = "256k", admin = "320k" }
+default_bitrate = "192k"
+chunk_size = 65536
+transcode_cache_enabled = true
+
 [email]
 # Uncomment and configure these to enable outbound email (verification,
 # password reset, etc.).

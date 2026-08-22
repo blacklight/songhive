@@ -1,7 +1,7 @@
 from ._enums import Visibility
 from .album import Album
 from .artist import Artist
-from .base import Base, get_session, init_db
+from .base import Base, get_session, init_db, reset_db
 from .favorite import Favorite
 from .history import ListeningHistory
 from .invite import Invite
@@ -14,6 +14,7 @@ from .share_grant import ShareGrant
 from .share_token import ShareToken
 from .stored_file import StoredFile
 from .track import Track
+from .transcoded_file import TranscodedFile
 from .upload import Upload
 from .user import User
 from .user_link import UserLink
@@ -25,6 +26,7 @@ __all__ = [
     "Favorite",
     "get_session",
     "init_db",
+    "reset_db",
     "Invite",
     "Library",
     "LibraryTrack",
@@ -37,6 +39,7 @@ __all__ = [
     "ShareToken",
     "StoredFile",
     "Track",
+    "TranscodedFile",
     "Upload",
     "User",
     "UserLink",
