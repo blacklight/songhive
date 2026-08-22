@@ -50,6 +50,9 @@
   python -m black .
   ```
 
+- `pytest.ini` enables `pytest-xdist` (`-n auto`) by default, so
+  `python -m pytest` now runs the suite in parallel. Use `-n 0` to force a
+  sequential run when debugging.
 - Note: running the full suite of tests takes time. You don't have to run the
   full suite of tests in the following cases:
   - If nothing has been modified since the beginning of the current

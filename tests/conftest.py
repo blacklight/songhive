@@ -37,6 +37,19 @@ def _ensure_test_secret_key(monkeypatch):
     monkeypatch.setenv("SONGHIVE_AUTH__SECRET_KEY", "a" * 64)
 
 
+@pytest.fixture(autouse=True)
+def _fast_password_hashing(monkeypatch):
+    """Use a low bcrypt cost in tests to avoid spending time on password hashing."""
+    from songhive.services import auth
+
+    _orig_gensalt = auth.bcrypt.gensalt
+
+    def _gensalt(rounds: int = 4, prefix: bytes = b"2b"):
+        return _orig_gensalt(rounds=rounds, prefix=prefix)
+
+    monkeypatch.setattr(auth.bcrypt, "gensalt", _gensalt)
+
+
 @pytest.fixture
 def fake_redis():
     """Create a fresh async fake Redis client for each test."""

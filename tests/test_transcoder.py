@@ -2,10 +2,10 @@
 Transcoder tests.
 """
 
+import array
 import asyncio
 import math
 import shutil
-import struct
 import wave
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,16 +15,18 @@ import pytest
 from songhive.streaming.transcoder import Transcoder, TranscoderError
 
 
-def _create_wav(path: Path, duration: float = 0.5, sample_rate: int = 44100) -> None:
+def _create_wav(path: Path, duration: float = 0.5, sample_rate: int = 8000) -> None:
     """Write a mono 16-bit PCM WAV file of the given duration."""
+    samples = int(duration * sample_rate)
+    data = array.array(
+        "h",
+        (int(32767 * math.sin(2 * math.pi * 440 * i / sample_rate)) for i in range(samples)),
+    )
     with wave.open(str(path), "w") as f:
         f.setnchannels(1)
         f.setsampwidth(2)
         f.setframerate(sample_rate)
-        samples = int(duration * sample_rate)
-        for i in range(samples):
-            value = int(32767 * math.sin(2 * math.pi * 440 * i / sample_rate))
-            f.writeframes(struct.pack("<h", value))
+        f.writeframes(data.tobytes())
 
 
 def test_transcoder_format_map():

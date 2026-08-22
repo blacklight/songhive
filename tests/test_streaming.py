@@ -2,10 +2,10 @@
 Tests for the Tornado audio streaming endpoint.
 """
 
+import array
 import asyncio
 import math
 import shutil
-import struct
 import tempfile
 import wave
 from pathlib import Path
@@ -38,16 +38,18 @@ from songhive.streaming.transcoder import Transcoder
 class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
     """Integration tests for the /api/v1/stream/{track_id} Tornado handler."""
 
-    def _create_wav(self, path: Path, duration: float, sample_rate: int = 44100) -> None:
+    def _create_wav(self, path: Path, duration: float, sample_rate: int = 8000) -> None:
         """Write a mono 16-bit PCM WAV file of the given duration."""
+        samples = int(duration * sample_rate)
+        data = array.array(
+            "h",
+            (int(32767 * math.sin(2 * math.pi * 440 * i / sample_rate)) for i in range(samples)),
+        )
         with wave.open(str(path), "w") as f:
             f.setnchannels(1)
             f.setsampwidth(2)
             f.setframerate(sample_rate)
-            samples = int(duration * sample_rate)
-            for i in range(samples):
-                value = int(32767 * math.sin(2 * math.pi * 440 * i / sample_rate))
-                f.writeframes(struct.pack("<h", value))
+            f.writeframes(data.tobytes())
 
     async def _create_tables(self):
         async with self.engine.begin() as conn:
