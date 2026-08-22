@@ -384,7 +384,7 @@ async def test_register_endpoint_closed_mode(client):
             "password": "secret",
         },
     )
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio

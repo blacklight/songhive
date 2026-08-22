@@ -7,6 +7,9 @@ Usage:
     songhive admin promote-user --username <name>
     songhive admin demote-user --username <name>
     songhive admin approve-user --username <name>
+    songhive admin disable-user --username <name>
+    songhive admin reset-password --username <name> --password <pw>
+    songhive admin import-dir --path <dir> --library-id <uuid> [--owner <username>]
     songhive admin create-invite --created-by <username> [--max-uses <n>] [--expires-at <iso>]
     songhive admin list-invites
 """
@@ -17,11 +20,15 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterable
+
+from kombu.exceptions import OperationalError as KombuOperationalError
 
 from ..config import load_config
 from ..models.base import create_all_tables, get_session, init_db
 from ..models.user import UserRole
 from ..services.auth import create_user, get_user_by_username
+from ..tasks.import_ import _AUDIO_EXTENSIONS, scan_directory
 from ..users import manager as user_manager
 from ..users.invites import InviteError, create_invite, list_invites
 
@@ -58,6 +65,21 @@ def _create_admin_parser() -> argparse.ArgumentParser:
     # approve-user
     approve_parser = subparsers.add_parser("approve-user", help="Approve a user by activating their account")
     approve_parser.add_argument("--username", required=True)
+
+    # disable-user
+    disable_parser = subparsers.add_parser("disable-user", help="Deactivate a user account")
+    disable_parser.add_argument("--username", required=True)
+
+    # reset-password
+    reset_parser = subparsers.add_parser("reset-password", help="Reset a user's password")
+    reset_parser.add_argument("--username", required=True)
+    reset_parser.add_argument("--password", required=True)
+
+    # import-dir
+    import_parser = subparsers.add_parser("import-dir", help="Import audio files from a directory")
+    import_parser.add_argument("--path", required=True, help="Path to the directory to import")
+    import_parser.add_argument("--library-id", required=True, help="Library UUID to import into")
+    import_parser.add_argument("--owner", default=None, help="Username to set as the owner")
 
     # create-invite
     create_invite_parser = subparsers.add_parser("create-invite", help="Create an invite code")
@@ -144,6 +166,110 @@ async def _handle_approve_user(args):
         print(f"User '{args.username}' approved and activated")
 
 
+async def _handle_disable_user(args):
+    async with get_session() as session:
+        user = await get_user_by_username(session, args.username)
+        if not user:
+            print(f"Error: user '{args.username}' not found", file=sys.stderr)
+            sys.exit(1)
+        try:
+            await user_manager.deactivate_user_by_id(session, user.id)
+        except user_manager.UserManagementError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(f"User '{args.username}' deactivated")
+
+
+async def _handle_reset_password(args):
+    async with get_session() as session:
+        user = await get_user_by_username(session, args.username)
+        if not user:
+            print(f"Error: user '{args.username}' not found", file=sys.stderr)
+            sys.exit(1)
+        try:
+            await user_manager.change_password(session, user, args.password)
+        except user_manager.UserManagementError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Password reset for user '{args.username}'")
+
+
+def _normalize_scan_roots(roots: Iterable[str]) -> list[Path]:
+    """Resolve configured scan roots to absolute paths."""
+    normalized = []
+    for root in roots or []:
+        path = Path(root).expanduser().resolve()
+        if path.exists() and path.is_dir():
+            normalized.append(path)
+    return normalized
+
+
+def _validate_import_path(config, path: Path) -> Path:
+    """Validate and resolve an import path against configured scan roots."""
+    resolved = path.expanduser().resolve()
+    if not resolved.exists():
+        raise ValueError(f"Path does not exist: {resolved}")
+    if not resolved.is_dir():
+        raise ValueError(f"Path is not a directory: {resolved}")
+
+    scan_roots = _normalize_scan_roots(config.imports.scan_roots)
+    if not scan_roots:
+        raise ValueError("No configured scan roots; configure one before importing")
+
+    for root in scan_roots:
+        try:
+            resolved.relative_to(root)
+            return resolved
+        except ValueError:
+            continue
+    raise ValueError(f"Path is not within any configured scan root: {resolved}")
+
+
+def _count_audio_files(path: Path) -> int:
+    """Count audio files under the given path."""
+    return sum(
+        1 for file_path in path.rglob("*") if file_path.is_file() and file_path.suffix.lower() in _AUDIO_EXTENSIONS
+    )
+
+
+async def _handle_import_dir(args):
+    config = load_config([])
+    try:
+        resolved = _validate_import_path(config, Path(args.path))
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    owner_id = None
+    if args.owner:
+        async with get_session() as session:
+            user = await get_user_by_username(session, args.owner)
+            if not user:
+                print(f"Error: owner '{args.owner}' not found", file=sys.stderr)
+                sys.exit(1)
+            owner_id = user.id
+
+    # Try to enqueue the task; fall back to a synchronous scan if the broker is
+    # unavailable, giving the admin an immediate count and a clear next step.
+    try:
+        result = scan_directory.delay(str(resolved), args.library_id, owner_id)  # type: ignore
+        print(f"Import queued with task id: {result.id}")
+    except (KombuOperationalError, OSError):
+        try:
+            count = scan_directory(str(resolved), args.library_id, owner_id)
+            print(f"Enqueued {count} file(s) for import")
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        except (KombuOperationalError, OSError):
+            count = _count_audio_files(resolved)
+            print(f"Found {count} file(s) to import")
+            print(
+                "Celery broker is not available; start the worker to process the queue.",
+                file=sys.stderr,
+            )
+
+
 async def _handle_create_invite(args):
     async with get_session() as session:
         user = await get_user_by_username(session, args.created_by)
@@ -215,6 +341,9 @@ def admin_main(argv=None):
         "promote-user": _handle_promote_user,
         "demote-user": _handle_demote_user,
         "approve-user": _handle_approve_user,
+        "disable-user": _handle_disable_user,
+        "reset-password": _handle_reset_password,
+        "import-dir": _handle_import_dir,
         "create-invite": _handle_create_invite,
         "list-invites": _handle_list_invites,
     }

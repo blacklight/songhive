@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 
 from pydantic import EmailStr, TypeAdapter, ValidationError
 from redis.asyncio import Redis
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -132,7 +132,7 @@ async def register_user(
         required but missing/invalid.
     """
     if config.auth.registration_mode == RegistrationMode.CLOSED:
-        raise RegistrationError("Registration is closed")
+        raise RegistrationError("Registration is closed", status_code=403)
 
     invite = None
     if config.auth.registration_mode == RegistrationMode.INVITE_ONLY:
@@ -252,10 +252,36 @@ async def _active_admin_count(session: AsyncSession) -> int:
     return result.scalar() or 0
 
 
+async def count_users(session: AsyncSession) -> int:
+    """Return the total number of users."""
+    result = await session.execute(select(func.count(User.id)))
+    return result.scalar() or 0
+
+
 async def list_users(session: AsyncSession, limit: int = 100, offset: int = 0) -> List[User]:
     """List users ordered by creation date (newest first)."""
     result = await session.execute(select(User).order_by(User.created_at.desc()).offset(offset).limit(limit))
     return list(result.scalars().all())
+
+
+async def search_users(
+    session: AsyncSession,
+    query: str,
+    limit: int = 20,
+    offset: int = 0,
+) -> tuple[list[User], int]:
+    """Search users by username or email (case-insensitive partial match)."""
+    pattern = f"%{query.strip().lower()}%"
+    where_clause = or_(
+        func.lower(User.username).like(pattern),
+        func.lower(User.email).like(pattern),
+    )
+    stmt = select(User).where(where_clause).order_by(User.created_at.desc())
+    total = await session.execute(select(func.count(User.id)).where(where_clause))
+    total_count = total.scalar() or 0
+    stmt = stmt.offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all()), total_count
 
 
 async def promote_user(session: AsyncSession, user_id: str) -> User:
@@ -292,14 +318,29 @@ async def activate_user(session: AsyncSession, user_id: str) -> User:
     return user
 
 
-async def deactivate_user_by_id(session: AsyncSession, user_id: str) -> User:
+async def deactivate_user_by_id(
+    session: AsyncSession,
+    user_id: str,
+    redis: Optional[Redis] = None,
+) -> User:
     """Deactivate a user account, guarding the last active admin."""
     user = await _get_user_or_raise(session, user_id)
     if user.role == UserRole.ADMIN and user.is_active and await _active_admin_count(session) <= 1:
         raise UserManagementError("Cannot deactivate the last active admin", 400)
     user.is_active = False
     await session.flush()
+    if redis is not None:
+        await revoke_all_user_refresh_tokens(redis, user.id)
     return user
+
+
+async def delete_user(session: AsyncSession, user_id: str) -> None:
+    """Delete a user account and all dependent data."""
+    user = await _get_user_or_raise(session, user_id)
+    if user.role == UserRole.ADMIN and user.is_active and await _active_admin_count(session) <= 1:
+        raise UserManagementError("Cannot delete the last active admin", 400)
+    await session.delete(user)
+    await session.flush()
 
 
 async def verify_email(session: AsyncSession, token: str) -> User | None:

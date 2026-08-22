@@ -42,6 +42,11 @@ def get_config(request: Request) -> SonghiveConfig:
     return config
 
 
+async def get_effective_config(request: Request) -> SonghiveConfig:
+    """Return the effective config as stored in app state."""
+    return get_config(request)
+
+
 def get_redis(request: Request) -> Redis:
     """Get the shared async Redis client from the request state."""
     redis: Redis = request.app.state.redis

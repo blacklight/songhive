@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 
 from ...config.schema import SonghiveConfig
 from ...models.user import User
+from .._common import client_ip
 from ..deps import get_config, get_current_user, get_redis
 
 logger = logging.getLogger(__name__)
@@ -20,20 +21,7 @@ logger = logging.getLogger(__name__)
 
 def _client_ip(request: Request, trusted_hops: int = 0) -> str:
     """Return the client IP address, honoring trusted X-Forwarded-For hops."""
-    forwarded: str | None = request.headers.get("X-Forwarded-For")
-    if forwarded and trusted_hops > 0:
-        parts = [ip.strip() for ip in forwarded.split(",")]
-        if len(parts) > trusted_hops:
-            return parts[-(trusted_hops + 1)]
-
-    real_ip: str | None = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-
-    if request.client and request.client.host:
-        return request.client.host
-
-    return "unknown"
+    return client_ip(request, trusted_hops=trusted_hops) or "unknown"
 
 
 def _rate_limit_key(ip: str, path: str, identifier: Optional[str] = None) -> str:

@@ -4,14 +4,15 @@ Track routes.
 
 from typing import List, Optional, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models._enums import Visibility
 from ...models.user import User
-from ...services import acl, music
+from ...services import acl, audit, music
 from ...services.storage import StorageService
+from .._common import client_ip
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -180,6 +181,7 @@ async def update_track(
 @router.delete("/{track_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_track(
     track_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -192,6 +194,17 @@ async def delete_track(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
+        )
+
+    if current_user.is_admin and track.owner_id != current_user.id:
+        await audit.log_action(
+            db,
+            actor_id=current_user.id,
+            action="track.admin_delete",
+            target_type="track",
+            target_id=track_id,
+            details={"title": track.title, "owner_id": track.owner_id},
+            ip_address=client_ip(request),
         )
 
     await db.delete(track)

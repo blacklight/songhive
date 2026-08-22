@@ -158,3 +158,56 @@ docs/              # Architecture & feature documentation
 - The Nginx reverse proxy resolves backend service hostnames through Docker's
   embedded DNS (`127.0.0.11`) so it keeps working when containers are
   recreated.
+
+## Audit Trails
+
+When adding or editing admin- or library-related features that mutate state,
+record an audit log entry with `songhive.services.audit.log_action`.
+
+- Use the shared `client_ip` helper from `songhive.api._common` for the
+  `ip_address` argument.
+- Use `require_admin` (or another authenticated dependency) to obtain the
+  `actor_id`.
+- Keep action names in `domain.verb` form, e.g.:
+  - `library.create`, `library.update`, `library.delete`
+  - `library_track.add`, `library_track.remove`
+  - `user.promote`, `user.demote`, `user.activate`, `user.deactivate`
+  - `report.resolve`, `invite.create`, `invite.revoke`
+- Always include a `target_type` and `target_id` when one exists, and put
+  relevant before/after values in `details`.
+
+Example:
+
+```python
+from .._common import client_ip
+from ..deps import get_db, require_admin
+from ...services import audit
+
+@router.post("/libraries/{library_id}", ...)
+async def update_library(
+    library_id: str,
+    body: LibraryUpdateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    library = await music.update_library(db, library_id, body)
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="library.update",
+        target_type="library",
+        target_id=library.id,
+        details={"name": library.name, "visibility": library.visibility},
+        ip_address=client_ip(request),
+    )
+    return LibraryResponse.model_validate(library)
+```
+
+- Add/update tests that assert an `AuditLog` row is created with the expected
+  `action`, `actor_id`, and `target_id`.
+- For bulk actions, prefer a single `user.bulk_action` (or domain-specific)
+  entry with the list of affected IDs and the action type in `details`.
+  Where the implementation contract specifies per-item entries (e.g. the
+  admin bulk user endpoints use `user.bulk_deactivate`, `user.bulk_activate`,
+  and `user.bulk_delete` per user), follow the contract.

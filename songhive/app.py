@@ -12,6 +12,7 @@ If a2wsgi is unavailable, falls back to running everything via uvicorn
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 from collections.abc import Iterable
@@ -62,11 +63,20 @@ def _run_tornado(config: SonghiveConfig):
     server = HTTPServer(tornado_app)
     server.listen(config.server.port, address=config.server.host)
 
+    # If port is 0 the kernel picked an ephemeral port; report the actual one.
+    bound_socket = next(iter(server._sockets.values()))
+    actual_host, actual_port = bound_socket.getsockname()[:2]
+
     logger.info(
         "Songhive server (Tornado) starting on %s:%d",
-        config.server.host,
-        config.server.port,
+        actual_host,
+        actual_port,
     )
+
+    port_file = os.environ.get("SONGHIVE_WRITE_PORT_TO")
+    if port_file:
+        with open(port_file, "w", encoding="utf-8") as f:
+            f.write(str(actual_port))
 
     loop = asyncio.get_event_loop()
 
