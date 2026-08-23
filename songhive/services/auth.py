@@ -10,7 +10,9 @@ from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config.schema import SonghiveConfig
 from ..models.user import VALID_ROLES, User
+from ..services.federation import ensure_user_actor
 
 _EMAIL_VALIDATOR = TypeAdapter(EmailStr)
 
@@ -84,8 +86,17 @@ async def create_user(
     password: str,
     role: str = "user",
     is_active: bool = True,
+    config: Optional[SonghiveConfig] = None,
 ) -> User:
-    """Create a new user."""
+    """
+    Create a new user.
+
+    When ``config`` is provided and federation is configured, the user's
+    ActivityPub actor URL and keypair are provisioned before the row is
+    flushed.  Callers that do not have a config handy (tests, low-level
+    helpers) can omit it; federation provisioning then happens at the next
+    higher-level call site that does have the config.
+    """
     if role not in VALID_ROLES:
         raise ValueError(f"Invalid role: {role}")
 
@@ -96,6 +107,8 @@ async def create_user(
         role=role,
         is_active=is_active,
     )
+    if config is not None:
+        ensure_user_actor(user, config)
     session.add(user)
     await session.flush()
     return user

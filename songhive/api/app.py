@@ -11,10 +11,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..config.schema import SonghiveConfig
-from ..models.base import get_session
+from ..models.base import get_session, init_db
 from ..services.acl import audit_ownerless_private
 from ..services.redis import close_redis_client, get_redis_client
 from ..services.settings import apply_settings_overrides
+from ..version import __version__
 from .errors import install_error_handlers
 from .routes import (
     admin,
@@ -22,6 +23,7 @@ from .routes import (
     artists,
     auth,
     favorites,
+    federation,
     files,
     history,
     libraries,
@@ -77,7 +79,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     :param config: The application configuration.
     :returns: A configured FastAPI instance.
     """
-    from ..version import __version__
+    init_db(config.database.url)
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -155,8 +157,9 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(share_urls.router, prefix=api_prefix, tags=["share-urls"])
     app.include_router(share.router, prefix=api_prefix, tags=["share"])
 
-    # Federation routes (pubby)
+    # Federation routes
     if config.federation.enabled and config.federation.instance_domain:
+        app.include_router(federation.router)
         _setup_federation(app, config)
 
     return app
@@ -167,6 +170,7 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
     try:
         from pubby import ActivityPubHandler, ActorConfig
         from pubby.server.adapters.fastapi import bind_activitypub
+        from pubby.server.adapters.fastapi_mastodon import bind_mastodon_api
 
         from ..federation.storage import (
             create_activitypub_storage,
@@ -191,5 +195,13 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
             private_key_path=str(private_key_path),
         )
         bind_activitypub(app, handler, prefix="/ap")
+        bind_mastodon_api(
+            app,
+            handler,
+            title=config.federation.instance_name,
+            description=config.federation.instance_description,
+            software_name="Songhive",
+            software_version=__version__,
+        )
     except ImportError:
         logger.error("Federation is enabled but pubby is not installed")

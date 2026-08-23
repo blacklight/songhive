@@ -41,6 +41,18 @@ enabled = true
 instance_domain = "music.example.com"
 instance_name = "Songhive"
 instance_description = "A federated music sharing service"
+# Optional path to the instance actor's PEM private key. A key is generated
+# here automatically when federation is enabled and the file does not exist.
+# private_key_path = "/var/lib/songhive/actor.pem"
+
+# ActivityPub instance allow/block lists. An empty allowed_instances list
+# means all instances are allowed except those in blocked_instances.
+allowed_instances = []
+blocked_instances = []
+
+# Examples:
+# allowed_instances = ["good.example", "friend.example"]
+# blocked_instances = ["evil.example", "spammers.example"]
 
 [auth]
 registration_mode = "open"

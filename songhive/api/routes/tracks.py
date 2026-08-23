@@ -2,15 +2,19 @@
 Track routes.
 """
 
+import uuid
 from typing import List, Optional, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...models import Track
 from ...models._enums import Visibility
 from ...models.user import User
 from ...services import acl, audit, music
+from ...services.auth import get_user_by_id
+from ...services.federation import publish_track_activity, unpublish_track_activity
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
 from ..deps import (
@@ -51,6 +55,55 @@ class TrackUpdate(BaseModel):
     track_number: Optional[int] = None
     disc_number: Optional[int] = None
     visibility: Optional[Visibility] = None
+
+
+async def _handle_visibility_changes(
+    track: Track,
+    previous_visibility: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession,
+):
+    """Partially update a track."""
+    if (
+        previous_visibility != Visibility.PUBLIC.value
+        and track.visibility == Visibility.PUBLIC.value
+        and track.owner_id
+    ):
+        owner = await get_user_by_id(db, track.owner_id)
+        artist = track.artist
+        if owner is not None and artist is not None:
+            if not track.federation_object_id:
+                track.federation_object_id = str(uuid.uuid4())
+                await db.commit()
+            background_tasks.add_task(
+                publish_track_activity,
+                track,
+                artist,
+                owner,
+                request.app.state.config,
+                track.federation_object_id,
+            )
+
+    if (
+        previous_visibility == Visibility.PUBLIC.value
+        and track.visibility != Visibility.PUBLIC.value
+        and track.owner_id
+    ):
+        owner = await get_user_by_id(db, track.owner_id)
+        artist = track.artist
+        if owner is not None and artist is not None:
+            object_id = track.federation_object_id
+            background_tasks.add_task(
+                unpublish_track_activity,
+                track,
+                artist,
+                owner,
+                request.app.state.config,
+                object_id,
+            )
+            track.federation_object_id = None
+            await db.commit()
 
 
 @router.get("/", response_model=List[TrackResponse])
@@ -147,6 +200,8 @@ async def get_track(
 async def update_track(
     track_id: str,
     body: TrackUpdate,
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
@@ -162,6 +217,7 @@ async def update_track(
             detail="Access denied",
         )
 
+    previous_visibility = track.visibility
     if body.title is not None:
         track.title = body.title
     if body.genre is not None:
@@ -174,6 +230,9 @@ async def update_track(
         track.visibility = body.visibility.value
 
     await db.commit()
+    await _handle_visibility_changes(
+        track, previous_visibility=previous_visibility, request=request, background_tasks=background_tasks, db=db
+    )
 
     return TrackResponse(
         id=str(track.id),
@@ -194,6 +253,7 @@ async def update_track(
 async def delete_track(
     track_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -219,6 +279,24 @@ async def delete_track(
             ip_address=client_ip(request),
         )
 
+    artist = track.artist
+    owner_id = track.owner_id
+    was_public = track.visibility == Visibility.PUBLIC.value
+    object_id = track.federation_object_id
+
     await db.delete(track)
     await db.commit()
+
+    if was_public and owner_id and artist is not None:
+        owner = await get_user_by_id(db, owner_id)
+        if owner is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                track,
+                artist,
+                owner,
+                request.app.state.config,
+                object_id,
+            )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)

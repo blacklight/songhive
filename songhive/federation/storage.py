@@ -9,6 +9,7 @@ a synchronous driver that pubby can use.
 from pathlib import Path
 from typing import Optional
 
+from pubby.storage.adapters.db import DbActivityPubStorage, init_db_storage
 from sqlalchemy import make_url
 
 # Mapping from Songhive's async SQLAlchemy drivers to sync equivalents that
@@ -51,7 +52,7 @@ def get_sync_database_url(database_url: str) -> str:
     return url.render_as_string(hide_password=False)
 
 
-def create_activitypub_storage(database_url: str):
+def create_activitypub_storage(database_url: str) -> DbActivityPubStorage:
     """
     Create a pubby SQLAlchemy ActivityPub storage backend.
 
@@ -61,8 +62,6 @@ def create_activitypub_storage(database_url: str):
     :param database_url: The async database URL from Songhive config.
     :returns: A configured ``DbActivityPubStorage`` instance.
     """
-    from pubby.storage.adapters.db import init_db_storage
-
     sync_url = get_sync_database_url(database_url)
     return init_db_storage(
         sync_url,

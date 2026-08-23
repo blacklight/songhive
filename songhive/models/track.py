@@ -35,6 +35,8 @@ class Track(Base):
     audio_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
     raw_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
+    audio_mime_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    federation_object_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     owner_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,

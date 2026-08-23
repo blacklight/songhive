@@ -5,7 +5,7 @@ Admin routes.
 from datetime import datetime
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from kombu.exceptions import OperationalError as KombuOperationalError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from redis.asyncio import Redis
@@ -14,10 +14,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
+from ...models._enums import Visibility
 from ...models.user import User, UserRole
 from ...services import audit, music
 from ...services import settings as settings_service
 from ...services import stats as stats_service
+from ...services.auth import get_user_by_id
+from ...services.federation import unpublish_track_activity
 from ...tasks.storage import cleanup_orphaned_files
 from ...users import invites as invite_service
 from ...users import manager as user_manager
@@ -270,6 +273,7 @@ async def delete_user(
 async def delete_track(
     track_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
@@ -288,8 +292,26 @@ async def delete_track(
         ip_address=client_ip(request),
     )
 
+    artist = track.artist
+    owner_id = track.owner_id
+    was_public = track.visibility == Visibility.PUBLIC.value
+    object_id = track.federation_object_id
+
     await db.delete(track)
     await db.commit()
+
+    if was_public and owner_id and artist is not None:
+        owner = await get_user_by_id(db, owner_id)
+        if owner is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                track,
+                artist,
+                owner,
+                request.app.state.config,
+                object_id,
+            )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

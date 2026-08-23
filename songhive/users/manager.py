@@ -24,6 +24,7 @@ from ..services.auth import (
     get_user_by_username_or_email,
     hash_password,
 )
+from ..services.federation import ensure_user_actor
 from ..users.invites import get_invite, is_invite_valid
 from ..users.tokens import revoke_all_user_refresh_tokens
 
@@ -174,6 +175,7 @@ async def register_user(
         email_verified=email_verified,
         email_verification_token=email_verification_token,
     )
+    ensure_user_actor(user, config)
     session.add(user)
     try:
         await session.flush()

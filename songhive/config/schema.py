@@ -126,6 +126,17 @@ class FederationConfig(BaseSettings):
         default=None,
         description="Path to the ActivityPub actor private key PEM file; a key is generated here if missing",
     )
+    allowed_instances: list[str] = Field(
+        default_factory=list,
+        description=(
+            "ActivityPub instances allowed to federate with this server. "
+            "When empty, all instances are allowed except those in blocked_instances."
+        ),
+    )
+    blocked_instances: list[str] = Field(
+        default_factory=list,
+        description="ActivityPub instances that are always blocked from federation.",
+    )
 
 
 class RegistrationMode(str, Enum):

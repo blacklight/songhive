@@ -12,8 +12,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from pubby.storage.adapters.db import DbActivityPubStorage
+
 from ..config.schema import SonghiveConfig
 from ..models.user import User
+from ..services.federation import ensure_user_actor
+from ._common import get_actor_url, get_inbox_url, get_outbox_url
 from .storage import create_activitypub_storage
 
 logger = logging.getLogger(__name__)
@@ -22,22 +26,7 @@ logger = logging.getLogger(__name__)
 # created lazily and cached for the lifetime of the process so that profile
 # updates can reuse the same backend across calls.  Instances are keyed by
 # database URL; tests that need a fresh backend should reset this cache.
-_federation_storage_cache: dict[str, Any] = {}
-
-
-def get_actor_url(domain: str, username: str) -> str:
-    """Get the ActivityPub actor URL for a user."""
-    return f"https://{domain}/users/{username}"
-
-
-def get_inbox_url(domain: str, username: str) -> str:
-    """Get the inbox URL for a user."""
-    return f"https://{domain}/users/{username}/inbox"
-
-
-def get_outbox_url(domain: str, username: str) -> str:
-    """Get the outbox URL for a user."""
-    return f"https://{domain}/users/{username}/outbox"
+_federation_storage_cache: dict[str, DbActivityPubStorage] = {}
 
 
 def _build_attachment(user: User) -> Optional[list[dict[str, Any]]]:
@@ -95,7 +84,7 @@ def user_to_actor_document(user: User, domain: str) -> dict:
     return document
 
 
-def get_federation_storage(database_url: str) -> Any:
+def get_federation_storage(database_url: str) -> DbActivityPubStorage:
     """Return a cached pubby storage instance for the configured database URL."""
     if database_url not in _federation_storage_cache:
         _federation_storage_cache[database_url] = create_activitypub_storage(database_url)
@@ -113,6 +102,8 @@ async def sync_user_actor(user: User, config: SonghiveConfig) -> bool:
     """
     if not config.federation.enabled or not config.federation.instance_domain:
         return False
+
+    ensure_user_actor(user, config)
 
     try:
         storage = await asyncio.to_thread(get_federation_storage, config.database.url)
