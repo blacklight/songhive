@@ -96,6 +96,7 @@ def process_upload(
                     "track_id": str(result.track.id),
                     "upload_id": str(result.upload.id),
                 },
+                topic="import",
             )
             return str(result.upload.id)
 
@@ -109,6 +110,7 @@ def process_upload(
                 "library_id": library_id,
                 "existing_track_id": exc.existing_track_id,
             },
+            topic="import",
         )
         return exc.existing_track_id
 

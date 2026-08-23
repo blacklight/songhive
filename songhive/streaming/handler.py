@@ -5,6 +5,7 @@ Tornado streaming handler for audio content delivery.
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import tornado.iostream
@@ -26,6 +27,7 @@ from ..services.streaming import (
 )
 from ..storage import get_storage
 from ..streaming.transcoder import Transcoder
+from ..ws.events import EventWebSocket
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +127,17 @@ class StreamHandler(tornado.web.RequestHandler):
                 return self._not_found()
             if local_path is None:
                 return self._not_found()
+
+            # --- Notify WebSocket subscribers that playback is starting ---
+            EventWebSocket.broadcast(
+                "now_playing",
+                {
+                    "track_id": track_id,
+                    "user_id": str(user.id) if user is not None else None,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+                topic="now_playing",
+            )
 
             # --- Parse requested format and bitrate ---
             fmt = self.get_argument("format", None)
