@@ -49,7 +49,7 @@ steps:
 ###
 
 - name: tests
-  image: python:3.12
+  image: python:3.14
   commands:
     - apt-get update && apt-get install -y ffmpeg
     - pip install -e . -r requirements-dev.txt
