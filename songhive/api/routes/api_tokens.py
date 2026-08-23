@@ -7,6 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
@@ -20,7 +21,7 @@ from ...users.api_tokens import (
     revoke_api_token,
 )
 from .._common import client_ip
-from ..deps import get_config, get_current_user, get_db
+from ..deps import get_config, get_current_user, get_db, get_redis
 from ..middleware.rate_limit import rate_limit
 
 router = APIRouter(prefix="/auth/api-tokens", tags=["API Tokens"])
@@ -29,8 +30,26 @@ router = APIRouter(prefix="/auth/api-tokens", tags=["API Tokens"])
 class ApiTokenCreateRequest(BaseModel):
     """Request body for creating a new API token."""
 
-    name: str = Field(..., min_length=1, max_length=128)
-    expires_at: Optional[datetime] = None
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "CI/CD Pipeline",
+                    "expires_at": "2027-12-31T23:59:59Z",
+                },
+                {
+                    "name": "Mobile App",
+                    "expires_at": None,
+                },
+            ]
+        }
+    )
+
+    name: str = Field(..., min_length=1, max_length=128, description="A descriptive name for the token")
+    expires_at: Optional[datetime] = Field(
+        None,
+        description="Optional expiration timestamp (ISO 8601 format with timezone). If null, the token never expires.",
+    )
 
     @field_validator("expires_at")
     @classmethod
@@ -47,33 +66,90 @@ class ApiTokenCreateRequest(BaseModel):
 class ApiTokenCreateResponse(BaseModel):
     """Response returned after a successful API token creation."""
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "name": "CI/CD Pipeline",
+                    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example",
+                    "expires_at": "2027-12-31T23:59:59Z",
+                    "created_at": "2026-08-23T12:00:00Z",
+                }
+            ]
+        },
+    )
 
-    id: str
-    name: str
-    token: str
-    expires_at: Optional[datetime]
-    created_at: datetime
+    id: str = Field(..., description="Unique identifier for the token")
+    name: str = Field(..., description="The descriptive name of the token")
+    token: str = Field(..., description="The raw JWT. Store this securely; it cannot be retrieved again.")
+    expires_at: Optional[datetime] = Field(None, description="Expiration timestamp, or null if the token never expires")
+    created_at: datetime = Field(..., description="Timestamp when the token was created")
 
 
 class ApiTokenSummary(BaseModel):
     """Metadata for an API token; never includes the raw JWT."""
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "name": "CI/CD Pipeline",
+                    "expires_at": "2027-12-31T23:59:59Z",
+                    "last_used_at": "2026-08-23T14:30:00Z",
+                    "created_at": "2026-08-23T12:00:00Z",
+                    "is_active": True,
+                }
+            ]
+        },
+    )
 
-    id: str
-    name: str
-    expires_at: Optional[datetime]
-    last_used_at: Optional[datetime]
-    created_at: datetime
-    is_active: bool
+    id: str = Field(..., description="Unique identifier for the token")
+    name: str = Field(..., description="The descriptive name of the token")
+    expires_at: Optional[datetime] = Field(None, description="Expiration timestamp, or null if the token never expires")
+    last_used_at: Optional[datetime] = Field(
+        None, description="Timestamp when the token was last used for authentication"
+    )
+    created_at: datetime = Field(..., description="Timestamp when the token was created")
+    is_active: bool = Field(..., description="True if the token is not revoked and has not expired")
 
 
 class ApiTokenListResponse(BaseModel):
     """Paginated list of API tokens."""
 
-    items: list[ApiTokenSummary]
-    total: int
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "items": [
+                        {
+                            "id": "550e8400-e29b-41d4-a716-446655440000",
+                            "name": "CI/CD Pipeline",
+                            "expires_at": "2027-12-31T23:59:59Z",
+                            "last_used_at": "2026-08-23T14:30:00Z",
+                            "created_at": "2026-08-23T12:00:00Z",
+                            "is_active": True,
+                        },
+                        {
+                            "id": "660e8400-e29b-41d4-a716-446655440001",
+                            "name": "Mobile App",
+                            "expires_at": None,
+                            "last_used_at": "2026-08-22T10:15:00Z",
+                            "created_at": "2026-08-20T08:00:00Z",
+                            "is_active": True,
+                        },
+                    ],
+                    "total": 2,
+                }
+            ]
+        }
+    )
+
+    items: list[ApiTokenSummary] = Field(..., description="List of API token metadata")
+    total: int = Field(..., description="Total number of tokens for the user")
 
 
 class RevokeApiTokenResponse(BaseModel):
@@ -156,10 +232,11 @@ async def delete_api_token(
     request: Request,
     token_id: str,
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
     user: User = Depends(get_current_user),
 ):
     """Revoke an API token belonging to the authenticated user."""
-    ok = await revoke_api_token(db, token_id, user.id)
+    ok = await revoke_api_token(db, token_id, user.id, redis=redis)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
 

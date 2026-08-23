@@ -6,6 +6,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
+from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,7 @@ from ..api.middleware.auth import create_api_token_jwt
 from ..config.schema import SonghiveConfig
 from ..models.api_token import ApiToken
 from ..models.user import User
+from ..services.api_token_tracker import flush_api_token_usage, track_api_token_usage
 
 __all__ = [
     "ApiTokenError",
@@ -68,26 +70,36 @@ async def get_api_token_by_jti(db: AsyncSession, jti: str) -> Optional[ApiToken]
     return result.scalar_one_or_none()
 
 
-async def validate_api_token(db: AsyncSession, jti: str) -> Optional[ApiToken]:
-    """Return the active API token for ``jti`` and update ``last_used_at``."""
+async def validate_api_token(
+    db: AsyncSession,
+    jti: str,
+    redis: Optional[Redis] = None,
+) -> Optional[ApiToken]:
+    """
+    Return the active API token for ``jti`` and track its usage.
+
+    If ``redis`` is provided, the usage timestamp is buffered in Redis and
+    flushed to the database periodically. Otherwise, the timestamp is written
+    directly to the database (legacy behavior for tests or when Redis is unavailable).
+    """
     api_token = await get_api_token_by_jti(db, jti)
     if api_token is None:
         return None
     if api_token.revoked_at is not None:
         return None
-    if api_token.expires_at is not None:
-        expires_at = api_token.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at <= datetime.now(timezone.utc):
-            return None
+    if api_token.expires_at is not None and api_token.expires_at <= datetime.now(timezone.utc):
+        return None
 
-    api_token.last_used_at = datetime.now(timezone.utc)
-    try:
-        await db.flush()
-    except Exception:
-        # Best-effort update: a failure here must not fail the request.
-        pass
+    # Buffer usage in Redis if available, otherwise write directly to DB
+    if redis is not None:
+        await track_api_token_usage(redis, jti)
+    else:
+        api_token.last_used_at = datetime.now(timezone.utc)
+        try:
+            await db.flush()
+        except Exception:
+            # Best-effort update: a failure here must not fail the request.
+            pass
 
     return api_token
 
@@ -118,14 +130,28 @@ async def count_user_api_tokens(db: AsyncSession, user_id: str) -> int:
     return result.scalar_one()
 
 
-async def revoke_api_token(db: AsyncSession, token_id: str, user_id: str) -> bool:
-    """Revoke an API token, returning True if it belonged to ``user_id``."""
+async def revoke_api_token(
+    db: AsyncSession,
+    token_id: str,
+    user_id: str,
+    redis: Optional[Redis] = None,
+) -> bool:
+    """
+    Revoke an API token, returning True if it belonged to ``user_id``.
+
+    If ``redis`` is provided, any buffered usage timestamp is flushed to the
+    database before revocation to ensure the final usage time is persisted.
+    """
     stmt = select(ApiToken).where(ApiToken.id == token_id, ApiToken.user_id == user_id)
     result = await db.execute(stmt)
     api_token = result.scalar_one_or_none()
 
     if api_token is None:
         return False
+
+    # Flush buffered usage before revoking
+    if redis is not None:
+        await flush_api_token_usage(db, redis, api_token.jti)
 
     api_token.revoked_at = datetime.now(timezone.utc)
     await db.flush()

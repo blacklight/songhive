@@ -7,10 +7,10 @@ Long-lived named tokens issued as HS256 JWTs for programmatic access.
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
+from .base import Base, TZDateTime
 
 
 class ApiToken(Base):
@@ -41,15 +41,15 @@ class ApiToken(Base):
         nullable=False,
     )
     expires_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(),
         nullable=True,
     )
     revoked_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(),
         nullable=True,
     )
     last_used_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(),
         nullable=True,
     )
 
@@ -58,10 +58,6 @@ class ApiToken(Base):
         """Return True if the token has not been revoked and has not expired."""
         if self.revoked_at is not None:
             return False
-        if self.expires_at is not None:
-            expires_at = self.expires_at
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if expires_at <= datetime.now(timezone.utc):
-                return False
+        if self.expires_at is not None and self.expires_at <= datetime.now(timezone.utc):
+            return False
         return True

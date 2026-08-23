@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Optional
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import DateTime, TypeDecorator, func
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.pool import NullPool
@@ -16,17 +16,42 @@ from sqlalchemy.pool import NullPool
 logger = logging.getLogger(__name__)
 
 
+class TZDateTime(TypeDecorator):
+    """
+    A DateTime type that enforces timezone-aware datetimes.
+
+    Raises ValueError if a naive datetime is assigned. This prevents defensive
+    ``if tzinfo is None`` checks throughout the codebase.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: Optional[datetime], *_, **__) -> Optional[datetime]:
+        """Validate that the datetime is timezone-aware before binding."""
+        if value is not None and value.tzinfo is None:
+            raise ValueError(f"Naive datetime not allowed: {value!r}")
+        return value
+
+    def process_result_value(self, value: Optional[datetime], *_, **__) -> Optional[datetime]:
+        """Ensure the datetime returned from the DB is timezone-aware."""
+        if value is not None and value.tzinfo is None:
+            # Defensive: assume UTC if the DB returns a naive datetime
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(),
         server_default=func.now(),
         default=lambda: datetime.now(timezone.utc),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(),
         server_default=func.now(),
         onupdate=func.now(),
         default=lambda: datetime.now(timezone.utc),

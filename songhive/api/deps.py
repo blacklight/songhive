@@ -82,7 +82,8 @@ async def _get_current_user(
         jti = payload.get("jti")
         if not jti:
             return None
-        api_token = await validate_api_token(db, jti)
+        redis = get_redis(request)
+        api_token = await validate_api_token(db, jti, redis=redis)
         if api_token is None:
             return None
         user = await get_user_by_id(db, api_token.user_id)
