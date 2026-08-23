@@ -41,9 +41,9 @@ def test_playlists_endpoint(client):
     assert response.json() == []
 
 
-def test_favorites_endpoint(client):
-    """Test the favorites listing endpoint."""
-    response = client.get("/api/v1/favorites/")
+def test_favorites_endpoint(client, regular_user, auth_headers):
+    """Test the favorites listing endpoint for an authenticated user."""
+    response = client.get("/api/v1/favorites/", headers=auth_headers(regular_user))
     assert response.status_code == 200
     assert response.json() == []
 
@@ -52,6 +52,8 @@ def test_history_endpoint_requires_auth(client):
     """GET /history without authentication returns 401."""
     response = client.get("/api/v1/history/")
     assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"
+    assert response.headers["content-type"].startswith("application/problem+json")
 
 
 def test_radios_endpoint(client):

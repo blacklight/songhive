@@ -4,6 +4,7 @@ Tests for the Tornado audio streaming endpoint.
 
 import array
 import asyncio
+import json
 import math
 import shutil
 import tempfile
@@ -16,6 +17,7 @@ import tornado.testing
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
+from tornado.websocket import websocket_connect
 
 from songhive.api.app import create_app
 from songhive.api.middleware.auth import create_access_token
@@ -33,6 +35,7 @@ from songhive.services.auth import create_user
 from songhive.services.storage import StorageService
 from songhive.storage import get_storage
 from songhive.streaming.transcoder import Transcoder
+from songhive.ws.events import EventWebSocket
 
 
 class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
@@ -159,6 +162,7 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
         self.config = SonghiveConfig(
             auth={"secret_key": "a" * 64},  # type: ignore
             database={"url": f"sqlite+aiosqlite:///{self._tmp / 'songhive.db'}"},  # type: ignore
+            server={"cors_origins": ["*"]},  # type: ignore
             storage={  # type: ignore
                 "backend": "local",
                 "local_path": str(self.media_path),
@@ -168,6 +172,8 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
         init_db(engine=self.engine, force=True)
         asyncio.run(self._create_tables())
         asyncio.run(self._seed())
+        EventWebSocket._connections.clear()
+        EventWebSocket._allowed_origins = None
         super().setUp()
 
     def tearDown(self):
@@ -389,3 +395,27 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
             f"/api/v1/stream/{self.private_track.id}?token={token}",
         )
         assert response.code == 200
+
+    def test_stream_broadcasts_now_playing(self):
+        """Starting a stream publishes a now_playing event to subscribers."""
+        ws_url = f"ws://localhost:{self.get_http_port()}/ws/?token={self.token}"
+        ws_client = self.io_loop.run_sync(lambda: websocket_connect(ws_url))
+        self.io_loop.run_sync(
+            lambda: ws_client.write_message(json.dumps({"action": "subscribe", "topics": ["now_playing"]}))
+        )
+        self.io_loop.run_sync(lambda: asyncio.sleep(0.05))
+
+        response = self.fetch(
+            f"/api/v1/stream/{self.public_track.id}",
+            headers=self._auth_header(self.token),
+        )
+        assert response.code == 200
+
+        msg = self.io_loop.run_sync(lambda: asyncio.wait_for(ws_client.read_message(), timeout=2.0))
+        payload = json.loads(msg)
+        assert payload["type"] == "now_playing"
+        assert payload["data"]["track_id"] == self.public_track.id
+        assert payload["data"]["user_id"] == str(self.user.id)
+        assert "timestamp" in payload["data"]
+
+        ws_client.close()

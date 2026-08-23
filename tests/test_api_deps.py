@@ -15,6 +15,7 @@ from songhive.api.deps import (
     get_db,
     require_access,
 )
+from songhive.api.errors import install_error_handlers
 from songhive.api.middleware.auth import create_access_token
 from songhive.models._enums import Visibility
 from songhive.models.artist import Artist
@@ -39,6 +40,7 @@ def deps_client(db_session, config, fake_redis):
     app = FastAPI()
     app.state.config = config
     app.state.redis = fake_redis
+    install_error_handlers(app)
 
     @app.get("/test/me")
     async def me(user: Optional[User] = Depends(get_current_user_optional)):
@@ -154,6 +156,7 @@ async def test_require_access_other_user_forbidden(deps_client, regular_user, ma
     )
     assert response.status_code == 403
     assert response.json()["detail"] == "Access denied"
+    assert response.headers["content-type"].startswith("application/problem+json")
 
 
 @pytest.mark.asyncio
@@ -208,6 +211,7 @@ async def test_require_access_missing_item(deps_client, regular_user, db_session
     )
     assert response.status_code == 404
     assert response.json()["detail"] == "Not found"
+    assert response.headers["content-type"].startswith("application/problem+json")
 
 
 def test_require_access_unknown_item_type():

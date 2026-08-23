@@ -865,7 +865,7 @@ async def test_oauth_token_rejects_refresh_without_refresh_grant(client, db_sess
         },
     )
     assert refresh_response.status_code == status.HTTP_400_BAD_REQUEST
-    assert refresh_response.json() == {"detail": "unsupported_grant_type"}
+    assert refresh_response.json()["detail"] == "unsupported_grant_type"
 
 
 @pytest.mark.asyncio

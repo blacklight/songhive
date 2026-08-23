@@ -1,14 +1,16 @@
 """
-Tests for the Redis-backed fixed-window rate limiter.
+Tests for the Redis-backed sliding-window rate limiter.
 """
 
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException, Request, status
 
+from songhive.api.middleware import rate_limit as rate_limit_module
 from songhive.api.middleware.rate_limit import (
+    _check_rate_limit,
     _client_ip,
     _rate_limit_key,
     check_rate_limit,
@@ -75,13 +77,13 @@ def test_client_ip_returns_unknown_when_missing():
 
 
 def test_rate_limit_key_without_identifier():
-    """Test the rate limit key for IP + path."""
-    assert _rate_limit_key("1.2.3.4", "/api/v1/auth/login") == "rate:1.2.3.4:/api/v1/auth/login"
+    """Test the rate limit key for scope + path."""
+    assert _rate_limit_key("1.2.3.4", "/api/v1/auth/login") == "rl:1.2.3.4:/api/v1/auth/login"
 
 
 def test_rate_limit_key_with_identifier():
     """Test the rate limit key including an optional identifier."""
-    assert _rate_limit_key("1.2.3.4", "/api/v1/auth/login", "alice") == ("rate:1.2.3.4:/api/v1/auth/login:alice")
+    assert _rate_limit_key("1.2.3.4", "/api/v1/auth/login", "alice") == ("rl:1.2.3.4:/api/v1/auth/login:alice")
 
 
 @pytest.mark.asyncio
@@ -161,6 +163,93 @@ async def test_check_rate_limit_uses_identifier(fake_redis):
     assert exc_info.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
 
 
+class _FakeTime:
+    """A stand-in for the ``time`` module with a controllable ``.time()`` value."""
+
+    def __init__(self, t: float):
+        self.t = t
+
+    def time(self) -> float:
+        return self.t
+
+
+@pytest.mark.asyncio
+async def test_check_rate_limit_includes_retry_after_header(fake_redis, monkeypatch):
+    """Test that a 429 response includes a positive Retry-After header."""
+    config = SonghiveConfig(
+        auth={
+            "rate_limit_enabled": True,
+            "rate_limit_requests": 2,
+            "rate_limit_window_seconds": 60,
+        }
+    )
+    request = _request()
+
+    fake_time = _FakeTime(1000.0)
+    monkeypatch.setattr(rate_limit_module, "time", fake_time)
+
+    await check_rate_limit(request, config, fake_redis)
+    await check_rate_limit(request, config, fake_redis)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await check_rate_limit(request, config, fake_redis)
+
+    assert exc_info.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert "Retry-After" in exc_info.value.headers
+    retry_after = int(exc_info.value.headers["Retry-After"])
+    assert 1 <= retry_after <= config.auth.rate_limit_window_seconds
+
+
+@pytest.mark.asyncio
+async def test_check_rate_limit_sliding_window(fake_redis, monkeypatch):
+    """Test that requests older than the window do not count against the limit."""
+    config = SonghiveConfig(
+        auth={
+            "rate_limit_enabled": True,
+            "rate_limit_requests": 2,
+            "rate_limit_window_seconds": 60,
+        }
+    )
+    request = _request()
+
+    fake_time = _FakeTime(1000.0)
+    monkeypatch.setattr(rate_limit_module, "time", fake_time)
+
+    await check_rate_limit(request, config, fake_redis)
+    await check_rate_limit(request, config, fake_redis)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await check_rate_limit(request, config, fake_redis)
+
+    assert exc_info.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+    # Advance past the window; old entries should be evicted.
+    fake_time.t += config.auth.rate_limit_window_seconds
+    await check_rate_limit(request, config, fake_redis)
+    await check_rate_limit(request, config, fake_redis)
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_user_or_ip_uses_different_scopes(fake_redis, monkeypatch):
+    """Test that different scopes maintain independent sliding windows."""
+    config = SonghiveConfig(
+        auth={
+            "rate_limit_enabled": True,
+            "rate_limit_requests": 1,
+            "rate_limit_window_seconds": 60,
+        }
+    )
+    request = _request()
+
+    await _check_rate_limit(request, config, fake_redis, scope="user-a")
+    await _check_rate_limit(request, config, fake_redis, scope="user-b")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _check_rate_limit(request, config, fake_redis, scope="user-a")
+
+    assert exc_info.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
 @pytest.mark.asyncio
 async def test_check_rate_limit_fails_open_on_redis_error(caplog):
     """Test that Redis errors fail open and log a warning."""
@@ -172,8 +261,10 @@ async def test_check_rate_limit_fails_open_on_redis_error(caplog):
         }
     )
     request = _request()
+    broken_pipeline = MagicMock()
+    broken_pipeline.execute = AsyncMock(side_effect=ConnectionError("redis down"))
     broken_redis = MagicMock()
-    broken_redis.incr = MagicMock(side_effect=ConnectionError("redis down"))
+    broken_redis.pipeline.return_value = broken_pipeline
 
     with caplog.at_level(logging.WARNING, logger="songhive.api.middleware.rate_limit"):
         await check_rate_limit(request, config, broken_redis)
