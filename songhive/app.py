@@ -34,12 +34,15 @@ def _build_tornado_app(config: SonghiveConfig, fastapi_app) -> Any:
     from .streaming.handler import StreamHandler
     from .ws.events import EventWebSocket
 
+    EventWebSocket._allowed_origins = set(config.server.cors_origins)
+
     wsgi_app = ASGIMiddleware(cast(Callable[[Any, Any, Any], Awaitable[None]], fastapi_app))
     container = WSGIContainer(cast(Callable[[dict[str, Any], Any], Iterable[bytes]], cast(object, wsgi_app)))
 
     return Application(
         [
             (r"/ws/events", EventWebSocket),
+            (r"/ws/", EventWebSocket),
             (r"/api/v1/stream/(?P<track_id>[^/]+)", StreamHandler),
             (r".*", FallbackHandler, {"fallback": container}),
         ],
