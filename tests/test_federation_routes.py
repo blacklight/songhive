@@ -68,6 +68,12 @@ def fed_client(fed_app, db_session, fake_redis_server, monkeypatch):
         client.app.dependency_overrides.pop(get_db, None)  # type: ignore
 
 
+async def test_federation_routes_disabled_when_federation_off(client, regular_user):
+    """Federation endpoints return 404 when federation is disabled."""
+    response = client.get("/users/regular", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
 async def test_get_actor_returns_person(fed_client, regular_user):
     """GET /users/{username} returns a valid ActivityPub Person."""
     response = fed_client.get(
@@ -299,3 +305,111 @@ async def test_get_followers_returns_only_requested_actors_followers(fed_client,
     assert data["id"] == f"{regular_actor_url}/followers"
     assert data["orderedItems"] == ["https://a.example/users/bob", "https://b.example/users/carol"]
     storage.get_followers.assert_called_once_with(actor_id=regular_actor_url)
+
+
+async def test_get_object_returns_404_when_audio_object_is_none(fed_client, db_session, regular_user, monkeypatch):
+    """GET /users/{username}/objects/{object_id} returns 404 when serialization fails."""
+    monkeypatch.setattr("songhive.api.routes.federation.track_to_audio_object", lambda *args, **kwargs: None)
+
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-none",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    response = fed_client.get(
+        "/users/regular/objects/pub-none",
+        headers={"Accept": ACTIVITY_JSON},
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_inbox_rejects_invalid_json(fed_client, regular_user, monkeypatch):
+    """POST /users/{username}/inbox rejects non-JSON bodies."""
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
+
+    response = fed_client.post(
+        "/users/regular/inbox",
+        data="not-json",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert len(mock_task.calls) == 0
+
+
+async def test_inbox_accepts_actor_as_list(fed_client, regular_user, monkeypatch):
+    """POST /users/{username}/inbox extracts the first actor from a list."""
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
+
+    activity = {"type": "Follow", "actor": ["https://good.example/users/bob"]}
+    response = fed_client.post("/users/regular/inbox", json=activity)
+    assert response.status_code == status.HTTP_202_ACCEPTED
+    assert len(mock_task.calls) == 1
+
+
+async def test_inbox_accepts_actor_as_dict(fed_client, regular_user, monkeypatch):
+    """POST /users/{username}/inbox extracts the actor id from a dict."""
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
+
+    activity = {"type": "Follow", "actor": {"id": "https://good.example/users/bob"}}
+    response = fed_client.post("/users/regular/inbox", json=activity)
+    assert response.status_code == status.HTTP_202_ACCEPTED
+    assert len(mock_task.calls) == 1
+
+
+async def test_get_outbox_returns_ordered_collection(fed_client, regular_user):
+    """GET /users/{username}/outbox returns an empty OrderedCollection."""
+    response = fed_client.get("/users/regular/outbox", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+    assert data["type"] == "OrderedCollection"
+    assert data["totalItems"] == 0
+    assert data["orderedItems"] == []
+
+
+async def test_get_following_returns_ordered_collection(fed_client, regular_user):
+    """GET /users/{username}/following returns an empty OrderedCollection."""
+    response = fed_client.get("/users/regular/following", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+    assert data["type"] == "OrderedCollection"
+    assert data["totalItems"] == 0
+    assert data["orderedItems"] == []
+
+
+async def test_webfinger_requires_resource(fed_client):
+    """WebFinger returns 400 when the resource parameter is missing."""
+    response = fed_client.get("/.well-known/webfinger")
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+async def test_webfinger_rejects_non_acct_resource(fed_client):
+    """WebFinger returns 404 for resources that do not start with acct:."""
+    response = fed_client.get("/.well-known/webfinger?resource=https://example.com/user")
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_webfinger_rejects_missing_at_symbol(fed_client):
+    """WebFinger returns 404 when the resource has no @ separator."""
+    response = fed_client.get("/.well-known/webfinger?resource=acct:regular")
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_webfinger_accepts_leading_at_symbol(fed_client, regular_user):
+    """WebFinger strips a leading @ from the username in the resource."""
+    response = fed_client.get("/.well-known/webfinger?resource=acct:@regular@music.example.com")
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["subject"] == "acct:regular@music.example.com"

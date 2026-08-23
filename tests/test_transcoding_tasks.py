@@ -3,6 +3,9 @@ Tests for the transcoding Celery task.
 """
 
 import io
+from contextlib import asynccontextmanager
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -18,7 +21,7 @@ from songhive.models.upload import Upload
 from songhive.services.storage import StorageService
 from songhive.storage import get_storage
 from songhive.streaming.transcoder import Transcoder, TranscoderError, TranscodeResult
-from songhive.tasks.transcoding import _transcode_upload
+from songhive.tasks.transcoding import _transcode_upload, transcode_upload
 
 
 @pytest.mark.asyncio
@@ -166,3 +169,120 @@ async def test_transcode_upload_unsupported_format(monkeypatch, db_session, engi
 
     with pytest.raises(TranscoderError, match="Unsupported format"):
         await _transcode_upload(upload.id, "wav", "128k")
+
+
+def _fake_session(session):
+    @asynccontextmanager
+    async def _cm():
+        yield session
+
+    return _cm()
+
+
+def _make_fake_session(upload):
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock())
+    session.execute.return_value.scalar_one_or_none.return_value = upload
+    return session
+
+
+def _make_config(tmp_path: Path) -> SonghiveConfig:
+    return SonghiveConfig(
+        auth={"secret_key": "a" * 64},
+        database={"url": "sqlite+aiosqlite:///:memory:"},
+        storage={"backend": "local", "local_path": str(tmp_path / "media")},
+        streaming={"ffmpeg_path": "/usr/bin/ffmpeg"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_transcode_upload_no_track(monkeypatch, tmp_path):
+    """_transcode_upload returns an empty string when the upload has no track."""
+    upload = MagicMock()
+    upload.track = None
+    upload.stored_file = MagicMock(storage_path="stored")
+    upload.storage_path = "legacy"
+
+    session = _make_fake_session(upload)
+
+    monkeypatch.setattr("songhive.tasks.transcoding.load_config", lambda *a, **k: _make_config(tmp_path))
+    monkeypatch.setattr("songhive.tasks.transcoding.init_db", lambda *a, **k: None)
+    monkeypatch.setattr("songhive.tasks.transcoding.get_storage", lambda *a, **k: MagicMock())
+    monkeypatch.setattr("songhive.tasks.transcoding.get_session", lambda: _fake_session(session))
+
+    result = await _transcode_upload("upload-1", "opus", "128k")
+    assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_transcode_upload_source_from_upload_path(monkeypatch, tmp_path):
+    """_transcode_upload falls back to upload.storage_path when stored_file is None."""
+    upload = MagicMock()
+    upload.track = MagicMock()
+    upload.stored_file = None
+    upload.storage_path = "legacy"
+
+    source_path = tmp_path / "source.mp3"
+    source_path.write_bytes(b"audio")
+
+    storage_backend = MagicMock()
+    storage_backend.retrieve = AsyncMock(return_value=source_path)
+
+    async def _fake_transcode(input_path, output_format, output_dir=None, *_, **__):
+        ext = Transcoder.FORMAT_MAP[output_format]["ext"]
+        mimetype = Transcoder.FORMAT_MAP[output_format]["mimetype"]
+        out = (output_dir or input_path.parent) / f"{input_path.stem}.{ext}"
+        out.write_bytes(b"transcoded")
+        return TranscodeResult(output_path=out, mimetype=mimetype)
+
+    session = _make_fake_session(upload)
+
+    monkeypatch.setattr("songhive.tasks.transcoding.load_config", lambda *a, **k: _make_config(tmp_path))
+    monkeypatch.setattr("songhive.tasks.transcoding.init_db", lambda *a, **k: None)
+    monkeypatch.setattr("songhive.tasks.transcoding.get_storage", lambda *a, **k: storage_backend)
+    monkeypatch.setattr("songhive.tasks.transcoding.get_session", lambda: _fake_session(session))
+    monkeypatch.setattr(
+        "songhive.tasks.transcoding.Transcoder.transcode",
+        staticmethod(_fake_transcode),
+    )
+    monkeypatch.setattr(
+        "songhive.tasks.transcoding.cache_transcode",
+        AsyncMock(return_value=MagicMock(id="cached-id")),
+    )
+
+    result = await _transcode_upload("upload-1", "opus", "128k")
+    assert result == "cached-id"
+    storage_backend.retrieve.assert_awaited_once_with("legacy")
+
+
+@pytest.mark.asyncio
+async def test_transcode_upload_no_source_file(monkeypatch, tmp_path):
+    """_transcode_upload returns an empty string when the source file is missing."""
+    upload = MagicMock()
+    upload.track = MagicMock()
+    upload.stored_file = None
+    upload.storage_path = "legacy"
+
+    storage_backend = MagicMock()
+    storage_backend.retrieve = AsyncMock(return_value=None)
+
+    session = _make_fake_session(upload)
+
+    monkeypatch.setattr("songhive.tasks.transcoding.load_config", lambda *a, **k: _make_config(tmp_path))
+    monkeypatch.setattr("songhive.tasks.transcoding.init_db", lambda *a, **k: None)
+    monkeypatch.setattr("songhive.tasks.transcoding.get_storage", lambda *a, **k: storage_backend)
+    monkeypatch.setattr("songhive.tasks.transcoding.get_session", lambda: _fake_session(session))
+
+    result = await _transcode_upload("upload-1", "opus", "128k")
+    assert result == ""
+    storage_backend.retrieve.assert_awaited_once_with("legacy")
+
+
+def test_transcode_upload_task(monkeypatch):
+    """The Celery wrapper runs the async helper and returns its result."""
+
+    async def _fake(*a, **k):
+        return "result-id"
+
+    monkeypatch.setattr("songhive.tasks.transcoding._transcode_upload", _fake)
+    assert transcode_upload("upload-1", "opus", "128k") == "result-id"

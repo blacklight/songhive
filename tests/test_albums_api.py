@@ -60,6 +60,17 @@ def test_get_public_album_redacts_owner_for_non_owner(client, sample_albums, oth
     assert response.json()["visibility"] == "public"
 
 
+def test_get_album_without_cover_file_uses_cover_url(client, sample_albums, regular_user, auth_headers):
+    """Albums with no cover file fall back to the configured cover_url."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+    album.cover_url = "https://example.com/cover.jpg"
+    album.cover_file_id = None
+
+    response = client.get(f"/api/v1/albums/{album.id}", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    assert response.json()["cover_url"] == "https://example.com/cover.jpg"
+
+
 def test_get_private_album_denied_for_other_user(client, sample_albums, other_user, auth_headers):
     """Private albums are denied (403) for other authenticated users."""
     album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
@@ -110,13 +121,19 @@ def test_update_album(client, sample_albums, regular_user, auth_headers):
 
     response = client.patch(
         f"/api/v1/albums/{album.id}",
-        json={"title": "Updated Album", "release_year": 2024, "visibility": "public"},
+        json={
+            "title": "Updated Album",
+            "release_year": 2024,
+            "description": "A new description",
+            "visibility": "public",
+        },
         headers=headers,
     )
     assert response.status_code == 200
     data = response.json()
     assert data["title"] == "Updated Album"
     assert data["release_year"] == 2024
+    assert data["description"] == "A new description"
     assert data["visibility"] == "public"
 
 
@@ -130,3 +147,99 @@ def test_delete_album(client, sample_albums, regular_user, auth_headers):
 
     get_response = client.get(f"/api/v1/albums/{album.id}", headers=headers)
     assert get_response.status_code == 404
+
+
+def test_get_missing_album_returns_404_authenticated(client, auth_headers, regular_user):
+    """Requesting a missing album returns 404 for authenticated users."""
+    response = client.get(
+        "/api/v1/albums/00000000-0000-0000-0000-000000000000",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 404
+
+
+def test_update_missing_album_returns_404(client, auth_headers, regular_user):
+    """Updating a missing album returns 404."""
+    response = client.patch(
+        "/api/v1/albums/00000000-0000-0000-0000-000000000000",
+        json={"title": "Updated"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 404
+
+
+def test_update_album_denied_for_other_user(client, sample_albums, other_user, auth_headers):
+    """Non-owners cannot update another user's album."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"title": "Hacked"},
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == 403
+
+
+def test_delete_album_denied_for_other_user(client, sample_albums, other_user, auth_headers):
+    """Non-owners cannot delete another user's album."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    response = client.delete(f"/api/v1/albums/{album.id}", headers=auth_headers(other_user))
+    assert response.status_code == 403
+
+
+def test_update_album_visibility(client, sample_albums, regular_user, auth_headers):
+    """Owners can change an album's visibility."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"visibility": "public"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    assert response.json()["visibility"] == "public"
+
+
+def test_delete_missing_album_returns_404(client, auth_headers, regular_user):
+    """Deleting a missing album returns 404."""
+    response = client.delete(
+        "/api/v1/albums/00000000-0000-0000-0000-000000000000",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 404
+
+
+def test_get_album_uses_cover_url_when_cover_file_missing(client, sample_albums, regular_user, auth_headers):
+    """Albums with a missing cover file fall back to the configured cover_url."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+    album.cover_file_id = "00000000-0000-0000-0000-000000000000"
+    album.cover_url = "https://example.com/fallback-cover.jpg"
+
+    response = client.get(f"/api/v1/albums/{album.id}", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    assert response.json()["cover_url"] == "https://example.com/fallback-cover.jpg"
+
+
+@pytest.mark.asyncio
+async def test_get_album_with_cover_file_returns_download_url(
+    client, db_session, sample_albums, regular_user, auth_headers
+):
+    """Albums with a stored cover file return the file download URL."""
+    from songhive.models.stored_file import StoredFile
+
+    stored = StoredFile(
+        storage_path="covers/abc",
+        storage_backend="local",
+        content_type="image/jpeg",
+        size=0,
+        sha256="abc",
+        owner_id=str(regular_user.id),
+    )
+    db_session.add(stored)
+    await db_session.flush()
+
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+    album.cover_file_id = str(stored.id)
+    await db_session.flush()
+
+    response = client.get(f"/api/v1/albums/{album.id}", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    assert response.json()["cover_url"] == f"/api/v1/files/{stored.id}/download"

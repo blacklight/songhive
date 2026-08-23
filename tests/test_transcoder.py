@@ -127,3 +127,80 @@ async def test_stream_cancellation_kills_process():
 
     fake_proc.kill.assert_called_once()
     fake_proc.wait.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_transcode_missing_input():
+    """transcode() raises TranscoderError when the input file does not exist."""
+    t = Transcoder(ffmpeg_path="/usr/bin/ffmpeg")
+    with pytest.raises(TranscoderError, match="does not exist"):
+        await t.transcode(Path("/tmp/nonexistent-audio.wav"), "mp3")
+
+
+@pytest.mark.asyncio
+async def test_transcode_ffmpeg_error(tmp_path: Path):
+    """A non-zero ffmpeg exit in transcode() raises TranscoderError with stderr."""
+    wav = tmp_path / "in.wav"
+    _create_wav(wav, duration=0.1)
+
+    fake_proc = MagicMock()
+    fake_proc.returncode = 1
+    fake_proc.communicate = AsyncMock(return_value=(b"", b"ffmpeg failed"))
+
+    with patch(
+        "songhive.streaming.transcoder.asyncio.create_subprocess_exec",
+        return_value=fake_proc,
+    ):
+        t = Transcoder(ffmpeg_path="/usr/bin/ffmpeg")
+        with pytest.raises(TranscoderError, match="ffmpeg exited with code 1"):
+            await t.transcode(wav, "mp3")
+
+    fake_proc.communicate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_transcode_success_default_output_dir_and_bitrate(tmp_path: Path):
+    """transcode() returns a TranscodeResult with the default output dir and bitrate."""
+    wav = tmp_path / "in.wav"
+    _create_wav(wav, duration=0.1)
+
+    fake_proc = MagicMock()
+    fake_proc.returncode = 0
+    fake_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+    with patch(
+        "songhive.streaming.transcoder.asyncio.create_subprocess_exec",
+        return_value=fake_proc,
+    ) as mock_exec:
+        t = Transcoder(ffmpeg_path="/usr/bin/ffmpeg")
+        result = await t.transcode(wav, "mp3", bitrate="192k")
+
+    assert result.output_path == wav.parent / f"{wav.stem}.mp3"
+    assert result.mimetype == "audio/mpeg"
+
+    cmd = mock_exec.call_args.args
+    assert cmd[0] == "/usr/bin/ffmpeg"
+    assert "-b:a" in cmd
+    assert "192k" in cmd
+
+
+@pytest.mark.asyncio
+async def test_transcode_success_custom_output_dir(tmp_path: Path):
+    """transcode() honors an explicit output_dir."""
+    wav = tmp_path / "in.wav"
+    _create_wav(wav, duration=0.1)
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+
+    fake_proc = MagicMock()
+    fake_proc.returncode = 0
+    fake_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+    with patch(
+        "songhive.streaming.transcoder.asyncio.create_subprocess_exec",
+        return_value=fake_proc,
+    ):
+        t = Transcoder(ffmpeg_path="/usr/bin/ffmpeg")
+        result = await t.transcode(wav, "mp3", output_dir=output_dir)
+
+    assert result.output_path == output_dir / f"{wav.stem}.mp3"

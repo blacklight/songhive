@@ -5,11 +5,14 @@ Storage backend tests.
 import io
 import os
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
+from songhive.config.schema import StorageConfig
+from songhive.storage import get_storage
+from songhive.storage.exc import FileSizeLimitExceededError
 from songhive.storage.local import LocalStorage
 from songhive.storage.s3 import S3Storage
 
@@ -144,6 +147,12 @@ async def test_local_delete(local_storage):
     assert await local_storage.delete("to_delete.mp3") is True
     assert await local_storage.exists("to_delete.mp3") is False
     assert await local_storage.delete("nonexistent.mp3") is False
+
+
+@pytest.mark.asyncio
+async def test_local_retrieve_missing(local_storage):
+    """retrieve() returns None when the requested file does not exist."""
+    assert await local_storage.retrieve("nonexistent.mp3") is None
 
 
 @pytest.mark.asyncio
@@ -357,6 +366,18 @@ async def test_s3_delete(s3_storage):
 
 
 @pytest.mark.asyncio
+async def test_s3_delete_missing_key(s3_storage):
+    """delete() returns False when the S3 object is missing."""
+    storage, client = s3_storage
+    client.delete_object.side_effect = ClientError(
+        error_response={"Error": {"Code": "NoSuchKey", "Message": "Not found"}},
+        operation_name="DeleteObject",
+    )
+
+    assert await storage.delete("missing.mp3") is False
+
+
+@pytest.mark.asyncio
 async def test_local_store_max_upload_size(tmp_path):
     """Test that LocalStorage enforces max_upload_size and cleans up partial files."""
     storage = LocalStorage(tmp_path / "media", max_upload_size=10)
@@ -482,3 +503,241 @@ async def test_s3_store_and_retrieve_minio():
     assert await storage.exists(large_path) is True
     assert await storage.delete(large_path) is True
     assert await storage.delete(path) is True
+
+
+class _FakeS3Client:
+    """Minimal stand-in for an aiobotocore S3 client."""
+
+    def __init__(self, **kwargs):
+        self._call_kwargs = kwargs
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_, **__):
+        return None
+
+    async def put_object(self, **__):
+        return {}
+
+
+@pytest.mark.asyncio
+async def test_get_storage_s3_requires_bucket():
+    """Selecting the s3 backend without a bucket raises a clear error."""
+    config = StorageConfig(backend="s3")
+    with pytest.raises(ValueError, match="s3_bucket"):
+        get_storage(config)
+
+
+@pytest.mark.asyncio
+async def test_get_storage_s3():
+    """get_storage returns a configured S3Storage when s3 is selected."""
+    config = StorageConfig(
+        backend="s3",
+        s3_bucket="my-bucket",
+        s3_endpoint="https://s3.example.com",
+        s3_access_key="access",
+        s3_secret_key="secret",
+        s3_region="us-east-1",
+        max_upload_size=100,
+    )
+    backend = get_storage(config)
+    assert isinstance(backend, S3Storage)
+    assert backend.bucket == "my-bucket"
+    assert backend.endpoint_url == "https://s3.example.com"
+    assert backend.access_key == "access"
+    assert backend.secret_key == "secret"
+    assert backend.region == "us-east-1"
+    assert backend._max_upload_size == 100
+
+
+@pytest.mark.asyncio
+async def test_s3_get_client_passes_kwargs(monkeypatch):
+    """_get_client builds an S3 client with the configured connection params."""
+    storage = S3Storage(
+        "my-bucket",
+        endpoint_url="https://s3.example.com",
+        region="us-east-1",
+        access_key="access",
+        secret_key="secret",
+    )
+    mock_session_class = MagicMock(return_value=MagicMock(client=MagicMock(return_value=_FakeS3Client())))
+    monkeypatch.setattr("songhive.storage.s3.aioboto3.Session", mock_session_class)
+
+    async with storage._get_client() as client:
+        assert isinstance(client, _FakeS3Client)
+
+    mock_session_class.return_value.client.assert_called_once_with(
+        "s3",
+        endpoint_url="https://s3.example.com",
+        region_name="us-east-1",
+        aws_access_key_id="access",
+        aws_secret_access_key="secret",
+    )
+
+
+@pytest.mark.asyncio
+async def test_s3_get_client_omits_optional_kwargs():
+    """_get_client does not pass unset endpoint, region or credentials."""
+    storage = S3Storage("my-bucket")
+
+    class _RecordingSession:
+        def __init__(self):
+            self.client_call = None
+
+        def client(self, *_, **kwargs):
+            self.client_call = kwargs
+            fake = _FakeS3Client()
+            return fake
+
+    recording = _RecordingSession()
+    with patch("songhive.storage.s3.aioboto3.Session", return_value=recording):
+        async with storage._get_client() as _:
+            pass
+
+    assert recording.client_call == {}
+
+
+def test_s3_is_missing_error_uses_status_404():
+    """_is_missing_error falls back to the HTTP status code 404."""
+    exc = ClientError(
+        error_response={
+            "Error": {"Code": "AccessDenied"},
+            "ResponseMetadata": {"HTTPStatusCode": 404},
+        },
+        operation_name="GetObject",
+    )
+    assert S3Storage._is_missing_error(exc) is True
+
+
+@pytest.mark.asyncio
+async def test_s3_retrieve_client_error_status_404_returns_none():
+    """retrieve returns None for a ClientError with a 404 status code."""
+    storage = S3Storage("my-bucket")
+    client = AsyncMock()
+    client.exceptions = _FakeClientExceptions()
+    client.get_object.side_effect = ClientError(
+        error_response={
+            "Error": {"Code": "SomeError", "Message": "Not found"},
+            "ResponseMetadata": {"HTTPStatusCode": 404},
+        },
+        operation_name="GetObject",
+    )
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(storage, "_get_client", lambda: _FakeClientContext(client))
+
+    assert await storage.retrieve("missing.txt") is None
+    monkeypatch.undo()
+
+
+@pytest.mark.asyncio
+async def test_s3_retrieve_exception_cleans_temp_file(s3_storage, monkeypatch):
+    """retrieve removes the temporary file when the body stream raises."""
+    storage, client = s3_storage
+
+    class _BadBody(_FakeBody):
+        async def iter_chunks(self, chunk_size: int = 64 * 1024):
+            yield self._data[:1]
+            raise RuntimeError("stream failed")
+
+    client.get_object.return_value = {"Body": _BadBody(b"abc")}
+
+    with (
+        patch("songhive.storage.s3.aiofiles.os.remove") as mock_remove,
+        pytest.raises(RuntimeError, match="stream failed"),
+    ):
+        await storage.retrieve("fail.txt")
+
+    mock_remove.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_s3_delete_client_error_not_missing(s3_storage):
+    """delete re-raises a ClientError that is not a missing-object error."""
+    storage, client = s3_storage
+    client.delete_object.side_effect = ClientError(
+        error_response={
+            "Error": {"Code": "AccessDenied"},
+            "ResponseMetadata": {"HTTPStatusCode": 403},
+        },
+        operation_name="DeleteObject",
+    )
+
+    with pytest.raises(ClientError, match="AccessDenied"):
+        await storage.delete("denied.txt")
+
+
+@pytest.mark.asyncio
+async def test_s3_delete_boto_core_error(s3_storage):
+    """delete re-raises a BotoCoreError."""
+    storage, client = s3_storage
+    client.delete_object.side_effect = BotoCoreError(msg="network down")
+
+    with pytest.raises(BotoCoreError):
+        await storage.delete("fail.txt")
+
+
+@pytest.mark.asyncio
+async def test_s3_exists_no_such_key(s3_storage):
+    """exists returns False when head_object raises the NoSuchKey service exception."""
+    storage, client = s3_storage
+    client.head_object.side_effect = client.exceptions.NoSuchKey(
+        error_response={"Error": {"Code": "NoSuchKey", "Message": "Not found"}},
+        operation_name="HeadObject",
+    )
+
+    assert await storage.exists("missing.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_s3_exists_client_error_not_missing(s3_storage):
+    """exists re-raises a ClientError that is not a missing-object error."""
+    storage, client = s3_storage
+    client.head_object.side_effect = ClientError(
+        error_response={
+            "Error": {"Code": "AccessDenied"},
+            "ResponseMetadata": {"HTTPStatusCode": 403},
+        },
+        operation_name="HeadObject",
+    )
+
+    with pytest.raises(ClientError, match="AccessDenied"):
+        await storage.exists("denied.txt")
+
+
+@pytest.mark.asyncio
+async def test_s3_exists_boto_core_error(s3_storage):
+    """exists re-raises a BotoCoreError."""
+    storage, client = s3_storage
+    client.head_object.side_effect = BotoCoreError(msg="network down")
+
+    with pytest.raises(BotoCoreError):
+        await storage.exists("fail.txt")
+
+
+@pytest.mark.asyncio
+async def test_local_path_escape_via_symlink(tmp_path):
+    """A path that resolves outside base_path through a symlink is rejected."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret")
+
+    base = tmp_path / "media"
+    base.mkdir()
+    (base / "escape").symlink_to(outside)
+
+    storage = LocalStorage(base)
+    for method in ("retrieve", "exists", "delete"):
+        with pytest.raises(ValueError, match="escapes"):
+            await getattr(storage, method)("escape/secret.txt")
+
+
+@pytest.mark.asyncio
+async def test_local_store_cleans_up_partial_file(tmp_path):
+    """store removes a partial file when writing is interrupted."""
+    storage = LocalStorage(tmp_path / "media", max_upload_size=10)
+
+    with pytest.raises(FileSizeLimitExceededError):
+        await storage.store(_NonSeekableStream(b"x" * 20), "toolarge.bin")
+
+    assert await storage.exists("toolarge.bin") is False

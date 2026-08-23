@@ -7,13 +7,18 @@ import secrets
 from typing import Optional
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
 from songhive.api.deps import (
+    get_current_user,
     get_current_user_optional,
     get_db,
+    get_effective_config,
+    get_redis,
+    get_storage_service,
     require_access,
+    require_admin,
 )
 from songhive.api.errors import install_error_handlers
 from songhive.api.middleware.auth import create_access_token
@@ -45,6 +50,32 @@ def deps_client(db_session, config, fake_redis):
     @app.get("/test/me")
     async def me(user: Optional[User] = Depends(get_current_user_optional)):
         return {"user_id": user.id if user is not None else None}
+
+    @app.get("/test/protected")
+    async def protected(user: User = Depends(get_current_user)):
+        return {"user_id": user.id}
+
+    @app.get("/test/admin")
+    async def admin(user: User = Depends(require_admin)):
+        return {"user_id": user.id}
+
+    @app.get("/test/effective-config")
+    async def effective_config(request: Request):
+        cfg = await get_effective_config(request)
+        return {"host": cfg.server.host}
+
+    @app.get("/test/redis")
+    async def redis(request: Request):
+        return {"ok": get_redis(request) is not None}
+
+    @app.get("/test/storage-service")
+    async def storage_service(request: Request):
+        service = get_storage_service(request)
+        return {"service_id": id(service)}
+
+    @app.get("/test/no-track", dependencies=[Depends(require_access("track"))])
+    async def no_track():
+        return {"ok": True}
 
     @app.get("/test/tracks/{track_id}", dependencies=[Depends(require_access("track"))])
     async def get_track(track_id: str):
@@ -240,3 +271,138 @@ async def test_require_access_with_revoked_share_token(deps_client, regular_user
 
     response = deps_client.get(f"/test/tracks/{track.id}?token={raw}")
     assert response.status_code == 403
+
+
+def test_get_current_user_required(deps_client, regular_user, config):
+    """A valid token on a protected route resolves the user."""
+    token = create_access_token(str(regular_user.id), config.auth.secret_key)
+    response = deps_client.get("/test/protected", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json()["user_id"] == str(regular_user.id)
+
+
+def test_get_current_user_missing_token(deps_client):
+    """A protected route without a token returns 401."""
+    response = deps_client.get("/test/protected")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"
+
+
+def test_get_current_user_invalid_token(deps_client, config):
+    """A protected route with an invalid token returns 401."""
+    import jwt
+
+    # Token without a subject claim should decode to None.
+    token = jwt.encode({"foo": "bar"}, config.auth.secret_key, algorithm="HS256")
+    response = deps_client.get("/test/protected", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+
+
+def test_get_current_user_inactive_user(deps_client, inactive_user, config):
+    """A protected route with an inactive user token returns 401."""
+    token = create_access_token(str(inactive_user.id), config.auth.secret_key)
+    response = deps_client.get("/test/protected", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+
+
+def test_get_effective_config(deps_client):
+    """get_effective_config returns the app config."""
+    response = deps_client.get("/test/effective-config")
+    assert response.status_code == 200
+    assert response.json()["host"] == "127.0.0.1"
+
+
+def test_get_redis(deps_client):
+    """get_redis returns the configured Redis client."""
+    response = deps_client.get("/test/redis")
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
+def test_get_storage_service_uses_cache_without_change(deps_client):
+    """get_storage_service returns the same instance when config is unchanged."""
+    response1 = deps_client.get("/test/storage-service")
+    response2 = deps_client.get("/test/storage-service")
+    assert response1.status_code == 200
+    assert response2.status_code == 200
+    assert response1.json()["service_id"] == response2.json()["service_id"]
+
+
+def test_get_storage_service_caches_and_recreates(deps_client, config):
+    """get_storage_service caches the service and rebuilds on config change."""
+    response1 = deps_client.get("/test/storage-service")
+    assert response1.status_code == 200
+    service_id1 = response1.json()["service_id"]
+
+    # Mutate storage config to force a fresh StorageService.
+    config.storage.local_path = config.storage.local_path.parent / "other_storage"
+
+    response2 = deps_client.get("/test/storage-service")
+    assert response2.status_code == 200
+    service_id2 = response2.json()["service_id"]
+    assert service_id2 != service_id1
+
+
+def test_require_admin_allows_admin(deps_client, admin_user, config):
+    """Admin-only routes allow admin users."""
+    token = create_access_token(str(admin_user.id), config.auth.secret_key)
+    response = deps_client.get("/test/admin", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json()["user_id"] == str(admin_user.id)
+
+
+def test_require_admin_rejects_regular_user(deps_client, regular_user, config):
+    """Admin-only routes reject non-admin users."""
+    token = create_access_token(str(regular_user.id), config.auth.secret_key)
+    response = deps_client.get("/test/admin", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin access required"
+
+
+def test_require_access_missing_item_id(deps_client):
+    """require_access raises 404 when the path parameter is missing."""
+    response = deps_client.get("/test/no-track")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Not found"
+
+
+@pytest.mark.asyncio
+async def test_require_access_with_share_token_header(deps_client, regular_user, db_session):
+    """A valid share token in the X-Share-Token header grants anonymous access."""
+    track = await _make_track(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    _, raw = await sharing.create_share_token(db_session, "track", track.id, created_by=regular_user.id)
+
+    response = deps_client.get(
+        f"/test/tracks/{track.id}",
+        headers={"X-Share-Token": raw},
+    )
+    assert response.status_code == 200
+    assert response.json()["track_id"] == str(track.id)
+
+
+@pytest.mark.asyncio
+async def test_require_access_with_share_token_cookie(deps_client, regular_user, db_session):
+    """A valid share token in the share_token cookie grants anonymous access."""
+    track = await _make_track(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    _, raw = await sharing.create_share_token(db_session, "track", track.id, created_by=regular_user.id)
+
+    response = deps_client.get(
+        f"/test/tracks/{track.id}",
+        cookies={"share_token": raw},
+    )
+    assert response.status_code == 200
+    assert response.json()["track_id"] == str(track.id)
+
+
+@pytest.mark.asyncio
+async def test_get_db_yields_session(engine):
+    """get_db yields an async SQLAlchemy session."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from songhive.models.base import init_db
+
+    init_db(engine=engine, force=True)
+    gen = get_db()
+    session = await gen.__anext__()
+    assert isinstance(session, AsyncSession)
+    await gen.aclose()

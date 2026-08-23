@@ -5,9 +5,11 @@ Sharing service unit tests.
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from songhive.models.share_token import ShareToken
 from songhive.services import sharing
@@ -145,3 +147,84 @@ async def test_list_share_tokens(db_session, regular_user):
     tokens = await sharing.list_share_tokens(db_session, "track", "track-1")
     assert len(tokens) == 2
     assert {t.id for t in tokens} == {token1.id, token2.id}
+
+
+@pytest.mark.asyncio
+async def test_count_share_grants_and_tokens(db_session, regular_user, make_user):
+    """count_share_grants and count_share_tokens return totals."""
+    other = await make_user("other", email_verified=True)
+
+    await sharing.create_share_grant(db_session, "track", "track-1", other.id, created_by=regular_user.id)
+    assert await sharing.count_share_grants(db_session, "track", "track-1") == 1
+
+    await sharing.create_share_token(db_session, "track", "track-1", created_by=regular_user.id)
+    assert await sharing.count_share_tokens(db_session, "track", "track-1") == 1
+
+
+@pytest.mark.asyncio
+async def test_revoke_share_grant_by_id(db_session, regular_user, make_user):
+    """revoke_share_grant_by_id deletes an existing grant and returns False for missing."""
+    other = await make_user("other", email_verified=True)
+    grant = await sharing.create_share_grant(
+        db_session,
+        "track",
+        "track-1",
+        other.id,
+        created_by=regular_user.id,
+    )
+    assert await sharing.revoke_share_grant_by_id(db_session, grant.id) is True
+    assert await sharing.revoke_share_grant_by_id(db_session, grant.id) is False
+    assert await sharing.revoke_share_grant_by_id(db_session, "missing-id") is False
+
+
+@pytest.mark.asyncio
+async def test_create_share_grant_non_unique_integrity_error(db_session, regular_user, make_user):
+    """A non-unique IntegrityError is re-raised."""
+    other = await make_user("other", email_verified=True)
+    with pytest.raises(IntegrityError):
+        await sharing.create_share_grant(
+            db_session,
+            "track",
+            "track-1",
+            other.id,
+            created_by=None,  # violates NOT NULL constraint, not a unique violation
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_share_grant_duplicate_not_found(db_session, regular_user, make_user, monkeypatch):
+    """A duplicate grant with no retrievable row re-raises the IntegrityError."""
+    other = await make_user("other", email_verified=True)
+    await sharing.create_share_grant(
+        db_session,
+        "track",
+        "track-1",
+        other.id,
+        created_by=regular_user.id,
+    )
+
+    monkeypatch.setattr(sharing, "_get_share_grant", AsyncMock(return_value=None))
+    with pytest.raises(IntegrityError):
+        await sharing.create_share_grant(
+            db_session,
+            "track",
+            "track-1",
+            other.id,
+            created_by=regular_user.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_make_aware_preserves_aware_and_utc_naive(db_session):
+    """make_aware treats naive datetimes as UTC and leaves aware datetimes alone."""
+    from datetime import datetime, timezone
+
+    from songhive.services.sharing import make_aware
+
+    naive = datetime(2024, 1, 1, 12)
+    aware = make_aware(naive)
+    assert aware is not None
+    assert aware.tzinfo is timezone.utc
+
+    already = datetime(2024, 1, 1, 12, tzinfo=timezone.utc)
+    assert make_aware(already) is already

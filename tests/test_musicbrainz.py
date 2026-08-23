@@ -3,6 +3,7 @@ MusicBrainz enrichment tests.
 """
 
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -11,9 +12,15 @@ from songhive.config.schema import MusicBrainzConfig, StorageConfig
 from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.track import Track
-from songhive.services.musicbrainz import MusicBrainzService
+from songhive.services.musicbrainz import (
+    MusicBrainzService,
+    _first_artist_id,
+    _first_release_id,
+    _guess_image_mime,
+)
 from songhive.services.storage import StorageService
 from songhive.storage import get_storage
+from songhive.tasks.musicbrainz import enrich_track
 
 
 @pytest.fixture
@@ -209,3 +216,321 @@ async def test_rate_limiter_enforces_limit(db_session, musicbrainz_config, monke
 
     assert call_count == 2
     assert elapsed >= 0.08
+
+
+# ---------------------------------------------------------------------------
+# Search / lookup error paths and no results
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_recordings_returns_empty_when_no_query(musicbrainz_config):
+    """search_recordings returns an empty dict when no query can be built."""
+    service = MusicBrainzService(musicbrainz_config)
+    result = await service.search_recordings()
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_fetch_recording_includes_artist_rels(musicbrainz_config, monkeypatch):
+    """fetch_recording requests artist relationships when asked."""
+    service = MusicBrainzService(musicbrainz_config)
+    calls = []
+
+    def fake_get_recording_by_id(recording_id, includes):
+        calls.append((recording_id, includes))
+        return {"recording": {"id": recording_id}}
+
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.get_recording_by_id",
+        fake_get_recording_by_id,
+    )
+
+    result = await service.fetch_recording("rec-1", include_artist_rels=True)
+
+    assert result == {"recording": {"id": "rec-1"}}
+    assert calls == [("rec-1", ["artist-rels"])]
+
+
+@pytest.mark.asyncio
+async def test_enrich_track_returns_false_when_track_not_found(db_session, musicbrainz_config):
+    """enrich_track returns False when the track does not exist."""
+    service = MusicBrainzService(musicbrainz_config)
+    result = await service.enrich_track(db_session, "missing-id")
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_enrich_track_returns_false_when_no_recordings(db_session, musicbrainz_config, monkeypatch):
+    """enrich_track returns False when MusicBrainz has no matching recordings."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(title="Album", artist_id=artist.id)
+    db_session.add(album)
+    await db_session.flush()
+
+    track = Track(title="Song", artist_id=artist.id, album_id=album.id)
+    db_session.add(track)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_recordings",
+        lambda **_: {"recording-list": []},
+    )
+
+    result = await service.enrich_track(db_session, str(track.id))
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_enrich_track_returns_false_when_recording_has_no_id(db_session, musicbrainz_config, monkeypatch):
+    """enrich_track returns False when the best match lacks a MusicBrainz ID."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(title="Song", artist_id=artist.id)
+    db_session.add(track)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_recordings",
+        lambda **_: {"recording-list": [{"title": "Song"}]},
+    )
+
+    result = await service.enrich_track(db_session, str(track.id))
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_recording_details_falls_back_on_error(musicbrainz_config, monkeypatch):
+    """_fetch_recording_details falls back to the search result on error."""
+    service = MusicBrainzService(musicbrainz_config)
+    monkeypatch.setattr(
+        service,
+        "fetch_recording",
+        AsyncMock(side_effect=RuntimeError("network")),
+    )
+
+    recording = {"id": "rec-1", "title": "Song"}
+    result = await service._fetch_recording_details("rec-1", recording)
+
+    assert result == {"recording": recording}
+
+
+# ---------------------------------------------------------------------------
+# Cover art fetching
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_returns_none_when_cover_art_disabled(mock_client):
+    """fetch_release returns None when cover art fetching is disabled."""
+    config = MusicBrainzConfig(enabled=True, fetch_cover_art=False)
+    service = MusicBrainzService(config, client=mock_client)
+    result = await service.fetch_release("release-1")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_handles_request_exception(musicbrainz_config, mock_client):
+    """fetch_release returns None when the request fails."""
+    service = MusicBrainzService(musicbrainz_config, client=mock_client)
+    mock_client.get = AsyncMock(side_effect=RuntimeError("network"))
+    result = await service.fetch_release("release-1")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_returns_redirect_location(musicbrainz_config, mock_client):
+    """fetch_release returns the Location header for a 307 response."""
+    service = MusicBrainzService(musicbrainz_config, client=mock_client)
+    mock_client.get = AsyncMock(
+        return_value=Mock(
+            status_code=307,
+            headers={"location": "https://example.com/cover.jpg"},
+            url="https://coverartarchive.org/release/release-1/front",
+        )
+    )
+    result = await service.fetch_release("release-1")
+    assert result == "https://example.com/cover.jpg"
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_returns_none_for_unexpected_status(musicbrainz_config, mock_client):
+    """fetch_release returns None for response codes other than 200 or 307."""
+    service = MusicBrainzService(musicbrainz_config, client=mock_client)
+    mock_client.get = AsyncMock(
+        return_value=Mock(
+            status_code=404,
+            url="https://coverartarchive.org/release/release-1/front",
+            headers={},
+        )
+    )
+    result = await service.fetch_release("release-1")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_cover_image_returns_none_when_release_has_no_url(mock_client):
+    """fetch_cover_image returns None when fetch_release cannot resolve a URL."""
+    config = MusicBrainzConfig(enabled=True, fetch_cover_art=False)
+    service = MusicBrainzService(config, client=mock_client)
+    result = await service.fetch_cover_image("release-1")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_cover_image_handles_download_exception(musicbrainz_config, mock_client):
+    """fetch_cover_image returns None when the cover download fails."""
+    service = MusicBrainzService(musicbrainz_config, client=mock_client)
+    release_response = Mock(
+        status_code=200,
+        url="https://example.com/cover.jpg",
+        headers={},
+        content=b"",
+        raise_for_status=Mock(),
+    )
+    mock_client.get = AsyncMock(side_effect=[release_response, RuntimeError("network")])
+
+    result = await service.fetch_cover_image("release-1")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_store_cover_art_skips_when_album_has_cover(musicbrainz_config, db_session):
+    """_store_cover_art returns immediately when the album already has cover art."""
+    service = MusicBrainzService(musicbrainz_config)
+    album = SimpleNamespace(cover_file_id="existing-cover", visibility="private")
+    await service._store_cover_art(db_session, album, "release-1", Mock())
+    assert album.cover_file_id == "existing-cover"
+
+
+@pytest.mark.asyncio
+async def test_store_cover_art_skips_when_no_image_data(musicbrainz_config, db_session, monkeypatch):
+    """_store_cover_art returns when no cover image can be downloaded."""
+    service = MusicBrainzService(musicbrainz_config)
+    monkeypatch.setattr(service, "fetch_cover_image", AsyncMock(return_value=None))
+    album = SimpleNamespace(cover_file_id=None, visibility="private")
+    await service._store_cover_art(db_session, album, "release-1", Mock())
+    assert album.cover_file_id is None
+
+
+@pytest.mark.asyncio
+async def test_maybe_store_cover_art_skips_when_cover_exists(musicbrainz_config, db_session):
+    """_maybe_store_cover_art returns immediately when the album already has cover art."""
+    service = MusicBrainzService(musicbrainz_config)
+    album = SimpleNamespace(cover_file_id="existing-cover", visibility="private")
+    await service._maybe_store_cover_art(db_session, album, "release-1", Mock())
+    assert album.cover_file_id == "existing-cover"
+
+
+# ---------------------------------------------------------------------------
+# Parsing helpers
+# ---------------------------------------------------------------------------
+
+
+def test_first_artist_id_returns_none_for_invalid_credit():
+    """_first_artist_id returns None when the artist credit is missing or malformed."""
+    assert _first_artist_id({}) is None
+    assert _first_artist_id({"artist-credit": []}) is None
+    assert _first_artist_id({"artist-credit": ["not-a-dict"]}) is None
+    assert _first_artist_id({"artist-credit": [{"artist": "not-a-dict"}]}) is None
+
+
+def test_first_release_id_returns_none_for_invalid_details():
+    """_first_release_id returns None when no releases are present."""
+    assert _first_release_id({}) is None
+    assert _first_release_id({"recording": {}}) is None
+    assert _first_release_id({"recording": {"release-list": []}}) is None
+
+
+def test_guess_image_mime_branches():
+    """_guess_image_mime detects common image formats and defaults to JPEG."""
+    assert _guess_image_mime(b"\x89PNG\r\n\x1a\n") == "image/png"
+    assert _guess_image_mime(b"\xff\xd8") == "image/jpeg"
+    assert _guess_image_mime(b"GIF89a") == "image/gif"
+    assert _guess_image_mime(b"RIFF" + b"\x00" * 4 + b"WEBP") == "image/webp"
+    assert _guess_image_mime(b"unknown") == "image/jpeg"
+
+
+# ---------------------------------------------------------------------------
+# songhive.tasks.musicbrainz helpers
+# ---------------------------------------------------------------------------
+
+
+class _FakeSessionContext:
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *args):
+        return None
+
+
+class _FakeMBService:
+    def __init__(self, config):
+        pass
+
+    async def enrich_track(self, session, track_id, storage_service):
+        return True
+
+
+class _FailingMBService:
+    def __init__(self, config):
+        pass
+
+    async def enrich_track(self, session, track_id, storage_service):
+        raise RuntimeError("boom")
+
+
+def _make_mb_config(enabled=True):
+    return SimpleNamespace(
+        database=SimpleNamespace(url="sqlite+aiosqlite:///test.db"),
+        storage=SimpleNamespace(backend="local", local_path="/tmp/media"),
+        musicbrainz=SimpleNamespace(enabled=enabled),
+    )
+
+
+def _patch_mb_task_env(monkeypatch, tmp_path, mb_service_cls=_FakeMBService):
+    monkeypatch.setattr("songhive.config.load_config", lambda *_: _make_mb_config(enabled=True))
+    monkeypatch.setattr("songhive.models.base.init_db", Mock())
+    monkeypatch.setattr(
+        "songhive.models.base.get_session",
+        lambda: _FakeSessionContext(Mock()),
+    )
+    monkeypatch.setattr("songhive.storage.get_storage", Mock(return_value=Mock()))
+    monkeypatch.setattr("songhive.services.musicbrainz.MusicBrainzService", mb_service_cls)
+
+
+# ---------------------------------------------------------------------------
+# songhive.tasks.musicbrainz.enrich_track
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_track_task_returns_false_when_disabled(monkeypatch, tmp_path):
+    """The Celery task returns False when MusicBrainz is disabled."""
+    monkeypatch.setattr("songhive.config.load_config", lambda *_: _make_mb_config(enabled=False))
+    result = enrich_track("track-1")
+    assert result is False
+
+
+def test_enrich_track_task_returns_true_when_enabled(monkeypatch, tmp_path):
+    """The Celery task returns the service result when enabled."""
+    _patch_mb_task_env(monkeypatch, tmp_path)
+    result = enrich_track("track-1")
+    assert result is True
+
+
+def test_enrich_track_task_returns_false_on_exception(monkeypatch, tmp_path, caplog):
+    """The Celery task catches exceptions and returns False."""
+    _patch_mb_task_env(monkeypatch, tmp_path, mb_service_cls=_FailingMBService)
+    result = enrich_track("track-1")
+    assert result is False
+    assert "MusicBrainz enrichment failed" in caplog.text

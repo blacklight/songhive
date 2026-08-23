@@ -25,6 +25,7 @@ from songhive.services.auth import (
     hash_password,
     verify_password,
 )
+from songhive.users import oauth as oauth_service
 
 SECRET_KEY = "a" * 32
 
@@ -1049,3 +1050,173 @@ async def test_password_reset_confirm_for_inactive_user_sets_password_but_blocks
     )
     assert login.status_code == status.HTTP_401_UNAUTHORIZED
     assert login.json()["detail"] == "Account is inactive"
+
+
+def _pkce_pair():
+    """Return a PKCE verifier and the matching S256 challenge."""
+    import base64
+    import hashlib
+    import secrets
+
+    verifier = secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("utf-8")).digest()).decode().rstrip("=")
+    return verifier, challenge
+
+
+@pytest.mark.asyncio
+async def test_oauth_authorize_post(client, db_session, config, monkeypatch):
+    """POST /auth/oauth/authorize issues an authorization code."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    client_obj, _ = await oauth_service.create_oauth_client(
+        db_session,
+        created_by=str(user.id),
+        name="Test Client",
+        redirect_uris=["https://example.com/callback"],
+    )
+    await db_session.flush()
+
+    token = create_access_token(str(user.id), config.auth.secret_key)
+    verifier, challenge = _pkce_pair()
+
+    response = client.post(
+        "/api/v1/auth/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_obj.client_id,
+            "redirect_uri": "https://example.com/callback",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "state": "xyz",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+        follow_redirects=False,
+    )
+    assert response.status_code == status.HTTP_302_FOUND
+    assert "code=" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_oauth_token_endpoint_accepts_http_basic_auth(client, db_session, config):
+    """The token endpoint accepts client credentials via HTTP Basic auth."""
+    import base64
+
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    client_obj, client_secret = await oauth_service.create_oauth_client(
+        db_session,
+        created_by=str(user.id),
+        name="Basic Client",
+        redirect_uris=["https://example.com/callback"],
+    )
+    await db_session.flush()
+
+    token_user = create_access_token(str(user.id), config.auth.secret_key)
+    verifier, challenge = _pkce_pair()
+
+    authorize = client.get(
+        "/api/v1/auth/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_obj.client_id,
+            "redirect_uri": "https://example.com/callback",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        },
+        headers={"Authorization": f"Bearer {token_user}"},
+        follow_redirects=False,
+    )
+    from urllib.parse import parse_qs, urlparse
+
+    parsed = urlparse(authorize.headers["location"])
+    code = parse_qs(parsed.query)["code"][0]
+
+    credentials = base64.b64encode(f"{client_obj.client_id}:{client_secret}".encode()).decode()
+    token_response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": "https://example.com/callback",
+            "code_verifier": verifier,
+        },
+        headers={"Authorization": f"Basic {credentials}"},
+    )
+    assert token_response.status_code == status.HTTP_200_OK
+    assert "access_token" in token_response.json()
+
+
+@pytest.mark.asyncio
+async def test_oauth_token_endpoint_rejects_invalid_basic_auth(client, db_session, config):
+    """The token endpoint ignores malformed HTTP Basic auth headers."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    client_obj, client_secret = await oauth_service.create_oauth_client(
+        db_session,
+        created_by=str(user.id),
+        name="Basic Client",
+        redirect_uris=["https://example.com/callback"],
+    )
+    await db_session.flush()
+
+    # Send an un-decodable basic header; the route falls back to the form values.
+    response = client.post(
+        "/api/v1/auth/oauth/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": client_obj.client_id,
+            "client_secret": client_secret,
+        },
+        headers={"Authorization": "Basic not-valid-base64"},
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_oauth_revoke_endpoint_returns_invalid_client_error(client, db_session, monkeypatch):
+    """The revoke endpoint converts OAuth2ProviderError into an HTTPException."""
+
+    async def _raise(*args, **kwargs):
+        from songhive.users.oauth import OAuth2ProviderError
+
+        raise OAuth2ProviderError("Invalid client", status_code=401, error="invalid_client")
+
+    monkeypatch.setattr("songhive.api.routes.auth.revoke_token", _raise)
+
+    response = client.post(
+        "/api/v1/auth/oauth/revoke",
+        data={"token": "some-token", "client_id": "client-id"},
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_refresh_endpoint_rotate_returns_none(client, config, monkeypatch):
+    """Test that the refresh endpoint handles a concurrent rotation failure."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "rotate-fail",
+            "email": "rotate-fail@example.com",
+            "password": "secret",
+        },
+    )
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "rotate-fail", "password": "secret"},
+    )
+    token = login.json()["refresh_token"]
+
+    async def _return_none(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("songhive.api.routes.auth.rotate_refresh_token", _return_none)
+
+    response = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": token},
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED

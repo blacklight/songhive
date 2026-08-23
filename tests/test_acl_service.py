@@ -3,6 +3,7 @@ ACL service unit tests.
 """
 
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -313,3 +314,79 @@ async def test_can_access_unknown_item_type(db_session, regular_user):
     """Unknown item types raise ValueError."""
     with pytest.raises(ValueError):
         await can_access(db_session, regular_user, "unknown", "some-id")
+
+
+@pytest.mark.asyncio
+async def test_get_item_plural(db_session):
+    """get_item_plural returns the plural path or None for unknown types."""
+    from songhive.services.acl import get_item_plural
+
+    assert get_item_plural("track") == "tracks"
+    assert get_item_plural("library") == "libraries"
+    assert get_item_plural("unknown") is None
+
+
+@pytest.mark.asyncio
+async def test_get_item_unknown_type(db_session):
+    """get_item raises ValueError for unknown item types."""
+    from songhive.services.acl import get_item
+
+    with pytest.raises(ValueError):
+        await get_item(db_session, "unknown", "some-id")
+
+
+@pytest.mark.asyncio
+async def test_apply_access_filter_admin_bypass(db_session, admin_user):
+    """Admins bypass the ACL list filter."""
+    from sqlalchemy import select
+
+    from songhive.models.track import Track
+    from songhive.services.acl import apply_access_filter
+
+    stmt = select(Track)
+    result = apply_access_filter(stmt, Track, admin_user, "track")
+    assert result is stmt
+
+
+@pytest.mark.asyncio
+async def test_can_access_missing_item(db_session, regular_user):
+    """can_access returns False for a missing item."""
+    assert await can_access(db_session, regular_user, "track", "missing-id") is False
+
+
+@pytest.mark.asyncio
+async def test_can_manage_user_none(db_session):
+    """None users cannot manage anything."""
+    assert await can_manage(db_session, None, "track", "any-id") is False
+
+
+@pytest.mark.asyncio
+async def test_can_manage_unknown_item_type(db_session, regular_user):
+    """can_manage raises ValueError for unknown item types."""
+    with pytest.raises(ValueError):
+        await can_manage(db_session, regular_user, "unknown", "some-id")
+
+
+@pytest.mark.asyncio
+async def test_audit_ownerless_private(db_session, regular_user, caplog):
+    """audit_ownerless_private counts ownerless private stored files."""
+    from songhive.models._enums import Visibility
+    from songhive.models.stored_file import StoredFile
+    from songhive.services.acl import audit_ownerless_private
+
+    file = StoredFile(
+        storage_path="files/aa/bb/cc",
+        storage_backend="local",
+        content_type="audio/mpeg",
+        size=1,
+        sha256="d" * 64,
+        owner_id=None,
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(file)
+    await db_session.flush()
+
+    with caplog.at_level(logging.WARNING, logger="songhive.services.acl"):
+        count = await audit_ownerless_private(db_session)
+    assert count == 1
+    assert "ownerless" in caplog.text.lower()

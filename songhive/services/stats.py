@@ -69,8 +69,8 @@ async def _get_storage_stats(session: AsyncSession) -> dict:
             await session.execute(
                 select(
                     StoredFile.storage_backend,
-                    func.count(StoredFile.id),
-                    func.coalesce(func.sum(StoredFile.size), 0),
+                    func.count(StoredFile.id).label("count"),
+                    func.coalesce(func.sum(StoredFile.size), 0).label("size"),
                 ).group_by(StoredFile.storage_backend)
             )
         )
@@ -82,7 +82,7 @@ async def _get_storage_stats(session: AsyncSession) -> dict:
         "total_files": total_files,
         "total_size_bytes": total_size,
         "files_by_backend": [
-            {"backend": row["storage_backend"], "count": row["count"], "size": row["sum"]} for row in by_backend
+            {"backend": row["storage_backend"], "count": row["count"], "size": row["size"]} for row in by_backend
         ],
     }
 

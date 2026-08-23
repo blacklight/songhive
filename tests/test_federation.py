@@ -3,8 +3,11 @@ Federation module tests.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from celery.exceptions import Retry
 
 from songhive.config.schema import SonghiveConfig
 from songhive.federation.activities import create_audio_activity
@@ -22,6 +25,7 @@ from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
+from songhive.tasks.federation import _load_user_actor, deliver_activity, process_incoming
 
 
 def test_get_actor_url():
@@ -228,3 +232,219 @@ async def test_sync_user_actor_caches_document(db_session, config):
     assert cached["attachment"] == [
         {"type": "PropertyValue", "name": "Website", "value": "https://example.com"},
     ]
+
+
+def _fed_config(**kwargs) -> SonghiveConfig:
+    """Return a federation-enabled test config."""
+    return SonghiveConfig(
+        auth={"secret_key": "a" * 64},
+        database={"url": "sqlite+aiosqlite:///:memory:"},
+        storage={"backend": "local", "local_path": "/tmp/media"},
+        federation={
+            "enabled": kwargs.get("enabled", True),
+            "instance_domain": "music.example.com",
+            "blocked_instances": kwargs.get("blocked_instances", []),
+            "allowed_instances": kwargs.get("allowed_instances", []),
+        },
+    )
+
+
+@asynccontextmanager
+async def _fake_session_cm(session=None):
+    """Yield a fixed session for federation task tests."""
+    yield session or MagicMock()
+
+
+def test_load_user_actor_not_found(monkeypatch):
+    """_load_user_actor returns None when the user does not exist."""
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
+    monkeypatch.setattr("songhive.tasks.federation.get_session", _fake_session_cm)
+    monkeypatch.setattr("songhive.services.auth.get_user_by_username", AsyncMock(return_value=None))
+
+    assert _load_user_actor("missing") is None
+
+
+def test_load_user_actor_found(monkeypatch):
+    """_load_user_actor provisions and returns the matching user."""
+    user = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
+    monkeypatch.setattr("songhive.tasks.federation.get_session", _fake_session_cm)
+    monkeypatch.setattr("songhive.services.auth.get_user_by_username", AsyncMock(return_value=user))
+    monkeypatch.setattr("songhive.tasks.federation.ensure_user_actor", MagicMock())
+
+    assert _load_user_actor("alice") is user
+
+
+def _patch_process_incoming(monkeypatch, config=None):
+    """Apply common monkeypatches for process_incoming tests."""
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: config or _fed_config())
+    monkeypatch.setattr(
+        "songhive.federation.storage.get_or_create_private_key",
+        lambda *a, **k: MagicMock(read_text=lambda *a, **k: "pem"),
+    )
+    monkeypatch.setattr("songhive.federation.actors.get_federation_storage", lambda *a, **k: MagicMock())
+    monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda *a, **k: "private_key")
+    monkeypatch.setattr("songhive.tasks.federation.init_db", lambda *a, **k: None)
+
+
+def test_process_incoming_disabled(monkeypatch):
+    """process_incoming is a no-op when federation is disabled."""
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config(enabled=False))
+    assert process_incoming({"actor": "https://example.com/user"}) is None
+
+
+def test_process_incoming_no_actor(monkeypatch):
+    """process_incoming drops activities without a usable actor."""
+    _patch_process_incoming(monkeypatch)
+    assert process_incoming({}) is None
+
+
+def test_process_incoming_blocked_domain(monkeypatch):
+    """process_incoming drops activities from blocked domains."""
+    _patch_process_incoming(monkeypatch, _fed_config(blocked_instances=["example.com"]))
+    assert process_incoming({"actor": "https://example.com/user"}) is None
+
+
+def test_process_incoming_user_actor_missing(monkeypatch):
+    """process_incoming drops activities for unknown local users."""
+    _patch_process_incoming(monkeypatch)
+    monkeypatch.setattr("songhive.tasks.federation._load_user_actor", lambda username: None)
+    assert process_incoming({"actor": "https://example.com/user"}, username="missing") is None
+
+
+def test_process_incoming_user_actor_no_context(monkeypatch):
+    """process_incoming drops activities when the local user has no actor context."""
+    _patch_process_incoming(monkeypatch)
+    user = MagicMock(actor_url="https://music.example.com/users/alice", private_key_pem=None)
+    monkeypatch.setattr("songhive.tasks.federation._load_user_actor", lambda username: user)
+    assert process_incoming({"actor": "https://example.com/user"}, username="alice") is None
+
+
+def test_process_incoming_base64_decode_error(monkeypatch):
+    """process_incoming continues when body_b64 cannot be decoded."""
+    _patch_process_incoming(monkeypatch)
+    processor = MagicMock(process=MagicMock(return_value={"ok": True}))
+    monkeypatch.setattr("songhive.tasks.federation.InboxProcessor", MagicMock(return_value=processor))
+
+    result = process_incoming(
+        {"actor": "https://example.com/user", "type": "Create"},
+        body_b64="not-valid-base64!!!",
+    )
+    assert result == {"ok": True}
+    assert processor.process.call_args.kwargs["body"] is None
+
+
+def test_process_incoming_signature_verification_error(monkeypatch):
+    """process_incoming drops activities with bad signatures."""
+    _patch_process_incoming(monkeypatch)
+    from songhive.tasks.federation import SignatureVerificationError
+
+    processor = MagicMock(process=MagicMock(side_effect=SignatureVerificationError("bad signature")))
+    monkeypatch.setattr("songhive.tasks.federation.InboxProcessor", MagicMock(return_value=processor))
+
+    assert process_incoming({"actor": "https://example.com/user", "type": "Create"}) is None
+
+
+def test_process_incoming_activitypub_error(monkeypatch):
+    """process_incoming drops activities that cannot be processed."""
+    _patch_process_incoming(monkeypatch)
+    from songhive.tasks.federation import ActivityPubError
+
+    processor = MagicMock(process=MagicMock(side_effect=ActivityPubError("bad activity")))
+    monkeypatch.setattr("songhive.tasks.federation.InboxProcessor", MagicMock(return_value=processor))
+
+    assert process_incoming({"actor": "https://example.com/user", "type": "Create"}) is None
+
+
+def _deliver_self(retries: int = 0, retry_side_effect=None):
+    self = MagicMock()
+    self.request.retries = retries
+    self.retry.side_effect = retry_side_effect or Retry()
+    return self
+
+
+def test_deliver_activity_disabled(monkeypatch):
+    """deliver_activity is a no-op when federation is disabled."""
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config(enabled=False))
+    self = _deliver_self()
+    assert deliver_activity.run.__func__(self, {"type": "Create"}, "https://example.com/inbox", "key", "pem") is None
+    self.retry.assert_not_called()
+
+
+def test_deliver_activity_blocked_domain(monkeypatch):
+    """deliver_activity drops deliveries to blocked domains."""
+    monkeypatch.setattr(
+        "songhive.tasks.federation.load_config",
+        lambda *a, **k: _fed_config(blocked_instances=["example.com"]),
+    )
+    self = _deliver_self()
+    assert deliver_activity.run.__func__(self, {"type": "Create"}, "https://example.com/inbox", "key", "pem") is None
+    self.retry.assert_not_called()
+
+
+def test_deliver_activity_success(monkeypatch):
+    """deliver_activity posts signed requests and returns the response."""
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
+    monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
+    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={"Signature": "sig"}))
+
+    response = MagicMock(status_code=200)
+    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(return_value=response))
+
+    self = _deliver_self()
+    result = deliver_activity.run.__func__(
+        self,
+        {"type": "Create"},
+        "https://example.com/inbox",
+        "https://music.example.com/actor#main-key",
+        "pem",
+    )
+    assert result is response
+
+
+def test_deliver_activity_request_exception_retries(monkeypatch):
+    """deliver_activity retries on request exceptions."""
+    from requests import RequestException
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
+    monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
+    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={}))
+
+    exc = RequestException("network down")
+    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(side_effect=exc))
+
+    self = _deliver_self(retries=1)
+    with pytest.raises(Retry):
+        deliver_activity.run.__func__(self, {"type": "Create"}, "https://example.com/inbox", "key", "pem")
+
+    self.retry.assert_called_once()
+
+
+def test_deliver_activity_5xx_retries(monkeypatch):
+    """deliver_activity retries on 5xx responses."""
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
+    monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
+    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={}))
+
+    response = MagicMock(status_code=503)
+    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(return_value=response))
+
+    self = _deliver_self(retries=0)
+    with pytest.raises(Retry):
+        deliver_activity.run.__func__(self, {"type": "Create"}, "https://example.com/inbox", "key", "pem")
+
+    self.retry.assert_called_once()
+
+
+def test_deliver_activity_4xx_gives_up(monkeypatch):
+    """deliver_activity gives up on non-retryable 4xx responses."""
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
+    monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
+    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={}))
+
+    response = MagicMock(status_code=400)
+    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(return_value=response))
+
+    self = _deliver_self()
+    assert deliver_activity.run.__func__(self, {"type": "Create"}, "https://example.com/inbox", "key", "pem") is None
+    self.retry.assert_not_called()

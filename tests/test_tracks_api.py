@@ -113,13 +113,15 @@ def test_update_track(client, sample_tracks, regular_user, auth_headers):
 
     response = client.patch(
         f"/api/v1/tracks/{track.id}",
-        json={"title": "Updated Title", "genre": "Rock"},
+        json={"title": "Updated Title", "genre": "Rock", "track_number": 3, "disc_number": 2},
         headers=headers,
     )
     assert response.status_code == 200
     data = response.json()
     assert data["title"] == "Updated Title"
     assert data["genre"] == "Rock"
+    assert data["track_number"] == 3
+    assert data["disc_number"] == 2
 
 
 def test_delete_track(client, sample_tracks, regular_user, auth_headers):
@@ -132,6 +134,69 @@ def test_delete_track(client, sample_tracks, regular_user, auth_headers):
 
     get_response = client.get(f"/api/v1/tracks/{track.id}", headers=headers)
     assert get_response.status_code == 404
+
+
+def test_update_missing_track_returns_404(client, auth_headers, regular_user):
+    """Updating a missing track returns 404."""
+    response = client.patch(
+        "/api/v1/tracks/00000000-0000-0000-0000-000000000000",
+        json={"title": "Updated"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 404
+
+
+def test_update_track_denied_for_other_user(client, sample_tracks, other_user, auth_headers):
+    """Non-owners cannot update another user's track."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"title": "Hacked"},
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == 403
+
+
+def test_delete_track_denied_for_other_user(client, sample_tracks, other_user, auth_headers):
+    """Non-owners cannot delete another user's track."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    response = client.delete(f"/api/v1/tracks/{track.id}", headers=auth_headers(other_user))
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_track_logs_audit_entry(
+    client, db_session, sample_tracks, admin_user, auth_headers, monkeypatch
+):
+    """Admins deleting someone else's track via /tracks log an audit entry."""
+    from sqlalchemy import select
+
+    from songhive.models.audit_log import AuditLog
+
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    assert str(track.owner_id) != str(admin_user.id)
+
+    monkeypatch.setattr("songhive.api.routes.tracks.unpublish_track_activity", MagicMock(return_value=0))
+
+    response = client.delete(f"/api/v1/tracks/{track.id}", headers=auth_headers(admin_user))
+    assert response.status_code == 204
+
+    result = await db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "track.admin_delete",
+            AuditLog.target_id == str(track.id),
+        )
+    )
+    assert result is not None
+
+
+def test_delete_missing_track_returns_404(client, auth_headers, regular_user):
+    """Deleting a missing track returns 404."""
+    response = client.delete(
+        "/api/v1/tracks/00000000-0000-0000-0000-000000000000",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 404
 
 
 def _patch_publish(monkeypatch):

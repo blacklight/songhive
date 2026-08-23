@@ -5,11 +5,13 @@ OAuth2 client registration, admin API, and provider flow tests.
 import base64
 import hashlib
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi import status
+from redis.exceptions import WatchError
 from sqlalchemy import select
 
 from songhive.models.oauth_client import OAuth2Client
@@ -915,3 +917,880 @@ async def test_oauth_introspect_requires_client_authentication(client, db_sessio
         },
     )
     assert introspect_response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+# --------------------------------------------------------------------------- #
+# Targeted coverage tests for songhive/users/oauth.py
+# --------------------------------------------------------------------------- #
+
+
+def test_is_loopback_host():
+    """Exercise the _is_loopback_host helper, including the None/empty branch."""
+    assert oauth_client_service._is_loopback_host(None) is False
+    assert oauth_client_service._is_loopback_host("") is False
+    assert oauth_client_service._is_loopback_host("localhost") is True
+    assert oauth_client_service._is_loopback_host("127.0.0.1") is True
+    assert oauth_client_service._is_loopback_host("[::1]") is True
+    assert oauth_client_service._is_loopback_host("example.com") is False
+
+
+def test_validate_name_and_redirect_uri_errors():
+    """Cover validation error branches in _validate_name and _validate_redirect_uris."""
+    with pytest.raises(oauth_client_service.OAuthClientError, match="required"):
+        oauth_client_service._validate_name("")
+
+    with pytest.raises(oauth_client_service.OAuthClientError, match="too long"):
+        oauth_client_service._validate_name("x" * 129)
+
+    with pytest.raises(oauth_client_service.OAuthClientError, match="At least one"):
+        oauth_client_service._validate_redirect_uris([])
+
+    with pytest.raises(oauth_client_service.OAuthClientError, match="must be strings"):
+        oauth_client_service._validate_redirect_uris([123])
+
+    with pytest.raises(oauth_client_service.OAuthClientError, match="empty values"):
+        oauth_client_service._validate_redirect_uris(["https://example.com/cb", ""])
+
+    long_uri = "https://example.com/" + "x" * 500
+    with pytest.raises(oauth_client_service.OAuthClientError, match="cannot exceed"):
+        oauth_client_service._validate_redirect_uris([long_uri])
+
+    with pytest.raises(oauth_client_service.OAuthClientError, match="Invalid redirect_uri scheme"):
+        oauth_client_service._validate_redirect_uris(["ftp://example.com/cb"])
+
+    with pytest.raises(oauth_client_service.OAuthClientError, match="Invalid redirect_uri:"):
+        oauth_client_service._validate_redirect_uris(["https:"])
+
+    with pytest.raises(oauth_client_service.OAuthClientError, match="fragments"):
+        oauth_client_service._validate_redirect_uris(["https://example.com/cb#frag"])
+
+
+def test_validate_grant_types_defaults_and_errors():
+    """Cover _validate_grant_types defaults, empty iterators, and type errors."""
+    assert oauth_client_service._validate_grant_types(None) == ["authorization_code"]
+    assert oauth_client_service._validate_grant_types([]) == ["authorization_code"]
+    assert oauth_client_service._validate_grant_types(iter([])) == ["authorization_code"]
+    assert oauth_client_service._validate_grant_types([" refresh_token "]) == ["refresh_token"]
+
+    with pytest.raises(oauth_client_service.OAuthClientError, match="must be strings"):
+        oauth_client_service._validate_grant_types([123])
+
+    with pytest.raises(oauth_client_service.OAuthClientError, match="Unsupported grant_type"):
+        oauth_client_service._validate_grant_types(["implicit"])
+
+
+@pytest.mark.asyncio
+async def test_generate_unique_client_id_collision_fallback(db_session, monkeypatch):
+    """Cover the collision fallback in _generate_unique_client_id."""
+    monkeypatch.setattr(
+        oauth_client_service,
+        "get_oauth_client_by_client_id",
+        AsyncMock(return_value=MagicMock()),
+    )
+    with pytest.raises(oauth_client_service.OAuthClientError, match="Could not generate"):
+        await oauth_client_service._generate_unique_client_id(db_session)
+
+
+def test_encode_decode_json_and_parse_expires_at():
+    """Cover _encode_json, _decode_json, and _parse_expires_at edge cases."""
+    now = datetime.now(timezone.utc)
+    encoded = oauth_client_service._encode_json({"dt": now})
+    assert now.isoformat() in encoded
+
+    with pytest.raises(TypeError):
+        oauth_client_service._encode_json({"value": object()})
+
+    assert oauth_client_service._decode_json("{invalid") is None
+    assert oauth_client_service._decode_json(None) is None
+
+    assert oauth_client_service._parse_expires_at(None) is None
+    assert oauth_client_service._parse_expires_at("not-a-date") is None
+    parsed = oauth_client_service._parse_expires_at("2020-01-01T00:00:00")
+    assert parsed is not None
+    assert parsed.tzinfo == timezone.utc
+
+
+@pytest.mark.asyncio
+async def test_check_client_secret_empty_and_public_client(db_session, make_user):
+    """Cover check_client_secret with missing hash or empty secret."""
+    admin = await make_user("admin", role="admin")
+    confidential, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Confidential",
+        redirect_uris=["https://example.com/cb"],
+    )
+    assert not oauth_client_service.check_client_secret(confidential, "")
+
+    public, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Public",
+        redirect_uris=["https://example.com/cb"],
+        is_confidential=False,
+    )
+    assert not oauth_client_service.check_client_secret(public, "secret")
+
+
+@pytest.mark.asyncio
+async def test_delete_oauth_client_missing(db_session):
+    """Cover delete_oauth_client when the client does not exist."""
+    result = await oauth_client_service.delete_oauth_client(db_session, "missing-client-id")
+    assert result is False
+
+
+def test_verify_pkce_branches():
+    """Cover all _verify_pkce error branches, including plain method and S256."""
+    verifier, challenge = _pkce_pair()
+    oauth_client_service._verify_pkce(challenge, "S256", verifier)
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Unsupported code challenge method"):
+        oauth_client_service._verify_pkce(challenge, "invalid", verifier)
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid code challenge"):
+        oauth_client_service._verify_pkce("short", "S256", verifier)
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid code verifier"):
+        oauth_client_service._verify_pkce(challenge, "S256", "short")
+
+    wrong_verifier = secrets.token_urlsafe(64)
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Code challenge failed"):
+        oauth_client_service._verify_pkce(challenge, "S256", wrong_verifier)
+
+    plain_verifier = secrets.token_urlsafe(64)
+    plain_challenge = secrets.token_urlsafe(64)
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Code challenge failed"):
+        oauth_client_service._verify_pkce(plain_challenge, "plain", plain_verifier)
+
+
+@pytest.mark.asyncio
+async def test_create_authorization_code_branches(db_session, fake_redis, make_user):
+    """Cover authorization-code creation validation branches."""
+    admin = await make_user("admin", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Auth Code Client",
+        redirect_uris=["https://example.com/cb"],
+    )
+    user = await make_user("alice")
+    verifier, challenge = _pkce_pair()
+    redirect_uri = client_obj.redirect_uris[0]
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Unsupported response type"):
+        await oauth_client_service.create_authorization_code(
+            db_session,
+            fake_redis,
+            user,
+            "token",
+            client_obj.client_id,
+            redirect_uri,
+            code_challenge=challenge,
+            code_challenge_method="S256",
+        )
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid client"):
+        await oauth_client_service.create_authorization_code(
+            db_session,
+            fake_redis,
+            user,
+            "code",
+            "missing-client-id",
+            redirect_uri,
+            code_challenge=challenge,
+            code_challenge_method="S256",
+        )
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Missing code_challenge"):
+        await oauth_client_service.create_authorization_code(
+            db_session,
+            fake_redis,
+            user,
+            "code",
+            client_obj.client_id,
+            redirect_uri,
+            code_challenge=None,
+            code_challenge_method="S256",
+        )
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Unsupported code challenge method"):
+        await oauth_client_service.create_authorization_code(
+            db_session,
+            fake_redis,
+            user,
+            "code",
+            client_obj.client_id,
+            redirect_uri,
+            code_challenge=challenge,
+            code_challenge_method="invalid",
+        )
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid code challenge"):
+        await oauth_client_service.create_authorization_code(
+            db_session,
+            fake_redis,
+            user,
+            "code",
+            client_obj.client_id,
+            redirect_uri,
+            code_challenge="short",
+            code_challenge_method="S256",
+        )
+
+    code, _ = await oauth_client_service.create_authorization_code(
+        db_session,
+        fake_redis,
+        user,
+        "code",
+        client_obj.client_id,
+        redirect_uri,
+        code_challenge=challenge,
+        code_challenge_method="",
+    )
+    assert code
+
+
+@pytest.mark.asyncio
+async def test_get_oauth_token_hints_and_expiry(fake_redis, config):
+    """Cover _get_oauth_token token_type_hint branches and expiry cleanup."""
+    client = OAuth2Client(client_id="hint-client", name="Hint Client")
+    access_data = oauth_client_service._token_payload("access_token", client, "user-1", None, config)
+    refresh_data = oauth_client_service._token_payload("refresh_token", client, "user-1", None, config)
+
+    await fake_redis.set(
+        oauth_client_service._access_token_key("access-hint"),
+        oauth_client_service._encode_json(access_data),
+    )
+    await fake_redis.set(
+        oauth_client_service._refresh_token_key("refresh-hint"),
+        oauth_client_service._encode_json(refresh_data),
+    )
+
+    got = await oauth_client_service._get_oauth_token(fake_redis, "access-hint", "access_token")
+    assert got["token_type"] == "access_token"
+
+    got = await oauth_client_service._get_oauth_token(fake_redis, "refresh-hint", "refresh_token")
+    assert got["token_type"] == "refresh_token"
+
+    got = await oauth_client_service._get_oauth_token(fake_redis, "access-hint")
+    assert got["token_type"] == "access_token"
+
+    got = await oauth_client_service._get_oauth_token(fake_redis, "refresh-hint")
+    assert got["token_type"] == "refresh_token"
+
+    expired = dict(access_data)
+    expired["expires_at"] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    await fake_redis.set(
+        oauth_client_service._access_token_key("expired-hint"),
+        oauth_client_service._encode_json(expired),
+    )
+    assert await oauth_client_service._get_oauth_token(fake_redis, "expired-hint") is None
+    assert await fake_redis.get(oauth_client_service._access_token_key("expired-hint")) is None
+
+
+@pytest.mark.asyncio
+async def test_consume_authorization_code_error_branches(db_session, fake_redis, make_user):
+    """Cover _consume_authorization_code validation and expiry branches."""
+    admin = await make_user("admin", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Consume Client",
+        redirect_uris=["https://example.com/cb"],
+    )
+    user = await make_user("alice")
+    verifier, challenge = _pkce_pair()
+    redirect_uri = client_obj.redirect_uris[0]
+    code = "consume-code"
+
+    async def _store(payload):
+        await fake_redis.set(
+            oauth_client_service._authz_code_key(code),
+            oauth_client_service._encode_json(payload),
+        )
+
+    payload = {
+        "client_id": client_obj.client_id,
+        "redirect_uri": redirect_uri,
+        "user_id": user.id,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "scope": None,
+        "state": None,
+        "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat(),
+    }
+    await _store(payload)
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid authorization code"):
+        await oauth_client_service._consume_authorization_code(fake_redis, client_obj, code, redirect_uri, verifier)
+
+    payload["client_id"] = "other-client"
+    payload["expires_at"] = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    await _store(payload)
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid authorization code"):
+        await oauth_client_service._consume_authorization_code(fake_redis, client_obj, code, redirect_uri, verifier)
+
+    payload["client_id"] = client_obj.client_id
+    payload["redirect_uri"] = "https://other.com/cb"
+    await _store(payload)
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid redirect URI"):
+        await oauth_client_service._consume_authorization_code(fake_redis, client_obj, code, redirect_uri, verifier)
+
+
+@pytest.mark.asyncio
+async def test_consume_authorization_code_watch_error(db_session, fake_redis, make_user, monkeypatch):
+    """Cover the WatchError handling in _consume_authorization_code."""
+    admin = await make_user("admin", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Watch Client",
+        redirect_uris=["https://example.com/cb"],
+    )
+    user = await make_user("alice")
+    verifier, challenge = _pkce_pair()
+    redirect_uri = client_obj.redirect_uris[0]
+    code = "watch-authz"
+
+    payload = {
+        "client_id": client_obj.client_id,
+        "redirect_uri": redirect_uri,
+        "user_id": user.id,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "scope": None,
+        "state": None,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+    }
+    await fake_redis.set(
+        oauth_client_service._authz_code_key(code),
+        oauth_client_service._encode_json(payload),
+    )
+
+    class FakePipe:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def watch(self, key):
+            pass
+
+        async def get(self, key):
+            return await fake_redis.get(key)
+
+        async def reset(self):
+            pass
+
+        def multi(self):
+            pass
+
+        def delete(self, key):
+            pass
+
+        async def execute(self):
+            raise WatchError()
+
+    monkeypatch.setattr(fake_redis, "pipeline", lambda transaction=True: FakePipe())
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid authorization code"):
+        await oauth_client_service._consume_authorization_code(fake_redis, client_obj, code, redirect_uri, verifier)
+
+
+@pytest.mark.asyncio
+async def test_consume_refresh_token_error_branches(db_session, fake_redis, make_user):
+    """Cover _consume_refresh_token validation and expiry branches."""
+    admin = await make_user("admin", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Refresh Client",
+        redirect_uris=["https://example.com/cb"],
+        grant_types=["authorization_code", "refresh_token"],
+    )
+    user = await make_user("alice")
+    token = "consume-refresh"
+
+    async def _store(payload):
+        await fake_redis.set(
+            oauth_client_service._refresh_token_key(token),
+            oauth_client_service._encode_json(payload),
+        )
+
+    payload = {
+        "client_id": client_obj.client_id,
+        "token_type": "refresh_token",
+        "user_id": user.id,
+        "scope": None,
+        "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat(),
+    }
+    await _store(payload)
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid refresh token"):
+        await oauth_client_service._consume_refresh_token(fake_redis, client_obj, token)
+
+    payload["client_id"] = "other-client"
+    payload["expires_at"] = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    await _store(payload)
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid refresh token"):
+        await oauth_client_service._consume_refresh_token(fake_redis, client_obj, token)
+
+    payload["client_id"] = client_obj.client_id
+    payload["token_type"] = "access_token"
+    await _store(payload)
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid refresh token"):
+        await oauth_client_service._consume_refresh_token(fake_redis, client_obj, token)
+
+
+@pytest.mark.asyncio
+async def test_consume_refresh_token_watch_error(db_session, fake_redis, make_user, monkeypatch):
+    """Cover the WatchError handling in _consume_refresh_token."""
+    admin = await make_user("admin", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Watch Refresh Client",
+        redirect_uris=["https://example.com/cb"],
+        grant_types=["authorization_code", "refresh_token"],
+    )
+    user = await make_user("alice")
+    token = "watch-refresh"
+
+    payload = {
+        "client_id": client_obj.client_id,
+        "token_type": "refresh_token",
+        "user_id": user.id,
+        "scope": None,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+    }
+    await fake_redis.set(
+        oauth_client_service._refresh_token_key(token),
+        oauth_client_service._encode_json(payload),
+    )
+
+    class FakePipe:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def watch(self, key):
+            pass
+
+        async def get(self, key):
+            return await fake_redis.get(key)
+
+        async def reset(self):
+            pass
+
+        def multi(self):
+            pass
+
+        def delete(self, key):
+            pass
+
+        async def execute(self):
+            raise WatchError()
+
+    monkeypatch.setattr(fake_redis, "pipeline", lambda transaction=True: FakePipe())
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Invalid refresh token"):
+        await oauth_client_service._consume_refresh_token(fake_redis, client_obj, token)
+
+
+@pytest.mark.asyncio
+async def test_authenticate_client_confidential_and_public(db_session, make_user):
+    """Cover _authenticate_client branches for wrong/empty secrets and public clients."""
+    admin = await make_user("admin", role="admin")
+    confidential, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Confidential Auth",
+        redirect_uris=["https://example.com/cb"],
+    )
+    public, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Public Auth",
+        redirect_uris=["https://example.com/cb"],
+        is_confidential=False,
+    )
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Client authentication failed"):
+        await oauth_client_service._authenticate_client(db_session, confidential.client_id, "wrong-secret")
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Client authentication failed"):
+        await oauth_client_service._authenticate_client(db_session, confidential.client_id, "")
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Client authentication failed"):
+        await oauth_client_service._authenticate_client(db_session, public.client_id, "any-secret")
+
+
+@pytest.mark.asyncio
+async def test_create_token_authorization_code_missing_params(db_session, fake_redis, config, make_user):
+    """Cover _create_token_from_authorization_code missing-parameter branches."""
+    admin = await make_user("admin", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Missing Params Client",
+        redirect_uris=["https://example.com/cb"],
+    )
+    await db_session.flush()
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Missing authorization code"):
+        await oauth_client_service.create_token(
+            db_session,
+            fake_redis,
+            config,
+            "authorization_code",
+            client_obj.client_id,
+            client_secret,
+        )
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Missing redirect URI"):
+        await oauth_client_service.create_token(
+            db_session,
+            fake_redis,
+            config,
+            "authorization_code",
+            client_obj.client_id,
+            client_secret,
+            code="fake-code",
+        )
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Missing code verifier"):
+        await oauth_client_service.create_token(
+            db_session,
+            fake_redis,
+            config,
+            "authorization_code",
+            client_obj.client_id,
+            client_secret,
+            code="fake-code",
+            redirect_uri="https://example.com/cb",
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_token_client_credentials_unsupported(db_session, fake_redis, config, make_user):
+    """Cover the unsupported grant-type branch for client_credentials."""
+    admin = await make_user("admin", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Client Credentials Client",
+        redirect_uris=["https://example.com/cb"],
+        grant_types=["client_credentials"],
+    )
+    await db_session.flush()
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Unsupported grant type"):
+        await oauth_client_service.create_token(
+            db_session,
+            fake_redis,
+            config,
+            "client_credentials",
+            client_obj.client_id,
+            client_secret,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_token_user_inactive_after_authorization(db_session, fake_redis, config, make_user):
+    """Cover the user-inactive branch in _create_token_from_authorization_code."""
+    admin = await make_user("admin", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Inactive Authz Client",
+        redirect_uris=["https://example.com/cb"],
+    )
+    user = await make_user("alice")
+    verifier, challenge = _pkce_pair()
+    redirect_uri = client_obj.redirect_uris[0]
+
+    code, _ = await oauth_client_service.create_authorization_code(
+        db_session,
+        fake_redis,
+        user,
+        "code",
+        client_obj.client_id,
+        redirect_uri,
+        code_challenge=challenge,
+        code_challenge_method="S256",
+    )
+
+    user.is_active = False
+    await db_session.flush()
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="User not active"):
+        await oauth_client_service.create_token(
+            db_session,
+            fake_redis,
+            config,
+            "authorization_code",
+            client_obj.client_id,
+            client_secret,
+            code=code,
+            redirect_uri=redirect_uri,
+            code_verifier=verifier,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_token_missing_refresh_token(db_session, fake_redis, config, make_user):
+    """Cover the missing refresh token branch in _create_token_from_refresh_token."""
+    admin = await make_user("admin", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Refresh Only Client",
+        redirect_uris=["https://example.com/cb"],
+        grant_types=["refresh_token"],
+    )
+    await db_session.flush()
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="Missing refresh token"):
+        await oauth_client_service.create_token(
+            db_session,
+            fake_redis,
+            config,
+            "refresh_token",
+            client_obj.client_id,
+            client_secret,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_token_refresh_user_inactive(db_session, fake_redis, config, make_user):
+    """Cover the user-inactive branch in _create_token_from_refresh_token."""
+    admin = await make_user("admin", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Refresh Inactive Client",
+        redirect_uris=["https://example.com/cb"],
+        grant_types=["authorization_code", "refresh_token"],
+    )
+    user = await make_user("alice")
+    await db_session.flush()
+
+    token_pair = await oauth_client_service._issue_oauth_token_pair(fake_redis, config, client_obj, user.id, None)
+
+    user.is_active = False
+    await db_session.flush()
+
+    with pytest.raises(oauth_client_service.OAuth2ProviderError, match="User not active"):
+        await oauth_client_service.create_token(
+            db_session,
+            fake_redis,
+            config,
+            "refresh_token",
+            client_obj.client_id,
+            client_secret,
+            refresh_token=token_pair["refresh_token"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_branches(db_session, fake_redis, config, make_user):
+    """Cover _revoke_token_by_client_id and empty-token branches."""
+    admin = await make_user("admin", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Revoke Client",
+        redirect_uris=["https://example.com/cb"],
+        grant_types=["authorization_code", "refresh_token"],
+    )
+    user = await make_user("alice")
+    await db_session.flush()
+
+    token_pair = await oauth_client_service._issue_oauth_token_pair(fake_redis, config, client_obj, user.id, None)
+
+    await oauth_client_service.revoke_token(
+        db_session,
+        fake_redis,
+        token_pair["access_token"],
+        "access_token",
+        client_obj.client_id,
+        client_secret,
+    )
+    assert await fake_redis.get(oauth_client_service._access_token_key(token_pair["access_token"])) is None
+
+    await oauth_client_service.revoke_token(
+        db_session,
+        fake_redis,
+        token_pair["refresh_token"],
+        "refresh_token",
+        client_obj.client_id,
+        client_secret,
+    )
+    assert await fake_redis.get(oauth_client_service._refresh_token_key(token_pair["refresh_token"])) is None
+
+    await oauth_client_service.revoke_token(
+        db_session,
+        fake_redis,
+        "any-token",
+        "access_token",
+        client_obj.client_id,
+        "wrong-secret",
+    )
+
+    await oauth_client_service.revoke_token(
+        db_session,
+        fake_redis,
+        "",
+        "access_token",
+        client_obj.client_id,
+        client_secret,
+    )
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_without_client_id(db_session, fake_redis, config, make_user):
+    """Cover revoke_token paths when no client_id is provided."""
+    admin = await make_user("admin", role="admin")
+    client_obj, _ = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Revoke Public Client",
+        redirect_uris=["https://example.com/cb"],
+        grant_types=["authorization_code", "refresh_token"],
+    )
+    user = await make_user("alice")
+    await db_session.flush()
+
+    token_pair = await oauth_client_service._issue_oauth_token_pair(fake_redis, config, client_obj, user.id, None)
+
+    await oauth_client_service.revoke_token(db_session, fake_redis, token_pair["access_token"], "access_token")
+    assert await fake_redis.get(oauth_client_service._access_token_key(token_pair["access_token"])) is None
+
+    token_pair = await oauth_client_service._issue_oauth_token_pair(fake_redis, config, client_obj, user.id, None)
+    await oauth_client_service.revoke_token(db_session, fake_redis, token_pair["refresh_token"], "refresh_token")
+    assert await fake_redis.get(oauth_client_service._refresh_token_key(token_pair["refresh_token"])) is None
+
+    await oauth_client_service.revoke_token(db_session, fake_redis, "unknown-access", "access_token")
+    await oauth_client_service.revoke_token(db_session, fake_redis, "unknown-refresh", "refresh_token")
+    await oauth_client_service.revoke_token(db_session, fake_redis, "unknown-none", None)
+
+
+@pytest.mark.asyncio
+async def test_introspect_token_branches(db_session, fake_redis, config, make_user):
+    """Cover introspect_token branches for client mismatch, user, and expiry."""
+    admin = await make_user("admin", role="admin")
+    client_a, secret_a = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Introspect Client A",
+        redirect_uris=["https://a.com/cb"],
+        grant_types=["authorization_code", "refresh_token"],
+    )
+    client_b, secret_b = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Introspect Client B",
+        redirect_uris=["https://b.com/cb"],
+        grant_types=["authorization_code", "refresh_token"],
+    )
+    user = await make_user("alice")
+    await db_session.flush()
+
+    token_pair = await oauth_client_service._issue_oauth_token_pair(fake_redis, config, client_a, user.id, None)
+    access_token = token_pair["access_token"]
+
+    result = await oauth_client_service.introspect_token(
+        db_session, fake_redis, access_token, "access_token", client_a.client_id, secret_a
+    )
+    assert result["active"] is True
+
+    result = await oauth_client_service.introspect_token(
+        db_session, fake_redis, access_token, "access_token", client_b.client_id, secret_b
+    )
+    assert result == {"active": False}
+
+    payload_no_user = {
+        "token_type": "access_token",
+        "client_id": client_a.client_id,
+        "scope": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+    }
+    await fake_redis.set(
+        oauth_client_service._access_token_key("no-user-token"),
+        oauth_client_service._encode_json(payload_no_user),
+    )
+    result = await oauth_client_service.introspect_token(
+        db_session, fake_redis, "no-user-token", "access_token", client_a.client_id, secret_a
+    )
+    assert result == {"active": False}
+
+    user.is_active = False
+    await db_session.flush()
+    result = await oauth_client_service.introspect_token(
+        db_session, fake_redis, access_token, "access_token", client_a.client_id, secret_a
+    )
+    assert result == {"active": False}
+
+    user.is_active = True
+    await db_session.flush()
+
+    expired_payload = oauth_client_service._token_payload("access_token", client_a, user.id, None, config)
+    expired_payload["expires_at"] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    await fake_redis.set(
+        oauth_client_service._access_token_key("expired-token"),
+        oauth_client_service._encode_json(expired_payload),
+    )
+    result = await oauth_client_service.introspect_token(
+        db_session, fake_redis, "expired-token", "access_token", client_a.client_id, secret_a
+    )
+    assert result == {"active": False}
+
+    no_exp_payload = oauth_client_service._token_payload("access_token", client_a, user.id, None, config)
+    no_exp_payload.pop("expires_at")
+    await fake_redis.set(
+        oauth_client_service._access_token_key("no-exp-token"),
+        oauth_client_service._encode_json(no_exp_payload),
+    )
+    result = await oauth_client_service.introspect_token(
+        db_session, fake_redis, "no-exp-token", "access_token", client_a.client_id, secret_a
+    )
+    assert result == {"active": False}
+
+
+@pytest.mark.asyncio
+async def test_introspect_token_expired_after_get(db_session, fake_redis, config, make_user, monkeypatch):
+    """Cover the defensive expiry branch in introspect_token after _get_oauth_token."""
+    admin = await make_user("admin", role="admin")
+    client_obj, client_secret = await oauth_client_service.create_oauth_client(
+        db_session,
+        created_by=admin.id,
+        name="Introspect Expired Client",
+        redirect_uris=["https://expired.com/cb"],
+        grant_types=["authorization_code", "refresh_token"],
+    )
+    user = await make_user("alice")
+    await db_session.flush()
+
+    payload = {
+        "token_type": "access_token",
+        "client_id": client_obj.client_id,
+        "user_id": user.id,
+        "scope": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+    }
+    monkeypatch.setattr(
+        oauth_client_service,
+        "_get_oauth_token",
+        AsyncMock(return_value=payload),
+    )
+
+    result = await oauth_client_service.introspect_token(
+        db_session,
+        fake_redis,
+        "expired-after-get",
+        "access_token",
+        client_obj.client_id,
+        client_secret,
+    )
+    assert result == {"active": False}

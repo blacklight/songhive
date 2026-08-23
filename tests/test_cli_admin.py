@@ -3,9 +3,11 @@ Admin CLI command tests.
 """
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -543,3 +545,577 @@ def test_admin_main_init_db(tmp_path, monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert "Database tables initialized successfully" in captured.out
+
+
+class _FakeCeleryResult:
+    """A minimal Celery AsyncResult stand-in."""
+
+    def __init__(self, task_id: str):
+        self.id = task_id
+
+
+class _FakeScanDir:
+    """Stand-in for the Celery ``scan_directory`` task."""
+
+    def __init__(self, delay_result=None, call_result=0, raise_delay=None, raise_call=None):
+        self.delay_result = delay_result
+        self.call_result = call_result
+        self.raise_delay = raise_delay
+        self.raise_call = raise_call
+
+    def delay(self, path: str, library_id: str, owner_id=None):
+        if self.raise_delay:
+            raise self.raise_delay
+        return self.delay_result
+
+    def __call__(self, path: str, library_id: str, owner_id=None):
+        if self.raise_call:
+            raise self.raise_call
+        return self.call_result
+
+
+@pytest.mark.asyncio
+async def test_reset_password_handler(db_session, monkeypatch, capsys):
+    """Test the reset-password handler."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret", role="user")
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args(username="alice", password="newsecret")
+    await cli_admin._handle_reset_password(args)
+    captured = capsys.readouterr()
+    assert "Password reset for user 'alice'" in captured.out
+    assert user.password_hash is not None
+
+
+@pytest.mark.asyncio
+async def test_reset_password_handler_missing_user(db_session, monkeypatch, capsys):
+    """Test that resetting a missing user's password exits with an error."""
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args(username="nobody", password="newsecret")
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_reset_password(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "not found" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_reset_password_handler_change_error(db_session, monkeypatch, capsys):
+    """Test that reset-password exits when the password change fails."""
+    await create_user(db_session, "alice", "alice@example.com", "secret", role="user")
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    monkeypatch.setattr(
+        cli_admin.user_manager,
+        "change_password",
+        AsyncMock(side_effect=cli_admin.user_manager.UserManagementError("too weak")),
+    )
+
+    args = _make_args(username="alice", password="newsecret")
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_reset_password(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "too weak" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_disable_user_handler(db_session, monkeypatch, capsys):
+    """Test the disable-user handler."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret", role="user")
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args(username="alice")
+    await cli_admin._handle_disable_user(args)
+    captured = capsys.readouterr()
+    assert "deactivated" in captured.out
+    assert user.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_disable_user_handler_missing_user(db_session, monkeypatch, capsys):
+    """Test that disabling a missing user exits with an error."""
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args(username="nobody")
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_disable_user(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "not found" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_disable_user_handler_last_admin(db_session, monkeypatch, capsys):
+    """Test that disable-user guards the last active admin."""
+    await create_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args(username="admin")
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_disable_user(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Cannot deactivate the last active admin" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_promote_user_handler_error(db_session, monkeypatch, capsys):
+    """Test that promote-user exits on a user management error."""
+    await create_user(db_session, "alice", "alice@example.com", "secret", role="user")
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    monkeypatch.setattr(
+        cli_admin.user_manager,
+        "promote_user",
+        AsyncMock(side_effect=cli_admin.user_manager.UserManagementError("bad")),
+    )
+
+    args = _make_args(username="alice")
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_promote_user(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "bad" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_approve_user_handler_error(db_session, monkeypatch, capsys):
+    """Test that approve-user exits on a user management error."""
+    await create_user(db_session, "pending", "pending@example.com", "secret", role="user", is_active=False)
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    monkeypatch.setattr(
+        cli_admin.user_manager,
+        "approve_user",
+        AsyncMock(side_effect=cli_admin.user_manager.UserManagementError("bad")),
+    )
+
+    args = _make_args(username="pending")
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_approve_user(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "bad" in captured.err
+
+
+def test_parse_iso_datetime_with_z():
+    """Test parsing an ISO 8601 timestamp with a 'Z' suffix."""
+    result = cli_admin._parse_iso_datetime("2026-01-01T00:00:00Z")
+    assert result.tzinfo is not None
+    assert result.isoformat() == "2026-01-01T00:00:00+00:00"
+
+
+def test_parse_iso_datetime_naive():
+    """Test parsing a naive ISO 8601 timestamp."""
+    result = cli_admin._parse_iso_datetime("2026-01-01T00:00:00")
+    assert result.tzinfo == timezone.utc
+
+
+@pytest.mark.asyncio
+async def test_create_invite_handler_with_z_expires_at(db_session, monkeypatch, capsys):
+    """Test the create-invite handler with a 'Z' suffix expires_at."""
+    await create_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args(created_by="admin", max_uses=5, expires_at="2099-01-01T00:00:00Z")
+    await cli_admin._handle_create_invite(args)
+    captured = capsys.readouterr()
+    assert "Invite code:" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_create_invite_handler_invalid_max_uses(db_session, monkeypatch, capsys):
+    """Test that create-invite exits on an InviteError."""
+    await create_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    args = _make_args(created_by="admin", max_uses=0, expires_at=None)
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_create_invite(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "max_uses must be a positive integer" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_list_invites_handler_with_expiration(db_session, monkeypatch, capsys):
+    """Test the list-invites handler with an expiring invite."""
+    admin = await create_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    await db_session.flush()
+    expires = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    invite = await create_invite(db_session, created_by=admin.id, max_uses=1, expires_at=expires)
+    await db_session.flush()
+
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    await cli_admin._handle_list_invites(_make_args())
+    captured = capsys.readouterr()
+    assert invite.code in captured.out
+    assert "2099-01-01T00:00:00+00:00" in captured.out
+
+
+def test_normalize_scan_roots(tmp_path):
+    """Test that scan roots are resolved and filtered to existing directories."""
+    existing = tmp_path / "exists"
+    existing.mkdir()
+    missing = tmp_path / "missing"
+    file_path = tmp_path / "file.txt"
+    file_path.write_text("x")
+
+    roots = [str(existing), str(missing), str(file_path)]
+    normalized = cli_admin._normalize_scan_roots(roots)
+    assert normalized == [existing.resolve()]
+
+
+def test_count_audio_files(tmp_path):
+    """Test counting audio files under a directory."""
+    (tmp_path / "track.mp3").write_text("audio")
+    (tmp_path / "notes.txt").write_text("text")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "deep.flac").write_text("audio")
+
+    assert cli_admin._count_audio_files(tmp_path) == 2
+
+
+def test_validate_import_path_success(tmp_path):
+    """Test resolving a valid import path within a scan root."""
+    root = tmp_path / "media"
+    root.mkdir()
+    target = root / "imports"
+    target.mkdir()
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(root)]},
+        federation={"enabled": False},
+    )
+
+    resolved = cli_admin._validate_import_path(config, target)
+    assert resolved == target.resolve()
+
+
+def test_validate_import_path_not_exists(tmp_path):
+    """Test that a non-existent import path is rejected."""
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(tmp_path)]},
+        federation={"enabled": False},
+    )
+    with pytest.raises(ValueError, match="does not exist"):
+        cli_admin._validate_import_path(config, tmp_path / "missing")
+
+
+def test_validate_import_path_not_directory(tmp_path):
+    """Test that a file path is rejected as an import directory."""
+    file_path = tmp_path / "file.txt"
+    file_path.write_text("x")
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(tmp_path)]},
+        federation={"enabled": False},
+    )
+    with pytest.raises(ValueError, match="not a directory"):
+        cli_admin._validate_import_path(config, file_path)
+
+
+def test_validate_import_path_no_scan_roots(tmp_path):
+    """Test that importing without configured scan roots is rejected."""
+    target = tmp_path / "imports"
+    target.mkdir()
+    config = SonghiveConfig(
+        imports={"scan_roots": []},
+        federation={"enabled": False},
+    )
+    with pytest.raises(ValueError, match="No configured scan roots"):
+        cli_admin._validate_import_path(config, target)
+
+
+def test_validate_import_path_outside_root(tmp_path):
+    """Test that an import path outside the scan roots is rejected."""
+    root = tmp_path / "media"
+    root.mkdir()
+    outside = tmp_path / "other"
+    outside.mkdir()
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(root)]},
+        federation={"enabled": False},
+    )
+    with pytest.raises(ValueError, match="not within any configured scan root"):
+        cli_admin._validate_import_path(config, outside)
+
+
+@pytest.mark.asyncio
+async def test_import_dir_handler_success(tmp_path, monkeypatch, capsys):
+    """Test the import-dir handler queuing a Celery task."""
+    root = tmp_path / "media"
+    root.mkdir()
+    import_dir = root / "imports"
+    import_dir.mkdir()
+
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(root)]},
+        federation={"enabled": False},
+    )
+    monkeypatch.setattr(cli_admin, "load_config", lambda argv: config)
+    monkeypatch.setattr(
+        cli_admin,
+        "scan_directory",
+        _FakeScanDir(delay_result=_FakeCeleryResult("task-123")),
+    )
+
+    args = _make_args(path=str(import_dir), library_id="lib-1", owner=None)
+    await cli_admin._handle_import_dir(args)
+    captured = capsys.readouterr()
+    assert "Import queued with task id: task-123" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_import_dir_handler_with_owner(db_session, tmp_path, monkeypatch, capsys):
+    """Test the import-dir handler with a valid owner."""
+    owner = await create_user(db_session, "owner", "owner@example.com", "secret", role="user")
+    await db_session.flush()
+
+    assert owner is not None
+
+    root = tmp_path / "media"
+    root.mkdir()
+    import_dir = root / "imports"
+    import_dir.mkdir()
+
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(root)]},
+        federation={"enabled": False},
+    )
+    monkeypatch.setattr(cli_admin, "load_config", lambda argv: config)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    monkeypatch.setattr(
+        cli_admin,
+        "scan_directory",
+        _FakeScanDir(delay_result=_FakeCeleryResult("task-456")),
+    )
+
+    args = _make_args(path=str(import_dir), library_id="lib-1", owner="owner")
+    await cli_admin._handle_import_dir(args)
+    captured = capsys.readouterr()
+    assert "Import queued with task id: task-456" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_import_dir_handler_owner_missing(db_session, tmp_path, monkeypatch, capsys):
+    """Test that import-dir exits when the owner does not exist."""
+    root = tmp_path / "media"
+    root.mkdir()
+    import_dir = root / "imports"
+    import_dir.mkdir()
+
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(root)]},
+        federation={"enabled": False},
+    )
+    monkeypatch.setattr(cli_admin, "load_config", lambda argv: config)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+
+    args = _make_args(path=str(import_dir), library_id="lib-1", owner="nobody")
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_import_dir(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "owner 'nobody' not found" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_import_dir_handler_outside_root(tmp_path, monkeypatch, capsys):
+    """Test that import-dir exits for a path outside the scan roots."""
+    root = tmp_path / "media"
+    root.mkdir()
+    outside = tmp_path / "other"
+    outside.mkdir()
+
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(root)]},
+        federation={"enabled": False},
+    )
+    monkeypatch.setattr(cli_admin, "load_config", lambda argv: config)
+
+    args = _make_args(path=str(outside), library_id="lib-1", owner=None)
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_import_dir(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "not within any configured scan root" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_import_dir_handler_broker_fallback(tmp_path, monkeypatch, capsys):
+    """Test the import-dir synchronous fallback when the Celery broker is down."""
+    root = tmp_path / "media"
+    root.mkdir()
+    import_dir = root / "imports"
+    import_dir.mkdir()
+
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(root)]},
+        federation={"enabled": False},
+    )
+    monkeypatch.setattr(cli_admin, "load_config", lambda argv: config)
+    monkeypatch.setattr(
+        cli_admin,
+        "scan_directory",
+        _FakeScanDir(
+            raise_delay=cli_admin.KombuOperationalError("broker down"),
+            call_result=3,
+        ),
+    )
+
+    args = _make_args(path=str(import_dir), library_id="lib-1", owner=None)
+    await cli_admin._handle_import_dir(args)
+    captured = capsys.readouterr()
+    assert "Enqueued 3 file(s) for import" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_import_dir_handler_sync_value_error(tmp_path, monkeypatch, capsys):
+    """Test the import-dir exit when the synchronous scan raises a ValueError."""
+    root = tmp_path / "media"
+    root.mkdir()
+    import_dir = root / "imports"
+    import_dir.mkdir()
+
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(root)]},
+        federation={"enabled": False},
+    )
+    monkeypatch.setattr(cli_admin, "load_config", lambda argv: config)
+    monkeypatch.setattr(
+        cli_admin,
+        "scan_directory",
+        _FakeScanDir(
+            raise_delay=cli_admin.KombuOperationalError("broker down"),
+            raise_call=ValueError("invalid scan"),
+        ),
+    )
+
+    args = _make_args(path=str(import_dir), library_id="lib-1", owner=None)
+    with pytest.raises(SystemExit) as exc_info:
+        await cli_admin._handle_import_dir(args)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "invalid scan" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_import_dir_handler_full_celery_fallback(tmp_path, monkeypatch, capsys):
+    """Test the final fallback that counts files when Celery is completely unavailable."""
+    root = tmp_path / "media"
+    root.mkdir()
+    import_dir = root / "imports"
+    import_dir.mkdir()
+    (import_dir / "track.mp3").write_text("audio")
+    (import_dir / "notes.txt").write_text("text")
+
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(root)]},
+        federation={"enabled": False},
+    )
+    monkeypatch.setattr(cli_admin, "load_config", lambda argv: config)
+    monkeypatch.setattr(
+        cli_admin,
+        "scan_directory",
+        _FakeScanDir(
+            raise_delay=cli_admin.KombuOperationalError("broker down"),
+            raise_call=cli_admin.KombuOperationalError("still down"),
+        ),
+    )
+
+    args = _make_args(path=str(import_dir), library_id="lib-1", owner=None)
+    await cli_admin._handle_import_dir(args)
+    captured = capsys.readouterr()
+    assert "Found 1 file(s) to import" in captured.out
+    assert "Celery broker is not available" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_provision_federation_keys_disabled(monkeypatch, capsys):
+    """Test that provision-federation-keys no-ops when federation is disabled."""
+    monkeypatch.setattr(
+        cli_admin,
+        "load_config",
+        lambda argv: SonghiveConfig(federation={"enabled": False}),
+    )
+    await cli_admin._handle_provision_federation_keys(_make_args())
+    captured = capsys.readouterr()
+    assert "Federation is not enabled" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_provision_federation_keys_batch(db_session, monkeypatch, capsys):
+    """Test batch flushing while provisioning federation keys for 50 users."""
+    for i in range(50):
+        db_session.add(
+            User(
+                username=f"user{i:02d}",
+                email=f"user{i:02d}@example.com",
+                password_hash="x",
+            )
+        )
+    await db_session.flush()
+
+    config = SonghiveConfig(
+        federation={"enabled": True, "instance_domain": "fed.example.com"},
+    )
+    monkeypatch.setattr(cli_admin, "load_config", lambda argv: config)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+
+    await cli_admin._handle_provision_federation_keys(_make_args())
+    captured = capsys.readouterr()
+    assert "Provisioned federation keys for 50 user(s) on fed.example.com" in captured.out
+
+
+def test_admin_main_secret_file(tmp_path, monkeypatch):
+    """Test that admin_main loads a secret key from SONGHIVE_SECRET_FILE."""
+    secret_file = tmp_path / "secret.txt"
+    secret_file.write_text("my-secret-value")
+    monkeypatch.delenv("SONGHIVE_AUTH__SECRET_KEY", raising=False)
+    monkeypatch.setenv("SONGHIVE_SECRET_FILE", str(secret_file))
+    monkeypatch.setattr(
+        cli_admin,
+        "load_config",
+        lambda argv: SonghiveConfig(
+            database={"url": "sqlite+aiosqlite:///:memory:"},
+            federation={"enabled": False},
+            auth={"secret_key": "a" * 64},
+        ),
+    )
+    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "_handle_init_db", AsyncMock())
+
+    cli_admin.admin_main(["init-db"])
+    assert os.environ.get("SONGHIVE_AUTH__SECRET_KEY") == "my-secret-value"
+
+
+def test_admin_main_import_dir(tmp_path, monkeypatch, capsys):
+    """Test the admin_main dispatch for the import-dir command."""
+    root = tmp_path / "media"
+    root.mkdir()
+    import_dir = root / "imports"
+    import_dir.mkdir()
+
+    config = SonghiveConfig(
+        imports={"scan_roots": [str(root)]},
+        federation={"enabled": False},
+        auth={"secret_key": "a" * 64},
+    )
+    monkeypatch.setattr(cli_admin, "load_config", lambda argv: config)
+    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(
+        cli_admin,
+        "scan_directory",
+        _FakeScanDir(delay_result=_FakeCeleryResult("task-id")),
+    )
+
+    cli_admin.admin_main(["import-dir", "--path", str(import_dir), "--library-id", "lib-1"])
+    captured = capsys.readouterr()
+    assert "Import queued with task id: task-id" in captured.out

@@ -3,11 +3,12 @@ Tests for storage Celery tasks, especially orphaned file cleanup.
 """
 
 import io
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
 
-from songhive.config.schema import StorageConfig
+from songhive.config.schema import SonghiveConfig, StorageConfig
 from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.library import Library
@@ -124,3 +125,97 @@ def test_parse_crontab_rejects_invalid_expression():
     """``_parse_crontab`` raises for cron expressions without exactly 5 fields."""
     with pytest.raises(ValueError):
         _parse_crontab("0 3 * *")
+
+
+@pytest.mark.asyncio
+async def test_cleanup_orphaned_files_logs_delete_error(
+    db_session, local_storage_service, regular_user, caplog, monkeypatch
+):
+    """A storage backend delete failure during cleanup is logged but not re-raised."""
+    file = io.BytesIO(b"orphan")
+    stored_file = await local_storage_service.store_file(
+        db_session,
+        file,
+        "audio/mpeg",
+    )
+    db_session.add(stored_file)
+    await db_session.flush()
+
+    monkeypatch.setattr(
+        local_storage_service.backend,
+        "delete",
+        AsyncMock(side_effect=RuntimeError("delete failed")),
+    )
+
+    with caplog.at_level("ERROR"):
+        count = await _cleanup_orphaned_files(local_storage_service.backend, db_session)
+
+    assert count == 1
+    assert "delete failed" in caplog.text
+    assert "Failed to delete backing file" in caplog.text
+
+
+class _FakeSession:
+    """Yield a fixed session for the cleanup task wrapper test."""
+
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *_, **__):
+        return False
+
+
+def test_cleanup_orphaned_files_task(monkeypatch):
+    """The ``cleanup_orphaned_files`` Celery task wires config, storage and DB."""
+    config = SonghiveConfig(
+        auth={"secret_key": "a" * 64},
+        database={"url": "sqlite+aiosqlite:///:memory:"},
+        storage={"backend": "local", "local_path": "/tmp/media"},
+    )
+    storage = MagicMock()
+    session = MagicMock()
+
+    monkeypatch.setattr("songhive.config.load_config", lambda *a, **k: config)
+    monkeypatch.setattr("songhive.models.base.init_db", lambda *a, **k: None)
+    monkeypatch.setattr("songhive.storage.get_storage", lambda *a, **k: storage)
+    monkeypatch.setattr("songhive.models.base.get_session", lambda: _FakeSession(session))
+
+    async def _fake_helper(s, sess):
+        assert s is storage
+        assert sess is session
+        return 7
+
+    monkeypatch.setattr("songhive.tasks.storage._cleanup_orphaned_files", _fake_helper)
+
+    from songhive.tasks.storage import cleanup_orphaned_files
+
+    result = cleanup_orphaned_files()
+    assert result == 7
+
+
+def test_load_celery_config_falls_back_to_defaults_on_error(monkeypatch, caplog):
+    """``_load_celery_config`` returns defaults when config loading fails."""
+    monkeypatch.setattr("songhive.config.load_config", lambda *a, **k: (_ for _ in ()).throw(ValueError("bad config")))
+
+    from songhive.tasks.celery import _load_celery_config
+
+    with caplog.at_level("INFO", logger="songhive.tasks.celery"):
+        broker, backend, schedule = _load_celery_config()
+
+    assert broker == "redis://localhost:6379/1"
+    assert backend == "redis://localhost:6379/2"
+    assert schedule == "0 3 * * *"
+    assert "Could not load Songhive config for Celery" in caplog.text
+
+
+def test_make_celery_uses_default_cleanup_schedule():
+    """``make_celery`` uses the default 03:00 UTC schedule when none is supplied."""
+    from songhive.tasks.celery import make_celery
+
+    app = make_celery()
+    schedule = app.conf.beat_schedule["cleanup-orphaned-files"]["schedule"]
+    assert schedule.hour == {3}
+    assert schedule.minute == {0}

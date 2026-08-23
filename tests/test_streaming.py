@@ -4,15 +4,17 @@ Tests for the Tornado audio streaming endpoint.
 
 import array
 import asyncio
+import io
 import json
 import math
 import shutil
 import tempfile
 import wave
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
+import tornado.iostream
 import tornado.testing
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -33,7 +35,10 @@ from songhive.models.track import Track
 from songhive.models.upload import Upload
 from songhive.services.auth import create_user
 from songhive.services.storage import StorageService
+from songhive.services.streaming import cache_transcode
 from songhive.storage import get_storage
+from songhive.storage.local import LocalStorage
+from songhive.streaming.handler import StreamHandler
 from songhive.streaming.transcoder import Transcoder
 from songhive.ws.events import EventWebSocket
 
@@ -105,6 +110,17 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
                 )
             session.add(long_file)
 
+            # MPEG source for format inference from bitrate-only requests.
+            mpeg_bytes = b"fake mpeg"
+            mpeg_file = await storage_service.store_file(
+                session,
+                io.BytesIO(mpeg_bytes),
+                "audio/mpeg",
+                owner_id=str(self.user.id),
+                visibility=Visibility.PUBLIC.value,
+            )
+            session.add(mpeg_file)
+
             self.public_track = Track(
                 title="Public Track",
                 artist_id=artist.id,
@@ -137,8 +153,38 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
                 visibility=Visibility.LOCAL.value,
                 duration=1.0,
             )
-            session.add_all([self.public_track, self.public_long_track, self.private_track, self.local_track])
+            self.mpeg_track = Track(
+                title="MPEG Track",
+                artist_id=artist.id,
+                audio_file_id=mpeg_file.id,
+                owner_id=str(self.user.id),
+                visibility=Visibility.PUBLIC.value,
+                duration=1.0,
+            )
+            session.add_all(
+                [self.public_track, self.public_long_track, self.private_track, self.local_track, self.mpeg_track]
+            )
             await session.flush()
+
+            # Pre-cache opus transcodes for cache-hit coverage.
+            self.cached_opus = await cache_transcode(
+                session,
+                storage_service,
+                self.public_track,
+                "opus",
+                "128k",
+                b"fake",
+                "audio/opus",
+            )
+            self.cached_long_opus = await cache_transcode(
+                session,
+                storage_service,
+                self.public_long_track,
+                "opus",
+                "128k",
+                b"1",
+                "audio/opus",
+            )
 
             # Upload that falls back to the short file.
             upload = Upload(
@@ -419,3 +465,249 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
         assert "timestamp" in payload["data"]
 
         ws_client.close()
+
+    def test_non_bearer_auth_returns_401(self):
+        """An Authorization header that is not Bearer returns 401."""
+        response = self.fetch(
+            f"/api/v1/stream/{self.public_track.id}",
+            headers={"Authorization": "Basic dXNlcjpwYXNz"},
+        )
+        assert response.code == 401
+        assert response.headers.get("WWW-Authenticate") == "Bearer"
+
+    def test_source_file_value_error_returns_404(self):
+        """A storage backend ValueError during retrieval is surfaced as 404."""
+        with patch.object(
+            LocalStorage,
+            "retrieve",
+            new=AsyncMock(side_effect=ValueError("missing backing file")),
+        ):
+            response = self.fetch(
+                f"/api/v1/stream/{self.public_track.id}",
+                headers=self._auth_header(self.token),
+            )
+        assert response.code == 404
+
+    def test_bitrate_without_format_uses_source_format(self):
+        """A ?bitrate= request without ?format= falls back to the source format."""
+
+        class FakeTranscoder:
+            FORMAT_MAP = Transcoder.FORMAT_MAP
+
+            def __init__(self, *_, **__):
+                pass
+
+            async def stream(self, *_, **__):
+                yield b"fake"
+
+        with (
+            patch("songhive.streaming.handler.Transcoder", FakeTranscoder),
+            patch(
+                "songhive.streaming.handler.cache_transcode",
+                side_effect=RuntimeError("cache fail"),
+            ),
+        ):
+            response = self.fetch(
+                f"/api/v1/stream/{self.mpeg_track.id}?bitrate=128k",
+                headers=self._auth_header(self.token),
+            )
+
+        assert response.code == 200
+        assert response.headers.get("Content-Type") == "audio/mpeg"
+
+    def test_passthrough_client_disconnect(self):
+        """A StreamClosedError during passthrough is handled gracefully."""
+
+        async def _raise_stream_closed(*_, **__):
+            raise tornado.iostream.StreamClosedError()
+
+        with patch.object(StreamHandler, "_serve_file", _raise_stream_closed):
+            response = self.fetch(
+                f"/api/v1/stream/{self.public_track.id}",
+                headers=self._auth_header(self.token),
+            )
+
+        assert response.code == 200
+
+    def test_cached_transcode_value_error_returns_404(self):
+        """A ValueError while retrieving a cached transcode returns 404."""
+        orig = LocalStorage.retrieve
+
+        async def _fake_retrieve(self, path):
+            if "transcoded" in path:
+                raise ValueError("missing cache file")
+            return await orig(self, path)
+
+        with patch.object(LocalStorage, "retrieve", _fake_retrieve):
+            response = self.fetch(
+                f"/api/v1/stream/{self.public_track.id}?format=opus&bitrate=128k",
+                headers=self._auth_header(self.token),
+            )
+
+        assert response.code == 404
+
+    def test_cached_transcode_file_missing_returns_404(self):
+        """A cached transcode whose backing file is missing returns 404."""
+
+        async def _remove_cache():
+            storage = get_storage(self.config.storage)
+            path = await storage.retrieve(self.cached_opus.storage_path)
+            if path:
+                path.unlink()
+
+        self.io_loop.run_sync(_remove_cache)
+
+        response = self.fetch(
+            f"/api/v1/stream/{self.public_track.id}?format=opus&bitrate=128k",
+            headers=self._auth_header(self.token),
+        )
+        assert response.code == 404
+
+    def test_cached_transcode_client_disconnect(self):
+        """A StreamClosedError while serving a cached transcode is handled."""
+
+        async def _raise_stream_closed(*_, **__):
+            raise tornado.iostream.StreamClosedError()
+
+        with patch.object(StreamHandler, "_serve_file", _raise_stream_closed):
+            response = self.fetch(
+                f"/api/v1/stream/{self.public_track.id}?format=opus&bitrate=128k",
+                headers=self._auth_header(self.token),
+            )
+
+        assert response.code == 200
+
+    def test_cached_transcode_records_listen_threshold(self):
+        """A cached transcode stream crossing the 30s threshold records a listen."""
+
+        async def _fake_serve_file(self, file_path, mimetype):
+            self.set_header("Content-Type", mimetype)
+            self.set_header("Content-Length", "1")
+            self.set_header("Accept-Ranges", "bytes")
+            self.set_status(200)
+            self.write(b"1")
+            await self.flush()
+            return 1
+
+        with patch.object(StreamHandler, "_serve_file", _fake_serve_file):
+            response = self.fetch(
+                f"/api/v1/stream/{self.public_long_track.id}?format=opus&bitrate=128k",
+                headers=self._auth_header(self.token),
+            )
+
+        assert response.code == 200
+        self.io_loop.run_sync(self._assert_listen_recorded)
+
+    def test_live_transcode_client_disconnect(self):
+        """A StreamClosedError during live transcoding is handled gracefully."""
+
+        class FakeTranscoder:
+            FORMAT_MAP = Transcoder.FORMAT_MAP
+
+            def __init__(self, *_, **__):
+                pass
+
+            async def stream(self, *_, **__):
+                yield b"fake"
+                raise tornado.iostream.StreamClosedError()
+
+        with patch("songhive.streaming.handler.Transcoder", FakeTranscoder):
+            response = self.fetch(
+                f"/api/v1/stream/{self.public_track.id}?format=mp3&bitrate=128k",
+                headers=self._auth_header(self.token),
+            )
+
+        assert response.code == 200
+
+    def test_live_transcode_records_listen_threshold(self):
+        """A live transcode that exceeds 30 seconds records a listen."""
+
+        class FakeTranscoder:
+            FORMAT_MAP = Transcoder.FORMAT_MAP
+
+            def __init__(self, *_, **__):
+                pass
+
+            async def stream(self, *_, **__):
+                yield b"chunk1"
+                yield b"chunk2"
+
+        with (
+            patch("songhive.streaming.handler.time.perf_counter", side_effect=[0.0, 31.0]),
+            patch("songhive.streaming.handler.Transcoder", FakeTranscoder),
+        ):
+            response = self.fetch(
+                f"/api/v1/stream/{self.public_track.id}?format=mp3&bitrate=128k",
+                headers=self._auth_header(self.token),
+            )
+
+        assert response.code == 200
+
+        async def _assert_listen():
+            for _ in range(40):
+                async with get_session() as session:
+                    track = await session.get(Track, self.public_track.id)
+                    if track is not None and track.play_count == 1:
+                        break
+                await asyncio.sleep(0.025)
+
+            async with get_session() as session:
+                track = await session.get(Track, self.public_track.id)
+                assert track is not None
+                assert track.play_count == 1
+
+        self.io_loop.run_sync(_assert_listen)
+
+    def test_cache_transcode_exception_is_logged(self):
+        """An exception while saving the live transcode output is logged."""
+
+        class FakeTranscoder:
+            FORMAT_MAP = Transcoder.FORMAT_MAP
+
+            def __init__(self, *_, **__):
+                pass
+
+            async def stream(self, *_, **__):
+                yield b"fake"
+
+        with (
+            patch("songhive.streaming.handler.Transcoder", FakeTranscoder),
+            patch(
+                "songhive.streaming.handler.cache_transcode",
+                side_effect=RuntimeError("cache write failed"),
+            ),
+        ):
+            response = self.fetch(
+                f"/api/v1/stream/{self.public_track.id}?format=mp3&bitrate=128k",
+                headers=self._auth_header(self.token),
+            )
+
+        assert response.code == 200
+
+    def test_serve_file_stops_on_empty_chunk(self):
+        """_serve_file stops reading when the file is shorter than its reported size."""
+        from unittest.mock import MagicMock
+
+        small = self._tmp / "short.txt"
+        small.write_bytes(b"12345")
+
+        handler = StreamHandler.__new__(StreamHandler)
+        handler.application = MagicMock(settings={"config": self.config})
+        handler.request = MagicMock(headers=MagicMock(get=MagicMock(return_value=None)))
+        handler.set_status = MagicMock()
+        handler.set_header = MagicMock()
+        handler.write = MagicMock()
+        handler.flush = AsyncMock()
+
+        async def _run():
+            with patch("songhive.streaming.handler.os.path.getsize", return_value=100):
+                return await handler._serve_file(str(small), "text/plain")
+
+        bytes_served = self.io_loop.run_sync(_run)
+        assert bytes_served == 5
+        handler.write.assert_called_once_with(b"12345")
+
+    def test_parse_range_invalid_format(self):
+        """_parse_range rejects range specs that do not split into two parts."""
+        assert StreamHandler._parse_range("bytes=0", 100) is None
+        assert StreamHandler._parse_range("bytes=0-1-2", 100) is None
