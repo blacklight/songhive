@@ -18,6 +18,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine
+from sqlalchemy.pool import NullPool
 
 from ..models import Base
 
@@ -37,7 +38,12 @@ def _to_sync_url(database_url: str) -> str:
 
 def _sync_engine(database_url: str) -> Engine:
     """Create a synchronous engine for migration operations."""
-    return create_engine(_to_sync_url(database_url))
+    sync_url = _to_sync_url(database_url)
+    # Use NullPool for SQLite so the sync migration connection does not hold
+    # a lock on the database after it is done; this prevents the async app
+    # startup from blocking while it waits for the lock.
+    kwargs = {"poolclass": NullPool} if sync_url.startswith("sqlite://") else {}
+    return create_engine(sync_url, **kwargs)
 
 
 def _get_alembic_config(database_url: str) -> Config:

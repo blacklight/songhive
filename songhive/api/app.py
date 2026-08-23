@@ -64,7 +64,14 @@ def _sync_settings_overlay(config: SonghiveConfig) -> tuple[SonghiveConfig, bool
     loop = None
     try:
         loop = asyncio.new_event_loop()
-        return loop.run_until_complete(_run()), True
+        # ``wait_for`` provides a hard ceiling so a stuck database query cannot
+        # block server startup forever. Avoid ``asyncio.run`` here because it
+        # sets/unsets the current event loop, which can break Tornado's
+        # IOLoop when ``create_app`` is called from an async test context.
+        return loop.run_until_complete(asyncio.wait_for(_run(), timeout=10.0)), True
+    except asyncio.TimeoutError:
+        logger.warning("Settings overlay timed out; using config file/defaults")
+        return config, False
     except Exception:
         logger.exception("Failed to apply settings overrides at app creation")
         return config, False
