@@ -584,6 +584,11 @@ Docker Compose (`docker-compose.yml`) provides a reference deployment:
 - `celery` — Celery worker container (same image, different entrypoint)
 - `postgres` — PostgreSQL database
 - `redis` — Redis (broker + cache + sessions)
-- `nginx` — Reverse proxy (`docker/nginx.conf`)
+- `nginx` — Reverse proxy (`docker/nginx.conf`). It proxies federation routes
+(`/.well-known/*`, `/ap/*`, `/users/<user>`, `/@<user>`, etc.) to the
+application and performs content negotiation for `/@<user>` and
+`/users/<user>`: requests that accept `application/activity+json` or
+`application/ld+json` are proxied to the backend, while browser `text/html`
+requests fall through to the Vue SPA.
 
 Persistent data is stored under `volumes/`.
