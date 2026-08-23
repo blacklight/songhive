@@ -53,7 +53,7 @@ steps:
   commands:
     - apt-get update && apt-get install -y ffmpeg
     - pip install -e . -r requirements-dev.txt
-    - python -m pytest --cov=songhive --cov-report=term-missing --cov-report=xml
+    - python -m pytest --cov=songhive --cov-report=term-missing --cov-report=xml -n 16
 
 - name: codacy-coverage
   image: python:3.12
