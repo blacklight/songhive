@@ -11,6 +11,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
+from songhive.migrations.utils import table_exists
+
 # revision identifiers, used by Alembic.
 revision: str = "194ec56009fe"
 down_revision: Union[str, Sequence[str], None] = "d49ed7492551"
@@ -18,19 +20,9 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _table_exists(table_name: str) -> bool:
-    """Return True if the table already exists in the database."""
-    bind = op.get_bind()
-    try:
-        return sa.inspect(bind).has_table(table_name)
-    except Exception:
-        # Offline mode or otherwise no real connection; assume not present.
-        return False
-
-
 def upgrade() -> None:
     """Upgrade schema."""
-    if _table_exists("api_tokens"):
+    if table_exists("api_tokens"):
         return
 
     op.create_table(
@@ -64,7 +56,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    if not _table_exists("api_tokens"):
+    if not table_exists("api_tokens"):
         return
 
     op.drop_index(op.f("ix_api_tokens_user_id"), table_name="api_tokens")
