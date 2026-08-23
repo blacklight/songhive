@@ -547,6 +547,21 @@ def test_admin_main_init_db(tmp_path, monkeypatch, capsys):
     assert "Database tables initialized successfully" in captured.out
 
 
+def test_admin_main_migrate(tmp_path, monkeypatch, capsys):
+    """Test the full migrate CLI command."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'migrate.db'}"
+    monkeypatch.setattr(
+        cli_admin,
+        "load_config",
+        lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
+    )
+
+    cli_admin.admin_main(["migrate"])
+
+    captured = capsys.readouterr()
+    assert "Migrations applied successfully" in captured.out
+
+
 class _FakeCeleryResult:
     """A minimal Celery AsyncResult stand-in."""
 

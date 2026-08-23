@@ -25,7 +25,8 @@ from typing import Iterable
 from kombu.exceptions import OperationalError as KombuOperationalError
 
 from ..config import load_config
-from ..models.base import create_all_tables, get_session, init_db
+from ..migrations import ensure_migrated
+from ..models.base import get_session, init_db
 from ..models.user import User, UserRole
 from ..services.auth import create_user, get_user_by_username
 from ..services.federation import ensure_user_actor
@@ -40,6 +41,9 @@ def _create_admin_parser() -> argparse.ArgumentParser:
 
     # init-db
     subparsers.add_parser("init-db", help="Create database tables if they do not exist")
+
+    # migrate
+    subparsers.add_parser("migrate", help="Run Alembic database migrations")
 
     # create-user
     create_user_parser = subparsers.add_parser("create-user", help="Create a new user")
@@ -114,8 +118,15 @@ def _parse_iso_datetime(value: str) -> datetime:
 
 
 async def _handle_init_db(*_, **__):
-    await create_all_tables()
+    config = load_config([])
+    ensure_migrated(config.database.url)
     print("Database tables initialized successfully")
+
+
+async def _handle_migrate(*_, **__):
+    config = load_config([])
+    ensure_migrated(config.database.url)
+    print("Migrations applied successfully")
 
 
 async def _handle_create_user(args):
@@ -385,6 +396,7 @@ def admin_main(argv=None):
 
     handlers = {
         "init-db": _handle_init_db,
+        "migrate": _handle_migrate,
         "create-user": _handle_create_user,
         "promote-user": _handle_promote_user,
         "demote-user": _handle_demote_user,

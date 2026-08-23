@@ -97,17 +97,19 @@
 ```
 songhive/          # Python backend package
 ├── api/           # FastAPI app + routes
+├── cli/           # Admin CLI
 ├── config/        # Configuration (Pydantic settings + TOML loader)
-├── models/        # SQLAlchemy models
-├── services/      # Business logic
 ├── federation/    # ActivityPub (pubby) integration
-├── users/         # User management
+├── migrations/    # Alembic migration scripts
+├── models/        # SQLAlchemy models
 ├── music/         # Music import & metadata
-├── streaming/     # Tornado stream handler + ffmpeg transcoder
+├── services/      # Business logic
 ├── storage/       # Storage backends (local, S3)
+├── streaming/     # Tornado stream handler + ffmpeg transcoder
 ├── tasks/         # Celery tasks
+├── users/         # User management
 ├── ws/            # WebSocket handlers
-└── cli/           # Admin CLI
+└── version.py
 
 frontend/          # Vue.js 3 + TypeScript SPA
 tests/             # pytest test suite
@@ -116,6 +118,34 @@ docs/              # Architecture & feature documentation
 
 When notable sections are added, changed or removed, remember to update
 `docs/ARCHITECTURE.md` accordingly.
+
+## Database Migrations
+
+- Migrations are managed with [Alembic](https://alembic.sqlalchemy.org/).
+- The initial ``base`` revision is intentionally empty: databases deployed
+  before this change are treated as the baseline, and fresh installs get the
+  current schema from SQLAlchemy and are then stamped at ``head``.
+- Migrations are run automatically when the application starts (inside
+  ``create_app``) and before ``songhive``/``celery`` starts in Docker.
+- Run migrations manually via the admin CLI:
+
+  ```bash
+  python -m songhive admin migrate
+  ```
+
+- Create a new migration after a model change (from the repository root, with
+  ``SONGHIVE_DATABASE__URL`` or a valid ``config.toml``):
+
+  ```bash
+  alembic revision --autogenerate -m "add example column"
+  ```
+
+- Verify migration status:
+
+  ```bash
+  alembic current
+  alembic history
+  ```
 
 ## Docker
 

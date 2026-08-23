@@ -71,6 +71,8 @@ songhive/
 ├── __main__.py
 ├── app.py                  # Entry point: Tornado+FastAPI bootstrap; uvicorn fallback
 ├── version.py
+├── cli/                    # Admin commands (init-db, migrate, create-user, etc.)
+│   └── admin.py
 ├── config/                 # Configuration management
 │   ├── schema.py           # Pydantic BaseSettings model (all subsections)
 │   └── loader.py           # TOML + env vars + CLI argument loading
@@ -100,6 +102,10 @@ songhive/
 │   └── middleware/
 │       ├── auth.py         # JWT decode middleware + access-token helpers
 │       └── rate_limit.py   # Redis sliding-window rate limiting (IP / user)
+├── migrations/             # Alembic database migrations
+│   ├── env.py              # Migration environment (imports all models)
+│   ├── script.py.mako      # Template for generated revisions
+│   └── versions/           # Revision scripts
 ├── models/                 # SQLAlchemy mapped models + shared enums
 │   ├── base.py             # DeclarativeBase, UUID PK, timestamps, async session factory
 │   ├── _enums.py           # Visibility enum (private / local / public)
@@ -304,6 +310,32 @@ libraries, stored files):
 - `private` — visible only to the owner (and users with a `ShareGrant`)
 - `local` — visible to authenticated users on the same instance
 - `public` — visible to everyone including federated instances
+
+---
+
+## Database Migrations
+
+Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/).  The
+``songhive/migrations/`` package contains the Alembic environment, the
+``versions/`` directory, and an empty ``base`` revision that marks the pre-
+migration schema baseline.  New installs receive the current schema from
+``Base.metadata.create_all`` and are then stamped at ``head``; existing
+production databases are stamped at ``base`` and upgraded normally.
+
+Migrations run automatically when ``create_app`` is called, and the Docker
+entrypoint runs ``songhive admin migrate`` before starting the web server or
+Celery workers.  Admins can also trigger them manually:
+
+```bash
+python -m songhive admin migrate
+```
+
+To autogenerate a revision after a model change (from the repository root,
+with ``SONGHIVE_DATABASE__URL`` set or ``database.url`` configured):
+
+```bash
+alembic revision --autogenerate -m "add example column"
+```
 
 ---
 

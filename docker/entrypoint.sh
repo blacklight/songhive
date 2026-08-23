@@ -90,29 +90,13 @@ if [ "$db_ready" -eq 0 ]; then
     exit 1
 fi
 
-# Only the main web server process needs to create the schema and publish
-# static assets. Workers and admin CLI commands can use the existing schema.
+# Ensure the database schema is up to date before starting the server, worker,
+# or any admin CLI command. This is idempotent and stamps existing baseline
+# databases as well as creating/stamping fresh ones.
+songhive admin migrate
+
+# Only the main web server process needs to publish static assets.
 if [ "$1" = "songhive" ] && [ -z "${2:-}" ]; then
-    python - <<'PY'
-import asyncio
-import songhive.models  # noqa: F401
-from songhive.config import load_config
-from songhive.models.base import Base
-from sqlalchemy.ext.asyncio import create_async_engine
-
-
-async def init_db() -> None:
-    config = load_config([])
-    engine = create_async_engine(config.database.url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    await engine.dispose()
-
-
-asyncio.run(init_db())
-PY
-
-    # Copy the built frontend assets into the shared static volume used by nginx.
     if [ -d "$STATIC_SOURCE" ] && [ -n "$(ls -A "$STATIC_SOURCE")" ]; then
         cp -r "$STATIC_SOURCE/." "$STATIC_TARGET/"
     fi

@@ -36,6 +36,9 @@ songhive = 'songhive:main'
 [tool.setuptools.packages.find]
 include = ["songhive*"]
 
+[tool.setuptools.package-data]
+"songhive.migrations" = ["*.mako", "versions/*.py"]
+
 [tool.black]
 line-length = 120
 target-version = ['py310']
