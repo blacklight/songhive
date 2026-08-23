@@ -114,6 +114,9 @@ tests/             # pytest test suite
 docs/              # Architecture & feature documentation
 ```
 
+When notable sections are added, changed or removed, remember to update
+`docs/ARCHITECTURE.md` accordingly.
+
 ## Docker
 
 - Build and start all services (set `PUID`/`PGID` to the host user so
