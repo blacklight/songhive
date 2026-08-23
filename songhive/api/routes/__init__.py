@@ -1,6 +1,7 @@
 from . import (
     admin,
     albums,
+    api_tokens,
     artists,
     auth,
     favorites,
@@ -21,6 +22,7 @@ from . import (
 __all__ = [
     "admin",
     "albums",
+    "api_tokens",
     "artists",
     "auth",
     "favorites",

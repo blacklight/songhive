@@ -38,3 +38,38 @@ def extract_token(request: Request) -> Optional[str]:
     if auth_header.startswith("Bearer "):
         return auth_header[7:]
     return None
+
+
+def create_api_token_jwt(
+    user_id: str,
+    secret_key: str,
+    jti: str,
+    expires_at: Optional[datetime],
+) -> str:
+    """Create a long-lived API-token JWT."""
+    payload = {
+        "sub": user_id,
+        "jti": jti,
+        "token_type": "api_token",
+        "iat": datetime.now(timezone.utc),
+    }
+    if expires_at is not None:
+        payload["exp"] = expires_at
+    return cast(str, jwt.encode(payload, secret_key, algorithm="HS256"))
+
+
+def decode_token_payload(token: str, secret_key: str) -> Optional[dict]:
+    """Decode a JWT with ``verify_exp=False`` and return the payload, or None."""
+    try:
+        payload = jwt.decode(
+            token,
+            secret_key,
+            algorithms=["HS256"],
+            options={"verify_exp": False},
+        )
+    except jwt.InvalidTokenError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    return payload

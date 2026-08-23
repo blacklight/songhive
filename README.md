@@ -228,6 +228,7 @@ REST API available at `/api/v1/`:
 | Endpoint | Description |
 |----------|-------------|
 | `/api/v1/auth/` | Authentication (login, register, refresh) |
+| `/api/v1/auth/api-tokens/` | API token management (create, list, revoke) |
 | `/api/v1/users/` | User profiles |
 | `/api/v1/artists/` | Artists |
 | `/api/v1/albums/` | Albums |

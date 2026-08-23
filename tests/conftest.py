@@ -15,6 +15,7 @@ from songhive.api.deps import get_db
 from songhive.api.middleware.auth import create_access_token
 from songhive.config.schema import SonghiveConfig
 from songhive.models.album import Album  # noqa: F401
+from songhive.models.api_token import ApiToken  # noqa: F401
 from songhive.models.artist import Artist  # noqa: F401
 from songhive.models.audit_log import AuditLog  # noqa: F401
 from songhive.models.base import Base, init_db, reset_db

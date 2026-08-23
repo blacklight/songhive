@@ -1,5 +1,6 @@
 from ._enums import Visibility
 from .album import Album
+from .api_token import ApiToken
 from .artist import Artist
 from .audit_log import AuditLog
 from .base import Base, get_session, init_db, reset_db
@@ -24,6 +25,7 @@ from .user_link import UserLink
 
 __all__ = [
     "Album",
+    "ApiToken",
     "Artist",
     "AuditLog",
     "Base",

@@ -73,11 +73,16 @@ def make_celery(
             "songhive.tasks.email.*": {"queue": "email"},
             "songhive.tasks.storage.*": {"queue": "storage"},
             "songhive.tasks.musicbrainz.*": {"queue": "musicbrainz"},
+            "songhive.tasks.api_tokens.*": {"queue": "default"},
         },
         beat_schedule={
             "cleanup-orphaned-files": {
                 "task": "songhive.tasks.storage.cleanup_orphaned_files",
                 "schedule": _parse_crontab(cleanup_orphaned_files_schedule),
+            },
+            "flush-api-token-usage": {
+                "task": "songhive.tasks.api_tokens.flush_usage_timestamps",
+                "schedule": 300.0,  # Every 5 minutes
             },
         },
     )

@@ -16,7 +16,8 @@ from ..services import acl
 from ..services.auth import get_user_by_id
 from ..services.storage import StorageService
 from ..storage import get_storage
-from .middleware.auth import decode_access_token, extract_token
+from ..users.api_tokens import validate_api_token
+from .middleware.auth import decode_access_token, decode_token_payload, extract_token
 
 bearer_scheme = HTTPBearer(
     auto_error=False,
@@ -70,15 +71,31 @@ async def _get_current_user(
         return None
 
     config = get_config(request)
+
+    # Peek at the payload without enforcing ``exp`` so we can route by token type.
+    payload = decode_token_payload(token, config.auth.secret_key)
+    if payload is None:
+        return None
+
+    # Slow path: API-token JWT (exp enforced at DB row level).
+    if payload.get("token_type") == "api_token":
+        jti = payload.get("jti")
+        if not jti:
+            return None
+        redis = get_redis(request)
+        api_token = await validate_api_token(db, jti, redis=redis)
+        if api_token is None:
+            return None
+        user = await get_user_by_id(db, api_token.user_id)
+        return user if user is not None and user.is_active else None
+
+    # Fast path: short-lived access JWT (PyJWT enforces exp).
     user_id = decode_access_token(token, config.auth.secret_key)
-    if user_id is None:
-        return None
+    if user_id is not None:
+        user = await get_user_by_id(db, user_id)
+        return user if user is not None and user.is_active else None
 
-    user = await get_user_by_id(db, user_id)
-    if user is None or not user.is_active:
-        return None
-
-    return user
+    return None
 
 
 async def get_current_user(

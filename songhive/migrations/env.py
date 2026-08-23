@@ -15,6 +15,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from songhive.migrations.utils import to_sync_url
+
 # Allow running ``alembic`` from the repository root before the package is
 # installed. When called programmatically the package is already importable.
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -38,27 +40,18 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-def _to_sync_url(database_url: str) -> str:
-    """Return a synchronous SQLAlchemy URL for the given async URL."""
-    if database_url.startswith("postgresql+asyncpg://"):
-        return database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
-    if database_url.startswith("sqlite+aiosqlite://"):
-        return database_url.replace("sqlite+aiosqlite://", "sqlite://", 1)
-    return database_url
-
-
 def _database_url() -> str:
     """Resolve the database URL to use for this migration run."""
     # If a URL was already injected (e.g. by ``ensure_migrated``) and is not the
     # placeholder from the default ``alembic.ini``, use it directly.
     existing = config.get_main_option("sqlalchemy.url")
     if existing and not existing.startswith("driver://"):
-        return _to_sync_url(existing)
+        return to_sync_url(existing)
 
     # Prefer the explicit environment variable used by the Docker Compose stack.
     env_url = os.environ.get("SONGHIVE_DATABASE__URL")
     if env_url:
-        return _to_sync_url(env_url)
+        return to_sync_url(env_url)
 
     # Fall back to the full Songhive configuration.  Provide a dummy auth secret
     # so that loading the config does not fail when only the database URL is
@@ -68,14 +61,14 @@ def _database_url() -> str:
 
     try:
         cfg = load_config([])
-        return _to_sync_url(cfg.database.url)
+        return to_sync_url(cfg.database.url)
     except Exception as exc:
         logger.warning("Could not load Songhive config for migration URL: %s", exc)
 
     if existing:
-        return _to_sync_url(existing)
+        return to_sync_url(existing)
 
-    raise RuntimeError("No database URL found. Set SONGHIVE_DATABASE__URL or configure " "database.url in config.toml.")
+    raise RuntimeError("No database URL found. Set SONGHIVE_DATABASE__URL or configure database.url in config.toml.")
 
 
 config.set_main_option("sqlalchemy.url", _database_url())

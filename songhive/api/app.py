@@ -20,6 +20,7 @@ from .errors import install_error_handlers
 from .routes import (
     admin,
     albums,
+    api_tokens,
     artists,
     auth,
     favorites,
@@ -63,7 +64,14 @@ def _sync_settings_overlay(config: SonghiveConfig) -> tuple[SonghiveConfig, bool
     loop = None
     try:
         loop = asyncio.new_event_loop()
-        return loop.run_until_complete(_run()), True
+        # ``wait_for`` provides a hard ceiling so a stuck database query cannot
+        # block server startup forever. Avoid ``asyncio.run`` here because it
+        # sets/unsets the current event loop, which can break Tornado's
+        # IOLoop when ``create_app`` is called from an async test context.
+        return loop.run_until_complete(asyncio.wait_for(_run(), timeout=10.0)), True
+    except asyncio.TimeoutError:
+        logger.warning("Settings overlay timed out; using config file/defaults")
+        return config, False
     except Exception:
         logger.exception("Failed to apply settings overrides at app creation")
         return config, False
@@ -140,6 +148,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     # Register API routes
     api_prefix = "/api/v1"
     app.include_router(auth.router, prefix=api_prefix, tags=["auth"])
+    app.include_router(api_tokens.router, prefix=api_prefix, tags=["api-tokens"])
     app.include_router(users.router, prefix=api_prefix, tags=["users"])
     app.include_router(artists.router, prefix=api_prefix, tags=["artists"])
     app.include_router(albums.router, prefix=api_prefix, tags=["albums"])
