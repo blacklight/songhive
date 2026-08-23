@@ -4,9 +4,17 @@ Import tasks: process uploaded audio files in the background.
 
 import asyncio
 import logging
+import uuid
 from pathlib import Path
 from typing import BinaryIO, Optional
 
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+from ..models._enums import Visibility
+from ..models.track import Track
+from ..models.user import User
+from ..services.federation import publish_track_activity
 from .celery import celery_app
 
 logger = logging.getLogger(__name__)
@@ -26,6 +34,7 @@ def process_upload(
     force: bool = False,
     enrich: bool = True,
     source: str = "upload",
+    content_type: Optional[str] = None,
 ) -> str:
     """
     Process a stored audio file or a filesystem path and import it into a library.
@@ -84,10 +93,30 @@ def process_upload(
                     force=force,
                     enrich=enrich,
                     source=source,
+                    content_type=content_type,
                 )
             finally:
                 if file is not None:
                     file.close()
+
+            if owner_id and result.track.visibility == Visibility.PUBLIC.value:
+                owner = await session.get(User, owner_id)
+                loaded_track = await session.execute(
+                    select(Track).options(selectinload(Track.artist)).where(Track.id == str(result.track.id))
+                )
+                track = loaded_track.scalar_one()
+                track.federation_object_id = str(uuid.uuid4())
+                await session.commit()
+                artist = track.artist
+                if owner is not None and artist is not None:
+                    await asyncio.to_thread(
+                        publish_track_activity,
+                        track,
+                        artist,
+                        owner,
+                        config,
+                        track.federation_object_id,
+                    )
 
             EventWebSocket.broadcast(
                 "import.completed",

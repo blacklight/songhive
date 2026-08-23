@@ -10,9 +10,9 @@ applicable.
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              External Services                              │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐│
-│  │ MusicBrainz │  │ ListenBrainz│  │  Last.fm    │  │ Federated Instances ││
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘│
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │ MusicBrainz │  │ ListenBrainz│  │  Last.fm    │  │ Federated Instances │ │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
@@ -225,8 +225,25 @@ its FastAPI adapter (`pubby.server.adapters.fastapi.bind_activitypub`).
 
 - Each user has an ActivityPub actor
 - Uploaded tracks are published as `Audio` objects (ActivityPub `Create`)
+- Each public lifecycle has its own ActivityPub object id (`Track.federation_object_id`); a new id is generated on every public transition and used for `Delete(Tombstone)` when the track is made non-public or deleted
+- This prevents a previous `Tombstone` at the same URL from blocking re-publication of the same track
 - Following/unfollowing is handled via standard AP activities
+- Per-actor follower isolation is delegated to pubby's native `target_actor_id` support
 - Media content renders on Mastodon as a post with an embedded audio link
+
+When federation is enabled, each user is reachable at:
+
+- `https://{instance_domain}/users/{username}` — the canonical ActivityPub
+  `Person` actor document.
+- `https://{instance_domain}/@{username}` — a Mastodon-like alias that returns
+  the actor document for ActivityPub clients and redirects browsers to the local
+  profile.
+- `https://{instance_domain}/.well-known/webfinger?resource=acct:{username}@{instance_domain}`
+  — WebFinger discovery returning the actor URL.
+
+Existing users created before federation was configured can be back-filled with
+actor URLs and RSA keypairs by running the admin CLI command
+`python -m songhive.cli.admin provision-federation-keys`.
 
 ---
 

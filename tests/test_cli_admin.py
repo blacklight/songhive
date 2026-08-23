@@ -488,6 +488,48 @@ def test_admin_main_approve_user(tmp_path, monkeypatch):
     assert user.is_active is True
 
 
+def test_admin_main_provision_federation_keys(tmp_path, monkeypatch, capsys):
+    """Test the provision-federation-keys CLI command."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'provision.db'}"
+
+    def _load_config(argv=None):
+        return SonghiveConfig(
+            database={"url": db_url},
+            federation={"enabled": False},
+        )
+
+    monkeypatch.setattr(cli_admin, "load_config", _load_config)
+    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
+
+    cli_admin.admin_main(["create-user", "--username", "alice", "--email", "alice@example.com", "--password", "secret"])
+
+    user = asyncio.run(_get_user_by_username(db_url, "alice"))
+    assert user is not None
+    assert user.actor_url is None
+
+    def _load_config_enabled(argv=None):
+        return SonghiveConfig(
+            database={"url": db_url},
+            federation={
+                "enabled": True,
+                "instance_domain": "music.example.com",
+            },
+        )
+
+    monkeypatch.setattr(cli_admin, "load_config", _load_config_enabled)
+    cli_admin.admin_main(["provision-federation-keys"])
+
+    user = asyncio.run(_get_user_by_username(db_url, "alice"))
+    assert user is not None
+    assert user.actor_url == "https://music.example.com/users/alice"
+    assert user.public_key_pem
+    assert user.private_key_pem
+
+    captured = capsys.readouterr()
+    assert "Provisioned federation keys for 1 user(s)" in captured.out
+
+
 def test_admin_main_init_db(tmp_path, monkeypatch, capsys):
     """Test the full init-db CLI command."""
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'init.db'}"

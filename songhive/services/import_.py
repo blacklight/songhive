@@ -262,6 +262,7 @@ async def _create_track_record(
     owner_id: Optional[str],
     visibility: str,
     source: str,
+    content_type: str,
 ) -> Track:
     """Create and persist a Track record from extracted metadata."""
     track = Track(
@@ -277,6 +278,7 @@ async def _create_track_record(
         source=source,
         owner_id=owner_id,
         visibility=visibility,
+        audio_mime_type=metadata.mimetype or content_type,
     )
     session.add(track)
     await session.flush()
@@ -342,6 +344,7 @@ async def import_audio_file(
     force: bool = False,
     enrich: bool = True,
     source: str = "upload",
+    content_type: Optional[str] = None,
 ) -> ImportResult:
     """
     Import an audio file: store it, extract metadata, create artist/album/track
@@ -357,11 +360,14 @@ async def import_audio_file(
     :param force: If ``True``, create a new track even if a duplicate exists.
     :param enrich: Whether to enqueue MusicBrainz enrichment.
     :param source: Track source (``upload``, ``import``, ``federation``).
+    :param content_type: MIME type for the audio file; guessed from ``filename``
+        when not provided.
     :returns: Import result with the created records.
     :raises DuplicateTrackError: When a duplicate is detected and ``force`` is
         ``False``.
     """
-    content_type = _guess_content_type(filename)
+    if not content_type:
+        content_type = _guess_content_type(filename)
     stored_file, was_duplicate = await _store_uploaded_file(
         session,
         storage_service,
@@ -394,6 +400,7 @@ async def import_audio_file(
         owner_id=owner_id,
         visibility=visibility,
         source=source,
+        content_type=content_type,
     )
 
     await _maybe_store_cover_art(

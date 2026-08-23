@@ -26,8 +26,9 @@ from kombu.exceptions import OperationalError as KombuOperationalError
 
 from ..config import load_config
 from ..models.base import create_all_tables, get_session, init_db
-from ..models.user import UserRole
+from ..models.user import User, UserRole
 from ..services.auth import create_user, get_user_by_username
+from ..services.federation import ensure_user_actor
 from ..tasks.import_ import _AUDIO_EXTENSIONS, scan_directory
 from ..users import manager as user_manager
 from ..users.invites import InviteError, create_invite, list_invites
@@ -92,6 +93,12 @@ def _create_admin_parser() -> argparse.ArgumentParser:
     # list-invites
     subparsers.add_parser("list-invites", help="List invite codes")
 
+    # provision-federation-keys
+    subparsers.add_parser(
+        "provision-federation-keys",
+        help="Provision ActivityPub actor keys for users that are missing them",
+    )
+
     return parser
 
 
@@ -112,6 +119,7 @@ async def _handle_init_db(*_, **__):
 
 
 async def _handle_create_user(args):
+    config = load_config([])
     async with get_session() as session:
         role = "admin" if args.admin else (args.role or "user")
         user = await create_user(
@@ -120,6 +128,7 @@ async def _handle_create_user(args):
             email=args.email,
             password=args.password,
             role=role,
+            config=config,
         )
         print(f"User '{user.username}' created successfully (id={user.id}, role={user.role})")
 
@@ -314,6 +323,45 @@ async def _handle_list_invites(*_):
             print(f"{invite.code}  max_uses={invite.max_uses}  uses={invite.uses}  expires_at={expires}")
 
 
+async def _handle_provision_federation_keys(*_):
+    """Back-fill ActivityPub actor URLs and keypairs for existing users."""
+    from sqlalchemy import or_, select
+
+    config = load_config([])
+    if not config.federation.enabled or not config.federation.instance_domain:
+        print("Federation is not enabled or no instance domain is configured; nothing to do.")
+        return
+
+    domain = config.federation.instance_domain
+    batch_size = 50
+    total = 0
+
+    async with get_session() as session:
+        stmt = (
+            select(User)
+            .where(
+                or_(
+                    User.actor_url.is_(None),
+                    User.private_key_pem.is_(None),
+                    User.public_key_pem.is_(None),
+                )
+            )
+            .order_by(User.created_at)
+        )
+        result = await session.execute(stmt)
+        users = result.scalars().all()
+
+        for user in users:
+            if ensure_user_actor(user, config):
+                total += 1
+                if total % batch_size == 0:
+                    await session.flush()
+
+        await session.commit()
+
+    print(f"Provisioned federation keys for {total} user(s) on {domain}")
+
+
 def admin_main(argv=None):
     """Entry point for admin CLI commands."""
     parser = _create_admin_parser()
@@ -346,6 +394,7 @@ def admin_main(argv=None):
         "import-dir": _handle_import_dir,
         "create-invite": _handle_create_invite,
         "list-invites": _handle_list_invites,
+        "provision-federation-keys": _handle_provision_federation_keys,
     }
 
     handler = handlers.get(args.command)

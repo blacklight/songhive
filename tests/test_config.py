@@ -17,6 +17,8 @@ def test_default_config():
     assert config.server.port == 8000
     assert config.server.host == "0.0.0.0"
     assert config.federation.enabled is True
+    assert config.federation.allowed_instances == []
+    assert config.federation.blocked_instances == []
 
 
 def test_config_from_dict():
@@ -28,6 +30,19 @@ def test_config_from_dict():
     assert config.server.port == 9000
     assert config.server.debug is True
     assert config.federation.instance_domain == "music.example.com"
+
+
+def test_federation_allow_block_lists():
+    """Federation allow and block lists parse as lists of strings."""
+    config = SonghiveConfig(
+        auth={"secret_key": "a" * 64},
+        federation={
+            "allowed_instances": ["a.example"],
+            "blocked_instances": ["b.example"],
+        },
+    )
+    assert config.federation.allowed_instances == ["a.example"]
+    assert config.federation.blocked_instances == ["b.example"]
 
 
 def test_deep_merge():
