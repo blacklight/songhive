@@ -3,6 +3,11 @@ kind: pipeline
 type: docker
 name: default
 
+trigger:
+  event:
+    exclude:
+      - pull_request
+
 steps:
 
 ###
