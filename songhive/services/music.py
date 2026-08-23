@@ -131,8 +131,42 @@ async def get_album(session: AsyncSession, album_id: str) -> Optional[Album]:
     return cast(Optional[Album], result.scalar_one_or_none())
 
 
+def _apply_tracks_query(
+    session: AsyncSession,
+    stmt: Select[Any],
+    *,
+    query: str,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+) -> Select[Any]:
+    """
+    Apply a search query to a tracks statement, using PostgreSQL full-text search if available.
+    """
+    dialect = getattr(getattr(session, "bind", None), "dialect", None)
+    if dialect is not None and getattr(dialect, "name", None) == "postgresql" and hasattr(Track, "search_vector"):
+        ts_query = func.plainto_tsquery("english", query)
+        track_search_vector = Track.search_vector  # type: ignore
+        stmt = stmt.where(track_search_vector.op("@@")(ts_query))
+        stmt = stmt.order_by(func.ts_rank(track_search_vector, ts_query).desc())
+    else:
+        stmt = stmt.join(Artist, Track.artist_id == Artist.id)
+        if year_from is None and year_to is None:
+            stmt = stmt.outerjoin(Album, Track.album_id == Album.id)
+        pattern = f"%{query}%"
+        stmt = stmt.where(
+            or_(
+                Track.title.ilike(pattern),
+                Artist.name.ilike(pattern),
+                Album.title.ilike(pattern),
+            )
+        )
+
+    return stmt
+
+
 def _build_tracks_stmt(
     session: AsyncSession,
+    *,
     query: Optional[str] = None,
     artist_id: Optional[str] = None,
     album_id: Optional[str] = None,
@@ -163,24 +197,7 @@ def _build_tracks_stmt(
         stmt = stmt.join(LibraryTrack, LibraryTrack.track_id == Track.id).where(LibraryTrack.library_id == library_id)
 
     if query:
-        dialect = getattr(getattr(session, "bind", None), "dialect", None)
-        if dialect is not None and getattr(dialect, "name", None) == "postgresql" and hasattr(Track, "search_vector"):
-            ts_query = func.plainto_tsquery("english", query)
-            track_search_vector = Track.search_vector  # type: ignore
-            stmt = stmt.where(track_search_vector.op("@@")(ts_query))
-            stmt = stmt.order_by(func.ts_rank(track_search_vector, ts_query).desc())
-        else:
-            stmt = stmt.join(Artist, Track.artist_id == Artist.id)
-            if year_from is None and year_to is None:
-                stmt = stmt.outerjoin(Album, Track.album_id == Album.id)
-            pattern = f"%{query}%"
-            stmt = stmt.where(
-                or_(
-                    Track.title.ilike(pattern),
-                    Artist.name.ilike(pattern),
-                    Album.title.ilike(pattern),
-                )
-            )
+        stmt = _apply_tracks_query(session, stmt, query=query, year_from=year_from, year_to=year_to)
 
     return stmt
 
@@ -221,6 +238,7 @@ async def list_tracks(
 
 async def count_tracks(
     session: AsyncSession,
+    *,
     query: Optional[str] = None,
     artist_id: Optional[str] = None,
     album_id: Optional[str] = None,
