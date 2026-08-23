@@ -83,6 +83,22 @@ def _fake_create_app(config: SonghiveConfig):
     return app
 
 
+@pytest.fixture
+def _minimal_config(tmp_path):
+    """Return a minimal config backed by a throw-away database."""
+    return SonghiveConfig(
+        server={
+            "host": "127.0.0.1",
+            "port": 8000,
+            "debug": True,
+            "cors_origins": [],
+        },
+        database={"url": f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"},
+        federation={"enabled": False},
+        auth={"secret_key": "a" * 64},
+    )
+
+
 def test_run_tornado(monkeypatch, tmp_path, _minimal_config):
     """Test _run_tornado binding, port file, signal handlers, and shutdown."""
     port_file = tmp_path / "port.txt"
@@ -160,7 +176,7 @@ def test_main_without_admin(monkeypatch, _minimal_config):
     def fake_run_tornado(config):
         calls.append(("tornado", config))
 
-    def fake_run_uvicorn(_):
+    def fake_run_uvicorn(config):
         pytest.fail("uvicorn should not be called when a2wsgi is available")
 
     monkeypatch.setattr(app_module, "load_config", lambda: _minimal_config)
@@ -196,7 +212,7 @@ def test_main_import_error_fallback(monkeypatch, _minimal_config, tmp_path):
     def fake_run_uvicorn(config):
         calls.append(("uvicorn", config))
 
-    def fake_run_tornado(_):
+    def fake_run_tornado(config):
         pytest.fail("tornado should not be called when a2wsgi is unavailable")
 
     monkeypatch.setattr(app_module, "load_config", lambda: _minimal_config)
