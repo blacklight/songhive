@@ -15,7 +15,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from .utils import to_sync_url
+from songhive.migrations.utils import to_sync_url
 
 # Allow running ``alembic`` from the repository root before the package is
 # installed. When called programmatically the package is already importable.
