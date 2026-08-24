@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import {
@@ -11,12 +11,10 @@ import {
   listLibraryTracks,
   type LibraryResponse,
 } from "@/api/libraries";
-import { getArtist, type ArtistResponse } from "@/api/artists";
-import { getAlbum, type AlbumResponse } from "@/api/albums";
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useEntityMeta } from "@/composables/useEntityMeta";
-import type { TrackEnrich } from "@/player/enrich";
+import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
 import AppButton from "@/components/ui/AppButton.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
@@ -28,8 +26,6 @@ const libraryId = computed(() => String(route.params.id));
 const library = ref<LibraryResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
-const artistMap = shallowRef<Map<string, ArtistResponse | null>>(new Map());
-const albumMap = shallowRef<Map<string, AlbumResponse | null>>(new Map());
 
 const {
   items: tracks,
@@ -48,54 +44,10 @@ const {
 
 const { ownerName, visibilityText } = useEntityMeta(library);
 
-const trackEnrich = computed<Map<string, TrackEnrich>>(() => {
-  const map = new Map<string, TrackEnrich>();
-  for (const track of tracks.value) {
-    const artist = track.artist_id
-      ? artistMap.value.get(track.artist_id)
-      : null;
-    const album = track.album_id ? albumMap.value.get(track.album_id) : null;
-    map.set(track.id, {
-      artist_name: artist?.name ?? library.value?.name ?? "",
-      album_title: album?.title,
-      artwork_url: album?.cover_url ?? undefined,
-    });
-  }
-  return map;
-});
-
-async function loadTrackDetails() {
-  if (tracks.value.length === 0) return;
-  const missingArtistIds: string[] = [];
-  const missingAlbumIds: string[] = [];
-  for (const track of tracks.value) {
-    if (track.artist_id && !artistMap.value.has(track.artist_id)) {
-      missingArtistIds.push(track.artist_id);
-    }
-    if (track.album_id && !albumMap.value.has(track.album_id)) {
-      missingAlbumIds.push(track.album_id);
-    }
-  }
-  if (missingArtistIds.length === 0 && missingAlbumIds.length === 0) return;
-
-  const [artists, albums] = await Promise.all([
-    Promise.all(missingArtistIds.map((id) => getArtist(id).catch(() => null))),
-    Promise.all(missingAlbumIds.map((id) => getAlbum(id).catch(() => null))),
-  ]);
-
-  const newArtistMap = new Map(artistMap.value);
-  const newAlbumMap = new Map(albumMap.value);
-  for (let i = 0; i < missingArtistIds.length; i++) {
-    newArtistMap.set(missingArtistIds[i], artists[i]);
-  }
-  for (let i = 0; i < missingAlbumIds.length; i++) {
-    newAlbumMap.set(missingAlbumIds[i], albums[i]);
-  }
-  artistMap.value = newArtistMap;
-  albumMap.value = newAlbumMap;
-}
-
-watch(tracks, loadTrackDetails, { immediate: true });
+const { enrich: trackEnrich } = useTrackEnrichment(
+  tracks,
+  computed(() => library.value?.name ?? ""),
+);
 
 async function loadLibrary() {
   loading.value = true;
@@ -114,8 +66,6 @@ async function loadLibrary() {
 async function load() {
   library.value = null;
   error.value = null;
-  artistMap.value = new Map();
-  albumMap.value = new Map();
   await loadLibrary();
   if (!library.value) return;
   await loadTracks(true);

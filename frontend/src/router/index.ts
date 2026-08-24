@@ -87,7 +87,12 @@ const routes: RouteRecordRaw[] = [
         name: "album",
         component: () => import("@/views/AlbumView.vue"),
       },
-      placeholder("albums/:id/edit", "albumEdit", 5, { requiresAuth: true }),
+      {
+        path: "albums/:id/edit",
+        name: "albumEdit",
+        component: () => import("@/views/AlbumEditView.vue"),
+        meta: { requiresAuth: true },
+      },
       {
         path: "tracks",
         name: "tracks",
@@ -98,7 +103,12 @@ const routes: RouteRecordRaw[] = [
         name: "track",
         component: () => import("@/views/TrackView.vue"),
       },
-      placeholder("tracks/:id/edit", "trackEdit", 5, { requiresAuth: true }),
+      {
+        path: "tracks/:id/edit",
+        name: "trackEdit",
+        component: () => import("@/views/TrackEditView.vue"),
+        meta: { requiresAuth: true },
+      },
       {
         path: "playlists",
         name: "playlists",
@@ -122,9 +132,12 @@ const routes: RouteRecordRaw[] = [
         name: "library",
         component: () => import("@/views/LibraryDetailView.vue"),
       },
-      placeholder("libraries/:id/edit", "libraryEdit", 5, {
-        requiresAuth: true,
-      }),
+      {
+        path: "libraries/:id/edit",
+        name: "libraryEdit",
+        component: () => import("@/views/LibraryEditView.vue"),
+        meta: { requiresAuth: true },
+      },
       placeholder("history", "history", 4, { requiresAuth: true }),
       placeholder("favorites", "favorites", 4, { requiresAuth: true }),
       placeholder("files", "files", 5, { requiresAuth: true }),

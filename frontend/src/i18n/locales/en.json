@@ -222,6 +222,8 @@
       "scanPath": "Scan path",
       "scanHint": "Filesystem path to scan for new tracks",
       "scanning": "Scanning…",
+      "scanSuccess": "Scan started.",
+      "scanError": "Could not scan: {message}",
       "uploadSuccess": "Upload complete.",
       "uploadError": "Could not upload: {message}",
       "force": "Overwrite existing files",
