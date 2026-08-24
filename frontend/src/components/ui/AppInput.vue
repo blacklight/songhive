@@ -6,23 +6,32 @@ let inputCounter = 0;
 export interface Props {
   modelValue: string | number;
   label?: string;
-  type?: "text" | "email" | "password" | "number" | "url" | "search" | "datetime-local";
+  type?:
+    | "text"
+    | "email"
+    | "password"
+    | "number"
+    | "url"
+    | "search"
+    | "datetime-local";
+  as?: "input" | "textarea";
   error?: string;
   hint?: string;
   required?: boolean;
   disabled?: boolean;
   id?: string;
+  rows?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   type: "text",
+  as: "input",
+  rows: 4,
 });
 
 const emit = defineEmits<{ "update:modelValue": [value: string | number] }>();
 
-const inputId = computed(
-  () => props.id || `app-input-${++inputCounter}`,
-);
+const inputId = computed(() => props.id || `app-input-${++inputCounter}`);
 const hintId = computed(() => `hint-${inputId.value}`);
 const errorId = computed(() => `error-${inputId.value}`);
 const describedBy = computed(() => {
@@ -33,7 +42,7 @@ const describedBy = computed(() => {
 });
 
 function onInput(event: Event) {
-  const target = event.target as HTMLInputElement;
+  const target = event.target as HTMLInputElement | HTMLTextAreaElement;
   emit("update:modelValue", target.value);
 }
 </script>
@@ -43,7 +52,20 @@ function onInput(event: Event) {
     <label v-if="props.label" :for="inputId" class="app-input__label">
       {{ props.label }}
     </label>
+    <textarea
+      v-if="props.as === 'textarea'"
+      :id="inputId"
+      :value="props.modelValue"
+      :required="props.required"
+      :disabled="props.disabled"
+      :aria-describedby="describedBy"
+      :aria-invalid="!!props.error"
+      :rows="props.rows"
+      class="app-input__field"
+      @input="onInput"
+    />
     <input
+      v-else
       :id="inputId"
       :type="props.type"
       :value="props.modelValue"
@@ -83,6 +105,10 @@ function onInput(event: Event) {
   background-color: var(--color-surface);
   color: var(--color-text);
   font-size: 1rem;
+}
+
+textarea.app-input__field {
+  resize: vertical;
 }
 
 .app-input__field:focus {

@@ -3,7 +3,7 @@ import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { passwordResetConfirm } from "@/api/auth";
-import { ApiError } from "@/api/client";
+import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -42,9 +42,7 @@ async function onSubmit() {
     });
     await router.replace("/login");
   } catch (err) {
-    const detail =
-      err instanceof ApiError ? err.detail || err.message : undefined;
-    error.value = detail || t("auth.passwordReset.invalidToken");
+    error.value = getApiErrorMessage(err, t("auth.passwordReset.invalidToken"));
   } finally {
     isLoading.value = false;
   }
@@ -53,7 +51,9 @@ async function onSubmit() {
 
 <template>
   <form class="password-reset-confirm-view" @submit.prevent="onSubmit">
-    <h2 class="password-reset-confirm-view__title">{{ t("auth.passwordReset.confirmTitle") }}</h2>
+    <h2 class="password-reset-confirm-view__title">
+      {{ t("auth.passwordReset.confirmTitle") }}
+    </h2>
 
     <AppBanner
       v-if="!token"

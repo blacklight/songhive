@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { passwordResetRequest } from "@/api/auth";
-import { ApiError } from "@/api/client";
+import { getApiErrorMessage } from "@/api/client";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppBanner from "@/components/feedback/AppBanner.vue";
@@ -25,9 +25,7 @@ async function onSubmit() {
     await passwordResetRequest({ username: username.value });
     success.value = true;
   } catch (err) {
-    const message =
-      err instanceof ApiError ? err.detail || err.message : undefined;
-    error.value = message || t("errors.unknown");
+    error.value = getApiErrorMessage(err, t("errors.unknown"));
   } finally {
     isLoading.value = false;
   }
@@ -35,12 +33,10 @@ async function onSubmit() {
 </script>
 
 <template>
-  <form
-    v-if="!success"
-    class="password-reset-view"
-    @submit.prevent="onSubmit"
-  >
-    <h2 class="password-reset-view__title">{{ t("auth.passwordReset.requestTitle") }}</h2>
+  <form v-if="!success" class="password-reset-view" @submit.prevent="onSubmit">
+    <h2 class="password-reset-view__title">
+      {{ t("auth.passwordReset.requestTitle") }}
+    </h2>
 
     <p class="password-reset-view__hint">
       {{ t("auth.passwordReset.requestHint") }}

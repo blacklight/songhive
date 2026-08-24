@@ -5,6 +5,7 @@ import {
   setRefreshHandler,
   setLogoutHandler,
   ApiError,
+  getApiErrorMessage,
 } from "./client";
 
 describe("apiRequest", () => {
@@ -170,5 +171,23 @@ describe("apiRequest", () => {
 
     await expect(apiRequest("/test")).rejects.toBeInstanceOf(ApiError);
     expect(logout).toHaveBeenCalled();
+  });
+});
+
+describe("getApiErrorMessage", () => {
+  it("returns detail for an ApiError", () => {
+    const err = new ApiError("Server error", 500, { detail: "Bad request" });
+    expect(getApiErrorMessage(err)).toBe("Bad request");
+  });
+
+  it("falls back to message when detail is absent", () => {
+    const err = new ApiError("Server error", 500);
+    expect(getApiErrorMessage(err, "fallback")).toBe("Server error");
+  });
+
+  it("uses the fallback for non-ApiError values", () => {
+    expect(getApiErrorMessage(new Error("generic"), "fallback")).toBe(
+      "fallback",
+    );
   });
 });

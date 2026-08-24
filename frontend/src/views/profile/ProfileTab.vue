@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
 import { uploadFile } from "@/api/files";
-import { ApiError } from "@/api/client";
+import { getApiErrorMessage } from "@/api/client";
 import type { UserProfileUpdate } from "@/api/users";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -75,34 +75,15 @@ async function onFileChange(event: Event) {
       ? relative
       : `${window.location.origin}${relative}`;
   } catch (err) {
-    const message =
-      err instanceof ApiError ? err.detail || err.message : undefined;
-    error.value = message || t("errors.unknown");
+    error.value = getApiErrorMessage(err, t("errors.unknown"));
   } finally {
     isUploading.value = false;
     if (target) target.value = "";
   }
 }
 
-function validateLinks(): boolean {
-  for (const link of links.value) {
-    if (!link.name || !link.url) {
-      continue;
-    }
-    if (!isHttpUrl(link.url)) {
-      error.value = t("profile.saveError", { message: t("profile.linkUrl") });
-      return false;
-    }
-  }
-  return true;
-}
-
 async function onSubmit() {
   error.value = null;
-
-  if (!validateLinks()) {
-    return;
-  }
 
   const patch: UserProfileUpdate = {};
 
@@ -123,11 +104,11 @@ async function onSubmit() {
   }
 
   const validLinks = links.value.filter((l) => l.name.trim() && l.url.trim());
+  if (validLinks.some((l) => !isHttpUrl(l.url.trim()))) {
+    error.value = t("profile.saveError", { message: t("profile.linkUrl") });
+    return;
+  }
   if (validLinks.length > 0) {
-    if (!validLinks.every((l) => isHttpUrl(l.url.trim()))) {
-      error.value = t("profile.saveError", { message: t("profile.linkUrl") });
-      return;
-    }
     patch.links = validLinks.map((l) => ({
       name: l.name.trim(),
       url: l.url.trim(),
@@ -139,9 +120,9 @@ async function onSubmit() {
     await authStore.updateProfile(patch);
     toast.push({ type: "success", message: t("profile.saveSuccess") });
   } catch (err) {
-    const message =
-      err instanceof ApiError ? err.detail || err.message : undefined;
-    error.value = t("profile.saveError", { message: message || t("errors.unknown") });
+    error.value = t("profile.saveError", {
+      message: getApiErrorMessage(err, t("errors.unknown")),
+    });
   } finally {
     isLoading.value = false;
   }
@@ -188,15 +169,7 @@ async function onSubmit() {
       :label="t('profile.displayName')"
     />
 
-    <div class="app-input">
-      <label for="profile-bio" class="profile-tab__label">{{ t("profile.bio") }}</label>
-      <textarea
-        id="profile-bio"
-        v-model="bio"
-        class="profile-tab__bio"
-        rows="4"
-      />
-    </div>
+    <AppInput v-model="bio" as="textarea" :label="t('profile.bio')" />
 
     <fieldset class="profile-tab__links">
       <legend>{{ t("profile.links") }}</legend>
@@ -212,11 +185,7 @@ async function onSubmit() {
           type="text"
           :label="t('profile.linkName')"
         />
-        <AppInput
-          v-model="link.url"
-          type="url"
-          :label="t('profile.linkUrl')"
-        />
+        <AppInput v-model="link.url" type="url" :label="t('profile.linkUrl')" />
         <AppButton
           type="button"
           variant="ghost"
@@ -232,12 +201,7 @@ async function onSubmit() {
       </AppButton>
     </fieldset>
 
-    <p
-      v-if="error"
-      class="profile-tab__error"
-      role="alert"
-      aria-live="polite"
-    >
+    <p v-if="error" class="profile-tab__error" role="alert" aria-live="polite">
       {{ error }}
     </p>
 
@@ -250,21 +214,27 @@ async function onSubmit() {
         <AppButton type="button" disabled>
           {{ t("profile.passwordChange") }}
         </AppButton>
-        <p class="profile-tab__hint">{{ t("profile.passwordChangeDisabled") }}</p>
+        <p class="profile-tab__hint">
+          {{ t("profile.passwordChangeDisabled") }}
+        </p>
       </div>
 
       <div class="profile-tab__gated-item">
         <AppButton type="button" disabled>
           {{ t("profile.resendVerification") }}
         </AppButton>
-        <p class="profile-tab__hint">{{ t("profile.resendVerificationDisabled") }}</p>
+        <p class="profile-tab__hint">
+          {{ t("profile.resendVerificationDisabled") }}
+        </p>
       </div>
 
       <div class="profile-tab__gated-item">
         <AppButton type="button" variant="danger" disabled>
           {{ t("profile.deleteAccount") }}
         </AppButton>
-        <p class="profile-tab__hint">{{ t("profile.deleteAccountDisabled") }}</p>
+        <p class="profile-tab__hint">
+          {{ t("profile.deleteAccountDisabled") }}
+        </p>
       </div>
     </div>
   </form>
@@ -300,30 +270,6 @@ async function onSubmit() {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-.profile-tab__label {
-  color: var(--color-text);
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
-.profile-tab__bio {
-  width: 95%;
-  display: block;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background-color: var(--color-surface);
-  color: var(--color-text);
-  font-size: 1rem;
-  font-family: inherit;
-  resize: vertical;
-}
-
-.profile-tab__bio:focus {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
 }
 
 .profile-tab__links {

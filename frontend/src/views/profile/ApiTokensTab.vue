@@ -1,12 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import {
-  listApiTokens,
-  createApiToken,
-  revokeApiToken,
-} from "@/api/auth";
-import { ApiError } from "@/api/client";
+import { listApiTokens, createApiToken, revokeApiToken } from "@/api/auth";
+import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import { useConfirm } from "@/composables/useConfirm";
 import { formatDateTime } from "@/i18n";
@@ -49,9 +45,7 @@ async function fetchTokens() {
     const response = await listApiTokens();
     tokens.value = response.items;
   } catch (err) {
-    const message =
-      err instanceof ApiError ? err.detail || err.message : undefined;
-    error.value = message || t("errors.unknown");
+    error.value = getApiErrorMessage(err, t("errors.unknown"));
   } finally {
     isLoading.value = false;
   }
@@ -68,12 +62,8 @@ async function onSubmit() {
   let expires: string | undefined;
   if (expiresAt.value) {
     const parsed = new Date(expiresAt.value);
-    if (Number.isNaN(parsed.getTime())) {
-      error.value = t("errors.unknown");
-      return;
-    }
-    if (parsed.getTime() <= Date.now()) {
-      error.value = t("errors.unknown");
+    if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+      error.value = t("profile.apiTokens.expiresAtInvalid");
       return;
     }
     expires = parsed.toISOString();
@@ -82,16 +72,16 @@ async function onSubmit() {
   isCreating.value = true;
   try {
     const response = await createApiToken(
-      expires ? { name: name.value, expires_at: expires } : { name: name.value },
+      expires
+        ? { name: name.value, expires_at: expires }
+        : { name: name.value },
     );
     newToken.value = response.token;
     name.value = "";
     expiresAt.value = "";
     await fetchTokens();
   } catch (err) {
-    const message =
-      err instanceof ApiError ? err.detail || err.message : undefined;
-    error.value = message || t("errors.unknown");
+    error.value = getApiErrorMessage(err, t("errors.unknown"));
   } finally {
     isCreating.value = false;
   }
@@ -99,16 +89,31 @@ async function onSubmit() {
 
 async function copyToken() {
   if (!newToken.value) return;
-  if (navigator.clipboard) {
-    await navigator.clipboard.writeText(newToken.value);
+  if (!navigator.clipboard) {
+    toast.push({
+      type: "error",
+      message: t("profile.apiTokens.copyFailed"),
+    });
+    return;
   }
-  toast.push({ type: "success", message: t("profile.apiTokens.tokenCopied") });
+  try {
+    await navigator.clipboard.writeText(newToken.value);
+    toast.push({
+      type: "success",
+      message: t("profile.apiTokens.tokenCopied"),
+    });
+  } catch {
+    toast.push({
+      type: "error",
+      message: t("profile.apiTokens.copyFailed"),
+    });
+  }
 }
 
 async function revoke(id: string, tokenName: string) {
   const ok = await confirm({
     title: t("profile.apiTokens.revoke"),
-    message: t("profile.apiTokens.revoke") + ` "${tokenName}"?`,
+    message: t("profile.apiTokens.revokeConfirm", { name: tokenName }),
     danger: true,
   });
   if (!ok) return;
@@ -117,9 +122,7 @@ async function revoke(id: string, tokenName: string) {
     await revokeApiToken(id);
     await fetchTokens();
   } catch (err) {
-    const message =
-      err instanceof ApiError ? err.detail || err.message : undefined;
-    error.value = message || t("errors.unknown");
+    error.value = getApiErrorMessage(err, t("errors.unknown"));
   }
 }
 
@@ -146,10 +149,7 @@ onMounted(fetchTokens);
         :disabled="isCreating"
       />
 
-      <AppButton
-        type="submit"
-        :loading="isCreating"
-      >
+      <AppButton type="submit" :loading="isCreating">
         {{ t("profile.apiTokens.create") }}
       </AppButton>
 
@@ -165,7 +165,7 @@ onMounted(fetchTokens);
 
     <div v-if="newToken" class="api-tokens-tab__raw">
       <label for="raw-token" class="api-tokens-tab__label">
-        {{ t("profile.apiTokens.tokenCopied") }}
+        {{ t("profile.apiTokens.rawTokenLabel") }}
       </label>
       <div class="api-tokens-tab__raw-field">
         <input
@@ -181,7 +181,9 @@ onMounted(fetchTokens);
           {{ t("common.copy") }}
         </AppButton>
       </div>
-      <p class="api-tokens-tab__hint">{{ t("profile.apiTokens.rawTokenHint") }}</p>
+      <p class="api-tokens-tab__hint">
+        {{ t("profile.apiTokens.rawTokenHint") }}
+      </p>
     </div>
 
     <div class="api-tokens-tab__list">
@@ -207,7 +209,9 @@ onMounted(fetchTokens);
             type="button"
             variant="danger"
             size="sm"
-            @click="revoke((row as ApiTokenSummary).id, (row as ApiTokenSummary).name)"
+            @click="
+              revoke((row as ApiTokenSummary).id, (row as ApiTokenSummary).name)
+            "
           >
             {{ t("profile.apiTokens.revoke") }}
           </AppButton>

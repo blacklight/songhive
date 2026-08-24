@@ -15,7 +15,7 @@ const rawToken = Array.isArray(route.query.token)
 const token = rawToken || "";
 
 const isLoading = ref(!!token);
-const isSuccess = ref<boolean | null>(null);
+const isSuccess = ref<boolean | null>(token ? null : false);
 
 onMounted(async () => {
   if (!token) {

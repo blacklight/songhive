@@ -3,7 +3,7 @@ import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { register } from "@/api/auth";
-import { ApiError } from "@/api/client";
+import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -24,11 +24,7 @@ const isLoading = ref(false);
 async function onSubmit() {
   error.value = null;
 
-  if (
-    !username.value ||
-    !email.value ||
-    !password.value
-  ) {
+  if (!username.value || !email.value || !password.value) {
     return;
   }
 
@@ -66,9 +62,7 @@ async function onSubmit() {
     }
     await router.replace("/login");
   } catch (err) {
-    const message =
-      err instanceof ApiError ? err.detail || err.message : undefined;
-    error.value = message || t("errors.unknown");
+    error.value = getApiErrorMessage(err, t("errors.unknown"));
   } finally {
     isLoading.value = false;
   }
@@ -136,11 +130,7 @@ async function onSubmit() {
       {{ error }}
     </p>
 
-    <AppButton
-      type="submit"
-      :loading="isLoading"
-      class="register-view__submit"
-    >
+    <AppButton type="submit" :loading="isLoading" class="register-view__submit">
       {{ t("auth.registerPage.submit") }}
     </AppButton>
 

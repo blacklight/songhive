@@ -58,6 +58,12 @@ export class ApiError extends Error {
   }
 }
 
+export function getApiErrorMessage(err: unknown, fallback?: string): string {
+  const message =
+    err instanceof ApiError ? err.detail || err.message : undefined;
+  return message || fallback || "";
+}
+
 let tokenProvider: (() => string | null) | null = null;
 let refreshHandler: (() => Promise<boolean>) | null = null;
 let logoutHandler: (() => void) | null = null;

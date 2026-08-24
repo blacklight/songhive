@@ -11,4 +11,13 @@ describe("AppInput", () => {
     expect(input.attributes("aria-invalid")).toBe("true");
     expect(wrapper.text()).toContain("bad");
   });
+
+  it("renders a textarea when as is 'textarea'", () => {
+    const wrapper = mount(AppInput, {
+      props: { modelValue: "hello", as: "textarea" },
+    });
+    const textarea = wrapper.find("textarea");
+    expect(textarea.exists()).toBe(true);
+    expect((textarea.element as HTMLTextAreaElement).value).toBe("hello");
+  });
 });
