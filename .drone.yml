@@ -113,6 +113,10 @@ steps:
       - main
     event:
       - push
+    paths:
+      include:
+        - songhive/**
+
   environment:
     CODACY_PROJECT_TOKEN:
       from_secret: codacy_project_token
