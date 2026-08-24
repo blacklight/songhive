@@ -1,0 +1,55 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "close": "Close",
+    "loading": "Loading",
+    "error": "Error",
+    "retry": "Retry",
+    "search": "Search",
+    "notFound": "Not found",
+    "forbidden": "Forbidden"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
+    "accent": "Accent color"
+  },
+  "auth": {
+    "login": "Log in",
+    "logout": "Log out",
+    "register": "Register",
+    "email": "Email",
+    "password": "Password",
+    "username": "Username"
+  },
+  "nav": {
+    "home": "Home",
+    "library": "Library",
+    "playlists": "Playlists",
+    "artists": "Artists",
+    "albums": "Albums",
+    "tracks": "Tracks",
+    "history": "History",
+    "favorites": "Favorites",
+    "files": "Files",
+    "radio": "Radio",
+    "about": "About",
+    "admin": "Admin",
+    "profile": "Profile",
+    "login": "Log in"
+  },
+  "errors": {
+    "unknown": "Something went wrong. Please try again."
+  },
+  "pages": {
+    "notFound": "Page not found.",
+    "forbidden": "You don't have permission to view this page.",
+    "placeholder": "Page {name} — coming in Phase {phase}",
+    "goHome": "Go home",
+    "goLogin": "Log in"
+  }
+}

@@ -524,14 +524,20 @@ is raised when an upload exceeds `storage.max_upload_size`.
 
 Vue.js 3 + TypeScript SPA, bundled with Vite.
 
-| File/Dir                     | Role                                      |
-|------------------------------|-------------------------------------------|
-| `frontend/src/main.ts`       | App bootstrap, Pinia + router mount       |
-| `frontend/src/App.vue`       | Root component                            |
-| `frontend/src/router/`       | Vue Router (history mode)                 |
-| `frontend/src/stores/auth.ts`| Pinia auth store (token management)       |
-| `frontend/src/stores/player.ts`| Pinia audio player state               |
-| `frontend/src/views/`        | Page-level components (Home, Library, Album, Artist, Playlists, Playlist) |
+| File/Dir | Role |
+|----------|------|
+| `frontend/src/main.ts` | App bootstrap, Pinia + i18n + router mount, theme apply |
+| `frontend/src/App.vue` | Root component (`<RouterView />`) |
+| `frontend/src/router/` | Vue Router (history mode) with global auth/admin guard |
+| `frontend/src/stores/` | Pinia stores (auth, theme, toast, confirm, player) |
+| `frontend/src/components/ui/` | Headless base components (button, input, select, avatar, table, pagination, search, context menu) |
+| `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
+| `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
+| `frontend/src/layouts/` | App, auth, and admin layouts |
+| `frontend/src/views/` | Page-level components (Home, Library, Album, Artist, Playlists, Playlist, plus 403/404 and placeholder views) |
+| `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules, WebSocket event bus, stream URL helper |
+| `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
+| `frontend/src/styles/tokens.css` | CSS custom properties for theming |
 
 Build output is served as static files by the backend (or a CDN).
 

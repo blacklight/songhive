@@ -1,0 +1,149 @@
+<script setup lang="ts">
+import { ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { RouterLink, RouterView } from "vue-router";
+import AppButton from "@/components/ui/AppButton.vue";
+import AppToast from "@/components/feedback/AppToast.vue";
+
+const { t } = useI18n();
+const isMobileMenuOpen = ref(false);
+
+function toggleMenu() {
+  isMobileMenuOpen.value = !isMobileMenuOpen.value;
+}
+
+const adminNav = [
+  { name: "Dashboard", to: "/admin" },
+  { name: "Users", to: "/admin/users" },
+  { name: "Settings", to: "/admin/settings" },
+  { name: "Reports", to: "/admin/reports" },
+  { name: "Invites", to: "/admin/invites" },
+  { name: "Audit", to: "/admin/audit" },
+  { name: "Storage", to: "/admin/storage" },
+];
+</script>
+
+<template>
+  <div class="admin-layout">
+    <AppButton
+      variant="ghost"
+      size="sm"
+      class="admin-layout__menu-toggle"
+      @click="toggleMenu"
+    >
+      ☰
+    </AppButton>
+    <aside
+      class="admin-layout__sidebar"
+      :class="{ 'admin-layout__sidebar--open': isMobileMenuOpen }"
+    >
+      <nav class="admin-layout__nav" role="navigation" aria-label="Admin">
+        <ul>
+          <li v-for="item in adminNav" :key="item.to">
+            <RouterLink :to="item.to" @click="isMobileMenuOpen = false">
+              {{ item.name }}
+            </RouterLink>
+          </li>
+        </ul>
+        <RouterLink to="/" class="admin-layout__back">
+          {{ t("common.cancel") }}
+        </RouterLink>
+      </nav>
+    </aside>
+    <main class="admin-layout__main" role="main">
+      <RouterView />
+    </main>
+    <AppToast />
+  </div>
+</template>
+
+<style scoped>
+.admin-layout {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+.admin-layout__menu-toggle {
+  display: none;
+  position: fixed;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 30;
+}
+
+.admin-layout__sidebar {
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  background-color: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  padding: var(--space-4);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.admin-layout__nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.admin-layout__nav a {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.admin-layout__nav a:hover,
+.admin-layout__nav a.router-link-active {
+  background-color: var(--color-surface-raised);
+}
+
+.admin-layout__back {
+  display: block;
+  margin-top: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+
+.admin-layout__main {
+  flex: 1;
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .admin-layout__menu-toggle {
+    display: inline-flex;
+  }
+
+  .admin-layout__sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    transform: translateX(-100%);
+    transition: transform var(--transition-base);
+    z-index: 20;
+  }
+
+  .admin-layout__sidebar--open {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-layout__sidebar {
+    transition: none;
+  }
+}
+</style>

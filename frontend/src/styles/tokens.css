@@ -1,0 +1,81 @@
+/* Design tokens for Songhive. Imported once in main.ts. */
+
+:root {
+  /* Color palette (light theme defaults) */
+  --accent: #fcd34d;
+  --color-bg: #f9f8f7;
+  --color-bg-menu: #1f2937;
+  --color-text-menu: #f9fafb;
+  --color-surface: #ffffff;
+  --color-surface-raised: #fff0e0;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+  --color-border: #d1d5db;
+  --color-accent: var(--accent);
+  --color-accent-contrast: #1f2937;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-info: #3b82f6;
+
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 3rem;
+
+  /* Radii */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg:
+    0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+  /* z-index layers */
+  --z-player: 40;
+  --z-toast: 50;
+  --z-modal: 60;
+  --z-dropdown: 70;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+
+  /* Layout */
+  --sidebar-width: 16rem;
+  --sidebar-collapsed-width: 3rem;
+  --header-height: 4rem;
+}
+
+[data-theme="dark"] {
+  --accent: #fcd34d;
+  --color-bg: #1f2937;
+  --color-surface: #374151;
+  --color-surface-raised: #4b5563;
+  --color-text: #f9fafb;
+  --color-text-muted: #9ca3af;
+  --color-border: #4b5563;
+  --color-accent: var(--accent);
+  --color-accent-contrast: #111827;
+  --color-danger: #f87171;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-info: #60a5fa;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-theme="dark"] {
+    --transition-fast: 0ms;
+    --transition-base: 0ms;
+  }
+}
