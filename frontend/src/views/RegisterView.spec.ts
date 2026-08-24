@@ -119,9 +119,7 @@ describe("RegisterView", () => {
 
     const toastStore = useToastStore();
     const messages = toastStore.toasts.map((t) => t.message);
-    expect(messages).toContain(
-      i18n.global.t("auth.registerPage.success"),
-    );
+    expect(messages).toContain(i18n.global.t("auth.registerPage.success"));
     expect(messages).toContain(
       i18n.global.t("auth.registerPage.emailVerificationNotice"),
     );

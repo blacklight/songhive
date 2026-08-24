@@ -46,9 +46,9 @@ describe("uploadFile", () => {
   });
 
   it("throws ApiError on a non-2xx response", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      createMockResponse({ detail: "Upload failed" }, 400),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(createMockResponse({ detail: "Upload failed" }, 400));
     vi.stubGlobal("fetch", fetchMock);
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });

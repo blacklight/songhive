@@ -60,7 +60,9 @@ describe("ProfileTab", () => {
 
     const textInputs = wrapper.findAll('input[type="text"]');
     expect((textInputs[0].element as HTMLInputElement).value).toBe("Alice");
-    expect((wrapper.find("textarea").element as HTMLTextAreaElement).value).toBe("Hello");
+    expect(
+      (wrapper.find("textarea").element as HTMLTextAreaElement).value,
+    ).toBe("Hello");
   });
 
   it("omits blank optional fields and sends the expected payload", async () => {
@@ -76,7 +78,9 @@ describe("ProfileTab", () => {
     const textInputs = wrapper.findAll('input[type="text"]');
     await textInputs[0].setValue("Alice U.");
     await wrapper.find("textarea").setValue("New bio");
-    await wrapper.find('input[type="url"]').setValue("https://example.com/avatar.png");
+    await wrapper
+      .find('input[type="url"]')
+      .setValue("https://example.com/avatar.png");
 
     await wrapper.find("form").trigger("submit");
     await flushPromises();
@@ -110,7 +114,9 @@ describe("ProfileTab", () => {
     await flushPromises();
 
     const rows = wrapper.findAll(".profile-tab__link-row");
-    const newRowInputs = rows[rows.length - 1].findAll('input[type="text"], input[type="url"]');
+    const newRowInputs = rows[rows.length - 1].findAll(
+      'input[type="text"], input[type="url"]',
+    );
     await newRowInputs[0].setValue("Bad link");
     await newRowInputs[1].setValue("ftp://example.com");
 
@@ -119,7 +125,9 @@ describe("ProfileTab", () => {
 
     expect(usersApi.updateMe).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain(
-      i18n.global.t("profile.saveError", { message: i18n.global.t("profile.linkUrl") }),
+      i18n.global.t("profile.saveError", {
+        message: i18n.global.t("profile.linkUrl"),
+      }),
     );
   });
 
@@ -133,7 +141,9 @@ describe("ProfileTab", () => {
     });
     await flushPromises();
 
-    const submitButtons = wrapper.findAll('button[type="submit"], button[type="button"]');
+    const submitButtons = wrapper.findAll(
+      'button[type="submit"], button[type="button"]',
+    );
     const disabledButtons = submitButtons.filter(
       (b) => b.attributes("disabled") === "",
     );

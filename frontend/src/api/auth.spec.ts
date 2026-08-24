@@ -44,10 +44,7 @@ describe("auth endpoints", () => {
 
   it("logout does not send Authorization or trigger refresh on 401", async () => {
     const refresh = vi.fn().mockResolvedValue(true);
-    const fetchMock = mockFetchWithStatus(
-      401,
-      '{"detail":"Invalid token"}',
-    );
+    const fetchMock = mockFetchWithStatus(401, '{"detail":"Invalid token"}');
     setRefreshHandler(refresh);
     vi.stubGlobal("fetch", fetchMock);
 

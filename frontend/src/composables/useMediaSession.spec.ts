@@ -77,7 +77,9 @@ describe("useMediaSession", () => {
     mount(TestComponent);
     await nextTick();
 
-    const handler = mockMediaSession.setActionHandler as ReturnType<typeof vi.fn>;
+    const handler = mockMediaSession.setActionHandler as ReturnType<
+      typeof vi.fn
+    >;
     const actions = handler.mock.calls.map((call: string[]) => call[0]);
 
     expect(actions).toContain("play");
@@ -128,7 +130,9 @@ describe("useMediaSession", () => {
     wrapper.unmount();
     await nextTick();
 
-    const handler = mockMediaSession.setActionHandler as ReturnType<typeof vi.fn>;
+    const handler = mockMediaSession.setActionHandler as ReturnType<
+      typeof vi.fn
+    >;
     const handlers = handler.mock.calls.map((call: string[]) => call[0]);
 
     expect(handlers).toContain("play");

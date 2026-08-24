@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as client from "./client";
-import {
-  listArtists,
-  getArtist,
-  type ArtistResponse,
-} from "./artists";
+import { listArtists, getArtist, type ArtistResponse } from "./artists";
 
 vi.mock("./client", () => ({
   apiRequest: vi.fn(),

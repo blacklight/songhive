@@ -93,7 +93,7 @@ describe("PlayerBar", () => {
     store.playAll([makeTrack("a"), makeTrack("b")], 0);
     await flushPromises();
 
-    const playButton = wrapper.find('.player-bar__full .player-controls__play');
+    const playButton = wrapper.find(".player-bar__full .player-controls__play");
     expect(playButton.exists()).toBe(true);
 
     await playButton.trigger("click");
@@ -109,7 +109,7 @@ describe("PlayerBar", () => {
     store.playAll(tracks, 0);
     await flushPromises();
 
-    const nextButton = wrapper.find('.player-bar__full .player-controls__next');
+    const nextButton = wrapper.find(".player-bar__full .player-controls__next");
     expect(nextButton.exists()).toBe(true);
 
     await nextButton.trigger("click");
@@ -122,7 +122,7 @@ describe("PlayerBar", () => {
     store.playAll([makeTrack("a"), makeTrack("b")], 0);
     await flushPromises();
 
-    const toggle = wrapper.find('.player-bar__full .player-bar__queue-toggle');
+    const toggle = wrapper.find(".player-bar__full .player-bar__queue-toggle");
     expect(wrapper.find(".queue-panel").exists()).toBe(false);
 
     await toggle.trigger("click");
@@ -141,7 +141,9 @@ describe("PlayerBar", () => {
     store.updateTime(0);
     await flushPromises();
 
-    const slider = wrapper.find('.player-bar__full .progress-bar input[type="range"]');
+    const slider = wrapper.find(
+      '.player-bar__full .progress-bar input[type="range"]',
+    );
     expect(slider.exists()).toBe(true);
 
     await slider.setValue(50);

@@ -66,7 +66,13 @@ export class PlayerEngine {
     if (promise && typeof promise.catch === "function") {
       promise.catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        if (err && typeof err === "object" && "name" in err && err.name === "AbortError") return;
+        if (
+          err &&
+          typeof err === "object" &&
+          "name" in err &&
+          err.name === "AbortError"
+        )
+          return;
         console.warn("play() failed", err);
       });
     }

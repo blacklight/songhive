@@ -103,7 +103,8 @@ describe("PlayerEngine", () => {
     primary.dispatchEvent(new Event("timeupdate"));
 
     expect(onTimeUpdate).toHaveBeenCalledWith(82);
-    const preload = (engine as unknown as { preload: HTMLAudioElement }).preload;
+    const preload = (engine as unknown as { preload: HTMLAudioElement })
+      .preload;
     expect(preload.src).toBe("/stream/b");
     expect(preload.load).toHaveBeenCalled();
   });
@@ -116,7 +117,8 @@ describe("PlayerEngine", () => {
 
     engine.load(current);
     engine.setNextTrack(next);
-    const preload = (engine as unknown as { preload: HTMLAudioElement }).preload;
+    const preload = (engine as unknown as { preload: HTMLAudioElement })
+      .preload;
     preload.src = "/stream/b";
 
     primary.dispatchEvent(new Event("ended"));
@@ -140,7 +142,9 @@ describe("PlayerEngine", () => {
     const onError = vi.fn();
     const onStateChange = vi.fn();
     engine.init({ onError, onStateChange });
-    (primary as unknown as { error: MediaError }).error = { code: 1 } as MediaError;
+    (primary as unknown as { error: MediaError }).error = {
+      code: 1,
+    } as MediaError;
     primary.dispatchEvent(new Event("error"));
     expect(onError).toHaveBeenCalled();
     expect(onStateChange).toHaveBeenCalledWith("error");
@@ -179,7 +183,8 @@ describe("PlayerEngine", () => {
     engine.init({});
     const next = makeTrack("b");
     engine.setNextTrack(next);
-    const preload = (engine as unknown as { preload: HTMLAudioElement }).preload;
+    const preload = (engine as unknown as { preload: HTMLAudioElement })
+      .preload;
     preload.src = "/stream/b";
     engine.setNextTrack(null);
     expect(preload.src).toBe("");

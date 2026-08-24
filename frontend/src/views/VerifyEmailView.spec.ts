@@ -60,9 +60,7 @@ describe("VerifyEmailView", () => {
     await flushPromises();
 
     expect(authApi.verifyEmail).toHaveBeenCalledWith({ token: "valid" });
-    expect(wrapper.text()).toContain(
-      i18n.global.t("auth.verifyEmail.success"),
-    );
+    expect(wrapper.text()).toContain(i18n.global.t("auth.verifyEmail.success"));
   });
 
   it("transitions from verifying to an invalid-token error", async () => {

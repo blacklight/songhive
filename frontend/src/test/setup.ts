@@ -68,7 +68,10 @@ function defineMediaProperty(
       return this[`__${name}`] ?? defaultValue;
     },
     set: writable
-      ? function (this: HTMLMediaElement & Record<string, unknown>, value: unknown) {
+      ? function (
+          this: HTMLMediaElement & Record<string, unknown>,
+          value: unknown,
+        ) {
           this[`__${name}`] = value;
         }
       : undefined,

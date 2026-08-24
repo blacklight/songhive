@@ -91,8 +91,7 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   const rawPosition = localStorage.getItem(STORAGE_POSITION);
-  const parsedPosition =
-    rawPosition === null ? NaN : Number(rawPosition);
+  const parsedPosition = rawPosition === null ? NaN : Number(rawPosition);
   const restoredPosition = ref<number | null>(
     Number.isNaN(parsedPosition) ? null : parsedPosition,
   );
@@ -102,10 +101,7 @@ export const usePlayerStore = defineStore("player", () => {
     ["off", "all", "one"],
     "off",
   );
-  volume.value = Math.min(
-    Math.max(readNumber(STORAGE_VOLUME, 1), 0),
-    1,
-  );
+  volume.value = Math.min(Math.max(readNumber(STORAGE_VOLUME, 1), 0), 1);
   muted.value = readBoolean(STORAGE_MUTED, false);
 
   const currentTrack = computed(() => queue.value[index.value] ?? null);
@@ -152,15 +148,15 @@ export const usePlayerStore = defineStore("player", () => {
   );
 
   function playTrack(track: QueueTrack, queueContext?: QueueTrack[]) {
-    const newQueue = queueContext && queueContext.length > 0 ? queueContext : [track];
+    const newQueue =
+      queueContext && queueContext.length > 0 ? queueContext : [track];
     queue.value = newQueue;
     originalQueue.value = [];
     index.value = newQueue.findIndex((t) => t.id === track.id);
     if (index.value < 0) index.value = 0;
 
     const startAt =
-      restoredPosition.value !== null &&
-      currentTrack.value?.id === track.id
+      restoredPosition.value !== null && currentTrack.value?.id === track.id
         ? restoredPosition.value
         : 0;
     restoredPosition.value = null;
@@ -346,7 +342,9 @@ export const usePlayerStore = defineStore("player", () => {
       const current = currentTrack.value;
       originalQueue.value = [...queue.value];
       const others = queue.value.filter((t) => t.id !== current?.id);
-      const shuffled = current ? [current, ...shuffleArray(others)] : shuffleArray(queue.value);
+      const shuffled = current
+        ? [current, ...shuffleArray(others)]
+        : shuffleArray(queue.value);
       queue.value = shuffled;
       index.value = 0;
       shuffle.value = true;
@@ -397,15 +395,7 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   watch(
-    [
-      queue,
-      index,
-      currentTime,
-      shuffle,
-      repeat,
-      volume,
-      muted,
-    ],
+    [queue, index, currentTime, shuffle, repeat, volume, muted],
     () => {
       persist();
     },

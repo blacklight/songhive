@@ -128,7 +128,9 @@ export async function apiRequest<T>(
   };
 
   if (options.body !== undefined) {
-    init.body = isFormData ? (options.body as FormData) : JSON.stringify(options.body);
+    init.body = isFormData
+      ? (options.body as FormData)
+      : JSON.stringify(options.body);
   }
 
   const response = await fetch(url, init);

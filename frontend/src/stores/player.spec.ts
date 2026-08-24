@@ -200,7 +200,13 @@ describe("usePlayerStore", () => {
     const store = usePlayerStore();
     const engine = createMockEngine();
     store.registerEngine(engine);
-    const tracks = [makeTrack("a"), makeTrack("b"), makeTrack("c"), makeTrack("d"), makeTrack("e")];
+    const tracks = [
+      makeTrack("a"),
+      makeTrack("b"),
+      makeTrack("c"),
+      makeTrack("d"),
+      makeTrack("e"),
+    ];
     store.playAll(tracks, 2);
 
     store.toggleShuffle();
@@ -218,7 +224,13 @@ describe("usePlayerStore", () => {
     const store = usePlayerStore();
     const engine = createMockEngine();
     store.registerEngine(engine);
-    const tracks = [makeTrack("a"), makeTrack("b"), makeTrack("c"), makeTrack("d"), makeTrack("e")];
+    const tracks = [
+      makeTrack("a"),
+      makeTrack("b"),
+      makeTrack("c"),
+      makeTrack("d"),
+      makeTrack("e"),
+    ];
     store.playAll(tracks, 2);
 
     store.toggleShuffle();
@@ -403,7 +415,10 @@ describe("usePlayerStore", () => {
   });
 
   it("restoredPosition is consumed by playAll", () => {
-    localStorage.setItem("songhive.player.queue", JSON.stringify([makeTrack("a"), makeTrack("b")]));
+    localStorage.setItem(
+      "songhive.player.queue",
+      JSON.stringify([makeTrack("a"), makeTrack("b")]),
+    );
     localStorage.setItem("songhive.player.index", "1");
     localStorage.setItem("songhive.player.position", "33");
 

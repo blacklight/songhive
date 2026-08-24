@@ -75,20 +75,11 @@ onMounted(() => {
       :disabled="isLoading"
     />
 
-    <p
-      v-if="error"
-      class="login-view__error"
-      role="alert"
-      aria-live="polite"
-    >
+    <p v-if="error" class="login-view__error" role="alert" aria-live="polite">
       {{ error }}
     </p>
 
-    <AppButton
-      type="submit"
-      :loading="isLoading"
-      class="login-view__submit"
-    >
+    <AppButton type="submit" :loading="isLoading" class="login-view__submit">
       {{ t("auth.loginPage.submit") }}
     </AppButton>
 

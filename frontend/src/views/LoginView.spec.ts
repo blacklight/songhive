@@ -13,8 +13,16 @@ function createTestRouter() {
     routes: [
       { path: "/", name: "home", component: { template: "<div>home</div>" } },
       { path: "/login", name: "login", component: LoginView },
-      { path: "/register", name: "register", component: { template: "<div/>" } },
-      { path: "/password-reset", name: "passwordReset", component: { template: "<div/>" } },
+      {
+        path: "/register",
+        name: "register",
+        component: { template: "<div/>" },
+      },
+      {
+        path: "/password-reset",
+        name: "passwordReset",
+        component: { template: "<div/>" },
+      },
       { path: "/history", name: "history", component: { template: "<div/>" } },
     ],
   });
@@ -86,9 +94,7 @@ describe("LoginView", () => {
     await wrapper.find("form").trigger("submit");
     await flushPromises();
 
-    expect(wrapper.text()).toContain(
-      i18n.global.t("auth.loginPage.failed"),
-    );
+    expect(wrapper.text()).toContain(i18n.global.t("auth.loginPage.failed"));
     expect(router.currentRoute.value.path).toBe("/login");
   });
 

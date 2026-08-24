@@ -26,9 +26,7 @@ const emit = defineEmits<{
   (e: "change", value: number): void;
 }>();
 
-const valueText = computed(() =>
-  props.ariaValueText ?? `${props.modelValue}`,
-);
+const valueText = computed(() => props.ariaValueText ?? `${props.modelValue}`);
 
 function onInput(event: Event) {
   const target = event.target as HTMLInputElement;
@@ -85,7 +83,9 @@ function onChange(event: Event) {
   background-color: var(--color-accent);
   border: 2px solid var(--color-surface);
   box-shadow: var(--shadow-sm);
-  transition: transform var(--transition-fast), background-color var(--transition-fast);
+  transition:
+    transform var(--transition-fast),
+    background-color var(--transition-fast);
 }
 
 .app-slider::-moz-range-thumb {
@@ -95,7 +95,9 @@ function onChange(event: Event) {
   background-color: var(--color-accent);
   border: 2px solid var(--color-surface);
   box-shadow: var(--shadow-sm);
-  transition: transform var(--transition-fast), background-color var(--transition-fast);
+  transition:
+    transform var(--transition-fast),
+    background-color var(--transition-fast);
 }
 
 .app-slider::-webkit-slider-thumb:hover {

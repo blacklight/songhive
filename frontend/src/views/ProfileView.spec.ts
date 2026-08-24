@@ -70,9 +70,7 @@ describe("ProfileView", () => {
     await flushPromises();
 
     expect(router.currentRoute.value.query.tab).toBeUndefined();
-    expect(wrapper.text()).toContain(
-      i18n.global.t("profile.tabs.profile"),
-    );
+    expect(wrapper.text()).toContain(i18n.global.t("profile.tabs.profile"));
     expect(
       (wrapper.find('input[type="text"]').element as HTMLInputElement).value,
     ).toBe("Alice");
@@ -89,9 +87,7 @@ describe("ProfileView", () => {
     await flushPromises();
 
     expect(router.currentRoute.value.query.tab).toBe("apiTokens");
-    expect(wrapper.text()).toContain(
-      i18n.global.t("profile.tabs.apiTokens"),
-    );
+    expect(wrapper.text()).toContain(i18n.global.t("profile.tabs.apiTokens"));
     expect(authApi.listApiTokens).toHaveBeenCalled();
   });
 
