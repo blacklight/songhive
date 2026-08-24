@@ -1,26 +1,34 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { usePlayerStore } from "@/stores/player";
 import AppButton from "@/components/ui/AppButton.vue";
 
+const { t } = useI18n();
 const store = usePlayerStore();
 
-const prevDisabled = computed(
-  () => !store.hasPrev && store.repeat === "off",
-);
-const nextDisabled = computed(
-  () => !store.hasNext && store.repeat === "off",
-);
+const repeatLabel = computed(() => {
+  if (store.repeat === "off") return t("player.repeatOff");
+  if (store.repeat === "all") return t("player.repeatAll");
+  return t("player.repeatOne");
+});
+
+const prevDisabled = computed(() => !store.hasPrev && store.repeat === "off");
+const nextDisabled = computed(() => !store.hasNext && store.repeat === "off");
 </script>
 
 <template>
-  <div class="player-controls" role="group" aria-label="Playback controls">
+  <div
+    class="player-controls"
+    role="group"
+    :aria-label="t('player.playbackControls')"
+  >
     <AppButton
       variant="ghost"
       size="sm"
       class="player-controls__shuffle"
       :class="{ 'player-controls__shuffle--active': store.shuffle }"
-      aria-label="Shuffle"
+      :aria-label="t('player.shuffle')"
       :aria-pressed="store.shuffle"
       @click="store.toggleShuffle"
     >
@@ -35,7 +43,7 @@ const nextDisabled = computed(
       variant="ghost"
       size="sm"
       class="player-controls__prev"
-      aria-label="Previous track"
+      :aria-label="t('player.previousTrack')"
       :disabled="prevDisabled"
       @click="store.prev"
     >
@@ -48,7 +56,7 @@ const nextDisabled = computed(
       variant="ghost"
       size="md"
       class="player-controls__play"
-      :aria-label="store.isPlaying ? 'Pause' : 'Play'"
+      :aria-label="store.isPlaying ? t('common.pause') : t('common.play')"
       @click="store.isPlaying ? store.pause() : store.play()"
     >
       <svg
@@ -60,13 +68,7 @@ const nextDisabled = computed(
       >
         <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
       </svg>
-      <svg
-        v-else
-        viewBox="0 0 24 24"
-        width="28"
-        height="28"
-        aria-hidden="true"
-      >
+      <svg v-else viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
         <path d="M8 5v14l11-7z" />
       </svg>
     </AppButton>
@@ -75,7 +77,7 @@ const nextDisabled = computed(
       variant="ghost"
       size="sm"
       class="player-controls__next"
-      aria-label="Next track"
+      :aria-label="t('player.nextTrack')"
       :disabled="nextDisabled"
       @click="store.next"
     >
@@ -89,13 +91,7 @@ const nextDisabled = computed(
       size="sm"
       class="player-controls__repeat"
       :class="`player-controls__repeat--${store.repeat}`"
-      :aria-label="
-        store.repeat === 'off'
-          ? 'Repeat off'
-          : store.repeat === 'all'
-            ? 'Repeat all'
-            : 'Repeat one'
-      "
+      :aria-label="repeatLabel"
       :aria-pressed="store.repeat !== 'off'"
       @click="store.cycleRepeat"
     >
@@ -121,13 +117,7 @@ const nextDisabled = computed(
           d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"
         />
       </svg>
-      <svg
-        v-else
-        viewBox="0 0 24 24"
-        width="20"
-        height="20"
-        aria-hidden="true"
-      >
+      <svg v-else viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
         <path
           d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"
         />

@@ -172,6 +172,33 @@ describe("apiRequest", () => {
     await expect(apiRequest("/test")).rejects.toBeInstanceOf(ApiError);
     expect(logout).toHaveBeenCalled();
   });
+
+  it("sends FormData bodies without a JSON Content-Type", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: () => Promise.resolve('{"id":"t1"}'),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const formData = new FormData();
+    const file = new File([""], "track.mp3", { type: "audio/mpeg" });
+    formData.append("file", file);
+
+    await apiRequest<unknown>("/libraries/lib1/tracks", {
+      method: "POST",
+      body: formData,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/libraries/lib1/tracks");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(formData);
+
+    const headers = new Headers(init.headers);
+    expect(headers.has("Content-Type")).toBe(false);
+    expect(headers.get("Authorization")).toBe("Bearer initial");
+  });
 });
 
 describe("getApiErrorMessage", () => {

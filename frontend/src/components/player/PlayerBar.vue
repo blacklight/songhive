@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, useTemplateRef, watch, type ComponentPublicInstance } from "vue";
+import { useI18n } from "vue-i18n";
 import { usePlayerStore } from "@/stores/player";
 import AppButton from "@/components/ui/AppButton.vue";
 import NowPlaying from "./NowPlaying.vue";
@@ -9,11 +10,14 @@ import VolumeControl from "./VolumeControl.vue";
 import QueuePanel from "./QueuePanel.vue";
 import { useMediaSession } from "@/composables/useMediaSession";
 
+const { t } = useI18n();
 const store = usePlayerStore();
 const expanded = ref(false);
 const queueOpen = ref(false);
 const queueToggleRef = useTemplateRef<ComponentPublicInstance>("queueToggle");
-const expandedQueueToggleRef = useTemplateRef<ComponentPublicInstance>("expandedQueueToggle");
+const expandedQueueToggleRef = useTemplateRef<ComponentPublicInstance>(
+  "expandedQueueToggle",
+);
 
 useMediaSession();
 
@@ -50,7 +54,7 @@ function queueReturnTarget() {
     class="player-bar"
     :class="{ 'player-bar--expanded': expanded }"
     role="region"
-    aria-label="Player"
+    :aria-label="t('player.player')"
   >
     <QueuePanel
       :open="queueOpen"
@@ -75,7 +79,9 @@ function queueReturnTarget() {
           variant="ghost"
           size="sm"
           class="player-bar__queue-toggle"
-          :aria-label="queueOpen ? 'Close queue' : 'Open queue'"
+          :aria-label="
+            queueOpen ? t('player.closeQueue') : t('player.openQueue')
+          "
           :aria-pressed="queueOpen"
           @click="toggleQueue"
         >
@@ -89,7 +95,7 @@ function queueReturnTarget() {
     <div class="player-bar__mini">
       <button
         class="player-bar__mini-info"
-        aria-label="Expand player"
+        :aria-label="t('player.expandPlayer')"
         @click="toggleExpanded"
       >
         <NowPlaying mini />
@@ -100,7 +106,7 @@ function queueReturnTarget() {
           variant="ghost"
           size="sm"
           class="player-bar__mini-play"
-          :aria-label="store.isPlaying ? 'Pause' : 'Play'"
+          :aria-label="store.isPlaying ? t('common.pause') : t('common.play')"
           @click="store.isPlaying ? store.pause() : store.play()"
         >
           <svg
@@ -127,7 +133,7 @@ function queueReturnTarget() {
           variant="ghost"
           size="sm"
           class="player-bar__mini-next"
-          aria-label="Next track"
+          :aria-label="t('player.nextTrack')"
           :disabled="!store.hasNext && store.repeat === 'off'"
           @click="store.next"
         >
@@ -145,7 +151,7 @@ function queueReturnTarget() {
           variant="ghost"
           size="sm"
           class="player-bar__collapse"
-          aria-label="Collapse player"
+          :aria-label="t('player.collapsePlayer')"
           @click="toggleExpanded"
         >
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -166,7 +172,9 @@ function queueReturnTarget() {
             variant="ghost"
             size="sm"
             class="player-bar__queue-toggle"
-            :aria-label="queueOpen ? 'Close queue' : 'Open queue'"
+            :aria-label="
+              queueOpen ? t('player.closeQueue') : t('player.openQueue')
+            "
             :aria-pressed="queueOpen"
             @click="toggleQueue"
           >

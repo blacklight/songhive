@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { usePlayerStore } from "@/stores/player";
 import { formatTime } from "@/utils/time";
 import AppSlider from "@/components/ui/AppSlider.vue";
 
+const { t } = useI18n();
 const store = usePlayerStore();
 
 const displayValue = computed(() =>
@@ -11,7 +13,10 @@ const displayValue = computed(() =>
 );
 
 const valueText = computed(() =>
-  `${formatTime(store.currentTime)} of ${formatTime(store.duration)}`,
+  t("player.progressValue", {
+    current: formatTime(store.currentTime),
+    duration: formatTime(store.duration),
+  }),
 );
 
 function onInput(seconds: number) {
@@ -41,7 +46,7 @@ function onKeyDown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="progress-bar" role="group" aria-label="Progress">
+  <div class="progress-bar" role="group" :aria-label="t('player.progress')">
     <time class="progress-bar__time" aria-hidden="true">
       {{ formatTime(store.currentTime) }}
     </time>
@@ -52,7 +57,7 @@ function onKeyDown(event: KeyboardEvent) {
       :min="0"
       :max="store.duration || 0"
       :step="0.1"
-      aria-label="Seek"
+      :aria-label="t('player.seek')"
       :aria-value-text="valueText"
       @update:model-value="onInput"
       @change="onChange"

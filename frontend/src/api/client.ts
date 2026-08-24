@@ -5,7 +5,7 @@ type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export interface RequestOptions {
   method?: HttpMethod;
   body?: unknown;
-  query?: Record<string, string | number | undefined | null>;
+  query?: Record<string, string | number | boolean | undefined | null>;
   signal?: AbortSignal;
   skipAuth?: boolean;
 }
@@ -107,7 +107,10 @@ export async function apiRequest<T>(
     Accept: "application/json",
   };
 
-  if (options.body !== undefined) {
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
+
+  if (options.body !== undefined && !isFormData) {
     (headers as Record<string, string>)["Content-Type"] = "application/json";
   }
 
@@ -125,7 +128,7 @@ export async function apiRequest<T>(
   };
 
   if (options.body !== undefined) {
-    init.body = JSON.stringify(options.body);
+    init.body = isFormData ? (options.body as FormData) : JSON.stringify(options.body);
   }
 
   const response = await fetch(url, init);

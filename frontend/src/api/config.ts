@@ -3,7 +3,7 @@ export const WS_URL = "/ws/events";
 
 export function buildUrl(
   path: string,
-  query?: Record<string, string | number | undefined | null>,
+  query?: Record<string, string | number | boolean | undefined | null>,
 ): string {
   if (!query) return path;
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { usePlayerStore } from "@/stores/player";
 
@@ -10,6 +11,7 @@ const props = withDefaults(defineProps<Props>(), {
   mini: false,
 });
 
+const { t } = useI18n();
 const store = usePlayerStore();
 const router = useRouter();
 
@@ -26,7 +28,7 @@ function goToAlbum() {
     class="now-playing"
     :class="{ 'now-playing--mini': props.mini }"
     role="region"
-    aria-label="Now playing"
+    :aria-label="t('player.nowPlaying')"
   >
     <button
       v-if="store.currentTrack?.artwork_url && !props.mini"
@@ -34,8 +36,10 @@ function goToAlbum() {
       :class="{ 'now-playing__artwork--link': store.currentTrack?.album_id }"
       :aria-label="
         store.currentTrack?.album_id
-          ? `Go to album ${store.currentTrack?.album_title ?? ''}`.trim()
-          : 'Album artwork'
+          ? t('player.goToAlbum', {
+              title: store.currentTrack?.album_title || '',
+            }).trim()
+          : t('player.albumArtwork')
       "
       @click="goToAlbum"
     >

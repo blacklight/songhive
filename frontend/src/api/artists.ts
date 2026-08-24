@@ -1,8 +1,16 @@
-// TODO: implement in a later phase.
-export function listArtists(): never {
-  throw new Error("not implemented in Phase 1");
+import type { components } from "./types";
+import { apiRequest } from "./client";
+
+export type ArtistResponse = components["schemas"]["ArtistResponse"];
+
+export function listArtists(params?: {
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ArtistResponse[]> {
+  return apiRequest<ArtistResponse[]>("/artists", { query: params });
 }
 
-export function getArtist(): never {
-  throw new Error("not implemented in Phase 1");
+export function getArtist(id: string): Promise<ArtistResponse> {
+  return apiRequest<ArtistResponse>(`/artists/${id}`);
 }

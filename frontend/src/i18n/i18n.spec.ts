@@ -5,6 +5,8 @@ describe("i18n", () => {
   it("loads en by default", () => {
     expect(i18n.global.locale.value).toBe("en");
     expect(i18n.global.t("common.save")).toBe("Save");
+    expect(i18n.global.t("browse.entities.artists")).toBe("Artists");
+    expect(i18n.global.t("player.shuffle")).toBe("Shuffle");
   });
 
   it("restores a stored, supported locale on init", async () => {

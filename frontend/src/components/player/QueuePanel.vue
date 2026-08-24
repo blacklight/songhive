@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { nextTick, useTemplateRef, watch, type ComponentPublicInstance } from "vue";
+import {
+  nextTick,
+  useTemplateRef,
+  watch,
+  type ComponentPublicInstance,
+} from "vue";
+import { useI18n } from "vue-i18n";
 import { usePlayerStore } from "@/stores/player";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
 import { useFocusTrap } from "@/composables/useFocusTrap";
+
+const { t } = useI18n();
 
 type FocusableTarget = HTMLElement | ComponentPublicInstance | null | undefined;
 
@@ -82,26 +90,26 @@ function clearQueue() {
     ref="panel"
     class="queue-panel"
     role="dialog"
-    aria-label="Queue"
+    :aria-label="t('player.queue')"
     aria-modal="true"
     @keydown="onKeyDown"
   >
     <div class="queue-panel__header">
-      <h2 class="queue-panel__title">Queue</h2>
+      <h2 class="queue-panel__title">{{ t("player.queue") }}</h2>
       <AppButton
         variant="ghost"
         size="sm"
         class="queue-panel__clear"
-        aria-label="Clear queue"
+        :aria-label="t('player.clearQueue')"
         @click="clearQueue"
       >
-        Clear
+        {{ t("common.clear") }}
       </AppButton>
       <AppButton
         variant="ghost"
         size="sm"
         class="queue-panel__close"
-        aria-label="Close queue"
+        :aria-label="t('player.closeQueue')"
         @click="emit('close')"
       >
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -112,7 +120,11 @@ function clearQueue() {
       </AppButton>
     </div>
 
-    <ol class="queue-panel__list" role="listbox" aria-label="Queue tracks">
+    <ol
+      class="queue-panel__list"
+      role="listbox"
+      :aria-label="t('player.queueTracks')"
+    >
       <!-- Drag-to-reorder is deferred to a later phase. -->
       <li
         v-for="(track, i) in store.queue"
@@ -132,7 +144,10 @@ function clearQueue() {
           alt=""
           class="queue-panel__artwork"
         />
-        <div v-else class="queue-panel__artwork queue-panel__artwork--placeholder" />
+        <div
+          v-else
+          class="queue-panel__artwork queue-panel__artwork--placeholder"
+        />
         <div class="queue-panel__meta">
           <p class="queue-panel__track-title" :title="track.title">
             {{ track.title }}
@@ -148,7 +163,7 @@ function clearQueue() {
           variant="ghost"
           size="sm"
           class="queue-panel__remove"
-          :aria-label="`Remove ${track.title} from queue`"
+          :aria-label="t('player.removeFromQueue', { title: track.title })"
           @click="removeAt($event, i)"
         >
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -161,7 +176,7 @@ function clearQueue() {
     </ol>
 
     <div v-if="store.queue.length === 0" class="queue-panel__empty">
-      The queue is empty.
+      {{ t("player.emptyQueue") }}
     </div>
   </div>
 </template>
