@@ -181,6 +181,8 @@
       "newLibrary": "New library"
     },
     "detail": {
+      "tracks": "Tracks",
+      "albums": "Albums",
       "discography": "Discography",
       "released": "Released",
       "year": "Year",
@@ -256,7 +258,10 @@
       "addToPlaylist": "Add to playlist"
     },
     "createPlaylist": "Playlist created.",
-    "createLibrary": "Library created."
+    "createLibrary": "Library created.",
+    "playlist": {
+      "empty": "Track listing is not available for playlists yet."
+    }
   },
   "player": {
     "player": "Player",

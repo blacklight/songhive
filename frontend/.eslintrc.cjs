@@ -18,5 +18,5 @@ module.exports = {
     'vue/multi-word-component-names': 'off',
     'vue/require-default-prop': 'off',
   },
-  ignorePatterns: ['openapi.json', 'src/api/types.ts'],
+  ignorePatterns: ['openapi.json', 'src/api/types.ts', '**/*.json'],
 }

@@ -72,27 +72,43 @@ const routes: RouteRecordRaw[] = [
         name: "artists",
         component: () => import("@/views/ArtistsView.vue"),
       },
-      placeholder("artists/:id", "artist", 4),
+      {
+        path: "artists/:id",
+        name: "artist",
+        component: () => import("@/views/ArtistView.vue"),
+      },
       {
         path: "albums",
         name: "albums",
         component: () => import("@/views/AlbumsView.vue"),
       },
-      placeholder("albums/:id", "album", 4),
+      {
+        path: "albums/:id",
+        name: "album",
+        component: () => import("@/views/AlbumView.vue"),
+      },
       placeholder("albums/:id/edit", "albumEdit", 5, { requiresAuth: true }),
       {
         path: "tracks",
         name: "tracks",
         component: () => import("@/views/TracksView.vue"),
       },
-      placeholder("tracks/:id", "track", 4),
+      {
+        path: "tracks/:id",
+        name: "track",
+        component: () => import("@/views/TrackView.vue"),
+      },
       placeholder("tracks/:id/edit", "trackEdit", 5, { requiresAuth: true }),
       {
         path: "playlists",
         name: "playlists",
         component: () => import("@/views/PlaylistsView.vue"),
       },
-      placeholder("playlists/:id", "playlist", 4),
+      {
+        path: "playlists/:id",
+        name: "playlist",
+        component: () => import("@/views/PlaylistView.vue"),
+      },
       placeholder("playlists/:id/edit", "playlistEdit", 5, {
         requiresAuth: true,
       }),
@@ -101,7 +117,11 @@ const routes: RouteRecordRaw[] = [
         name: "libraries",
         component: () => import("@/views/LibraryView.vue"),
       },
-      placeholder("libraries/:id", "library", 4),
+      {
+        path: "libraries/:id",
+        name: "library",
+        component: () => import("@/views/LibraryDetailView.vue"),
+      },
       placeholder("libraries/:id/edit", "libraryEdit", 5, {
         requiresAuth: true,
       }),
