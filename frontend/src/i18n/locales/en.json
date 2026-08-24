@@ -169,7 +169,8 @@
       "album": "Album",
       "track": "Track",
       "playlist": "Playlist",
-      "library": "Library"
+      "library": "Library",
+      "item": "Item"
     },
     "list": {
       "searchPlaceholder": "Search {entity}…",
@@ -234,7 +235,7 @@
       "shareTitle": "Share \"{name}\"",
       "shareGrants": "Shared with users",
       "shareUrls": "Public links",
-      "shareWithUser": "Share with a user",
+      "unknownItem": "Untitled item",
       "user": "User",
       "createGrant": "Grant access",
       "revoke": "Revoke",
@@ -247,10 +248,21 @@
       "revokeConfirm": "Are you sure you want to revoke access for \"{user}\"?",
       "shareUrlCreated": "Public link created.",
       "sharedItem": "Shared {type}",
-      "sharedBy": "Shared by",
       "shareExpired": "This link has expired.",
       "shareRevoked": "This link has been revoked.",
-      "shareNotFound": "This shared item was not found."
+      "shareNotFound": "This shared item was not found.",
+      "createdAt": "Created",
+      "expiresAtInvalid": "Expiry must be in the future.",
+      "grantCreated": "Access granted.",
+      "grantCreateError": "Could not grant access: {message}",
+      "urlCreateError": "Could not create link: {message}",
+      "revokeError": "Could not revoke: {message}",
+      "rawToken": "Token",
+      "rawTokenHint": "Copy this token now — it cannot be displayed again.",
+      "revokeUrlConfirm": "Are you sure you want to revoke this public link?",
+      "emptyGrants": "Not shared with any users.",
+      "emptyUrls": "No public links.",
+      "openInApp": "Log in to open in the app"
     },
     "contextMenu": {
       "playNext": "Play next",

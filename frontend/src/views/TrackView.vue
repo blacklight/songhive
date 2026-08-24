@@ -8,10 +8,13 @@ import { getAlbum, type AlbumResponse } from "@/api/albums";
 import { getApiErrorMessage } from "@/api/client";
 import { usePlayerStore } from "@/stores/player";
 import { useEntityMeta } from "@/composables/useEntityMeta";
+import { useOwnership } from "@/composables/useOwnership";
+import { useShareDialog } from "@/composables/useShareDialog";
 import { toQueueTrack } from "@/player/enrich";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import ShareDialog from "@/components/share/ShareDialog.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -34,6 +37,8 @@ const queueTrack = computed(() => {
 });
 
 const { ownerName, visibilityText } = useEntityMeta(track);
+const { isOwner } = useOwnership(computed(() => track.value?.owner_id ?? null));
+const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 const durationText = computed(() =>
   track.value?.duration != null ? formatTime(track.value.duration) : "—",
@@ -153,11 +158,33 @@ watch(
           </div>
         </div>
 
-        <AppButton size="lg" :disabled="!queueTrack" @click="play">
-          {{ t("common.play") }}
-        </AppButton>
+        <div class="track-view__header-actions">
+          <AppButton size="lg" :disabled="!queueTrack" @click="play">
+            {{ t("common.play") }}
+          </AppButton>
+          <AppButton
+            v-if="isOwner"
+            size="lg"
+            variant="secondary"
+            @click="
+              track && openShare('track', track.id, track.title, track.owner_id)
+            "
+          >
+            {{ t("common.share") }}
+          </AppButton>
+        </div>
       </div>
     </template>
+
+    <ShareDialog
+      v-if="shareTarget"
+      :open="shareOpen"
+      :item-type="shareTarget.itemType"
+      :item-id="shareTarget.itemId"
+      :title="shareTarget.title"
+      :owner-id="shareTarget.ownerId"
+      @close="closeShare"
+    />
   </div>
 </template>
 
@@ -189,6 +216,12 @@ watch(
   justify-content: space-between;
   gap: var(--space-4);
   flex-wrap: wrap;
+}
+
+.track-view__header-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
 }
 
 .track-view__info {

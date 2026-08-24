@@ -14,10 +14,14 @@ import {
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useEntityMeta } from "@/composables/useEntityMeta";
+import { useOwnership } from "@/composables/useOwnership";
+import { useShareDialog } from "@/composables/useShareDialog";
 import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
+import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
+import ShareDialog from "@/components/share/ShareDialog.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -48,6 +52,14 @@ const { enrich: trackEnrich } = useTrackEnrichment(
   tracks,
   computed(() => library.value?.name ?? ""),
 );
+const { isOwner } = useOwnership(
+  computed(() => library.value?.owner_id ?? null),
+);
+const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
+
+function onTrackShare(track: QueueTrack) {
+  openShare("track", track.id, track.title, track.owner_id ?? null);
+}
 
 async function loadLibrary() {
   loading.value = true;
@@ -105,6 +117,19 @@ watch(
             {{ t("browse.detail.owner") }} {{ ownerName }}
           </span>
         </div>
+
+        <div class="library-detail-view__header-actions">
+          <AppButton
+            v-if="isOwner"
+            size="sm"
+            @click="
+              library &&
+              openShare('library', library.id, library.name, library.owner_id)
+            "
+          >
+            {{ t("common.share") }}
+          </AppButton>
+        </div>
       </div>
 
       <section
@@ -134,6 +159,7 @@ watch(
           :loading="tracksLoading"
           :context="library.name"
           :enrich="trackEnrich"
+          @share="onTrackShare"
         />
 
         <div class="library-detail-view__footer">
@@ -148,6 +174,16 @@ watch(
           </AppButton>
         </div>
       </section>
+
+      <ShareDialog
+        v-if="shareTarget"
+        :open="shareOpen"
+        :item-type="shareTarget.itemType"
+        :item-id="shareTarget.itemId"
+        :title="shareTarget.title"
+        :owner-id="shareTarget.ownerId"
+        @close="closeShare"
+      />
     </template>
   </div>
 </template>
@@ -198,6 +234,10 @@ watch(
   gap: var(--space-3);
   color: var(--color-text-muted);
   font-size: 0.875rem;
+}
+
+.library-detail-view__header-actions {
+  margin-top: var(--space-2);
 }
 
 .library-detail-view__section {

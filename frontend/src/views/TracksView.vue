@@ -2,15 +2,23 @@
 import { onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { useEntityList } from "@/composables/useEntityList";
+import { useShareDialog } from "@/composables/useShareDialog";
 import { listTracks, type TrackResponse } from "@/api/tracks";
+import type { QueueTrack } from "@/player/types";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import TrackList from "@/components/library/TrackList.vue";
+import ShareDialog from "@/components/share/ShareDialog.vue";
 
 const { t } = useI18n();
 const { items, loading, error, query, hasMore, load, loadMore, search, retry } =
   useEntityList<TrackResponse>(listTracks);
+const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
+
+function onTrackShare(track: QueueTrack) {
+  openShare("track", track.id, track.title, track.owner_id ?? null);
+}
 
 onMounted(() => load());
 </script>
@@ -40,7 +48,22 @@ onMounted(() => load());
       <AppButton size="sm" @click="retry">{{ t("common.retry") }}</AppButton>
     </div>
 
-    <TrackList v-else :tracks="items" :loading="loading" />
+    <TrackList
+      v-else
+      :tracks="items"
+      :loading="loading"
+      @share="onTrackShare"
+    />
+
+    <ShareDialog
+      v-if="shareTarget"
+      :open="shareOpen"
+      :item-type="shareTarget.itemType"
+      :item-id="shareTarget.itemId"
+      :title="shareTarget.title"
+      :owner-id="shareTarget.ownerId"
+      @close="closeShare"
+    />
 
     <div class="tracks-view__footer">
       <AppButton

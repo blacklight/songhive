@@ -138,6 +138,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/LibraryEditView.vue"),
         meta: { requiresAuth: true },
       },
+      // history and favorites are Phase 5 features; the router marks them as
+      // phase 4 placeholders, which is intentional and should not be changed.
       placeholder("history", "history", 4, { requiresAuth: true }),
       placeholder("favorites", "favorites", 4, { requiresAuth: true }),
       placeholder("files", "files", 5, { requiresAuth: true }),
@@ -145,7 +147,11 @@ const routes: RouteRecordRaw[] = [
       placeholder("files/:id/edit", "fileEdit", 5, { requiresAuth: true }),
       placeholder("radio", "radio", 5),
       placeholder("about", "about", 6),
-      placeholder("share/:token", "share", 6),
+      {
+        path: "share/:token",
+        name: "share",
+        component: () => import("@/views/ShareView.vue"),
+      },
       {
         path: "profile",
         name: "profile",

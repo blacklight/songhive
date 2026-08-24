@@ -11,11 +11,14 @@ import { listAlbums, type AlbumResponse } from "@/api/albums";
 import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import type { TrackEnrich } from "@/player/enrich";
+import { useShareDialog } from "@/composables/useShareDialog";
+import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AlbumCard from "@/components/library/AlbumCard.vue";
 import TrackList from "@/components/library/TrackList.vue";
+import ShareDialog from "@/components/share/ShareDialog.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -78,6 +81,12 @@ const trackEnrich = computed<Map<string, TrackEnrich>>(() => {
   }
   return map;
 });
+
+const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
+
+function onTrackShare(track: QueueTrack) {
+  openShare("track", track.id, track.title, track.owner_id ?? null);
+}
 
 async function loadArtist() {
   loading.value = true;
@@ -230,6 +239,7 @@ watch(
           :loading="tracksLoading"
           :context="artist.name"
           :enrich="trackEnrich"
+          @share="onTrackShare"
         />
 
         <div class="artist-view__footer">
@@ -245,6 +255,16 @@ watch(
         </div>
       </section>
     </template>
+
+    <ShareDialog
+      v-if="shareTarget"
+      :open="shareOpen"
+      :item-type="shareTarget.itemType"
+      :item-id="shareTarget.itemId"
+      :title="shareTarget.title"
+      :owner-id="shareTarget.ownerId"
+      @close="closeShare"
+    />
   </div>
 </template>
 

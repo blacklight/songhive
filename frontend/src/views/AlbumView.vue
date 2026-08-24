@@ -12,10 +12,14 @@ import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import type { TrackEnrich } from "@/player/enrich";
 import { useEntityMeta } from "@/composables/useEntityMeta";
+import { useOwnership } from "@/composables/useOwnership";
+import { useShareDialog } from "@/composables/useShareDialog";
+import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
+import ShareDialog from "@/components/share/ShareDialog.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -58,6 +62,12 @@ const trackEnrich = computed<Map<string, TrackEnrich>>(() => {
 });
 
 const { ownerName, visibilityText } = useEntityMeta(album);
+const { isOwner } = useOwnership(computed(() => album.value?.owner_id ?? null));
+const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
+
+function onTrackShare(track: QueueTrack) {
+  openShare("track", track.id, track.title, track.owner_id ?? null);
+}
 
 async function loadAlbum() {
   loading.value = true;
@@ -153,6 +163,16 @@ watch(
           <p v-if="album.description" class="album-view__description">
             {{ album.description }}
           </p>
+
+          <div class="album-view__header-actions">
+            <AppButton
+              v-if="isOwner"
+              size="sm"
+              @click="openShare('album', album.id, album.title, album.owner_id)"
+            >
+              {{ t("common.share") }}
+            </AppButton>
+          </div>
         </div>
       </div>
 
@@ -177,6 +197,7 @@ watch(
           :context="artistName"
           :enrich="trackEnrich"
           :show-artwork="true"
+          @share="onTrackShare"
         />
 
         <div class="album-view__footer">
@@ -192,6 +213,16 @@ watch(
         </div>
       </section>
     </template>
+
+    <ShareDialog
+      v-if="shareTarget"
+      :open="shareOpen"
+      :item-type="shareTarget.itemType"
+      :item-id="shareTarget.itemId"
+      :title="shareTarget.title"
+      :owner-id="shareTarget.ownerId"
+      @close="closeShare"
+    />
   </div>
 </template>
 
@@ -267,6 +298,10 @@ watch(
   margin: var(--space-2) 0 0;
   color: var(--color-text-muted);
   max-width: 40rem;
+}
+
+.album-view__header-actions {
+  margin-top: var(--space-2);
 }
 
 .album-view__section {

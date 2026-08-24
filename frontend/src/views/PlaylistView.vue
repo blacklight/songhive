@@ -5,9 +5,12 @@ import { useRoute } from "vue-router";
 import { getPlaylist, type PlaylistResponse } from "@/api/playlists";
 import { getApiErrorMessage } from "@/api/client";
 import { useEntityMeta } from "@/composables/useEntityMeta";
+import { useOwnership } from "@/composables/useOwnership";
+import { useShareDialog } from "@/composables/useShareDialog";
 import AppBanner from "@/components/feedback/AppBanner.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import ShareDialog from "@/components/share/ShareDialog.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -18,6 +21,10 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const { ownerName, visibilityText } = useEntityMeta(playlist);
+const { isOwner } = useOwnership(
+  computed(() => playlist.value?.owner_id ?? null),
+);
+const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 async function load() {
   loading.value = true;
@@ -69,9 +76,37 @@ watch(
             {{ t("browse.detail.owner") }} {{ ownerName }}
           </span>
         </div>
+
+        <div class="playlist-view__header-actions">
+          <AppButton
+            v-if="isOwner"
+            size="sm"
+            @click="
+              playlist &&
+              openShare(
+                'playlist',
+                playlist.id,
+                playlist.name,
+                playlist.owner_id,
+              )
+            "
+          >
+            {{ t("common.share") }}
+          </AppButton>
+        </div>
       </div>
 
       <AppBanner type="info" :title="t('browse.playlist.empty')" />
+
+      <ShareDialog
+        v-if="shareTarget"
+        :open="shareOpen"
+        :item-type="shareTarget.itemType"
+        :item-id="shareTarget.itemId"
+        :title="shareTarget.title"
+        :owner-id="shareTarget.ownerId"
+        @close="closeShare"
+      />
     </template>
   </div>
 </template>
@@ -121,5 +156,9 @@ watch(
   gap: var(--space-3);
   color: var(--color-text-muted);
   font-size: 0.875rem;
+}
+
+.playlist-view__header-actions {
+  margin-top: var(--space-2);
 }
 </style>

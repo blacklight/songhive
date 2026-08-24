@@ -22,14 +22,17 @@ import type { TrackResponse } from "@/api/tracks";
 import { toVisibility } from "@/utils/entity";
 import { getApiErrorMessage } from "@/api/client";
 import { useOwnership } from "@/composables/useOwnership";
+import { useShareDialog } from "@/composables/useShareDialog";
 import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
+import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
+import ShareDialog from "@/components/share/ShareDialog.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -90,6 +93,11 @@ const { enrich: trackEnrich } = useTrackEnrichment(
   tracks,
   computed(() => library.value?.name ?? ""),
 );
+const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
+
+function onTrackShare(track: QueueTrack) {
+  openShare("track", track.id, track.title, track.owner_id ?? null);
+}
 
 function resetForm() {
   name.value = library.value?.name ?? "";
@@ -456,6 +464,7 @@ watch(
           :loading="tracksLoading"
           :context="library.name"
           :enrich="trackEnrich"
+          @share="onTrackShare"
         />
 
         <div class="library-edit-view__footer">
@@ -471,6 +480,16 @@ watch(
         </div>
       </section>
     </template>
+
+    <ShareDialog
+      v-if="shareTarget"
+      :open="shareOpen"
+      :item-type="shareTarget.itemType"
+      :item-id="shareTarget.itemId"
+      :title="shareTarget.title"
+      :owner-id="shareTarget.ownerId"
+      @close="closeShare"
+    />
   </div>
 </template>
 
