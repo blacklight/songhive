@@ -55,6 +55,40 @@ steps:
     - pip install -e . -r requirements-dev.txt
     - python -m pytest --cov=songhive --cov-report=term-missing --cov-report=xml
 
+###
+### Frontend Lint
+###
+
+- name: frontend-lint
+  image: node:20
+  commands:
+    - cd frontend && npm ci && npm run lint
+  when:
+    event:
+      - push
+    paths:
+      include:
+        - frontend/**
+
+###
+### Frontend tests
+###
+
+- name: frontend-tests
+  image: node:20
+  commands:
+    - cd frontend && npm ci && npm run test
+  when:
+    event:
+      - push
+    paths:
+      include:
+        - frontend/**
+
+###
+### Upload test coverage to Codacy
+###
+
 - name: codacy-coverage
   image: python:3.12
   depends_on:
