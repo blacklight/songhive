@@ -50,3 +50,16 @@ export async function initializeI18n(): Promise<void> {
   }
   i18n.global.locale.value = initial as "en";
 }
+
+export function formatDateTime(
+  value: string | Date | number | null | undefined,
+  locale?: string,
+): string {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(locale || (i18n.global.locale.value as string), {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}

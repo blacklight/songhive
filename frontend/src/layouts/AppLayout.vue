@@ -1,15 +1,27 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { RouterLink, RouterView } from "vue-router";
+import { RouterLink, RouterView, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppToast from "@/components/feedback/AppToast.vue";
+import AppAvatar from "@/components/ui/AppAvatar.vue";
 import PlayerBarSlot from "@/components/player/PlayerBarSlot.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
+const router = useRouter();
 const isMobileMenuOpen = ref(false);
+
+const displayName = computed(() => {
+  if (!authStore.user) return "";
+  return authStore.user.display_name || authStore.user.username;
+});
+
+async function logout() {
+  await authStore.logout();
+  await router.push("/login");
+}
 
 function toggleMenu() {
   isMobileMenuOpen.value = !isMobileMenuOpen.value;
@@ -29,7 +41,6 @@ const navItems = computed<NavItem[]>(() => [
   { name: t("nav.files"), to: "/files", requiresAuth: true },
   { name: t("nav.radio"), to: "/radio", requiresAuth: true },
   { name: t("nav.about"), to: "/about", requiresAuth: false },
-  { name: t("nav.profile"), to: "/profile", requiresAuth: true },
 ]);
 
 const visibleNavItems = computed(() =>
@@ -79,6 +90,29 @@ const loginItem = { name: t("nav.login"), to: "/login" };
         >
           {{ loginItem.name }}
         </RouterLink>
+      </footer>
+
+      <footer v-else class="app-layout__menu-footer">
+        <RouterLink
+          :to="{ name: 'profile' }"
+          class="app-layout__user"
+          @click="isMobileMenuOpen = false"
+        >
+          <AppAvatar
+            :src="authStore.user?.avatar_url || ''"
+            :name="displayName"
+            size="sm"
+          />
+          <span class="app-layout__user-name">{{ displayName }}</span>
+        </RouterLink>
+        <AppButton
+          variant="ghost"
+          size="sm"
+          class="app-layout__logout"
+          @click="logout"
+        >
+          {{ t("auth.logout") }}
+        </AppButton>
       </footer>
     </aside>
     <main id="main" class="app-layout__main" role="main">
@@ -191,6 +225,37 @@ const loginItem = { name: t("nav.login"), to: "/login" };
 
 .app-layout__login:hover {
   filter: brightness(0.95);
+}
+
+.app-layout__user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--color-text-menu);
+  text-decoration: none;
+  font-weight: 500;
+  transition: background-color var(--transition-fast);
+}
+
+.app-layout__user:hover,
+.app-layout__user.router-link-active {
+  background-color: var(--color-surface-raised);
+  color: var(--color-accent-contrast);
+}
+
+.app-layout__user-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-layout__logout {
+  width: 100%;
+  margin-top: 0;
+  color: var(--color-text-menu);
+  justify-content: flex-start;
 }
 
 .app-layout__main {

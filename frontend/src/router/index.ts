@@ -25,16 +25,36 @@ function placeholder(
 const isRegistrationOpen = import.meta.env.VITE_REGISTRATION_OPEN !== "false";
 
 const authChildren: RouteRecordRaw[] = [
-  placeholder("login", "login", 2),
-  placeholder("password-reset", "passwordReset", 2),
-  placeholder("password-reset/confirm", "passwordResetConfirm", 2),
-  placeholder("verify-email", "verifyEmail", 2),
+  {
+    path: "login",
+    name: "login",
+    component: () => import("@/views/LoginView.vue"),
+  },
+  {
+    path: "password-reset",
+    name: "passwordReset",
+    component: () => import("@/views/PasswordResetView.vue"),
+  },
+  {
+    path: "password-reset/confirm",
+    name: "passwordResetConfirm",
+    component: () => import("@/views/PasswordResetConfirmView.vue"),
+  },
+  {
+    path: "verify-email",
+    name: "verifyEmail",
+    component: () => import("@/views/VerifyEmailView.vue"),
+  },
 ];
 
 // Interim: registration route is gated by a build-time env var until the
 // backend exposes a public instance-info endpoint.
 if (isRegistrationOpen) {
-  authChildren.push(placeholder("register", "register", 2));
+  authChildren.push({
+    path: "register",
+    name: "register",
+    component: () => import("@/views/RegisterView.vue"),
+  });
 }
 
 const routes: RouteRecordRaw[] = [
@@ -73,7 +93,12 @@ const routes: RouteRecordRaw[] = [
       placeholder("radio", "radio", 5),
       placeholder("about", "about", 6),
       placeholder("share/:token", "share", 6),
-      placeholder("profile", "profile", 2, { requiresAuth: true }),
+      {
+        path: "profile",
+        name: "profile",
+        component: () => import("@/views/ProfileView.vue"),
+        meta: { requiresAuth: true },
+      },
     ],
   },
   {

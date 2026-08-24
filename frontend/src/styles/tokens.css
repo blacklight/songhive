@@ -7,7 +7,7 @@
   --color-bg-menu: #1f2937;
   --color-text-menu: #f9fafb;
   --color-surface: #ffffff;
-  --color-surface-raised: #fff0e0;
+  --color-surface-raised: #fbc775;
   --color-text: #111827;
   --color-text-muted: #6b7280;
   --color-border: #d1d5db;
@@ -59,6 +59,8 @@
 [data-theme="dark"] {
   --accent: #fcd34d;
   --color-bg: #1f2937;
+  --color-bg-menu: #2f3937;
+  --color-text-menu: #f9fafb;
   --color-surface: #374151;
   --color-surface-raised: #4b5563;
   --color-text: #f9fafb;

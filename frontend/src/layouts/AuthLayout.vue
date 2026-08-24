@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RouterView } from "vue-router";
+import AppToast from "@/components/feedback/AppToast.vue";
 </script>
 
 <template>
@@ -9,6 +10,7 @@ import { RouterView } from "vue-router";
       <RouterView />
     </div>
   </div>
+  <AppToast />
 </template>
 
 <style scoped>

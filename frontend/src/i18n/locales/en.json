@@ -9,6 +9,7 @@
     "error": "Error",
     "retry": "Retry",
     "search": "Search",
+    "copy": "Copy",
     "notFound": "Not found",
     "forbidden": "Forbidden"
   },
@@ -24,7 +25,55 @@
     "register": "Register",
     "email": "Email",
     "password": "Password",
-    "username": "Username"
+    "username": "Username",
+    "loginPage": {
+      "title": "Log in",
+      "usernameOrEmail": "Username or email",
+      "password": "Password",
+      "submit": "Log in",
+      "failed": "Invalid username or password.",
+      "emailNotVerified": "Your email address has not been verified.",
+      "forgotPassword": "Forgot password?",
+      "noAccount": "Don't have an account? Register"
+    },
+    "registerPage": {
+      "title": "Register",
+      "username": "Username",
+      "email": "Email",
+      "password": "Password",
+      "confirmPassword": "Confirm password",
+      "displayName": "Display name",
+      "displayNameHint": "Optional name shown on your public profile",
+      "inviteCode": "Invite code",
+      "inviteCodeHint": "Required if this instance requires invitations",
+      "submit": "Register",
+      "success": "Registration successful. Please log in.",
+      "emailVerificationNotice": "Please check your inbox to verify your email address.",
+      "passwordMismatch": "Passwords do not match.",
+      "haveAccount": "Already have an account? Log in"
+    },
+    "passwordReset": {
+      "requestTitle": "Reset password",
+      "requestHint": "Enter your username or email and we'll send you a reset link if an account exists.",
+      "usernameOrEmail": "Username or email",
+      "requestSubmit": "Send reset link",
+      "requestSuccess": "If an account exists, a reset link has been sent to its email address.",
+      "backToLogin": "Back to log in",
+      "confirmTitle": "Set new password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm new password",
+      "confirmSubmit": "Reset password",
+      "confirmSuccess": "Your password has been updated. Please log in.",
+      "invalidToken": "This reset link is invalid or has expired.",
+      "passwordMismatch": "Passwords do not match."
+    },
+    "verifyEmail": {
+      "title": "Verify email",
+      "verifying": "Verifying your email address…",
+      "success": "Your email address has been verified. You can now log in.",
+      "invalidToken": "This verification link is invalid or has expired.",
+      "backToLogin": "Back to log in"
+    }
   },
   "nav": {
     "home": "Home",
@@ -51,5 +100,50 @@
     "placeholder": "Page {name} — coming in Phase {phase}",
     "goHome": "Go home",
     "goLogin": "Log in"
+  },
+  "profile": {
+    "title": "Profile",
+    "tabs": {
+      "profile": "Profile",
+      "apiTokens": "API Tokens",
+      "sessions": "Sessions"
+    },
+    "displayName": "Display name",
+    "bio": "Bio",
+    "avatar": "Avatar",
+    "avatarUrl": "Avatar URL",
+    "avatarUpload": "Upload avatar",
+    "links": "Links",
+    "linksHint": "rel=\"me\" links (e.g. your website or social profile)",
+    "addLink": "Add link",
+    "linkName": "Name",
+    "linkUrl": "URL",
+    "removeLink": "Remove",
+    "save": "Save",
+    "saveSuccess": "Profile saved.",
+    "saveError": "Could not save profile: {message}",
+    "passwordChange": "Change password",
+    "passwordChangeDisabled": "Password changes are not available yet.",
+    "resendVerification": "Resend verification email",
+    "resendVerificationDisabled": "Resending verification emails is not available yet.",
+    "deleteAccount": "Delete account",
+    "deleteAccountDisabled": "Account deletion is not available yet.",
+    "apiTokens": {
+      "create": "Create token",
+      "name": "Name",
+      "nameHint": "A descriptive name for this token",
+      "expiresAt": "Expires at",
+      "expiresAtHint": "Optional. Leave blank for a token that never expires.",
+      "tokenCopied": "Token copied to clipboard.",
+      "rawTokenHint": "Copy this token now — it cannot be displayed again.",
+      "revoke": "Revoke",
+      "empty": "You have no API tokens.",
+      "createdAt": "Created",
+      "lastUsedAt": "Last used",
+      "never": "Never"
+    },
+    "sessions": {
+      "disabled": "Session management is not available yet."
+    }
   }
 }

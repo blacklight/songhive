@@ -86,7 +86,7 @@ async function performRefresh(): Promise<boolean> {
   return inFlightRefresh;
 }
 
-function getAuthHeader(): string | null {
+export function getAuthHeader(): string | null {
   if (!tokenProvider) return null;
   const token = tokenProvider();
   return token ? `Bearer ${token}` : null;

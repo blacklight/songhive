@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import * as authApi from "@/api/auth";
 import * as usersApi from "@/api/users";
 import {
+  ApiError,
   setLogoutHandler,
   setRefreshHandler,
   setTokenProvider,
@@ -85,8 +86,11 @@ export const useAuthStore = defineStore("auth", () => {
       setTokens(data.access_token, data.refresh_token, data.expires_in);
       await fetchProfile();
       status.value = "authenticated";
-    } catch {
+    } catch (err) {
       status.value = "error";
+      if (err instanceof ApiError) {
+        throw err;
+      }
       throw new Error("Login failed");
     }
   }
