@@ -1,0 +1,339 @@
+<script setup lang="ts">
+import { ref, useTemplateRef, watch, type ComponentPublicInstance } from "vue";
+import { usePlayerStore } from "@/stores/player";
+import AppButton from "@/components/ui/AppButton.vue";
+import NowPlaying from "./NowPlaying.vue";
+import PlayerControls from "./PlayerControls.vue";
+import ProgressBar from "./ProgressBar.vue";
+import VolumeControl from "./VolumeControl.vue";
+import QueuePanel from "./QueuePanel.vue";
+import { useMediaSession } from "@/composables/useMediaSession";
+
+const store = usePlayerStore();
+const expanded = ref(false);
+const queueOpen = ref(false);
+const queueToggleRef = useTemplateRef<ComponentPublicInstance>("queueToggle");
+const expandedQueueToggleRef = useTemplateRef<ComponentPublicInstance>("expandedQueueToggle");
+
+useMediaSession();
+
+function toggleExpanded() {
+  expanded.value = !expanded.value;
+}
+
+function toggleQueue() {
+  queueOpen.value = !queueOpen.value;
+}
+
+function closeQueue() {
+  queueOpen.value = false;
+}
+
+watch(
+  () => store.currentTrack,
+  () => {
+    if (!store.currentTrack) {
+      expanded.value = false;
+      queueOpen.value = false;
+    }
+  },
+);
+
+function queueReturnTarget() {
+  return expanded.value ? expandedQueueToggleRef.value : queueToggleRef.value;
+}
+</script>
+
+<template>
+  <div
+    v-if="store.currentTrack"
+    class="player-bar"
+    :class="{ 'player-bar--expanded': expanded }"
+    role="region"
+    aria-label="Player"
+  >
+    <QueuePanel
+      :open="queueOpen"
+      :return-focus-to="queueReturnTarget()"
+      @close="closeQueue"
+    />
+
+    <div class="player-bar__full">
+      <div class="player-bar__left">
+        <NowPlaying />
+      </div>
+
+      <div class="player-bar__center">
+        <PlayerControls />
+        <ProgressBar />
+      </div>
+
+      <div class="player-bar__right">
+        <VolumeControl />
+        <AppButton
+          ref="queueToggle"
+          variant="ghost"
+          size="sm"
+          class="player-bar__queue-toggle"
+          :aria-label="queueOpen ? 'Close queue' : 'Open queue'"
+          :aria-pressed="queueOpen"
+          @click="toggleQueue"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+          </svg>
+        </AppButton>
+      </div>
+    </div>
+
+    <div class="player-bar__mini">
+      <button
+        class="player-bar__mini-info"
+        aria-label="Expand player"
+        @click="toggleExpanded"
+      >
+        <NowPlaying mini />
+      </button>
+
+      <div class="player-bar__mini-controls">
+        <AppButton
+          variant="ghost"
+          size="sm"
+          class="player-bar__mini-play"
+          :aria-label="store.isPlaying ? 'Pause' : 'Play'"
+          @click="store.isPlaying ? store.pause() : store.play()"
+        >
+          <svg
+            v-if="store.isPlaying"
+            viewBox="0 0 24 24"
+            width="24"
+            height="24"
+            aria-hidden="true"
+          >
+            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+          </svg>
+          <svg
+            v-else
+            viewBox="0 0 24 24"
+            width="24"
+            height="24"
+            aria-hidden="true"
+          >
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        </AppButton>
+
+        <AppButton
+          variant="ghost"
+          size="sm"
+          class="player-bar__mini-next"
+          aria-label="Next track"
+          :disabled="!store.hasNext && store.repeat === 'off'"
+          @click="store.next"
+        >
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+            <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+          </svg>
+        </AppButton>
+      </div>
+    </div>
+
+    <div class="player-bar__expanded">
+      <div class="player-bar__expanded-header">
+        <NowPlaying />
+        <AppButton
+          variant="ghost"
+          size="sm"
+          class="player-bar__collapse"
+          aria-label="Collapse player"
+          @click="toggleExpanded"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path
+              d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
+            />
+          </svg>
+        </AppButton>
+      </div>
+
+      <div class="player-bar__expanded-body">
+        <PlayerControls />
+        <ProgressBar />
+        <div class="player-bar__expanded-bottom">
+          <VolumeControl />
+          <AppButton
+            ref="expandedQueueToggle"
+            variant="ghost"
+            size="sm"
+            class="player-bar__queue-toggle"
+            :aria-label="queueOpen ? 'Close queue' : 'Open queue'"
+            :aria-pressed="queueOpen"
+            @click="toggleQueue"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+            </svg>
+          </AppButton>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.player-bar {
+  --player-bar-height: 5rem;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--player-bar-height);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  z-index: var(--z-player);
+  transition: height var(--transition-base);
+  overflow: hidden;
+}
+
+.player-bar--expanded {
+  --player-bar-height: 13rem;
+}
+
+.player-bar__full,
+.player-bar__mini {
+  display: flex;
+  align-items: center;
+  height: var(--player-bar-height, 5rem);
+  padding: 0 var(--space-4);
+  gap: var(--space-4);
+}
+
+.player-bar__full {
+  display: grid;
+  grid-template-columns: 1fr 2fr 1fr;
+  align-items: center;
+}
+
+.player-bar__left,
+.player-bar__right {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.player-bar__left {
+  justify-content: flex-start;
+}
+
+.player-bar__center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.player-bar__right {
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.player-bar__mini {
+  display: none;
+  justify-content: space-between;
+  padding: 0 var(--space-3);
+}
+
+.player-bar__mini-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.player-bar__mini-info:hover {
+  color: var(--color-accent);
+}
+
+.player-bar__mini-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.player-bar__expanded {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.player-bar__expanded-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--player-bar-height, 5rem);
+  padding: 0 var(--space-3);
+}
+
+.player-bar__expanded-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  flex: 1;
+  padding: 0 var(--space-4);
+}
+
+.player-bar__expanded-bottom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 24rem;
+  justify-content: center;
+}
+
+.player-bar__expanded-bottom .volume-control {
+  flex: 1;
+  width: auto;
+}
+
+@media (max-width: 767px) {
+  .player-bar__full {
+    display: none;
+  }
+
+  .player-bar__mini {
+    display: flex;
+  }
+
+  .player-bar--expanded .player-bar__mini,
+  .player-bar--expanded .player-bar__full {
+    display: none;
+  }
+
+  .player-bar--expanded .player-bar__expanded {
+    display: flex;
+  }
+
+  .player-bar__queue-toggle,
+  .player-bar__collapse {
+    flex-shrink: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-bar {
+    transition: none;
+  }
+}
+</style>

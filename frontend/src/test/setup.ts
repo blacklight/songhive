@@ -57,6 +57,56 @@ Object.defineProperty(window, "IntersectionObserver", {
   })),
 });
 
+function defineMediaProperty(
+  name: string,
+  defaultValue: unknown,
+  writable = true,
+) {
+  Object.defineProperty(window.HTMLMediaElement.prototype, name, {
+    configurable: true,
+    get(this: HTMLMediaElement & Record<string, unknown>) {
+      return this[`__${name}`] ?? defaultValue;
+    },
+    set: writable
+      ? function (this: HTMLMediaElement & Record<string, unknown>, value: unknown) {
+          this[`__${name}`] = value;
+        }
+      : undefined,
+  });
+}
+
+if (!("HTMLMediaElement" in window)) {
+  Object.defineProperty(window, "HTMLMediaElement", {
+    writable: true,
+    value: function HTMLMediaElement() {},
+  });
+}
+
+Object.setPrototypeOf(
+  window.HTMLMediaElement.prototype,
+  window.HTMLElement.prototype,
+);
+
+defineMediaProperty("src", "");
+defineMediaProperty("currentTime", 0);
+defineMediaProperty("duration", NaN);
+defineMediaProperty("paused", true);
+defineMediaProperty("volume", 1);
+defineMediaProperty("muted", false);
+
+Object.defineProperty(window.HTMLMediaElement.prototype, "play", {
+  writable: true,
+  value: vi.fn(() => Promise.resolve()),
+});
+Object.defineProperty(window.HTMLMediaElement.prototype, "pause", {
+  writable: true,
+  value: vi.fn(),
+});
+Object.defineProperty(window.HTMLMediaElement.prototype, "load", {
+  writable: true,
+  value: vi.fn(),
+});
+
 beforeEach(() => {
   localStorage.clear();
 });

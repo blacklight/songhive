@@ -54,6 +54,7 @@
   --sidebar-width: 16rem;
   --sidebar-collapsed-width: 3rem;
   --header-height: 4rem;
+  --player-bar-height: 5rem;
 }
 
 [data-theme="dark"] {

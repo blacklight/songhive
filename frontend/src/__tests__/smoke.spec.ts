@@ -8,6 +8,8 @@ describe("smoke", () => {
       await import("@/stores/theme");
       await import("@/components/feedback/AppToast.vue");
       await import("@/components/ui/AppButton.vue");
+      await import("@/components/player/PlayerBar.vue");
+      await import("@/components/player/PlayerBarSlot.vue");
     }).not.toThrow();
   });
 });
