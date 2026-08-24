@@ -123,4 +123,52 @@ describe("apiRequest", () => {
       expect(error.detail).toBe("bad");
     }
   });
+
+  it("does not send auth or trigger refresh when skipAuth is set", async () => {
+    const refresh = vi.fn().mockResolvedValue(true);
+    const logout = vi.fn();
+    setRefreshHandler(refresh);
+    setLogoutHandler(logout);
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 401,
+      ok: false,
+      statusText: "Unauthorized",
+      text: () => Promise.resolve('{"detail":"no auth"}'),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      apiRequest("/test", { skipAuth: true }),
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.has("Authorization")).toBe(false);
+  });
+
+  it("logs out when the retried request is still 401", async () => {
+    const logout = vi.fn();
+    setLogoutHandler(logout);
+    let calls = 0;
+    vi.stubGlobal("fetch", () => {
+      calls += 1;
+      return Promise.resolve({
+        status: 401,
+        ok: false,
+        statusText: "Unauthorized",
+        text: () =>
+          Promise.resolve(
+            calls === 1
+              ? '{"detail":"expired"}'
+              : '{"detail":"rejected after refresh"}',
+          ),
+      });
+    });
+
+    await expect(apiRequest("/test")).rejects.toBeInstanceOf(ApiError);
+    expect(logout).toHaveBeenCalled();
+  });
 });

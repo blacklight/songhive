@@ -144,6 +144,12 @@ export async function apiRequest<T>(
       headers: retryHeaders,
     });
 
+    if (retry.status === 401) {
+      if (logoutHandler) logoutHandler();
+      const body = await safeReadBody(retry);
+      throw await ApiError.fromResponse(retry, body);
+    }
+
     return handleResponse<T>(retry);
   }
 
