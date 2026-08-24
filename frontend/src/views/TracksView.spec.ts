@@ -85,6 +85,28 @@ describe("TracksView", () => {
     );
   });
 
+  it("shows an error banner with a retry button", async () => {
+    vi.mocked(tracksApi.listTracks).mockRejectedValue(
+      new Error("network failure"),
+    );
+
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("network failure");
+
+    vi.mocked(tracksApi.listTracks).mockResolvedValue([
+      createTrack("track-1", "Song One"),
+    ]);
+    await wrapper.find("button").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Song One");
+    expect(wrapper.text()).not.toContain("network failure");
+  });
+
   it("debounces search and resets the list", async () => {
     const fetcher = vi.mocked(tracksApi.listTracks);
     fetcher

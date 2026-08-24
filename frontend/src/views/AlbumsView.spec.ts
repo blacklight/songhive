@@ -79,6 +79,28 @@ describe("AlbumsView", () => {
     );
   });
 
+  it("shows an error banner with a retry button", async () => {
+    vi.mocked(albumsApi.listAlbums).mockRejectedValue(
+      new Error("network failure"),
+    );
+
+    wrapper = mount(AlbumsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("network failure");
+
+    vi.mocked(albumsApi.listAlbums).mockResolvedValue([
+      createAlbum("album-1", "Meadowland"),
+    ]);
+    await wrapper.find("button").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Meadowland");
+    expect(wrapper.text()).not.toContain("network failure");
+  });
+
   it("debounces search and resets the list", async () => {
     const fetcher = vi.mocked(albumsApi.listAlbums);
     fetcher

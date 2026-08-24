@@ -94,12 +94,16 @@ async function onCreate() {
 <template>
   <div class="library-view">
     <div class="library-view__header">
-      <h1 class="library-view__title">{{ t("nav.library") }}</h1>
+      <h1 class="library-view__title">{{ t("nav.libraries") }}</h1>
       <AppButton v-if="canCreate" size="sm" @click="openCreate">
         {{ t("browse.list.createLibrary") }}
       </AppButton>
     </div>
 
+    <!--
+      :debounce="0" avoids stacking with useEntityList's 300 ms debounce;
+      the composable owns the real debounce.
+    -->
     <SearchBar
       :model-value="query"
       :debounce="0"

@@ -128,6 +128,39 @@ describe("PlaylistsView", () => {
     expect(wrapper.text()).not.toContain("First Playlist");
   });
 
+  it("loads the next page", async () => {
+    const fetcher = vi.mocked(playlistsApi.listPlaylists);
+    fetcher
+      .mockResolvedValueOnce(
+        Array.from({ length: 20 }, (_, i) =>
+          createPlaylist(`playlist-${i}`, `Playlist ${i}`),
+        ),
+      )
+      .mockResolvedValueOnce([createPlaylist("playlist-20", "Playlist 20")]);
+
+    wrapper = mount(PlaylistsView, {
+      attachTo: document.body,
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const loadMore = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.list.loadMore"));
+    expect(loadMore).toBeDefined();
+
+    await loadMore?.trigger("click");
+    await flushPromises();
+
+    expect(fetcher).toHaveBeenLastCalledWith({
+      q: "",
+      limit: 20,
+      offset: 20,
+    });
+    expect(wrapper.text()).toContain("Playlist 19");
+    expect(wrapper.text()).toContain("Playlist 20");
+  });
+
   it("creates a playlist and refreshes the list", async () => {
     setAuthenticated();
     const fetcher = vi.mocked(playlistsApi.listPlaylists);

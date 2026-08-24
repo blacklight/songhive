@@ -100,6 +100,10 @@ async function onCreate() {
       </AppButton>
     </div>
 
+    <!--
+      :debounce="0" avoids stacking with useEntityList's 300 ms debounce;
+      the composable owns the real debounce.
+    -->
     <SearchBar
       :model-value="query"
       :debounce="0"

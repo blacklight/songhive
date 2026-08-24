@@ -19,6 +19,10 @@ onMounted(() => load());
   <div class="tracks-view">
     <h1 class="tracks-view__title">{{ t("nav.tracks") }}</h1>
 
+    <!--
+      :debounce="0" avoids stacking with useEntityList's 300 ms debounce;
+      the composable owns the real debounce.
+    -->
     <SearchBar
       :model-value="query"
       :debounce="0"
@@ -36,14 +40,7 @@ onMounted(() => load());
       <AppButton size="sm" @click="retry">{{ t("common.retry") }}</AppButton>
     </div>
 
-    <TrackList
-      v-else
-      :tracks="items"
-      :loading="loading"
-      :empty-label="
-        t('browse.list.empty', { entity: t('browse.entities.tracks') })
-      "
-    />
+    <TrackList v-else :tracks="items" :loading="loading" />
 
     <div class="tracks-view__footer">
       <AppButton

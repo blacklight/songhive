@@ -126,6 +126,39 @@ describe("LibraryView", () => {
     expect(wrapper.text()).not.toContain("First Library");
   });
 
+  it("loads the next page", async () => {
+    const fetcher = vi.mocked(librariesApi.listLibraries);
+    fetcher
+      .mockResolvedValueOnce(
+        Array.from({ length: 20 }, (_, i) =>
+          createLibrary(`library-${i}`, `Library ${i}`),
+        ),
+      )
+      .mockResolvedValueOnce([createLibrary("library-20", "Library 20")]);
+
+    wrapper = mount(LibraryView, {
+      attachTo: document.body,
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const loadMore = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.list.loadMore"));
+    expect(loadMore).toBeDefined();
+
+    await loadMore?.trigger("click");
+    await flushPromises();
+
+    expect(fetcher).toHaveBeenLastCalledWith({
+      q: "",
+      limit: 20,
+      offset: 20,
+    });
+    expect(wrapper.text()).toContain("Library 19");
+    expect(wrapper.text()).toContain("Library 20");
+  });
+
   it("creates a library and refreshes the list", async () => {
     setAuthenticated();
     const fetcher = vi.mocked(librariesApi.listLibraries);

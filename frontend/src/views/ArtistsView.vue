@@ -20,6 +20,10 @@ onMounted(() => load());
   <div class="artists-view">
     <h1 class="artists-view__title">{{ t("nav.artists") }}</h1>
 
+    <!--
+      :debounce="0" avoids stacking with useEntityList's 300 ms debounce;
+      the composable owns the real debounce.
+    -->
     <SearchBar
       :model-value="query"
       :debounce="0"
