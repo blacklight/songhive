@@ -29,3 +29,12 @@ repos:
     rev: 24.10.0
     hooks:
     -   id: black
+
+-   repo: local
+    hooks:
+    -   id: prettier-frontend
+        name: prettier (frontend/src)
+        language: system
+        files: ^frontend/src/
+        entry: frontend/node_modules/.bin/prettier
+        args: ['--ignore-unknown', '--write']
