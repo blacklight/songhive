@@ -31,29 +31,43 @@ export type ApiTokenCreateResponse =
   paths["/api/v1/auth/api-tokens"]["post"]["responses"]["201"]["content"]["application/json"];
 
 export function login(body: LoginRequest): Promise<TokenPairResponse> {
-  return apiRequest<TokenPairResponse>("/auth/login", { method: "POST", body });
+  return apiRequest<TokenPairResponse>("/auth/login", {
+    method: "POST",
+    body,
+    skipAuth: true,
+  });
 }
 
 export function refresh(body: RefreshRequest): Promise<TokenPairResponse> {
   return apiRequest<TokenPairResponse>("/auth/refresh", {
     method: "POST",
     body,
+    skipAuth: true,
   });
 }
 
 export function logout(body: LogoutRequest): Promise<LogoutResponse> {
-  return apiRequest<LogoutResponse>("/auth/logout", { method: "POST", body });
+  return apiRequest<LogoutResponse>("/auth/logout", {
+    method: "POST",
+    body,
+    skipAuth: true,
+  });
 }
 
 export function register(body: RegisterRequest): Promise<RegisterResponse> {
   return apiRequest<RegisterResponse>("/auth/register", {
     method: "POST",
     body,
+    skipAuth: true,
   });
 }
 
 export function verifyEmail(body: VerifyEmailRequest): Promise<unknown> {
-  return apiRequest<unknown>("/auth/verify-email", { method: "POST", body });
+  return apiRequest<unknown>("/auth/verify-email", {
+    method: "POST",
+    body,
+    skipAuth: true,
+  });
 }
 
 export function passwordResetRequest(
@@ -62,6 +76,7 @@ export function passwordResetRequest(
   return apiRequest<unknown>("/auth/password-reset/request", {
     method: "POST",
     body,
+    skipAuth: true,
   });
 }
 
@@ -71,6 +86,7 @@ export function passwordResetConfirm(
   return apiRequest<unknown>("/auth/password-reset/confirm", {
     method: "POST",
     body,
+    skipAuth: true,
   });
 }
 
