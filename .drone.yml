@@ -76,7 +76,7 @@ steps:
 - name: frontend-lint
   image: node:20
   commands:
-    - cd frontend && npm ci && npm run lint
+    - cd frontend && npm ci && npm run lint && ./node_modules/.bin/prettier --check src
   when:
     event:
       - push
