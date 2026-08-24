@@ -1,0 +1,71 @@
+<script setup lang="ts">
+import { RouterLink } from "vue-router";
+import type { ArtistResponse } from "@/api/artists";
+import AppAvatar from "@/components/ui/AppAvatar.vue";
+
+export interface Props {
+  artist: ArtistResponse;
+}
+
+const props = defineProps<Props>();
+const emit = defineEmits<{ click: [artist: ArtistResponse] }>();
+</script>
+
+<template>
+  <RouterLink
+    :to="`/artists/${props.artist.id}`"
+    class="artist-card"
+    @click="emit('click', props.artist)"
+  >
+    <AppAvatar
+      :src="props.artist.image_url ?? undefined"
+      :name="props.artist.name"
+      size="lg"
+      class="artist-card__avatar"
+    />
+    <span class="artist-card__name">{{ props.artist.name }}</span>
+    <span v-if="props.artist.bio" class="artist-card__bio">
+      {{ props.artist.bio }}
+    </span>
+  </RouterLink>
+</template>
+
+<style scoped>
+.artist-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background-color var(--transition-fast);
+}
+
+.artist-card:hover {
+  background-color: var(--color-surface-raised);
+}
+
+.artist-card__avatar {
+  width: 6rem;
+  height: 6rem;
+}
+
+.artist-card__name {
+  font-weight: 600;
+  text-align: center;
+}
+
+.artist-card__bio {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+</style>
