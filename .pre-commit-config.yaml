@@ -38,3 +38,12 @@ repos:
         files: ^frontend/src/
         entry: frontend/node_modules/.bin/prettier
         args: ['--ignore-unknown', '--write']
+
+-   repo: local
+    hooks:
+    -   id: eslint-frontend
+        name: eslint (frontend/src)
+        language: system
+        files: ^frontend/src/
+        entry: frontend/node_modules/.bin/eslint
+        args: ['--fix']
