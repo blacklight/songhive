@@ -66,4 +66,23 @@ describe("router guard", () => {
     await router.push("/");
     expect(router.currentRoute.value.path).toBe("/");
   });
+
+  it("allows /radio and /about without authentication", async () => {
+    const store = useAuthStore();
+    store.status = "unauthenticated";
+
+    await router.push("/radio");
+    expect(router.currentRoute.value.path).toBe("/radio");
+
+    await router.push("/about");
+    expect(router.currentRoute.value.path).toBe("/about");
+  });
+
+  it("redirects unauthenticated from /files/:id to login", async () => {
+    const store = useAuthStore();
+    store.status = "unauthenticated";
+    await router.push("/files/abc");
+    expect(router.currentRoute.value.path).toBe("/login");
+    expect(router.currentRoute.value.query.redirect).toBe("/files/abc");
+  });
 });

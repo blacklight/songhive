@@ -138,15 +138,41 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/LibraryEditView.vue"),
         meta: { requiresAuth: true },
       },
-      // history and favorites are Phase 5 features; the router marks them as
-      // phase 4 placeholders, which is intentional and should not be changed.
-      placeholder("history", "history", 4, { requiresAuth: true }),
-      placeholder("favorites", "favorites", 4, { requiresAuth: true }),
-      placeholder("files", "files", 5, { requiresAuth: true }),
-      placeholder("files/:id", "file", 5, { requiresAuth: true }),
-      placeholder("files/:id/edit", "fileEdit", 5, { requiresAuth: true }),
-      placeholder("radio", "radio", 5),
-      placeholder("about", "about", 6),
+      // History and favorites are Phase 5 views that require authentication.
+      {
+        path: "history",
+        name: "history",
+        component: () => import("@/views/HistoryView.vue"),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: "favorites",
+        name: "favorites",
+        component: () => import("@/views/FavoritesView.vue"),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: "files",
+        name: "files",
+        component: () => import("@/views/FilesView.vue"),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: "files/:id",
+        name: "file",
+        component: () => import("@/views/FileDetailView.vue"),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: "radio",
+        name: "radio",
+        component: () => import("@/views/RadioView.vue"),
+      },
+      {
+        path: "about",
+        name: "about",
+        component: () => import("@/views/AboutView.vue"),
+      },
       {
         path: "share/:token",
         name: "share",
