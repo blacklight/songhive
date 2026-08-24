@@ -15,11 +15,11 @@ import logging
 from pathlib import Path
 
 import sqlalchemy as sa
+from alembic import command, op
+from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
-from alembic import command, op
-from alembic.config import Config
 
 from ..models import Base
 

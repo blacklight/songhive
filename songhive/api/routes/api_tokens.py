@@ -196,6 +196,8 @@ async def create_api_token(
         ip_address=client_ip(request),
     )
 
+    await db.commit()
+
     return ApiTokenCreateResponse(
         id=api_token.id,
         name=api_token.name,
@@ -215,7 +217,7 @@ async def list_api_tokens(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    """List the authenticated user's API token metadata."""
+    """List the authenticated user's active (non-revoked, non-expired) API token metadata."""
     tokens = await list_user_api_tokens(db, user.id, limit=limit, offset=offset)
     total = await count_user_api_tokens(db, user.id)
     return ApiTokenListResponse(
@@ -249,5 +251,7 @@ async def delete_api_token(
         details={},
         ip_address=client_ip(request),
     )
+
+    await db.commit()
 
     return RevokeApiTokenResponse()

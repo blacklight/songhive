@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -104,6 +104,17 @@ async def validate_api_token(
     return api_token
 
 
+def _active_api_token_clause(now: datetime):
+    """Return WHERE clause matching non-revoked, non-expired API tokens."""
+    return (
+        ApiToken.revoked_at.is_(None),
+        or_(
+            ApiToken.expires_at.is_(None),
+            ApiToken.expires_at > now,
+        ),
+    )
+
+
 async def list_user_api_tokens(
     db: AsyncSession,
     user_id: str,
@@ -111,10 +122,11 @@ async def list_user_api_tokens(
     limit: int = 100,
     offset: int = 0,
 ) -> list[ApiToken]:
-    """Return a paginated list of API tokens for a user, newest first."""
+    """Return a paginated list of active API tokens for a user, newest first."""
+    now = datetime.now(timezone.utc)
     stmt = (
         select(ApiToken)
-        .where(ApiToken.user_id == user_id)
+        .where(ApiToken.user_id == user_id, *_active_api_token_clause(now))
         .order_by(ApiToken.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -124,8 +136,9 @@ async def list_user_api_tokens(
 
 
 async def count_user_api_tokens(db: AsyncSession, user_id: str) -> int:
-    """Return the total number of API tokens for a user."""
-    stmt = select(func.count()).select_from(ApiToken).where(ApiToken.user_id == user_id)
+    """Return the total number of active API tokens for a user."""
+    now = datetime.now(timezone.utc)
+    stmt = select(func.count()).select_from(ApiToken).where(ApiToken.user_id == user_id, *_active_api_token_clause(now))
     result = await db.execute(stmt)
     return result.scalar_one()
 
