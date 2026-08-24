@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+let inputCounter = 0;
+
 export interface Props {
   modelValue: string | number;
   label?: string;
@@ -19,7 +21,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{ "update:modelValue": [value: string | number] }>();
 
 const inputId = computed(
-  () => props.id || `app-input-${Math.random().toString(36).slice(2)}`,
+  () => props.id || `app-input-${++inputCounter}`,
 );
 const hintId = computed(() => `hint-${inputId.value}`);
 const errorId = computed(() => `error-${inputId.value}`);
