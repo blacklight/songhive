@@ -253,7 +253,9 @@
       "goToAlbum": "Go to album",
       "goToArtist": "Go to artist",
       "addToPlaylist": "Add to playlist"
-    }
+    },
+    "createPlaylist": "Playlist created.",
+    "createLibrary": "Library created."
   },
   "player": {
     "player": "Player",
