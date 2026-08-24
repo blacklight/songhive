@@ -100,7 +100,9 @@
     "login": "Log in"
   },
   "errors": {
-    "unknown": "Something went wrong. Please try again."
+    "unknown": "Something went wrong. Please try again.",
+    "uploadFailed": "Upload failed. Please try again.",
+    "uploadAborted": "Upload was cancelled."
   },
   "pages": {
     "notFound": "Page not found.",
