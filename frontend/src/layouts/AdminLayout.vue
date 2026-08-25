@@ -48,6 +48,10 @@ const adminNav = [
             <RouterLink
               :to="item.to"
               class="admin-layout__nav-link"
+              :active-class="item.to === '/admin' ? '' : undefined"
+              :exact-active-class="
+                item.to === '/admin' ? 'router-link-active' : undefined
+              "
               @click="isMobileMenuOpen = false"
             >
               <AppIcon :name="item.icon" />
@@ -115,9 +119,12 @@ const adminNav = [
   text-decoration: none;
 }
 
-.admin-layout__nav a:hover,
 .admin-layout__nav a.router-link-active {
   background-color: var(--color-surface-raised);
+}
+
+.admin-layout__nav a:hover {
+  background-color: var(--color-bg-hover);
 }
 
 .admin-layout__back {

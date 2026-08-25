@@ -1,18 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
-import { uploadFile } from "@/api/files";
+import { RouterLink, useRouter } from "vue-router";
+import { listFiles, uploadFile, type StoredFileResponse } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
 import {
   listLibraries,
   type Visibility,
   type LibraryResponse,
 } from "@/api/libraries";
+import { useEntityList } from "@/composables/useEntityList";
 import { useToastStore } from "@/stores/toast";
+import { formatBytes, toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
+import AppSpinner from "@/components/feedback/AppSpinner.vue";
+import SearchBar from "@/components/ui/SearchBar.vue";
+import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 
 const { t } = useI18n();
 const router = useRouter();
@@ -55,6 +61,18 @@ const progressLabel = computed(() =>
     : t("pages.files.uploading"),
 );
 
+const {
+  items: files,
+  loading,
+  error: listError,
+  query,
+  hasMore,
+  load,
+  loadMore,
+  search,
+  retry,
+} = useEntityList<StoredFileResponse>(listFiles);
+
 function getErrorMessage(err: unknown): string {
   return (
     getApiErrorMessage(err) ||
@@ -69,6 +87,7 @@ onMounted(async () => {
     // The upload can still fall back to the default library on the backend.
     libraries.value = [];
   }
+  await load();
 });
 
 function resetInput() {
@@ -80,6 +99,19 @@ function resetInput() {
 
 function onSelectClick() {
   fileInput.value?.click();
+}
+
+function fileName(file: StoredFileResponse): string {
+  return file.original_filename?.trim()
+    ? file.original_filename
+    : t("pages.files.untitledFile");
+}
+
+function fileIcon(file: StoredFileResponse): string {
+  if (file.content_type.startsWith("audio/")) return "music";
+  if (file.content_type.startsWith("image/")) return "image";
+  if (file.content_type.startsWith("video/")) return "video";
+  return "file";
 }
 
 async function onFileChange(event: Event) {
@@ -129,11 +161,22 @@ async function onFileChange(event: Event) {
       t("pages.files.title")
     }}</AppPageTitle>
 
-    <p class="files-view__notice" role="note">
-      {{ t("pages.files.noList") }}
-    </p>
+    <SearchBar
+      :model-value="query"
+      :debounce="0"
+      class="files-view__search"
+      :placeholder="
+        t('browse.list.searchPlaceholder', {
+          entity: t('browse.entities.files'),
+        })
+      "
+      @update:model-value="search"
+    />
 
-    <section class="files-view__upload" aria-labelledby="files-upload-heading">
+    <section
+      class="boxed files-view__upload"
+      aria-labelledby="files-upload-heading"
+    >
       <AppPageTitle
         id="files-upload-heading"
         :level="2"
@@ -199,6 +242,53 @@ async function onFileChange(event: Event) {
         <span>{{ error }}</span>
       </div>
     </section>
+    <div v-if="listError" class="files-view__error" role="alert">
+      <span>{{ listError }}</span>
+      <AppButton size="sm" icon="rotate-right" @click="retry">
+        {{ t("common.retry") }}
+      </AppButton>
+    </div>
+
+    <div
+      v-else-if="loading && files.length === 0"
+      class="files-view__list files-view__list--skeleton"
+    >
+      <SkeletonLoader v-for="i in 5" :key="i" variant="list-row" />
+    </div>
+
+    <p v-else-if="files.length === 0" class="files-view__empty">
+      {{ t("browse.list.empty", { entity: t("browse.entities.files") }) }}
+    </p>
+
+    <ul v-else class="files-view__list">
+      <li v-for="file in files" :key="file.id" class="files-view__item">
+        <RouterLink
+          :to="{ name: 'file', params: { id: file.id } }"
+          class="files-view__link"
+        >
+          <AppIcon :name="fileIcon(file)" spacing="right" />
+          <span class="files-view__name">{{ fileName(file) }}</span>
+          <span class="files-view__meta">
+            {{ formatBytes(file.size) }} ·
+            {{ t(`browse.visibility.${toVisibility(file.visibility)}`) }}
+          </span>
+        </RouterLink>
+      </li>
+    </ul>
+
+    <div class="files-view__footer">
+      <AppButton
+        v-if="hasMore"
+        icon="chevron-down"
+        variant="secondary"
+        :loading="loading"
+        :disabled="loading"
+        @click="loadMore"
+      >
+        {{ t("browse.list.loadMore") }}
+      </AppButton>
+      <AppSpinner v-else-if="loading" />
+    </div>
   </div>
 </template>
 
@@ -215,13 +305,79 @@ async function onFileChange(event: Event) {
   font-size: 1.5rem;
 }
 
-.files-view__notice {
+.files-view__search {
+  max-width: 32rem;
+}
+
+.files-view__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
   margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.files-view__list--skeleton {
+  gap: var(--space-3);
+}
+
+.files-view__item {
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  transition: background-color var(--transition-fast);
+}
+
+.files-view__item:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.files-view__link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.files-view__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.files-view__meta {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.files-view__empty {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.files-view__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
   padding: var(--space-4);
   border-radius: var(--radius-md);
   background-color: var(--color-surface);
-  color: var(--color-text-muted);
+  color: var(--color-danger);
   font-size: 0.9375rem;
+}
+
+.files-view__footer {
+  display: flex;
+  justify-content: center;
 }
 
 .files-view__upload {
@@ -275,13 +431,5 @@ async function onFileChange(event: Event) {
   margin: 0;
   font-size: 0.875rem;
   color: var(--color-text-muted);
-}
-
-.files-view__error {
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  background-color: var(--color-surface-raised);
-  color: var(--color-danger);
-  font-size: 0.9375rem;
 }
 </style>

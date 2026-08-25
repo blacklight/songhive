@@ -10,7 +10,28 @@ function createTestRouter() {
   return createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: "/", component: { template: "<div/>" } },
+      {
+        path: "/",
+        component: { template: "<div/>" },
+        children: [
+          { path: "", name: "home", component: { template: "<div/>" } },
+          {
+            path: "artists",
+            name: "artists",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "artists/:id",
+            name: "artist",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "albums",
+            name: "albums",
+            component: { template: "<div/>" },
+          },
+        ],
+      },
       { path: "/login", component: { template: "<div/>" } },
       { path: "/profile", name: "profile", component: { template: "<div/>" } },
       { path: "/:pathMatch(.*)*", component: { template: "<div/>" } },
@@ -143,5 +164,34 @@ describe("AppLayout", () => {
 
     expect(store.isAuthenticated).toBe(false);
     expect(router.currentRoute.value.path).toBe("/login");
+  });
+
+  it("highlights the Home nav item only on /", async () => {
+    const { wrapper, router } = await mountLayout();
+    await router.push("/");
+    await flushPromises();
+
+    const home = wrapper
+      .findAll(".app-layout__nav li a")
+      .find((a) => a.text().trim() === "Home");
+    expect(home).toBeTruthy();
+    expect(home!.classes()).toContain("router-link-active");
+  });
+
+  it("does not highlight the Home nav item when another section is active", async () => {
+    const { wrapper, router } = await mountLayout();
+    await router.push("/artists");
+    await flushPromises();
+
+    const home = wrapper
+      .findAll(".app-layout__nav li a")
+      .find((a) => a.text().trim() === "Home");
+    const artists = wrapper
+      .findAll(".app-layout__nav li a")
+      .find((a) => a.text().trim() === "Artists");
+    expect(home).toBeTruthy();
+    expect(artists).toBeTruthy();
+    expect(home!.classes()).not.toContain("router-link-active");
+    expect(artists!.classes()).toContain("router-link-active");
   });
 });

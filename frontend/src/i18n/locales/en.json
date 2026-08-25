@@ -149,7 +149,6 @@
       "uploadProgress": "{percent}% uploaded",
       "uploadSuccess": "File uploaded.",
       "uploadError": "Could not upload file: {message}",
-      "noList": "A list of uploaded files is not available yet.",
       "detailTitle": "File details",
       "originalFilename": "Original filename",
       "contentType": "Content type",
@@ -247,11 +246,13 @@
       "tracks": "Tracks",
       "playlists": "Playlists",
       "libraries": "Libraries",
+      "files": "Files",
       "artist": "Artist",
       "album": "Album",
       "track": "Track",
       "playlist": "Playlist",
       "library": "Library",
+      "file": "File",
       "item": "Item"
     },
     "list": {

@@ -3,12 +3,13 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
-import { uploadFile, type StoredFileResponse } from "@/api/files";
+import { listFiles, uploadFile, type StoredFileResponse } from "@/api/files";
 import { listLibraries, type LibraryResponse } from "@/api/libraries";
 import { useToastStore } from "@/stores/toast";
 import FilesView from "./FilesView.vue";
 
 vi.mock("@/api/files", () => ({
+  listFiles: vi.fn(),
   uploadFile: vi.fn(),
 }));
 
@@ -82,6 +83,7 @@ describe("FilesView", () => {
       createLibrary("lib1", "Uploads"),
       createLibrary("lib2", "My Library"),
     ]);
+    vi.mocked(listFiles).mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -102,13 +104,40 @@ describe("FilesView", () => {
     await flushPromises();
   }
 
-  it("renders the upload form and notice", async () => {
+  it("renders the upload form and an empty list notice", async () => {
     await mountView();
 
     expect(wrapper.text()).toContain(i18n.global.t("pages.files.title"));
-    expect(wrapper.text()).toContain(i18n.global.t("pages.files.noList"));
     expect(wrapper.text()).toContain(i18n.global.t("pages.files.selectFile"));
+    expect(wrapper.text()).toContain(
+      i18n.global.t("browse.list.empty", {
+        entity: i18n.global.t("browse.entities.files"),
+      }),
+    );
     expect(wrapper.find('input[type="file"]').exists()).toBe(true);
+  });
+
+  it("loads files on mount", async () => {
+    vi.mocked(listFiles).mockResolvedValue([
+      createStoredFile("f1"),
+      createStoredFile("f2"),
+    ]);
+
+    await mountView();
+
+    expect(listFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: expect.any(Number), offset: 0 }),
+    );
+    expect(wrapper.text()).toContain("avatar.png");
+    expect(wrapper.findAll(".files-view__item")).toHaveLength(2);
+  });
+
+  it("shows an error when listing files fails", async () => {
+    vi.mocked(listFiles).mockRejectedValue(new Error("network failure"));
+
+    await mountView();
+
+    expect(wrapper.text()).toContain("network failure");
   });
 
   it("uploads a file with the selected visibility", async () => {

@@ -83,8 +83,12 @@ export async function uploadFile(
   });
 }
 
-export function listFiles(): never {
-  throw new Error("not implemented in Phase 1");
+export function listFiles(params?: {
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<StoredFileResponse[]> {
+  return apiRequest<StoredFileResponse[]>("/files/", { query: params });
 }
 
 export function getFile(fileId: string): Promise<StoredFileResponse> {

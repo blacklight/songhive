@@ -128,6 +128,10 @@ const loginItem = {
             <RouterLink
               :to="item.to"
               class="app-layout__nav-link"
+              :active-class="item.to === '/' ? '' : undefined"
+              :exact-active-class="
+                item.to === '/' ? 'router-link-active' : undefined
+              "
               @click="isMobileMenuOpen = false"
             >
               <AppIcon :name="item.icon" />
@@ -326,8 +330,15 @@ const loginItem = {
 
 .app-layout__user:hover,
 .app-layout__user.router-link-active {
-  background-color: var(--color-surface-raised);
   color: var(--color-accent-contrast);
+}
+
+.app-layout__user.router-link-active {
+  background-color: var(--color-surface-raised);
+}
+
+.app-layout__user:hover {
+  background-color: var(--color-bg-hover);
 }
 
 .app-layout__user-name {
