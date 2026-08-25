@@ -109,7 +109,20 @@
     "forbidden": "You don't have permission to view this page.",
     "placeholder": "Page {name} — coming in Phase {phase}",
     "goHome": "Go home",
-    "goLogin": "Log in"
+    "goLogin": "Log in",
+    "history": {
+      "title": "History",
+      "searchPlaceholder": "Search history…",
+      "playedAt": "Played at",
+      "playAgain": "Play again",
+      "empty": "No listening history yet.",
+      "emptySearch": "No matching history entries.",
+      "previous": "Previous",
+      "next": "Next",
+      "untitled": "Untitled track",
+      "playError": "Could not play this track: {message}",
+      "playAllPartial": "Could only play {count} of {total} tracks."
+    }
   },
   "profile": {
     "title": "Profile",

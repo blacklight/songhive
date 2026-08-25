@@ -14,7 +14,10 @@ export async function addHistory(trackId: string): Promise<void> {
   await apiRequest<void>(`/history/${trackId}`, { method: "POST" });
 }
 
-// TODO(phase-5): fully implement pagination and wire into the history view.
+// Note: the backend returns only items, page, and pageSize (no total).
+// Callers must infer "has more" from items.length === pageSize, which leaves
+// an edge when the total count is an exact multiple of pageSize (one extra
+// empty page may be fetched before hasMore becomes false).
 export function listHistory(params?: {
   page?: number;
   pageSize?: number;
