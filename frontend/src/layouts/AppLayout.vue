@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink, RouterView, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useInstanceStore } from "@/stores/instance";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppToast from "@/components/feedback/AppToast.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
@@ -11,6 +12,7 @@ import PlayerBarSlot from "@/components/player/PlayerBarSlot.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
+const instanceStore = useInstanceStore();
 const router = useRouter();
 const isMobileMenuOpen = ref(false);
 
@@ -122,6 +124,17 @@ const loginItem = {
       class="app-layout__sidebar"
       :class="{ 'app-layout__sidebar--open': isMobileMenuOpen }"
     >
+      <header class="app-layout__brand">
+        <RouterLink
+          to="/"
+          class="app-layout__brand-link"
+          :aria-label="t('pages.goHome')"
+          @click="isMobileMenuOpen = false"
+        >
+          <img src="/logo.png" alt="" class="app-layout__logo" />
+          <span class="app-layout__brand-name">{{ instanceStore.name }}</span>
+        </RouterLink>
+      </header>
       <nav class="app-layout__nav" role="navigation" aria-label="Main">
         <ul>
           <li v-for="item in visibleNavItems" :key="item.to">
@@ -281,6 +294,33 @@ const loginItem = {
   background-color: var(--color-bg-hover);
 }
 
+.app-layout__brand {
+  margin-bottom: var(--space-4);
+}
+
+.app-layout__brand-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text-menu);
+  text-decoration: none;
+  font-size: 1.25rem;
+  font-weight: 600;
+  transition: background-color var(--transition-fast);
+}
+
+.app-layout__brand-link:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-accent-contrast);
+}
+
+.app-layout__logo {
+  width: 4rem;
+  height: 4rem;
+}
+
 .app-layout__nav-link .fa-solid {
   margin-right: var(--space-2);
 }
@@ -374,6 +414,10 @@ const loginItem = {
 @media (max-width: 767px) {
   .app-layout__menu-toggle {
     display: inline-flex;
+  }
+
+  .app-layout__brand {
+    margin-top: 2.75rem;
   }
 
   .app-layout__sidebar {

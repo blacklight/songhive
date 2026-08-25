@@ -1,12 +1,30 @@
 <script setup lang="ts">
-import { RouterView } from "vue-router";
+import { useI18n } from "vue-i18n";
+import { RouterLink, RouterView } from "vue-router";
+import { useInstanceStore } from "@/stores/instance";
 import AppToast from "@/components/feedback/AppToast.vue";
+
+const { t } = useI18n();
+const instanceStore = useInstanceStore();
 </script>
 
 <template>
   <div class="auth-layout">
     <div class="auth-layout__card">
-      <h1 class="auth-layout__brand">Songhive</h1>
+      <RouterLink
+        to="/"
+        class="auth-layout__brand"
+        :aria-label="t('pages.goHome')"
+      >
+        <img
+          src="/logo.png"
+          alt=""
+          class="auth-layout__logo"
+          width="40"
+          height="40"
+        />
+        <span class="auth-layout__brand-name">{{ instanceStore.name }}</span>
+      </RouterLink>
       <RouterView />
     </div>
   </div>
@@ -35,7 +53,23 @@ import AppToast from "@/components/feedback/AppToast.vue";
 }
 
 .auth-layout__brand {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
   margin: 0 0 var(--space-6);
+  color: var(--color-text);
+  text-decoration: none;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.auth-layout__brand:hover {
+  filter: brightness(0.95);
+}
+
+.auth-layout__logo {
+  width: 2.5rem;
+  height: 2.5rem;
 }
 </style>

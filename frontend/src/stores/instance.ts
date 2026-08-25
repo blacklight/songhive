@@ -20,6 +20,7 @@ export const useInstanceStore = defineStore("instance", () => {
     () => instance.value?.invites_enabled ?? false,
   );
   const loading = computed(() => status.value === "loading");
+  const name = computed(() => instance.value?.title || "Songhive");
 
   async function load(): Promise<void> {
     if (bootstrapped && status.value !== "idle") return bootstrapped;
@@ -47,6 +48,7 @@ export const useInstanceStore = defineStore("instance", () => {
     approvalRequired,
     invitesEnabled,
     loading,
+    name,
     load,
   };
 });
