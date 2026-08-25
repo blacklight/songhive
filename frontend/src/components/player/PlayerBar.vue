@@ -82,6 +82,7 @@ function queueReturnTarget() {
           :aria-label="
             queueOpen ? t('player.closeQueue') : t('player.openQueue')
           "
+          :title="queueOpen ? t('player.closeQueue') : t('player.openQueue')"
           :aria-pressed="queueOpen"
           icon="list"
           @click="toggleQueue"
@@ -104,6 +105,7 @@ function queueReturnTarget() {
           size="sm"
           class="player-bar__mini-play"
           :aria-label="store.isPlaying ? t('common.pause') : t('common.play')"
+          :title="store.isPlaying ? t('common.pause') : t('common.play')"
           :icon="store.isPlaying ? 'pause' : 'play'"
           @click="store.isPlaying ? store.pause() : store.play()"
         />
@@ -113,6 +115,7 @@ function queueReturnTarget() {
           size="sm"
           class="player-bar__mini-next"
           :aria-label="t('player.nextTrack')"
+          :title="t('player.nextTrack')"
           :disabled="!store.hasNext && store.repeat === 'off'"
           icon="forward-step"
           @click="store.next"
@@ -128,6 +131,7 @@ function queueReturnTarget() {
           size="sm"
           class="player-bar__collapse"
           :aria-label="t('player.collapsePlayer')"
+          :title="t('player.collapsePlayer')"
           icon="xmark"
           @click="toggleExpanded"
         />
@@ -146,6 +150,7 @@ function queueReturnTarget() {
             :aria-label="
               queueOpen ? t('player.closeQueue') : t('player.openQueue')
             "
+            :title="queueOpen ? t('player.closeQueue') : t('player.openQueue')"
             :aria-pressed="queueOpen"
             icon="list"
             @click="toggleQueue"

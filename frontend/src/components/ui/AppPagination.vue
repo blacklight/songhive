@@ -32,6 +32,7 @@ function next() {
       size="sm"
       :disabled="!canPrev"
       :aria-label="`Page ${page - 1}`"
+      :title="`Page ${page - 1}`"
       icon="chevron-left"
       @click="prev"
     />
@@ -40,6 +41,7 @@ function next() {
       size="sm"
       :disabled="!canNext"
       :aria-label="`Page ${page + 1}`"
+      :title="`Page ${page + 1}`"
       icon="chevron-right"
       @click="next"
     />

@@ -35,6 +35,7 @@ function onVolumeChange(value: number) {
       size="sm"
       class="volume-control__mute"
       :aria-label="store.muted ? t('player.unmute') : t('player.mute')"
+      :title="store.muted ? t('player.unmute') : t('player.mute')"
       :icon="
         store.muted || store.volume === 0
           ? 'volume-xmark'

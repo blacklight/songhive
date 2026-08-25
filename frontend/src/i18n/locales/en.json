@@ -5,6 +5,8 @@
     "delete": "Delete",
     "confirm": "Confirm",
     "close": "Close",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
     "clear": "Clear",
     "loading": "Loading",
     "error": "Error",

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import AppIcon from "./AppIcon.vue";
 
@@ -11,6 +12,7 @@ export interface Props {
   icon?: string;
   iconVariant?: "solid" | "regular" | "light" | "brand";
   title?: string;
+  ariaLabel?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -19,7 +21,10 @@ const props = withDefaults(defineProps<Props>(), {
   type: "button",
   iconVariant: "solid",
   title: undefined,
+  ariaLabel: undefined,
 });
+
+const accessibleLabel = computed(() => props.ariaLabel ?? props.title);
 </script>
 
 <template>
@@ -27,7 +32,7 @@ const props = withDefaults(defineProps<Props>(), {
     :type="props.type"
     :class="['app-btn', `app-btn--${props.variant}`, `app-btn--${props.size}`]"
     :title="props.title"
-    :aria-label="props.title"
+    :aria-label="accessibleLabel"
     :disabled="props.loading || props.disabled"
     :aria-busy="props.loading ? 'true' : 'false'"
   >

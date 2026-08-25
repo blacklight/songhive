@@ -254,6 +254,7 @@ function onMenuSelect(key: string) {
           variant="ghost"
           size="sm"
           :aria-label="t('browse.detail.actions')"
+          :title="t('browse.detail.actions')"
           icon="ellipsis-vertical"
           @click="openMenu($event, asTrackRow(row).track)"
         />

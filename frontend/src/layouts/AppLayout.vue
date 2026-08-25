@@ -111,7 +111,11 @@ const loginItem = {
       size="sm"
       class="app-layout__menu-toggle"
       icon="bars"
-      aria-label="Toggle menu"
+      :title="isMobileMenuOpen ? t('common.closeMenu') : t('common.openMenu')"
+      :aria-label="
+        isMobileMenuOpen ? t('common.closeMenu') : t('common.openMenu')
+      "
+      :aria-expanded="isMobileMenuOpen"
       @click="toggleMenu"
     />
     <aside

@@ -222,6 +222,7 @@ onMounted(() => load());
           size="sm"
           icon="rotate-right"
           :aria-label="t('pages.history.playAgain')"
+          :title="t('pages.history.playAgain')"
           @click="onPlayAgain(asRow(row).entry)"
         >
           {{ t("pages.history.playAgain") }}

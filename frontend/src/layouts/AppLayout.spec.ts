@@ -99,7 +99,9 @@ describe("AppLayout", () => {
     expect(wrapper.find(".app-layout__user").exists()).toBe(true);
     expect(wrapper.find(".app-layout__user-name").text()).toBe("alice");
     expect(wrapper.find(".app-layout__logout").exists()).toBe(true);
-    expect(wrapper.find(".app-layout__logout").text()).toBe("Log out");
+    expect(wrapper.find(".app-layout__logout").attributes("aria-label")).toBe(
+      "Log out",
+    );
   });
 
   it("shows the Admin link for logged-in admins", async () => {

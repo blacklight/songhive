@@ -109,6 +109,7 @@ function clearQueue() {
         size="sm"
         class="queue-panel__clear"
         :aria-label="t('player.clearQueue')"
+        :title="t('player.clearQueue')"
         icon="xmark"
         @click="clearQueue"
       >
@@ -119,6 +120,7 @@ function clearQueue() {
         size="sm"
         class="queue-panel__close"
         :aria-label="t('player.closeQueue')"
+        :title="t('player.closeQueue')"
         icon="xmark"
         @click="emit('close')"
       />
@@ -168,6 +170,7 @@ function clearQueue() {
           size="sm"
           class="queue-panel__remove"
           :aria-label="t('player.removeFromQueue', { title: track.title })"
+          :title="t('player.removeFromQueue', { title: track.title })"
           icon="xmark"
           @click="removeAt($event, i)"
         />
