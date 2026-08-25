@@ -237,7 +237,7 @@ export interface paths {
     };
     /**
      * List Api Tokens
-     * @description List the authenticated user's API token metadata.
+     * @description List the authenticated user's active (non-revoked, non-expired) API token metadata.
      */
     get: operations["list_api_tokens_api_v1_auth_api_tokens_get"];
     put?: never;
@@ -1372,6 +1372,66 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/instance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Instance V1
+     * @description Return Mastodon-compatible instance metadata (v1).
+     */
+    get: operations["get_instance_v1_api_v1_instance__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/instance/peers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Instance Peers
+     * @description Return a list of known peer instance domains.
+     */
+    get: operations["get_instance_peers_api_v1_instance_peers_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/instance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Instance V2
+     * @description Return Mastodon-compatible instance metadata (v2).
+     */
+    get: operations["get_instance_v2_api_v2_instance__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1842,6 +1902,76 @@ export interface components {
       artist?: string | null;
       /** Created At */
       created_at: string;
+    };
+    /**
+     * InstanceV1
+     * @description Mastodon-compatible ``/api/v1/instance`` response.
+     */
+    InstanceV1: {
+      /** Uri */
+      uri: string;
+      /** Title */
+      title: string;
+      /** Description */
+      description: string;
+      /** Short Description */
+      short_description: string;
+      /**
+       * Email
+       * @default
+       */
+      email: string;
+      /** Version */
+      version: string;
+      /** Songhive Version */
+      songhive_version: string;
+      urls?: components["schemas"]["_Urls"];
+      stats: components["schemas"]["_Stats"];
+      /** Thumbnail */
+      thumbnail?: string | null;
+      /** Languages */
+      languages?: string[];
+      /** Registrations */
+      registrations: boolean;
+      /** Approval Required */
+      approval_required: boolean;
+      /** Invites Enabled */
+      invites_enabled: boolean;
+      configuration?: components["schemas"]["_V1Configuration"];
+      /** Contact Account */
+      contact_account?: unknown;
+      /** Rules */
+      rules?: unknown[];
+    };
+    /**
+     * InstanceV2
+     * @description Mastodon-compatible ``/api/v2/instance`` response.
+     */
+    InstanceV2: {
+      /** Domain */
+      domain: string;
+      /** Title */
+      title: string;
+      /** Version */
+      version: string;
+      /** Songhive Version */
+      songhive_version: string;
+      /**
+       * Source Url
+       * @default
+       */
+      source_url: string;
+      /** Description */
+      description: string;
+      usage?: components["schemas"]["_V2Usage"];
+      thumbnail?: components["schemas"]["_V2Thumbnail"];
+      /** Languages */
+      languages?: string[];
+      configuration?: components["schemas"]["_V2Configuration"];
+      registrations: components["schemas"]["_V2Registrations"];
+      contact?: components["schemas"]["_V2Contact"];
+      /** Rules */
+      rules?: unknown[];
     };
     /**
      * LibraryCreate
@@ -2462,6 +2592,217 @@ export interface components {
      * @enum {string}
      */
     Visibility: "private" | "local" | "public";
+    /** _Stats */
+    _Stats: {
+      /**
+       * User Count
+       * @default 0
+       */
+      user_count: number;
+      /**
+       * Status Count
+       * @default 0
+       */
+      status_count: number;
+      /**
+       * Domain Count
+       * @default 0
+       */
+      domain_count: number;
+    };
+    /** _Urls */
+    _Urls: {
+      /**
+       * Streaming Api
+       * @default
+       */
+      streaming_api: string;
+    };
+    /** _V1Configuration */
+    _V1Configuration: {
+      statuses?: components["schemas"]["_V1StatusConfig"];
+      media_attachments?: components["schemas"]["_V1MediaConfig"];
+      polls?: components["schemas"]["_V1PollConfig"];
+    };
+    /** _V1MediaConfig */
+    _V1MediaConfig: {
+      /** Supported Mime Types */
+      supported_mime_types?: string[];
+      /**
+       * Image Size Limit
+       * @default 10485760
+       */
+      image_size_limit: number;
+      /**
+       * Video Size Limit
+       * @default 41943040
+       */
+      video_size_limit: number;
+    };
+    /** _V1PollConfig */
+    _V1PollConfig: {
+      /**
+       * Max Options
+       * @default 4
+       */
+      max_options: number;
+      /**
+       * Max Characters Per Option
+       * @default 50
+       */
+      max_characters_per_option: number;
+      /**
+       * Min Expiration
+       * @default 300
+       */
+      min_expiration: number;
+      /**
+       * Max Expiration
+       * @default 2629746
+       */
+      max_expiration: number;
+    };
+    /** _V1StatusConfig */
+    _V1StatusConfig: {
+      /**
+       * Max Characters
+       * @default 500
+       */
+      max_characters: number;
+      /**
+       * Max Media Attachments
+       * @default 4
+       */
+      max_media_attachments: number;
+    };
+    /** _V2AccountsConfig */
+    _V2AccountsConfig: {
+      /**
+       * Max Featured Tags
+       * @default 0
+       */
+      max_featured_tags: number;
+    };
+    /** _V2Configuration */
+    _V2Configuration: {
+      urls?: components["schemas"]["_V2Urls"];
+      accounts?: components["schemas"]["_V2AccountsConfig"];
+      statuses?: components["schemas"]["_V2StatusConfig"];
+      media_attachments?: components["schemas"]["_V2MediaConfig"];
+      polls?: components["schemas"]["_V2PollConfig"];
+      translation?: components["schemas"]["_V2TranslationConfig"];
+    };
+    /** _V2Contact */
+    _V2Contact: {
+      /**
+       * Email
+       * @default
+       */
+      email: string;
+      /** Account */
+      account?: unknown;
+    };
+    /** _V2MediaConfig */
+    _V2MediaConfig: {
+      /** Supported Mime Types */
+      supported_mime_types?: string[];
+      /**
+       * Image Size Limit
+       * @default 10485760
+       */
+      image_size_limit: number;
+      /**
+       * Video Size Limit
+       * @default 41943040
+       */
+      video_size_limit: number;
+    };
+    /** _V2PollConfig */
+    _V2PollConfig: {
+      /**
+       * Max Options
+       * @default 4
+       */
+      max_options: number;
+      /**
+       * Max Characters Per Option
+       * @default 50
+       */
+      max_characters_per_option: number;
+      /**
+       * Min Expiration
+       * @default 300
+       */
+      min_expiration: number;
+      /**
+       * Max Expiration
+       * @default 2629746
+       */
+      max_expiration: number;
+    };
+    /** _V2Registrations */
+    _V2Registrations: {
+      /** Enabled */
+      enabled: boolean;
+      /** Approval Required */
+      approval_required: boolean;
+      /** Message */
+      message?: string | null;
+    };
+    /** _V2StatusConfig */
+    _V2StatusConfig: {
+      /**
+       * Max Characters
+       * @default 500
+       */
+      max_characters: number;
+      /**
+       * Max Media Attachments
+       * @default 4
+       */
+      max_media_attachments: number;
+      /**
+       * Characters Reserved Per Url
+       * @default 23
+       */
+      characters_reserved_per_url: number;
+    };
+    /** _V2Thumbnail */
+    _V2Thumbnail: {
+      /**
+       * Url
+       * @default
+       */
+      url: string;
+    };
+    /** _V2TranslationConfig */
+    _V2TranslationConfig: {
+      /**
+       * Enabled
+       * @default false
+       */
+      enabled: boolean;
+    };
+    /** _V2Urls */
+    _V2Urls: {
+      /**
+       * Streaming
+       * @default
+       */
+      streaming: string;
+    };
+    /** _V2Usage */
+    _V2Usage: {
+      users?: components["schemas"]["_V2UsageUsers"];
+    };
+    /** _V2UsageUsers */
+    _V2UsageUsers: {
+      /**
+       * Active Month
+       * @default 0
+       */
+      active_month: number;
+    };
   };
   responses: never;
   parameters: never;
@@ -5128,6 +5469,66 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_instance_v1_api_v1_instance__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InstanceV1"];
+        };
+      };
+    };
+  };
+  get_instance_peers_api_v1_instance_peers_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": string[];
+        };
+      };
+    };
+  };
+  get_instance_v2_api_v2_instance__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InstanceV2"];
         };
       };
     };

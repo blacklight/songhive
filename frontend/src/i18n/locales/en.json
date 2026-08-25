@@ -175,6 +175,16 @@
       "emptyTracks": "No tracks were generated for this station.",
       "empty": "No radio stations yet.",
       "loginHint": "Log in to create your own station."
+    },
+    "about": {
+      "title": "About",
+      "instanceName": "Instance name",
+      "version": "Version",
+      "description": "Description",
+      "documentation": "Documentation",
+      "support": "Support",
+      "defaultName": "Songhive",
+      "defaultDescription": "A federated music sharing service."
     }
   },
   "profile": {
