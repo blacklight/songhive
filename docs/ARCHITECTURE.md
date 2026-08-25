@@ -370,7 +370,8 @@ alembic revision --autogenerate -m "add example column"
 
 ## File Storage & Upload Pipeline
 
-1. Client POSTs audio file to `POST /api/v1/files`.
+1. Client lists visible files via `GET /api/v1/files/` or uploads via
+   `POST /api/v1/files/upload`.
 2. `StorageService` (facade over `StorageBackend`) validates size limit,
    computes SHA-256, deduplicates by hash, writes to backend.
 3. A `StoredFile` row is created (content-addressable, owner/visibility set).
@@ -554,7 +555,7 @@ REST API under `/api/v1/`:
 ├── artists/        # Artist CRUD + search
 ├── albums/         # Album CRUD + search
 ├── tracks/         # Track CRUD + search
-├── files/          # Generic file upload/download (StoredFile)
+├── files/          # Generic file upload/list/download (StoredFile)
 ├── libraries/      # Library management
 ├── playlists/      # Playlist CRUD
 ├── favorites/      # Favorites/bookmarks

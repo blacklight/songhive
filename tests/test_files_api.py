@@ -687,3 +687,112 @@ def test_upload_audio_file_to_unauthorized_library_returns_403(
         headers=headers,
     )
     assert response.status_code == 403
+
+
+def test_list_files(files_client, regular_user, auth_headers, upload_txt):
+    """Listing files returns files visible to the requester with pagination totals."""
+    data, _ = upload_txt
+    headers = auth_headers(regular_user)
+
+    response = files_client.get("/api/v1/files/", headers=headers)
+    assert response.status_code == 200
+    files = response.json()
+    assert len(files) == 1
+    assert files[0]["id"] == data["id"]
+    assert files[0]["url"] == f"/api/v1/files/{data['id']}/download"
+    assert "X-Total-Count" in response.headers
+    assert response.headers["X-Total-Count"] == "1"
+
+
+def test_list_files_private_denied_for_other_user(files_client, regular_user, other_user, auth_headers, upload_txt):
+    """Private files are not included in another user's file list."""
+    other_headers = auth_headers(other_user)
+
+    response = files_client.get("/api/v1/files/", headers=other_headers)
+    assert response.status_code == 200
+    assert response.json() == []
+    assert response.headers["X-Total-Count"] == "0"
+
+
+def test_list_files_public_visible_to_anonymous(files_client, regular_user, auth_headers):
+    """Public files appear in unauthenticated file lists."""
+    content = b"public list data"
+    headers = auth_headers(regular_user)
+
+    upload = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("public.txt", content, "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+
+    response = files_client.get("/api/v1/files/")
+    assert response.status_code == 200
+    files = response.json()
+    assert len(files) == 1
+    assert files[0]["visibility"] == "public"
+    assert files[0]["owner_id"] is None
+
+
+def test_list_files_local_visible_to_authenticated_users(files_client, regular_user, other_user, auth_headers):
+    """Local files appear for any authenticated user but hide the owner."""
+    content = b"local list data"
+    headers = auth_headers(regular_user)
+
+    upload = files_client.post(
+        "/api/v1/files/upload?visibility=local",
+        files={"file": ("local.txt", content, "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+
+    other_headers = auth_headers(other_user)
+    response = files_client.get("/api/v1/files/", headers=other_headers)
+    assert response.status_code == 200
+    files = response.json()
+    assert len(files) == 1
+    assert files[0]["visibility"] == "local"
+    assert files[0]["owner_id"] is None
+
+
+def test_list_files_search_by_original_filename(files_client, regular_user, auth_headers):
+    """The q parameter filters the file list by original filename."""
+    headers = auth_headers(regular_user)
+
+    files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("apple.txt", b"a", "text/plain")},
+        headers=headers,
+    )
+    files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("banana.txt", b"b", "text/plain")},
+        headers=headers,
+    )
+
+    response = files_client.get("/api/v1/files/?q=apple", headers=headers)
+    assert response.status_code == 200
+    files = response.json()
+    assert len(files) == 1
+    assert files[0]["original_filename"] == "apple.txt"
+
+
+def test_list_files_pagination(files_client, regular_user, auth_headers):
+    """Limit and offset query parameters paginate the file list."""
+    headers = auth_headers(regular_user)
+
+    for i in range(3):
+        files_client.post(
+            "/api/v1/files/upload?visibility=public",
+            files={"file": (f"file{i}.txt", f"data{i}".encode(), "text/plain")},
+            headers=headers,
+        )
+
+    first = files_client.get("/api/v1/files/?limit=2&offset=0", headers=headers)
+    assert first.status_code == 200
+    assert len(first.json()) == 2
+    assert first.headers["X-Total-Count"] == "3"
+
+    second = files_client.get("/api/v1/files/?limit=2&offset=2", headers=headers)
+    assert second.status_code == 200
+    assert len(second.json()) == 1

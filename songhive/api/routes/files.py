@@ -4,7 +4,7 @@ File storage routes: upload, metadata, and download.
 
 import logging
 from pathlib import Path
-from typing import Literal, Optional, cast
+from typing import List, Literal, Optional, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
@@ -18,8 +18,9 @@ from ...models.stored_file import StoredFile
 from ...models.user import User
 from ...services import acl, music
 from ...services.import_ import DuplicateTrackError, import_audio_file
-from ...services.storage import StorageService
+from ...services.storage import StorageService, count_files, list_files
 from ...storage import FileSizeLimitExceededError
+from .._common import Pagination, get_pagination
 from ..deps import get_current_user, get_current_user_optional, get_db, get_storage_service, require_access
 from ..middleware.rate_limit import rate_limit
 from ._common import HasOwnerId, redact_owner
@@ -163,6 +164,38 @@ async def upload_file(
         original_filename=stored_file.original_filename,
         url=url,
     )
+
+
+@router.get(
+    "/",
+    response_model=List[StoredFileResponse],
+    operation_id="list_files_api_v1_files__get",
+)
+async def list_uploaded_files(
+    response: Response,
+    q: Optional[str] = Query(None, description="Search by original filename"),
+    user: Optional[User] = Depends(get_current_user_optional),
+    pagination: Pagination = Depends(get_pagination),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+):
+    """List stored files visible to the requester."""
+    total = await count_files(db, q=q, user=user)
+    rows = await list_files(db, q=q, user=user, limit=pagination.limit, offset=pagination.offset)
+    pagination.set_total(response, total)
+    return [
+        StoredFileResponse(
+            id=f.id,
+            content_type=f.content_type,
+            size=f.size,
+            sha256=f.sha256,
+            owner_id=redact_owner(cast(HasOwnerId, f), user),
+            visibility=f.visibility,
+            original_filename=f.original_filename,
+            url=await storage.get_url(f),
+        )
+        for f in rows
+    ]
 
 
 @router.get(
