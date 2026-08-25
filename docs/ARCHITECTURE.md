@@ -534,7 +534,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
 | `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
-| `frontend/src/views/` | Page-level components (Home, Library, Album, Artist, Playlists, Playlist, Login, Register, PasswordReset, VerifyEmail, Profile, plus 403/404 and placeholder views) |
+| `frontend/src/views/` | Page-level components (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio, About, Login, Register, PasswordReset, VerifyEmail, Profile, plus 403/404 and placeholder views) |
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules, WebSocket event bus, stream URL helper |
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |

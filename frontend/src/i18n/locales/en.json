@@ -134,6 +134,30 @@
       "emptyWithFavorites": "Could not load your favorite tracks.",
       "removeSuccess": "Removed from favorites.",
       "removeError": "Could not remove favorite: {message}"
+    },
+    "files": {
+      "title": "Files",
+      "uploadTitle": "Upload a file",
+      "visibility": "Visibility",
+      "selectFile": "Choose a file",
+      "upload": "Upload",
+      "uploading": "Uploading…",
+      "uploadProgress": "{percent}% uploaded",
+      "uploadSuccess": "File uploaded.",
+      "uploadError": "Could not upload file: {message}",
+      "noList": "A list of uploaded files is not available yet.",
+      "detailTitle": "File details",
+      "originalFilename": "Original filename",
+      "contentType": "Content type",
+      "size": "Size",
+      "sha256": "SHA-256",
+      "owner": "Owner",
+      "download": "Download",
+      "untitledFile": "Untitled file",
+      "copySha256": "Copy SHA-256",
+      "sha256Copied": "SHA-256 copied to clipboard.",
+      "copyFailed": "Could not copy SHA-256.",
+      "empty": "File not found."
     }
   },
   "profile": {
