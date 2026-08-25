@@ -23,8 +23,14 @@ const emit = defineEmits<{ click: [artist: ArtistResponse] }>();
       size="lg"
       class="artist-card__avatar"
     />
-    <span class="artist-card__name">{{ props.artist.name }}</span>
-    <span v-if="props.artist.bio" class="artist-card__bio">
+    <span :title="props.artist.name" class="artist-card__name">{{
+      props.artist.name
+    }}</span>
+    <span
+      v-if="props.artist.bio"
+      :title="props.artist.bio"
+      class="artist-card__bio"
+    >
       {{ props.artist.bio }}
     </span>
   </RouterLink>
@@ -36,6 +42,8 @@ const emit = defineEmits<{ click: [artist: ArtistResponse] }>();
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  width: 100%;
   padding: var(--space-4);
   border-radius: var(--radius-lg);
   background-color: var(--color-surface);
@@ -52,20 +60,27 @@ const emit = defineEmits<{ click: [artist: ArtistResponse] }>();
 .artist-card__avatar {
   width: 6rem;
   height: 6rem;
+  flex-shrink: 0;
 }
 
 .artist-card__name {
   font-weight: 600;
+  width: 100%;
   text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .artist-card__bio {
   font-size: 0.875rem;
   color: var(--color-text-muted);
+  width: 100%;
   text-align: center;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  word-break: break-word;
 }
 </style>

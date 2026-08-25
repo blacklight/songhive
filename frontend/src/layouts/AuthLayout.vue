@@ -16,13 +16,7 @@ const instanceStore = useInstanceStore();
         class="auth-layout__brand"
         :aria-label="t('pages.goHome')"
       >
-        <img
-          src="/logo.png"
-          alt=""
-          class="auth-layout__logo"
-          width="40"
-          height="40"
-        />
+        <img src="/logo.png" alt="" class="auth-layout__logo" />
         <span class="auth-layout__brand-name">{{ instanceStore.name }}</span>
       </RouterLink>
       <RouterView />
@@ -69,7 +63,7 @@ const instanceStore = useInstanceStore();
 }
 
 .auth-layout__logo {
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 6rem;
+  height: 6rem;
 }
 </style>

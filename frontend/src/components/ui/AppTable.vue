@@ -5,6 +5,7 @@ export interface Column {
   key: string;
   label: string;
   align?: "left" | "right" | "center";
+  width?: string;
 }
 
 export interface Props {
@@ -26,6 +27,14 @@ function rowId(row: Record<string, unknown>, index: number): string {
 function alignClass(align?: string): string {
   return align ? `app-table__cell--${align}` : "app-table__cell--left";
 }
+
+function cellClass(column: Column): string {
+  return `app-table__cell app-table__cell--${column.key} ${alignClass(column.align)}`;
+}
+
+function cellStyle(column: Column): Record<string, string> | undefined {
+  return column.width ? { width: column.width } : undefined;
+}
 </script>
 
 <template>
@@ -35,7 +44,8 @@ function alignClass(align?: string): string {
         <th
           v-for="column in props.columns"
           :key="column.key"
-          :class="alignClass(column.align)"
+          :class="cellClass(column)"
+          :style="cellStyle(column)"
         >
           <slot :name="`column-${column.key}`" :column="column">
             {{ column.label }}
@@ -45,12 +55,18 @@ function alignClass(align?: string): string {
     </thead>
     <tbody>
       <tr v-if="props.loading">
-        <td :colspan="props.columns.length">
+        <td
+          :colspan="props.columns.length"
+          class="app-table__cell app-table__loading"
+        >
           <SkeletonLoader v-for="i in 3" :key="i" variant="list-row" />
         </td>
       </tr>
       <tr v-else-if="props.rows.length === 0">
-        <td :colspan="props.columns.length" class="app-table__empty">
+        <td
+          :colspan="props.columns.length"
+          class="app-table__cell app-table__empty"
+        >
           {{ props.emptyLabel }}
         </td>
       </tr>
@@ -58,7 +74,8 @@ function alignClass(align?: string): string {
         <td
           v-for="column in props.columns"
           :key="column.key"
-          :class="['app-table__cell', alignClass(column.align)]"
+          :class="cellClass(column)"
+          :style="cellStyle(column)"
         >
           <slot :name="`row-${column.key}`" :row="row" :value="row[column.key]">
             {{ row[column.key] }}
@@ -88,6 +105,7 @@ function alignClass(align?: string): string {
 .app-table td {
   padding: var(--space-3);
   text-align: left;
+  overflow-wrap: anywhere;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -108,6 +126,11 @@ function alignClass(align?: string): string {
   text-align: center;
   padding: var(--space-6);
   color: var(--color-text-muted);
+}
+
+.app-table__empty,
+.app-table__loading {
+  white-space: normal;
 }
 
 .app-table[aria-busy="true"] td {

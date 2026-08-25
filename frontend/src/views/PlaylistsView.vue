@@ -189,10 +189,6 @@ async function onCreate() {
   gap: var(--space-4);
 }
 
-.playlists-view__card {
-  display: block;
-}
-
 .playlists-view__card--selectable {
   pointer-events: none;
   opacity: 0.8;

@@ -66,10 +66,6 @@ onMounted(() => load());
   gap: var(--space-4);
 }
 
-.artists-view__card {
-  display: block;
-}
-
 .artists-view__card--selectable {
   pointer-events: none;
   opacity: 0.8;

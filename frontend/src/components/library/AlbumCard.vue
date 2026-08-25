@@ -42,7 +42,9 @@ const artistText = computed(
         size="lg"
         class="album-card__cover"
       />
-      <span class="album-card__title">{{ props.album.title }}</span>
+      <span :title="props.album.title" class="album-card__title">{{
+        props.album.title
+      }}</span>
       <span v-if="props.album.release_year" class="album-card__year">
         {{ props.album.release_year }}
       </span>
@@ -50,12 +52,17 @@ const artistText = computed(
     <RouterLink
       v-if="artistLink"
       :to="artistLink"
+      :title="artistText"
       class="album-card__artist"
       @click.stop
     >
       {{ artistText }}
     </RouterLink>
-    <span v-else-if="props.artistName" class="album-card__artist">
+    <span
+      v-else-if="props.artistName"
+      :title="props.artistName"
+      class="album-card__artist"
+    >
       {{ props.artistName }}
     </span>
   </div>
@@ -66,6 +73,7 @@ const artistText = computed(
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
   padding: var(--space-4);
   border-radius: var(--radius-lg);
   background-color: var(--color-surface);
@@ -77,6 +85,7 @@ const artistText = computed(
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  min-width: 0;
   color: var(--color-text);
   text-decoration: none;
   transition: background-color var(--transition-fast);
@@ -88,6 +97,7 @@ const artistText = computed(
 
 .album-card__cover {
   width: 100%;
+  height: 100%;
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: var(--radius-md);
@@ -95,6 +105,9 @@ const artistText = computed(
 
 .album-card__title {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .album-card__year {
@@ -103,9 +116,14 @@ const artistText = computed(
 }
 
 .album-card__artist {
+  display: inline-block;
+  max-width: 100%;
   font-size: 0.875rem;
   color: var(--color-accent-contrast);
   text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .album-card__artist:hover {

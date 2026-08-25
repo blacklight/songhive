@@ -235,12 +235,14 @@ watch(
 .share-view__name {
   margin: 0;
   font-size: 2rem;
+  word-break: break-word;
 }
 
 .share-view__description {
   margin: 0;
   color: var(--color-text-muted);
   max-width: 40rem;
+  word-break: break-word;
 }
 
 .share-view__meta {
@@ -254,5 +256,6 @@ watch(
 .share-view__meta-item {
   display: inline-flex;
   align-items: center;
+  word-break: break-word;
 }
 </style>

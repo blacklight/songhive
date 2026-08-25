@@ -64,10 +64,6 @@ onMounted(() => load());
   gap: var(--space-4);
 }
 
-.albums-view__card {
-  display: block;
-}
-
 .albums-view__card--selectable {
   pointer-events: none;
   opacity: 0.8;

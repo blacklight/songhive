@@ -47,13 +47,21 @@ const visibilityText = computed(() => {
       size="lg"
       class="library-card__avatar"
     />
-    <span class="library-card__name">{{ props.library.name }}</span>
-    <span v-if="props.library.description" class="library-card__description">
+    <span :title="props.library.name" class="library-card__name">{{
+      props.library.name
+    }}</span>
+    <span
+      v-if="props.library.description"
+      :title="props.library.description"
+      class="library-card__description"
+    >
       {{ props.library.description }}
     </span>
     <div class="library-card__meta">
-      <span class="library-card__visibility">{{ visibilityText }}</span>
-      <span v-if="ownerName" class="library-card__owner">
+      <span :title="visibilityText" class="library-card__visibility">{{
+        visibilityText
+      }}</span>
+      <span v-if="ownerName" :title="ownerName" class="library-card__owner">
         {{ t("browse.detail.owner") }} {{ ownerName }}
       </span>
     </div>
@@ -65,6 +73,7 @@ const visibilityText = computed(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
   padding: var(--space-4);
   border-radius: var(--radius-lg);
   background-color: var(--color-surface);
@@ -80,6 +89,9 @@ const visibilityText = computed(() => {
 
 .library-card__name {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .library-card__description {
@@ -89,6 +101,7 @@ const visibilityText = computed(() => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  word-break: break-word;
 }
 
 .library-card__meta {
@@ -97,5 +110,13 @@ const visibilityText = computed(() => {
   gap: var(--space-2);
   font-size: 0.875rem;
   color: var(--color-text-muted);
+}
+
+.library-card__visibility,
+.library-card__owner {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

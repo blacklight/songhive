@@ -47,13 +47,21 @@ const visibilityText = computed(() => {
       size="lg"
       class="playlist-card__avatar"
     />
-    <span class="playlist-card__name">{{ props.playlist.name }}</span>
-    <span v-if="props.playlist.description" class="playlist-card__description">
+    <span :title="props.playlist.name" class="playlist-card__name">{{
+      props.playlist.name
+    }}</span>
+    <span
+      v-if="props.playlist.description"
+      :title="props.playlist.description"
+      class="playlist-card__description"
+    >
       {{ props.playlist.description }}
     </span>
     <div class="playlist-card__meta">
-      <span class="playlist-card__visibility">{{ visibilityText }}</span>
-      <span v-if="ownerName" class="playlist-card__owner">
+      <span :title="visibilityText" class="playlist-card__visibility">{{
+        visibilityText
+      }}</span>
+      <span v-if="ownerName" :title="ownerName" class="playlist-card__owner">
         {{ t("browse.detail.owner") }} {{ ownerName }}
       </span>
     </div>
@@ -65,6 +73,7 @@ const visibilityText = computed(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
   padding: var(--space-4);
   border-radius: var(--radius-lg);
   background-color: var(--color-surface);
@@ -80,6 +89,9 @@ const visibilityText = computed(() => {
 
 .playlist-card__name {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .playlist-card__description {
@@ -89,6 +101,7 @@ const visibilityText = computed(() => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  word-break: break-word;
 }
 
 .playlist-card__meta {
@@ -97,5 +110,13 @@ const visibilityText = computed(() => {
   gap: var(--space-2);
   font-size: 0.875rem;
   color: var(--color-text-muted);
+}
+
+.playlist-card__visibility,
+.playlist-card__owner {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

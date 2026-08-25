@@ -309,6 +309,7 @@ watch(
   margin: 0;
   color: var(--color-text-muted);
   max-width: 40rem;
+  word-break: break-word;
 }
 
 .playlist-view__meta {
@@ -317,10 +318,15 @@ watch(
   gap: var(--space-3);
   color: var(--color-text-muted);
   font-size: 0.875rem;
+  word-break: break-word;
 }
 
 .playlist-view__header-actions {
   margin-top: var(--space-2);
+}
+
+.playlist-view__header-actions button {
+  margin-right: var(--space-2);
 }
 
 .playlist-view__section {

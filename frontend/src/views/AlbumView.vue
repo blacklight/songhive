@@ -385,6 +385,7 @@ watch(
   color: var(--color-accent-contrast);
   text-decoration: none;
   font-size: 1.125rem;
+  word-break: break-word;
 }
 
 .album-view__artist:hover {
@@ -397,12 +398,14 @@ watch(
   gap: var(--space-3);
   color: var(--color-text-muted);
   font-size: 0.875rem;
+  word-break: break-word;
 }
 
 .album-view__description {
   margin: var(--space-2) 0 0;
   color: var(--color-text-muted);
   max-width: 40rem;
+  word-break: break-word;
 }
 
 .album-view__header-actions {
@@ -410,6 +413,10 @@ watch(
   gap: var(--space-3);
   align-items: center;
   margin-top: var(--space-2);
+}
+
+.album-view__header-actions button {
+  margin-right: var(--space-2);
 }
 
 .album-view__section {

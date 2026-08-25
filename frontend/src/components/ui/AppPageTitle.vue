@@ -25,6 +25,8 @@ withDefaults(defineProps<Props>(), {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   margin: 0;
+  word-break: break-word;
 }
 </style>

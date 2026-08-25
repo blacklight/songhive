@@ -428,6 +428,7 @@ watch(
   margin: 0;
   color: var(--color-text-muted);
   max-width: 40rem;
+  word-break: break-word;
 }
 
 .artist-view__header-actions {
@@ -435,6 +436,10 @@ watch(
   gap: var(--space-3);
   align-items: center;
   margin-top: var(--space-2);
+}
+
+.artist-view__header-actions button {
+  margin-right: var(--space-2);
 }
 
 .artist-view__section {

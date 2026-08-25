@@ -315,6 +315,10 @@ watch(
   align-items: center;
 }
 
+.track-view__header-actions button {
+  margin-right: var(--space-2);
+}
+
 .track-view__info {
   display: flex;
   flex-direction: column;
@@ -339,6 +343,7 @@ watch(
 .track-view__meta-item {
   display: inline-flex;
   align-items: center;
+  word-break: break-word;
 }
 
 .track-view__link {

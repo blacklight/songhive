@@ -7,7 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
 import type { TrackResponse, QueueTrack } from "@/player/types";
 import { toQueueTrack, type TrackEnrich } from "@/player/enrich";
-import AppTable from "@/components/ui/AppTable.vue";
+import AppTable, { type Column } from "@/components/ui/AppTable.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppModal from "@/components/feedback/AppModal.vue";
@@ -98,12 +98,6 @@ const enrichedTracks = computed<QueueTrack[]>(() => {
   });
 });
 
-interface Column {
-  key: string;
-  label: string;
-  align?: "left" | "right" | "center";
-}
-
 interface TrackListRow extends Record<string, unknown> {
   id: string;
   index: number;
@@ -123,15 +117,25 @@ const canEdit = computed(
 const columns = computed<Column[]>(() => {
   const cols: Column[] = [];
   if (bulkMode.value && canEdit.value) {
-    cols.push({ key: "selected", label: "", align: "center" });
+    cols.push({ key: "selected", label: "", align: "center", width: "2.5rem" });
   }
   cols.push(
-    { key: "num", label: "#", align: "right" },
+    { key: "num", label: "#", align: "right", width: "2rem" },
     { key: "title", label: t("browse.entities.track"), align: "left" },
     { key: "artist", label: t("browse.entities.artist"), align: "left" },
     { key: "album", label: t("browse.entities.album"), align: "left" },
-    { key: "duration", label: t("browse.detail.duration"), align: "right" },
-    { key: "actions", label: t("browse.detail.actions"), align: "center" },
+    {
+      key: "duration",
+      label: t("browse.detail.duration"),
+      align: "right",
+      width: "4rem",
+    },
+    {
+      key: "actions",
+      label: t("browse.detail.actions"),
+      align: "center",
+      width: "3.5rem",
+    },
   );
   return cols;
 });
@@ -625,8 +629,25 @@ function onMenuSelect(key: string) {
             class="track-list__artwork"
             alt=""
           />
-          {{ asTrackRow(row).track.title }}
+          <span
+            :title="asTrackRow(row).track.title"
+            class="track-list__title-text"
+          >
+            {{ asTrackRow(row).track.title }}
+          </span>
         </button>
+      </template>
+
+      <template #row-artist="{ row }">
+        <span :title="asTrackRow(row).artist" class="track-list__cell-text">
+          {{ asTrackRow(row).artist }}
+        </span>
+      </template>
+
+      <template #row-album="{ row }">
+        <span :title="asTrackRow(row).album" class="track-list__cell-text">
+          {{ asTrackRow(row).album }}
+        </span>
       </template>
 
       <template #row-actions="{ row }">
@@ -720,6 +741,8 @@ function onMenuSelect(key: string) {
 .track-list__title-btn {
   display: inline-flex;
   align-items: center;
+  width: 100%;
+  min-width: 0;
   gap: var(--space-2);
   background: transparent;
   border: none;
@@ -734,15 +757,44 @@ function onMenuSelect(key: string) {
   color: var(--color-accent-contrast);
 }
 
+.track-list__title-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-list__cell-text {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .track-list__artwork {
   width: 1.5rem;
   height: 1.5rem;
   border-radius: var(--radius-sm);
   object-fit: cover;
+  flex-shrink: 0;
 }
 
 .track-list__confirm-text {
   margin: 0;
   color: var(--color-text);
+}
+
+.track-list :deep(.app-table) {
+  table-layout: fixed;
+}
+
+.track-list :deep(.app-table th),
+.track-list :deep(.app-table td) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
