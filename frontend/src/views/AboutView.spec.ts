@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import AboutView from "./AboutView.vue";
 import * as instanceApi from "@/api/instance";
@@ -10,6 +11,7 @@ describe("AboutView", () => {
   const originalEnv = { ...import.meta.env };
 
   beforeEach(() => {
+    setActivePinia(createPinia());
     vi.stubEnv("VITE_DOCS_URL", "");
     vi.stubEnv("VITE_SUPPORT_URL", "");
   });

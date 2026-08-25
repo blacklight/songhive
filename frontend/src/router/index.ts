@@ -4,6 +4,7 @@ import {
   type RouteRecordRaw,
 } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useInstanceStore } from "@/stores/instance";
 import AppLayout from "@/layouts/AppLayout.vue";
 import AuthLayout from "@/layouts/AuthLayout.vue";
 import AdminLayout from "@/layouts/AdminLayout.vue";
@@ -22,13 +23,16 @@ function placeholder(
   } as RouteRecordRaw;
 }
 
-const isRegistrationOpen = import.meta.env.VITE_REGISTRATION_OPEN !== "false";
-
 const authChildren: RouteRecordRaw[] = [
   {
     path: "login",
     name: "login",
     component: () => import("@/views/LoginView.vue"),
+  },
+  {
+    path: "register",
+    name: "register",
+    component: () => import("@/views/RegisterView.vue"),
   },
   {
     path: "password-reset",
@@ -46,16 +50,6 @@ const authChildren: RouteRecordRaw[] = [
     component: () => import("@/views/VerifyEmailView.vue"),
   },
 ];
-
-// Interim: registration route is gated by a build-time env var until the
-// backend exposes a public instance-info endpoint.
-if (isRegistrationOpen) {
-  authChildren.push({
-    path: "register",
-    name: "register",
-    component: () => import("@/views/RegisterView.vue"),
-  });
-}
 
 const routes: RouteRecordRaw[] = [
   {
@@ -225,6 +219,14 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const authStore = useAuthStore();
   await authStore.bootstrap();
+
+  if (to.name === "register") {
+    const instanceStore = useInstanceStore();
+    await instanceStore.load();
+    if (!instanceStore.registrations) {
+      return authStore.isAuthenticated ? { path: "/" } : { path: "/login" };
+    }
+  }
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     return { path: "/login", query: { redirect: to.fullPath } };

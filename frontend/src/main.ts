@@ -5,6 +5,7 @@ import router from "./router";
 import { i18n, initializeI18n } from "./i18n";
 import { useThemeStore } from "./stores/theme";
 import { useAuthStore } from "./stores/auth";
+import { useInstanceStore } from "./stores/instance";
 import { usePlayerStore } from "./stores/player";
 import { playerEngine } from "./player/engine";
 import "./styles/tokens.css";
@@ -19,6 +20,9 @@ themeStore.apply();
 
 const authStore = useAuthStore();
 authStore.registerClientProviders();
+
+const instanceStore = useInstanceStore();
+void instanceStore.load();
 
 const playerStore = usePlayerStore();
 playerEngine.init({

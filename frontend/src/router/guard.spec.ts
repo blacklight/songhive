@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import router from "./index";
 import { useAuthStore } from "@/stores/auth";
+import * as instanceApi from "@/api/instance";
 import type { UserResponse } from "@/api/users";
 
 vi.mock("@/api/client", () => ({
@@ -16,6 +17,10 @@ vi.mock("@/api/stream", () => ({
 
 vi.mock("@/api/ws", () => ({
   setWsTokenProvider: vi.fn(),
+}));
+
+vi.mock("@/api/instance", () => ({
+  getInstance: vi.fn(),
 }));
 
 describe("router guard", () => {
@@ -84,5 +89,39 @@ describe("router guard", () => {
     await router.push("/files/abc");
     expect(router.currentRoute.value.path).toBe("/login");
     expect(router.currentRoute.value.query.redirect).toBe("/files/abc");
+  });
+
+  it("allows /register when public registration is open", async () => {
+    vi.mocked(instanceApi.getInstance).mockResolvedValue({
+      registrations: true,
+    } as unknown as instanceApi.InstanceInfo);
+
+    await router.push("/register");
+    expect(router.currentRoute.value.path).toBe("/register");
+  });
+
+  it("redirects /register to /login when public registration is closed", async () => {
+    vi.mocked(instanceApi.getInstance).mockResolvedValue({
+      registrations: false,
+    } as unknown as instanceApi.InstanceInfo);
+
+    await router.push("/register");
+    expect(router.currentRoute.value.path).toBe("/login");
+  });
+
+  it("redirects /register to / for authenticated users when public registration is closed", async () => {
+    const store = useAuthStore();
+    store.accessToken = "token";
+    store.refreshToken = "refresh";
+    store.expiresAt = Date.now() + 10000;
+    store.user = { id: "u1", username: "bob", links: [] } as UserResponse;
+    store.status = "authenticated";
+
+    vi.mocked(instanceApi.getInstance).mockResolvedValue({
+      registrations: false,
+    } as unknown as instanceApi.InstanceInfo);
+
+    await router.push("/register");
+    expect(router.currentRoute.value.path).toBe("/");
   });
 });

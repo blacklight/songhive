@@ -1,47 +1,33 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
-import { getInstance, type InstanceInfo } from "@/api/instance";
-import { getApiErrorMessage } from "@/api/client";
+import { useInstanceStore } from "@/stores/instance";
 
 const { t } = useI18n();
-
-const instance = ref<InstanceInfo | null>(null);
-const loading = ref(true);
-const error = ref<string | null>(null);
+const instanceStore = useInstanceStore();
 
 const appName = computed(
-  () => instance.value?.title || t("pages.about.defaultName") || "Songhive",
+  () =>
+    instanceStore.instance?.title || t("pages.about.defaultName") || "Songhive",
 );
 const appVersion = computed(
   () =>
-    instance.value?.songhive_version ||
+    instanceStore.instance?.songhive_version ||
     import.meta.env.PACKAGE_VERSION ||
     "0.0.1",
 );
 const appDescription = computed(
   () =>
-    instance.value?.description ||
-    instance.value?.short_description ||
+    instanceStore.instance?.description ||
+    instanceStore.instance?.short_description ||
     t("pages.about.defaultDescription"),
 );
 const docsUrl = computed(() => import.meta.env.VITE_DOCS_URL);
 const supportUrl = computed(() => import.meta.env.VITE_SUPPORT_URL);
 const hasLinks = computed(() => Boolean(docsUrl.value || supportUrl.value));
+const errorMessage = computed(() => instanceStore.error || t("errors.unknown"));
 
-async function load() {
-  loading.value = true;
-  error.value = null;
-  try {
-    instance.value = await getInstance();
-  } catch (err) {
-    error.value = getApiErrorMessage(err) || t("errors.unknown");
-  } finally {
-    loading.value = false;
-  }
-}
-
-onMounted(() => load());
+onMounted(() => void instanceStore.load());
 </script>
 
 <template>
@@ -49,11 +35,13 @@ onMounted(() => load());
     <h1 class="about-view__title">{{ t("pages.about.title") }}</h1>
 
     <section class="about-view__card" :aria-label="t('pages.about.title')">
-      <div v-if="loading" class="about-view__loading">
+      <div v-if="instanceStore.loading" class="about-view__loading">
         {{ t("common.loading") }}
       </div>
       <template v-else>
-        <div v-if="error" class="about-view__error">{{ error }}</div>
+        <div v-if="instanceStore.status === 'error'" class="about-view__error">
+          {{ errorMessage }}
+        </div>
         <dl class="about-view__list">
           <div class="about-view__row">
             <dt>{{ t("pages.about.instanceName") }}</dt>
