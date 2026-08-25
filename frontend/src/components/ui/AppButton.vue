@@ -50,7 +50,7 @@ const props = withDefaults(defineProps<Props>(), {
 }
 
 .app-btn--sm {
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2);
   font-size: 0.875rem;
 }
 
