@@ -270,26 +270,15 @@ async def delete_track(
         )
 
     admin_deletion = current_user.is_admin and track.owner_id != current_user.id
-    if admin_deletion:
-        await audit.log_action(
-            db,
-            actor_id=current_user.id,
-            action="track.admin_delete",
-            target_type="track",
-            target_id=track_id,
-            details={"title": track.title, "owner_id": track.owner_id},
-            ip_address=client_ip(request),
-        )
-    else:
-        await audit.log_action(
-            db,
-            actor_id=current_user.id,
-            action="track.delete",
-            target_type="track",
-            target_id=track_id,
-            details={"title": track.title, "owner_id": track.owner_id},
-            ip_address=client_ip(request),
-        )
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="track.admin_delete" if admin_deletion else "track.delete",
+        target_type="track",
+        target_id=track_id,
+        details={"title": track.title, "owner_id": track.owner_id},
+        ip_address=client_ip(request),
+    )
 
     try:
         unpublish = await deletion.delete_track(db, storage, track_id)

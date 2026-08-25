@@ -169,19 +169,10 @@ async def _track_response(
     user: Optional[User],
 ) -> TrackResponse:
     """Build a TrackResponse with audio URL."""
-    return TrackResponse(
-        id=str(track.id),
-        title=track.title,
-        artist_id=track.artist_id,
-        album_id=track.album_id,
-        track_number=track.track_number,
-        disc_number=track.disc_number,
-        duration=track.duration,
-        genre=track.genre,
-        audio_url=await storage.get_url(track.audio_file) if track.audio_file_id else None,
-        owner_id=redact_owner(track, user),
-        visibility=track.visibility,
-    )
+    response = TrackResponse.model_validate(track)
+    response.audio_url = await storage.get_url(track.audio_file) if track.audio_file_id else None
+    response.owner_id = redact_owner(track, user)
+    return response
 
 
 @router.post("/{playlist_id}/tracks", status_code=status.HTTP_201_CREATED)

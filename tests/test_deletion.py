@@ -3,10 +3,20 @@ Tests for cascade deletion of tracks, files, playlists, albums, artists, and lib
 """
 
 import io
+from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import func, select
 
+from songhive.config.schema import StorageConfig
+from songhive.models._enums import Visibility
+from songhive.models.artist import Artist
+from songhive.models.stored_file import StoredFile
+from songhive.models.track import Track
+from songhive.services import deletion
 from songhive.services.metadata import AudioMetadata
+from songhive.services.storage import StorageService
+from songhive.storage import get_storage
 
 
 def _fake_metadata():
@@ -335,3 +345,86 @@ def test_delete_artist_forbidden_for_non_admin(files_client, regular_user, other
         headers=auth_headers(other_user),
     )
     assert response.status_code == 403
+
+
+@pytest.fixture
+def storage_service(tmp_path):
+    """Create a StorageService backed by a local temp directory."""
+    config = StorageConfig(backend="local", local_path=tmp_path / "media")
+    backend = get_storage(config)
+    return StorageService(backend, config)
+
+
+@pytest.mark.asyncio
+async def test_delete_artist_recursive_fails_early_for_unmanageable_tracks(
+    db_session, regular_user, other_user, storage_service
+):
+    """A non-admin cannot partially delete an artist that contains tracks owned by others."""
+    artist = Artist(name="Shared Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    own_track = Track(
+        title="Own Track",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    other_track = Track(
+        title="Other Track",
+        artist_id=artist.id,
+        owner_id=other_user.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add_all([own_track, other_track])
+    await db_session.flush()
+
+    track_count_before = await db_session.scalar(select(func.count(Track.id)).where(Track.artist_id == artist.id))
+
+    with pytest.raises(deletion.DeletionError, match="tracks owned by another user") as exc_info:
+        await deletion.delete_artist(
+            db_session,
+            storage_service,
+            str(artist.id),
+            recursive=True,
+            user=regular_user,
+            is_admin=False,
+        )
+    assert exc_info.value.status_code == 403
+
+    track_count_after = await db_session.scalar(select(func.count(Track.id)).where(Track.artist_id == artist.id))
+    assert track_count_before == track_count_after
+
+
+@pytest.mark.asyncio
+async def test_delete_track_keeps_stored_file_when_storage_delete_fails(
+    db_session, regular_user, storage_service, monkeypatch
+):
+    """If the storage backend cannot delete a file, the StoredFile row is kept."""
+    content = b"audio content"
+    file = io.BytesIO(content)
+    stored_file = await storage_service.store_file(db_session, file, "audio/mpeg", owner_id=str(regular_user.id))
+    await db_session.flush()
+
+    artist = Artist(name="Storage Failure Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Storage Failure Track",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        audio_file_id=stored_file.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    monkeypatch.setattr(storage_service, "delete_file", AsyncMock(side_effect=RuntimeError("storage down")))
+
+    await deletion.delete_track(db_session, storage_service, str(track.id))
+    await db_session.flush()
+
+    assert await db_session.get(Track, track.id) is None
+    assert await db_session.get(StoredFile, stored_file.id) is not None
+    assert await storage_service.backend.exists(stored_file.storage_path) is True

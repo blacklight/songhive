@@ -260,6 +260,35 @@ async def test_remove_track_from_library(client, regular_user, db_session, auth_
 
 
 @pytest.mark.asyncio
+async def test_remove_tracks_from_library_preserves_input_order(client, regular_user, db_session, auth_headers):
+    """Removing tracks from a library returns the IDs in the caller's input order."""
+    artist = await _make_artist(db_session)
+    track_one = await _make_track(db_session, artist, title="Track One", owner=regular_user)
+    track_two = await _make_track(db_session, artist, title="Track Two", owner=regular_user)
+    track_three = await _make_track(db_session, artist, title="Track Three", owner=regular_user)
+    library = await _make_library(db_session, regular_user)
+
+    db_session.add_all(
+        [
+            LibraryTrack(library_id=library.id, track_id=track_one.id, added_by_id=regular_user.id),
+            LibraryTrack(library_id=library.id, track_id=track_two.id, added_by_id=regular_user.id),
+            LibraryTrack(library_id=library.id, track_id=track_three.id, added_by_id=regular_user.id),
+        ]
+    )
+    await db_session.flush()
+
+    response = client.post(
+        f"/api/v1/libraries/{library.id}/tracks/remove",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track_three.id), str(track_one.id)]},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["track_ids"] == [str(track_three.id), str(track_one.id)]
+
+
+@pytest.mark.asyncio
 async def test_remove_tracks_from_library_forbidden_for_non_owner(
     client, regular_user, other_user, db_session, auth_headers
 ):

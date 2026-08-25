@@ -100,7 +100,13 @@ async def _maybe_delete_stored_file(
     try:
         await storage.delete_file(stored_file)
     except Exception:
-        logger.exception("Failed to delete stored file %s backend", stored_file.id)
+        logger.exception(
+            "Failed to delete stored file %s from %s backend (path: %s); keeping database row for retry",
+            stored_file.id,
+            stored_file.storage_backend,
+            stored_file.storage_path,
+        )
+        return False
 
     await session.execute(delete(StoredFile).where(StoredFile.id == stored_file.id))
     return True
@@ -291,6 +297,20 @@ async def delete_artist(
     deletion.deleted_artist_ids.append(str(artist.id))
 
     if recursive:
+        # Pre-check all tracks are manageable before deleting anything.  This
+        # prevents a partial cascade where some tracks are deleted before the
+        # loop raises on a track owned by another user.
+        if not is_admin:
+            if user is None:
+                raise DeletionError("Cannot delete artist without a managing user", 403)
+
+            all_track_rows = list(
+                (await session.execute(select(Track.id, Track.owner_id).where(Track.artist_id == artist_id))).all()
+            )
+            for _, owner_id in all_track_rows:
+                if str(owner_id) != str(user.id):
+                    raise DeletionError("Cannot delete artist with tracks owned by another user", 403)
+
         # Albums must be deleted first because they hold a non-nullable artist FK.
         album_ids = list((await session.execute(select(Album.id).where(Album.artist_id == artist_id))).scalars().all())
         for album_id in album_ids:
@@ -311,12 +331,13 @@ async def delete_artist(
             (await session.execute(select(Track.id, Track.owner_id).where(Track.artist_id == artist_id))).all()
         )
         for track_id, owner_id in track_rows:
-            if is_admin or (user is not None and user.id == owner_id):
+            if is_admin or (user is not None and str(user.id) == str(owner_id)):
                 info = await delete_track(session, storage, str(track_id))
                 deletion.deleted_track_ids.append(str(track_id))
                 if info is not None:
                     deletion.unpublish.append(info)
             else:
+                # Defensive guard: the pre-check above should prevent this path.
                 raise DeletionError("Cannot delete track owned by another user", 403)
 
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "artist", ShareGrant.item_id == artist.id))
@@ -418,6 +439,7 @@ async def delete_library(
                 if info is not None:
                     deletion.unpublish.append(info)
 
+    await session.execute(delete(LibraryTrack).where(LibraryTrack.library_id == library_id))
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "library", ShareGrant.item_id == library.id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "library", ShareToken.item_id == library.id))
     await session.execute(delete(Report).where(Report.target_type == "library", Report.target_id == library.id))

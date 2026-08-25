@@ -3,7 +3,7 @@ Music service: CRUD operations for artists, albums, tracks, playlists,
 libraries, and radios.
 """
 
-from typing import Any, List, Optional, cast
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -499,14 +499,17 @@ async def remove_library_tracks(
         )
     )
     rows = list(result.scalars().all())
+    removed_track_ids = {str(row.track_id) for row in rows}
 
-    removed: List[str] = []
-    seen: set[str] = set()
     for row in rows:
         await session.delete(row)
-        if row.track_id not in seen:
-            seen.add(row.track_id)
-            removed.append(str(row.track_id))
+
+    removed: List[str] = []
+    seen: Set[str] = set()
+    for track_id in track_ids:
+        if track_id in removed_track_ids and track_id not in seen:
+            seen.add(track_id)
+            removed.append(track_id)
 
     if rows:
         await session.flush()
@@ -550,7 +553,7 @@ async def remove_playlist_tracks(
     session: AsyncSession,
     playlist_id: str,
     track_ids: List[str],
-) -> tuple[int, List[str]]:
+) -> Tuple[int, List[str]]:
     """
     Remove all occurrences of ``track_ids`` from ``playlist_id``.
 
@@ -567,14 +570,18 @@ async def remove_playlist_tracks(
         )
     )
     rows = list(result.scalars().all())
-
-    removed_ids: List[str] = []
-    seen: set[str] = set()
+    removed_track_counts: Dict[str, int] = {}
     for row in rows:
         await session.delete(row)
-        if row.track_id not in seen:
-            seen.add(row.track_id)
-            removed_ids.append(str(row.track_id))
+        track_id = str(row.track_id)
+        removed_track_counts[track_id] = removed_track_counts.get(track_id, 0) + 1
+
+    removed_ids: List[str] = []
+    seen: Set[str] = set()
+    for track_id in track_ids:
+        if track_id in removed_track_counts and track_id not in seen:
+            seen.add(track_id)
+            removed_ids.append(track_id)
 
     if rows:
         await session.flush()

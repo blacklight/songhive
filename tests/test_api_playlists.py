@@ -289,6 +289,34 @@ async def test_remove_track_from_playlist(client, regular_user, db_session, auth
 
 
 @pytest.mark.asyncio
+async def test_remove_tracks_from_playlist_preserves_input_order(client, regular_user, db_session, auth_headers):
+    """Removing tracks from a playlist returns distinct IDs in the caller's input order."""
+    artist = await _make_artist(db_session)
+    track_one = await _make_track(db_session, artist, title="Track One", owner=regular_user)
+    track_two = await _make_track(db_session, artist, title="Track Two", owner=regular_user)
+    track_three = await _make_track(db_session, artist, title="Track Three", owner=regular_user)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track_one.id), str(track_two.id), str(track_three.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/remove",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track_three.id), str(track_one.id), str(track_three.id)]},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["removed"] == 2
+    assert data["track_ids"] == [str(track_three.id), str(track_one.id)]
+
+
+@pytest.mark.asyncio
 async def test_remove_tracks_from_playlist_forbidden_for_non_owner(
     client, regular_user, other_user, db_session, auth_headers
 ):
