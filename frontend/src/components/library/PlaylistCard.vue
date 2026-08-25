@@ -75,7 +75,7 @@ const visibilityText = computed(() => {
 }
 
 .playlist-card:hover {
-  background-color: var(--color-surface-raised);
+  background-color: var(--color-bg-hover);
 }
 
 .playlist-card__name {

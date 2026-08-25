@@ -266,8 +266,15 @@ const loginItem = {
 
 .app-layout__nav a:hover,
 .app-layout__nav a.router-link-active {
-  background-color: var(--color-surface-raised);
   color: var(--color-accent-contrast);
+}
+
+.app-layout__nav a.router-link-active {
+  background-color: var(--color-surface-raised);
+}
+
+.app-layout__nav a:hover {
+  background-color: var(--color-bg-hover);
 }
 
 .app-layout__nav-link .fa-solid {

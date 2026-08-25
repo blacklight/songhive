@@ -16,4 +16,8 @@ body {
   letter-spacing: 0.0333em;
   margin: 0;
 }
+
+main section.boxed {
+  border: 1px solid var(--color-border);
+}
 </style>

@@ -8,6 +8,7 @@
   --color-text-menu: #f9fafb;
   --color-surface: #ffffff;
   --color-surface-raised: #fbc775;
+  --color-bg-hover: #f3f4f6;
   --color-text: #111827;
   --color-text-muted: #6b7280;
   --color-border: #d1d5db;
@@ -64,6 +65,7 @@
   --color-text-menu: #f9fafb;
   --color-surface: #374151;
   --color-surface-raised: #4b5563;
+  --color-bg-hover: #374151;
   --color-text: #f9fafb;
   --color-text-muted: #9ca3af;
   --color-border: #4b5563;

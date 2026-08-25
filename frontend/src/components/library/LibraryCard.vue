@@ -75,7 +75,7 @@ const visibilityText = computed(() => {
 }
 
 .library-card:hover {
-  background-color: var(--color-surface-raised);
+  background-color: var(--color-bg-hover);
 }
 
 .library-card__name {

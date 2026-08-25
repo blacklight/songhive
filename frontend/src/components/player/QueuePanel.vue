@@ -233,9 +233,12 @@ function clearQueue() {
   outline: none;
 }
 
-.queue-panel__item:hover,
 .queue-panel__item:focus-visible {
   background-color: var(--color-surface-raised);
+}
+
+.queue-panel__item:hover {
+  background-color: var(--color-bg-hover);
 }
 
 .queue-panel__item--current {

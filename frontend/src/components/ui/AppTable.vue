@@ -76,6 +76,14 @@ function alignClass(align?: string): string {
   color: var(--color-text);
 }
 
+.app-table tr {
+  transition: background-color 0.2s;
+}
+
+.app-table tr:hover {
+  background-color: var(--color-bg-hover);
+}
+
 .app-table th,
 .app-table td {
   padding: var(--space-3);

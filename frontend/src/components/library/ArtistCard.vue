@@ -46,7 +46,7 @@ const emit = defineEmits<{ click: [artist: ArtistResponse] }>();
 }
 
 .artist-card:hover {
-  background-color: var(--color-surface-raised);
+  background-color: var(--color-bg-hover);
 }
 
 .artist-card__avatar {

@@ -147,9 +147,12 @@ function select(key: string) {
   outline: none;
 }
 
-.context-menu__item:hover,
 .context-menu__item:focus {
   background-color: var(--color-surface-raised);
+}
+
+.context-menu__item:hover {
+  background-color: var(--color-bg-hover);
 }
 
 .context-menu__item--danger {

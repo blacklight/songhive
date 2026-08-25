@@ -83,7 +83,7 @@ const artistText = computed(
 }
 
 .album-card__main:hover {
-  background-color: var(--color-surface-raised);
+  background-color: var(--color-bg-hover);
 }
 
 .album-card__cover {
