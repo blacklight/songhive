@@ -19,7 +19,8 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{ "update:modelValue": [value: boolean] }>();
 
-const inputId = computed(() => props.id || `app-checkbox-${++checkboxCounter}`);
+const fallbackId = `app-checkbox-${++checkboxCounter}`;
+const inputId = computed(() => props.id || fallbackId);
 
 function onChange(event: Event) {
   const target = event.target as HTMLInputElement;
