@@ -24,11 +24,12 @@ function confirm() {
   >
     <p>{{ store.state?.message }}</p>
     <template #actions>
-      <AppButton variant="secondary" @click="cancel">
+      <AppButton variant="secondary" icon="xmark" @click="cancel">
         {{ store.state?.cancelLabel || t("common.cancel") }}
       </AppButton>
       <AppButton
         :variant="store.state?.danger ? 'danger' : 'primary'"
+        icon="check"
         @click="confirm"
       >
         {{ store.state?.confirmLabel || t("common.confirm") }}

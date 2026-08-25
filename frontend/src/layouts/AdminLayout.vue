@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink, RouterView } from "vue-router";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import AppToast from "@/components/feedback/AppToast.vue";
 
 const { t } = useI18n();
@@ -13,13 +14,13 @@ function toggleMenu() {
 }
 
 const adminNav = [
-  { name: "Dashboard", to: "/admin" },
-  { name: "Users", to: "/admin/users" },
-  { name: "Settings", to: "/admin/settings" },
-  { name: "Reports", to: "/admin/reports" },
-  { name: "Invites", to: "/admin/invites" },
-  { name: "Audit", to: "/admin/audit" },
-  { name: "Storage", to: "/admin/storage" },
+  { name: "Dashboard", to: "/admin", icon: "gauge" },
+  { name: "Users", to: "/admin/users", icon: "users" },
+  { name: "Settings", to: "/admin/settings", icon: "gear" },
+  { name: "Reports", to: "/admin/reports", icon: "flag" },
+  { name: "Invites", to: "/admin/invites", icon: "user-plus" },
+  { name: "Audit", to: "/admin/audit", icon: "clipboard-list" },
+  { name: "Storage", to: "/admin/storage", icon: "database" },
 ];
 </script>
 
@@ -29,10 +30,10 @@ const adminNav = [
       variant="ghost"
       size="sm"
       class="admin-layout__menu-toggle"
+      icon="bars"
+      aria-label="Toggle menu"
       @click="toggleMenu"
-    >
-      ☰
-    </AppButton>
+    />
     <aside
       class="admin-layout__sidebar"
       :class="{ 'admin-layout__sidebar--open': isMobileMenuOpen }"
@@ -40,12 +41,18 @@ const adminNav = [
       <nav class="admin-layout__nav" role="navigation" aria-label="Admin">
         <ul>
           <li v-for="item in adminNav" :key="item.to">
-            <RouterLink :to="item.to" @click="isMobileMenuOpen = false">
+            <RouterLink
+              :to="item.to"
+              class="admin-layout__nav-link"
+              @click="isMobileMenuOpen = false"
+            >
+              <AppIcon :name="item.icon" />
               {{ item.name }}
             </RouterLink>
           </li>
         </ul>
         <RouterLink to="/" class="admin-layout__back">
+          <AppIcon name="arrow-left" spacing="right" />
           {{ t("common.cancel") }}
         </RouterLink>
       </nav>
@@ -95,7 +102,9 @@ const adminNav = [
 }
 
 .admin-layout__nav a {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   color: var(--color-text);
@@ -108,7 +117,8 @@ const adminNav = [
 }
 
 .admin-layout__back {
-  display: block;
+  display: inline-flex;
+  align-items: center;
   margin-top: var(--space-4);
   padding: var(--space-2) var(--space-3);
   color: var(--color-text-muted);

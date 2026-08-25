@@ -30,6 +30,7 @@ import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -296,13 +297,15 @@ watch(
 
     <div v-else-if="error" class="library-edit-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="load">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="load">
+        {{ t("common.retry") }}
+      </AppButton>
     </div>
 
     <template v-else-if="library && isOwner">
-      <h1 class="library-edit-view__title">
+      <AppPageTitle class="library-edit-view__title" icon="pen-to-square">
         {{ t("browse.edit.editLibrary") }}
-      </h1>
+      </AppPageTitle>
 
       <form class="library-edit-view__form" @submit.prevent="onSubmit">
         <AppInput
@@ -322,13 +325,14 @@ watch(
         />
 
         <div class="library-edit-view__actions">
-          <AppButton type="submit" :loading="isSaving">
+          <AppButton type="submit" :loading="isSaving" icon="floppy-disk">
             {{ t("common.save") }}
           </AppButton>
           <AppButton
             type="button"
             variant="danger"
             :loading="isDeleting"
+            icon="trash-can"
             @click="onDelete"
           >
             {{ t("common.delete") }}
@@ -340,12 +344,14 @@ watch(
         class="library-edit-view__section"
         aria-labelledby="library-upload-heading"
       >
-        <h2
+        <AppPageTitle
           id="library-upload-heading"
+          :level="2"
           class="library-edit-view__section-title"
+          icon="plus"
         >
           {{ t("browse.libraryManagement.addTracks") }}
-        </h2>
+        </AppPageTitle>
 
         <div class="library-edit-view__upload-options">
           <AppSelect
@@ -367,6 +373,7 @@ watch(
           <AppButton
             variant="secondary"
             :loading="isUploading"
+            icon="upload"
             @click="singleFileInput?.click()"
           >
             {{ t("browse.libraryManagement.upload") }}
@@ -382,6 +389,7 @@ watch(
           <AppButton
             variant="secondary"
             :loading="isBulkUploading"
+            icon="upload"
             @click="bulkFileInput?.click()"
           >
             {{ t("browse.libraryManagement.bulkUpload") }}
@@ -409,9 +417,14 @@ watch(
         class="library-edit-view__section"
         aria-labelledby="library-scan-heading"
       >
-        <h2 id="library-scan-heading" class="library-edit-view__section-title">
+        <AppPageTitle
+          id="library-scan-heading"
+          :level="2"
+          class="library-edit-view__section-title"
+          icon="magnifying-glass"
+        >
           {{ t("browse.libraryManagement.scan") }}
-        </h2>
+        </AppPageTitle>
 
         <div class="library-edit-view__scan-row">
           <AppInput
@@ -422,6 +435,7 @@ watch(
           <AppButton
             :loading="isScanning"
             :disabled="!scanPath.trim()"
+            icon="magnifying-glass"
             @click="onScan"
           >
             {{ t("browse.libraryManagement.scan") }}
@@ -441,12 +455,14 @@ watch(
         class="library-edit-view__section"
         aria-labelledby="library-tracks-heading"
       >
-        <h2
+        <AppPageTitle
           id="library-tracks-heading"
+          :level="2"
           class="library-edit-view__section-title"
+          icon="music"
         >
           {{ t("browse.libraryManagement.libraryTracks") }}
-        </h2>
+        </AppPageTitle>
 
         <div
           v-if="tracksError"
@@ -454,9 +470,9 @@ watch(
           role="alert"
         >
           <span>{{ tracksError }}</span>
-          <AppButton size="sm" @click="retryTracks">{{
-            t("common.retry")
-          }}</AppButton>
+          <AppButton size="sm" icon="rotate-right" @click="retryTracks">
+            {{ t("common.retry") }}
+          </AppButton>
         </div>
 
         <TrackList
@@ -473,6 +489,7 @@ watch(
             variant="secondary"
             :loading="tracksLoading"
             :disabled="tracksLoading"
+            icon="chevron-down"
             @click="loadMoreTracks"
           >
             {{ t("browse.list.loadMore") }}

@@ -7,6 +7,7 @@ import { listTracks, type TrackResponse } from "@/api/tracks";
 import type { QueueTrack } from "@/player/types";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -25,7 +26,9 @@ onMounted(() => load());
 
 <template>
   <div class="tracks-view">
-    <h1 class="tracks-view__title">{{ t("nav.tracks") }}</h1>
+    <AppPageTitle class="tracks-view__title" icon="music">{{
+      t("nav.tracks")
+    }}</AppPageTitle>
 
     <!--
       :debounce="0" avoids stacking with useEntityList's 300 ms debounce;
@@ -45,7 +48,9 @@ onMounted(() => load());
 
     <div v-if="error" class="tracks-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="retry">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="retry">{{
+        t("common.retry")
+      }}</AppButton>
     </div>
 
     <TrackList
@@ -68,6 +73,7 @@ onMounted(() => load());
     <div class="tracks-view__footer">
       <AppButton
         v-if="hasMore"
+        icon="chevron-down"
         variant="secondary"
         :loading="loading"
         :disabled="loading"

@@ -5,6 +5,7 @@ import { useEntityList } from "@/composables/useEntityList";
 import { listArtists, type ArtistResponse } from "@/api/artists";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ArtistCard from "@/components/library/ArtistCard.vue";
@@ -18,7 +19,9 @@ onMounted(() => load());
 
 <template>
   <div class="artists-view">
-    <h1 class="artists-view__title">{{ t("nav.artists") }}</h1>
+    <AppPageTitle class="artists-view__title" icon="users">{{
+      t("nav.artists")
+    }}</AppPageTitle>
 
     <!--
       :debounce="0" avoids stacking with useEntityList's 300 ms debounce;
@@ -45,7 +48,9 @@ onMounted(() => load());
 
     <div v-else-if="error" class="artists-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="retry">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="retry">{{
+        t("common.retry")
+      }}</AppButton>
     </div>
 
     <div v-else-if="items.length === 0" class="artists-view__empty">
@@ -59,6 +64,7 @@ onMounted(() => load());
     <div class="artists-view__footer">
       <AppButton
         v-if="hasMore"
+        icon="chevron-down"
         variant="secondary"
         :loading="loading"
         :disabled="loading"

@@ -83,12 +83,9 @@ function queueReturnTarget() {
             queueOpen ? t('player.closeQueue') : t('player.openQueue')
           "
           :aria-pressed="queueOpen"
+          icon="list"
           @click="toggleQueue"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
-          </svg>
-        </AppButton>
+        />
       </div>
     </div>
 
@@ -107,27 +104,9 @@ function queueReturnTarget() {
           size="sm"
           class="player-bar__mini-play"
           :aria-label="store.isPlaying ? t('common.pause') : t('common.play')"
+          :icon="store.isPlaying ? 'pause' : 'play'"
           @click="store.isPlaying ? store.pause() : store.play()"
-        >
-          <svg
-            v-if="store.isPlaying"
-            viewBox="0 0 24 24"
-            width="24"
-            height="24"
-            aria-hidden="true"
-          >
-            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-          </svg>
-          <svg
-            v-else
-            viewBox="0 0 24 24"
-            width="24"
-            height="24"
-            aria-hidden="true"
-          >
-            <path d="M8 5v14l11-7z" />
-          </svg>
-        </AppButton>
+        />
 
         <AppButton
           variant="ghost"
@@ -135,12 +114,9 @@ function queueReturnTarget() {
           class="player-bar__mini-next"
           :aria-label="t('player.nextTrack')"
           :disabled="!store.hasNext && store.repeat === 'off'"
+          icon="forward-step"
           @click="store.next"
-        >
-          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-            <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
-          </svg>
-        </AppButton>
+        />
       </div>
     </div>
 
@@ -152,14 +128,9 @@ function queueReturnTarget() {
           size="sm"
           class="player-bar__collapse"
           :aria-label="t('player.collapsePlayer')"
+          icon="xmark"
           @click="toggleExpanded"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path
-              d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
-            />
-          </svg>
-        </AppButton>
+        />
       </div>
 
       <div class="player-bar__expanded-body">
@@ -176,12 +147,9 @@ function queueReturnTarget() {
               queueOpen ? t('player.closeQueue') : t('player.openQueue')
             "
             :aria-pressed="queueOpen"
+            icon="list"
             @click="toggleQueue"
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
-            </svg>
-          </AppButton>
+          />
         </div>
       </div>
     </div>
@@ -313,6 +281,13 @@ function queueReturnTarget() {
 .player-bar__expanded-bottom .volume-control {
   flex: 1;
   width: auto;
+}
+
+.player-bar .player-bar__queue-toggle,
+.player-bar .player-bar__collapse,
+.player-bar .player-bar__mini-play,
+.player-bar .player-bar__mini-next {
+  font-size: 1.25rem;
 }
 
 @media (max-width: 767px) {

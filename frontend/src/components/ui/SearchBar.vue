@@ -2,6 +2,7 @@
 import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useDebounce } from "@/composables/useDebounce";
+import AppIcon from "./AppIcon.vue";
 
 export interface Props {
   modelValue: string;
@@ -55,6 +56,11 @@ function clear() {
 
 <template>
   <div class="search-bar">
+    <AppIcon
+      name="magnifying-glass"
+      class="search-bar__search-icon"
+      aria-hidden="true"
+    />
     <input
       :value="localValue"
       type="search"
@@ -70,7 +76,7 @@ function clear() {
       :aria-label="t('common.close')"
       @click="clear"
     >
-      ×
+      <AppIcon name="xmark" />
     </button>
   </div>
 </template>
@@ -84,13 +90,19 @@ function clear() {
 
 .search-bar__input {
   width: 100%;
-  padding: var(--space-2) var(--space-3);
-  padding-right: 2rem;
+  padding: var(--space-2) 2rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background-color: var(--color-surface);
   color: var(--color-text);
   font-size: 1rem;
+}
+
+.search-bar__search-icon {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--color-text-muted);
+  pointer-events: none;
 }
 
 .search-bar__input:focus {

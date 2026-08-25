@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useFocusTrap } from "@/composables/useFocusTrap";
+import AppIcon from "@/components/ui/AppIcon.vue";
 
 export interface Props {
   open: boolean;
@@ -69,7 +70,7 @@ useFocusTrap(
             :aria-label="t('common.close')"
             @click="close"
           >
-            ×
+            <AppIcon name="xmark" />
           </button>
         </div>
         <div class="app-modal__body">

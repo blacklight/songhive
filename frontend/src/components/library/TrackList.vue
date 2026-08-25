@@ -129,27 +129,49 @@ const menuItems = computed(() => {
   const track = menuTrack.value;
   if (!track) return [];
 
+  const isUnfavorite =
+    props.favoriteLabel === t("common.unfavorite") ||
+    (!props.favoriteLabel && false);
+
   const items = [
-    { key: "play", label: t("common.play") },
-    { key: "play-next", label: t("browse.contextMenu.playNext") },
-    { key: "enqueue", label: t("browse.contextMenu.enqueue") },
-    { key: "favorite", label: props.favoriteLabel ?? t("common.favorite") },
+    { key: "play", label: t("common.play"), icon: "play" },
+    {
+      key: "play-next",
+      label: t("browse.contextMenu.playNext"),
+      icon: "forward-step",
+    },
+    {
+      key: "enqueue",
+      label: t("browse.contextMenu.enqueue"),
+      icon: "plus",
+    },
+    {
+      key: "favorite",
+      label: props.favoriteLabel ?? t("common.favorite"),
+      icon: isUnfavorite ? "heart-crack" : "heart",
+    },
   ];
 
   if (track.album_id) {
     items.push({
       key: "go-to-album",
       label: t("browse.contextMenu.goToAlbum"),
+      icon: "compact-disc",
     });
   }
   if (track.artist_id) {
     items.push({
       key: "go-to-artist",
       label: t("browse.contextMenu.goToArtist"),
+      icon: "user",
     });
   }
 
-  items.push({ key: "share", label: t("common.share") });
+  items.push({
+    key: "share",
+    label: t("common.share"),
+    icon: "share-nodes",
+  });
   return items;
 });
 
@@ -196,6 +218,7 @@ function onMenuSelect(key: string) {
       <AppButton
         variant="primary"
         size="sm"
+        icon="play"
         :disabled="enrichedTracks.length === 0"
         @click="playAll"
       >
@@ -231,10 +254,9 @@ function onMenuSelect(key: string) {
           variant="ghost"
           size="sm"
           :aria-label="t('browse.detail.actions')"
+          icon="ellipsis-vertical"
           @click="openMenu($event, asTrackRow(row).track)"
-        >
-          ⋮
-        </AppButton>
+        />
       </template>
     </AppTable>
     <ContextMenu

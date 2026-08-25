@@ -19,6 +19,7 @@ import { useShareDialog } from "@/composables/useShareDialog";
 import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -98,12 +99,16 @@ watch(
 
     <div v-else-if="error" class="library-detail-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="load">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="load">{{
+        t("common.retry")
+      }}</AppButton>
     </div>
 
     <template v-else-if="library">
       <div class="library-detail-view__header">
-        <h1 class="library-detail-view__name">{{ library.name }}</h1>
+        <AppPageTitle class="library-detail-view__name" icon="folder-open">{{
+          library.name
+        }}</AppPageTitle>
 
         <p v-if="library.description" class="library-detail-view__description">
           {{ library.description }}
@@ -122,6 +127,7 @@ watch(
           <AppButton
             v-if="isOwner"
             size="sm"
+            icon="share-nodes"
             @click="
               library &&
               openShare('library', library.id, library.name, library.owner_id)
@@ -136,12 +142,14 @@ watch(
         class="library-detail-view__section"
         aria-labelledby="library-tracks-heading"
       >
-        <h2
+        <AppPageTitle
           id="library-tracks-heading"
+          :level="2"
           class="library-detail-view__section-title"
+          icon="music"
         >
           {{ t("browse.detail.tracks") }}
-        </h2>
+        </AppPageTitle>
 
         <div
           v-if="tracksError"
@@ -149,7 +157,7 @@ watch(
           role="alert"
         >
           <span>{{ tracksError }}</span>
-          <AppButton size="sm" @click="retryTracks">{{
+          <AppButton size="sm" icon="rotate-right" @click="retryTracks">{{
             t("common.retry")
           }}</AppButton>
         </div>
@@ -165,6 +173,7 @@ watch(
         <div class="library-detail-view__footer">
           <AppButton
             v-if="tracksHasMore"
+            icon="chevron-down"
             variant="secondary"
             :loading="tracksLoading"
             :disabled="tracksLoading"

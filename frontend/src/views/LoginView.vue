@@ -3,14 +3,19 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useInstanceStore } from "@/stores/instance";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import { ApiError } from "@/api/client";
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
+const instanceStore = useInstanceStore();
+
+const showRegisterLink = computed(() => instanceStore.registrations);
 
 const username = ref("");
 const password = ref("");
@@ -57,7 +62,9 @@ onMounted(() => {
 
 <template>
   <form class="login-view" @submit.prevent="onSubmit">
-    <h2 class="login-view__title">{{ t("auth.loginPage.title") }}</h2>
+    <AppPageTitle :level="2" class="login-view__title" icon="right-to-bracket">
+      {{ t("auth.loginPage.title") }}
+    </AppPageTitle>
 
     <AppInput
       v-model="username"
@@ -79,7 +86,12 @@ onMounted(() => {
       {{ error }}
     </p>
 
-    <AppButton type="submit" :loading="isLoading" class="login-view__submit">
+    <AppButton
+      type="submit"
+      :loading="isLoading"
+      class="login-view__submit"
+      icon="right-to-bracket"
+    >
       {{ t("auth.loginPage.submit") }}
     </AppButton>
 
@@ -87,7 +99,7 @@ onMounted(() => {
       <RouterLink to="/password-reset">
         {{ t("auth.loginPage.forgotPassword") }}
       </RouterLink>
-      <RouterLink to="/register">
+      <RouterLink v-if="showRegisterLink" to="/register">
         {{ t("auth.loginPage.noAccount") }}
       </RouterLink>
     </nav>

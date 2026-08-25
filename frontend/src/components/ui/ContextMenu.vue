@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useOnClickOutside } from "@/composables/useOnClickOutside";
+import AppIcon from "./AppIcon.vue";
 
 export interface MenuItem {
   key: string;
   label: string;
   icon?: string;
+  iconVariant?: "solid" | "regular" | "light" | "brand";
   danger?: boolean;
 }
 
@@ -109,9 +111,12 @@ function select(key: string) {
         @click="select(item.key)"
         @keydown.enter.space.prevent="select(item.key)"
       >
-        <span v-if="item.icon" class="context-menu__icon" aria-hidden="true">{{
-          item.icon
-        }}</span>
+        <AppIcon
+          v-if="item.icon"
+          :name="item.icon"
+          :variant="item.iconVariant || 'solid'"
+          class="context-menu__icon"
+        />
         <span class="context-menu__label">{{ item.label }}</span>
       </li>
     </ul>
@@ -152,6 +157,7 @@ function select(key: string) {
 }
 
 .context-menu__icon {
+  display: inline-block;
   width: 1rem;
   text-align: center;
 }

@@ -5,6 +5,8 @@ import { passwordResetRequest } from "@/api/auth";
 import { getApiErrorMessage } from "@/api/client";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import AppBanner from "@/components/feedback/AppBanner.vue";
 
 const { t } = useI18n();
@@ -34,9 +36,13 @@ async function onSubmit() {
 
 <template>
   <form v-if="!success" class="password-reset-view" @submit.prevent="onSubmit">
-    <h2 class="password-reset-view__title">
+    <AppPageTitle
+      :level="2"
+      class="password-reset-view__title"
+      icon="paper-plane"
+    >
       {{ t("auth.passwordReset.requestTitle") }}
-    </h2>
+    </AppPageTitle>
 
     <p class="password-reset-view__hint">
       {{ t("auth.passwordReset.requestHint") }}
@@ -63,12 +69,14 @@ async function onSubmit() {
       type="submit"
       :loading="isLoading"
       class="password-reset-view__submit"
+      icon="paper-plane"
     >
       {{ t("auth.passwordReset.requestSubmit") }}
     </AppButton>
 
     <nav class="password-reset-view__links">
       <RouterLink to="/login">
+        <AppIcon name="arrow-left" spacing="right" />
         {{ t("auth.passwordReset.backToLogin") }}
       </RouterLink>
     </nav>
@@ -79,6 +87,7 @@ async function onSubmit() {
       {{ t("auth.passwordReset.requestSuccess") }}
     </AppBanner>
     <RouterLink to="/login" class="password-reset-view__back">
+      <AppIcon name="arrow-left" spacing="right" />
       {{ t("auth.passwordReset.backToLogin") }}
     </RouterLink>
   </div>

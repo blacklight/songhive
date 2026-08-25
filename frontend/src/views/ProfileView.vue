@@ -2,6 +2,8 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
+import AppIcon from "@/components/ui/AppIcon.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ProfileTab from "./profile/ProfileTab.vue";
 import ApiTokensTab from "./profile/ApiTokensTab.vue";
 import SessionsTab from "./profile/SessionsTab.vue";
@@ -19,9 +21,9 @@ const tab = computed(() => {
 });
 
 const tabs = [
-  { key: "profile", label: t("profile.tabs.profile") },
-  { key: "apiTokens", label: t("profile.tabs.apiTokens") },
-  { key: "sessions", label: t("profile.tabs.sessions") },
+  { key: "profile", label: t("profile.tabs.profile"), icon: "user" },
+  { key: "apiTokens", label: t("profile.tabs.apiTokens"), icon: "key" },
+  { key: "sessions", label: t("profile.tabs.sessions"), icon: "laptop" },
 ];
 
 const currentComponent = computed(() => {
@@ -38,7 +40,9 @@ const currentComponent = computed(() => {
 
 <template>
   <main class="profile-view">
-    <h1 class="profile-view__title">{{ t("profile.title") }}</h1>
+    <AppPageTitle class="profile-view__title" icon="user">{{
+      t("profile.title")
+    }}</AppPageTitle>
 
     <nav class="profile-view__tabs" aria-label="Profile tabs">
       <RouterLink
@@ -50,6 +54,7 @@ const currentComponent = computed(() => {
           { 'profile-view__tab--active': tab === item.key },
         ]"
       >
+        <AppIcon :name="item.icon" spacing="right" />
         {{ item.label }}
       </RouterLink>
     </nav>
@@ -81,6 +86,9 @@ const currentComponent = computed(() => {
 }
 
 .profile-view__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
   border-bottom: 2px solid transparent;
   color: var(--color-text-muted);

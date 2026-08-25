@@ -18,6 +18,7 @@ import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AppModal from "@/components/feedback/AppModal.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import PlaylistCard from "@/components/library/PlaylistCard.vue";
 import type { Visibility } from "@/api/playlists";
 
@@ -94,8 +95,10 @@ async function onCreate() {
 <template>
   <div class="playlists-view">
     <div class="playlists-view__header">
-      <h1 class="playlists-view__title">{{ t("nav.playlists") }}</h1>
-      <AppButton v-if="canCreate" size="sm" @click="openCreate">
+      <AppPageTitle class="playlists-view__title" icon="list-music">
+        {{ t("nav.playlists") }}
+      </AppPageTitle>
+      <AppButton v-if="canCreate" size="sm" icon="plus" @click="openCreate">
         {{ t("browse.list.createPlaylist") }}
       </AppButton>
     </div>
@@ -125,7 +128,9 @@ async function onCreate() {
 
     <div v-else-if="error" class="playlists-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="retry">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="retry">
+        {{ t("common.retry") }}
+      </AppButton>
     </div>
 
     <div v-else-if="items.length === 0" class="playlists-view__empty">
@@ -146,6 +151,7 @@ async function onCreate() {
         variant="secondary"
         :loading="loading"
         :disabled="loading"
+        icon="chevron-down"
         @click="loadMore"
       >
         {{ t("browse.list.loadMore") }}
@@ -184,7 +190,7 @@ async function onCreate() {
       </form>
 
       <template #actions>
-        <AppButton variant="secondary" @click="closeCreate">
+        <AppButton variant="secondary" icon="xmark" @click="closeCreate">
           {{ t("common.cancel") }}
         </AppButton>
         <AppButton
@@ -192,6 +198,7 @@ async function onCreate() {
           type="submit"
           :loading="isCreating"
           :disabled="isCreating || !name.trim()"
+          icon="floppy-disk"
         >
           {{ t("common.save") }}
         </AppButton>

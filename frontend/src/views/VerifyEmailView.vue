@@ -5,6 +5,8 @@ import { useRoute } from "vue-router";
 import { verifyEmail } from "@/api/auth";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import AppBanner from "@/components/feedback/AppBanner.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -36,7 +38,9 @@ onMounted(async () => {
 
 <template>
   <div class="verify-email-view">
-    <h2 class="verify-email-view__title">{{ t("auth.verifyEmail.title") }}</h2>
+    <AppPageTitle :level="2" class="verify-email-view__title" icon="envelope">
+      {{ t("auth.verifyEmail.title") }}
+    </AppPageTitle>
 
     <div v-if="isLoading" class="verify-email-view__status">
       <AppSpinner />
@@ -48,6 +52,7 @@ onMounted(async () => {
         {{ t("auth.verifyEmail.success") }}
       </AppBanner>
       <RouterLink to="/login" class="verify-email-view__link">
+        <AppIcon name="arrow-left" spacing="right" />
         {{ t("auth.verifyEmail.backToLogin") }}
       </RouterLink>
     </template>
@@ -57,6 +62,7 @@ onMounted(async () => {
         {{ t("auth.verifyEmail.invalidToken") }}
       </AppBanner>
       <RouterLink to="/login" class="verify-email-view__link">
+        <AppIcon name="arrow-left" spacing="right" />
         {{ t("auth.verifyEmail.backToLogin") }}
       </RouterLink>
     </template>

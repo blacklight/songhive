@@ -10,6 +10,7 @@ import { usePlayerStore } from "@/stores/player";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
 import { useFocusTrap } from "@/composables/useFocusTrap";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 
 const { t } = useI18n();
 
@@ -95,12 +96,20 @@ function clearQueue() {
     @keydown="onKeyDown"
   >
     <div class="queue-panel__header">
-      <h2 class="queue-panel__title">{{ t("player.queue") }}</h2>
+      <AppPageTitle
+        :level="2"
+        class="queue-panel__title"
+        icon="list"
+        icon-variant="solid"
+      >
+        {{ t("player.queue") }}
+      </AppPageTitle>
       <AppButton
         variant="ghost"
         size="sm"
         class="queue-panel__clear"
         :aria-label="t('player.clearQueue')"
+        icon="xmark"
         @click="clearQueue"
       >
         {{ t("common.clear") }}
@@ -110,14 +119,9 @@ function clearQueue() {
         size="sm"
         class="queue-panel__close"
         :aria-label="t('player.closeQueue')"
+        icon="xmark"
         @click="emit('close')"
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-          <path
-            d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
-          />
-        </svg>
-      </AppButton>
+      />
     </div>
 
     <ol
@@ -164,14 +168,9 @@ function clearQueue() {
           size="sm"
           class="queue-panel__remove"
           :aria-label="t('player.removeFromQueue', { title: track.title })"
+          icon="xmark"
           @click="removeAt($event, i)"
-        >
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path
-              d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
-            />
-          </svg>
-        </AppButton>
+        />
       </li>
     </ol>
 
@@ -299,6 +298,12 @@ function clearQueue() {
 .queue-panel__remove {
   flex-shrink: 0;
   color: var(--color-text-muted);
+}
+
+.queue-panel .queue-panel__clear,
+.queue-panel .queue-panel__close,
+.queue-panel .queue-panel__remove {
+  font-size: 1rem;
 }
 
 .queue-panel__remove:hover {

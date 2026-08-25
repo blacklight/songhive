@@ -14,6 +14,7 @@ import type { TrackEnrich } from "@/player/enrich";
 import { useShareDialog } from "@/composables/useShareDialog";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AlbumCard from "@/components/library/AlbumCard.vue";
@@ -150,7 +151,9 @@ watch(
 
     <div v-else-if="error" class="artist-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="load">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="load">{{
+        t("common.retry")
+      }}</AppButton>
     </div>
 
     <template v-else-if="artist">
@@ -162,7 +165,9 @@ watch(
           class="artist-view__avatar"
         />
         <div class="artist-view__info">
-          <h1 class="artist-view__name">{{ artist.name }}</h1>
+          <AppPageTitle class="artist-view__name" icon="users">{{
+            artist.name
+          }}</AppPageTitle>
           <p v-if="artist.bio" class="artist-view__bio">{{ artist.bio }}</p>
         </div>
       </div>
@@ -171,9 +176,14 @@ watch(
         class="artist-view__section"
         aria-labelledby="artist-albums-heading"
       >
-        <h2 id="artist-albums-heading" class="artist-view__section-title">
+        <AppPageTitle
+          id="artist-albums-heading"
+          :level="2"
+          class="artist-view__section-title"
+          icon="compact-disc"
+        >
           {{ t("browse.detail.discography") }}
-        </h2>
+        </AppPageTitle>
 
         <div
           v-if="albumsLoading && albums.length === 0"
@@ -188,7 +198,7 @@ watch(
           role="alert"
         >
           <span>{{ albumsError }}</span>
-          <AppButton size="sm" @click="retryAlbums">{{
+          <AppButton size="sm" icon="rotate-right" @click="retryAlbums">{{
             t("common.retry")
           }}</AppButton>
         </div>
@@ -209,6 +219,7 @@ watch(
         <div class="artist-view__footer">
           <AppButton
             v-if="albumsHasMore"
+            icon="chevron-down"
             variant="secondary"
             :loading="albumsLoading"
             :disabled="albumsLoading"
@@ -223,13 +234,18 @@ watch(
         class="artist-view__section"
         aria-labelledby="artist-tracks-heading"
       >
-        <h2 id="artist-tracks-heading" class="artist-view__section-title">
+        <AppPageTitle
+          id="artist-tracks-heading"
+          :level="2"
+          class="artist-view__section-title"
+          icon="music"
+        >
           {{ t("browse.detail.tracks") }}
-        </h2>
+        </AppPageTitle>
 
         <div v-if="tracksError" class="artist-view__section-error" role="alert">
           <span>{{ tracksError }}</span>
-          <AppButton size="sm" @click="retryTracks">{{
+          <AppButton size="sm" icon="rotate-right" @click="retryTracks">{{
             t("common.retry")
           }}</AppButton>
         </div>
@@ -245,6 +261,7 @@ watch(
         <div class="artist-view__footer">
           <AppButton
             v-if="tracksHasMore"
+            icon="chevron-down"
             variant="secondary"
             :loading="tracksLoading"
             :disabled="tracksLoading"

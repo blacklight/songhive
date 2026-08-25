@@ -18,6 +18,7 @@ import { parseNumber, toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 
 const { t } = useI18n();
@@ -152,11 +153,15 @@ watch(
 
     <div v-else-if="error" class="album-edit-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="load">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="load">
+        {{ t("common.retry") }}
+      </AppButton>
     </div>
 
     <template v-else-if="album && isOwner">
-      <h1 class="album-edit-view__title">{{ t("browse.edit.editAlbum") }}</h1>
+      <AppPageTitle class="album-edit-view__title" icon="pen-to-square">
+        {{ t("browse.edit.editAlbum") }}
+      </AppPageTitle>
 
       <form class="album-edit-view__form" @submit.prevent="onSubmit">
         <AppInput
@@ -181,13 +186,14 @@ watch(
         />
 
         <div class="album-edit-view__actions">
-          <AppButton type="submit" :loading="isSaving">
+          <AppButton type="submit" :loading="isSaving" icon="floppy-disk">
             {{ t("common.save") }}
           </AppButton>
           <AppButton
             type="button"
             variant="danger"
             :loading="isDeleting"
+            icon="trash-can"
             @click="onDelete"
           >
             {{ t("common.delete") }}

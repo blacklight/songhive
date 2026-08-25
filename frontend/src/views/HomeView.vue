@@ -1,8 +1,10 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+</script>
 
 <template>
   <div class="home">
-    <h1>Songhive</h1>
+    <AppPageTitle icon="music">Songhive</AppPageTitle>
     <p>A federated music sharing service</p>
   </div>
 </template>

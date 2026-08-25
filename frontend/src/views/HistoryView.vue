@@ -9,6 +9,7 @@ import { useToastStore } from "@/stores/toast";
 import { toQueueTrack } from "@/player/enrich";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppTable, { type Column } from "@/components/ui/AppTable.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
@@ -173,7 +174,9 @@ onMounted(() => load());
 
 <template>
   <div class="history-view">
-    <h1 class="history-view__title">{{ t("pages.history.title") }}</h1>
+    <AppPageTitle class="history-view__title" icon="clock-rotate-left">{{
+      t("pages.history.title")
+    }}</AppPageTitle>
 
     <div class="history-view__controls">
       <AppInput
@@ -184,6 +187,7 @@ onMounted(() => load());
       />
       <AppButton
         size="sm"
+        icon="play"
         :disabled="filteredItems.length === 0"
         @click="onPlayAll"
       >
@@ -193,7 +197,7 @@ onMounted(() => load());
 
     <div v-if="error" class="history-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="load(page, false)">
+      <AppButton size="sm" icon="rotate-right" @click="load(page, false)">
         {{ t("common.retry") }}
       </AppButton>
     </div>
@@ -216,6 +220,7 @@ onMounted(() => load());
       <template #row-actions="{ row }">
         <AppButton
           size="sm"
+          icon="rotate-right"
           :aria-label="t('pages.history.playAgain')"
           @click="onPlayAgain(asRow(row).entry)"
         >
@@ -227,6 +232,7 @@ onMounted(() => load());
     <div v-if="!error" class="history-view__pagination">
       <AppButton
         size="sm"
+        icon="chevron-left"
         variant="secondary"
         :disabled="page === 1 || loading"
         @click="onPrevious"
@@ -235,6 +241,7 @@ onMounted(() => load());
       </AppButton>
       <AppButton
         size="sm"
+        icon="chevron-right"
         variant="secondary"
         :disabled="!hasMore || loading"
         @click="onNext"

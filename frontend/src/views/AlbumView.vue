@@ -16,6 +16,7 @@ import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
@@ -116,7 +117,9 @@ watch(
 
     <div v-else-if="error" class="album-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="load">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="load">{{
+        t("common.retry")
+      }}</AppButton>
     </div>
 
     <template v-else-if="album">
@@ -135,7 +138,9 @@ watch(
         />
 
         <div class="album-view__info">
-          <h1 class="album-view__title">{{ album.title }}</h1>
+          <AppPageTitle class="album-view__title" icon="compact-disc">{{
+            album.title
+          }}</AppPageTitle>
 
           <RouterLink
             v-if="artist && album.artist_id"
@@ -168,6 +173,7 @@ watch(
             <AppButton
               v-if="isOwner"
               size="sm"
+              icon="share-nodes"
               @click="openShare('album', album.id, album.title, album.owner_id)"
             >
               {{ t("common.share") }}
@@ -180,13 +186,18 @@ watch(
         class="album-view__section"
         aria-labelledby="album-tracks-heading"
       >
-        <h2 id="album-tracks-heading" class="album-view__section-title">
+        <AppPageTitle
+          id="album-tracks-heading"
+          :level="2"
+          class="album-view__section-title"
+          icon="music"
+        >
           {{ t("browse.detail.tracks") }}
-        </h2>
+        </AppPageTitle>
 
         <div v-if="tracksError" class="album-view__section-error" role="alert">
           <span>{{ tracksError }}</span>
-          <AppButton size="sm" @click="retryTracks">{{
+          <AppButton size="sm" icon="rotate-right" @click="retryTracks">{{
             t("common.retry")
           }}</AppButton>
         </div>
@@ -203,6 +214,7 @@ watch(
         <div class="album-view__footer">
           <AppButton
             v-if="tracksHasMore"
+            icon="chevron-down"
             variant="secondary"
             :loading="tracksLoading"
             :disabled="tracksLoading"

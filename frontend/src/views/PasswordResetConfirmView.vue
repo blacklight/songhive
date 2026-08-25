@@ -7,6 +7,8 @@ import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import AppBanner from "@/components/feedback/AppBanner.vue";
 
 const { t } = useI18n();
@@ -51,9 +53,13 @@ async function onSubmit() {
 
 <template>
   <form class="password-reset-confirm-view" @submit.prevent="onSubmit">
-    <h2 class="password-reset-confirm-view__title">
+    <AppPageTitle
+      :level="2"
+      class="password-reset-confirm-view__title"
+      icon="key"
+    >
       {{ t("auth.passwordReset.confirmTitle") }}
-    </h2>
+    </AppPageTitle>
 
     <AppBanner
       v-if="!token"
@@ -93,12 +99,14 @@ async function onSubmit() {
       :loading="isLoading"
       :disabled="!token"
       class="password-reset-confirm-view__submit"
+      icon="floppy-disk"
     >
       {{ t("auth.passwordReset.confirmSubmit") }}
     </AppButton>
 
     <nav class="password-reset-confirm-view__links">
       <RouterLink to="/login">
+        <AppIcon name="arrow-left" spacing="right" />
         {{ t("auth.passwordReset.backToLogin") }}
       </RouterLink>
     </nav>

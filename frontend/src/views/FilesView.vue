@@ -7,6 +7,7 @@ import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import type { Visibility } from "@/api/libraries";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 
 const { t } = useI18n();
@@ -87,16 +88,23 @@ async function onFileChange(event: Event) {
 
 <template>
   <div class="files-view">
-    <h1 class="files-view__title">{{ t("pages.files.title") }}</h1>
+    <AppPageTitle class="files-view__title" icon="file">{{
+      t("pages.files.title")
+    }}</AppPageTitle>
 
     <p class="files-view__notice" role="note">
       {{ t("pages.files.noList") }}
     </p>
 
     <section class="files-view__upload" aria-labelledby="files-upload-heading">
-      <h2 id="files-upload-heading" class="files-view__section-title">
+      <AppPageTitle
+        id="files-upload-heading"
+        :level="2"
+        class="files-view__section-title"
+        icon="upload"
+      >
         {{ t("pages.files.uploadTitle") }}
-      </h2>
+      </AppPageTitle>
 
       <div class="files-view__controls">
         <AppSelect
@@ -107,6 +115,7 @@ async function onFileChange(event: Event) {
         />
 
         <AppButton
+          icon="folder-open"
           variant="secondary"
           :loading="uploading"
           :disabled="uploading"

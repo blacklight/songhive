@@ -294,6 +294,7 @@ watch(
     <div class="share-dialog__tabs">
       <AppButton
         size="sm"
+        icon="users"
         :variant="activeTab === 'grants' ? 'primary' : 'ghost'"
         @click="activeTab = 'grants'"
       >
@@ -301,6 +302,7 @@ watch(
       </AppButton>
       <AppButton
         size="sm"
+        icon="link"
         :variant="activeTab === 'urls' ? 'primary' : 'ghost'"
         @click="activeTab = 'urls'"
       >
@@ -317,6 +319,7 @@ watch(
         />
         <AppButton
           size="sm"
+          icon="plus"
           :loading="isCreatingGrant"
           :disabled="!userId.trim()"
           @click="createGrant"
@@ -327,9 +330,9 @@ watch(
 
       <div v-if="grantsError" class="share-dialog__error" role="alert">
         {{ grantsError }}
-        <AppButton size="sm" @click="loadGrants">{{
-          t("common.retry")
-        }}</AppButton>
+        <AppButton size="sm" icon="rotate-right" @click="loadGrants">
+          {{ t("common.retry") }}
+        </AppButton>
       </div>
 
       <AppTable
@@ -343,6 +346,7 @@ watch(
           <AppButton
             size="sm"
             variant="danger"
+            icon="trash-can"
             @click="revokeGrant(String(row.id))"
           >
             {{ t("browse.share.revoke") }}
@@ -358,7 +362,7 @@ watch(
           :label="t('browse.share.copyUrl')"
           disabled
         />
-        <AppButton size="sm" @click="copyToClipboard(newUrl)">
+        <AppButton size="sm" icon="copy" @click="copyToClipboard(newUrl)">
           {{ t("common.copy") }}
         </AppButton>
 
@@ -368,7 +372,11 @@ watch(
           :hint="t('browse.share.rawTokenHint')"
           disabled
         />
-        <AppButton size="sm" @click="newToken && copyToClipboard(newToken)">
+        <AppButton
+          size="sm"
+          icon="copy"
+          @click="newToken && copyToClipboard(newToken)"
+        >
           {{ t("common.copy") }}
         </AppButton>
       </div>
@@ -380,16 +388,21 @@ watch(
           :label="t('browse.share.expiresAt')"
           :hint="t('browse.share.expiresAtHint')"
         />
-        <AppButton size="sm" :loading="isCreatingUrl" @click="createUrl">
+        <AppButton
+          size="sm"
+          icon="plus"
+          :loading="isCreatingUrl"
+          @click="createUrl"
+        >
           {{ t("browse.share.createShareUrl") }}
         </AppButton>
       </div>
 
       <div v-if="urlsError" class="share-dialog__error" role="alert">
         {{ urlsError }}
-        <AppButton size="sm" @click="loadUrls">{{
-          t("common.retry")
-        }}</AppButton>
+        <AppButton size="sm" icon="rotate-right" @click="loadUrls">
+          {{ t("common.retry") }}
+        </AppButton>
       </div>
 
       <AppTable
@@ -403,6 +416,7 @@ watch(
           <AppButton
             size="sm"
             variant="danger"
+            icon="trash-can"
             @click="revokeUrl(String(row.id))"
           >
             {{ t("browse.share.revoke") }}

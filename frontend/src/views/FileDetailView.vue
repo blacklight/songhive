@@ -8,6 +8,8 @@ import { API_PREFIX, buildUrl } from "@/api/config";
 import { useToastStore } from "@/stores/toast";
 import { formatBytes, toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 
 const { t } = useI18n();
@@ -81,11 +83,15 @@ watch(
 
     <div v-else-if="error" class="file-detail-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="load">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="load">{{
+        t("common.retry")
+      }}</AppButton>
     </div>
 
     <template v-else-if="file">
-      <h1 class="file-detail-view__title">{{ displayName }}</h1>
+      <AppPageTitle class="file-detail-view__title" icon="file">{{
+        displayName
+      }}</AppPageTitle>
 
       <section class="file-detail-view__meta">
         <div class="file-detail-view__row">
@@ -119,7 +125,7 @@ watch(
             <code class="file-detail-view__sha256-value" :title="file.sha256">
               {{ file.sha256 }}
             </code>
-            <AppButton size="sm" @click="copySha256">
+            <AppButton size="sm" icon="copy" @click="copySha256">
               {{ t("common.copy") }}
             </AppButton>
           </div>
@@ -148,6 +154,7 @@ watch(
             :download="file.original_filename ?? file.id"
             class="file-detail-view__download"
           >
+            <AppIcon name="download" spacing="right" />
             {{ t("pages.files.download") }}
           </a>
         </div>

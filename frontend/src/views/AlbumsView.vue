@@ -8,6 +8,7 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AlbumCard from "@/components/library/AlbumCard.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 
 const { t } = useI18n();
 const { items, loading, error, query, hasMore, load, loadMore, search, retry } =
@@ -18,7 +19,9 @@ onMounted(() => load());
 
 <template>
   <div class="albums-view">
-    <h1 class="albums-view__title">{{ t("nav.albums") }}</h1>
+    <AppPageTitle class="albums-view__title" icon="compact-disc">
+      {{ t("nav.albums") }}
+    </AppPageTitle>
 
     <!--
       :debounce="0" avoids stacking with useEntityList's 300 ms debounce;
@@ -45,7 +48,9 @@ onMounted(() => load());
 
     <div v-else-if="error" class="albums-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="retry">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="retry">
+        {{ t("common.retry") }}
+      </AppButton>
     </div>
 
     <div v-else-if="items.length === 0" class="albums-view__empty">
@@ -62,6 +67,7 @@ onMounted(() => load());
         variant="secondary"
         :loading="loading"
         :disabled="loading"
+        icon="chevron-down"
         @click="loadMore"
       >
         {{ t("browse.list.loadMore") }}

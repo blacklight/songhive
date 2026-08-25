@@ -4,6 +4,8 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import { createPinia, setActivePinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
+import { useInstanceStore } from "@/stores/instance";
+import * as instanceApi from "@/api/instance";
 import { ApiError } from "@/api/client";
 import LoginView from "./LoginView.vue";
 
@@ -139,5 +141,43 @@ describe("LoginView", () => {
 
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/");
+  });
+
+  it("shows the register link when public registration is open", async () => {
+    const router = createTestRouter();
+    await router.push("/login");
+    await router.isReady();
+
+    const instanceStore = useInstanceStore();
+    instanceStore.instance = {
+      registrations: true,
+    } as unknown as instanceApi.InstanceInfo;
+
+    const wrapper = mount(LoginView, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(i18n.global.t("auth.loginPage.noAccount"));
+  });
+
+  it("hides the register link when public registration is closed", async () => {
+    const router = createTestRouter();
+    await router.push("/login");
+    await router.isReady();
+
+    const instanceStore = useInstanceStore();
+    instanceStore.instance = {
+      registrations: false,
+    } as unknown as instanceApi.InstanceInfo;
+
+    const wrapper = mount(LoginView, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain(
+      i18n.global.t("auth.loginPage.noAccount"),
+    );
   });
 });

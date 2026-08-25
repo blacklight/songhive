@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
+import AppIcon from "@/components/ui/AppIcon.vue";
 
 const { t } = useI18n();
 </script>
@@ -9,9 +10,10 @@ const { t } = useI18n();
   <main class="error-view">
     <h1>404</h1>
     <p>{{ t("pages.notFound") }}</p>
-    <RouterLink to="/" class="error-view__link">{{
-      t("pages.goHome")
-    }}</RouterLink>
+    <RouterLink to="/" class="error-view__link">
+      <AppIcon name="house" spacing="right" />
+      {{ t("pages.goHome") }}
+    </RouterLink>
   </main>
 </template>
 

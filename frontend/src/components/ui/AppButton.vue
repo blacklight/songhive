@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
+import AppIcon from "./AppIcon.vue";
 
 export interface Props {
   variant?: "primary" | "secondary" | "ghost" | "danger";
@@ -7,12 +8,15 @@ export interface Props {
   loading?: boolean;
   disabled?: boolean;
   type?: "button" | "submit";
+  icon?: string;
+  iconVariant?: "solid" | "regular" | "light" | "brand";
 }
 
 const props = withDefaults(defineProps<Props>(), {
   variant: "primary",
   size: "md",
   type: "button",
+  iconVariant: "solid",
 });
 </script>
 
@@ -23,6 +27,11 @@ const props = withDefaults(defineProps<Props>(), {
     :disabled="props.loading || props.disabled"
     :aria-busy="props.loading ? 'true' : 'false'"
   >
+    <AppIcon
+      v-if="props.icon && !props.loading"
+      :name="props.icon"
+      :variant="props.iconVariant"
+    />
     <AppSpinner v-if="props.loading" size="sm" class="app-btn__spinner" />
     <slot />
   </button>

@@ -149,6 +149,7 @@ async function onSubmit() {
           type="button"
           variant="secondary"
           :loading="isUploading"
+          icon="upload"
           @click="triggerFileInput"
         >
           {{ t("profile.avatarUpload") }}
@@ -190,13 +191,20 @@ async function onSubmit() {
           type="button"
           variant="ghost"
           size="sm"
+          icon="xmark"
           @click="removeLink(index)"
         >
           {{ t("profile.removeLink") }}
         </AppButton>
       </div>
 
-      <AppButton type="button" variant="secondary" size="sm" @click="addLink">
+      <AppButton
+        type="button"
+        variant="secondary"
+        size="sm"
+        icon="plus"
+        @click="addLink"
+      >
         {{ t("profile.addLink") }}
       </AppButton>
     </fieldset>
@@ -205,7 +213,7 @@ async function onSubmit() {
       {{ error }}
     </p>
 
-    <AppButton type="submit" :loading="isLoading">
+    <AppButton type="submit" :loading="isLoading" icon="floppy-disk">
       {{ t("profile.save") }}
     </AppButton>
 
@@ -229,7 +237,7 @@ async function onSubmit() {
       </div>
 
       <div class="profile-tab__gated-item">
-        <AppButton type="button" variant="danger" disabled>
+        <AppButton type="button" variant="danger" icon="trash-can" disabled>
           {{ t("profile.deleteAccount") }}
         </AppButton>
         <p class="profile-tab__hint">

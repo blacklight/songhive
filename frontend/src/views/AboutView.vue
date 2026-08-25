@@ -2,6 +2,7 @@
 import { computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { useInstanceStore } from "@/stores/instance";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 
 const { t } = useI18n();
 const instanceStore = useInstanceStore();
@@ -32,7 +33,9 @@ onMounted(() => void instanceStore.load());
 
 <template>
   <main class="about-view">
-    <h1 class="about-view__title">{{ t("pages.about.title") }}</h1>
+    <AppPageTitle class="about-view__title" icon="circle-info">{{
+      t("pages.about.title")
+    }}</AppPageTitle>
 
     <section class="about-view__card" :aria-label="t('pages.about.title')">
       <div v-if="instanceStore.loading" class="about-view__loading">

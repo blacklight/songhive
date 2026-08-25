@@ -6,6 +6,7 @@ import { useAuthStore } from "@/stores/auth";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppToast from "@/components/feedback/AppToast.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import PlayerBarSlot from "@/components/player/PlayerBarSlot.vue";
 
 const { t } = useI18n();
@@ -27,20 +28,65 @@ function toggleMenu() {
   isMobileMenuOpen.value = !isMobileMenuOpen.value;
 }
 
-type NavItem = { name: string; to: string; requiresAuth: boolean };
+type NavItem = {
+  name: string;
+  to: string;
+  requiresAuth: boolean;
+  icon: string;
+};
 
 const navItems = computed<NavItem[]>(() => [
-  { name: t("nav.home"), to: "/", requiresAuth: false },
-  { name: t("nav.library"), to: "/libraries", requiresAuth: false },
-  { name: t("nav.artists"), to: "/artists", requiresAuth: false },
-  { name: t("nav.albums"), to: "/albums", requiresAuth: false },
-  { name: t("nav.tracks"), to: "/tracks", requiresAuth: false },
-  { name: t("nav.playlists"), to: "/playlists", requiresAuth: false },
-  { name: t("nav.history"), to: "/history", requiresAuth: true },
-  { name: t("nav.favorites"), to: "/favorites", requiresAuth: true },
-  { name: t("nav.files"), to: "/files", requiresAuth: true },
-  { name: t("nav.radio"), to: "/radio", requiresAuth: true },
-  { name: t("nav.about"), to: "/about", requiresAuth: false },
+  { name: t("nav.home"), to: "/", requiresAuth: false, icon: "house" },
+  {
+    name: t("nav.library"),
+    to: "/libraries",
+    requiresAuth: false,
+    icon: "folder-open",
+  },
+  {
+    name: t("nav.artists"),
+    to: "/artists",
+    requiresAuth: false,
+    icon: "users",
+  },
+  {
+    name: t("nav.albums"),
+    to: "/albums",
+    requiresAuth: false,
+    icon: "compact-disc",
+  },
+  { name: t("nav.tracks"), to: "/tracks", requiresAuth: false, icon: "music" },
+  {
+    name: t("nav.playlists"),
+    to: "/playlists",
+    requiresAuth: false,
+    icon: "list",
+  },
+  {
+    name: t("nav.history"),
+    to: "/history",
+    requiresAuth: true,
+    icon: "clock-rotate-left",
+  },
+  {
+    name: t("nav.favorites"),
+    to: "/favorites",
+    requiresAuth: true,
+    icon: "heart",
+  },
+  { name: t("nav.files"), to: "/files", requiresAuth: true, icon: "file" },
+  {
+    name: t("nav.radio"),
+    to: "/radio",
+    requiresAuth: true,
+    icon: "tower-broadcast",
+  },
+  {
+    name: t("nav.about"),
+    to: "/about",
+    requiresAuth: false,
+    icon: "circle-info",
+  },
 ]);
 
 const visibleNavItems = computed(() =>
@@ -49,8 +95,12 @@ const visibleNavItems = computed(() =>
   ),
 );
 
-const adminItem = { name: t("nav.admin"), to: "/admin" };
-const loginItem = { name: t("nav.login"), to: "/login" };
+const adminItem = { name: t("nav.admin"), to: "/admin", icon: "shield-halved" };
+const loginItem = {
+  name: t("nav.login"),
+  to: "/login",
+  icon: "right-to-bracket",
+};
 </script>
 
 <template>
@@ -60,10 +110,10 @@ const loginItem = { name: t("nav.login"), to: "/login" };
       variant="ghost"
       size="sm"
       class="app-layout__menu-toggle"
+      icon="bars"
+      aria-label="Toggle menu"
       @click="toggleMenu"
-    >
-      ☰
-    </AppButton>
+    />
     <aside
       class="app-layout__sidebar"
       :class="{ 'app-layout__sidebar--open': isMobileMenuOpen }"
@@ -71,12 +121,22 @@ const loginItem = { name: t("nav.login"), to: "/login" };
       <nav class="app-layout__nav" role="navigation" aria-label="Main">
         <ul>
           <li v-for="item in visibleNavItems" :key="item.to">
-            <RouterLink :to="item.to" @click="isMobileMenuOpen = false">
+            <RouterLink
+              :to="item.to"
+              class="app-layout__nav-link"
+              @click="isMobileMenuOpen = false"
+            >
+              <AppIcon :name="item.icon" />
               {{ item.name }}
             </RouterLink>
           </li>
           <li v-if="authStore.isAdmin" class="app-layout__admin">
-            <RouterLink :to="adminItem.to" @click="isMobileMenuOpen = false">
+            <RouterLink
+              :to="adminItem.to"
+              class="app-layout__nav-link"
+              @click="isMobileMenuOpen = false"
+            >
+              <AppIcon :name="adminItem.icon" />
               {{ adminItem.name }}
             </RouterLink>
           </li>
@@ -88,6 +148,7 @@ const loginItem = { name: t("nav.login"), to: "/login" };
           class="app-layout__login"
           @click="isMobileMenuOpen = false"
         >
+          <AppIcon :name="loginItem.icon" spacing="right" />
           {{ loginItem.name }}
         </RouterLink>
       </footer>
@@ -109,6 +170,7 @@ const loginItem = { name: t("nav.login"), to: "/login" };
           variant="ghost"
           size="sm"
           class="app-layout__logout"
+          icon="right-from-bracket"
           @click="logout"
         >
           {{ t("auth.logout") }}
@@ -187,7 +249,9 @@ const loginItem = { name: t("nav.login"), to: "/login" };
 }
 
 .app-layout__nav a {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   color: var(--color-text-menu);
@@ -211,13 +275,15 @@ const loginItem = { name: t("nav.login"), to: "/login" };
 }
 
 .app-layout__login {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
   width: calc(100% - 2 * var(--space-3));
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   background-color: var(--color-accent);
   color: var(--color-accent-contrast);
-  text-align: center;
   text-decoration: none;
   font-weight: 500;
   transition: filter var(--transition-fast);

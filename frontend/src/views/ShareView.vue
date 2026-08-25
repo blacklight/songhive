@@ -7,6 +7,7 @@ import { ApiError } from "@/api/client";
 import { parseSharePayload, enrichSharePreview } from "@/utils/share";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import type { SharePreview } from "@/utils/share";
 
@@ -106,9 +107,9 @@ watch(
       :class="`share-view__error--${error}`"
       role="alert"
     >
-      <h1 class="share-view__title">
+      <AppPageTitle class="share-view__title" icon="share-nodes">
         {{ t("browse.share.sharedItem", { type: t("browse.entities.item") }) }}
-      </h1>
+      </AppPageTitle>
 
       <p v-if="error === 'expired'">{{ t("browse.share.shareExpired") }}</p>
       <p v-else-if="error === 'revoked'">
@@ -120,16 +121,16 @@ watch(
       <p v-else>{{ t("errors.unknown") }}</p>
 
       <RouterLink :to="loginRoute">
-        <AppButton size="sm" variant="secondary">
+        <AppButton size="sm" icon="right-to-bracket" variant="secondary">
           {{ t("browse.share.openInApp") }}
         </AppButton>
       </RouterLink>
     </div>
 
     <template v-else-if="preview">
-      <h1 class="share-view__title">
+      <AppPageTitle class="share-view__title" icon="share-nodes">
         {{ t("browse.share.sharedItem", { type: typeLabel }) }}
-      </h1>
+      </AppPageTitle>
 
       <div class="share-view__header">
         <img
@@ -173,7 +174,7 @@ watch(
 
       <div class="share-view__actions">
         <RouterLink :to="loginRoute">
-          <AppButton size="sm" variant="secondary">
+          <AppButton size="sm" icon="right-to-bracket" variant="secondary">
             {{ t("browse.share.openInApp") }}
           </AppButton>
         </RouterLink>

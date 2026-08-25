@@ -9,6 +9,7 @@ import { useInstanceStore } from "./stores/instance";
 import { usePlayerStore } from "./stores/player";
 import { playerEngine } from "./player/engine";
 import "./styles/tokens.css";
+import "@fortawesome/fontawesome-free/css/all.min.css";
 
 const app = createApp(App);
 const pinia = createPinia();

@@ -9,6 +9,7 @@ import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import AppBanner from "@/components/feedback/AppBanner.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 
@@ -57,12 +58,16 @@ watch(
 
     <div v-else-if="error" class="playlist-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="load">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="load">{{
+        t("common.retry")
+      }}</AppButton>
     </div>
 
     <template v-else-if="playlist">
       <div class="playlist-view__header">
-        <h1 class="playlist-view__name">{{ playlist.name }}</h1>
+        <AppPageTitle class="playlist-view__name" icon="list-music">{{
+          playlist.name
+        }}</AppPageTitle>
 
         <p v-if="playlist.description" class="playlist-view__description">
           {{ playlist.description }}
@@ -81,6 +86,7 @@ watch(
           <AppButton
             v-if="isOwner"
             size="sm"
+            icon="share-nodes"
             @click="
               playlist &&
               openShare(

@@ -32,19 +32,17 @@ function next() {
       size="sm"
       :disabled="!canPrev"
       :aria-label="`Page ${page - 1}`"
+      icon="chevron-left"
       @click="prev"
-    >
-      ←
-    </AppButton>
+    />
     <span class="app-pagination__info">{{ page }} / {{ totalPages }}</span>
     <AppButton
       size="sm"
       :disabled="!canNext"
       :aria-label="`Page ${page + 1}`"
+      icon="chevron-right"
       @click="next"
-    >
-      →
-    </AppButton>
+    />
   </nav>
 </template>
 

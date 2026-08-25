@@ -13,6 +13,7 @@ import { useShareDialog } from "@/composables/useShareDialog";
 import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -126,7 +127,9 @@ onMounted(() => load(true));
 
 <template>
   <div class="favorites-view">
-    <h1 class="favorites-view__title">{{ t("pages.favorites.title") }}</h1>
+    <AppPageTitle class="favorites-view__title" icon="heart">{{
+      t("pages.favorites.title")
+    }}</AppPageTitle>
 
     <div class="favorites-view__tabs">
       <AppButton
@@ -148,7 +151,9 @@ onMounted(() => load(true));
     <template v-if="activeTab === 'tracks'">
       <div v-if="error" class="favorites-view__error" role="alert">
         <span>{{ error }}</span>
-        <AppButton size="sm" @click="retry">{{ t("common.retry") }}</AppButton>
+        <AppButton size="sm" icon="rotate-right" @click="retry">{{
+          t("common.retry")
+        }}</AppButton>
       </div>
 
       <div
@@ -178,6 +183,7 @@ onMounted(() => load(true));
 
       <div v-if="!error && hasMore" class="favorites-view__footer">
         <AppButton
+          icon="chevron-down"
           variant="secondary"
           :loading="loading"
           :disabled="loading"

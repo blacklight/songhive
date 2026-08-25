@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import AppIcon from "@/components/ui/AppIcon.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -20,6 +21,10 @@ const redirectLabel = computed(() =>
     <h1>403</h1>
     <p>{{ t("pages.forbidden") }}</p>
     <RouterLink :to="redirectTarget" class="error-view__link">
+      <AppIcon
+        :name="authStore.isAuthenticated ? 'house' : 'right-to-bracket'"
+        spacing="right"
+      />
       {{ redirectLabel }}
     </RouterLink>
   </main>

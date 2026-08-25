@@ -17,6 +17,7 @@ import { useToastStore } from "@/stores/toast";
 import { toVisibility } from "@/utils/entity";
 import { enrichTracks } from "@/player/enrich";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
@@ -163,11 +164,13 @@ onMounted(() => load(true));
 
 <template>
   <div class="radio-view">
-    <h1 class="radio-view__title">{{ t("pages.radio.title") }}</h1>
+    <AppPageTitle class="radio-view__title" icon="tower-broadcast">{{
+      t("pages.radio.title")
+    }}</AppPageTitle>
 
     <div v-if="error" class="radio-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="retry">
+      <AppButton size="sm" icon="rotate-right" @click="retry">
         {{ t("common.retry") }}
       </AppButton>
     </div>
@@ -196,6 +199,7 @@ onMounted(() => load(true));
         </div>
         <AppButton
           size="sm"
+          icon="play"
           :loading="playingId === radio.id"
           @click="onPlay(radio)"
         >
@@ -205,7 +209,12 @@ onMounted(() => load(true));
     </ul>
 
     <div v-if="!error && hasMore" class="radio-view__footer">
-      <AppButton variant="secondary" :loading="loading" @click="loadMore">
+      <AppButton
+        icon="chevron-down"
+        variant="secondary"
+        :loading="loading"
+        @click="loadMore"
+      >
         {{ t("browse.list.loadMore") }}
       </AppButton>
     </div>
@@ -215,9 +224,14 @@ onMounted(() => load(true));
       class="radio-view__create"
       aria-labelledby="radio-create-heading"
     >
-      <h2 id="radio-create-heading" class="radio-view__section-title">
+      <AppPageTitle
+        id="radio-create-heading"
+        :level="2"
+        class="radio-view__section-title"
+        icon="plus"
+      >
         {{ t("pages.radio.createTitle") }}
-      </h2>
+      </AppPageTitle>
 
       <form class="radio-view__create-form" @submit.prevent="onCreate">
         <AppInput
@@ -243,7 +257,7 @@ onMounted(() => load(true));
         />
 
         <div class="radio-view__create-actions">
-          <AppButton type="submit" :loading="creating">
+          <AppButton type="submit" icon="plus" :loading="creating">
             {{ t("pages.radio.create") }}
           </AppButton>
         </div>

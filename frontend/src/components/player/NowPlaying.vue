@@ -2,6 +2,7 @@
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { usePlayerStore } from "@/stores/player";
+import AppIcon from "@/components/ui/AppIcon.vue";
 
 export interface Props {
   mini?: boolean;
@@ -56,17 +57,7 @@ function goToAlbum() {
       class="now-playing__artwork now-playing__img"
     />
     <div v-else class="now-playing__artwork now-playing__artwork--placeholder">
-      <svg
-        viewBox="0 0 24 24"
-        width="24"
-        height="24"
-        fill="currentColor"
-        aria-hidden="true"
-      >
-        <path
-          d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"
-        />
-      </svg>
+      <AppIcon name="music" />
     </div>
 
     <div class="now-playing__meta">

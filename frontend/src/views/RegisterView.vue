@@ -7,6 +7,7 @@ import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 
 const { t } = useI18n();
 const router = useRouter();
@@ -71,7 +72,9 @@ async function onSubmit() {
 
 <template>
   <form class="register-view" @submit.prevent="onSubmit">
-    <h2 class="register-view__title">{{ t("auth.registerPage.title") }}</h2>
+    <AppPageTitle :level="2" class="register-view__title" icon="user-plus">
+      {{ t("auth.registerPage.title") }}
+    </AppPageTitle>
 
     <AppInput
       v-model="username"
@@ -130,7 +133,12 @@ async function onSubmit() {
       {{ error }}
     </p>
 
-    <AppButton type="submit" :loading="isLoading" class="register-view__submit">
+    <AppButton
+      type="submit"
+      :loading="isLoading"
+      class="register-view__submit"
+      icon="user-plus"
+    >
       {{ t("auth.registerPage.submit") }}
     </AppButton>
 

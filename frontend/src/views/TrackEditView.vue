@@ -18,6 +18,7 @@ import { parseNumber, toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 
 const { t } = useI18n();
@@ -156,11 +157,15 @@ watch(
 
     <div v-else-if="error" class="track-edit-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="load">{{ t("common.retry") }}</AppButton>
+      <AppButton size="sm" icon="rotate-right" @click="load">
+        {{ t("common.retry") }}
+      </AppButton>
     </div>
 
     <template v-else-if="track && isOwner">
-      <h1 class="track-edit-view__title">{{ t("browse.edit.editTrack") }}</h1>
+      <AppPageTitle class="track-edit-view__title" icon="pen-to-square">
+        {{ t("browse.edit.editTrack") }}
+      </AppPageTitle>
 
       <form class="track-edit-view__form" @submit.prevent="onSubmit">
         <AppInput
@@ -188,13 +193,14 @@ watch(
         />
 
         <div class="track-edit-view__actions">
-          <AppButton type="submit" :loading="isSaving">
+          <AppButton type="submit" :loading="isSaving" icon="floppy-disk">
             {{ t("common.save") }}
           </AppButton>
           <AppButton
             type="button"
             variant="danger"
             :loading="isDeleting"
+            icon="trash-can"
             @click="onDelete"
           >
             {{ t("common.delete") }}

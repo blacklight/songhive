@@ -13,6 +13,7 @@ import { useShareDialog } from "@/composables/useShareDialog";
 import { toQueueTrack } from "@/player/enrich";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 
@@ -100,7 +101,7 @@ watch(
 
     <div v-else-if="error" class="track-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" @click="loadTrack">{{
+      <AppButton size="sm" icon="rotate-right" @click="loadTrack">{{
         t("common.retry")
       }}</AppButton>
     </div>
@@ -108,7 +109,9 @@ watch(
     <template v-else-if="track">
       <div class="track-view__header">
         <div class="track-view__info">
-          <h1 class="track-view__title">{{ track.title }}</h1>
+          <AppPageTitle class="track-view__title" icon="music">{{
+            track.title
+          }}</AppPageTitle>
 
           <div class="track-view__meta">
             <span v-if="artist" class="track-view__meta-item">
@@ -159,12 +162,18 @@ watch(
         </div>
 
         <div class="track-view__header-actions">
-          <AppButton size="lg" :disabled="!queueTrack" @click="play">
+          <AppButton
+            size="lg"
+            icon="play"
+            :disabled="!queueTrack"
+            @click="play"
+          >
             {{ t("common.play") }}
           </AppButton>
           <AppButton
             v-if="isOwner"
             size="lg"
+            icon="share-nodes"
             variant="secondary"
             @click="
               track && openShare('track', track.id, track.title, track.owner_id)

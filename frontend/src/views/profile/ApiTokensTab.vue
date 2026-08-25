@@ -149,7 +149,7 @@ onMounted(fetchTokens);
         :disabled="isCreating"
       />
 
-      <AppButton type="submit" :loading="isCreating">
+      <AppButton type="submit" :loading="isCreating" icon="key">
         {{ t("profile.apiTokens.create") }}
       </AppButton>
 
@@ -177,7 +177,7 @@ onMounted(fetchTokens);
           class="api-tokens-tab__raw-input"
           @focus="selectRawToken"
         />
-        <AppButton type="button" @click="copyToken">
+        <AppButton type="button" icon="copy" @click="copyToken">
           {{ t("common.copy") }}
         </AppButton>
       </div>
@@ -209,6 +209,7 @@ onMounted(fetchTokens);
             type="button"
             variant="danger"
             size="sm"
+            icon="trash-can"
             @click="
               revoke((row as ApiTokenSummary).id, (row as ApiTokenSummary).name)
             "
