@@ -95,7 +95,7 @@ async function onCreate() {
 <template>
   <div class="playlists-view">
     <div class="playlists-view__header">
-      <AppPageTitle class="playlists-view__title" icon="list-music">
+      <AppPageTitle class="playlists-view__title" icon="list">
         {{ t("nav.playlists") }}
       </AppPageTitle>
       <AppButton v-if="canCreate" size="sm" icon="plus" @click="openCreate">

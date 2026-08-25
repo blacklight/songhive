@@ -3,11 +3,13 @@ import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { usePlayerStore } from "@/stores/player";
+import { useAuthStore } from "@/stores/auth";
 import type { TrackResponse, QueueTrack } from "@/player/types";
 import { toQueueTrack, type TrackEnrich } from "@/player/enrich";
 import AppTable from "@/components/ui/AppTable.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import ContextMenu from "@/components/ui/ContextMenu.vue";
+import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import { formatTime } from "@/utils/time";
 
 export interface Props {
@@ -36,11 +38,26 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const router = useRouter();
 const player = usePlayerStore();
+const authStore = useAuthStore();
 
 const menuOpen = ref(false);
 const menuX = ref(0);
 const menuY = ref(0);
 const menuTrack = ref<QueueTrack | null>(null);
+const dialogTrack = ref<QueueTrack | null>(null);
+
+const addDialogOpen = ref(false);
+const addDialogMode = ref<"library" | "playlist">("library");
+
+function openAddDialog(mode: "library" | "playlist") {
+  addDialogMode.value = mode;
+  addDialogOpen.value = true;
+}
+
+function closeAddDialog() {
+  addDialogOpen.value = false;
+  dialogTrack.value = null;
+}
 
 const enrichedTracks = computed<QueueTrack[]>(() => {
   const defaultEnrich: TrackEnrich = { artist_name: props.context ?? "" };
@@ -145,12 +162,28 @@ const menuItems = computed(() => {
       label: t("browse.contextMenu.enqueue"),
       icon: "plus",
     },
-    {
-      key: "favorite",
-      label: props.favoriteLabel ?? t("common.favorite"),
-      icon: isUnfavorite ? "heart-crack" : "heart",
-    },
   ];
+
+  if (authStore.isAuthenticated) {
+    items.push(
+      {
+        key: "add-to-library",
+        label: t("browse.contextMenu.addToLibrary"),
+        icon: "folder-plus",
+      },
+      {
+        key: "add-to-playlist",
+        label: t("browse.contextMenu.addToPlaylist"),
+        icon: "list",
+      },
+    );
+  }
+
+  items.push({
+    key: "favorite",
+    label: props.favoriteLabel ?? t("common.favorite"),
+    icon: isUnfavorite ? "heart-crack" : "heart",
+  });
 
   if (track.album_id) {
     items.push({
@@ -193,6 +226,16 @@ function onMenuSelect(key: string) {
     case "enqueue":
       player.enqueue(track);
       emit("enqueue", track);
+      break;
+    case "add-to-library":
+      dialogTrack.value = track;
+      closeMenu();
+      openAddDialog("library");
+      break;
+    case "add-to-playlist":
+      dialogTrack.value = track;
+      closeMenu();
+      openAddDialog("playlist");
       break;
     case "favorite":
       emit("toggle-favorite", track);
@@ -267,6 +310,15 @@ function onMenuSelect(key: string) {
       :y="menuY"
       @select="onMenuSelect"
       @close="closeMenu"
+    />
+    <AddToCollectionDialog
+      v-if="dialogTrack"
+      :open="addDialogOpen"
+      :mode="addDialogMode"
+      item-type="track"
+      :item-id="dialogTrack.id"
+      :item-name="dialogTrack.title"
+      @close="closeAddDialog"
     />
   </div>
 </template>

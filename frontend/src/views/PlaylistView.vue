@@ -65,7 +65,7 @@ watch(
 
     <template v-else-if="playlist">
       <div class="playlist-view__header">
-        <AppPageTitle class="playlist-view__name" icon="list-music">{{
+        <AppPageTitle class="playlist-view__name" icon="list">{{
           playlist.name
         }}</AppPageTitle>
 

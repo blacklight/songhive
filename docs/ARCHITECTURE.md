@@ -556,8 +556,8 @@ REST API under `/api/v1/`:
 ├── albums/         # Album CRUD + search
 ├── tracks/         # Track CRUD + search
 ├── files/          # Generic file upload/list/download (StoredFile)
-├── libraries/      # Library management
-├── playlists/      # Playlist CRUD
+├── libraries/      # Library management + add tracks/albums/artists
+├── playlists/      # Playlist CRUD + add tracks/albums/artists
 ├── favorites/      # Favorites/bookmarks
 ├── history/        # Listening history
 ├── radios/         # Dynamic radio generation

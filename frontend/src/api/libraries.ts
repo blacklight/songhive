@@ -88,3 +88,24 @@ export function scanLibrary(id: string, body: ScanRequest): Promise<unknown> {
     body,
   });
 }
+
+export interface AddTracksToLibraryRequest {
+  track_ids?: string[];
+  album_id?: string;
+  artist_id?: string;
+}
+
+export interface AddTracksToLibraryResponse {
+  added: number;
+  track_ids: string[];
+}
+
+export function addTracksToLibrary(
+  id: string,
+  body: AddTracksToLibraryRequest,
+): Promise<AddTracksToLibraryResponse> {
+  return apiRequest<AddTracksToLibraryResponse>(`/libraries/${id}/tracks/add`, {
+    method: "POST",
+    body,
+  });
+}

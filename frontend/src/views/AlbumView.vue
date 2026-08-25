@@ -10,6 +10,7 @@ import { getAlbum, type AlbumResponse } from "@/api/albums";
 import { getArtist, type ArtistResponse } from "@/api/artists";
 import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
+import { useAuthStore } from "@/stores/auth";
 import type { TrackEnrich } from "@/player/enrich";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
@@ -21,10 +22,20 @@ import AppAvatar from "@/components/ui/AppAvatar.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
+import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 
 const { t } = useI18n();
 const route = useRoute();
+const authStore = useAuthStore();
 const albumId = computed(() => String(route.params.id));
+
+const addDialogOpen = ref(false);
+const addDialogMode = ref<"library" | "playlist">("library");
+
+function openAddDialog(mode: "library" | "playlist") {
+  addDialogMode.value = mode;
+  addDialogOpen.value = true;
+}
 
 const album = ref<AlbumResponse | null>(null);
 const artist = ref<ArtistResponse | null>(null);
@@ -178,6 +189,22 @@ watch(
             >
               {{ t("common.share") }}
             </AppButton>
+            <AppButton
+              v-if="authStore.isAuthenticated"
+              size="sm"
+              icon="folder-plus"
+              @click="openAddDialog('library')"
+            >
+              {{ t("browse.addToCollection.addToLibrary") }}
+            </AppButton>
+            <AppButton
+              v-if="authStore.isAuthenticated"
+              size="sm"
+              icon="list"
+              @click="openAddDialog('playlist')"
+            >
+              {{ t("browse.addToCollection.addToPlaylist") }}
+            </AppButton>
           </div>
         </div>
       </div>
@@ -225,6 +252,16 @@ watch(
         </div>
       </section>
     </template>
+
+    <AddToCollectionDialog
+      v-if="album"
+      :open="addDialogOpen"
+      :mode="addDialogMode"
+      item-type="album"
+      :item-id="album.id"
+      :item-name="album.title"
+      @close="addDialogOpen = false"
+    />
 
     <ShareDialog
       v-if="shareTarget"
@@ -313,6 +350,9 @@ watch(
 }
 
 .album-view__header-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
   margin-top: var(--space-2);
 }
 

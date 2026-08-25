@@ -10,6 +10,7 @@ import { getArtist, type ArtistResponse } from "@/api/artists";
 import { listAlbums, type AlbumResponse } from "@/api/albums";
 import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
+import { useAuthStore } from "@/stores/auth";
 import type { TrackEnrich } from "@/player/enrich";
 import { useShareDialog } from "@/composables/useShareDialog";
 import type { QueueTrack } from "@/player/types";
@@ -20,10 +21,20 @@ import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AlbumCard from "@/components/library/AlbumCard.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
+import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 
 const { t } = useI18n();
 const route = useRoute();
+const authStore = useAuthStore();
 const artistId = computed(() => String(route.params.id));
+
+const addDialogOpen = ref(false);
+const addDialogMode = ref<"library" | "playlist">("library");
+
+function openAddDialog(mode: "library" | "playlist") {
+  addDialogMode.value = mode;
+  addDialogOpen.value = true;
+}
 
 const artist = ref<ArtistResponse | null>(null);
 const loading = ref(false);
@@ -169,6 +180,24 @@ watch(
             artist.name
           }}</AppPageTitle>
           <p v-if="artist.bio" class="artist-view__bio">{{ artist.bio }}</p>
+          <div class="artist-view__header-actions">
+            <AppButton
+              v-if="authStore.isAuthenticated"
+              size="sm"
+              icon="folder-plus"
+              @click="openAddDialog('library')"
+            >
+              {{ t("browse.addToCollection.addToLibrary") }}
+            </AppButton>
+            <AppButton
+              v-if="authStore.isAuthenticated"
+              size="sm"
+              icon="list"
+              @click="openAddDialog('playlist')"
+            >
+              {{ t("browse.addToCollection.addToPlaylist") }}
+            </AppButton>
+          </div>
         </div>
       </div>
 
@@ -273,6 +302,16 @@ watch(
       </section>
     </template>
 
+    <AddToCollectionDialog
+      v-if="artist"
+      :open="addDialogOpen"
+      :mode="addDialogMode"
+      item-type="artist"
+      :item-id="artist.id"
+      :item-name="artist.name"
+      @close="addDialogOpen = false"
+    />
+
     <ShareDialog
       v-if="shareTarget"
       :open="shareOpen"
@@ -334,6 +373,13 @@ watch(
   margin: 0;
   color: var(--color-text-muted);
   max-width: 40rem;
+}
+
+.artist-view__header-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin-top: var(--space-2);
 }
 
 .artist-view__section {

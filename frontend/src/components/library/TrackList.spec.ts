@@ -1,12 +1,26 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { usePlayerStore } from "@/stores/player";
+import { useAuthStore } from "@/stores/auth";
+import type { UserResponse } from "@/api/users";
 import type { TrackResponse } from "@/player/types";
 import { toQueueTrack } from "@/player/enrich";
 import TrackList from "./TrackList.vue";
+
+vi.mock("@/api/libraries", () => ({
+  listLibraries: vi.fn().mockResolvedValue([]),
+  createLibrary: vi.fn(),
+  addTracksToLibrary: vi.fn(),
+}));
+
+vi.mock("@/api/playlists", () => ({
+  listPlaylists: vi.fn().mockResolvedValue([]),
+  createPlaylist: vi.fn(),
+  addTracksToPlaylist: vi.fn(),
+}));
 
 const actionsLabel = i18n.global.t("browse.detail.actions");
 
@@ -70,6 +84,12 @@ describe("TrackList", () => {
 
   beforeEach(() => {
     setActivePinia(createPinia());
+    const authStore = useAuthStore();
+    authStore.$patch({
+      accessToken: "token",
+      expiresAt: Date.now() + 60000,
+      user: { id: "user-1", username: "user" } as UserResponse,
+    });
   });
 
   afterEach(() => {
@@ -229,5 +249,24 @@ describe("TrackList", () => {
     expect(wrapper.emitted("enqueue")?.[0]).toEqual([
       toQueueTrack(tracks[0], { artist_name: "Artist" }),
     ]);
+  });
+
+  it("opens the add-to-library modal from the context menu", async () => {
+    const tracks = [makeTrack()];
+    ({ wrapper } = mountTrackList({ tracks, context: "Artist" }));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    await clickMenuItem(i18n.global.t("browse.contextMenu.addToLibrary"));
+    await flushPromises();
+
+    expect(document.body.querySelector(".app-modal__overlay")).not.toBeNull();
+    expect(document.body.textContent).toContain(
+      i18n.global.t("browse.addToCollection.libraryTitle", {
+        name: "Song One",
+      }),
+    );
   });
 });

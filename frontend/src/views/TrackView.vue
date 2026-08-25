@@ -7,9 +7,11 @@ import { getArtist, type ArtistResponse } from "@/api/artists";
 import { getAlbum, type AlbumResponse } from "@/api/albums";
 import { getApiErrorMessage } from "@/api/client";
 import { usePlayerStore } from "@/stores/player";
+import { useAuthStore } from "@/stores/auth";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
+import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import { toQueueTrack } from "@/player/enrich";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -20,7 +22,16 @@ import ShareDialog from "@/components/share/ShareDialog.vue";
 const { t } = useI18n();
 const route = useRoute();
 const player = usePlayerStore();
+const authStore = useAuthStore();
 const trackId = computed(() => String(route.params.id));
+
+const addDialogOpen = ref(false);
+const addDialogMode = ref<"library" | "playlist">("library");
+
+function openAddDialog(mode: "library" | "playlist") {
+  addDialogMode.value = mode;
+  addDialogOpen.value = true;
+}
 
 const track = ref<TrackResponse | null>(null);
 const artist = ref<ArtistResponse | null>(null);
@@ -181,9 +192,37 @@ watch(
           >
             {{ t("common.share") }}
           </AppButton>
+          <AppButton
+            v-if="authStore.isAuthenticated"
+            size="lg"
+            icon="folder-plus"
+            variant="secondary"
+            @click="track && openAddDialog('library')"
+          >
+            {{ t("browse.addToCollection.addToLibrary") }}
+          </AppButton>
+          <AppButton
+            v-if="authStore.isAuthenticated"
+            size="lg"
+            icon="list"
+            variant="secondary"
+            @click="track && openAddDialog('playlist')"
+          >
+            {{ t("browse.addToCollection.addToPlaylist") }}
+          </AppButton>
         </div>
       </div>
     </template>
+
+    <AddToCollectionDialog
+      v-if="track"
+      :open="addDialogOpen"
+      :mode="addDialogMode"
+      item-type="track"
+      :item-id="track.id"
+      :item-name="track.title"
+      @close="addDialogOpen = false"
+    />
 
     <ShareDialog
       v-if="shareTarget"

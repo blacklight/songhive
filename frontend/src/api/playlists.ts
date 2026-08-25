@@ -26,3 +26,24 @@ export function createPlaylist(
 export function getPlaylist(id: string): Promise<PlaylistResponse> {
   return apiRequest<PlaylistResponse>(`/playlists/${id}`);
 }
+
+export interface AddTracksToPlaylistRequest {
+  track_ids?: string[];
+  album_id?: string;
+  artist_id?: string;
+}
+
+export interface AddTracksToPlaylistResponse {
+  added: number;
+  track_ids: string[];
+}
+
+export function addTracksToPlaylist(
+  id: string,
+  body: AddTracksToPlaylistRequest,
+): Promise<AddTracksToPlaylistResponse> {
+  return apiRequest<AddTracksToPlaylistResponse>(`/playlists/${id}/tracks`, {
+    method: "POST",
+    body,
+  });
+}
