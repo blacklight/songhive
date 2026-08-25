@@ -187,8 +187,15 @@ function playAll() {
 
 function openMenu(event: MouseEvent, track: QueueTrack) {
   menuTrack.value = track;
-  menuX.value = event.clientX;
-  menuY.value = event.clientY;
+  const trigger = event.currentTarget as HTMLElement | null;
+  if (trigger) {
+    const rect = trigger.getBoundingClientRect();
+    menuX.value = Math.round(rect.right);
+    menuY.value = Math.round(rect.bottom);
+  } else {
+    menuX.value = event.clientX;
+    menuY.value = event.clientY;
+  }
   menuOpen.value = true;
 }
 

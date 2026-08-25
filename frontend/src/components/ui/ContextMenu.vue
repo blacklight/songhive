@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useOnClickOutside } from "@/composables/useOnClickOutside";
 import AppIcon from "./AppIcon.vue";
 
@@ -23,12 +23,16 @@ const emit = defineEmits<{ select: [key: string]; close: [] }>();
 
 const menuRef = ref<HTMLElement | null>(null);
 const activeIndex = ref(-1);
+const adjustedX = ref(props.x ?? 0);
+const adjustedY = ref(props.y ?? 0);
+const isPositioned = ref(false);
 
 const style = computed(() => ({
   position: "fixed" as const,
-  top: `${props.y ?? 0}px`,
-  left: `${props.x ?? 0}px`,
+  top: `${adjustedY.value}px`,
+  left: `${adjustedX.value}px`,
   zIndex: "var(--z-dropdown)",
+  visibility: isPositioned.value ? ("visible" as const) : ("hidden" as const),
 }));
 
 useOnClickOutside(
@@ -36,17 +40,72 @@ useOnClickOutside(
   () => emit("close"),
 );
 
+function reposition() {
+  adjustedX.value = props.x ?? 0;
+  adjustedY.value = props.y ?? 0;
+  isPositioned.value = false;
+
+  nextTick(() => {
+    updatePosition();
+  });
+}
+
+function updatePosition() {
+  const element = menuRef.value;
+  if (!element) return;
+
+  const rect = element.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+
+  let x = props.x ?? 0;
+  let y = props.y ?? 0;
+
+  if (x + rect.width > viewportWidth) {
+    x -= rect.width;
+  }
+  if (y + rect.height > viewportHeight) {
+    y -= rect.height;
+  }
+
+  adjustedX.value = Math.max(0, x);
+  adjustedY.value = Math.max(0, y);
+  isPositioned.value = true;
+}
+
+function onResize() {
+  if (!props.open) return;
+  reposition();
+}
+
 watch(
   () => props.open,
   (isOpen) => {
     if (!isOpen) {
       activeIndex.value = -1;
+      isPositioned.value = false;
       return;
     }
+
     activeIndex.value = 0;
     nextTickFocus();
+    reposition();
   },
+  { immediate: true },
 );
+
+watch([() => props.x, () => props.y], () => {
+  if (!props.open) return;
+  reposition();
+});
+
+onMounted(() => {
+  window.addEventListener("resize", onResize);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("resize", onResize);
+});
 
 function nextTickFocus() {
   setTimeout(() => {
@@ -129,6 +188,8 @@ function select(key: string) {
   margin: 0;
   padding: var(--space-1);
   min-width: 10rem;
+  max-height: calc(100vh - 2 * var(--space-2));
+  overflow-y: auto;
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
