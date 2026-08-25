@@ -89,6 +89,10 @@ const nextDisabled = computed(() => !store.hasNext && store.repeat === "off");
   gap: var(--space-1);
 }
 
+.player-controls .app-btn {
+  margin: 0 var(--space-2);
+}
+
 .player-controls .player-controls__shuffle,
 .player-controls .player-controls__prev,
 .player-controls .player-controls__next,
