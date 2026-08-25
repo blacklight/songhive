@@ -27,6 +27,7 @@ function createLibrary() {
     description: "My personal collection.",
     visibility: "private" as const,
     owner_id: "user-1",
+    can_write: true,
   };
 }
 

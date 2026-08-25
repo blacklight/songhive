@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { uploadFile } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
+import {
+  listLibraries,
+  type Visibility,
+  type LibraryResponse,
+} from "@/api/libraries";
 import { useToastStore } from "@/stores/toast";
-import type { Visibility } from "@/api/libraries";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
@@ -20,11 +24,25 @@ const progress = ref(0);
 const error = ref<string | null>(null);
 const selectedFileName = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
+const libraries = ref<LibraryResponse[]>([]);
+const selectedLibraryId = ref("");
 
 const visibilityOptions = computed(() => [
   { value: "private", label: t("browse.visibility.private") },
   { value: "local", label: t("browse.visibility.local") },
   { value: "public", label: t("browse.visibility.public") },
+]);
+
+const writableLibraries = computed(() =>
+  libraries.value.filter((library) => library.can_write),
+);
+
+const libraryOptions = computed(() => [
+  { value: "", label: t("pages.files.defaultLibrary") },
+  ...writableLibraries.value.map((library) => ({
+    value: library.id,
+    label: library.name,
+  })),
 ]);
 
 const chooseFileLabel = computed(() =>
@@ -43,6 +61,15 @@ function getErrorMessage(err: unknown): string {
     (err instanceof Error ? err.message : t("errors.unknown"))
   );
 }
+
+onMounted(async () => {
+  try {
+    libraries.value = await listLibraries();
+  } catch {
+    // The upload can still fall back to the default library on the backend.
+    libraries.value = [];
+  }
+});
 
 function resetInput() {
   progress.value = 0;
@@ -69,9 +96,15 @@ async function onFileChange(event: Event) {
   selectedFileName.value = file.name;
 
   try {
-    const response = await uploadFile(file, visibility.value, (percent) => {
-      progress.value = percent;
-    });
+    const libraryId = selectedLibraryId.value || undefined;
+    const response = await uploadFile(
+      file,
+      visibility.value,
+      (percent) => {
+        progress.value = percent;
+      },
+      libraryId,
+    );
     toast.push({ type: "success", message: t("pages.files.uploadSuccess") });
     if (response.trackId) {
       await router.push({ name: "track", params: { id: response.trackId } });
@@ -115,6 +148,13 @@ async function onFileChange(event: Event) {
           v-model="visibility"
           :label="t('pages.files.visibility')"
           :options="visibilityOptions"
+          :disabled="uploading"
+        />
+
+        <AppSelect
+          v-model="selectedLibraryId"
+          :label="t('pages.files.library')"
+          :options="libraryOptions"
           :disabled="uploading"
         />
 

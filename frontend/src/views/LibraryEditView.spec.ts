@@ -55,6 +55,7 @@ function createLibrary(
     owner_id: ownerId,
     description: "Main music library.",
     visibility: "public",
+    can_write: true,
   };
 }
 

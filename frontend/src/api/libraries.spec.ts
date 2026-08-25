@@ -28,6 +28,7 @@ const sampleLibrary: LibraryResponse = {
   owner_id: "u1",
   description: null,
   visibility: "private",
+  can_write: true,
 };
 
 describe("libraries api", () => {

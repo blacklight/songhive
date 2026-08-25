@@ -174,6 +174,16 @@ describe("uploadFile", () => {
     );
   });
 
+  it("includes the selected library_id in the upload URL", async () => {
+    const file = new File(["contents"], "song.mp3", { type: "audio/mpeg" });
+    await uploadFile(file, "private", undefined, "lib1");
+
+    expect(mockXhr.open).toHaveBeenCalledWith(
+      "POST",
+      "/api/v1/files/upload?visibility=private&library_id=lib1",
+    );
+  });
+
   it("throws ApiError on a non-2xx response", async () => {
     mockXhr = createMockXHR({
       status: 400,

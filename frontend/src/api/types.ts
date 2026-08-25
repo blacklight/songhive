@@ -1209,6 +1209,10 @@ export interface paths {
      *     the same bytes have already been uploaded. In that case the response
      *     includes an ``X-Duplicate: true`` header and the caller's ``owner_id`` and
      *     ``visibility`` are ignored; they only apply to newly created rows.
+     *
+     *     Audio files are additionally imported into the selected library (or the
+     *     caller's default ``Uploads`` library) so they become tracks and are not
+     *     garbage-collected as orphans.
      */
     post: operations["upload_file_api_v1_files_upload_post"];
     delete?: never;
@@ -2001,6 +2005,11 @@ export interface components {
        * @default private
        */
       visibility: string;
+      /**
+       * Can Write
+       * @default false
+       */
+      can_write: boolean;
     };
     /**
      * LibraryUpdate
@@ -5155,6 +5164,7 @@ export interface operations {
     parameters: {
       query?: {
         visibility?: components["schemas"]["Visibility"];
+        library_id?: string | null;
       };
       header?: never;
       path?: never;

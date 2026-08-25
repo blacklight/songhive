@@ -10,6 +10,7 @@ export interface Props {
   type?: "button" | "submit";
   icon?: string;
   iconVariant?: "solid" | "regular" | "light" | "brand";
+  title?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {

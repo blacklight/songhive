@@ -10,13 +10,17 @@ export async function uploadFile(
   file: File,
   visibility: "private" | "local" | "public" = "public",
   onProgress?: (percent: number) => void,
+  libraryId?: string,
 ): Promise<FileUploadResult> {
   const auth = getAuthHeader();
   if (!auth) {
     throw new ApiError("Not authenticated", 401);
   }
 
-  const url = buildUrl(`${API_PREFIX}/files/upload`, { visibility });
+  const url = buildUrl(`${API_PREFIX}/files/upload`, {
+    visibility,
+    library_id: libraryId,
+  });
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();

@@ -4,11 +4,16 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { uploadFile, type StoredFileResponse } from "@/api/files";
+import { listLibraries, type LibraryResponse } from "@/api/libraries";
 import { useToastStore } from "@/stores/toast";
 import FilesView from "./FilesView.vue";
 
 vi.mock("@/api/files", () => ({
   uploadFile: vi.fn(),
+}));
+
+vi.mock("@/api/libraries", () => ({
+  listLibraries: vi.fn(),
 }));
 
 function createTestRouter() {
@@ -50,6 +55,21 @@ function createStoredFile(id: string): StoredFileResponse {
   };
 }
 
+function createLibrary(
+  id: string,
+  name: string,
+  canWrite = true,
+): LibraryResponse {
+  return {
+    id,
+    name,
+    owner_id: "user-1",
+    description: null,
+    visibility: "public",
+    can_write: canWrite,
+  };
+}
+
 describe("FilesView", () => {
   let wrapper: ReturnType<typeof mount>;
   let router: ReturnType<typeof createTestRouter>;
@@ -58,6 +78,10 @@ describe("FilesView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    vi.mocked(listLibraries).mockResolvedValue([
+      createLibrary("lib1", "Uploads"),
+      createLibrary("lib2", "My Library"),
+    ]);
   });
 
   afterEach(() => {
@@ -92,9 +116,13 @@ describe("FilesView", () => {
 
     await mountView();
 
-    const select = wrapper.find("select").element as HTMLSelectElement;
-    select.value = "private";
-    select.dispatchEvent(new Event("change"));
+    const selects = wrapper.findAll("select");
+    const visibilitySelect = selects.find(
+      (s) => (s.element as HTMLSelectElement).options[0]?.value === "private",
+    )?.element as HTMLSelectElement | undefined;
+    expect(visibilitySelect).toBeDefined();
+    visibilitySelect!.value = "private";
+    visibilitySelect!.dispatchEvent(new Event("change"));
     await flushPromises();
 
     const fileInput = wrapper.find('input[type="file"]')
@@ -108,6 +136,7 @@ describe("FilesView", () => {
       file,
       "private",
       expect.any(Function),
+      undefined,
     );
     expect(router.push).toHaveBeenCalledWith({
       name: "file",
@@ -118,6 +147,43 @@ describe("FilesView", () => {
     expect(toast.toasts[0].message).toBe(
       i18n.global.t("pages.files.uploadSuccess"),
     );
+  });
+
+  it("uploads a file to the selected library", async () => {
+    vi.mocked(uploadFile).mockResolvedValue({
+      ...createStoredFile("f1"),
+      trackId: "t1",
+    });
+
+    await mountView();
+    await flushPromises();
+
+    const selects = wrapper.findAll("select");
+    const librarySelect = selects.find(
+      (s) => (s.element as HTMLSelectElement).options[0]?.value === "",
+    )?.element as HTMLSelectElement | undefined;
+    expect(librarySelect).toBeDefined();
+    librarySelect!.value = "lib2";
+    librarySelect!.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const fileInput = wrapper.find('input[type="file"]')
+      .element as HTMLInputElement;
+    const file = new File(["contents"], "song.mp3", { type: "audio/mpeg" });
+    setFiles(fileInput, [file]);
+    fileInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(uploadFile).toHaveBeenCalledWith(
+      file,
+      "public",
+      expect.any(Function),
+      "lib2",
+    );
+    expect(router.push).toHaveBeenCalledWith({
+      name: "track",
+      params: { id: "t1" },
+    });
   });
 
   it("updates the progress bar while uploading", async () => {

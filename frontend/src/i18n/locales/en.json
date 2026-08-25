@@ -139,6 +139,8 @@
       "title": "Files",
       "uploadTitle": "Upload a file",
       "visibility": "Visibility",
+      "library": "Library",
+      "defaultLibrary": "Default library (Uploads)",
       "selectFile": "Choose a file",
       "upload": "Upload",
       "uploading": "Uploading…",

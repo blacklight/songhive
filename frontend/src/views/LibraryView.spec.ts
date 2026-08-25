@@ -35,6 +35,7 @@ function createLibrary(id: string, name: string): LibraryResponse {
     owner_id: "user-1",
     description: null,
     visibility: "public",
+    can_write: true,
   };
 }
 

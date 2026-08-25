@@ -45,6 +45,7 @@ function createLibrary(id: string, name: string): LibraryResponse {
     owner_id: "user-1",
     description: "Main music library.",
     visibility: "public",
+    can_write: true,
   };
 }
 
