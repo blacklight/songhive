@@ -23,7 +23,7 @@ from ...services.storage import StorageService, count_files, list_files
 from ...storage import FileSizeLimitExceededError
 from .._common import Pagination, client_ip, get_pagination
 from ..deps import get_current_user, get_current_user_optional, get_db, get_storage_service, require_access
-from ..middleware.rate_limit import rate_limit
+from ..middleware.rate_limit import rate_limit, rate_limit_account
 from ._common import HasOwnerId, redact_owner
 
 logger = logging.getLogger(__name__)
@@ -309,7 +309,7 @@ async def download_file(
     )
 
 
-@router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
 async def delete_file(
     file_id: str,
     request: Request,

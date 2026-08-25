@@ -41,6 +41,7 @@ from ..deps import (
     get_storage_service,
     require_access,
 )
+from ..middleware.rate_limit import rate_limit_account
 from ._common import HasOwnerId, redact_owner
 from .tracks import TrackResponse
 
@@ -694,7 +695,7 @@ async def update_library(
     )
 
 
-@router.delete("/{library_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{library_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
 async def delete_library(
     library_id: str,
     request: Request,

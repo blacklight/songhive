@@ -14,6 +14,7 @@ from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
 from ..deps import get_current_user, get_db, get_storage_service
+from ..middleware.rate_limit import rate_limit_account
 
 router = APIRouter(prefix="/artists")
 
@@ -84,7 +85,7 @@ async def get_artist(
     )
 
 
-@router.delete("/{artist_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{artist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
 async def delete_artist(
     artist_id: str,
     request: Request,

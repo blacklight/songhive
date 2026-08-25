@@ -31,6 +31,7 @@ from ..models.track import Track
 from ..models.transcoded_file import TranscodedFile
 from ..models.upload import Upload
 from ..models.user import User
+from ..services.acl import can_manage
 from ..services.auth import get_user_by_id
 from ..services.storage import StorageService
 
@@ -89,26 +90,40 @@ async def _maybe_delete_stored_file(
     storage: StorageService,
     stored_file: Optional[StoredFile],
 ) -> bool:
-    """Delete a stored file's backing object and row if it is no longer referenced."""
+    """Delete a stored file's backing object and row if it is no longer referenced.
+
+    The row is re-loaded with ``SELECT ... FOR UPDATE`` so concurrent writers
+    (e.g. an audio import creating a new reference) block until the delete
+    commits, preventing a race between the reference count and storage removal.
+
+    This assumes duplicate uploads still create a new ``StoredFile`` row rather
+    than sharing an existing one, which keeps reference counting tied to a
+    single row's lifecycle.
+    """
     if stored_file is None:
         return False
 
-    refs = await _count_stored_file_references(session, str(stored_file.id))
+    result = await session.execute(select(StoredFile).where(StoredFile.id == stored_file.id).with_for_update())
+    fresh = result.scalar_one_or_none()
+    if fresh is None:
+        return False
+
+    refs = await _count_stored_file_references(session, str(fresh.id))
     if refs > 0:
         return False
 
     try:
-        await storage.delete_file(stored_file)
+        await storage.delete_file(fresh)
     except Exception:
         logger.exception(
             "Failed to delete stored file %s from %s backend (path: %s); keeping database row for retry",
-            stored_file.id,
-            stored_file.storage_backend,
-            stored_file.storage_path,
+            fresh.id,
+            fresh.storage_backend,
+            fresh.storage_path,
         )
         return False
 
-    await session.execute(delete(StoredFile).where(StoredFile.id == stored_file.id))
+    await session.execute(delete(StoredFile).where(StoredFile.id == fresh.id))
     return True
 
 
@@ -179,6 +194,44 @@ async def delete_track(
         raise DeletionError("Track not found", 404)
 
     return await _delete_track_dependents(session, storage, track, delete_audio_file=delete_audio_file)
+
+
+async def delete_tracks_bulk(
+    session: AsyncSession,
+    storage: StorageService,
+    track_ids: List[str],
+    *,
+    user: Optional[User] = None,
+) -> tuple[List[UnpublishInfo], List[str]]:
+    """Delete several tracks after pre-checking existence and manageability.
+
+    This prevents partial deletes: if any track does not exist or cannot be
+    managed by the caller, no rows are changed and a ``DeletionError`` is
+    raised before the first track is removed.
+    """
+    result = await session.execute(
+        select(Track).options(selectinload(Track.artist), selectinload(Track.audio_file)).where(Track.id.in_(track_ids))
+    )
+    track_map = {str(track.id): track for track in result.scalars().all()}
+
+    tracks: List[Track] = []
+    for track_id in track_ids:
+        track = track_map.get(track_id)
+        if track is None:
+            raise DeletionError("Track not found", 404)
+        if not await can_manage(session, user, "track", track_id):
+            raise DeletionError("Cannot delete track", 403)
+        tracks.append(track)
+
+    unpublish: List[UnpublishInfo] = []
+    deleted: List[str] = []
+    for track in tracks:
+        info = await _delete_track_dependents(session, storage, track, delete_audio_file=True)
+        deleted.append(str(track.id))
+        if info is not None:
+            unpublish.append(info)
+
+    return unpublish, deleted
 
 
 async def delete_stored_file(

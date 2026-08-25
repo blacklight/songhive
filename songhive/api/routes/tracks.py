@@ -24,6 +24,7 @@ from ..deps import (
     get_storage_service,
     require_access,
 )
+from ..middleware.rate_limit import rate_limit_account
 from ._common import HasOwnerId, redact_owner
 
 router = APIRouter(prefix="/tracks")
@@ -55,6 +56,19 @@ class TrackUpdate(BaseModel):
     track_number: Optional[int] = None
     disc_number: Optional[int] = None
     visibility: Optional[Visibility] = None
+
+
+class BulkTrackDeleteRequest(BaseModel):
+    """Bulk track deletion payload."""
+
+    track_ids: List[str]
+
+
+class BulkTrackDeleteResponse(BaseModel):
+    """Bulk track deletion result."""
+
+    deleted: int
+    track_ids: List[str]
 
 
 async def _handle_visibility_changes(
@@ -249,7 +263,57 @@ async def update_track(
     )
 
 
-@router.delete("/{track_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/bulk", status_code=status.HTTP_200_OK, dependencies=[Depends(rate_limit_account)])
+async def delete_tracks_bulk_route(
+    body: BulkTrackDeleteRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+):
+    """Delete multiple tracks in a single request."""
+    try:
+        unpublish, deleted_ids = await deletion.delete_tracks_bulk(
+            db,
+            storage,
+            body.track_ids,
+            user=current_user,
+        )
+    except deletion.DeletionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="track.bulk_delete",
+        target_type="track",
+        target_id=None,
+        details={
+            "count": len(deleted_ids),
+            "track_ids": deleted_ids,
+            "admin_deletion": current_user.is_admin,
+        },
+        ip_address=client_ip(request),
+    )
+
+    await db.commit()
+
+    for info in unpublish:
+        if info.owner is not None and info.artist is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                info.track,
+                info.artist,
+                info.owner,
+                request.app.state.config,
+                info.federation_object_id,
+            )
+
+    return BulkTrackDeleteResponse(deleted=len(deleted_ids), track_ids=deleted_ids)
+
+
+@router.delete("/{track_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
 async def delete_track(
     track_id: str,
     request: Request,

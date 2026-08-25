@@ -364,7 +364,8 @@ alembic revision --autogenerate -m "add example column"
   short-link cookie).
 - **Rate limiting** — Redis sliding-window; `rate_limit` (IP), `rate_limit_user_or_ip`
   (authenticated users keyed by id), and `rate_limit_account` (always per-user)
-  FastAPI dependencies. Fails open when Redis is unavailable.
+  FastAPI dependencies. Media `DELETE` endpoints use `rate_limit_account` for
+  per-user rate limiting on destructive operations. Fails open when Redis is unavailable.
 
 ---
 
@@ -390,7 +391,10 @@ configured crontab (default: daily at 03:00) and deletes `StoredFile` rows
 logic for `Track`, `StoredFile`, `Album`, `Artist`, `Playlist`, and `Library`.
 `DELETE` endpoints on the corresponding routes accept a `recursive` query
 parameter; albums default to recursive deletion while other collections default
-to non-recursive. Deleting a track removes its `Upload`, `LibraryTrack`,
+to non-recursive. A dedicated `DELETE /api/v1/tracks/bulk` endpoint accepts a
+list of track IDs and delegates to `delete_tracks_bulk` in the deletion service,
+applying the same ACL and rate-limiting checks as single-track deletion.
+Deleting a track removes its `Upload`, `LibraryTrack`,
 `PlaylistTrack`, `Favorite`, `ListeningHistory`, `TranscodedFile`, `ShareGrant`,
 `ShareToken`, and `Report` rows and deletes the underlying `StoredFile` once it
 is unreferenced. Deleting a stored file removes all tracks that use it as their

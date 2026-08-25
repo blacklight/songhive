@@ -23,6 +23,7 @@ from ..deps import (
     get_storage_service,
     require_access,
 )
+from ..middleware.rate_limit import rate_limit_account
 from ._common import HasOwnerId, redact_owner
 from .tracks import TrackResponse
 
@@ -289,7 +290,7 @@ async def remove_tracks_from_playlist(
     return {"removed": removed_count, "track_ids": removed_ids}
 
 
-@router.delete("/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
 async def delete_playlist(
     playlist_id: str,
     request: Request,

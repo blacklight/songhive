@@ -21,6 +21,7 @@ from ..deps import (
     get_storage_service,
     require_access,
 )
+from ..middleware.rate_limit import rate_limit_account
 from ._common import HasOwnerId, redact_owner
 
 router = APIRouter(prefix="/albums")
@@ -178,7 +179,7 @@ async def update_album(
     )
 
 
-@router.delete("/{album_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{album_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
 async def delete_album(
     album_id: str,
     request: Request,
