@@ -265,6 +265,10 @@ const loginItem = {
   color: var(--color-accent-contrast);
 }
 
+.app-layout__nav-link .fa-solid {
+  margin-right: var(--space-2);
+}
+
 .app-layout__admin a {
   color: var(--color-accent);
 }
