@@ -2,6 +2,7 @@
 Library routes.
 """
 
+import asyncio
 import uuid
 from pathlib import Path
 from typing import List, Optional, cast
@@ -27,12 +28,12 @@ from ...models._enums import Visibility
 from ...models.artist import Artist
 from ...models.library import Library
 from ...models.user import User
-from ...services import acl, music
+from ...services import acl, audit, music
 from ...services.federation import publish_track_activity
 from ...services.import_ import DuplicateTrackError, ImportResult, import_audio_file
 from ...services.storage import StorageService
 from ...tasks.import_ import process_upload, scan_directory
-from .._common import Pagination, get_pagination
+from .._common import Pagination, client_ip, get_pagination
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -79,6 +80,14 @@ class LibraryUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     visibility: Optional[Visibility] = None
+
+
+class AddLibraryTracksRequest(BaseModel):
+    """Request body for adding tracks, albums, or artists to a library."""
+
+    track_ids: Optional[List[str]] = None
+    album_id: Optional[str] = None
+    artist_id: Optional[str] = None
 
 
 class ScanRequest(BaseModel):
@@ -452,6 +461,80 @@ async def bulk_upload_tracks(
         force,
         enrich,
     )
+
+
+async def _resolve_track_ids(
+    db: AsyncSession,
+    user: User,
+    body: AddLibraryTracksRequest,
+) -> List[str]:
+    """Resolve ``track_ids`` / ``album_id`` / ``artist_id`` into accessible track IDs."""
+    resolved: List[str] = []
+    resolved_promises = []
+
+    if body.track_ids:
+        for track_id in body.track_ids:
+            resolved_promises.append(acl.can_access(db, user, "track", track_id))
+        access_results = await asyncio.gather(*resolved_promises)
+        resolved.extend([track_id for track_id, can_access in zip(body.track_ids, access_results) if can_access])
+
+    if body.album_id:
+        resolved.extend(await music.get_track_ids_for_album(db, body.album_id, user=user))
+    if body.artist_id:
+        resolved.extend(await music.get_track_ids_for_artist(db, body.artist_id, user=user))
+
+    seen: set[str] = set()
+    deduped: List[str] = []
+    for track_id in resolved:
+        if track_id not in seen:
+            seen.add(track_id)
+            deduped.append(track_id)
+    return deduped
+
+
+@router.post("/{library_id}/tracks/add", status_code=status.HTTP_201_CREATED)
+async def add_tracks_to_library(
+    library_id: str,
+    request: Request,
+    body: AddLibraryTracksRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add existing tracks, an album, or an artist to a library."""
+    library = await music.get_library(db, library_id)
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if not await acl.can_manage(db, current_user, "library", library_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    if not body.track_ids and not body.album_id and not body.artist_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least one source must be provided",
+        )
+
+    track_ids = await _resolve_track_ids(db, current_user, body)
+    added_ids = await music.add_library_tracks(db, library_id, track_ids, added_by_id=current_user.id)
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library_track.add",
+        target_type="library",
+        target_id=library_id,
+        details={
+            "source": body.model_dump(exclude_unset=True),
+            "track_ids": added_ids,
+            "count": len(added_ids),
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return {"added": len(added_ids), "track_ids": added_ids}
 
 
 @router.post("/{library_id}/scan")
