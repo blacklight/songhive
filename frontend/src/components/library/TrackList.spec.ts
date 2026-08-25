@@ -29,6 +29,7 @@ vi.mock("@/api/playlists", () => ({
 vi.mock("@/api/tracks", () => ({
   deleteTrack: vi.fn(),
   deleteTracks: vi.fn().mockResolvedValue({ deleted: 0, track_ids: [] }),
+  downloadTrack: vi.fn().mockResolvedValue(undefined),
 }));
 
 const actionsLabel = i18n.global.t("browse.detail.actions");
@@ -222,6 +223,23 @@ describe("TrackList", () => {
     expect(wrapper.emitted("share")?.[0]).toEqual([
       toQueueTrack(tracks[0], { artist_name: "Artist" }),
     ]);
+  });
+
+  it("downloads the track from the context menu", async () => {
+    const tracks = [makeTrack({ audio_url: "/api/v1/files/f1/download" })];
+    ({ wrapper } = mountTrackList({ tracks, context: "Artist" }));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    await clickMenuItem(i18n.global.t("common.download"));
+    await flushPromises();
+
+    expect(tracksApi.downloadTrack).toHaveBeenCalledWith(
+      tracks[0].audio_url,
+      tracks[0].title,
+    );
   });
 
   it("navigates to the artist and album from the context menu", async () => {

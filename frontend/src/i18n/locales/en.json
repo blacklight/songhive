@@ -20,7 +20,8 @@
     "pause": "Pause",
     "favorite": "Favorite",
     "unfavorite": "Unfavorite",
-    "share": "Share"
+    "share": "Share",
+    "download": "Download"
   },
   "theme": {
     "light": "Light",
@@ -306,6 +307,9 @@
       "success": "Deleted \"{name}\".",
       "bulkSuccess": "Deleted {count} {entity}.",
       "error": "Could not delete {entity}: {message}"
+    },
+    "download": {
+      "error": "Could not download track: {message}"
     },
     "libraryManagement": {
       "addTracks": "Add tracks",

@@ -17,7 +17,7 @@ import { formatTime } from "@/utils/time";
 import { getApiErrorMessage } from "@/api/client";
 import { removeTracksFromLibrary } from "@/api/libraries";
 import { removeTracksFromPlaylist } from "@/api/playlists";
-import { deleteTrack, deleteTracks } from "@/api/tracks";
+import { deleteTrack, deleteTracks, downloadTrack } from "@/api/tracks";
 import { canManageItem } from "@/composables/useCanManage";
 
 export interface RemovableFrom {
@@ -421,6 +421,14 @@ const menuItems = computed(() => {
     },
   ];
 
+  if (track.audio_url) {
+    items.push({
+      key: "download",
+      label: t("common.download"),
+      icon: "download",
+    });
+  }
+
   if (authStore.isAuthenticated) {
     items.push(
       {
@@ -487,7 +495,7 @@ const menuItems = computed(() => {
   return items;
 });
 
-function onMenuSelect(key: string) {
+async function onMenuSelect(key: string) {
   const track = menuTrack.value;
   if (!track) return;
   closeMenu();
@@ -505,6 +513,18 @@ function onMenuSelect(key: string) {
     case "enqueue":
       player.enqueue(track);
       emit("enqueue", track);
+      break;
+    case "download":
+      try {
+        await downloadTrack(track.audio_url!, track.title);
+      } catch (err) {
+        toastStore.push({
+          type: "error",
+          message: t("browse.download.error", {
+            message: getApiErrorMessage(err) || t("errors.unknown"),
+          }),
+        });
+      }
       break;
     case "add-to-library":
       dialogTrack.value = track;
