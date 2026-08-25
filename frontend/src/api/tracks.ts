@@ -15,7 +15,7 @@ export function listTracks(params?: {
   limit?: number;
   offset?: number;
 }): Promise<TrackResponse[]> {
-  return apiRequest<TrackResponse[]>("/tracks", { query: params });
+  return apiRequest<TrackResponse[]>("/tracks/", { query: params });
 }
 
 export function getTrack(id: string): Promise<TrackResponse> {

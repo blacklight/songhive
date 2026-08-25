@@ -34,7 +34,7 @@ describe("history api", () => {
   it("listHistory fetches with pagination", async () => {
     apiRequest.mockResolvedValueOnce([]);
     await listHistory({ page: 2, pageSize: 10 });
-    expect(apiRequest).toHaveBeenCalledWith("/history", {
+    expect(apiRequest).toHaveBeenCalledWith("/history/", {
       query: { limit: 10, offset: 10 },
     });
   });
@@ -42,7 +42,7 @@ describe("history api", () => {
   it("listHistory uses defaults", async () => {
     apiRequest.mockResolvedValueOnce([]);
     await listHistory();
-    expect(apiRequest).toHaveBeenCalledWith("/history", {
+    expect(apiRequest).toHaveBeenCalledWith("/history/", {
       query: { limit: 20, offset: 0 },
     });
   });

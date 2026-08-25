@@ -39,14 +39,14 @@ describe("radios api", () => {
   it("listRadios fetches the radios endpoint", async () => {
     apiRequest.mockResolvedValueOnce([sampleRadio]);
     const result = await listRadios();
-    expect(apiRequest).toHaveBeenCalledWith("/radios", { query: undefined });
+    expect(apiRequest).toHaveBeenCalledWith("/radios/", { query: undefined });
     expect(result).toEqual([sampleRadio]);
   });
 
   it("listRadios passes pagination query params", async () => {
     apiRequest.mockResolvedValueOnce([]);
     await listRadios({ limit: 10, offset: 5 });
-    expect(apiRequest).toHaveBeenCalledWith("/radios", {
+    expect(apiRequest).toHaveBeenCalledWith("/radios/", {
       query: { limit: 10, offset: 5 },
     });
   });
@@ -55,7 +55,7 @@ describe("radios api", () => {
     apiRequest.mockResolvedValueOnce(sampleRadio);
     const body: RadioCreate = { name: "New Radio", description: "A station" };
     await createRadio(body, "public");
-    expect(apiRequest).toHaveBeenCalledWith("/radios", {
+    expect(apiRequest).toHaveBeenCalledWith("/radios/", {
       method: "POST",
       body,
       query: { visibility: "public" },
@@ -66,7 +66,7 @@ describe("radios api", () => {
     apiRequest.mockResolvedValueOnce(sampleRadio);
     const body: RadioCreate = { name: "New Radio" };
     await createRadio(body);
-    expect(apiRequest).toHaveBeenCalledWith("/radios", {
+    expect(apiRequest).toHaveBeenCalledWith("/radios/", {
       method: "POST",
       body,
       query: { visibility: undefined },

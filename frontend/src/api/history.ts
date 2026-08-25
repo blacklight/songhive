@@ -24,7 +24,7 @@ export function listHistory(params?: {
 }): Promise<HistoryPage> {
   const page = params?.page ?? 1;
   const pageSize = params?.pageSize ?? 20;
-  return apiRequest<HistoryListResponse>("/history", {
+  return apiRequest<HistoryListResponse>("/history/", {
     query: {
       limit: pageSize,
       offset: (page - 1) * pageSize,

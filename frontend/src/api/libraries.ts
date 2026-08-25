@@ -13,14 +13,14 @@ export function listLibraries(params?: {
   limit?: number;
   offset?: number;
 }): Promise<LibraryResponse[]> {
-  return apiRequest<LibraryResponse[]>("/libraries", { query: params });
+  return apiRequest<LibraryResponse[]>("/libraries/", { query: params });
 }
 
 export function createLibrary(
   body: LibraryCreate,
   params?: { visibility?: Visibility },
 ): Promise<LibraryResponse> {
-  return apiRequest<LibraryResponse>("/libraries", {
+  return apiRequest<LibraryResponse>("/libraries/", {
     method: "POST",
     body,
     query: params,

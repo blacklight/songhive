@@ -27,14 +27,16 @@ describe("favorites api", () => {
   it("listFavorites fetches the favorites endpoint", async () => {
     apiRequest.mockResolvedValueOnce([sampleFavorite]);
     const result = await listFavorites();
-    expect(apiRequest).toHaveBeenCalledWith("/favorites", { query: undefined });
+    expect(apiRequest).toHaveBeenCalledWith("/favorites/", {
+      query: undefined,
+    });
     expect(result).toEqual([sampleFavorite]);
   });
 
   it("listFavorites passes pagination query params", async () => {
     apiRequest.mockResolvedValueOnce([]);
     await listFavorites({ limit: 10, offset: 5 });
-    expect(apiRequest).toHaveBeenCalledWith("/favorites", {
+    expect(apiRequest).toHaveBeenCalledWith("/favorites/", {
       query: { limit: 10, offset: 5 },
     });
   });

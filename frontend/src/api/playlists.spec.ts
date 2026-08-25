@@ -30,14 +30,16 @@ describe("playlists api", () => {
   it("listPlaylists fetches the playlists endpoint", async () => {
     apiRequest.mockResolvedValueOnce([samplePlaylist]);
     const result = await listPlaylists();
-    expect(apiRequest).toHaveBeenCalledWith("/playlists", { query: undefined });
+    expect(apiRequest).toHaveBeenCalledWith("/playlists/", {
+      query: undefined,
+    });
     expect(result).toEqual([samplePlaylist]);
   });
 
   it("listPlaylists passes pagination query params", async () => {
     apiRequest.mockResolvedValueOnce([]);
     await listPlaylists({ limit: 10, offset: 5 });
-    expect(apiRequest).toHaveBeenCalledWith("/playlists", {
+    expect(apiRequest).toHaveBeenCalledWith("/playlists/", {
       query: { limit: 10, offset: 5 },
     });
   });
@@ -46,7 +48,7 @@ describe("playlists api", () => {
     apiRequest.mockResolvedValueOnce(samplePlaylist);
     const body: PlaylistCreate = { name: "New Playlist" };
     await createPlaylist(body, { visibility: "public" });
-    expect(apiRequest).toHaveBeenCalledWith("/playlists", {
+    expect(apiRequest).toHaveBeenCalledWith("/playlists/", {
       method: "POST",
       body,
       query: { visibility: "public" },

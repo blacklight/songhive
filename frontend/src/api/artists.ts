@@ -8,7 +8,7 @@ export function listArtists(params?: {
   limit?: number;
   offset?: number;
 }): Promise<ArtistResponse[]> {
-  return apiRequest<ArtistResponse[]>("/artists", { query: params });
+  return apiRequest<ArtistResponse[]>("/artists/", { query: params });
 }
 
 export function getArtist(id: string): Promise<ArtistResponse> {

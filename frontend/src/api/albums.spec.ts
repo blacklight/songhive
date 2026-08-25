@@ -35,7 +35,7 @@ describe("albums api", () => {
   it("listAlbums fetches the albums endpoint", async () => {
     apiRequest.mockResolvedValueOnce([sampleAlbum]);
     const result = await listAlbums();
-    expect(apiRequest).toHaveBeenCalledWith("/albums", { query: undefined });
+    expect(apiRequest).toHaveBeenCalledWith("/albums/", { query: undefined });
     expect(result).toEqual([sampleAlbum]);
   });
 
@@ -49,7 +49,7 @@ describe("albums api", () => {
       limit: 10,
       offset: 5,
     });
-    expect(apiRequest).toHaveBeenCalledWith("/albums", {
+    expect(apiRequest).toHaveBeenCalledWith("/albums/", {
       query: {
         q: "foo",
         artist_id: "a1",

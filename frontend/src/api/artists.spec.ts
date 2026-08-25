@@ -25,14 +25,14 @@ describe("artists api", () => {
   it("listArtists fetches the artists endpoint", async () => {
     apiRequest.mockResolvedValueOnce([sampleArtist]);
     const result = await listArtists();
-    expect(apiRequest).toHaveBeenCalledWith("/artists", { query: undefined });
+    expect(apiRequest).toHaveBeenCalledWith("/artists/", { query: undefined });
     expect(result).toEqual([sampleArtist]);
   });
 
   it("listArtists passes search and pagination query params", async () => {
     apiRequest.mockResolvedValueOnce([]);
     await listArtists({ q: "foo", limit: 10, offset: 5 });
-    expect(apiRequest).toHaveBeenCalledWith("/artists", {
+    expect(apiRequest).toHaveBeenCalledWith("/artists/", {
       query: { q: "foo", limit: 10, offset: 5 },
     });
   });

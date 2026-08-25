@@ -9,14 +9,14 @@ export function listPlaylists(params?: {
   limit?: number;
   offset?: number;
 }): Promise<PlaylistResponse[]> {
-  return apiRequest<PlaylistResponse[]>("/playlists", { query: params });
+  return apiRequest<PlaylistResponse[]>("/playlists/", { query: params });
 }
 
 export function createPlaylist(
   body: PlaylistCreate,
   params?: { visibility?: Visibility },
 ): Promise<PlaylistResponse> {
-  return apiRequest<PlaylistResponse>("/playlists", {
+  return apiRequest<PlaylistResponse>("/playlists/", {
     method: "POST",
     body,
     query: params,

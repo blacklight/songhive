@@ -15,13 +15,13 @@ export function listShareGrants(params: {
   limit?: number;
   offset?: number;
 }): Promise<ShareGrantResponse[]> {
-  return apiRequest<ShareGrantResponse[]>("/shares", { query: params });
+  return apiRequest<ShareGrantResponse[]>("/shares/", { query: params });
 }
 
 export function createShareGrant(
   body: ShareGrantCreate,
 ): Promise<ShareGrantResponse> {
-  return apiRequest<ShareGrantResponse>("/shares", { method: "POST", body });
+  return apiRequest<ShareGrantResponse>("/shares/", { method: "POST", body });
 }
 
 export function deleteShareGrant(shareId: string): Promise<void> {
@@ -34,13 +34,13 @@ export function listShareUrls(params: {
   limit?: number;
   offset?: number;
 }): Promise<ShareTokenResponse[]> {
-  return apiRequest<ShareTokenResponse[]>("/share-urls", { query: params });
+  return apiRequest<ShareTokenResponse[]>("/share-urls/", { query: params });
 }
 
 export function createShareUrl(
   body: ShareTokenCreate,
 ): Promise<ShareTokenCreated> {
-  return apiRequest<ShareTokenCreated>("/share-urls", {
+  return apiRequest<ShareTokenCreated>("/share-urls/", {
     method: "POST",
     body,
   });

@@ -38,14 +38,16 @@ describe("libraries api", () => {
   it("listLibraries fetches the libraries endpoint", async () => {
     apiRequest.mockResolvedValueOnce([sampleLibrary]);
     const result = await listLibraries();
-    expect(apiRequest).toHaveBeenCalledWith("/libraries", { query: undefined });
+    expect(apiRequest).toHaveBeenCalledWith("/libraries/", {
+      query: undefined,
+    });
     expect(result).toEqual([sampleLibrary]);
   });
 
   it("listLibraries passes pagination query params", async () => {
     apiRequest.mockResolvedValueOnce([]);
     await listLibraries({ limit: 10, offset: 5 });
-    expect(apiRequest).toHaveBeenCalledWith("/libraries", {
+    expect(apiRequest).toHaveBeenCalledWith("/libraries/", {
       query: { limit: 10, offset: 5 },
     });
   });
@@ -54,7 +56,7 @@ describe("libraries api", () => {
     apiRequest.mockResolvedValueOnce(sampleLibrary);
     const body: LibraryCreate = { name: "New Library" };
     await createLibrary(body, { visibility: "public" });
-    expect(apiRequest).toHaveBeenCalledWith("/libraries", {
+    expect(apiRequest).toHaveBeenCalledWith("/libraries/", {
       method: "POST",
       body,
       query: { visibility: "public" },

@@ -13,14 +13,14 @@ export function listRadios(params?: {
   limit?: number;
   offset?: number;
 }): Promise<RadioResponse[]> {
-  return apiRequest<RadioResponse[]>("/radios", { query: params });
+  return apiRequest<RadioResponse[]>("/radios/", { query: params });
 }
 
 export function createRadio(
   body: RadioCreate,
   visibility?: Visibility,
 ): Promise<RadioResponse> {
-  return apiRequest<RadioResponse>("/radios", {
+  return apiRequest<RadioResponse>("/radios/", {
     method: "POST",
     body,
     query: { visibility },

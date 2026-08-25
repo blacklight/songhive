@@ -51,7 +51,7 @@ describe("shares api", () => {
   it("listShareGrants requires item_type and item_id", async () => {
     apiRequest.mockResolvedValueOnce([sampleGrant]);
     await listShareGrants({ item_type: "track", item_id: "t1", limit: 10 });
-    expect(apiRequest).toHaveBeenCalledWith("/shares", {
+    expect(apiRequest).toHaveBeenCalledWith("/shares/", {
       query: { item_type: "track", item_id: "t1", limit: 10 },
     });
   });
@@ -64,7 +64,7 @@ describe("shares api", () => {
       user_id: "u2",
     };
     await createShareGrant(body);
-    expect(apiRequest).toHaveBeenCalledWith("/shares", {
+    expect(apiRequest).toHaveBeenCalledWith("/shares/", {
       method: "POST",
       body,
     });
@@ -81,7 +81,7 @@ describe("shares api", () => {
   it("listShareUrls requires item_type and item_id", async () => {
     apiRequest.mockResolvedValueOnce([sampleToken]);
     await listShareUrls({ item_type: "playlist", item_id: "p1" });
-    expect(apiRequest).toHaveBeenCalledWith("/share-urls", {
+    expect(apiRequest).toHaveBeenCalledWith("/share-urls/", {
       query: { item_type: "playlist", item_id: "p1" },
     });
   });
@@ -94,7 +94,7 @@ describe("shares api", () => {
       expires_at: null,
     };
     await createShareUrl(body);
-    expect(apiRequest).toHaveBeenCalledWith("/share-urls", {
+    expect(apiRequest).toHaveBeenCalledWith("/share-urls/", {
       method: "POST",
       body,
     });

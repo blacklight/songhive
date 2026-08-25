@@ -37,7 +37,7 @@ describe("tracks api", () => {
   it("listTracks fetches the tracks endpoint", async () => {
     apiRequest.mockResolvedValueOnce([sampleTrack]);
     const result = await listTracks();
-    expect(apiRequest).toHaveBeenCalledWith("/tracks", { query: undefined });
+    expect(apiRequest).toHaveBeenCalledWith("/tracks/", { query: undefined });
     expect(result).toEqual([sampleTrack]);
   });
 
@@ -54,7 +54,7 @@ describe("tracks api", () => {
       limit: 10,
       offset: 5,
     });
-    expect(apiRequest).toHaveBeenCalledWith("/tracks", {
+    expect(apiRequest).toHaveBeenCalledWith("/tracks/", {
       query: {
         q: "foo",
         artist_id: "a1",

@@ -12,7 +12,7 @@ export function listAlbums(params?: {
   limit?: number;
   offset?: number;
 }): Promise<AlbumResponse[]> {
-  return apiRequest<AlbumResponse[]>("/albums", { query: params });
+  return apiRequest<AlbumResponse[]>("/albums/", { query: params });
 }
 
 export function getAlbum(id: string): Promise<AlbumResponse> {
