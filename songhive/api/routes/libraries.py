@@ -90,6 +90,12 @@ class AddLibraryTracksRequest(BaseModel):
     artist_id: Optional[str] = None
 
 
+class RemoveLibraryTracksRequest(BaseModel):
+    """Request body for removing tracks from a library."""
+
+    track_ids: List[str]
+
+
 class ScanRequest(BaseModel):
     """Directory scan request."""
 
@@ -535,6 +541,49 @@ async def add_tracks_to_library(
     await db.commit()
 
     return {"added": len(added_ids), "track_ids": added_ids}
+
+
+@router.post("/{library_id}/tracks/remove", status_code=status.HTTP_200_OK)
+async def remove_tracks_from_library(
+    library_id: str,
+    request: Request,
+    body: RemoveLibraryTracksRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove existing tracks from a library."""
+    library = await music.get_library(db, library_id)
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if not await acl.can_manage(db, current_user, "library", library_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    if not body.track_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="track_ids must not be empty",
+        )
+
+    removed_ids = await music.remove_library_tracks(db, library_id, body.track_ids)
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library_track.remove",
+        target_type="library",
+        target_id=library_id,
+        details={
+            "track_ids": removed_ids,
+            "count": len(removed_ids),
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return {"removed": len(removed_ids), "track_ids": removed_ids}
 
 
 @router.post("/{library_id}/scan")

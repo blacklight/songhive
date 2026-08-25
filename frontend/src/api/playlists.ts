@@ -4,6 +4,7 @@ import { apiRequest } from "./client";
 export type PlaylistResponse = components["schemas"]["PlaylistResponse"];
 export type PlaylistCreate = components["schemas"]["PlaylistCreate"];
 export type Visibility = components["schemas"]["Visibility"];
+export type TrackResponse = components["schemas"]["TrackResponse"];
 
 export function listPlaylists(params?: {
   limit?: number;
@@ -46,4 +47,35 @@ export function addTracksToPlaylist(
     method: "POST",
     body,
   });
+}
+
+export function listPlaylistTracks(
+  id: string,
+  params?: { limit?: number; offset?: number },
+): Promise<TrackResponse[]> {
+  return apiRequest<TrackResponse[]>(`/playlists/${id}/tracks`, {
+    query: params,
+  });
+}
+
+export interface RemoveTracksFromPlaylistRequest {
+  track_ids: string[];
+}
+
+export interface RemoveTracksFromPlaylistResponse {
+  removed: number;
+  track_ids: string[];
+}
+
+export function removeTracksFromPlaylist(
+  id: string,
+  body: RemoveTracksFromPlaylistRequest,
+): Promise<RemoveTracksFromPlaylistResponse> {
+  return apiRequest<RemoveTracksFromPlaylistResponse>(
+    `/playlists/${id}/tracks/remove`,
+    {
+      method: "POST",
+      body,
+    },
+  );
 }

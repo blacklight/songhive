@@ -227,3 +227,87 @@ async def test_add_tracks_to_library_creates_audit_log(client, regular_user, db_
     assert log.target_type == "library"
     assert log.details["count"] == 1
     assert log.details["track_ids"] == [str(track.id)]
+
+
+@pytest.mark.asyncio
+async def test_remove_track_from_library(client, regular_user, db_session, auth_headers):
+    """A track can be removed from a library by its owner."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+    library = await _make_library(db_session, regular_user)
+
+    db_session.add(LibraryTrack(library_id=library.id, track_id=track.id, added_by_id=regular_user.id))
+    await db_session.flush()
+
+    response = client.post(
+        f"/api/v1/libraries/{library.id}/tracks/remove",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["removed"] == 1
+    assert data["track_ids"] == [str(track.id)]
+
+    link = await db_session.scalar(
+        select(LibraryTrack).where(
+            LibraryTrack.library_id == library.id,
+            LibraryTrack.track_id == str(track.id),
+        )
+    )
+    assert link is None
+
+
+@pytest.mark.asyncio
+async def test_remove_tracks_from_library_forbidden_for_non_owner(
+    client, regular_user, other_user, db_session, auth_headers
+):
+    """A user that does not manage the library cannot remove tracks."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+    library = await _make_library(db_session, regular_user)
+
+    db_session.add(LibraryTrack(library_id=library.id, track_id=track.id, added_by_id=regular_user.id))
+    await db_session.flush()
+
+    response = client.post(
+        f"/api/v1/libraries/{library.id}/tracks/remove",
+        headers=auth_headers(other_user),
+        json={"track_ids": [str(track.id)]},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_remove_tracks_from_library_creates_audit_log(client, regular_user, db_session, auth_headers):
+    """Removing tracks writes a library_track.remove AuditLog row."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+    library = await _make_library(db_session, regular_user)
+
+    db_session.add(LibraryTrack(library_id=library.id, track_id=track.id, added_by_id=regular_user.id))
+    await db_session.flush()
+
+    response = client.post(
+        f"/api/v1/libraries/{library.id}/tracks/remove",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+
+    assert response.status_code == 200
+
+    log = await db_session.scalar(
+        select(AuditLog)
+        .where(
+            AuditLog.action == "library_track.remove",
+            AuditLog.actor_id == regular_user.id,
+            AuditLog.target_id == library.id,
+        )
+        .order_by(AuditLog.created_at.desc())
+    )
+    assert log is not None
+    assert log.target_type == "library"
+    assert log.details["count"] == 1
+    assert log.details["track_ids"] == [str(track.id)]

@@ -13,9 +13,17 @@ from ...models._enums import Visibility
 from ...models.playlist import Playlist
 from ...models.user import User
 from ...services import acl, audit, music
+from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
-from ..deps import get_current_user, get_current_user_optional, get_db, require_access
+from ..deps import (
+    get_current_user,
+    get_current_user_optional,
+    get_db,
+    get_storage_service,
+    require_access,
+)
 from ._common import HasOwnerId, redact_owner
+from .tracks import TrackResponse
 
 router = APIRouter(prefix="/playlists")
 
@@ -45,6 +53,12 @@ class AddPlaylistTracksRequest(BaseModel):
     track_ids: Optional[List[str]] = None
     album_id: Optional[str] = None
     artist_id: Optional[str] = None
+
+
+class RemovePlaylistTracksRequest(BaseModel):
+    """Request body for removing tracks from a playlist."""
+
+    track_ids: List[str]
 
 
 @router.get("/", response_model=List[PlaylistResponse])
@@ -148,6 +162,27 @@ async def _resolve_track_ids(
     return deduped
 
 
+async def _track_response(
+    storage: StorageService,
+    track,
+    user: Optional[User],
+) -> TrackResponse:
+    """Build a TrackResponse with audio URL."""
+    return TrackResponse(
+        id=str(track.id),
+        title=track.title,
+        artist_id=track.artist_id,
+        album_id=track.album_id,
+        track_number=track.track_number,
+        disc_number=track.disc_number,
+        duration=track.duration,
+        genre=track.genre,
+        audio_url=await storage.get_url(track.audio_file) if track.audio_file_id else None,
+        owner_id=redact_owner(track, user),
+        visibility=track.visibility,
+    )
+
+
 @router.post("/{playlist_id}/tracks", status_code=status.HTTP_201_CREATED)
 async def add_tracks_to_playlist(
     playlist_id: str,
@@ -191,3 +226,72 @@ async def add_tracks_to_playlist(
     await db.commit()
 
     return {"added": len(added_ids), "track_ids": added_ids}
+
+
+@router.get(
+    "/{playlist_id}/tracks",
+    response_model=List[TrackResponse],
+    dependencies=[Depends(require_access("playlist"))],
+)
+async def list_playlist_tracks_route(
+    response: Response,
+    playlist_id: str,
+    user: Optional[User] = Depends(get_current_user_optional),
+    pagination: Pagination = Depends(get_pagination),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+):
+    """List tracks that are members of the playlist."""
+    playlist = await music.get_playlist(db, playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    total = await music.count_playlist_tracks(db, playlist_id=playlist_id, user=user)
+    rows = await music.list_playlist_tracks(
+        db, playlist_id=playlist_id, user=user, limit=pagination.limit, offset=pagination.offset
+    )
+    pagination.set_total(response, total)
+    return [await _track_response(storage, row, user) for row in rows]
+
+
+@router.post("/{playlist_id}/tracks/remove", status_code=status.HTTP_200_OK)
+async def remove_tracks_from_playlist(
+    playlist_id: str,
+    request: Request,
+    body: RemovePlaylistTracksRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove existing tracks from a playlist."""
+    playlist = await music.get_playlist(db, playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    if not body.track_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="track_ids must not be empty",
+        )
+
+    removed_count, removed_ids = await music.remove_playlist_tracks(db, playlist_id, body.track_ids)
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="playlist_track.remove",
+        target_type="playlist",
+        target_id=playlist_id,
+        details={
+            "track_ids": removed_ids,
+            "count": removed_count,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return {"removed": removed_count, "track_ids": removed_ids}

@@ -353,7 +353,26 @@
       "goToAlbum": "Go to album",
       "goToArtist": "Go to artist",
       "addToLibrary": "Add to library",
-      "addToPlaylist": "Add to playlist"
+      "addToPlaylist": "Add to playlist",
+      "removeFromLibrary": "Remove from library",
+      "removeFromPlaylist": "Remove from playlist"
+    },
+    "removeFromCollection": {
+      "singleTitle": "Remove \"{track}\" from \"{collection}\"?",
+      "bulkTitle": "Remove {count} tracks from \"{collection}\"?",
+      "confirm": "Remove",
+      "cancel": "Cancel",
+      "singleSuccess": "Removed \"{track}\" from \"{collection}\".",
+      "bulkSuccess": "Removed {count} tracks from \"{collection}\".",
+      "error": "Could not remove tracks: {message}"
+    },
+    "bulkEdit": {
+      "start": "Bulk edit",
+      "done": "Done",
+      "selectAll": "Select all",
+      "deselectAll": "Deselect all",
+      "removeSelected": "Remove selected",
+      "empty": "No tracks selected."
     },
     "addToCollection": {
       "addToLibrary": "Add to library",
@@ -374,7 +393,7 @@
     "createPlaylist": "Playlist created.",
     "createLibrary": "Library created.",
     "playlist": {
-      "empty": "Track listing is not available for playlists yet."
+      "empty": "No tracks in this playlist yet."
     }
   },
   "player": {

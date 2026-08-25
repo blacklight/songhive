@@ -109,3 +109,25 @@ export function addTracksToLibrary(
     body,
   });
 }
+
+export interface RemoveTracksFromLibraryRequest {
+  track_ids: string[];
+}
+
+export interface RemoveTracksFromLibraryResponse {
+  removed: number;
+  track_ids: string[];
+}
+
+export function removeTracksFromLibrary(
+  id: string,
+  body: RemoveTracksFromLibraryRequest,
+): Promise<RemoveTracksFromLibraryResponse> {
+  return apiRequest<RemoveTracksFromLibraryResponse>(
+    `/libraries/${id}/tracks/remove`,
+    {
+      method: "POST",
+      body,
+    },
+  );
+}

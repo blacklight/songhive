@@ -8,18 +8,21 @@ import { useAuthStore } from "@/stores/auth";
 import type { UserResponse } from "@/api/users";
 import type { TrackResponse } from "@/player/types";
 import { toQueueTrack } from "@/player/enrich";
+import * as librariesApi from "@/api/libraries";
 import TrackList from "./TrackList.vue";
 
 vi.mock("@/api/libraries", () => ({
   listLibraries: vi.fn().mockResolvedValue([]),
   createLibrary: vi.fn(),
   addTracksToLibrary: vi.fn(),
+  removeTracksFromLibrary: vi.fn(),
 }));
 
 vi.mock("@/api/playlists", () => ({
   listPlaylists: vi.fn().mockResolvedValue([]),
   createPlaylist: vi.fn(),
   addTracksToPlaylist: vi.fn(),
+  removeTracksFromPlaylist: vi.fn(),
 }));
 
 const actionsLabel = i18n.global.t("browse.detail.actions");
@@ -268,5 +271,113 @@ describe("TrackList", () => {
         name: "Song One",
       }),
     );
+  });
+
+  it("removes a track from a library via the context menu", async () => {
+    vi.mocked(librariesApi.removeTracksFromLibrary).mockResolvedValue({
+      removed: 1,
+      track_ids: ["track-1"],
+    });
+
+    const tracks = [makeTrack()];
+    ({ wrapper } = mountTrackList({
+      tracks,
+      context: "Artist",
+      removableFrom: {
+        type: "library",
+        id: "library-1",
+        canRemove: true,
+        name: "My Library",
+      },
+    }));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    await clickMenuItem(i18n.global.t("browse.contextMenu.removeFromLibrary"));
+    await flushPromises();
+
+    const confirm = document.body.querySelector(".app-modal__overlay");
+    expect(confirm).not.toBeNull();
+
+    const removeButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) =>
+        b.textContent === i18n.global.t("browse.removeFromCollection.confirm"),
+    );
+    removeButton?.click();
+    await flushPromises();
+
+    expect(librariesApi.removeTracksFromLibrary).toHaveBeenCalledWith(
+      "library-1",
+      {
+        track_ids: ["track-1"],
+      },
+    );
+    expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1"]]);
+  });
+
+  it("removes selected tracks in bulk", async () => {
+    vi.mocked(librariesApi.removeTracksFromLibrary).mockResolvedValue({
+      removed: 2,
+      track_ids: ["track-1", "track-2"],
+    });
+
+    const tracks = [
+      makeTrack(),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+    ];
+    ({ wrapper } = mountTrackList({
+      tracks,
+      context: "Artist",
+      removableFrom: {
+        type: "library",
+        id: "library-1",
+        canRemove: true,
+        name: "My Library",
+      },
+    }));
+    await flushPromises();
+
+    const bulkButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.bulkEdit.start"));
+    expect(bulkButton).toBeDefined();
+    await bulkButton?.trigger("click");
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll('input[type="checkbox"]');
+    expect(checkboxes.length).toBeGreaterThanOrEqual(3);
+
+    await checkboxes[0]?.setValue(true);
+    await flushPromises();
+
+    const removeSelected = wrapper
+      .findAll("button")
+      .find(
+        (b) => b.text() === i18n.global.t("browse.bulkEdit.removeSelected"),
+      );
+    expect(removeSelected).toBeDefined();
+    await removeSelected?.trigger("click");
+    await flushPromises();
+
+    const confirmButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) =>
+        b.textContent === i18n.global.t("browse.removeFromCollection.confirm"),
+    );
+    confirmButton?.click();
+    await flushPromises();
+
+    expect(librariesApi.removeTracksFromLibrary).toHaveBeenCalledWith(
+      "library-1",
+      {
+        track_ids: ["track-1", "track-2"],
+      },
+    );
+    expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1", "track-2"]]);
   });
 });

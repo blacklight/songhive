@@ -226,3 +226,125 @@ async def test_add_tracks_to_playlist_creates_audit_log(client, regular_user, db
     assert log.target_type == "playlist"
     assert log.details["count"] == 1
     assert log.details["track_ids"] == [str(track.id)]
+
+
+@pytest.mark.asyncio
+async def test_list_playlist_tracks(client, regular_user, db_session, auth_headers):
+    """Tracks can be listed for a playlist in order."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.get(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == str(track.id)
+    assert response.headers["x-total-count"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_remove_track_from_playlist(client, regular_user, db_session, auth_headers):
+    """A track can be removed from a playlist by its owner."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/remove",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["removed"] == 1
+    assert data["track_ids"] == [str(track.id)]
+
+    link = await db_session.scalar(
+        select(PlaylistTrack).where(
+            PlaylistTrack.playlist_id == playlist.id,
+            PlaylistTrack.track_id == str(track.id),
+        )
+    )
+    assert link is None
+
+
+@pytest.mark.asyncio
+async def test_remove_tracks_from_playlist_forbidden_for_non_owner(
+    client, regular_user, other_user, db_session, auth_headers
+):
+    """A user that does not manage the playlist cannot remove tracks."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/remove",
+        headers=auth_headers(other_user),
+        json={"track_ids": [str(track.id)]},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_remove_tracks_from_playlist_creates_audit_log(client, regular_user, db_session, auth_headers):
+    """Removing tracks writes a playlist_track.remove AuditLog row."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/remove",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+
+    assert response.status_code == 200
+
+    log = await db_session.scalar(
+        select(AuditLog)
+        .where(
+            AuditLog.action == "playlist_track.remove",
+            AuditLog.actor_id == regular_user.id,
+            AuditLog.target_id == playlist.id,
+        )
+        .order_by(AuditLog.created_at.desc())
+    )
+    assert log is not None
+    assert log.target_type == "playlist"
+    assert log.details["count"] == 1
+    assert log.details["track_ids"] == [str(track.id)]

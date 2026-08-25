@@ -479,6 +479,41 @@ async def add_library_tracks(
     return added
 
 
+async def remove_library_tracks(
+    session: AsyncSession,
+    library_id: str,
+    track_ids: List[str],
+) -> List[str]:
+    """
+    Remove ``track_ids`` from ``library_id``.
+
+    Returns the IDs that were actually removed, preserving input order.
+    """
+    if not track_ids:
+        return []
+
+    result = await session.execute(
+        select(LibraryTrack).where(
+            LibraryTrack.library_id == library_id,
+            LibraryTrack.track_id.in_(track_ids),
+        )
+    )
+    rows = list(result.scalars().all())
+
+    removed: List[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        await session.delete(row)
+        if row.track_id not in seen:
+            seen.add(row.track_id)
+            removed.append(str(row.track_id))
+
+    if rows:
+        await session.flush()
+
+    return removed
+
+
 async def add_playlist_tracks(
     session: AsyncSession,
     playlist_id: str,
@@ -509,3 +544,80 @@ async def add_playlist_tracks(
         await session.flush()
 
     return added
+
+
+async def remove_playlist_tracks(
+    session: AsyncSession,
+    playlist_id: str,
+    track_ids: List[str],
+) -> tuple[int, List[str]]:
+    """
+    Remove all occurrences of ``track_ids`` from ``playlist_id``.
+
+    Returns the number of rows removed and the distinct track IDs that were
+    removed.
+    """
+    if not track_ids:
+        return 0, []
+
+    result = await session.execute(
+        select(PlaylistTrack).where(
+            PlaylistTrack.playlist_id == playlist_id,
+            PlaylistTrack.track_id.in_(track_ids),
+        )
+    )
+    rows = list(result.scalars().all())
+
+    removed_ids: List[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        await session.delete(row)
+        if row.track_id not in seen:
+            seen.add(row.track_id)
+            removed_ids.append(str(row.track_id))
+
+    if rows:
+        await session.flush()
+
+    return len(rows), removed_ids
+
+
+async def list_playlist_tracks(
+    session: AsyncSession,
+    playlist_id: str,
+    user: Optional[User] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> List[Track]:
+    """List tracks that are members of ``playlist_id`` in playlist order."""
+    stmt = (
+        select(Track)
+        .options(
+            selectinload(Track.artist),
+            selectinload(Track.album),
+            selectinload(Track.audio_file),
+        )
+        .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+        .order_by(PlaylistTrack.position)
+    )
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    stmt = stmt.offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def count_playlist_tracks(
+    session: AsyncSession,
+    playlist_id: str,
+    user: Optional[User] = None,
+) -> int:
+    """Return the total number of tracks in ``playlist_id`` visible to ``user``."""
+    stmt = (
+        select(Track)
+        .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+    )
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    return result.scalar() or 0

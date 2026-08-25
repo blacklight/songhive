@@ -2,36 +2,88 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
-import { getPlaylist, type PlaylistResponse } from "@/api/playlists";
+import {
+  useEntityList,
+  type EntityListParams,
+} from "@/composables/useEntityList";
+import {
+  getPlaylist,
+  listPlaylistTracks,
+  type PlaylistResponse,
+} from "@/api/playlists";
+import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
-import AppBanner from "@/components/feedback/AppBanner.vue";
+import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
+import { useAuthStore } from "@/stores/auth";
+import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 
 const { t } = useI18n();
 const route = useRoute();
+const authStore = useAuthStore();
 const playlistId = computed(() => String(route.params.id));
 
 const playlist = ref<PlaylistResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
+const {
+  items: tracks,
+  loading: tracksLoading,
+  error: tracksError,
+  hasMore: tracksHasMore,
+  load: loadTracks,
+  loadMore: loadMoreTracks,
+  retry: retryTracks,
+  refresh: refreshTracks,
+} = useEntityList<TrackResponse>((params: EntityListParams) =>
+  listPlaylistTracks(playlistId.value, {
+    limit: params.limit,
+    offset: params.offset,
+  }),
+);
+
 const { ownerName, visibilityText } = useEntityMeta(playlist);
+
+const { enrich: trackEnrich } = useTrackEnrichment(
+  tracks,
+  computed(() => playlist.value?.name ?? ""),
+);
 const { isOwner } = useOwnership(
   computed(() => playlist.value?.owner_id ?? null),
 );
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
-async function load() {
+const canRemove = computed(() => isOwner.value || authStore.isAdmin);
+
+const removableFrom = computed(() => {
+  if (!playlist.value) return undefined;
+  return {
+    type: "playlist" as const,
+    id: playlist.value.id,
+    canRemove: canRemove.value,
+    name: playlist.value.name,
+  };
+});
+
+function onTrackShare(track: QueueTrack) {
+  openShare("track", track.id, track.title, track.owner_id ?? null);
+}
+
+async function onTracksRemoved() {
+  await refreshTracks();
+}
+
+async function loadPlaylist() {
   loading.value = true;
   error.value = null;
-  playlist.value = null;
-
   try {
     playlist.value = await getPlaylist(playlistId.value);
   } catch (err) {
@@ -41,6 +93,14 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+async function load() {
+  playlist.value = null;
+  error.value = null;
+  await loadPlaylist();
+  if (!playlist.value) return;
+  await loadTracks(true);
 }
 
 onMounted(() => load());
@@ -102,7 +162,54 @@ watch(
         </div>
       </div>
 
-      <AppBanner type="info" :title="t('browse.playlist.empty')" />
+      <section
+        class="playlist-view__section"
+        aria-labelledby="playlist-tracks-heading"
+      >
+        <AppPageTitle
+          id="playlist-tracks-heading"
+          :level="2"
+          class="playlist-view__section-title"
+          icon="music"
+        >
+          {{ t("browse.detail.tracks") }}
+        </AppPageTitle>
+
+        <div
+          v-if="tracksError"
+          class="playlist-view__section-error"
+          role="alert"
+        >
+          <span>{{ tracksError }}</span>
+          <AppButton size="sm" icon="rotate-right" @click="retryTracks">{{
+            t("common.retry")
+          }}</AppButton>
+        </div>
+
+        <TrackList
+          :tracks="tracks"
+          :loading="tracksLoading"
+          :context="playlist.name"
+          :enrich="trackEnrich"
+          :removable-from="removableFrom"
+          :empty-label="t('browse.playlist.empty')"
+          @share="onTrackShare"
+          @removed="onTracksRemoved"
+        />
+
+        <div class="playlist-view__footer">
+          <AppButton
+            v-if="tracksHasMore"
+            icon="chevron-down"
+            variant="secondary"
+            :loading="tracksLoading"
+            :disabled="tracksLoading"
+            @click="loadMoreTracks"
+          >
+            {{ t("browse.list.loadMore") }}
+          </AppButton>
+        </div>
+      </section>
 
       <ShareDialog
         v-if="shareTarget"
@@ -128,7 +235,8 @@ watch(
   min-height: 16rem;
 }
 
-.playlist-view__error {
+.playlist-view__error,
+.playlist-view__section-error {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -166,5 +274,21 @@ watch(
 
 .playlist-view__header-actions {
   margin-top: var(--space-2);
+}
+
+.playlist-view__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.playlist-view__section-title {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.playlist-view__footer {
+  display: flex;
+  justify-content: center;
 }
 </style>
