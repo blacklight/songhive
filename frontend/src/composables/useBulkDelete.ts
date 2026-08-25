@@ -16,6 +16,7 @@ export interface UseBulkDeleteOptions<T extends ManageableItem> {
   entitySingular: string;
   entityPlural: string;
   getName: (item: T) => string;
+  getOwnerId?: (item: T) => string | null | undefined;
   recursive?: boolean;
   recursiveLabel?: MaybeRef<string | undefined>;
 }
@@ -41,8 +42,12 @@ export function useBulkDelete<T extends ManageableItem>(
 
   const recursiveLabel = computed(() => toValue(options.recursiveLabel));
 
+  function getOwnerId(item: T): string | null | undefined {
+    return options.getOwnerId?.(item) ?? item.owner_id;
+  }
+
   function canManage(item: T): boolean {
-    return canManageItem(authStore, item);
+    return canManageItem(authStore, { owner_id: getOwnerId(item) });
   }
 
   function selected(items: T[]): T[] {

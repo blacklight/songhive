@@ -15,29 +15,22 @@ import {
   type LibraryResponse,
 } from "@/api/libraries";
 import { useEntityList } from "@/composables/useEntityList";
-import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
-import { useBulkDelete } from "@/composables/useBulkDelete";
 import { formatBytes, toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
-import AppCheckbox from "@/components/ui/AppCheckbox.vue";
-import AppSpinner from "@/components/feedback/AppSpinner.vue";
-import SearchBar from "@/components/ui/SearchBar.vue";
-import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
-import DeleteModal from "@/components/entity/DeleteModal.vue";
+import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
 
 const { t } = useI18n();
 const router = useRouter();
 const toast = useToastStore();
-const authStore = useAuthStore();
 
 const visibility = ref<Visibility>("public");
 const uploading = ref(false);
 const progress = ref(0);
-const error = ref<string | null>(null);
+const uploadError = ref<string | null>(null);
 const selectedFileName = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const libraries = ref<LibraryResponse[]>([]);
@@ -90,33 +83,6 @@ function fileName(file: StoredFileResponse): string {
     : t("pages.files.untitledFile");
 }
 
-const bulk = useBulkDelete<StoredFileResponse>({
-  deleteOne: (id: string) => deleteFile(id),
-  refresh,
-  entitySingular: t("browse.entities.file"),
-  entityPlural: t("browse.entities.files"),
-  getName: fileName,
-  recursive: false,
-});
-
-const {
-  bulkMode,
-  selectedIds,
-  isDeleting,
-  deleteModalOpen,
-  deleteModalTitle,
-  deleteModalMessage,
-  deleteModalAllowRecursive,
-  deleteModalLoading,
-} = bulk;
-
-const manageableFiles = computed(() =>
-  files.value.filter((file) => bulk.canManage(file)),
-);
-
-const allSelected = computed(() => bulk.allSelected(manageableFiles.value));
-const someSelected = computed(() => bulk.someSelected(manageableFiles.value));
-
 function fileIcon(file: StoredFileResponse): string {
   if (file.content_type.startsWith("audio/")) return "music";
   if (file.content_type.startsWith("image/")) return "image";
@@ -159,7 +125,7 @@ async function onFileChange(event: Event) {
     return;
   }
 
-  error.value = null;
+  uploadError.value = null;
   uploading.value = true;
   progress.value = 0;
   selectedFileName.value = file.name;
@@ -181,7 +147,7 @@ async function onFileChange(event: Event) {
       await router.push({ name: "file", params: { id: response.id } });
     }
   } catch (err) {
-    error.value = t("pages.files.uploadError", {
+    uploadError.value = t("pages.files.uploadError", {
       message: getErrorMessage(err),
     });
   } finally {
@@ -194,65 +160,6 @@ async function onFileChange(event: Event) {
 
 <template>
   <div class="files-view">
-    <div class="files-view__header">
-      <AppPageTitle class="files-view__title" icon="file">{{
-        t("pages.files.title")
-      }}</AppPageTitle>
-
-      <div class="files-view__actions">
-        <template v-if="authStore.isAuthenticated && !bulkMode">
-          <AppButton
-            size="sm"
-            icon="pen-to-square"
-            variant="secondary"
-            @click="bulk.enterBulkMode"
-          >
-            {{ t("browse.bulkEdit.start") }}
-          </AppButton>
-        </template>
-
-        <template v-else-if="authStore.isAuthenticated">
-          <AppCheckbox
-            :model-value="allSelected"
-            :indeterminate="someSelected"
-            :label="t('browse.bulkEdit.selectAll')"
-            @update:model-value="bulk.toggleAll(files)"
-          />
-          <AppButton
-            variant="danger"
-            size="sm"
-            icon="trash"
-            :disabled="selectedIds.size === 0 || isDeleting"
-            :loading="isDeleting"
-            @click="bulk.openDeleteBulk(files)"
-          >
-            {{ t("browse.bulkEdit.deleteSelected") }}
-          </AppButton>
-          <AppButton
-            size="sm"
-            icon="xmark"
-            variant="secondary"
-            :disabled="isDeleting"
-            @click="bulk.exitBulkMode"
-          >
-            {{ t("browse.bulkEdit.done") }}
-          </AppButton>
-        </template>
-      </div>
-    </div>
-
-    <SearchBar
-      :model-value="query"
-      :debounce="0"
-      class="files-view__search"
-      :placeholder="
-        t('browse.list.searchPlaceholder', {
-          entity: t('browse.entities.files'),
-        })
-      "
-      @update:model-value="search"
-    />
-
     <section
       class="boxed files-view__upload"
       aria-labelledby="files-upload-heading"
@@ -318,93 +225,45 @@ async function onFileChange(event: Event) {
         {{ progressLabel }}
       </p>
 
-      <div v-if="error" class="files-view__error" role="alert">
-        <span>{{ error }}</span>
+      <div v-if="uploadError" class="files-view__error" role="alert">
+        <span>{{ uploadError }}</span>
       </div>
     </section>
-    <div v-if="listError" class="files-view__error" role="alert">
-      <span>{{ listError }}</span>
-      <AppButton size="sm" icon="rotate-right" @click="retry">
-        {{ t("common.retry") }}
-      </AppButton>
-    </div>
 
-    <div
-      v-else-if="loading && files.length === 0"
-      class="files-view__list files-view__list--skeleton"
+    <BulkEditableGrid
+      :title="t('pages.files.title')"
+      icon="file"
+      :items="files"
+      :loading="loading"
+      :error="listError"
+      :has-more="hasMore"
+      :query="query"
+      :entity-singular="t('browse.entities.file')"
+      :entity-plural="t('browse.entities.files')"
+      :delete-one="(id: string) => deleteFile(id)"
+      :refresh="refresh"
+      :get-name="fileName"
+      :search="search"
+      :load-more="loadMore"
+      :retry="retry"
+      layout="list"
+      item-class="files-view__item"
     >
-      <SkeletonLoader v-for="i in 5" :key="i" variant="list-row" />
-    </div>
-
-    <p v-else-if="files.length === 0" class="files-view__empty">
-      {{ t("browse.list.empty", { entity: t("browse.entities.files") }) }}
-    </p>
-
-    <ul
-      v-else
-      class="files-view__list"
-      :class="{ 'files-view__list--bulk': bulkMode }"
-    >
-      <li
-        v-for="file in files"
-        :key="file.id"
-        class="files-view__item"
-        :class="{ 'files-view__item--bulk': bulkMode }"
-      >
-        <AppCheckbox
-          v-if="bulkMode"
-          :model-value="selectedIds.has(file.id)"
-          :disabled="!bulk.canManage(file)"
-          @update:model-value="bulk.toggleSelect(file.id)"
-        />
-
+      <template #card="{ item, bulkMode }">
         <RouterLink
-          :to="{ name: 'file', params: { id: file.id } }"
-          class="files-view__link"
+          :to="{ name: 'file', params: { id: item.id } }"
+          class="files-view__card"
+          :class="{ 'files-view__card--bulk': bulkMode }"
         >
-          <AppIcon :name="fileIcon(file)" spacing="right" />
-          <span class="files-view__name">{{ fileName(file) }}</span>
+          <AppIcon :name="fileIcon(item)" spacing="right" />
+          <span class="files-view__name">{{ fileName(item) }}</span>
           <span class="files-view__meta">
-            {{ formatBytes(file.size) }} ·
-            {{ t(`browse.visibility.${toVisibility(file.visibility)}`) }}
+            {{ formatBytes(item.size) }} ·
+            {{ t(`browse.visibility.${toVisibility(item.visibility)}`) }}
           </span>
         </RouterLink>
-
-        <AppButton
-          v-if="!bulkMode && bulk.canManage(file)"
-          class="files-view__delete"
-          variant="danger"
-          size="sm"
-          icon="trash"
-          :title="t('common.delete')"
-          @click="bulk.openDeleteSingle(file)"
-        />
-      </li>
-    </ul>
-
-    <div class="files-view__footer">
-      <AppButton
-        v-if="hasMore"
-        icon="chevron-down"
-        variant="secondary"
-        :loading="loading"
-        :disabled="loading"
-        @click="loadMore"
-      >
-        {{ t("browse.list.loadMore") }}
-      </AppButton>
-      <AppSpinner v-else-if="loading" />
-    </div>
-
-    <DeleteModal
-      :open="deleteModalOpen"
-      :title="deleteModalTitle"
-      :message="deleteModalMessage"
-      :allow-recursive="deleteModalAllowRecursive"
-      :loading="deleteModalLoading"
-      @close="bulk.closeDeleteModal"
-      @confirm="bulk.confirmDelete"
-    />
+      </template>
+    </BulkEditableGrid>
   </div>
 </template>
 
@@ -416,61 +275,25 @@ async function onFileChange(event: Event) {
   max-width: 48rem;
 }
 
-.files-view__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.files-view__title {
-  margin: 0;
-  font-size: 1.5rem;
-}
-
-.files-view__actions {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-}
-
-.files-view__search {
-  max-width: 32rem;
-}
-
-.files-view__list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.files-view__list--skeleton {
-  gap: var(--space-3);
-}
-
 .files-view__item {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+}
+
+.files-view__item.bulk-editable-grid__item-wrapper--list {
   border-radius: var(--radius-md);
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   transition: background-color var(--transition-fast);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) 2.5rem var(--space-2) var(--space-3);
 }
 
-.files-view__item:hover {
+.files-view__item.bulk-editable-grid__item-wrapper--list:hover {
   background-color: var(--color-bg-hover);
 }
 
-.files-view__item--bulk .files-view__link {
-  pointer-events: none;
-}
-
-.files-view__link {
+.files-view__card {
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -479,6 +302,10 @@ async function onFileChange(event: Event) {
   color: var(--color-text);
   text-decoration: none;
   padding: var(--space-1) 0;
+}
+
+.files-view__card--bulk {
+  pointer-events: none;
 }
 
 .files-view__name {
@@ -496,12 +323,6 @@ async function onFileChange(event: Event) {
   white-space: nowrap;
 }
 
-.files-view__empty {
-  padding: var(--space-8);
-  text-align: center;
-  color: var(--color-text-muted);
-}
-
 .files-view__error {
   display: flex;
   align-items: center;
@@ -512,11 +333,6 @@ async function onFileChange(event: Event) {
   background-color: var(--color-surface);
   color: var(--color-danger);
   font-size: 0.9375rem;
-}
-
-.files-view__footer {
-  display: flex;
-  justify-content: center;
 }
 
 .files-view__upload {

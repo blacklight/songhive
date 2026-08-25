@@ -17,7 +17,7 @@ import { formatTime } from "@/utils/time";
 import { getApiErrorMessage } from "@/api/client";
 import { removeTracksFromLibrary } from "@/api/libraries";
 import { removeTracksFromPlaylist } from "@/api/playlists";
-import { deleteTrack } from "@/api/tracks";
+import { deleteTrack, deleteTracks } from "@/api/tracks";
 import { canManageItem } from "@/composables/useCanManage";
 
 export interface RemovableFrom {
@@ -296,16 +296,15 @@ async function onConfirm() {
   try {
     if (confirmIsDelete.value) {
       let deleted = 0;
-      const ids: string[] = [];
-      for (const id of trackIds) {
-        try {
-          await deleteTrack(id);
-          ids.push(id);
-          deleted++;
-        } catch (err) {
-          if (deleted > 0) break;
-          throw err;
-        }
+      let ids: string[] = [];
+      if (confirmMode.value === "single" && confirmTrack.value) {
+        await deleteTrack(confirmTrack.value.id);
+        ids = [confirmTrack.value.id];
+        deleted = 1;
+      } else {
+        const response = await deleteTracks(trackIds);
+        ids = response.track_ids;
+        deleted = response.deleted;
       }
 
       if (confirmMode.value === "single" && confirmTrack.value) {

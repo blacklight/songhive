@@ -9,6 +9,7 @@ import type { UserResponse } from "@/api/users";
 import type { TrackResponse } from "@/player/types";
 import { toQueueTrack } from "@/player/enrich";
 import * as librariesApi from "@/api/libraries";
+import * as tracksApi from "@/api/tracks";
 import TrackList from "./TrackList.vue";
 
 vi.mock("@/api/libraries", () => ({
@@ -27,6 +28,7 @@ vi.mock("@/api/playlists", () => ({
 
 vi.mock("@/api/tracks", () => ({
   deleteTrack: vi.fn(),
+  deleteTracks: vi.fn().mockResolvedValue({ deleted: 0, track_ids: [] }),
 }));
 
 const actionsLabel = i18n.global.t("browse.detail.actions");
@@ -382,6 +384,55 @@ describe("TrackList", () => {
         track_ids: ["track-1", "track-2"],
       },
     );
+    expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1", "track-2"]]);
+  });
+
+  it("deletes selected tracks in bulk with a single API call", async () => {
+    vi.mocked(tracksApi.deleteTracks).mockResolvedValue({
+      deleted: 2,
+      track_ids: ["track-1", "track-2"],
+    });
+
+    const tracks = [
+      makeTrack(),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+    ];
+    ({ wrapper } = mountTrackList({
+      tracks,
+      context: "Artist",
+      deletable: true,
+    }));
+    await flushPromises();
+
+    const bulkButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.bulkEdit.start"));
+    expect(bulkButton).toBeDefined();
+    await bulkButton?.trigger("click");
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll('input[type="checkbox"]');
+    expect(checkboxes.length).toBeGreaterThanOrEqual(3);
+
+    await checkboxes[0]?.setValue(true);
+    await flushPromises();
+
+    const deleteSelected = wrapper
+      .findAll("button")
+      .find(
+        (b) => b.text() === i18n.global.t("browse.bulkEdit.deleteSelected"),
+      );
+    expect(deleteSelected).toBeDefined();
+    await deleteSelected?.trigger("click");
+    await flushPromises();
+
+    const confirmButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.delete"));
+    confirmButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.deleteTracks).toHaveBeenCalledWith(["track-1", "track-2"]);
     expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1", "track-2"]]);
   });
 });

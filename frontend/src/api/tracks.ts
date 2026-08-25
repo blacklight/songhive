@@ -29,6 +29,24 @@ export function updateTrack(
   return apiRequest<TrackResponse>(`/tracks/${id}`, { method: "PATCH", body });
 }
 
+export interface BulkTrackDeleteRequest {
+  track_ids: string[];
+}
+
+export interface BulkTrackDeleteResponse {
+  deleted: number;
+  track_ids: string[];
+}
+
 export function deleteTrack(id: string): Promise<void> {
   return apiRequest<void>(`/tracks/${id}`, { method: "DELETE" });
+}
+
+export function deleteTracks(
+  trackIds: string[],
+): Promise<BulkTrackDeleteResponse> {
+  return apiRequest<BulkTrackDeleteResponse>("/tracks/bulk", {
+    method: "DELETE",
+    body: { track_ids: trackIds } as BulkTrackDeleteRequest,
+  });
 }

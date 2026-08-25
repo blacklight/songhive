@@ -5,6 +5,7 @@ import {
   getTrack,
   updateTrack,
   deleteTrack,
+  deleteTracks,
   type TrackResponse,
   type TrackUpdate,
 } from "./tracks";
@@ -92,5 +93,16 @@ describe("tracks api", () => {
     expect(apiRequest).toHaveBeenCalledWith("/tracks/t1", {
       method: "DELETE",
     });
+  });
+
+  it("deleteTracks sends a single DELETE request for multiple ids", async () => {
+    const response = { deleted: 2, track_ids: ["t1", "t2"] };
+    apiRequest.mockResolvedValueOnce(response);
+    const result = await deleteTracks(["t1", "t2"]);
+    expect(apiRequest).toHaveBeenCalledWith("/tracks/bulk", {
+      method: "DELETE",
+      body: { track_ids: ["t1", "t2"] },
+    });
+    expect(result).toEqual(response);
   });
 });
