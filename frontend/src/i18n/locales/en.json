@@ -122,6 +122,18 @@
       "untitled": "Untitled track",
       "playError": "Could not play this track: {message}",
       "playAllPartial": "Could only play {count} of {total} tracks."
+    },
+    "favorites": {
+      "title": "Favorites",
+      "tracks": "Tracks",
+      "albums": "Albums",
+      "artists": "Artists",
+      "playlists": "Playlists",
+      "entityTypesGated": "Favoriting albums, artists, and playlists is not available yet.",
+      "empty": "You have no favorite tracks yet.",
+      "emptyWithFavorites": "Could not load your favorite tracks.",
+      "removeSuccess": "Removed from favorites.",
+      "removeError": "Could not remove favorite: {message}"
     }
   },
   "profile": {

@@ -16,6 +16,7 @@ export interface Props {
   loading?: boolean;
   showArtwork?: boolean;
   enrich?: Map<string, TrackEnrich>;
+  favoriteLabel?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -132,7 +133,7 @@ const menuItems = computed(() => {
     { key: "play", label: t("common.play") },
     { key: "play-next", label: t("browse.contextMenu.playNext") },
     { key: "enqueue", label: t("browse.contextMenu.enqueue") },
-    { key: "favorite", label: t("common.favorite") },
+    { key: "favorite", label: props.favoriteLabel ?? t("common.favorite") },
   ];
 
   if (track.album_id) {
