@@ -158,6 +158,23 @@
       "sha256Copied": "SHA-256 copied to clipboard.",
       "copyFailed": "Could not copy SHA-256.",
       "empty": "File not found."
+    },
+    "radio": {
+      "title": "Radio",
+      "createTitle": "Create a station",
+      "name": "Name",
+      "description": "Description",
+      "config": "Configuration",
+      "configHint": "Optional raw radio configuration for advanced users.",
+      "visibility": "Visibility",
+      "create": "Create station",
+      "createSuccess": "Radio station created.",
+      "createError": "Could not create station: {message}",
+      "playError": "Could not start station: {message}",
+      "loadError": "Could not load stations: {message}",
+      "emptyTracks": "No tracks were generated for this station.",
+      "empty": "No radio stations yet.",
+      "loginHint": "Log in to create your own station."
     }
   },
   "profile": {
