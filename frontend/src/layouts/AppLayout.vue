@@ -171,10 +171,9 @@ const loginItem = {
           size="sm"
           class="app-layout__logout"
           icon="right-from-bracket"
+          :title="t('auth.logout')"
           @click="logout"
-        >
-          {{ t("auth.logout") }}
-        </AppButton>
+        />
       </footer>
     </aside>
     <main id="main" class="app-layout__main" role="main">
@@ -209,6 +208,8 @@ const loginItem = {
   min-height: 100vh;
   background-color: var(--color-bg);
   color: var(--color-text);
+
+  --logout-btn-width: 2.5rem;
 }
 
 .app-layout__menu-toggle {
@@ -275,6 +276,8 @@ const loginItem = {
 
 .app-layout__menu-footer {
   margin-top: var(--space-4);
+  display: flex;
+  flex-direction: row;
   flex-shrink: 0;
 }
 
@@ -298,6 +301,7 @@ const loginItem = {
 }
 
 .app-layout__user {
+  width: calc(100% - var(--space-3) - var(--logout-btn-width));
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -322,10 +326,9 @@ const loginItem = {
 }
 
 .app-layout__logout {
-  width: 100%;
+  width: var(--logout-btn-width);
   margin-top: 0;
   color: var(--color-text-menu);
-  justify-content: flex-start;
 }
 
 .app-layout__main {

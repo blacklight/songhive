@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<Props>(), {
   size: "md",
   type: "button",
   iconVariant: "solid",
+  title: undefined,
 });
 </script>
 
@@ -24,6 +25,8 @@ const props = withDefaults(defineProps<Props>(), {
   <button
     :type="props.type"
     :class="['app-btn', `app-btn--${props.variant}`, `app-btn--${props.size}`]"
+    :title="props.title"
+    :aria-label="props.title"
     :disabled="props.loading || props.disabled"
     :aria-busy="props.loading ? 'true' : 'false'"
   >
