@@ -6,10 +6,11 @@ import io
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 
 from songhive.config.schema import StorageConfig
 from songhive.models._enums import Visibility
+from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
@@ -428,3 +429,226 @@ async def test_delete_track_keeps_stored_file_when_storage_delete_fails(
     assert await db_session.get(Track, track.id) is None
     assert await db_session.get(StoredFile, stored_file.id) is not None
     assert await storage_service.backend.exists(stored_file.storage_path) is True
+
+
+def test_delete_tracks_bulk_deletes_multiple(files_client, regular_user, auth_headers, monkeypatch):
+    """DELETE /tracks/bulk removes multiple tracks in one request."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(regular_user)
+
+    _, track1 = _upload_audio(files_client, auth_headers, regular_user, b"bulk delete 1")
+    _, track2 = _upload_audio(files_client, auth_headers, regular_user, b"bulk delete 2")
+
+    response = files_client.request(
+        "DELETE",
+        "/api/v1/tracks/bulk",
+        json={"track_ids": [track1, track2]},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 2
+    assert sorted(response.json()["track_ids"]) == sorted([track1, track2])
+
+    assert files_client.get(f"/api/v1/tracks/{track1}", headers=headers).status_code == 404
+    assert files_client.get(f"/api/v1/tracks/{track2}", headers=headers).status_code == 404
+
+
+def test_delete_tracks_bulk_forbidden_for_non_owner(files_client, regular_user, other_user, auth_headers, monkeypatch):
+    """A non-owner cannot bulk-delete another user's tracks."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+
+    _, track_id = _upload_audio(files_client, auth_headers, regular_user, b"bulk forbidden")
+
+    response = files_client.request(
+        "DELETE",
+        "/api/v1/tracks/bulk",
+        json={"track_ids": [track_id]},
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == 403
+    assert files_client.get(f"/api/v1/tracks/{track_id}", headers=auth_headers(regular_user)).status_code == 200
+
+
+def test_delete_tracks_bulk_not_found(files_client, regular_user, auth_headers, monkeypatch):
+    """A missing track in the bulk list aborts the whole operation."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(regular_user)
+
+    _, track_id = _upload_audio(files_client, auth_headers, regular_user, b"bulk missing")
+    missing_id = "00000000-0000-0000-0000-000000000000"
+
+    response = files_client.request(
+        "DELETE",
+        "/api/v1/tracks/bulk",
+        json={"track_ids": [track_id, missing_id]},
+        headers=headers,
+    )
+    assert response.status_code == 404
+    assert files_client.get(f"/api/v1/tracks/{track_id}", headers=headers).status_code == 200
+
+
+def test_delete_tracks_bulk_rate_limited(files_client, regular_user, auth_headers, monkeypatch):
+    """DELETE /tracks/bulk respects the per-user rate limit."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(regular_user)
+
+    _, track1 = _upload_audio(files_client, auth_headers, regular_user, b"bulk rate 1")
+    _, track2 = _upload_audio(files_client, auth_headers, regular_user, b"bulk rate 2")
+    _, track3 = _upload_audio(files_client, auth_headers, regular_user, b"bulk rate 3")
+
+    files_client.app.state.config.auth.rate_limit_requests = 2
+    files_client.app.state.config.auth.rate_limit_window_seconds = 60
+
+    first = files_client.request(
+        "DELETE",
+        "/api/v1/tracks/bulk",
+        json={"track_ids": [track1, track2]},
+        headers=headers,
+    )
+    assert first.status_code == 200
+
+    second = files_client.request(
+        "DELETE",
+        "/api/v1/tracks/bulk",
+        json={"track_ids": ["00000000-0000-0000-0000-000000000000"]},
+        headers=headers,
+    )
+    assert second.status_code in (404, 429)
+
+    third = files_client.request(
+        "DELETE",
+        "/api/v1/tracks/bulk",
+        json={"track_ids": [track3]},
+        headers=headers,
+    )
+    assert third.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_maybe_delete_stored_file_uses_for_update(db_session, storage_service, regular_user, monkeypatch):
+    """_maybe_delete_stored_file re-loads the StoredFile row with FOR UPDATE."""
+    from sqlalchemy.dialects import postgresql
+
+    content = io.BytesIO(b"for update test")
+    stored_file = await storage_service.store_file(db_session, content, "audio/mpeg", owner_id=str(regular_user.id))
+    await db_session.flush()
+
+    captured: list[object] = []
+    original_execute = db_session.execute
+
+    async def capture_execute(stmt, *args, **kwargs):
+        captured.append(stmt)
+        return await original_execute(stmt, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", capture_execute)
+
+    await deletion._maybe_delete_stored_file(db_session, storage_service, stored_file)
+
+    select_statements = [stmt for stmt in captured if isinstance(stmt, Select)]
+    compiled = [
+        str(
+            stmt.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        for stmt in select_statements
+    ]
+    assert any("FOR UPDATE" in sql for sql in compiled)
+
+
+@pytest.mark.asyncio
+async def test_delete_stored_file_clears_album_cover(db_session, regular_user, storage_service):
+    """Deleting a stored file that is used as album cover art clears the reference."""
+    artist = Artist(name="Cover Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    cover_file = io.BytesIO(b"cover image")
+    stored_file = await storage_service.store_file(db_session, cover_file, "image/jpeg", owner_id=str(regular_user.id))
+    await db_session.flush()
+
+    album = Album(
+        title="Cover Album",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        cover_file_id=stored_file.id,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    await deletion.delete_stored_file(db_session, storage_service, str(stored_file.id))
+    await db_session.flush()
+
+    refreshed = await db_session.get(Album, album.id)
+    assert refreshed is not None
+    assert refreshed.cover_file_id is None
+    assert await db_session.get(StoredFile, stored_file.id) is None
+
+
+def test_delete_playlist_recursive_mixed_ownership(files_client, regular_user, other_user, auth_headers, monkeypatch):
+    """Recursive playlist delete removes manageable tracks and keeps others."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(regular_user)
+
+    _, own_track = _upload_audio(files_client, auth_headers, regular_user, b"mixed playlist own")
+    _, other_track = _upload_audio(files_client, auth_headers, other_user, b"mixed playlist other", visibility="public")
+
+    playlist = files_client.post(
+        "/api/v1/playlists/",
+        json={"name": "Mixed Playlist"},
+        headers=headers,
+    )
+    playlist_id = playlist.json()["id"]
+
+    add = files_client.post(
+        f"/api/v1/playlists/{playlist_id}/tracks",
+        json={"track_ids": [own_track, other_track]},
+        headers=headers,
+    )
+    assert add.status_code == 201
+
+    response = files_client.delete(
+        f"/api/v1/playlists/{playlist_id}?recursive=true",
+        headers=headers,
+    )
+    assert response.status_code == 204
+
+    assert files_client.get(f"/api/v1/playlists/{playlist_id}", headers=headers).status_code == 404
+    assert files_client.get(f"/api/v1/tracks/{own_track}", headers=headers).status_code == 404
+    other_headers = auth_headers(other_user)
+    assert files_client.get(f"/api/v1/tracks/{other_track}", headers=other_headers).status_code == 200
+
+
+def test_delete_library_recursive_mixed_ownership(files_client, regular_user, other_user, auth_headers, monkeypatch):
+    """Recursive library delete removes manageable tracks and keeps others."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(regular_user)
+
+    library = files_client.post(
+        "/api/v1/libraries/",
+        json={"name": "Mixed Library", "visibility": "public"},
+        headers=headers,
+    )
+    library_id = library.json()["id"]
+
+    _, own_track = _upload_audio(files_client, auth_headers, regular_user, b"mixed library own", library_id=library_id)
+    _, other_track = _upload_audio(files_client, auth_headers, other_user, b"mixed library other", visibility="public")
+
+    add = files_client.post(
+        f"/api/v1/libraries/{library_id}/tracks/add",
+        json={"track_ids": [other_track]},
+        headers=headers,
+    )
+    assert add.status_code == 201
+
+    response = files_client.delete(
+        f"/api/v1/libraries/{library_id}?recursive=true",
+        headers=headers,
+    )
+    assert response.status_code == 204
+
+    assert files_client.get(f"/api/v1/libraries/{library_id}", headers=headers).status_code == 404
+    assert files_client.get(f"/api/v1/tracks/{own_track}", headers=headers).status_code == 404
+    other_headers = auth_headers(other_user)
+    assert files_client.get(f"/api/v1/tracks/{other_track}", headers=other_headers).status_code == 200
