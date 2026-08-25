@@ -13,6 +13,7 @@ import ArtistView from "./ArtistView.vue";
 
 vi.mock("@/api/artists", () => ({
   getArtist: vi.fn(),
+  deleteArtist: vi.fn(),
 }));
 
 vi.mock("@/api/albums", () => ({
@@ -21,6 +22,7 @@ vi.mock("@/api/albums", () => ({
 
 vi.mock("@/api/tracks", () => ({
   listTracks: vi.fn(),
+  deleteTrack: vi.fn(),
 }));
 
 function createTestRouter() {

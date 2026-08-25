@@ -23,7 +23,8 @@ const STORAGE_USER = "songhive.auth.user";
 export type AuthStatus =
   "idle" | "loading" | "authenticated" | "unauthenticated" | "error";
 
-type UserProfile = UserResponse & { role?: "admin" | null };
+type UserProfile = UserResponse;
+type UserRole = "user" | "moderator" | "admin";
 
 let bootstrapped: Promise<void> | null = null;
 
@@ -36,7 +37,9 @@ export const useAuthStore = defineStore("auth", () => {
   );
   const expiresAt: Ref<number | null> = ref(readNumber(STORAGE_EXPIRES));
   const user: Ref<UserProfile | null> = ref(readJson(STORAGE_USER));
-  const role: Ref<"admin" | null> = ref((user.value?.role as "admin") ?? null);
+  const role: Ref<UserRole | null> = ref(
+    (user.value?.role as UserRole) ?? null,
+  );
   const status: Ref<AuthStatus> = ref("idle");
 
   const isAuthenticated = computed(() => {
@@ -74,8 +77,8 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function fetchProfile() {
     const profile = await usersApi.getMe();
-    user.value = { ...profile, role: (profile as UserProfile).role ?? null };
-    role.value = (profile as UserProfile).role ?? null;
+    user.value = profile;
+    role.value = profile.role ?? null;
     persist();
   }
 
@@ -152,7 +155,7 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function updateProfile(patch: usersApi.UserProfileUpdate) {
     const updated = await usersApi.updateMe(patch);
-    user.value = { ...updated, role: (updated as UserProfile).role ?? null };
+    user.value = updated;
     persist();
   }
 

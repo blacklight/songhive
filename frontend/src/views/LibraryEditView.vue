@@ -77,6 +77,7 @@ const {
   load: loadTracks,
   loadMore: loadMoreTracks,
   retry: retryTracks,
+  refresh: refreshTracks,
 } = useEntityList<TrackResponse>((params: EntityListParams) =>
   listLibraryTracks(libraryId.value, {
     limit: params.limit,
@@ -96,8 +97,23 @@ const { enrich: trackEnrich } = useTrackEnrichment(
 );
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
+const removableFrom = computed(() =>
+  library.value
+    ? {
+        type: "library" as const,
+        id: library.value.id,
+        canRemove: isOwner.value,
+        name: library.value.name,
+      }
+    : undefined,
+);
+
 function onTrackShare(track: QueueTrack) {
   openShare("track", track.id, track.title, track.owner_id ?? null);
+}
+
+async function onTracksRemoved() {
+  await refreshTracks();
 }
 
 function resetForm() {
@@ -480,7 +496,10 @@ watch(
           :loading="tracksLoading"
           :context="library.name"
           :enrich="trackEnrich"
+          :removable-from="removableFrom"
+          :deletable="true"
           @share="onTrackShare"
+          @removed="onTracksRemoved"
         />
 
         <div class="library-edit-view__footer">

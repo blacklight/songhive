@@ -9,6 +9,7 @@ import ArtistsView from "./ArtistsView.vue";
 
 vi.mock("@/api/artists", () => ({
   listArtists: vi.fn(),
+  deleteArtist: vi.fn(),
 }));
 
 function createTestRouter() {

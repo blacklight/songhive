@@ -10,6 +10,11 @@ import PlaylistView from "./PlaylistView.vue";
 vi.mock("@/api/playlists", () => ({
   getPlaylist: vi.fn(),
   listPlaylistTracks: vi.fn(),
+  deletePlaylist: vi.fn(),
+}));
+
+vi.mock("@/api/tracks", () => ({
+  deleteTrack: vi.fn(),
 }));
 
 function createTestRouter() {

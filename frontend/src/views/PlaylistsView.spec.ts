@@ -16,6 +16,7 @@ import PlaylistsView from "./PlaylistsView.vue";
 vi.mock("@/api/playlists", () => ({
   listPlaylists: vi.fn(),
   createPlaylist: vi.fn(),
+  deletePlaylist: vi.fn(),
 }));
 
 function createTestRouter() {

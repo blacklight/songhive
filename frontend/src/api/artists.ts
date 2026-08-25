@@ -14,3 +14,10 @@ export function listArtists(params?: {
 export function getArtist(id: string): Promise<ArtistResponse> {
   return apiRequest<ArtistResponse>(`/artists/${id}`);
 }
+
+export function deleteArtist(id: string, recursive = false): Promise<void> {
+  return apiRequest<void>(`/artists/${id}`, {
+    method: "DELETE",
+    query: { recursive },
+  });
+}

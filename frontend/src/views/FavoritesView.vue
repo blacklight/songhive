@@ -115,6 +115,14 @@ function onTrackShare(track: QueueTrack) {
   openShare("track", track.id, track.title, track.owner_id ?? null);
 }
 
+async function onTracksRemoved(trackIds: string[]) {
+  const removed = new Set(trackIds);
+  tracks.value = tracks.value.filter((track) => !removed.has(track.id));
+  favorites.value = favorites.value.filter(
+    (favorite) => !removed.has(favorite.track_id),
+  );
+}
+
 const tabs = [
   { key: "tracks" as const, label: t("pages.favorites.tracks") },
   { key: "albums" as const, label: t("pages.favorites.albums") },
@@ -177,8 +185,10 @@ onMounted(() => load(true));
         :loading="loading"
         :enrich="trackEnrich"
         :favorite-label="t('common.unfavorite')"
+        :deletable="true"
         @toggle-favorite="onToggleFavorite"
         @share="onTrackShare"
+        @removed="onTracksRemoved"
       />
 
       <div v-if="!error && hasMore" class="favorites-view__footer">

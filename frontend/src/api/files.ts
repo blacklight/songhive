@@ -94,3 +94,7 @@ export function listFiles(params?: {
 export function getFile(fileId: string): Promise<StoredFileResponse> {
   return apiRequest<StoredFileResponse>(`/files/${fileId}`);
 }
+
+export function deleteFile(fileId: string): Promise<void> {
+  return apiRequest<void>(`/files/${fileId}`, { method: "DELETE" });
+}

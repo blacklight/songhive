@@ -9,6 +9,7 @@ import {
 import {
   getPlaylist,
   listPlaylistTracks,
+  deletePlaylist as deletePlaylistApi,
   type PlaylistResponse,
 } from "@/api/playlists";
 import type { TrackResponse } from "@/api/tracks";
@@ -17,6 +18,7 @@ import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
+import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useAuthStore } from "@/stores/auth";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -24,6 +26,7 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
+import DeleteModal from "@/components/entity/DeleteModal.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -59,6 +62,29 @@ const { enrich: trackEnrich } = useTrackEnrichment(
 const { isOwner } = useOwnership(
   computed(() => playlist.value?.owner_id ?? null),
 );
+
+const deletePlaylist = useEntityDelete({
+  delete: deletePlaylistApi,
+  entity: t("browse.entities.playlist"),
+  redirectTo: "/playlists",
+  allowRecursive: true,
+  recursiveLabel: t("browse.delete.recursive", {
+    contents: t("browse.entities.tracks"),
+  }),
+  getName: () => playlist.value?.name ?? "",
+  getOwnerId: () => playlist.value?.owner_id,
+});
+
+const {
+  modalOpen: deleteModalOpen,
+  modalTitle: deleteModalTitle,
+  modalMessage: deleteModalMessage,
+  modalLoading: deleteModalLoading,
+  allowRecursive: deleteAllowRecursive,
+  recursiveLabel: deleteRecursiveLabel,
+  canDelete: canDeletePlaylist,
+} = deletePlaylist;
+
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 const canRemove = computed(() => isOwner.value || authStore.isAdmin);
@@ -159,6 +185,15 @@ watch(
           >
             {{ t("common.share") }}
           </AppButton>
+          <AppButton
+            v-if="canDeletePlaylist"
+            size="sm"
+            variant="danger"
+            icon="trash"
+            @click="playlist && deletePlaylist.open(playlist.id)"
+          >
+            {{ t("common.delete") }}
+          </AppButton>
         </div>
       </div>
 
@@ -193,6 +228,7 @@ watch(
           :enrich="trackEnrich"
           :removable-from="removableFrom"
           :empty-label="t('browse.playlist.empty')"
+          :deletable="true"
           @share="onTrackShare"
           @removed="onTracksRemoved"
         />
@@ -219,6 +255,17 @@ watch(
         :title="shareTarget.title"
         :owner-id="shareTarget.ownerId"
         @close="closeShare"
+      />
+
+      <DeleteModal
+        :open="deleteModalOpen"
+        :title="deleteModalTitle"
+        :message="deleteModalMessage"
+        :allow-recursive="deleteAllowRecursive"
+        :recursive-label="deleteRecursiveLabel"
+        :loading="deleteModalLoading"
+        @close="deletePlaylist.close"
+        @confirm="deletePlaylist.confirm"
       />
     </template>
   </div>

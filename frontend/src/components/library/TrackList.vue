@@ -17,6 +17,8 @@ import { formatTime } from "@/utils/time";
 import { getApiErrorMessage } from "@/api/client";
 import { removeTracksFromLibrary } from "@/api/libraries";
 import { removeTracksFromPlaylist } from "@/api/playlists";
+import { deleteTrack } from "@/api/tracks";
+import { canManageItem } from "@/composables/useCanManage";
 
 export interface RemovableFrom {
   type: "library" | "playlist";
@@ -34,6 +36,7 @@ export interface Props {
   favoriteLabel?: string;
   emptyLabel?: string;
   removableFrom?: RemovableFrom;
+  deletable?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -71,6 +74,7 @@ const bulkMode = ref(false);
 const confirmOpen = ref(false);
 const confirmMode = ref<"single" | "bulk">("single");
 const confirmTrack = ref<QueueTrack | null>(null);
+const confirmIsDelete = ref(false);
 const isRemoving = ref(false);
 
 function openAddDialog(mode: "library" | "playlist") {
@@ -112,9 +116,13 @@ interface TrackListRow extends Record<string, unknown> {
   selected: boolean;
 }
 
+const canEdit = computed(
+  () => props.removableFrom?.canRemove || props.deletable,
+);
+
 const columns = computed<Column[]>(() => {
   const cols: Column[] = [];
-  if (bulkMode.value && props.removableFrom?.canRemove) {
+  if (bulkMode.value && canEdit.value) {
     cols.push({ key: "selected", label: "", align: "center" });
   }
   cols.push(
@@ -209,24 +217,59 @@ function toggleRow(track: QueueTrack) {
   }
 }
 
+function canDelete(track: QueueTrack): boolean {
+  return canManageItem(authStore, track);
+}
+
 function openBulkRemove() {
   confirmTrack.value = null;
   confirmMode.value = "bulk";
+  confirmIsDelete.value = false;
   confirmOpen.value = true;
 }
 
 function openSingleRemove(track: QueueTrack) {
   confirmTrack.value = track;
   confirmMode.value = "single";
+  confirmIsDelete.value = false;
+  confirmOpen.value = true;
+}
+
+function openBulkDelete() {
+  confirmTrack.value = null;
+  confirmMode.value = "bulk";
+  confirmIsDelete.value = true;
+  confirmOpen.value = true;
+}
+
+function openSingleDelete(track: QueueTrack) {
+  confirmTrack.value = track;
+  confirmMode.value = "single";
+  confirmIsDelete.value = true;
   confirmOpen.value = true;
 }
 
 function closeConfirm() {
   confirmOpen.value = false;
   confirmTrack.value = null;
+  confirmIsDelete.value = false;
 }
 
 const confirmTitle = computed(() => {
+  if (confirmIsDelete.value) {
+    const entity = t("browse.entities.track");
+    if (confirmMode.value === "single" && confirmTrack.value) {
+      return t("browse.delete.title", {
+        name: confirmTrack.value.title,
+        entity,
+      });
+    }
+    return t("browse.delete.bulkTitle", {
+      count: selectedIds.value.size,
+      entity: t("browse.entities.tracks"),
+    });
+  }
+
   if (!props.removableFrom) return "";
   const collection = props.removableFrom.name;
   if (confirmMode.value === "single" && confirmTrack.value) {
@@ -241,9 +284,7 @@ const confirmTitle = computed(() => {
   });
 });
 
-async function onConfirmRemove() {
-  if (!props.removableFrom) return;
-
+async function onConfirm() {
   const trackIds =
     confirmMode.value === "single" && confirmTrack.value
       ? [confirmTrack.value.id]
@@ -253,6 +294,48 @@ async function onConfirmRemove() {
 
   isRemoving.value = true;
   try {
+    if (confirmIsDelete.value) {
+      let deleted = 0;
+      const ids: string[] = [];
+      for (const id of trackIds) {
+        try {
+          await deleteTrack(id);
+          ids.push(id);
+          deleted++;
+        } catch (err) {
+          if (deleted > 0) break;
+          throw err;
+        }
+      }
+
+      if (confirmMode.value === "single" && confirmTrack.value) {
+        toastStore.push({
+          type: "success",
+          message: t("browse.delete.success", {
+            name: confirmTrack.value.title,
+            entity: t("browse.entities.track"),
+          }),
+        });
+      } else {
+        toastStore.push({
+          type: "success",
+          message: t("browse.delete.bulkSuccess", {
+            count: deleted,
+            entity: t("browse.entities.tracks"),
+          }),
+        });
+      }
+
+      emit("removed", ids);
+      closeConfirm();
+      if (confirmMode.value === "bulk") {
+        selectedIds.value.clear();
+        bulkMode.value = false;
+      }
+      return;
+    }
+
+    if (!props.removableFrom) return;
     const remove =
       props.removableFrom.type === "library"
         ? removeTracksFromLibrary
@@ -287,12 +370,15 @@ async function onConfirmRemove() {
       bulkMode.value = false;
     }
   } catch (err) {
-    toastStore.push({
-      type: "error",
-      message: t("browse.removeFromCollection.error", {
-        message: getApiErrorMessage(err),
-      }),
-    });
+    const message = confirmIsDelete.value
+      ? t("browse.delete.error", {
+          entity: t("browse.entities.track"),
+          message: getApiErrorMessage(err),
+        })
+      : t("browse.removeFromCollection.error", {
+          message: getApiErrorMessage(err),
+        });
+    toastStore.push({ type: "error", message });
   } finally {
     isRemoving.value = false;
   }
@@ -348,6 +434,15 @@ const menuItems = computed(() => {
     items.push({
       key: "remove-from-collection",
       label,
+      icon: "minus",
+      danger: true,
+    });
+  }
+
+  if (props.deletable && track && canDelete(track)) {
+    items.push({
+      key: "delete-track",
+      label: t("browse.contextMenu.deleteTrack"),
       icon: "trash",
       danger: true,
     });
@@ -414,6 +509,9 @@ function onMenuSelect(key: string) {
     case "remove-from-collection":
       openSingleRemove(track);
       break;
+    case "delete-track":
+      openSingleDelete(track);
+      break;
     case "favorite":
       emit("toggle-favorite", track);
       break;
@@ -445,12 +543,23 @@ function onMenuSelect(key: string) {
         {{ t("browse.detail.playAll") }}
       </AppButton>
 
-      <div v-if="props.removableFrom?.canRemove" class="track-list__bulk">
+      <div v-if="canEdit" class="track-list__bulk">
         <template v-if="bulkMode">
           <AppButton
+            v-if="props.deletable"
             variant="danger"
             size="sm"
             icon="trash"
+            :disabled="selectedIds.size === 0 || isRemoving"
+            @click="openBulkDelete"
+          >
+            {{ t("browse.bulkEdit.deleteSelected") }}
+          </AppButton>
+          <AppButton
+            v-if="props.removableFrom?.canRemove"
+            variant="danger"
+            size="sm"
+            icon="minus"
             :disabled="selectedIds.size === 0 || isRemoving"
             @click="openBulkRemove"
           >
@@ -554,7 +663,7 @@ function onMenuSelect(key: string) {
     />
 
     <AppModal
-      v-if="props.removableFrom"
+      v-if="canEdit"
       :open="confirmOpen"
       :title="confirmTitle"
       :closable="!isRemoving"
@@ -578,9 +687,13 @@ function onMenuSelect(key: string) {
           icon="trash"
           :loading="isRemoving"
           :disabled="isRemoving"
-          @click="onConfirmRemove"
+          @click="onConfirm"
         >
-          {{ t("browse.removeFromCollection.confirm") }}
+          {{
+            confirmIsDelete
+              ? t("common.delete")
+              : t("browse.removeFromCollection.confirm")
+          }}
         </AppButton>
       </template>
     </AppModal>

@@ -2,7 +2,11 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, RouterLink } from "vue-router";
-import { getTrack, type TrackResponse } from "@/api/tracks";
+import {
+  getTrack,
+  deleteTrack as deleteTrackApi,
+  type TrackResponse,
+} from "@/api/tracks";
 import { getArtist, type ArtistResponse } from "@/api/artists";
 import { getAlbum, type AlbumResponse } from "@/api/albums";
 import { getApiErrorMessage } from "@/api/client";
@@ -11,7 +15,9 @@ import { useAuthStore } from "@/stores/auth";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
+import { useEntityDelete } from "@/composables/useEntityDelete";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
+import DeleteModal from "@/components/entity/DeleteModal.vue";
 import { toQueueTrack } from "@/player/enrich";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -50,6 +56,24 @@ const queueTrack = computed(() => {
 
 const { ownerName, visibilityText } = useEntityMeta(track);
 const { isOwner } = useOwnership(computed(() => track.value?.owner_id ?? null));
+
+const deleteTrack = useEntityDelete({
+  delete: deleteTrackApi,
+  entity: t("browse.entities.track"),
+  redirectTo: "/tracks",
+  allowRecursive: false,
+  getName: () => track.value?.title ?? "",
+  getOwnerId: () => track.value?.owner_id,
+});
+
+const {
+  modalOpen: deleteModalOpen,
+  modalTitle: deleteModalTitle,
+  modalMessage: deleteModalMessage,
+  modalLoading: deleteModalLoading,
+  canDelete: canDeleteTrack,
+} = deleteTrack;
+
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 const durationText = computed(() =>
@@ -210,6 +234,15 @@ watch(
           >
             {{ t("browse.addToCollection.addToPlaylist") }}
           </AppButton>
+          <AppButton
+            v-if="canDeleteTrack"
+            size="lg"
+            icon="trash"
+            variant="danger"
+            @click="track && deleteTrack.open(track.id)"
+          >
+            {{ t("common.delete") }}
+          </AppButton>
         </div>
       </div>
     </template>
@@ -232,6 +265,16 @@ watch(
       :title="shareTarget.title"
       :owner-id="shareTarget.ownerId"
       @close="closeShare"
+    />
+
+    <DeleteModal
+      :open="deleteModalOpen"
+      :title="deleteModalTitle"
+      :message="deleteModalMessage"
+      :allow-recursive="false"
+      :loading="deleteModalLoading"
+      @close="deleteTrack.close"
+      @confirm="deleteTrack.confirm"
     />
   </div>
 </template>

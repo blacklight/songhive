@@ -11,6 +11,7 @@ import FilesView from "./FilesView.vue";
 vi.mock("@/api/files", () => ({
   listFiles: vi.fn(),
   uploadFile: vi.fn(),
+  deleteFile: vi.fn(),
 }));
 
 vi.mock("@/api/libraries", () => ({

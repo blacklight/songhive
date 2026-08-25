@@ -9,6 +9,7 @@ import TracksView from "./TracksView.vue";
 
 vi.mock("@/api/tracks", () => ({
   listTracks: vi.fn(),
+  deleteTrack: vi.fn(),
 }));
 
 function createTestRouter() {

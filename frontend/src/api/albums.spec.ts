@@ -83,6 +83,7 @@ describe("albums api", () => {
     await deleteAlbum("al1");
     expect(apiRequest).toHaveBeenCalledWith("/albums/al1", {
       method: "DELETE",
+      query: { recursive: true },
     });
   });
 });

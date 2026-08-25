@@ -32,6 +32,11 @@ vi.mock("@/api/albums", () => ({
   getAlbum: vi.fn(),
 }));
 
+vi.mock("@/api/tracks", () => ({
+  listTracks: vi.fn(),
+  deleteTrack: vi.fn(),
+}));
+
 function createTestRouter() {
   return createRouter({
     history: createMemoryHistory(),

@@ -9,6 +9,7 @@ import FileDetailView from "./FileDetailView.vue";
 
 vi.mock("@/api/files", () => ({
   getFile: vi.fn(),
+  deleteFile: vi.fn(),
 }));
 
 function createTestRouter() {

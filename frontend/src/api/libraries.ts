@@ -41,8 +41,11 @@ export function updateLibrary(
   });
 }
 
-export function deleteLibrary(id: string): Promise<void> {
-  return apiRequest<void>(`/libraries/${id}`, { method: "DELETE" });
+export function deleteLibrary(id: string, recursive = false): Promise<void> {
+  return apiRequest<void>(`/libraries/${id}`, {
+    method: "DELETE",
+    query: { recursive },
+  });
 }
 
 export function listLibraryTracks(

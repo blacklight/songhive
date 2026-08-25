@@ -297,6 +297,16 @@
       "deleteConfirm": "Are you sure you want to delete \"{name}\"?",
       "deleted": "Deleted."
     },
+    "delete": {
+      "title": "Delete {entity}?",
+      "confirm": "Are you sure you want to delete \"{name}\"?",
+      "bulkTitle": "Delete {count} {entity}?",
+      "bulkConfirm": "Are you sure you want to delete {count} {entity}?",
+      "recursive": "Delete associated {contents}",
+      "success": "Deleted \"{name}\".",
+      "bulkSuccess": "Deleted {count} {entity}.",
+      "error": "Could not delete {entity}: {message}"
+    },
     "libraryManagement": {
       "addTracks": "Add tracks",
       "upload": "Upload",
@@ -355,7 +365,8 @@
       "addToLibrary": "Add to library",
       "addToPlaylist": "Add to playlist",
       "removeFromLibrary": "Remove from library",
-      "removeFromPlaylist": "Remove from playlist"
+      "removeFromPlaylist": "Remove from playlist",
+      "deleteTrack": "Delete track"
     },
     "removeFromCollection": {
       "singleTitle": "Remove \"{track}\" from \"{collection}\"?",
@@ -372,6 +383,7 @@
       "selectAll": "Select all",
       "deselectAll": "Deselect all",
       "removeSelected": "Remove selected",
+      "deleteSelected": "Delete selected",
       "empty": "No tracks selected."
     },
     "addToCollection": {

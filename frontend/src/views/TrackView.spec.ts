@@ -14,6 +14,7 @@ import TrackView from "./TrackView.vue";
 
 vi.mock("@/api/tracks", () => ({
   getTrack: vi.fn(),
+  deleteTrack: vi.fn(),
 }));
 
 vi.mock("@/api/artists", () => ({

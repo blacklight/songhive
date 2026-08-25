@@ -9,6 +9,7 @@ import {
 import {
   getLibrary,
   listLibraryTracks,
+  deleteLibrary as deleteLibraryApi,
   type LibraryResponse,
 } from "@/api/libraries";
 import type { TrackResponse } from "@/api/tracks";
@@ -17,12 +18,14 @@ import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
+import { useEntityDelete } from "@/composables/useEntityDelete";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
+import DeleteModal from "@/components/entity/DeleteModal.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -57,6 +60,29 @@ const { enrich: trackEnrich } = useTrackEnrichment(
 const { isOwner } = useOwnership(
   computed(() => library.value?.owner_id ?? null),
 );
+
+const deleteLibrary = useEntityDelete({
+  delete: deleteLibraryApi,
+  entity: t("browse.entities.library"),
+  redirectTo: "/libraries",
+  allowRecursive: true,
+  recursiveLabel: t("browse.delete.recursive", {
+    contents: t("browse.entities.tracks"),
+  }),
+  getName: () => library.value?.name ?? "",
+  getOwnerId: () => library.value?.owner_id,
+});
+
+const {
+  modalOpen: deleteModalOpen,
+  modalTitle: deleteModalTitle,
+  modalMessage: deleteModalMessage,
+  modalLoading: deleteModalLoading,
+  allowRecursive: deleteAllowRecursive,
+  recursiveLabel: deleteRecursiveLabel,
+  canDelete: canDeleteLibrary,
+} = deleteLibrary;
+
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 function onTrackShare(track: QueueTrack) {
@@ -150,6 +176,15 @@ watch(
           >
             {{ t("common.share") }}
           </AppButton>
+          <AppButton
+            v-if="canDeleteLibrary"
+            size="sm"
+            variant="danger"
+            icon="trash"
+            @click="library && deleteLibrary.open(library.id)"
+          >
+            {{ t("common.delete") }}
+          </AppButton>
         </div>
       </div>
 
@@ -183,6 +218,7 @@ watch(
           :context="library.name"
           :enrich="trackEnrich"
           :removable-from="removableFrom"
+          :deletable="true"
           @share="onTrackShare"
           @removed="onTracksRemoved"
         />
@@ -209,6 +245,17 @@ watch(
         :title="shareTarget.title"
         :owner-id="shareTarget.ownerId"
         @close="closeShare"
+      />
+
+      <DeleteModal
+        :open="deleteModalOpen"
+        :title="deleteModalTitle"
+        :message="deleteModalMessage"
+        :allow-recursive="deleteAllowRecursive"
+        :recursive-label="deleteRecursiveLabel"
+        :loading="deleteModalLoading"
+        @close="deleteLibrary.close"
+        @confirm="deleteLibrary.confirm"
       />
     </template>
   </div>

@@ -16,6 +16,7 @@ import LibraryView from "./LibraryView.vue";
 vi.mock("@/api/libraries", () => ({
   listLibraries: vi.fn(),
   createLibrary: vi.fn(),
+  deleteLibrary: vi.fn(),
 }));
 
 function createTestRouter() {

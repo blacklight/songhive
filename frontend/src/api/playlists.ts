@@ -67,6 +67,13 @@ export interface RemoveTracksFromPlaylistResponse {
   track_ids: string[];
 }
 
+export function deletePlaylist(id: string, recursive = false): Promise<void> {
+  return apiRequest<void>(`/playlists/${id}`, {
+    method: "DELETE",
+    query: { recursive },
+  });
+}
+
 export function removeTracksFromPlaylist(
   id: string,
   body: RemoveTracksFromPlaylistRequest,

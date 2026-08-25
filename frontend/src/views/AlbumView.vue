@@ -6,7 +6,11 @@ import {
   useEntityList,
   type EntityListParams,
 } from "@/composables/useEntityList";
-import { getAlbum, type AlbumResponse } from "@/api/albums";
+import {
+  getAlbum,
+  deleteAlbum as deleteAlbumApi,
+  type AlbumResponse,
+} from "@/api/albums";
 import { getArtist, type ArtistResponse } from "@/api/artists";
 import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
@@ -15,6 +19,7 @@ import type { TrackEnrich } from "@/player/enrich";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
+import { useEntityDelete } from "@/composables/useEntityDelete";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
@@ -23,6 +28,7 @@ import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
+import DeleteModal from "@/components/entity/DeleteModal.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -50,6 +56,7 @@ const {
   load: loadTracks,
   loadMore: loadMoreTracks,
   retry: retryTracks,
+  refresh: refreshTracks,
 } = useEntityList<TrackResponse>((params: EntityListParams) =>
   listTracks({
     q: params.q,
@@ -75,10 +82,37 @@ const trackEnrich = computed<Map<string, TrackEnrich>>(() => {
 
 const { ownerName, visibilityText } = useEntityMeta(album);
 const { isOwner } = useOwnership(computed(() => album.value?.owner_id ?? null));
+
+const deleteAlbum = useEntityDelete({
+  delete: deleteAlbumApi,
+  entity: t("browse.entities.album"),
+  redirectTo: "/albums",
+  allowRecursive: true,
+  recursiveLabel: t("browse.delete.recursive", {
+    contents: t("browse.entities.tracks"),
+  }),
+  getName: () => album.value?.title ?? "",
+  getOwnerId: () => album.value?.owner_id,
+});
+
+const {
+  modalOpen: deleteModalOpen,
+  modalTitle: deleteModalTitle,
+  modalMessage: deleteModalMessage,
+  modalLoading: deleteModalLoading,
+  allowRecursive: deleteAllowRecursive,
+  recursiveLabel: deleteRecursiveLabel,
+  canDelete: canDeleteAlbum,
+} = deleteAlbum;
+
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 function onTrackShare(track: QueueTrack) {
   openShare("track", track.id, track.title, track.owner_id ?? null);
+}
+
+async function onTracksRemoved() {
+  await refreshTracks();
 }
 
 async function loadAlbum() {
@@ -205,6 +239,15 @@ watch(
             >
               {{ t("browse.addToCollection.addToPlaylist") }}
             </AppButton>
+            <AppButton
+              v-if="canDeleteAlbum"
+              size="sm"
+              variant="danger"
+              icon="trash"
+              @click="album && deleteAlbum.open(album.id)"
+            >
+              {{ t("common.delete") }}
+            </AppButton>
           </div>
         </div>
       </div>
@@ -235,7 +278,9 @@ watch(
           :context="artistName"
           :enrich="trackEnrich"
           :show-artwork="true"
+          :deletable="true"
           @share="onTrackShare"
+          @removed="onTracksRemoved"
         />
 
         <div class="album-view__footer">
@@ -271,6 +316,17 @@ watch(
       :title="shareTarget.title"
       :owner-id="shareTarget.ownerId"
       @close="closeShare"
+    />
+
+    <DeleteModal
+      :open="deleteModalOpen"
+      :title="deleteModalTitle"
+      :message="deleteModalMessage"
+      :allow-recursive="deleteAllowRecursive"
+      :recursive-label="deleteRecursiveLabel"
+      :loading="deleteModalLoading"
+      @close="deleteAlbum.close"
+      @confirm="deleteAlbum.confirm"
     />
   </div>
 </template>

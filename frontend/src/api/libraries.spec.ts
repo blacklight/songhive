@@ -86,6 +86,7 @@ describe("libraries api", () => {
     await deleteLibrary("lib1");
     expect(apiRequest).toHaveBeenCalledWith("/libraries/lib1", {
       method: "DELETE",
+      query: { recursive: false },
     });
   });
 

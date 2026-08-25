@@ -16,6 +16,7 @@ import LibraryDetailView from "./LibraryDetailView.vue";
 vi.mock("@/api/libraries", () => ({
   getLibrary: vi.fn(),
   listLibraryTracks: vi.fn(),
+  deleteLibrary: vi.fn(),
 }));
 
 vi.mock("@/api/artists", () => ({
@@ -24,6 +25,11 @@ vi.mock("@/api/artists", () => ({
 
 vi.mock("@/api/albums", () => ({
   getAlbum: vi.fn(),
+}));
+
+vi.mock("@/api/tracks", () => ({
+  listTracks: vi.fn(),
+  deleteTrack: vi.fn(),
 }));
 
 function createTestRouter() {

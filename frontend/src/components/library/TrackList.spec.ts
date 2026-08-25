@@ -25,6 +25,10 @@ vi.mock("@/api/playlists", () => ({
   removeTracksFromPlaylist: vi.fn(),
 }));
 
+vi.mock("@/api/tracks", () => ({
+  deleteTrack: vi.fn(),
+}));
+
 const actionsLabel = i18n.global.t("browse.detail.actions");
 
 function createTestRouter() {

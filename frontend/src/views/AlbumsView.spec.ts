@@ -9,6 +9,7 @@ import AlbumsView from "./AlbumsView.vue";
 
 vi.mock("@/api/albums", () => ({
   listAlbums: vi.fn(),
+  deleteAlbum: vi.fn(),
 }));
 
 function createTestRouter() {

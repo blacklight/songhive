@@ -26,6 +26,9 @@ export function updateAlbum(
   return apiRequest<AlbumResponse>(`/albums/${id}`, { method: "PATCH", body });
 }
 
-export function deleteAlbum(id: string): Promise<void> {
-  return apiRequest<void>(`/albums/${id}`, { method: "DELETE" });
+export function deleteAlbum(id: string, recursive = true): Promise<void> {
+  return apiRequest<void>(`/albums/${id}`, {
+    method: "DELETE",
+    query: { recursive },
+  });
 }

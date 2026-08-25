@@ -2,7 +2,11 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
-import { getFile, type StoredFileResponse } from "@/api/files";
+import {
+  getFile,
+  deleteFile as deleteFileApi,
+  type StoredFileResponse,
+} from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
 import { API_PREFIX, buildUrl } from "@/api/config";
 import { useToastStore } from "@/stores/toast";
@@ -11,6 +15,8 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import DeleteModal from "@/components/entity/DeleteModal.vue";
+import { useEntityDelete } from "@/composables/useEntityDelete";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -35,6 +41,23 @@ const downloadUrl = computed(() =>
       })
     : undefined,
 );
+
+const deleteFile = useEntityDelete({
+  delete: deleteFileApi,
+  entity: t("browse.entities.file"),
+  redirectTo: "/files",
+  allowRecursive: false,
+  getName: () => displayName.value,
+  getOwnerId: () => file.value?.owner_id,
+});
+
+const {
+  modalOpen: deleteModalOpen,
+  modalTitle: deleteModalTitle,
+  modalMessage: deleteModalMessage,
+  modalLoading: deleteModalLoading,
+  canDelete: canDeleteFile,
+} = deleteFile;
 
 function getErrorMessage(err: unknown): string {
   return (
@@ -157,6 +180,15 @@ watch(
             <AppIcon name="download" spacing="right" />
             {{ t("pages.files.download") }}
           </a>
+          <AppButton
+            v-if="canDeleteFile"
+            size="sm"
+            variant="danger"
+            icon="trash"
+            @click="deleteFile.open(file.id)"
+          >
+            {{ t("common.delete") }}
+          </AppButton>
         </div>
       </section>
     </template>
@@ -164,6 +196,16 @@ watch(
     <div v-else class="file-detail-view__empty" role="alert">
       {{ t("pages.files.empty") }}
     </div>
+
+    <DeleteModal
+      :open="deleteModalOpen"
+      :title="deleteModalTitle"
+      :message="deleteModalMessage"
+      :allow-recursive="false"
+      :loading="deleteModalLoading"
+      @close="deleteFile.close"
+      @confirm="deleteFile.confirm"
+    />
   </div>
 </template>
 
