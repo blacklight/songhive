@@ -16,6 +16,7 @@ from ...models._enums import Visibility
 from ...models.library import Library
 from ...models.stored_file import StoredFile
 from ...models.user import User
+from ...services import acl, music
 from ...services.import_ import DuplicateTrackError, import_audio_file
 from ...services.storage import StorageService
 from ...storage import FileSizeLimitExceededError
@@ -48,6 +49,23 @@ async def _get_or_create_uploads_library(session: AsyncSession, user: User) -> L
     return library
 
 
+async def _get_target_library(
+    session: AsyncSession,
+    user: User,
+    library_id: Optional[str],
+) -> Library:
+    """Resolve the library to import audio into, or fall back to Uploads."""
+    if library_id is None:
+        return await _get_or_create_uploads_library(session, user)
+
+    library = await music.get_library(session, library_id)
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
+    if not await acl.can_manage(session, user, "library", library_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    return library
+
+
 class StoredFileResponse(BaseModel):
     """Public metadata for a stored file."""
 
@@ -72,6 +90,7 @@ async def upload_file(
     response: Response,
     file: UploadFile,
     visibility: Visibility = Query(Visibility.PRIVATE),
+    library_id: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
     storage: StorageService = Depends(get_storage_service),
     db: AsyncSession = Depends(get_db),
@@ -83,8 +102,9 @@ async def upload_file(
     includes an ``X-Duplicate: true`` header and the caller's ``owner_id`` and
     ``visibility`` are ignored; they only apply to newly created rows.
 
-    Audio files are additionally imported into the caller's default ``Uploads``
-    library so they become tracks and are not garbage-collected as orphans.
+    Audio files are additionally imported into the selected library (or the
+    caller's default ``Uploads`` library) so they become tracks and are not
+    garbage-collected as orphans.
     """
     content_type = file.content_type or "application/octet-stream"
     try:
@@ -106,7 +126,7 @@ async def upload_file(
     track_id: Optional[str] = None
     if content_type.startswith("audio/"):
         storage._rewind(file.file)
-        library = await _get_or_create_uploads_library(db, current_user)
+        library = await _get_target_library(db, current_user, library_id)
         try:
             result = await import_audio_file(
                 db,

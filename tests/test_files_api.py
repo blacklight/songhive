@@ -549,7 +549,7 @@ def test_upload_audio_file_imports_as_track(files_client, regular_user, auth_hea
 def test_upload_audio_file_ignores_failed_import(files_client, regular_user, auth_headers, monkeypatch):
     """A storage-only fallback is returned if the audio import pipeline raises."""
 
-    def _broken_import(*args, **kwargs):
+    def _broken_import(*_, **__):
         raise RuntimeError("metadata extraction exploded")
 
     monkeypatch.setattr(
@@ -602,3 +602,88 @@ def test_upload_audio_file_reuses_uploads_library(files_client, regular_user, au
     assert libraries_response.status_code == 200
     uploads = [lib for lib in libraries_response.json() if lib["name"] == "Uploads"]
     assert len(uploads) == 1
+
+
+def test_upload_audio_file_to_selected_library(files_client, regular_user, auth_headers, monkeypatch):
+    """Uploading an audio file with library_id imports it into that library."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Selected Library Song",
+            artist="Selected Artist",
+            album="Selected Album",
+            mimetype="audio/mpeg",
+        ),
+    )
+    headers = auth_headers(regular_user)
+
+    library = files_client.post(
+        "/api/v1/libraries/",
+        json={"name": "My Upload Library"},
+        headers=headers,
+    )
+    assert library.status_code == 201
+    library_id = library.json()["id"]
+
+    response = files_client.post(
+        f"/api/v1/files/upload?visibility=public&library_id={library_id}",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    track_id = response.headers["X-Track-Id"]
+
+    tracks_response = files_client.get(f"/api/v1/libraries/{library_id}/tracks", headers=headers)
+    assert tracks_response.status_code == 200
+    track_ids = {track["id"] for track in tracks_response.json()}
+    assert track_id in track_ids
+
+    # The default Uploads library should not be created.
+    libraries_response = files_client.get("/api/v1/libraries/", headers=headers)
+    assert libraries_response.status_code == 200
+    library_names = {lib["name"] for lib in libraries_response.json()}
+    assert "Uploads" not in library_names
+
+
+def test_upload_audio_file_to_missing_library_returns_404(files_client, regular_user, auth_headers):
+    """Uploading to a non-existent library returns 404 before storing the file."""
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?library_id=00000000-0000-0000-0000-000000000000",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == 404
+
+
+def test_upload_audio_file_to_unauthorized_library_returns_403(
+    files_client, regular_user, other_user, auth_headers, monkeypatch
+):
+    """Uploading to a library the user cannot manage returns 403."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Unauthorized Song",
+            artist="Unauthorized Artist",
+            album="Unauthorized Album",
+            mimetype="audio/mpeg",
+        ),
+    )
+    other_headers = auth_headers(other_user)
+
+    other_library = files_client.post(
+        "/api/v1/libraries/",
+        json={"name": "Other Library"},
+        headers=other_headers,
+    )
+    assert other_library.status_code == 201
+    library_id = other_library.json()["id"]
+
+    headers = auth_headers(regular_user)
+    response = files_client.post(
+        f"/api/v1/files/upload?library_id={library_id}",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == 403

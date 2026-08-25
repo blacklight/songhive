@@ -56,6 +56,14 @@ class LibraryResponse(BaseModel):
     owner_id: Optional[str] = None
     description: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+    can_write: bool = False
+
+
+def _can_write_library(user: Optional[User], library: Library) -> bool:
+    """Return whether the requester may add tracks to this library."""
+    if user is None:
+        return False
+    return user.is_admin or library.owner_id == user.id
 
 
 class LibraryCreate(BaseModel):
@@ -108,6 +116,7 @@ async def list_libraries(
             owner_id=redact_owner(cast(HasOwnerId, lib), user),
             description=lib.description,
             visibility=lib.visibility,
+            can_write=_can_write_library(user, lib),
         )
         for lib in rows
     ]
@@ -136,6 +145,7 @@ async def create_library(
         owner_id=library.owner_id,
         description=library.description,
         visibility=library.visibility,
+        can_write=True,
     )
 
 
@@ -160,6 +170,7 @@ async def get_library(
         owner_id=redact_owner(cast(HasOwnerId, library), user),
         description=library.description,
         visibility=library.visibility,
+        can_write=_can_write_library(user, library),
     )
 
 
@@ -547,6 +558,7 @@ async def update_library(
         owner_id=library.owner_id,
         description=library.description,
         visibility=library.visibility,
+        can_write=True,
     )
 
 

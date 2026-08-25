@@ -75,6 +75,33 @@ def test_get_library_as_owner_sees_owner_id(client, sample_libraries, regular_us
     assert response.json()["owner_id"] == str(regular_user.id)
 
 
+def test_list_libraries_includes_can_write_flag(client, sample_libraries, regular_user, other_user, auth_headers):
+    """Owners see can_write as true; non-owners see false for public libraries."""
+    owner_response = client.get("/api/v1/libraries", headers=auth_headers(regular_user))
+    assert owner_response.status_code == 200
+    owner_data = owner_response.json()
+    for library in owner_data:
+        assert library["can_write"] is True
+
+    other_response = client.get("/api/v1/libraries", headers=auth_headers(other_user))
+    assert other_response.status_code == 200
+    public_library = next(lib for lib in other_response.json() if lib["visibility"] == "public")
+    assert public_library["can_write"] is False
+
+
+def test_get_library_includes_can_write_flag(client, sample_libraries, regular_user, other_user, auth_headers):
+    """The owner sees can_write as true; a non-owner sees it as false for public libraries."""
+    library = next(lib for lib in sample_libraries if lib["visibility"] == "public")
+
+    owner_response = client.get(f"/api/v1/libraries/{library['id']}", headers=auth_headers(regular_user))
+    assert owner_response.status_code == 200
+    assert owner_response.json()["can_write"] is True
+
+    other_response = client.get(f"/api/v1/libraries/{library['id']}", headers=auth_headers(other_user))
+    assert other_response.status_code == 200
+    assert other_response.json()["can_write"] is False
+
+
 def test_create_library_sets_owner_and_visibility(client, regular_user, auth_headers):
     """Creating a library sets owner and visibility from the query parameter."""
     response = client.post(
