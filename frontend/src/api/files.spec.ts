@@ -18,6 +18,7 @@ interface MockXhr {
   setRequestHeader: ReturnType<typeof vi.fn>;
   send: ReturnType<typeof vi.fn>;
   abort: ReturnType<typeof vi.fn>;
+  getResponseHeader: ReturnType<typeof vi.fn>;
   status: number;
   statusText: string;
   responseText: string;
@@ -31,6 +32,7 @@ function createMockXHR(config: {
   status?: number;
   statusText?: string;
   responseText?: string;
+  headers?: Record<string, string | null>;
   trigger?: "load" | "error" | "abort";
   progressSteps?: Array<{ loaded: number; total: number }>;
 }): MockXhr {
@@ -41,11 +43,16 @@ function createMockXHR(config: {
     trigger = "load",
   } = config;
 
+  const headers: Record<string, string | null> = config.headers ?? {};
+
   const xhr: MockXhr = {
     open: vi.fn(),
     setRequestHeader: vi.fn(),
     send: vi.fn(),
     abort: vi.fn(),
+    getResponseHeader: vi.fn(
+      (name: string) => headers[name.toLowerCase()] ?? null,
+    ),
     status,
     statusText,
     responseText,
@@ -194,6 +201,22 @@ describe("uploadFile", () => {
     await expect(uploadFile(file)).rejects.toMatchObject({
       status: 401,
     });
+  });
+
+  it("returns trackId from the X-Track-Id header", async () => {
+    mockXhr = createMockXHR({
+      responseText: JSON.stringify(sampleFile),
+      headers: { "x-track-id": "t1" },
+    });
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      vi.fn(() => mockXhr),
+    );
+
+    const file = new File(["contents"], "avatar.png", { type: "image/png" });
+    const result = await uploadFile(file);
+
+    expect(result.trackId).toBe("t1");
   });
 
   it("rejects with a localized ApiError on XHR error", async () => {

@@ -73,7 +73,11 @@ async function onFileChange(event: Event) {
       progress.value = percent;
     });
     toast.push({ type: "success", message: t("pages.files.uploadSuccess") });
-    await router.push({ name: "file", params: { id: response.id } });
+    if (response.trackId) {
+      await router.push({ name: "track", params: { id: response.trackId } });
+    } else {
+      await router.push({ name: "file", params: { id: response.id } });
+    }
   } catch (err) {
     error.value = t("pages.files.uploadError", {
       message: getErrorMessage(err),

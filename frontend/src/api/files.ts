@@ -4,12 +4,13 @@ import { i18n } from "@/i18n";
 import type { components } from "./types";
 
 export type StoredFileResponse = components["schemas"]["StoredFileResponse"];
+export type FileUploadResult = StoredFileResponse & { trackId?: string };
 
 export async function uploadFile(
   file: File,
   visibility: "private" | "local" | "public" = "public",
   onProgress?: (percent: number) => void,
-): Promise<StoredFileResponse> {
+): Promise<FileUploadResult> {
   const auth = getAuthHeader();
   if (!auth) {
     throw new ApiError("Not authenticated", 401);
@@ -58,7 +59,10 @@ export async function uploadFile(
 
       // The backend may return X-Duplicate: true with a canonical row when bytes
       // are deduplicated; in that case the upload can reach 100% near-instantly.
-      resolve(parsed as StoredFileResponse);
+      // Audio files are also imported as tracks and the resulting track id is
+      // returned in the X-Track-Id header.
+      const trackId = xhr.getResponseHeader("X-Track-Id") ?? undefined;
+      resolve({ ...(parsed as StoredFileResponse), trackId });
     };
 
     xhr.onerror = () => {

@@ -9,11 +9,14 @@ from typing import Literal, Optional, cast
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models._enums import Visibility
+from ...models.library import Library
 from ...models.stored_file import StoredFile
 from ...models.user import User
+from ...services.import_ import DuplicateTrackError, import_audio_file
 from ...services.storage import StorageService
 from ...storage import FileSizeLimitExceededError
 from ..deps import get_current_user, get_current_user_optional, get_db, get_storage_service, require_access
@@ -22,6 +25,27 @@ from ._common import HasOwnerId, redact_owner
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/files")
+
+_DEFAULT_UPLOADS_LIBRARY_NAME = "Uploads"
+
+
+async def _get_or_create_uploads_library(session: AsyncSession, user: User) -> Library:
+    """Return a user's default uploads library, creating it if necessary."""
+    result = await session.execute(
+        select(Library).where(Library.owner_id == user.id, Library.name == _DEFAULT_UPLOADS_LIBRARY_NAME).limit(1)
+    )
+    library = cast(Optional[Library], result.scalar_one_or_none())
+    if library is not None:
+        return library
+
+    library = Library(
+        name=_DEFAULT_UPLOADS_LIBRARY_NAME,
+        owner_id=user.id,
+        visibility=Visibility.PRIVATE.value,
+    )
+    session.add(library)
+    await session.flush()
+    return library
 
 
 class StoredFileResponse(BaseModel):
@@ -58,12 +82,16 @@ async def upload_file(
     the same bytes have already been uploaded. In that case the response
     includes an ``X-Duplicate: true`` header and the caller's ``owner_id`` and
     ``visibility`` are ignored; they only apply to newly created rows.
+
+    Audio files are additionally imported into the caller's default ``Uploads``
+    library so they become tracks and are not garbage-collected as orphans.
     """
+    content_type = file.content_type or "application/octet-stream"
     try:
         stored_file, is_duplicate = await storage.store_file(
             db,
             file.file,
-            content_type=file.content_type or "application/octet-stream",
+            content_type=content_type,
             original_filename=file.filename,
             owner_id=current_user.id,
             visibility=visibility.value,
@@ -74,6 +102,31 @@ async def upload_file(
 
     if is_duplicate:
         response.headers["X-Duplicate"] = "true"
+
+    track_id: Optional[str] = None
+    if content_type.startswith("audio/"):
+        storage._rewind(file.file)
+        library = await _get_or_create_uploads_library(db, current_user)
+        try:
+            result = await import_audio_file(
+                db,
+                storage_service=storage,
+                file=file.file,
+                filename=file.filename or "audio",
+                library_id=str(library.id),
+                owner_id=str(current_user.id),
+                visibility=visibility.value,
+                source="upload",
+                content_type=content_type,
+            )
+            track_id = str(result.track.id)
+        except DuplicateTrackError as exc:
+            track_id = exc.existing_track_id
+        except Exception as exc:
+            logger.warning("Could not import audio file %s as track: %s", stored_file.id, exc)
+
+    if track_id is not None:
+        response.headers["X-Track-Id"] = track_id
 
     db.add(stored_file)
     await db.commit()

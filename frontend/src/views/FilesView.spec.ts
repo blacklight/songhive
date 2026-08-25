@@ -21,6 +21,11 @@ function createTestRouter() {
         name: "file",
         component: { template: "<div/>" },
       },
+      {
+        path: "/tracks/:id",
+        name: "track",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -170,6 +175,27 @@ describe("FilesView", () => {
       }),
     );
     expect(router.push).not.toHaveBeenCalled();
+  });
+
+  it("navigates to the track when the upload returns a trackId", async () => {
+    vi.mocked(uploadFile).mockResolvedValue({
+      ...createStoredFile("f1"),
+      trackId: "t1",
+    });
+
+    await mountView();
+
+    const fileInput = wrapper.find('input[type="file"]')
+      .element as HTMLInputElement;
+    const file = new File(["contents"], "song.mp3", { type: "audio/mpeg" });
+    setFiles(fileInput, [file]);
+    fileInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(router.push).toHaveBeenCalledWith({
+      name: "track",
+      params: { id: "t1" },
+    });
   });
 
   it("resets the input value after an upload so the same file can be re-picked", async () => {

@@ -3,11 +3,13 @@ Tests for the file storage API endpoints.
 """
 
 import hashlib
+import io
 import logging
 
 import pytest
 
 from songhive.models._enums import Visibility
+from songhive.services.metadata import AudioMetadata
 
 
 @pytest.fixture
@@ -505,3 +507,98 @@ async def test_derived_file_download_through_public_track(files_client, regular_
 
     private_download = files_client.get(f"/api/v1/files/{stored_file.id}/download")
     assert private_download.status_code == 403
+
+
+def test_upload_audio_file_imports_as_track(files_client, regular_user, auth_headers, monkeypatch):
+    """Uploading an audio file creates a track in the user's default Uploads library."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Uploaded Song",
+            artist="Uploaded Artist",
+            album="Uploaded Album",
+            mimetype="audio/mpeg",
+        ),
+    )
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["content_type"] == "audio/mpeg"
+    assert "X-Track-Id" in response.headers
+
+    track_id = response.headers["X-Track-Id"]
+    track_response = files_client.get(f"/api/v1/tracks/{track_id}", headers=headers)
+    assert track_response.status_code == 200
+    track = track_response.json()
+    assert track["title"] == "Uploaded Song"
+    assert track["audio_url"] == data["url"]
+
+    libraries_response = files_client.get("/api/v1/libraries/", headers=headers)
+    assert libraries_response.status_code == 200
+    library_names = {lib["name"] for lib in libraries_response.json()}
+    assert "Uploads" in library_names
+
+
+def test_upload_audio_file_ignores_failed_import(files_client, regular_user, auth_headers, monkeypatch):
+    """A storage-only fallback is returned if the audio import pipeline raises."""
+
+    def _broken_import(*args, **kwargs):
+        raise RuntimeError("metadata extraction exploded")
+
+    monkeypatch.setattr(
+        "songhive.api.routes.files.import_audio_file",
+        _broken_import,
+    )
+
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("noise.mp3", io.BytesIO(b"not an mp3"), "audio/mpeg")},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "X-Track-Id" not in response.headers
+    assert data["content_type"] == "audio/mpeg"
+
+
+def test_upload_audio_file_reuses_uploads_library(files_client, regular_user, auth_headers, monkeypatch):
+    """Subsequent audio uploads reuse the existing Uploads library."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Song Two",
+            artist="Artist Two",
+            album="Album Two",
+            mimetype="audio/mpeg",
+        ),
+    )
+    headers = auth_headers(regular_user)
+
+    first = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("one.mp3", io.BytesIO(b"fake audio one"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert first.status_code == 200
+
+    second = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("two.mp3", io.BytesIO(b"fake audio two"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert second.status_code == 200
+
+    libraries_response = files_client.get("/api/v1/libraries/", headers=headers)
+    assert libraries_response.status_code == 200
+    uploads = [lib for lib in libraries_response.json() if lib["name"] == "Uploads"]
+    assert len(uploads) == 1
