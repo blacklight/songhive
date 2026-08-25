@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import List, Literal, Optional, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
@@ -16,11 +16,12 @@ from ...models._enums import Visibility
 from ...models.library import Library
 from ...models.stored_file import StoredFile
 from ...models.user import User
-from ...services import acl, music
+from ...services import acl, audit, deletion, music
+from ...services.federation import unpublish_track_activity
 from ...services.import_ import DuplicateTrackError, import_audio_file
 from ...services.storage import StorageService, count_files, list_files
 from ...storage import FileSizeLimitExceededError
-from .._common import Pagination, get_pagination
+from .._common import Pagination, client_ip, get_pagination
 from ..deps import get_current_user, get_current_user_optional, get_db, get_storage_service, require_access
 from ..middleware.rate_limit import rate_limit
 from ._common import HasOwnerId, redact_owner
@@ -306,3 +307,56 @@ async def download_file(
         content_disposition_type=disposition,
         headers=headers,
     )
+
+
+@router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_file(
+    file_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+):
+    """Delete a file upload and any tracks/playlists/libraries that reference it."""
+    stored_file = await db.get(StoredFile, file_id)
+    if stored_file is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "file", file_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    admin_deletion = current_user.is_admin and stored_file.owner_id != current_user.id
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="file.admin_delete" if admin_deletion else "file.delete",
+        target_type="file",
+        target_id=file_id,
+        details={
+            "sha256": stored_file.sha256,
+            "original_filename": stored_file.original_filename,
+            "owner_id": stored_file.owner_id,
+        },
+        ip_address=client_ip(request),
+    )
+
+    try:
+        unpublish_list = await deletion.delete_stored_file(db, storage, file_id)
+    except deletion.DeletionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
+
+    await db.commit()
+
+    for info in unpublish_list:
+        if info.owner is not None and info.artist is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                info.track,
+                info.artist,
+                info.owner,
+                request.app.state.config,
+                info.federation_object_id,
+            )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

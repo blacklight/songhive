@@ -5,14 +5,15 @@ Playlist routes.
 import asyncio
 from typing import List, Optional, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models._enums import Visibility
 from ...models.playlist import Playlist
 from ...models.user import User
-from ...services import acl, audit, music
+from ...services import acl, audit, deletion, music
+from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
 from ..deps import (
@@ -295,3 +296,67 @@ async def remove_tracks_from_playlist(
     await db.commit()
 
     return {"removed": removed_count, "track_ids": removed_ids}
+
+
+@router.delete("/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_playlist(
+    playlist_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    recursive: bool = Query(False, description="Also delete the playlist's tracks and uploads"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+):
+    """Delete a playlist and, optionally, its tracks."""
+    playlist = await music.get_playlist(db, playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    admin_deletion = current_user.is_admin and playlist.owner_id != current_user.id
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="playlist.admin_delete" if admin_deletion else "playlist.delete",
+        target_type="playlist",
+        target_id=playlist_id,
+        details={
+            "name": playlist.name,
+            "recursive": recursive,
+            "owner_id": playlist.owner_id,
+        },
+        ip_address=client_ip(request),
+    )
+
+    try:
+        result = await deletion.delete_playlist(
+            db,
+            storage,
+            playlist_id,
+            recursive=recursive,
+            user=current_user,
+            is_admin=current_user.is_admin,
+        )
+    except deletion.DeletionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
+
+    await db.commit()
+
+    for info in result.unpublish:
+        if info.owner is not None and info.artist is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                info.track,
+                info.artist,
+                info.owner,
+                request.app.state.config,
+                info.federation_object_id,
+            )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

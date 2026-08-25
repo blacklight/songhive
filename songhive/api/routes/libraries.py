@@ -28,8 +28,8 @@ from ...models._enums import Visibility
 from ...models.artist import Artist
 from ...models.library import Library
 from ...models.user import User
-from ...services import acl, audit, music
-from ...services.federation import publish_track_activity
+from ...services import acl, audit, deletion, music
+from ...services.federation import publish_track_activity, unpublish_track_activity
 from ...services.import_ import DuplicateTrackError, ImportResult, import_audio_file
 from ...services.storage import StorageService
 from ...tasks.import_ import process_upload, scan_directory
@@ -697,10 +697,14 @@ async def update_library(
 @router.delete("/{library_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_library(
     library_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    recursive: bool = Query(False, description="Also delete the library's tracks and uploads"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
 ):
-    """Delete a library and its track memberships."""
+    """Delete a library and, optionally, its tracks and uploads."""
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -711,6 +715,44 @@ async def delete_library(
             detail="Access denied",
         )
 
-    await db.delete(library)
+    admin_deletion = current_user.is_admin and library.owner_id != current_user.id
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library.admin_delete" if admin_deletion else "library.delete",
+        target_type="library",
+        target_id=library_id,
+        details={
+            "name": library.name,
+            "recursive": recursive,
+            "owner_id": library.owner_id,
+        },
+        ip_address=client_ip(request),
+    )
+
+    try:
+        result = await deletion.delete_library(
+            db,
+            storage,
+            library_id,
+            recursive=recursive,
+            user=current_user,
+            is_admin=current_user.is_admin,
+        )
+    except deletion.DeletionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
+
     await db.commit()
+
+    for info in result.unpublish:
+        if info.owner is not None and info.artist is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                info.track,
+                info.artist,
+                info.owner,
+                request.app.state.config,
+                info.federation_object_id,
+            )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)

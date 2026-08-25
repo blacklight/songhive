@@ -386,6 +386,19 @@ alembic revision --autogenerate -m "add example column"
 configured crontab (default: daily at 03:00) and deletes `StoredFile` rows
 (and their backing files) not referenced by any `Track`, `Album`, or `Upload`.
 
+**Cascade Deletion** — `services/deletion.py` provides centralized deletion
+logic for `Track`, `StoredFile`, `Album`, `Artist`, `Playlist`, and `Library`.
+`DELETE` endpoints on the corresponding routes accept a `recursive` query
+parameter; albums default to recursive deletion while other collections default
+to non-recursive. Deleting a track removes its `Upload`, `LibraryTrack`,
+`PlaylistTrack`, `Favorite`, `ListeningHistory`, `TranscodedFile`, `ShareGrant`,
+`ShareToken`, and `Report` rows and deletes the underlying `StoredFile` once it
+is unreferenced. Deleting a stored file removes all tracks that use it as their
+audio source and clears `cover_file_id`/`image_file_id` references on
+albums/artists before removing the backing object. Recursive deletion collects
+unpublish information for public tracks and enqueues `Delete(Tombstone)`
+ActivityPub activities.
+
 ---
 
 ## Streaming & Transcoding

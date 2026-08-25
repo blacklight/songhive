@@ -4,17 +4,16 @@ Album routes.
 
 from typing import List, Optional, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models._enums import Visibility
-from ...models.track import Track
 from ...models.user import User
-from ...services import acl, music
+from ...services import acl, audit, deletion, music
+from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
-from .._common import Pagination, get_pagination
+from .._common import Pagination, client_ip, get_pagination
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -182,10 +181,14 @@ async def update_album(
 @router.delete("/{album_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_album(
     album_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    recursive: bool = Query(True, description="Also delete the album's tracks and uploads"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
 ):
-    """Delete an album and clear its track references."""
+    """Delete an album and, by default, its tracks and uploads."""
     album = await music.get_album(db, album_id)
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -196,7 +199,44 @@ async def delete_album(
             detail="Access denied",
         )
 
-    await db.execute(update(Track).where(Track.album_id == album_id).values(album_id=None))
-    await db.delete(album)
+    admin_deletion = current_user.is_admin and album.owner_id != current_user.id
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="album.admin_delete" if admin_deletion else "album.delete",
+        target_type="album",
+        target_id=album_id,
+        details={
+            "title": album.title,
+            "recursive": recursive,
+            "owner_id": album.owner_id,
+        },
+        ip_address=client_ip(request),
+    )
+
+    try:
+        result = await deletion.delete_album(
+            db,
+            storage,
+            album_id,
+            recursive=recursive,
+            user=current_user,
+            is_admin=current_user.is_admin,
+        )
+    except deletion.DeletionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
+
     await db.commit()
+
+    for info in result.unpublish:
+        if info.owner is not None and info.artist is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                info.track,
+                info.artist,
+                info.owner,
+                request.app.state.config,
+                info.federation_object_id,
+            )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -14,20 +14,19 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
-from ...models._enums import Visibility
 from ...models.user import User, UserRole
-from ...services import audit, music
+from ...services import audit, deletion, music
 from ...services import settings as settings_service
 from ...services import stats as stats_service
-from ...services.auth import get_user_by_id
 from ...services.federation import unpublish_track_activity
+from ...services.storage import StorageService
 from ...tasks.storage import cleanup_orphaned_files
 from ...users import invites as invite_service
 from ...users import manager as user_manager
 from ...users import oauth as oauth_client_service
 from ...users.tokens import revoke_all_user_refresh_tokens
 from .._common import Pagination, client_ip, get_pagination
-from ..deps import get_config, get_db, get_redis, require_admin
+from ..deps import get_config, get_db, get_redis, get_storage_service, require_admin
 from ..middleware.rate_limit import rate_limit_account
 
 router = APIRouter(prefix="/admin")
@@ -275,6 +274,7 @@ async def delete_track(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
     admin: User = Depends(require_admin),
 ):
     """Delete any track as an admin."""
@@ -292,25 +292,22 @@ async def delete_track(
         ip_address=client_ip(request),
     )
 
-    artist = track.artist
-    owner_id = track.owner_id
-    was_public = track.visibility == Visibility.PUBLIC.value
-    object_id = track.federation_object_id
+    try:
+        unpublish = await deletion.delete_track(db, storage, track_id)
+    except deletion.DeletionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
 
-    await db.delete(track)
     await db.commit()
 
-    if was_public and owner_id and artist is not None:
-        owner = await get_user_by_id(db, owner_id)
-        if owner is not None:
-            background_tasks.add_task(
-                unpublish_track_activity,
-                track,
-                artist,
-                owner,
-                request.app.state.config,
-                object_id,
-            )
+    if unpublish is not None and unpublish.owner is not None and unpublish.artist is not None:
+        background_tasks.add_task(
+            unpublish_track_activity,
+            unpublish.track,
+            unpublish.artist,
+            unpublish.owner,
+            request.app.state.config,
+            unpublish.federation_object_id,
+        )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
