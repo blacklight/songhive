@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...federation.actors import sync_user_actor
-from ...models.user import User
+from ...models.user import User, UserRole
 from ...models.user_link import UserLink
 from ...services.auth import get_user_by_username
 from ...users.manager import update_profile
@@ -61,6 +61,7 @@ class UserResponse(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
+    role: Optional[UserRole] = None
     links: List[UserLinkOutput] = Field(default_factory=list)
 
 
