@@ -194,7 +194,10 @@
       "documentation": "Documentation",
       "support": "Support",
       "defaultName": "Songhive",
-      "defaultDescription": "A federated music sharing service."
+      "defaultDescription": "A federated music sharing service.",
+      "projectUrl": "Project URL",
+      "githubUrl": "GitHub mirror",
+      "issueTracker": "Issue tracker"
     }
   },
   "profile": {
