@@ -22,6 +22,7 @@ import { toQueueTrack } from "@/player/enrich";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 
@@ -79,6 +80,70 @@ const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 const durationText = computed(() =>
   track.value?.duration != null ? formatTime(track.value.duration) : "—",
 );
+
+const actions = computed(() => [
+  {
+    key: "play",
+    label: t("common.play"),
+    icon: "play",
+    visible: true,
+    disabled: !queueTrack.value,
+  },
+  {
+    key: "share",
+    label: t("common.share"),
+    icon: "share-nodes",
+    variant: "secondary" as const,
+    visible: isOwner.value,
+  },
+  {
+    key: "add-to-library",
+    label: t("browse.addToCollection.addToLibrary"),
+    icon: "folder-plus",
+    variant: "secondary" as const,
+    visible: authStore.isAuthenticated,
+  },
+  {
+    key: "add-to-playlist",
+    label: t("browse.addToCollection.addToPlaylist"),
+    icon: "list",
+    variant: "secondary" as const,
+    visible: authStore.isAuthenticated,
+  },
+  {
+    key: "delete",
+    label: t("common.delete"),
+    icon: "trash",
+    variant: "danger" as const,
+    visible: canDeleteTrack.value,
+  },
+]);
+
+function onAction(key: string) {
+  if (!track.value) return;
+  switch (key) {
+    case "play":
+      play();
+      break;
+    case "share":
+      openShare(
+        "track",
+        track.value.id,
+        track.value.title,
+        track.value.owner_id,
+      );
+      break;
+    case "add-to-library":
+      openAddDialog("library");
+      break;
+    case "add-to-playlist":
+      openAddDialog("playlist");
+      break;
+    case "delete":
+      deleteTrack.open(track.value.id);
+      break;
+  }
+}
 
 async function loadTrack() {
   loading.value = true;
@@ -196,54 +261,12 @@ watch(
           </div>
         </div>
 
-        <div class="track-view__header-actions">
-          <AppButton
-            size="lg"
-            icon="play"
-            :disabled="!queueTrack"
-            @click="play"
-          >
-            {{ t("common.play") }}
-          </AppButton>
-          <AppButton
-            v-if="isOwner"
-            size="lg"
-            icon="share-nodes"
-            variant="secondary"
-            @click="
-              track && openShare('track', track.id, track.title, track.owner_id)
-            "
-          >
-            {{ t("common.share") }}
-          </AppButton>
-          <AppButton
-            v-if="authStore.isAuthenticated"
-            size="lg"
-            icon="folder-plus"
-            variant="secondary"
-            @click="track && openAddDialog('library')"
-          >
-            {{ t("browse.addToCollection.addToLibrary") }}
-          </AppButton>
-          <AppButton
-            v-if="authStore.isAuthenticated"
-            size="lg"
-            icon="list"
-            variant="secondary"
-            @click="track && openAddDialog('playlist')"
-          >
-            {{ t("browse.addToCollection.addToPlaylist") }}
-          </AppButton>
-          <AppButton
-            v-if="canDeleteTrack"
-            size="lg"
-            icon="trash"
-            variant="danger"
-            @click="track && deleteTrack.open(track.id)"
-          >
-            {{ t("common.delete") }}
-          </AppButton>
-        </div>
+        <EntityActions
+          class="track-view__header-actions"
+          :actions="actions"
+          size="lg"
+          @select="onAction"
+        />
       </div>
     </template>
 
@@ -307,16 +330,6 @@ watch(
   justify-content: space-between;
   gap: var(--space-4);
   flex-wrap: wrap;
-}
-
-.track-view__header-actions {
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
-}
-
-.track-view__header-actions button {
-  margin-right: var(--space-2);
 }
 
 .track-view__info {

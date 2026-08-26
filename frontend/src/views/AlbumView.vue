@@ -25,6 +25,7 @@ import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
+import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -105,6 +106,67 @@ function onTrackShare(track: QueueTrack) {
 
 async function onTracksRemoved() {
   await refreshTracks();
+}
+
+const actions = computed(() => [
+  {
+    key: "share",
+    label: t("common.share"),
+    icon: "share-nodes",
+    variant: "secondary" as const,
+    visible: isOwner.value,
+  },
+  {
+    key: "add-to-library",
+    label: t("browse.addToCollection.addToLibrary"),
+    icon: "folder-plus",
+    visible: authStore.isAuthenticated,
+  },
+  {
+    key: "add-to-playlist",
+    label: t("browse.addToCollection.addToPlaylist"),
+    icon: "list",
+    visible: authStore.isAuthenticated,
+  },
+  {
+    key: "enrich",
+    label: t("browse.enrich.metadata"),
+    icon: "wand-magic-sparkles",
+    visible: canDeleteAlbum.value,
+  },
+  {
+    key: "delete",
+    label: t("common.delete"),
+    icon: "trash",
+    variant: "danger" as const,
+    visible: canDeleteAlbum.value,
+  },
+]);
+
+function onAction(key: string) {
+  if (!album.value) return;
+  switch (key) {
+    case "share":
+      openShare(
+        "album",
+        album.value.id,
+        album.value.title,
+        album.value.owner_id,
+      );
+      break;
+    case "add-to-library":
+      openAddDialog("library");
+      break;
+    case "add-to-playlist":
+      openAddDialog("playlist");
+      break;
+    case "enrich":
+      onEnrichAlbum();
+      break;
+    case "delete":
+      deleteAlbum.open(album.value.id);
+      break;
+  }
 }
 
 async function onEnrichAlbum() {
@@ -236,49 +298,11 @@ watch(
             {{ album.description }}
           </p>
 
-          <div class="album-view__header-actions">
-            <AppButton
-              v-if="isOwner"
-              size="sm"
-              icon="share-nodes"
-              @click="openShare('album', album.id, album.title, album.owner_id)"
-            >
-              {{ t("common.share") }}
-            </AppButton>
-            <AppButton
-              v-if="authStore.isAuthenticated"
-              size="sm"
-              icon="folder-plus"
-              @click="openAddDialog('library')"
-            >
-              {{ t("browse.addToCollection.addToLibrary") }}
-            </AppButton>
-            <AppButton
-              v-if="authStore.isAuthenticated"
-              size="sm"
-              icon="list"
-              @click="openAddDialog('playlist')"
-            >
-              {{ t("browse.addToCollection.addToPlaylist") }}
-            </AppButton>
-            <AppButton
-              v-if="canDeleteAlbum"
-              size="sm"
-              icon="wand-magic-sparkles"
-              @click="onEnrichAlbum"
-            >
-              {{ t("browse.enrich.metadata") }}
-            </AppButton>
-            <AppButton
-              v-if="canDeleteAlbum"
-              size="sm"
-              variant="danger"
-              icon="trash"
-              @click="album && deleteAlbum.open(album.id)"
-            >
-              {{ t("common.delete") }}
-            </AppButton>
-          </div>
+          <EntityActions
+            class="album-view__header-actions"
+            :actions="actions"
+            @select="onAction"
+          />
         </div>
       </div>
 
@@ -461,14 +485,7 @@ watch(
 }
 
 .album-view__header-actions {
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
   margin-top: var(--space-2);
-}
-
-.album-view__header-actions button {
-  margin-right: var(--space-2);
 }
 
 .album-view__section {

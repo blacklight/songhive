@@ -22,6 +22,7 @@ import type { QueueTrack } from "@/player/types";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -101,6 +102,40 @@ async function onTracksRemoved() {
   await refreshTracks();
 }
 
+const actions = computed(() => [
+  {
+    key: "share",
+    label: t("common.share"),
+    icon: "share-nodes",
+    variant: "secondary" as const,
+    visible: isOwner.value,
+  },
+  {
+    key: "delete",
+    label: t("common.delete"),
+    icon: "trash",
+    variant: "danger" as const,
+    visible: canDeleteLibrary.value,
+  },
+]);
+
+function onAction(key: string) {
+  if (!library.value) return;
+  switch (key) {
+    case "share":
+      openShare(
+        "library",
+        library.value.id,
+        library.value.name,
+        library.value.owner_id,
+      );
+      break;
+    case "delete":
+      deleteLibrary.open(library.value.id);
+      break;
+  }
+}
+
 async function loadLibrary() {
   loading.value = true;
   error.value = null;
@@ -172,28 +207,11 @@ watch(
           </span>
         </div>
 
-        <div class="library-detail-view__header-actions">
-          <AppButton
-            v-if="isOwner"
-            size="sm"
-            icon="share-nodes"
-            @click="
-              library &&
-              openShare('library', library.id, library.name, library.owner_id)
-            "
-          >
-            {{ t("common.share") }}
-          </AppButton>
-          <AppButton
-            v-if="canDeleteLibrary"
-            size="sm"
-            variant="danger"
-            icon="trash"
-            @click="library && deleteLibrary.open(library.id)"
-          >
-            {{ t("common.delete") }}
-          </AppButton>
-        </div>
+        <EntityActions
+          class="library-detail-view__header-actions"
+          :actions="actions"
+          @select="onAction"
+        />
       </div>
 
       <section
@@ -337,10 +355,6 @@ watch(
 
 .library-detail-view__header-actions {
   margin-top: var(--space-2);
-}
-
-.library-detail-view__header-actions button {
-  margin-right: var(--space-2);
 }
 
 .library-detail-view__section {

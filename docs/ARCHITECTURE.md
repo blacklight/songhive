@@ -548,7 +548,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/App.vue` | Root component (`<RouterView />`) |
 | `frontend/src/router/` | Vue Router (history mode) with global auth/admin guard |
 | `frontend/src/stores/` | Pinia stores (auth, theme, toast, confirm, player) |
-| `frontend/src/components/ui/` | Headless base components (button, input, select, avatar, table, pagination, search, context menu) |
+| `frontend/src/components/ui/` | Headless base components (button, input, select, avatar, table, pagination, search, context menu, entity actions) |
 | `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
 | `frontend/src/components/entity/` | Reusable entity grid/list components (e.g. `BulkEditableGrid` for bulk selection and deletion) |
 | `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |

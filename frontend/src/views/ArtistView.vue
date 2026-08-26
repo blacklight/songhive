@@ -21,6 +21,7 @@ import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
+import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AlbumCard from "@/components/library/AlbumCard.vue";
 import TrackList from "@/components/library/TrackList.vue";
@@ -113,6 +114,43 @@ async function onTracksRemoved() {
   await refreshTracks();
 }
 
+const actions = computed(() => [
+  {
+    key: "add-to-library",
+    label: t("browse.addToCollection.addToLibrary"),
+    icon: "folder-plus",
+    visible: authStore.isAuthenticated,
+  },
+  {
+    key: "add-to-playlist",
+    label: t("browse.addToCollection.addToPlaylist"),
+    icon: "list",
+    visible: authStore.isAuthenticated,
+  },
+  {
+    key: "delete",
+    label: t("common.delete"),
+    icon: "trash",
+    variant: "danger" as const,
+    visible: canDeleteArtist.value,
+  },
+]);
+
+function onAction(key: string) {
+  if (!artist.value) return;
+  switch (key) {
+    case "add-to-library":
+      openAddDialog("library");
+      break;
+    case "add-to-playlist":
+      openAddDialog("playlist");
+      break;
+    case "delete":
+      deleteArtist.open(artist.value.id);
+      break;
+  }
+}
+
 async function loadArtist() {
   loading.value = true;
   error.value = null;
@@ -168,33 +206,11 @@ watch(
             artist.name
           }}</AppPageTitle>
           <p v-if="artist.bio" class="artist-view__bio">{{ artist.bio }}</p>
-          <div class="artist-view__header-actions">
-            <AppButton
-              v-if="authStore.isAuthenticated"
-              size="sm"
-              icon="folder-plus"
-              @click="openAddDialog('library')"
-            >
-              {{ t("browse.addToCollection.addToLibrary") }}
-            </AppButton>
-            <AppButton
-              v-if="authStore.isAuthenticated"
-              size="sm"
-              icon="list"
-              @click="openAddDialog('playlist')"
-            >
-              {{ t("browse.addToCollection.addToPlaylist") }}
-            </AppButton>
-            <AppButton
-              v-if="canDeleteArtist"
-              size="sm"
-              variant="danger"
-              icon="trash"
-              @click="artist && deleteArtist.open(artist.id)"
-            >
-              {{ t("common.delete") }}
-            </AppButton>
-          </div>
+          <EntityActions
+            class="artist-view__header-actions"
+            :actions="actions"
+            @select="onAction"
+          />
         </div>
       </div>
 
@@ -386,14 +402,7 @@ watch(
 }
 
 .artist-view__header-actions {
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
   margin-top: var(--space-2);
-}
-
-.artist-view__header-actions button {
-  margin-right: var(--space-2);
 }
 
 .artist-view__section {
