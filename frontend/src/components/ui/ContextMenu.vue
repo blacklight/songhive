@@ -213,7 +213,7 @@ function select(key: string) {
 }
 
 .context-menu__item:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .context-menu__item--danger {

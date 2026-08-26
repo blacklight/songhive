@@ -53,7 +53,7 @@ const emit = defineEmits<{ click: [artist: ArtistResponse] }>();
 }
 
 .artist-card:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .artist-card__avatar {

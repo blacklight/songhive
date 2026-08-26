@@ -1028,7 +1028,7 @@ async function onMenuSelect(key: string) {
 }
 
 .track-list__compact-item:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .track-list__compact-item--loading {

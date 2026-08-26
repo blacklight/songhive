@@ -98,7 +98,7 @@ function cellStyle(column: Column): Record<string, string> | undefined {
 }
 
 .app-table tr:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .app-table th,

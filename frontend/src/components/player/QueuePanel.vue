@@ -238,7 +238,7 @@ function clearQueue() {
 }
 
 .queue-panel__item:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .queue-panel__item--current {

@@ -110,7 +110,7 @@ const visibilityIcon = computed(() => {
 }
 
 .playlist-card:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .playlist-card__name {

@@ -110,7 +110,7 @@ const visibilityIcon = computed(() => {
 }
 
 .library-card:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .library-card__name {

@@ -300,7 +300,7 @@ const loginItem = {
 }
 
 .app-layout__nav a:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .app-layout__brand {
@@ -321,7 +321,7 @@ const loginItem = {
 }
 
 .app-layout__brand-link:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
   color: var(--color-accent-contrast);
 }
 
@@ -387,7 +387,7 @@ const loginItem = {
 }
 
 .app-layout__user:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .app-layout__user-name {

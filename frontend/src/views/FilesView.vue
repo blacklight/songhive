@@ -407,7 +407,7 @@ async function onFileChange(event: Event) {
 }
 
 .files-view__item.bulk-editable-grid__item-wrapper--list:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .files-view__card {

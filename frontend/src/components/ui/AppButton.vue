@@ -98,7 +98,7 @@ const accessibleLabel = computed(() => props.ariaLabel ?? props.title);
 }
 
 .app-btn--secondary:hover:not(:disabled) {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .app-btn--ghost {

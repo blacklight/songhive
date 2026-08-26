@@ -124,7 +124,7 @@ const adminNav = [
 }
 
 .admin-layout__nav a:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .admin-layout__back {
