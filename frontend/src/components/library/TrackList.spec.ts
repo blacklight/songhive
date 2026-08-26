@@ -93,6 +93,7 @@ describe("TrackList", () => {
   let wrapper: ReturnType<typeof mountTrackList>["wrapper"];
 
   beforeEach(() => {
+    localStorage.clear();
     setActivePinia(createPinia());
     const authStore = useAuthStore();
     authStore.$patch({
@@ -532,5 +533,98 @@ describe("TrackList", () => {
 
     expect(tracksApi.deleteTracks).toHaveBeenCalledWith(["track-1", "track-2"]);
     expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1", "track-2"]]);
+  });
+
+  it("highlights the currently playing track in the table", async () => {
+    const tracks = [
+      makeTrack(),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+    ];
+    const queueTracks = tracks.map((t) =>
+      toQueueTrack(t, { artist_name: "Artist" }),
+    );
+
+    const player = usePlayerStore();
+    player.playTrack(queueTracks[0]!, queueTracks);
+
+    ({ wrapper } = mountTrackList({ tracks, context: "Artist" }));
+    await flushPromises();
+
+    const currentRows = wrapper.findAll(".track-list__row--current");
+    expect(currentRows.length).toBe(1);
+    expect(currentRows[0]!.text()).toContain("Song One");
+
+    const playing = wrapper.find(".track-list__playing");
+    expect(playing.exists()).toBe(true);
+    expect(playing.classes()).toContain("track-list__playing--active");
+
+    player.pause();
+    await flushPromises();
+
+    const paused = wrapper.find(".track-list__playing");
+    expect(paused.exists()).toBe(true);
+    expect(paused.classes()).not.toContain("track-list__playing--active");
+
+    player.playTrack(queueTracks[1]!, queueTracks);
+    await flushPromises();
+
+    const currentRows2 = wrapper.findAll(".track-list__row--current");
+    expect(currentRows2.length).toBe(1);
+    expect(currentRows2[0]!.text()).toContain("Song Two");
+  });
+
+  it("highlights the currently playing track in the compact view", async () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes("max-width"),
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+
+    try {
+      const tracks = [
+        makeTrack(),
+        makeTrack({ id: "track-2", title: "Song Two" }),
+      ];
+      const queueTracks = tracks.map((t) =>
+        toQueueTrack(t, { artist_name: "Artist" }),
+      );
+
+      const player = usePlayerStore();
+      player.playTrack(queueTracks[0]!, queueTracks);
+
+      ({ wrapper } = mountTrackList({ tracks, context: "Artist" }));
+      await flushPromises();
+
+      const currentItems = wrapper.findAll(
+        ".track-list__compact-item--current",
+      );
+      expect(currentItems.length).toBe(1);
+      expect(currentItems[0]!.text()).toContain("Song One");
+
+      const playing = wrapper.find(".track-list__playing");
+      expect(playing.exists()).toBe(true);
+      expect(playing.classes()).toContain("track-list__playing--active");
+
+      player.pause();
+      await flushPromises();
+
+      const paused = wrapper.find(".track-list__playing");
+      expect(paused.exists()).toBe(true);
+      expect(paused.classes()).not.toContain("track-list__playing--active");
+    } finally {
+      Object.defineProperty(window, "matchMedia", {
+        writable: true,
+        configurable: true,
+        value: originalMatchMedia,
+      });
+    }
   });
 });

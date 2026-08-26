@@ -12,6 +12,10 @@ export interface Props {
   columns: Column[];
   rows: Record<string, unknown>[];
   rowKey?: (row: Record<string, unknown>, index: number) => string;
+  rowClass?: (
+    row: Record<string, unknown>,
+    index: number,
+  ) => string | undefined;
   loading?: boolean;
   emptyLabel?: string;
 }
@@ -70,7 +74,12 @@ function cellStyle(column: Column): Record<string, string> | undefined {
           {{ props.emptyLabel }}
         </td>
       </tr>
-      <tr v-for="(row, index) in props.rows" v-else :key="rowId(row, index)">
+      <tr
+        v-for="(row, index) in props.rows"
+        v-else
+        :key="rowId(row, index)"
+        :class="props.rowClass ? props.rowClass(row, index) : undefined"
+      >
         <td
           v-for="column in props.columns"
           :key="column.key"

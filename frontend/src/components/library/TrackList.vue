@@ -202,6 +202,20 @@ function rowKey(row: Record<string, unknown>, index: number): string {
   return row.id ? `${row.id}-${index}` : `row-${index}`;
 }
 
+function isCurrentTrack(track: QueueTrack): boolean {
+  return player.currentTrack?.id === track.id;
+}
+
+function isPlayingCurrent(track: QueueTrack): boolean {
+  return isCurrentTrack(track) && player.isPlaying;
+}
+
+function rowClass(row: Record<string, unknown>): string | undefined {
+  return isCurrentTrack(asTrackRow(row).track)
+    ? "track-list__row--current"
+    : undefined;
+}
+
 function play(index: number) {
   const track = enrichedTracks.value[index];
   if (!track) return;
@@ -683,6 +697,7 @@ async function onMenuSelect(key: string) {
       :columns="columns"
       :rows="rows"
       :row-key="rowKey"
+      :row-class="rowClass"
       :loading="props.loading"
       :empty-label="
         props.emptyLabel ??
@@ -704,6 +719,29 @@ async function onMenuSelect(key: string) {
           :aria-label="t('browse.bulkEdit.selectAll')"
           @update:model-value="toggleRow(asTrackRow(row).track)"
         />
+      </template>
+
+      <template #row-num="{ row }">
+        <span
+          v-if="isCurrentTrack(asTrackRow(row).track)"
+          class="track-list__playing"
+          :class="{
+            'track-list__playing--active': isPlayingCurrent(
+              asTrackRow(row).track,
+            ),
+          }"
+          :aria-label="t('player.nowPlaying')"
+        >
+          <span
+            v-for="bar in 3"
+            :key="bar"
+            class="track-list__playing-bar"
+            aria-hidden="true"
+          />
+        </span>
+        <span v-else class="track-list__num">
+          {{ asTrackRow(row).num }}
+        </span>
       </template>
 
       <template #row-title="{ row }">
@@ -801,6 +839,11 @@ async function onMenuSelect(key: string) {
           v-for="(row, index) in rows"
           :key="rowKey(row, index)"
           class="track-list__compact-item"
+          :class="{
+            'track-list__compact-item--current': isCurrentTrack(
+              asTrackRow(row).track,
+            ),
+          }"
         >
           <div v-if="bulkMode && canEdit" class="track-list__compact-select">
             <AppCheckbox
@@ -809,6 +852,23 @@ async function onMenuSelect(key: string) {
               @update:model-value="toggleRow(asTrackRow(row).track)"
             />
           </div>
+          <span
+            v-else-if="isCurrentTrack(asTrackRow(row).track)"
+            class="track-list__compact-number track-list__playing"
+            :class="{
+              'track-list__playing--active': isPlayingCurrent(
+                asTrackRow(row).track,
+              ),
+            }"
+            :aria-label="t('player.nowPlaying')"
+          >
+            <span
+              v-for="bar in 3"
+              :key="bar"
+              class="track-list__playing-bar"
+              aria-hidden="true"
+            />
+          </span>
           <span v-else class="track-list__compact-number" aria-hidden="true">
             {{ asTrackRow(row).num }}
           </span>
@@ -1109,5 +1169,82 @@ a.track-list__compact-artist:hover {
   text-align: right;
   color: var(--color-text-muted);
   font-size: 0.875rem;
+}
+
+.track-list :deep(.app-table tr.track-list__row--current) {
+  background-color: var(--color-surface-raised);
+}
+
+.track-list :deep(.app-table tr.track-list__row--current:hover) {
+  background-color: var(--color-surface-raised);
+}
+
+.track-list__compact-item--current {
+  background-color: var(--color-surface-raised);
+}
+
+.track-list__compact-item--current:hover {
+  background-color: var(--color-surface-raised);
+}
+
+.track-list
+  :deep(.app-table tr.track-list__row--current)
+  .app-table__cell--artist,
+.track-list
+  :deep(.app-table tr.track-list__row--current)
+  .app-table__cell--album,
+.track-list
+  :deep(.app-table tr.track-list__row--current)
+  .app-table__cell--duration,
+.track-list__compact-item--current .track-list__compact-artist,
+.track-list__compact-item--current .track-list__compact-duration,
+.track-list__compact-item--current .track-list__compact-number {
+  color: var(--color-text);
+}
+
+.track-list__playing {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 0.75rem;
+  height: 0.75rem;
+  color: currentColor;
+}
+
+.track-list__playing-bar {
+  flex: 1;
+  width: 2px;
+  min-height: 2px;
+  background-color: currentColor;
+  border-radius: 1px;
+  height: 30%;
+}
+
+.track-list__playing--active .track-list__playing-bar {
+  height: 20%;
+  animation: track-list-playing 0.6s ease-in-out infinite alternate;
+}
+
+.track-list__playing--active .track-list__playing-bar:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.track-list__playing--active .track-list__playing-bar:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes track-list-playing {
+  0% {
+    height: 20%;
+  }
+  100% {
+    height: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track-list__playing-bar {
+    animation: none !important;
+  }
 }
 </style>
