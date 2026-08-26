@@ -163,28 +163,47 @@ async def _can_access(  # pylint: disable=too-many-return-statements,too-many-br
     if share_token is not None and await sharing.validate_share_token(session, item_type, item_id, share_token):
         return True
 
-    # Rule 8: derived file access through owning tracks or albums.
+    # Rule 8: derived file access through owning tracks, albums, artists,
+    # libraries, or playlists.
     if item_type == "file" and depth < _MAX_DERIVED_DEPTH:
         track_ids = (await session.execute(select(Track.id).where(Track.audio_file_id == item_id))).scalars().all()
+        track_image_ids = (
+            (await session.execute(select(Track.id).where(Track.image_file_id == item_id))).scalars().all()
+        )
         album_ids = (await session.execute(select(Album.id).where(Album.cover_file_id == item_id))).scalars().all()
+        artist_image_ids = (
+            (await session.execute(select(Artist.id).where(Artist.image_file_id == item_id))).scalars().all()
+        )
+        artist_cover_ids = (
+            (await session.execute(select(Artist.id).where(Artist.cover_file_id == item_id))).scalars().all()
+        )
+        library_image_ids = (
+            (await session.execute(select(Library.id).where(Library.image_file_id == item_id))).scalars().all()
+        )
+        library_cover_ids = (
+            (await session.execute(select(Library.id).where(Library.cover_file_id == item_id))).scalars().all()
+        )
+        playlist_image_ids = (
+            (await session.execute(select(Playlist.id).where(Playlist.image_file_id == item_id))).scalars().all()
+        )
+        playlist_cover_ids = (
+            (await session.execute(select(Playlist.id).where(Playlist.cover_file_id == item_id))).scalars().all()
+        )
 
-        for track_id in track_ids:
+        derived_item_ids = (
+            [("track", str(i)) for i in set(track_ids) | set(track_image_ids)]
+            + [("album", str(i)) for i in album_ids]
+            + [("artist", str(i)) for i in set(artist_image_ids) | set(artist_cover_ids)]
+            + [("library", str(i)) for i in set(library_image_ids) | set(library_cover_ids)]
+            + [("playlist", str(i)) for i in set(playlist_image_ids) | set(playlist_cover_ids)]
+        )
+
+        for derived_type, derived_id in derived_item_ids:
             if await _can_access(
                 session,
                 user,
-                "track",
-                str(track_id),
-                share_token=share_token,
-                depth=depth + 1,
-            ):
-                return True
-
-        for album_id in album_ids:
-            if await _can_access(
-                session,
-                user,
-                "album",
-                str(album_id),
+                derived_type,
+                derived_id,
                 share_token=share_token,
                 depth=depth + 1,
             ):
