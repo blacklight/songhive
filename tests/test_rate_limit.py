@@ -2,6 +2,7 @@
 Tests for the Redis-backed sliding-window rate limiter.
 """
 
+import io
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,7 @@ from songhive.api.middleware.rate_limit import (
 )
 from songhive.config.schema import SonghiveConfig
 from songhive.services.auth import create_user
+from songhive.services.metadata import AudioMetadata
 
 
 def _request(
@@ -600,3 +602,140 @@ async def test_password_reset_request_rate_limited_per_username(client):
         json={"username": "reset-bob@example.com"},
     )
     assert other.status_code == status.HTTP_200_OK
+
+
+def _fake_metadata():
+    """Return minimal audio metadata so test uploads do not need a real file."""
+    return AudioMetadata(
+        title="Rate Limit Song",
+        artist="Rate Limit Artist",
+        album="Rate Limit Album",
+        mimetype="audio/mpeg",
+    )
+
+
+def _upload_audio(client, auth_headers, user, content):
+    """Upload an audio file and return (file_id, track_id)."""
+    response = client.post(
+        "/api/v1/files/upload?visibility=private",
+        files={"file": ("song.mp3", io.BytesIO(content), "audio/mpeg")},
+        headers=auth_headers(user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    track_id = response.headers.get("X-Track-Id")
+    assert track_id is not None
+    return response.json()["id"], track_id
+
+
+def _configure_rate_limit(client):
+    """Set a low per-user rate limit for delete endpoints."""
+    client.app.state.config.auth.rate_limit_requests = 2
+    client.app.state.config.auth.rate_limit_window_seconds = 60
+
+
+@pytest.mark.asyncio
+async def test_delete_track_rate_limited(client, regular_user, auth_headers, monkeypatch):
+    """DELETE /tracks/{id} is rate-limited."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(regular_user)
+    _configure_rate_limit(client)
+
+    _, track_id = _upload_audio(client, auth_headers, regular_user, b"track rate limit")
+
+    for _ in range(2):
+        response = client.delete(f"/api/v1/tracks/{track_id}", headers=headers)
+        assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_404_NOT_FOUND)
+
+    response = client.delete(f"/api/v1/tracks/{track_id}", headers=headers)
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_delete_album_rate_limited(client, regular_user, auth_headers, monkeypatch):
+    """DELETE /albums/{id} is rate-limited."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(regular_user)
+    _configure_rate_limit(client)
+
+    _, track_id = _upload_audio(client, auth_headers, regular_user, b"album rate limit")
+    album_id = client.get(f"/api/v1/tracks/{track_id}", headers=headers).json()["album_id"]
+
+    for _ in range(2):
+        response = client.delete(f"/api/v1/albums/{album_id}", headers=headers)
+        assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_404_NOT_FOUND)
+
+    response = client.delete(f"/api/v1/albums/{album_id}", headers=headers)
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_delete_artist_rate_limited(client, admin_user, auth_headers, monkeypatch):
+    """DELETE /artists/{id} is rate-limited for admins (artists have no owner)."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(admin_user)
+    _configure_rate_limit(client)
+
+    _, track_id = _upload_audio(client, auth_headers, admin_user, b"artist rate limit")
+    artist_id = client.get(f"/api/v1/tracks/{track_id}", headers=headers).json()["artist_id"]
+
+    for _ in range(2):
+        response = client.delete(f"/api/v1/artists/{artist_id}?recursive=true", headers=headers)
+        assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_404_NOT_FOUND)
+
+    response = client.delete(f"/api/v1/artists/{artist_id}?recursive=true", headers=headers)
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_delete_playlist_rate_limited(client, regular_user, auth_headers, monkeypatch):
+    """DELETE /playlists/{id} is rate-limited."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(regular_user)
+    _configure_rate_limit(client)
+
+    _, track_id = _upload_audio(client, auth_headers, regular_user, b"playlist rate limit")
+    playlist = client.post("/api/v1/playlists/", json={"name": "Rate Limit Playlist"}, headers=headers)
+    playlist_id = playlist.json()["id"]
+    client.post(f"/api/v1/playlists/{playlist_id}/tracks", json={"track_ids": [track_id]}, headers=headers)
+
+    for _ in range(2):
+        response = client.delete(f"/api/v1/playlists/{playlist_id}", headers=headers)
+        assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_404_NOT_FOUND)
+
+    response = client.delete(f"/api/v1/playlists/{playlist_id}", headers=headers)
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_delete_library_rate_limited(client, regular_user, auth_headers, monkeypatch):
+    """DELETE /libraries/{id} is rate-limited."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(regular_user)
+    _configure_rate_limit(client)
+
+    library = client.post("/api/v1/libraries/", json={"name": "Rate Limit Library"}, headers=headers)
+    library_id = library.json()["id"]
+
+    for _ in range(2):
+        response = client.delete(f"/api/v1/libraries/{library_id}", headers=headers)
+        assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_404_NOT_FOUND)
+
+    response = client.delete(f"/api/v1/libraries/{library_id}", headers=headers)
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_delete_file_rate_limited(client, regular_user, auth_headers, monkeypatch):
+    """DELETE /files/{id} is rate-limited."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    headers = auth_headers(regular_user)
+    _configure_rate_limit(client)
+
+    file_id, _ = _upload_audio(client, auth_headers, regular_user, b"file rate limit")
+
+    for _ in range(2):
+        response = client.delete(f"/api/v1/files/{file_id}", headers=headers)
+        assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_404_NOT_FOUND)
+
+    response = client.delete(f"/api/v1/files/{file_id}", headers=headers)
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS

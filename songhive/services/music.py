@@ -3,7 +3,7 @@ Music service: CRUD operations for artists, albums, tracks, playlists,
 libraries, and radios.
 """
 
-from typing import Any, List, Optional, cast
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,7 @@ from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
 from ..models.library_track import LibraryTrack
-from ..models.playlist import Playlist
+from ..models.playlist import Playlist, PlaylistTrack
 from ..models.radio import Radio
 from ..models.track import Track
 from ..models.user import User
@@ -404,3 +404,227 @@ async def count_radios(
 async def get_radio(session: AsyncSession, radio_id: str) -> Optional[Radio]:
     """Get a radio by ID."""
     return cast(Optional[Radio], await session.get(Radio, radio_id))
+
+
+async def get_track_ids_for_album(
+    session: AsyncSession,
+    album_id: str,
+    user: Optional[User] = None,
+) -> List[str]:
+    """Return the IDs of accessible tracks that belong to ``album_id``."""
+    stmt = (
+        select(Track.id)
+        .where(Track.album_id == album_id)
+        .order_by(Track.track_number, Track.disc_number, Track.created_at)
+    )
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    result = await session.execute(stmt)
+    return [str(row) for row in result.scalars().all()]
+
+
+async def get_track_ids_for_artist(
+    session: AsyncSession,
+    artist_id: str,
+    user: Optional[User] = None,
+) -> List[str]:
+    """Return the IDs of accessible tracks that belong to ``artist_id``."""
+    stmt = (
+        select(Track.id)
+        .where(Track.artist_id == artist_id)
+        .order_by(Track.album_id, Track.track_number, Track.disc_number, Track.created_at)
+    )
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    result = await session.execute(stmt)
+    return [str(row) for row in result.scalars().all()]
+
+
+async def add_library_tracks(
+    session: AsyncSession,
+    library_id: str,
+    track_ids: List[str],
+    added_by_id: Optional[str] = None,
+) -> List[str]:
+    """
+    Insert ``LibraryTrack`` rows for ``track_ids`` into ``library_id``.
+
+    Duplicate rows are skipped because of the unique constraint. The returned
+    list preserves the input order and contains only the IDs that were actually
+    added.
+    """
+    if not track_ids:
+        return []
+
+    result = await session.execute(
+        select(LibraryTrack.track_id).where(
+            LibraryTrack.library_id == library_id,
+            LibraryTrack.track_id.in_(track_ids),
+        )
+    )
+    existing = {str(row) for row in result.scalars().all()}
+
+    added: List[str] = []
+    rows: List[LibraryTrack] = []
+    seen: set[str] = set()
+    for track_id in track_ids:
+        if track_id in existing or track_id in seen:
+            continue
+        seen.add(track_id)
+        rows.append(LibraryTrack(library_id=library_id, track_id=track_id, added_by_id=added_by_id))
+        added.append(track_id)
+
+    if rows:
+        session.add_all(rows)
+        await session.flush()
+
+    return added
+
+
+async def remove_library_tracks(
+    session: AsyncSession,
+    library_id: str,
+    track_ids: List[str],
+) -> List[str]:
+    """
+    Remove ``track_ids`` from ``library_id``.
+
+    Returns the IDs that were actually removed, preserving input order.
+    """
+    if not track_ids:
+        return []
+
+    result = await session.execute(
+        select(LibraryTrack).where(
+            LibraryTrack.library_id == library_id,
+            LibraryTrack.track_id.in_(track_ids),
+        )
+    )
+    rows = list(result.scalars().all())
+    removed_track_ids = {str(row.track_id) for row in rows}
+
+    for row in rows:
+        await session.delete(row)
+
+    removed: List[str] = []
+    seen: Set[str] = set()
+    for track_id in track_ids:
+        if track_id in removed_track_ids and track_id not in seen:
+            seen.add(track_id)
+            removed.append(track_id)
+
+    if rows:
+        await session.flush()
+
+    return removed
+
+
+async def add_playlist_tracks(
+    session: AsyncSession,
+    playlist_id: str,
+    track_ids: List[str],
+) -> List[str]:
+    """
+    Append ``track_ids`` to ``playlist_id`` at the end of the playlist.
+
+    New ``PlaylistTrack`` rows are assigned increasing ``position`` values. The
+    returned list contains the IDs that were appended, in input order.
+    """
+    if not track_ids:
+        return []
+
+    result = await session.execute(
+        select(func.max(PlaylistTrack.position)).where(PlaylistTrack.playlist_id == playlist_id)
+    )
+    max_position = result.scalar() or 0
+
+    added: List[str] = []
+    rows: List[PlaylistTrack] = []
+    for offset, track_id in enumerate(track_ids, start=1):
+        rows.append(PlaylistTrack(playlist_id=playlist_id, track_id=track_id, position=max_position + offset))
+        added.append(track_id)
+
+    if rows:
+        session.add_all(rows)
+        await session.flush()
+
+    return added
+
+
+async def remove_playlist_tracks(
+    session: AsyncSession,
+    playlist_id: str,
+    track_ids: List[str],
+) -> Tuple[int, List[str]]:
+    """
+    Remove all occurrences of ``track_ids`` from ``playlist_id``.
+
+    Returns the number of rows removed and the distinct track IDs that were
+    removed.
+    """
+    if not track_ids:
+        return 0, []
+
+    result = await session.execute(
+        select(PlaylistTrack).where(
+            PlaylistTrack.playlist_id == playlist_id,
+            PlaylistTrack.track_id.in_(track_ids),
+        )
+    )
+    rows = list(result.scalars().all())
+    removed_track_counts: Dict[str, int] = {}
+    for row in rows:
+        await session.delete(row)
+        track_id = str(row.track_id)
+        removed_track_counts[track_id] = removed_track_counts.get(track_id, 0) + 1
+
+    removed_ids: List[str] = []
+    seen: Set[str] = set()
+    for track_id in track_ids:
+        if track_id in removed_track_counts and track_id not in seen:
+            seen.add(track_id)
+            removed_ids.append(track_id)
+
+    if rows:
+        await session.flush()
+
+    return len(rows), removed_ids
+
+
+async def list_playlist_tracks(
+    session: AsyncSession,
+    playlist_id: str,
+    user: Optional[User] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> List[Track]:
+    """List tracks that are members of ``playlist_id`` in playlist order."""
+    stmt = (
+        select(Track)
+        .options(
+            selectinload(Track.artist),
+            selectinload(Track.album),
+            selectinload(Track.audio_file),
+        )
+        .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+        .order_by(PlaylistTrack.position)
+    )
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    stmt = stmt.offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def count_playlist_tracks(
+    session: AsyncSession,
+    playlist_id: str,
+    user: Optional[User] = None,
+) -> int:
+    """Return the total number of tracks in ``playlist_id`` visible to ``user``."""
+    stmt = (
+        select(Track)
+        .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+    )
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    return result.scalar() or 0

@@ -2,6 +2,7 @@
 Library routes.
 """
 
+import asyncio
 import uuid
 from pathlib import Path
 from typing import List, Optional, cast
@@ -27,12 +28,12 @@ from ...models._enums import Visibility
 from ...models.artist import Artist
 from ...models.library import Library
 from ...models.user import User
-from ...services import acl, music
-from ...services.federation import publish_track_activity
+from ...services import acl, audit, deletion, music
+from ...services.federation import publish_track_activity, unpublish_track_activity
 from ...services.import_ import DuplicateTrackError, ImportResult, import_audio_file
 from ...services.storage import StorageService
 from ...tasks.import_ import process_upload, scan_directory
-from .._common import Pagination, get_pagination
+from .._common import Pagination, client_ip, get_pagination
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -40,6 +41,7 @@ from ..deps import (
     get_storage_service,
     require_access,
 )
+from ..middleware.rate_limit import rate_limit_account
 from ._common import HasOwnerId, redact_owner
 from .tracks import TrackResponse
 
@@ -56,6 +58,14 @@ class LibraryResponse(BaseModel):
     owner_id: Optional[str] = None
     description: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+    can_write: bool = False
+
+
+def _can_write_library(user: Optional[User], library: Library) -> bool:
+    """Return whether the requester may add tracks to this library."""
+    if user is None:
+        return False
+    return user.is_admin or library.owner_id == user.id
 
 
 class LibraryCreate(BaseModel):
@@ -71,6 +81,20 @@ class LibraryUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     visibility: Optional[Visibility] = None
+
+
+class AddLibraryTracksRequest(BaseModel):
+    """Request body for adding tracks, albums, or artists to a library."""
+
+    track_ids: Optional[List[str]] = None
+    album_id: Optional[str] = None
+    artist_id: Optional[str] = None
+
+
+class RemoveLibraryTracksRequest(BaseModel):
+    """Request body for removing tracks from a library."""
+
+    track_ids: List[str]
 
 
 class ScanRequest(BaseModel):
@@ -108,6 +132,7 @@ async def list_libraries(
             owner_id=redact_owner(cast(HasOwnerId, lib), user),
             description=lib.description,
             visibility=lib.visibility,
+            can_write=_can_write_library(user, lib),
         )
         for lib in rows
     ]
@@ -136,6 +161,7 @@ async def create_library(
         owner_id=library.owner_id,
         description=library.description,
         visibility=library.visibility,
+        can_write=True,
     )
 
 
@@ -160,6 +186,7 @@ async def get_library(
         owner_id=redact_owner(cast(HasOwnerId, library), user),
         description=library.description,
         visibility=library.visibility,
+        can_write=_can_write_library(user, library),
     )
 
 
@@ -443,6 +470,123 @@ async def bulk_upload_tracks(
     )
 
 
+async def _resolve_track_ids(
+    db: AsyncSession,
+    user: User,
+    body: AddLibraryTracksRequest,
+) -> List[str]:
+    """Resolve ``track_ids`` / ``album_id`` / ``artist_id`` into accessible track IDs."""
+    resolved: List[str] = []
+    resolved_promises = []
+
+    if body.track_ids:
+        for track_id in body.track_ids:
+            resolved_promises.append(acl.can_access(db, user, "track", track_id))
+        access_results = await asyncio.gather(*resolved_promises)
+        resolved.extend([track_id for track_id, can_access in zip(body.track_ids, access_results) if can_access])
+
+    if body.album_id:
+        resolved.extend(await music.get_track_ids_for_album(db, body.album_id, user=user))
+    if body.artist_id:
+        resolved.extend(await music.get_track_ids_for_artist(db, body.artist_id, user=user))
+
+    seen: set[str] = set()
+    deduped: List[str] = []
+    for track_id in resolved:
+        if track_id not in seen:
+            seen.add(track_id)
+            deduped.append(track_id)
+    return deduped
+
+
+@router.post("/{library_id}/tracks/add", status_code=status.HTTP_201_CREATED)
+async def add_tracks_to_library(
+    library_id: str,
+    request: Request,
+    body: AddLibraryTracksRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add existing tracks, an album, or an artist to a library."""
+    library = await music.get_library(db, library_id)
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if not await acl.can_manage(db, current_user, "library", library_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    if not body.track_ids and not body.album_id and not body.artist_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least one source must be provided",
+        )
+
+    track_ids = await _resolve_track_ids(db, current_user, body)
+    added_ids = await music.add_library_tracks(db, library_id, track_ids, added_by_id=current_user.id)
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library_track.add",
+        target_type="library",
+        target_id=library_id,
+        details={
+            "source": body.model_dump(exclude_unset=True),
+            "track_ids": added_ids,
+            "count": len(added_ids),
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return {"added": len(added_ids), "track_ids": added_ids}
+
+
+@router.post("/{library_id}/tracks/remove", status_code=status.HTTP_200_OK)
+async def remove_tracks_from_library(
+    library_id: str,
+    request: Request,
+    body: RemoveLibraryTracksRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove existing tracks from a library."""
+    library = await music.get_library(db, library_id)
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if not await acl.can_manage(db, current_user, "library", library_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    if not body.track_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="track_ids must not be empty",
+        )
+
+    removed_ids = await music.remove_library_tracks(db, library_id, body.track_ids)
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library_track.remove",
+        target_type="library",
+        target_id=library_id,
+        details={
+            "track_ids": removed_ids,
+            "count": len(removed_ids),
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return {"removed": len(removed_ids), "track_ids": removed_ids}
+
+
 @router.post("/{library_id}/scan")
 async def scan_library(
     library_id: str,
@@ -547,16 +691,21 @@ async def update_library(
         owner_id=library.owner_id,
         description=library.description,
         visibility=library.visibility,
+        can_write=True,
     )
 
 
-@router.delete("/{library_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{library_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
 async def delete_library(
     library_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    recursive: bool = Query(False, description="Also delete the library's tracks and uploads"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
 ):
-    """Delete a library and its track memberships."""
+    """Delete a library and, optionally, its tracks and uploads."""
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -567,6 +716,44 @@ async def delete_library(
             detail="Access denied",
         )
 
-    await db.delete(library)
+    admin_deletion = current_user.is_admin and library.owner_id != current_user.id
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library.admin_delete" if admin_deletion else "library.delete",
+        target_type="library",
+        target_id=library_id,
+        details={
+            "name": library.name,
+            "recursive": recursive,
+            "owner_id": library.owner_id,
+        },
+        ip_address=client_ip(request),
+    )
+
+    try:
+        result = await deletion.delete_library(
+            db,
+            storage,
+            library_id,
+            recursive=recursive,
+            user=current_user,
+            is_admin=current_user.is_admin,
+        )
+    except deletion.DeletionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
+
     await db.commit()
+
+    for info in result.unpublish:
+        if info.owner is not None and info.artist is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                info.track,
+                info.artist,
+                info.owner,
+                request.app.state.config,
+                info.federation_object_id,
+            )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -3,11 +3,13 @@ Tests for the file storage API endpoints.
 """
 
 import hashlib
+import io
 import logging
 
 import pytest
 
 from songhive.models._enums import Visibility
+from songhive.services.metadata import AudioMetadata
 
 
 @pytest.fixture
@@ -505,3 +507,292 @@ async def test_derived_file_download_through_public_track(files_client, regular_
 
     private_download = files_client.get(f"/api/v1/files/{stored_file.id}/download")
     assert private_download.status_code == 403
+
+
+def test_upload_audio_file_imports_as_track(files_client, regular_user, auth_headers, monkeypatch):
+    """Uploading an audio file creates a track in the user's default Uploads library."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Uploaded Song",
+            artist="Uploaded Artist",
+            album="Uploaded Album",
+            mimetype="audio/mpeg",
+        ),
+    )
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["content_type"] == "audio/mpeg"
+    assert "X-Track-Id" in response.headers
+
+    track_id = response.headers["X-Track-Id"]
+    track_response = files_client.get(f"/api/v1/tracks/{track_id}", headers=headers)
+    assert track_response.status_code == 200
+    track = track_response.json()
+    assert track["title"] == "Uploaded Song"
+    assert track["audio_url"] == data["url"]
+
+    libraries_response = files_client.get("/api/v1/libraries/", headers=headers)
+    assert libraries_response.status_code == 200
+    library_names = {lib["name"] for lib in libraries_response.json()}
+    assert "Uploads" in library_names
+
+
+def test_upload_audio_file_ignores_failed_import(files_client, regular_user, auth_headers, monkeypatch):
+    """A storage-only fallback is returned if the audio import pipeline raises."""
+
+    def _broken_import(*_, **__):
+        raise RuntimeError("metadata extraction exploded")
+
+    monkeypatch.setattr(
+        "songhive.api.routes.files.import_audio_file",
+        _broken_import,
+    )
+
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("noise.mp3", io.BytesIO(b"not an mp3"), "audio/mpeg")},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "X-Track-Id" not in response.headers
+    assert data["content_type"] == "audio/mpeg"
+
+
+def test_upload_audio_file_reuses_uploads_library(files_client, regular_user, auth_headers, monkeypatch):
+    """Subsequent audio uploads reuse the existing Uploads library."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Song Two",
+            artist="Artist Two",
+            album="Album Two",
+            mimetype="audio/mpeg",
+        ),
+    )
+    headers = auth_headers(regular_user)
+
+    first = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("one.mp3", io.BytesIO(b"fake audio one"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert first.status_code == 200
+
+    second = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("two.mp3", io.BytesIO(b"fake audio two"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert second.status_code == 200
+
+    libraries_response = files_client.get("/api/v1/libraries/", headers=headers)
+    assert libraries_response.status_code == 200
+    uploads = [lib for lib in libraries_response.json() if lib["name"] == "Uploads"]
+    assert len(uploads) == 1
+
+
+def test_upload_audio_file_to_selected_library(files_client, regular_user, auth_headers, monkeypatch):
+    """Uploading an audio file with library_id imports it into that library."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Selected Library Song",
+            artist="Selected Artist",
+            album="Selected Album",
+            mimetype="audio/mpeg",
+        ),
+    )
+    headers = auth_headers(regular_user)
+
+    library = files_client.post(
+        "/api/v1/libraries/",
+        json={"name": "My Upload Library"},
+        headers=headers,
+    )
+    assert library.status_code == 201
+    library_id = library.json()["id"]
+
+    response = files_client.post(
+        f"/api/v1/files/upload?visibility=public&library_id={library_id}",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    track_id = response.headers["X-Track-Id"]
+
+    tracks_response = files_client.get(f"/api/v1/libraries/{library_id}/tracks", headers=headers)
+    assert tracks_response.status_code == 200
+    track_ids = {track["id"] for track in tracks_response.json()}
+    assert track_id in track_ids
+
+    # The default Uploads library should not be created.
+    libraries_response = files_client.get("/api/v1/libraries/", headers=headers)
+    assert libraries_response.status_code == 200
+    library_names = {lib["name"] for lib in libraries_response.json()}
+    assert "Uploads" not in library_names
+
+
+def test_upload_audio_file_to_missing_library_returns_404(files_client, regular_user, auth_headers):
+    """Uploading to a non-existent library returns 404 before storing the file."""
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?library_id=00000000-0000-0000-0000-000000000000",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == 404
+
+
+def test_upload_audio_file_to_unauthorized_library_returns_403(
+    files_client, regular_user, other_user, auth_headers, monkeypatch
+):
+    """Uploading to a library the user cannot manage returns 403."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Unauthorized Song",
+            artist="Unauthorized Artist",
+            album="Unauthorized Album",
+            mimetype="audio/mpeg",
+        ),
+    )
+    other_headers = auth_headers(other_user)
+
+    other_library = files_client.post(
+        "/api/v1/libraries/",
+        json={"name": "Other Library"},
+        headers=other_headers,
+    )
+    assert other_library.status_code == 201
+    library_id = other_library.json()["id"]
+
+    headers = auth_headers(regular_user)
+    response = files_client.post(
+        f"/api/v1/files/upload?library_id={library_id}",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == 403
+
+
+def test_list_files(files_client, regular_user, auth_headers, upload_txt):
+    """Listing files returns files visible to the requester with pagination totals."""
+    data, _ = upload_txt
+    headers = auth_headers(regular_user)
+
+    response = files_client.get("/api/v1/files/", headers=headers)
+    assert response.status_code == 200
+    files = response.json()
+    assert len(files) == 1
+    assert files[0]["id"] == data["id"]
+    assert files[0]["url"] == f"/api/v1/files/{data['id']}/download"
+    assert "X-Total-Count" in response.headers
+    assert response.headers["X-Total-Count"] == "1"
+
+
+def test_list_files_private_denied_for_other_user(files_client, regular_user, other_user, auth_headers, upload_txt):
+    """Private files are not included in another user's file list."""
+    other_headers = auth_headers(other_user)
+
+    response = files_client.get("/api/v1/files/", headers=other_headers)
+    assert response.status_code == 200
+    assert response.json() == []
+    assert response.headers["X-Total-Count"] == "0"
+
+
+def test_list_files_public_visible_to_anonymous(files_client, regular_user, auth_headers):
+    """Public files appear in unauthenticated file lists."""
+    content = b"public list data"
+    headers = auth_headers(regular_user)
+
+    upload = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("public.txt", content, "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+
+    response = files_client.get("/api/v1/files/")
+    assert response.status_code == 200
+    files = response.json()
+    assert len(files) == 1
+    assert files[0]["visibility"] == "public"
+    assert files[0]["owner_id"] is None
+
+
+def test_list_files_local_visible_to_authenticated_users(files_client, regular_user, other_user, auth_headers):
+    """Local files appear for any authenticated user but hide the owner."""
+    content = b"local list data"
+    headers = auth_headers(regular_user)
+
+    upload = files_client.post(
+        "/api/v1/files/upload?visibility=local",
+        files={"file": ("local.txt", content, "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+
+    other_headers = auth_headers(other_user)
+    response = files_client.get("/api/v1/files/", headers=other_headers)
+    assert response.status_code == 200
+    files = response.json()
+    assert len(files) == 1
+    assert files[0]["visibility"] == "local"
+    assert files[0]["owner_id"] is None
+
+
+def test_list_files_search_by_original_filename(files_client, regular_user, auth_headers):
+    """The q parameter filters the file list by original filename."""
+    headers = auth_headers(regular_user)
+
+    files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("apple.txt", b"a", "text/plain")},
+        headers=headers,
+    )
+    files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("banana.txt", b"b", "text/plain")},
+        headers=headers,
+    )
+
+    response = files_client.get("/api/v1/files/?q=apple", headers=headers)
+    assert response.status_code == 200
+    files = response.json()
+    assert len(files) == 1
+    assert files[0]["original_filename"] == "apple.txt"
+
+
+def test_list_files_pagination(files_client, regular_user, auth_headers):
+    """Limit and offset query parameters paginate the file list."""
+    headers = auth_headers(regular_user)
+
+    for i in range(3):
+        files_client.post(
+            "/api/v1/files/upload?visibility=public",
+            files={"file": (f"file{i}.txt", f"data{i}".encode(), "text/plain")},
+            headers=headers,
+        )
+
+    first = files_client.get("/api/v1/files/?limit=2&offset=0", headers=headers)
+    assert first.status_code == 200
+    assert len(first.json()) == 2
+    assert first.headers["X-Total-Count"] == "3"
+
+    second = files_client.get("/api/v1/files/?limit=2&offset=2", headers=headers)
+    assert second.status_code == 200
+    assert len(second.json()) == 1

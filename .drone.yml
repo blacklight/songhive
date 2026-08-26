@@ -69,6 +69,40 @@ steps:
       include:
         - songhive/**
 
+###
+### Frontend Lint
+###
+
+- name: frontend-lint
+  image: node:20
+  commands:
+    - cd frontend && npm ci && npm run lint && ./node_modules/.bin/prettier --check src
+  when:
+    event:
+      - push
+    paths:
+      include:
+        - frontend/**
+
+###
+### Frontend tests
+###
+
+- name: frontend-tests
+  image: node:20
+  commands:
+    - cd frontend && npm ci && npm run test
+  when:
+    event:
+      - push
+    paths:
+      include:
+        - frontend/**
+
+###
+### Upload test coverage to Codacy
+###
+
 - name: codacy-coverage
   image: python:3.12
   depends_on:

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models import Track
 from ...models._enums import Visibility
 from ...models.user import User
-from ...services import acl, audit, music
+from ...services import acl, audit, deletion, music
 from ...services.auth import get_user_by_id
 from ...services.federation import publish_track_activity, unpublish_track_activity
 from ...services.storage import StorageService
@@ -24,6 +24,7 @@ from ..deps import (
     get_storage_service,
     require_access,
 )
+from ..middleware.rate_limit import rate_limit_account
 from ._common import HasOwnerId, redact_owner
 
 router = APIRouter(prefix="/tracks")
@@ -55,6 +56,19 @@ class TrackUpdate(BaseModel):
     track_number: Optional[int] = None
     disc_number: Optional[int] = None
     visibility: Optional[Visibility] = None
+
+
+class BulkTrackDeleteRequest(BaseModel):
+    """Bulk track deletion payload."""
+
+    track_ids: List[str]
+
+
+class BulkTrackDeleteResponse(BaseModel):
+    """Bulk track deletion result."""
+
+    deleted: int
+    track_ids: List[str]
 
 
 async def _handle_visibility_changes(
@@ -249,15 +263,66 @@ async def update_track(
     )
 
 
-@router.delete("/{track_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/bulk", status_code=status.HTTP_200_OK, dependencies=[Depends(rate_limit_account)])
+async def delete_tracks_bulk_route(
+    body: BulkTrackDeleteRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+):
+    """Delete multiple tracks in a single request."""
+    try:
+        unpublish, deleted_ids = await deletion.delete_tracks_bulk(
+            db,
+            storage,
+            body.track_ids,
+            user=current_user,
+        )
+    except deletion.DeletionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="track.bulk_delete",
+        target_type="track",
+        target_id=None,
+        details={
+            "count": len(deleted_ids),
+            "track_ids": deleted_ids,
+            "admin_deletion": current_user.is_admin,
+        },
+        ip_address=client_ip(request),
+    )
+
+    await db.commit()
+
+    for info in unpublish:
+        if info.owner is not None and info.artist is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                info.track,
+                info.artist,
+                info.owner,
+                request.app.state.config,
+                info.federation_object_id,
+            )
+
+    return BulkTrackDeleteResponse(deleted=len(deleted_ids), track_ids=deleted_ids)
+
+
+@router.delete("/{track_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
 async def delete_track(
     track_id: str,
     request: Request,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
 ):
-    """Delete a track and its library memberships."""
+    """Delete a track, its upload, and all playlist/library memberships."""
     track = await music.get_track(db, track_id)
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -268,35 +333,32 @@ async def delete_track(
             detail="Access denied",
         )
 
-    if current_user.is_admin and track.owner_id != current_user.id:
-        await audit.log_action(
-            db,
-            actor_id=current_user.id,
-            action="track.admin_delete",
-            target_type="track",
-            target_id=track_id,
-            details={"title": track.title, "owner_id": track.owner_id},
-            ip_address=client_ip(request),
-        )
+    admin_deletion = current_user.is_admin and track.owner_id != current_user.id
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="track.admin_delete" if admin_deletion else "track.delete",
+        target_type="track",
+        target_id=track_id,
+        details={"title": track.title, "owner_id": track.owner_id},
+        ip_address=client_ip(request),
+    )
 
-    artist = track.artist
-    owner_id = track.owner_id
-    was_public = track.visibility == Visibility.PUBLIC.value
-    object_id = track.federation_object_id
+    try:
+        unpublish = await deletion.delete_track(db, storage, track_id)
+    except deletion.DeletionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
 
-    await db.delete(track)
     await db.commit()
 
-    if was_public and owner_id and artist is not None:
-        owner = await get_user_by_id(db, owner_id)
-        if owner is not None:
-            background_tasks.add_task(
-                unpublish_track_activity,
-                track,
-                artist,
-                owner,
-                request.app.state.config,
-                object_id,
-            )
+    if unpublish is not None and unpublish.owner is not None and unpublish.artist is not None:
+        background_tasks.add_task(
+            unpublish_track_activity,
+            unpublish.track,
+            unpublish.artist,
+            unpublish.owner,
+            request.app.state.config,
+            unpublish.federation_object_id,
+        )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)

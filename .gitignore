@@ -223,6 +223,8 @@ songhive/static/
 *.sqlite
 frontend/node_modules/
 frontend/dist/
+frontend/coverage/
+frontend/openapi.json
 
 # Temporary documentation and prompts
 docs/features

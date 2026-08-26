@@ -8,18 +8,20 @@ import os
 import stat
 import tempfile
 from pathlib import Path
-from typing import BinaryIO, Literal, Optional, Union, overload
+from typing import BinaryIO, List, Literal, Optional, Union, overload
 
 import aiofiles
 import aiofiles.os
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import StorageConfig
 from ..models._enums import Visibility
 from ..models.stored_file import StoredFile
+from ..models.user import User
 from ..storage.base import StorageBackend
+from .acl import apply_access_filter
 
 
 class StorageService:
@@ -183,3 +185,37 @@ class StorageService:
     async def delete_file(self, stored_file: StoredFile) -> bool:
         """Delete a stored file's backing object."""
         return await self.backend.delete(stored_file.storage_path)
+
+
+async def list_files(
+    session: AsyncSession,
+    *,
+    q: Optional[str] = None,
+    user: Optional[User] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> List[StoredFile]:
+    """List stored files visible to ``user``."""
+    stmt = select(StoredFile)
+    if q:
+        stmt = stmt.where(StoredFile.original_filename.ilike(f"%{q}%"))
+    stmt = apply_access_filter(stmt, StoredFile, user, "file")
+    stmt = stmt.order_by(StoredFile.created_at.desc())
+    stmt = stmt.offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def count_files(
+    session: AsyncSession,
+    *,
+    q: Optional[str] = None,
+    user: Optional[User] = None,
+) -> int:
+    """Return the total number of stored files visible to ``user``."""
+    stmt = select(StoredFile)
+    if q:
+        stmt = stmt.where(StoredFile.original_filename.ilike(f"%{q}%"))
+    stmt = apply_access_filter(stmt, StoredFile, user, "file")
+    result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    return result.scalar() or 0

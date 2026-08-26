@@ -364,13 +364,15 @@ alembic revision --autogenerate -m "add example column"
   short-link cookie).
 - **Rate limiting** — Redis sliding-window; `rate_limit` (IP), `rate_limit_user_or_ip`
   (authenticated users keyed by id), and `rate_limit_account` (always per-user)
-  FastAPI dependencies. Fails open when Redis is unavailable.
+  FastAPI dependencies. Media `DELETE` endpoints use `rate_limit_account` for
+  per-user rate limiting on destructive operations. Fails open when Redis is unavailable.
 
 ---
 
 ## File Storage & Upload Pipeline
 
-1. Client POSTs audio file to `POST /api/v1/files`.
+1. Client lists visible files via `GET /api/v1/files/` or uploads via
+   `POST /api/v1/files/upload`.
 2. `StorageService` (facade over `StorageBackend`) validates size limit,
    computes SHA-256, deduplicates by hash, writes to backend.
 3. A `StoredFile` row is created (content-addressable, owner/visibility set).
@@ -384,6 +386,22 @@ alembic revision --autogenerate -m "add example column"
 **Orphan GC** — the `storage.cleanup_orphaned_files` Celery task runs on the
 configured crontab (default: daily at 03:00) and deletes `StoredFile` rows
 (and their backing files) not referenced by any `Track`, `Album`, or `Upload`.
+
+**Cascade Deletion** — `services/deletion.py` provides centralized deletion
+logic for `Track`, `StoredFile`, `Album`, `Artist`, `Playlist`, and `Library`.
+`DELETE` endpoints on the corresponding routes accept a `recursive` query
+parameter; albums default to recursive deletion while other collections default
+to non-recursive. A dedicated `DELETE /api/v1/tracks/bulk` endpoint accepts a
+list of track IDs and delegates to `delete_tracks_bulk` in the deletion service,
+applying the same ACL and rate-limiting checks as single-track deletion.
+Deleting a track removes its `Upload`, `LibraryTrack`,
+`PlaylistTrack`, `Favorite`, `ListeningHistory`, `TranscodedFile`, `ShareGrant`,
+`ShareToken`, and `Report` rows and deletes the underlying `StoredFile` once it
+is unreferenced. Deleting a stored file removes all tracks that use it as their
+audio source and clears `cover_file_id`/`image_file_id` references on
+albums/artists before removing the backing object. Recursive deletion collects
+unpublish information for public tracks and enqueues `Delete(Tombstone)`
+ActivityPub activities.
 
 ---
 
@@ -524,14 +542,21 @@ is raised when an upload exceeds `storage.max_upload_size`.
 
 Vue.js 3 + TypeScript SPA, bundled with Vite.
 
-| File/Dir                     | Role                                      |
-|------------------------------|-------------------------------------------|
-| `frontend/src/main.ts`       | App bootstrap, Pinia + router mount       |
-| `frontend/src/App.vue`       | Root component                            |
-| `frontend/src/router/`       | Vue Router (history mode)                 |
-| `frontend/src/stores/auth.ts`| Pinia auth store (token management)       |
-| `frontend/src/stores/player.ts`| Pinia audio player state               |
-| `frontend/src/views/`        | Page-level components (Home, Library, Album, Artist, Playlists, Playlist) |
+| File/Dir | Role |
+|----------|------|
+| `frontend/src/main.ts` | App bootstrap, Pinia + i18n + router mount, theme apply |
+| `frontend/src/App.vue` | Root component (`<RouterView />`) |
+| `frontend/src/router/` | Vue Router (history mode) with global auth/admin guard |
+| `frontend/src/stores/` | Pinia stores (auth, theme, toast, confirm, player) |
+| `frontend/src/components/ui/` | Headless base components (button, input, select, avatar, table, pagination, search, context menu) |
+| `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
+| `frontend/src/components/entity/` | Reusable entity grid/list components (e.g. `BulkEditableGrid` for bulk selection and deletion) |
+| `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
+| `frontend/src/layouts/` | App, auth, and admin layouts |
+| `frontend/src/views/` | Page-level components (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About (fetches `GET /api/v1/instance`), Login, Register, PasswordReset, VerifyEmail, Profile, plus 403/404 and placeholder views) |
+| `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules, WebSocket event bus, stream URL helper |
+| `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
+| `frontend/src/styles/tokens.css` | CSS custom properties for theming |
 
 Build output is served as static files by the backend (or a CDN).
 
@@ -548,12 +573,13 @@ REST API under `/api/v1/`:
 ├── artists/        # Artist CRUD + search
 ├── albums/         # Album CRUD + search
 ├── tracks/         # Track CRUD + search
-├── files/          # Generic file upload/download (StoredFile)
-├── libraries/      # Library management
-├── playlists/      # Playlist CRUD
+├── files/          # Generic file upload/list/download (StoredFile)
+├── libraries/      # Library management + add/remove tracks/albums/artists
+├── playlists/      # Playlist CRUD + add/remove tracks/albums/artists + list tracks
 ├── favorites/      # Favorites/bookmarks
 ├── history/        # Listening history
 ├── radios/         # Dynamic radio generation
+├── instance/       # Public instance metadata (Mastodon-compatible)
 ├── shares/         # Share grants (owner → specific user)
 ├── share-urls/     # Share URL tokens (revocable short links)
 ├── share/{token}   # Public short-URL resolver
@@ -571,7 +597,7 @@ REST API under `/api/v1/`:
 /.well-known/nodeinfo           # NodeInfo (Mastodon compat)
 /ap/actor                       # Instance-level Application actor
 /ap/inbox                       # Instance inbox
-/api/v1/*/                      # Mastodon-compatible API (pubby adapter)
+/api/v1/*/                      # Mastodon-compatible API (pubby adapter), except /api/v1/instance which is provided by Songhive and always available
 ```
 
 ---

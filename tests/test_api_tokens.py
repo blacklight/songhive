@@ -365,6 +365,23 @@ def test_delete_api_token_other_user_404(client, auth_headers, api_token_pair, a
     assert after.status_code == 200
 
 
+def test_delete_api_token_removes_from_list(client, auth_headers, api_token_pair, regular_user):
+    """A revoked API token no longer appears in the token list."""
+    token, _ = api_token_pair
+
+    response = client.delete(
+        f"/api/v1/auth/api-tokens/{token.id}",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    response = client.get("/api/v1/auth/api-tokens", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 0
+    assert body["items"] == []
+
+
 def test_unauthenticated_create_returns_401(client):
     """POST without authentication returns 401."""
     response = client.post("/api/v1/auth/api-tokens", json={"name": "nope"})
