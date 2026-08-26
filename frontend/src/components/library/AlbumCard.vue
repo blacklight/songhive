@@ -92,12 +92,14 @@ const artistText = computed(
   transition: background-color var(--transition-fast);
 }
 
-.album-card__cover {
+.album-card__cover,
+.album-card__cover.app-avatar--lg {
   width: 100%;
-  height: 100%;
+  height: auto;
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: var(--radius-md);
+  font-size: clamp(2.5rem, 5vw, 4rem);
 }
 
 .album-card__title {

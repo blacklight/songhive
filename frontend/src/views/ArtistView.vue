@@ -222,12 +222,12 @@ watch(
             artist.name
           }}</AppPageTitle>
           <p v-if="artist.bio" class="artist-view__bio">{{ artist.bio }}</p>
-          <EntityActions
-            class="artist-view__header-actions"
-            :actions="actions"
-            @select="onAction"
-          />
         </div>
+        <EntityActions
+          class="artist-view__header-actions"
+          :actions="actions"
+          @select="onAction"
+        />
       </div>
 
       <section
@@ -390,17 +390,24 @@ watch(
 }
 
 .artist-view__header {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "avatar name"
+    "avatar actions";
   gap: var(--space-4);
+  align-items: center;
 }
 
 .artist-view__avatar {
+  grid-area: avatar;
   width: 8rem;
   height: 8rem;
+  flex-shrink: 0;
 }
 
 .artist-view__info {
+  grid-area: name;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -419,7 +426,24 @@ watch(
 }
 
 .artist-view__header-actions {
-  margin-top: var(--space-2);
+  grid-area: actions;
+}
+
+@media (max-width: 767px) {
+  .artist-view__header {
+    grid-template-areas:
+      "avatar name"
+      "actions actions";
+  }
+
+  .artist-view__avatar {
+    width: clamp(4rem, 20vw, 8rem);
+    height: clamp(4rem, 20vw, 8rem);
+  }
+
+  .artist-view__name {
+    font-size: clamp(1.5rem, 7vw, 2rem);
+  }
 }
 
 .artist-view__section {
