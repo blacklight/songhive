@@ -102,9 +102,12 @@ const artistText = computed(
 
 .album-card__title {
   font-weight: 600;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  flex: 0 0 auto;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .album-card__year {
@@ -121,6 +124,7 @@ const artistText = computed(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .album-card__artist:hover {
