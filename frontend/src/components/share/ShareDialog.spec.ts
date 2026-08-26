@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
+import { nextTick } from "vue";
 import { i18n } from "@/i18n";
 import { formatDateTime } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
 import * as sharesApi from "@/api/shares";
+import ConfirmDialog from "@/components/feedback/ConfirmDialog.vue";
 import ShareDialog from "./ShareDialog.vue";
 
 vi.mock("@/api/shares", () => ({
@@ -427,5 +429,50 @@ describe("ShareDialog", () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it("renders the confirm dialog above the share modal when revoking", async () => {
+    vi.mocked(sharesApi.listShareGrants).mockResolvedValue([
+      createGrant("sg1", "user-2"),
+    ]);
+    setAuthenticated("user-1");
+
+    // ConfirmDialog is mounted in App.vue and exists before any modal.
+    const confirmWrapper = mount(ConfirmDialog, { attachTo: document.body });
+
+    wrapper = mountOpen({ ownerId: "user-1" });
+    await flushPromises();
+
+    const revokeButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.revoke"));
+    expect(revokeButton).toBeDefined();
+    revokeButton?.click();
+    await flushPromises();
+    await nextTick();
+
+    const overlays = document.body.querySelectorAll(".app-modal__overlay");
+    expect(overlays.length).toBe(2);
+
+    const shareOverlay = Array.from(overlays).find((o) =>
+      (o as HTMLElement)
+        .getAttribute("style")
+        ?.includes("--app-modal-depth: 0"),
+    );
+    const confirmOverlay = Array.from(overlays).find((o) =>
+      (o as HTMLElement)
+        .getAttribute("style")
+        ?.includes("--app-modal-depth: 1"),
+    );
+
+    expect(shareOverlay).toBeDefined();
+    expect(confirmOverlay).toBeDefined();
+
+    expect((shareOverlay as HTMLElement).textContent).toContain("Meadowland");
+    expect((confirmOverlay as HTMLElement).textContent).toContain(
+      i18n.global.t("common.cancel"),
+    );
+
+    confirmWrapper.unmount();
   });
 });

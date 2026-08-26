@@ -47,6 +47,7 @@
   --z-player: 40;
   --z-toast: 50;
   --z-modal: 60;
+  --z-modal-step: 1;
   --z-dropdown: 70;
 
   /* Transitions */

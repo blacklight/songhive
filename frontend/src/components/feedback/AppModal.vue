@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useModalStackStore } from "@/stores/modalStack";
 import { useFocusTrap } from "@/composables/useFocusTrap";
 import AppIcon from "@/components/ui/AppIcon.vue";
 
@@ -17,12 +18,50 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 
+const modalStack = useModalStackStore();
+const modalId = ref<string | null>(null);
+
 const dialogRef = ref<HTMLElement | null>(null);
 const titleId = computed(() =>
   props.title
     ? `modal-title-${Math.random().toString(36).slice(2)}`
     : undefined,
 );
+
+const overlayStyle = computed(() => {
+  if (modalId.value === null) {
+    return { "z-index": "var(--z-modal)" };
+  }
+
+  const depth = modalStack.depthOf(modalId.value);
+  return {
+    "z-index":
+      "calc(var(--z-modal) + var(--z-modal-step) * var(--app-modal-depth, 0))",
+    "--app-modal-depth": String(depth >= 0 ? depth : 0),
+  };
+});
+
+watch(
+  () => props.open,
+  (open) => {
+    if (open) {
+      if (modalId.value === null) {
+        modalId.value = modalStack.open();
+      }
+    } else if (modalId.value !== null) {
+      modalStack.close(modalId.value);
+      modalId.value = null;
+    }
+  },
+  { immediate: true },
+);
+
+onUnmounted(() => {
+  if (modalId.value !== null) {
+    modalStack.close(modalId.value);
+    modalId.value = null;
+  }
+});
 
 function close() {
   if (props.closable) emit("close");
@@ -48,7 +87,7 @@ useFocusTrap(
       v-if="props.open"
       ref="dialogRef"
       class="app-modal__overlay"
-      :style="{ 'z-index': 'var(--z-modal)' }"
+      :style="overlayStyle"
       @click="onBackdropClick"
       @keydown="onEsc"
     >

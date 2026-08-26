@@ -1,5 +1,6 @@
 import { config } from "@vue/test-utils";
 import { beforeEach, vi } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
 import { i18n } from "@/i18n";
 
 function createFakeStorage(): Storage {
@@ -111,6 +112,7 @@ Object.defineProperty(window.HTMLMediaElement.prototype, "load", {
 });
 
 beforeEach(() => {
+  setActivePinia(createPinia());
   localStorage.clear();
 });
 
