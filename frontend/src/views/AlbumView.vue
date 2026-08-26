@@ -9,12 +9,14 @@ import {
 import {
   getAlbum,
   deleteAlbum as deleteAlbumApi,
+  enrichAlbum,
   type AlbumResponse,
 } from "@/api/albums";
 import { getArtist, type ArtistResponse } from "@/api/artists";
 import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
+import { useToastStore } from "@/stores/toast";
 import type { TrackEnrich } from "@/player/enrich";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
@@ -33,6 +35,7 @@ import DeleteModal from "@/components/entity/DeleteModal.vue";
 const { t } = useI18n();
 const route = useRoute();
 const authStore = useAuthStore();
+const toastStore = useToastStore();
 const albumId = computed(() => String(route.params.id));
 
 const addDialogOpen = ref(false);
@@ -113,6 +116,21 @@ function onTrackShare(track: QueueTrack) {
 
 async function onTracksRemoved() {
   await refreshTracks();
+}
+
+async function onEnrichAlbum() {
+  try {
+    const response = await enrichAlbum(albumId.value);
+    toastStore.push({
+      type: "success",
+      message: t("browse.enrich.albumSuccess", { count: response.enqueued }),
+    });
+  } catch (err) {
+    toastStore.push({
+      type: "error",
+      message: t("browse.enrich.error", { message: getApiErrorMessage(err) }),
+    });
+  }
 }
 
 async function loadAlbum() {
@@ -238,6 +256,14 @@ watch(
               @click="openAddDialog('playlist')"
             >
               {{ t("browse.addToCollection.addToPlaylist") }}
+            </AppButton>
+            <AppButton
+              v-if="canDeleteAlbum"
+              size="sm"
+              icon="wand-magic-sparkles"
+              @click="onEnrichAlbum"
+            >
+              {{ t("browse.enrich.metadata") }}
             </AppButton>
             <AppButton
               v-if="canDeleteAlbum"

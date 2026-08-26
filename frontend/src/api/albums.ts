@@ -26,9 +26,20 @@ export function updateAlbum(
   return apiRequest<AlbumResponse>(`/albums/${id}`, { method: "PATCH", body });
 }
 
+export interface AlbumEnrichResponse {
+  album_id: string;
+  enqueued: number;
+}
+
 export function deleteAlbum(id: string, recursive = true): Promise<void> {
   return apiRequest<void>(`/albums/${id}`, {
     method: "DELETE",
     query: { recursive },
+  });
+}
+
+export function enrichAlbum(id: string): Promise<AlbumEnrichResponse> {
+  return apiRequest<AlbumEnrichResponse>(`/albums/${id}/enrich`, {
+    method: "POST",
   });
 }

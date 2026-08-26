@@ -17,7 +17,12 @@ import { formatTime } from "@/utils/time";
 import { getApiErrorMessage } from "@/api/client";
 import { removeTracksFromLibrary } from "@/api/libraries";
 import { removeTracksFromPlaylist } from "@/api/playlists";
-import { deleteTrack, deleteTracks, downloadTrack } from "@/api/tracks";
+import {
+  deleteTrack,
+  deleteTracks,
+  downloadTrack,
+  enrichTrack,
+} from "@/api/tracks";
 import { canManageItem } from "@/composables/useCanManage";
 
 export interface RemovableFrom {
@@ -457,6 +462,14 @@ const menuItems = computed(() => {
     });
   }
 
+  if (track && canDelete(track)) {
+    items.push({
+      key: "enrich",
+      label: t("browse.contextMenu.enrich"),
+      icon: "wand-magic-sparkles",
+    });
+  }
+
   if (props.deletable && track && canDelete(track)) {
     items.push({
       key: "delete-track",
@@ -550,6 +563,22 @@ async function onMenuSelect(key: string) {
       break;
     case "go-to-artist":
       if (track.artist_id) router.push(`/artists/${track.artist_id}`);
+      break;
+    case "enrich":
+      try {
+        await enrichTrack(track.id);
+        toastStore.push({
+          type: "success",
+          message: t("browse.enrich.success"),
+        });
+      } catch (err) {
+        toastStore.push({
+          type: "error",
+          message: t("browse.enrich.error", {
+            message: getApiErrorMessage(err),
+          }),
+        });
+      }
       break;
     case "share":
       emit("share", track);

@@ -370,7 +370,15 @@
       "addToPlaylist": "Add to playlist",
       "removeFromLibrary": "Remove from library",
       "removeFromPlaylist": "Remove from playlist",
-      "deleteTrack": "Delete track"
+      "deleteTrack": "Delete track",
+      "enrich": "Fetch metadata"
+    },
+    "enrich": {
+      "title": "Fetch metadata",
+      "metadata": "Fetch metadata",
+      "success": "Metadata enrichment queued.",
+      "albumSuccess": "Metadata enrichment queued for {count} tracks.",
+      "error": "Could not fetch metadata: {message}"
     },
     "removeFromCollection": {
       "singleTitle": "Remove \"{track}\" from \"{collection}\"?",

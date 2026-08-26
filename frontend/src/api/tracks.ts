@@ -39,6 +39,17 @@ export interface BulkTrackDeleteResponse {
   track_ids: string[];
 }
 
+export interface TrackEnrichResponse {
+  track_id: string;
+  enqueued: boolean;
+}
+
+export function enrichTrack(id: string): Promise<TrackEnrichResponse> {
+  return apiRequest<TrackEnrichResponse>(`/tracks/${id}/enrich`, {
+    method: "POST",
+  });
+}
+
 export function deleteTrack(id: string): Promise<void> {
   return apiRequest<void>(`/tracks/${id}`, { method: "DELETE" });
 }
