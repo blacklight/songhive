@@ -2,6 +2,8 @@
 Tests for the album API endpoints.
 """
 
+import io
+
 import pytest
 
 from songhive.models._enums import Visibility
@@ -335,3 +337,36 @@ async def test_enrich_album_logs_audit_entry(
         )
     )
     assert result is not None
+
+
+def test_update_album_metadata(client, sample_albums, regular_user, auth_headers):
+    """Owners can update an album's title, release year, and description."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"title": "Updated Title", "release_year": 2020, "description": "Updated description"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "Updated Title"
+    assert body["release_year"] == 2020
+    assert body["description"] == "Updated description"
+
+
+def test_upload_and_delete_album_cover(client, sample_albums, regular_user, auth_headers):
+    """Owners can upload and remove album cover art."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+    headers = auth_headers(regular_user)
+
+    cover = client.post(
+        f"/api/v1/albums/{album.id}/cover",
+        files={"file": ("cover.jpg", io.BytesIO(b"fake cover"), "image/jpeg")},
+        headers=headers,
+    )
+    assert cover.status_code == 200
+    assert cover.json()["cover_url"] is not None
+
+    delete = client.delete(f"/api/v1/albums/{album.id}/cover", headers=headers)
+    assert delete.status_code == 200
+    assert delete.json()["cover_url"] is None

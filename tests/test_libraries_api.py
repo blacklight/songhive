@@ -581,3 +581,118 @@ def test_list_library_tracks_unauthorized(client, sample_libraries, other_user, 
         headers=auth_headers(other_user),
     )
     assert response.status_code == 403
+
+
+def test_update_library_metadata(client, sample_libraries, regular_user, auth_headers):
+    """Owners can update a library's name, description, and visibility."""
+    library = next(lib for lib in sample_libraries if lib["visibility"] == "private")
+    response = client.patch(
+        f"/api/v1/libraries/{library['id']}",
+        json={"name": "New Name", "description": "New description"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "New Name"
+    assert body["description"] == "New description"
+    assert "image_url" in body
+    assert "cover_url" in body
+
+
+def test_upload_and_delete_library_images(client, sample_libraries, regular_user, auth_headers):
+    """Owners can upload and remove library image and cover."""
+    library = next(lib for lib in sample_libraries if lib["visibility"] == "public")
+    headers = auth_headers(regular_user)
+
+    image = client.post(
+        f"/api/v1/libraries/{library['id']}/image",
+        files={"file": ("image.jpg", io.BytesIO(b"fake image"), "image/jpeg")},
+        headers=headers,
+    )
+    assert image.status_code == 200
+    assert image.json()["image_url"] is not None
+
+    cover = client.post(
+        f"/api/v1/libraries/{library['id']}/cover",
+        files={"file": ("cover.jpg", io.BytesIO(b"fake cover"), "image/jpeg")},
+        headers=headers,
+    )
+    assert cover.status_code == 200
+    assert cover.json()["cover_url"] is not None
+
+    delete = client.delete(f"/api/v1/libraries/{library['id']}/image", headers=headers)
+    assert delete.status_code == 200
+    assert delete.json()["image_url"] is None
+
+    delete_cover = client.delete(f"/api/v1/libraries/{library['id']}/cover", headers=headers)
+    assert delete_cover.status_code == 200
+    assert delete_cover.json()["cover_url"] is None
+
+
+def test_library_image_isolation(client, regular_user, auth_headers):
+    """Uploading an image to one library must not set it on another."""
+    headers = auth_headers(regular_user)
+
+    lib_a = client.post(
+        "/api/v1/libraries/",
+        params={"visibility": "private"},
+        json={"name": "Library A"},
+        headers=headers,
+    )
+    assert lib_a.status_code == 201
+    lib_a_id = lib_a.json()["id"]
+
+    lib_b = client.post(
+        "/api/v1/libraries/",
+        params={"visibility": "private"},
+        json={"name": "Library B"},
+        headers=headers,
+    )
+    assert lib_b.status_code == 201
+    lib_b_id = lib_b.json()["id"]
+
+    image = client.post(
+        f"/api/v1/libraries/{lib_a_id}/image",
+        files={"file": ("image.jpg", io.BytesIO(b"fake image"), "image/jpeg")},
+        headers=headers,
+    )
+    assert image.status_code == 200
+    lib_a_image = image.json()["image_url"]
+    assert lib_a_image is not None
+
+    detail_a = client.get(f"/api/v1/libraries/{lib_a_id}", headers=headers)
+    assert detail_a.status_code == 200
+    assert detail_a.json()["image_url"] == lib_a_image
+
+    detail_b = client.get(f"/api/v1/libraries/{lib_b_id}", headers=headers)
+    assert detail_b.status_code == 200
+    assert detail_b.json()["image_url"] is None
+
+    listed = client.get("/api/v1/libraries/", headers=headers)
+    assert listed.status_code == 200
+    by_id = {lib["id"]: lib for lib in listed.json()}
+    assert by_id[lib_a_id]["image_url"] == lib_a_image
+    assert by_id[lib_b_id]["image_url"] is None
+
+
+def test_library_image_size_limit(client, sample_libraries, regular_user, auth_headers):
+    """Oversized image uploads are rejected."""
+    library = next(lib for lib in sample_libraries if lib["visibility"] == "public")
+    big = b"x" * (10 * 1024 * 1024 + 1)
+    response = client.post(
+        f"/api/v1/libraries/{library['id']}/image",
+        files={"file": ("big.jpg", io.BytesIO(big), "image/jpeg")},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 413
+
+
+def test_library_image_unsupported_type(client, sample_libraries, regular_user, auth_headers):
+    """Non-image uploads are rejected."""
+    library = next(lib for lib in sample_libraries if lib["visibility"] == "public")
+    response = client.post(
+        f"/api/v1/libraries/{library['id']}/image",
+        files={"file": ("audio.mp3", io.BytesIO(b"audio"), "audio/mpeg")},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 415

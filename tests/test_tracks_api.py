@@ -2,12 +2,14 @@
 Tests for the track API endpoints.
 """
 
+import io
 import uuid
 from unittest.mock import MagicMock
 
 import pytest
 
 from songhive.models._enums import Visibility
+from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.track import Track
 
@@ -525,3 +527,69 @@ async def test_list_tracks_around_track_id(client, db_session, regular_user, aut
     assert len(data) == 10
     assert int(response.headers["X-List-Offset"]) == 10
     assert data[5]["id"] == target.id
+
+
+def test_update_track_metadata(client, sample_tracks, regular_user, auth_headers):
+    """Owners can update track title, release year, and track number."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"title": "Updated Track", "track_number": 5, "release_year": 1999},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "Updated Track"
+    assert body["track_number"] == 5
+    assert body["release_year"] == 1999
+
+
+@pytest.mark.asyncio
+async def test_track_release_year_inherits_album(client, db_session, regular_user, auth_headers):
+    """Tracks inherit an album's release year when no override is set."""
+    artist = Artist(name="Album Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    album = Album(title="Test Album", artist_id=artist.id, owner_id=str(regular_user.id), release_year=2005)
+    db_session.add(album)
+    await db_session.flush()
+    track = Track(
+        title="Inherit Year",
+        artist_id=artist.id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    response = client.get(f"/api/v1/tracks/{track.id}?include=album", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["release_year"] == 2005
+
+    patch = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"release_year": 2010},
+        headers=auth_headers(regular_user),
+    )
+    assert patch.status_code == 200
+    assert patch.json()["release_year"] == 2010
+
+
+def test_upload_and_delete_track_image(client, sample_tracks, regular_user, auth_headers):
+    """Owners can upload and remove a track image."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    headers = auth_headers(regular_user)
+
+    image = client.post(
+        f"/api/v1/tracks/{track.id}/image",
+        files={"file": ("image.jpg", io.BytesIO(b"fake image"), "image/jpeg")},
+        headers=headers,
+    )
+    assert image.status_code == 200
+    assert image.json()["image_url"] is not None
+
+    delete = client.delete(f"/api/v1/tracks/{track.id}/image", headers=headers)
+    assert delete.status_code == 200
+    assert delete.json()["image_url"] is None
