@@ -408,6 +408,26 @@ export interface paths {
     patch: operations["update_album_api_v1_albums__album_id__patch"];
     trace?: never;
   };
+  "/api/v1/albums/{album_id}/enrich": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enrich Album
+     * @description Enqueue MusicBrainz enrichment for all tracks in an album.
+     */
+    post: operations["enrich_album_api_v1_albums__album_id__enrich_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/tracks/": {
     parameters: {
       query?: never;
@@ -454,6 +474,46 @@ export interface paths {
      * @description Partially update a track.
      */
     patch: operations["update_track_api_v1_tracks__track_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/tracks/bulk": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete Tracks Bulk Route
+     * @description Delete multiple tracks in a single request.
+     */
+    delete: operations["delete_tracks_bulk_route_api_v1_tracks_bulk_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/tracks/{track_id}/enrich": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enrich Track Route
+     * @description Enqueue MusicBrainz enrichment for a single track.
+     */
+    post: operations["enrich_track_route_api_v1_tracks__track_id__enrich_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/playlists/": {
@@ -2030,6 +2090,16 @@ export interface components {
       role: components["schemas"]["UserRole"];
     };
     /**
+     * AlbumEnrichResponse
+     * @description Album metadata enrichment result.
+     */
+    AlbumEnrichResponse: {
+      /** Album Id */
+      album_id: string;
+      /** Enqueued */
+      enqueued: number;
+    };
+    /**
      * AlbumResponse
      * @description Public album response.
      */
@@ -2048,6 +2118,36 @@ export interface components {
       cover_url?: string | null;
       /** Description */
       description?: string | null;
+      /** Owner Id */
+      owner_id?: string | null;
+      /**
+       * Visibility
+       * @default private
+       */
+      visibility: string;
+      artist?: components["schemas"]["ArtistSummary"] | null;
+      owner?: components["schemas"]["UserSummary"] | null;
+      /** Tracks */
+      tracks?: components["schemas"]["TrackSummary"][] | null;
+    };
+    /**
+     * AlbumSummary
+     * @description Shallow album object suitable for nesting inside other responses.
+     */
+    AlbumSummary: {
+      /** Id */
+      id: string;
+      /** Title */
+      title: string;
+      /** Artist Id */
+      artist_id: string;
+      artist?: components["schemas"]["ArtistSummary"] | null;
+      /** Musicbrainz Id */
+      musicbrainz_id?: string | null;
+      /** Release Year */
+      release_year?: number | null;
+      /** Cover Url */
+      cover_url?: string | null;
       /** Owner Id */
       owner_id?: string | null;
       /**
@@ -2229,6 +2329,22 @@ export interface components {
       image_file_id?: string | null;
       /** Image Url */
       image_url?: string | null;
+      /** Albums */
+      albums?: components["schemas"]["AlbumSummary"][] | null;
+      /** Tracks */
+      tracks?: components["schemas"]["TrackSummary"][] | null;
+    };
+    /**
+     * ArtistSummary
+     * @description Shallow artist object suitable for nesting inside other responses.
+     */
+    ArtistSummary: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Image Url */
+      image_url?: string | null;
     };
     /**
      * AuditLogResponse
@@ -2312,6 +2428,14 @@ export interface components {
     Body_upload_track_api_v1_libraries__library_id__tracks_post: {
       /** File */
       file: string;
+    };
+    /**
+     * BulkTrackDeleteRequest
+     * @description Bulk track deletion payload.
+     */
+    BulkTrackDeleteRequest: {
+      /** Track Ids */
+      track_ids: string[];
     };
     /**
      * BulkUserActionRequest
@@ -2470,6 +2594,9 @@ export interface components {
        * @default false
        */
       can_write: boolean;
+      owner?: components["schemas"]["UserSummary"] | null;
+      /** Tracks */
+      tracks?: components["schemas"]["TrackSummary"][] | null;
     };
     /**
      * LibraryUpdate
@@ -2615,6 +2742,9 @@ export interface components {
        * @default private
        */
       visibility: string;
+      owner?: components["schemas"]["UserSummary"] | null;
+      /** Tracks */
+      tracks?: components["schemas"]["TrackSummary"][] | null;
     };
     /**
      * PublicUserResponse
@@ -2939,6 +3069,16 @@ export interface components {
       expires_in: number;
     };
     /**
+     * TrackEnrichResponse
+     * @description Track metadata enrichment result.
+     */
+    TrackEnrichResponse: {
+      /** Track Id */
+      track_id: string;
+      /** Enqueued */
+      enqueued: boolean;
+    };
+    /**
      * TrackResponse
      * @description Public track response.
      */
@@ -2959,6 +3099,40 @@ export interface components {
       duration?: number | null;
       /** Genre */
       genre?: string | null;
+      /** Audio Url */
+      audio_url?: string | null;
+      /** Owner Id */
+      owner_id?: string | null;
+      /**
+       * Visibility
+       * @default private
+       */
+      visibility: string;
+      artist?: components["schemas"]["ArtistSummary"] | null;
+      album?: components["schemas"]["AlbumSummary"] | null;
+      owner?: components["schemas"]["UserSummary"] | null;
+    };
+    /**
+     * TrackSummary
+     * @description Shallow track object suitable for nesting inside other responses.
+     */
+    TrackSummary: {
+      /** Id */
+      id: string;
+      /** Title */
+      title: string;
+      /** Artist Id */
+      artist_id: string;
+      artist?: components["schemas"]["ArtistSummary"] | null;
+      /** Album Id */
+      album_id?: string | null;
+      album?: components["schemas"]["AlbumSummary"] | null;
+      /** Track Number */
+      track_number?: number | null;
+      /** Disc Number */
+      disc_number?: number | null;
+      /** Duration */
+      duration?: number | null;
       /** Audio Url */
       audio_url?: string | null;
       /** Owner Id */
@@ -3040,6 +3214,20 @@ export interface components {
      * @enum {string}
      */
     UserRole: "user" | "moderator" | "admin";
+    /**
+     * UserSummary
+     * @description Shallow user object suitable for nesting as an owner reference.
+     */
+    UserSummary: {
+      /** Id */
+      id: string;
+      /** Username */
+      username: string;
+      /** Display Name */
+      display_name?: string | null;
+      /** Avatar Url */
+      avatar_url?: string | null;
+    };
     /** ValidationError */
     ValidationError: {
       /** Location */
@@ -3889,6 +4077,8 @@ export interface operations {
         q?: string | null;
         limit?: number;
         offset?: number;
+        /** @description Comma-separated relations to include. Allowed: albums, tracks */
+        include?: string | null;
       };
       header?: never;
       path?: never;
@@ -3918,7 +4108,10 @@ export interface operations {
   };
   get_artist_api_v1_artists__artist_id__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: albums, tracks */
+        include?: string | null;
+      };
       header?: never;
       path: {
         artist_id: string;
@@ -3989,6 +4182,8 @@ export interface operations {
         year_to?: number | null;
         limit?: number;
         offset?: number;
+        /** @description Comma-separated relations to include. Allowed: artist, owner, tracks */
+        include?: string | null;
       };
       header?: never;
       path?: never;
@@ -4018,7 +4213,10 @@ export interface operations {
   };
   get_album_api_v1_albums__album_id__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: artist, owner, tracks */
+        include?: string | null;
+      };
       header?: never;
       path: {
         album_id: string;
@@ -4081,7 +4279,10 @@ export interface operations {
   };
   update_album_api_v1_albums__album_id__patch: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: artist, owner, tracks */
+        include?: string | null;
+      };
       header?: never;
       path: {
         album_id: string;
@@ -4114,6 +4315,37 @@ export interface operations {
       };
     };
   };
+  enrich_album_api_v1_albums__album_id__enrich_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        album_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AlbumEnrichResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_tracks_api_v1_tracks__get: {
     parameters: {
       query?: {
@@ -4127,6 +4359,8 @@ export interface operations {
         library_id?: string | null;
         limit?: number;
         offset?: number;
+        /** @description Comma-separated relations to include. Allowed: album, artist, owner */
+        include?: string | null;
       };
       header?: never;
       path?: never;
@@ -4156,7 +4390,10 @@ export interface operations {
   };
   get_track_api_v1_tracks__track_id__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: album, artist, owner */
+        include?: string | null;
+      };
       header?: never;
       path: {
         track_id: string;
@@ -4216,7 +4453,10 @@ export interface operations {
   };
   update_track_api_v1_tracks__track_id__patch: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: album, artist, owner */
+        include?: string | null;
+      };
       header?: never;
       path: {
         track_id: string;
@@ -4249,11 +4489,77 @@ export interface operations {
       };
     };
   };
+  delete_tracks_bulk_route_api_v1_tracks_bulk_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BulkTrackDeleteRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  enrich_track_route_api_v1_tracks__track_id__enrich_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        track_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TrackEnrichResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_playlists_api_v1_playlists__get: {
     parameters: {
       query?: {
         limit?: number;
         offset?: number;
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
       };
       header?: never;
       path?: never;
@@ -4318,7 +4624,10 @@ export interface operations {
   };
   get_playlist_api_v1_playlists__playlist_id__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
       header?: never;
       path: {
         playlist_id: string;
@@ -4384,6 +4693,8 @@ export interface operations {
       query?: {
         limit?: number;
         offset?: number;
+        /** @description Comma-separated relations to include. Allowed: album, artist, owner */
+        include?: string | null;
       };
       header?: never;
       path: {
@@ -4488,6 +4799,8 @@ export interface operations {
       query?: {
         limit?: number;
         offset?: number;
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
       };
       header?: never;
       path?: never;
@@ -4552,7 +4865,10 @@ export interface operations {
   };
   get_library_api_v1_libraries__library_id__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
       header?: never;
       path: {
         library_id: string;
@@ -4615,7 +4931,10 @@ export interface operations {
   };
   update_library_api_v1_libraries__library_id__patch: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
       header?: never;
       path: {
         library_id: string;
@@ -4653,6 +4972,8 @@ export interface operations {
       query?: {
         limit?: number;
         offset?: number;
+        /** @description Comma-separated relations to include. Allowed: album, artist, owner */
+        include?: string | null;
       };
       header?: never;
       path: {

@@ -17,9 +17,10 @@ export function toQueueTrack(
 ): QueueTrack {
   return {
     ...track,
-    artist_name: enrich?.artist_name ?? "",
-    album_title: enrich?.album_title,
-    artwork_url: enrich?.artwork_url,
+    artist_name: track.artist?.name ?? enrich?.artist_name ?? "",
+    album_title: track.album?.title ?? enrich?.album_title,
+    artwork_url:
+      track.album?.cover_url ?? track.artist?.image_url ?? enrich?.artwork_url,
   };
 }
 

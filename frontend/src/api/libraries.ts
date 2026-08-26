@@ -50,7 +50,7 @@ export function deleteLibrary(id: string, recursive = false): Promise<void> {
 
 export function listLibraryTracks(
   id: string,
-  params?: { limit?: number; offset?: number },
+  params?: { limit?: number; offset?: number; include?: string },
 ): Promise<TrackResponse[]> {
   return apiRequest<TrackResponse[]>(`/libraries/${id}/tracks`, {
     query: params,

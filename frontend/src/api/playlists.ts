@@ -51,7 +51,7 @@ export function addTracksToPlaylist(
 
 export function listPlaylistTracks(
   id: string,
-  params?: { limit?: number; offset?: number },
+  params?: { limit?: number; offset?: number; include?: string },
 ): Promise<TrackResponse[]> {
   return apiRequest<TrackResponse[]>(`/playlists/${id}/tracks`, {
     query: params,

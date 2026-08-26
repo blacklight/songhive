@@ -23,7 +23,6 @@ import { toVisibility } from "@/utils/entity";
 import { getApiErrorMessage } from "@/api/client";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
-import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import type { QueueTrack } from "@/player/types";
@@ -82,6 +81,7 @@ const {
   listLibraryTracks(libraryId.value, {
     limit: params.limit,
     offset: params.offset,
+    include: "artist,album",
   }),
 );
 
@@ -91,10 +91,6 @@ const visibilityOptions = computed(() => [
   { value: "public", label: t("browse.visibility.public") },
 ]);
 
-const { enrich: trackEnrich } = useTrackEnrichment(
-  tracks,
-  computed(() => library.value?.name ?? ""),
-);
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 const removableFrom = computed(() =>
@@ -495,7 +491,6 @@ watch(
           :tracks="tracks"
           :loading="tracksLoading"
           :context="library.name"
-          :enrich="trackEnrich"
           :removable-from="removableFrom"
           :deletable="true"
           @share="onTrackShare"

@@ -18,7 +18,9 @@ const {
   search,
   retry,
   refresh,
-} = useEntityList<AlbumResponse>(listAlbums);
+} = useEntityList<AlbumResponse>((params) =>
+  listAlbums({ ...params, include: "artist" }),
+);
 
 onMounted(() => load());
 </script>

@@ -26,7 +26,9 @@ const {
   search,
   retry,
   refresh,
-} = useEntityList<TrackResponse>(listTracks);
+} = useEntityList<TrackResponse>((params) =>
+  listTracks({ ...params, include: "artist,album" }),
+);
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 function onTrackShare(track: QueueTrack) {

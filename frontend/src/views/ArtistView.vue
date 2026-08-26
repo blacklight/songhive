@@ -15,7 +15,6 @@ import { listAlbums, type AlbumResponse } from "@/api/albums";
 import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
-import type { TrackEnrich } from "@/player/enrich";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import type { QueueTrack } from "@/player/types";
@@ -45,7 +44,6 @@ function openAddDialog(mode: "library" | "playlist") {
 const artist = ref<ArtistResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
-const allAlbums = ref<AlbumResponse[]>([]);
 
 const {
   items: albums,
@@ -79,27 +77,9 @@ const {
     artist_id: artistId.value,
     limit: params.limit,
     offset: params.offset,
+    include: "artist,album",
   }),
 );
-
-const allAlbumsMap = computed(
-  () => new Map(allAlbums.value.map((album) => [album.id, album])),
-);
-
-const trackEnrich = computed<Map<string, TrackEnrich>>(() => {
-  const map = new Map<string, TrackEnrich>();
-  for (const track of tracks.value) {
-    const album = track.album_id
-      ? allAlbumsMap.value.get(track.album_id)
-      : null;
-    map.set(track.id, {
-      artist_name: artist.value?.name ?? "",
-      album_title: album?.title,
-      artwork_url: album?.cover_url ?? undefined,
-    });
-  }
-  return map;
-});
 
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
@@ -147,37 +127,12 @@ async function loadArtist() {
   }
 }
 
-async function loadAllAlbums() {
-  const collected: AlbumResponse[] = [];
-  const limit = 100;
-  let offset = 0;
-  let hasMore = true;
-  while (hasMore) {
-    try {
-      const page = await listAlbums({
-        q: "",
-        artist_id: artistId.value,
-        limit,
-        offset,
-      });
-      collected.push(...page);
-      hasMore = page.length === limit;
-      if (hasMore) offset += limit;
-    } catch {
-      // Best-effort enrichment; the paginated discography grid still works.
-      hasMore = false;
-    }
-  }
-  allAlbums.value = collected;
-}
-
 async function load() {
   artist.value = null;
-  allAlbums.value = [];
   error.value = null;
   await loadArtist();
   if (!artist.value) return;
-  await Promise.all([loadAllAlbums(), loadAlbums(true), loadTracks(true)]);
+  await Promise.all([loadAlbums(true), loadTracks(true)]);
 }
 
 onMounted(() => load());
@@ -325,7 +280,6 @@ watch(
           :tracks="tracks"
           :loading="tracksLoading"
           :context="artist.name"
-          :enrich="trackEnrich"
           :deletable="true"
           @share="onTrackShare"
           @removed="onTracksRemoved"

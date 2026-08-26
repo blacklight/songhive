@@ -74,6 +74,18 @@ function createTrack(id: string, title: string): TrackResponse {
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
     owner_id: "user-1",
+    artist: { id: "artist-1", name: "The Larks", image_url: null },
+    album: {
+      id: "album-1",
+      title: "Meadowland",
+      artist_id: "artist-1",
+      artist: null,
+      musicbrainz_id: null,
+      release_year: 2024,
+      cover_url: null,
+      owner_id: "user-1",
+      visibility: "public",
+    },
   };
 }
 
@@ -121,6 +133,7 @@ describe("AlbumView", () => {
       album_id: "album-1",
       limit: 20,
       offset: 0,
+      include: "artist,album",
     });
 
     expect(wrapper.text()).toContain("Meadowland");
@@ -178,6 +191,7 @@ describe("AlbumView", () => {
       album_id: "album-1",
       limit: 20,
       offset: 20,
+      include: "artist,album",
     });
     expect(wrapper.text()).toContain("Song 19");
     expect(wrapper.text()).toContain("Song 20");

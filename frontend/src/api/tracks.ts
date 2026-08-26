@@ -15,11 +15,18 @@ export function listTracks(params?: {
   library_id?: string;
   limit?: number;
   offset?: number;
+  include?: string;
 }): Promise<TrackResponse[]> {
   return apiRequest<TrackResponse[]>("/tracks/", { query: params });
 }
 
-export function getTrack(id: string): Promise<TrackResponse> {
+export function getTrack(
+  id: string,
+  params?: { include?: string },
+): Promise<TrackResponse> {
+  if (params) {
+    return apiRequest<TrackResponse>(`/tracks/${id}`, { query: params });
+  }
   return apiRequest<TrackResponse>(`/tracks/${id}`);
 }
 

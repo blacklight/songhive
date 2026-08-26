@@ -19,7 +19,8 @@ const artistLink = computed(() =>
 );
 
 const artistText = computed(
-  () => props.artistName ?? t("browse.entities.artist"),
+  () =>
+    props.artistName ?? props.album.artist?.name ?? t("browse.entities.artist"),
 );
 </script>
 

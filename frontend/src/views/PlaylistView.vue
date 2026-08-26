@@ -17,7 +17,6 @@ import { getApiErrorMessage } from "@/api/client";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
-import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useAuthStore } from "@/stores/auth";
 import type { QueueTrack } from "@/player/types";
@@ -51,16 +50,13 @@ const {
   listPlaylistTracks(playlistId.value, {
     limit: params.limit,
     offset: params.offset,
+    include: "artist,album",
   }),
 );
 
 const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
   useEntityMeta(playlist);
 
-const { enrich: trackEnrich } = useTrackEnrichment(
-  tracks,
-  computed(() => playlist.value?.name ?? ""),
-);
 const { isOwner } = useOwnership(
   computed(() => playlist.value?.owner_id ?? null),
 );
@@ -237,7 +233,6 @@ watch(
           :tracks="tracks"
           :loading="tracksLoading"
           :context="playlist.name"
-          :enrich="trackEnrich"
           :removable-from="removableFrom"
           :empty-label="t('browse.playlist.empty')"
           :deletable="true"

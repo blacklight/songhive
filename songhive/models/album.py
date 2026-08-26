@@ -2,13 +2,17 @@
 Album model.
 """
 
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._enums import Visibility
 from .base import Base
+
+if TYPE_CHECKING:
+    from .artist import Artist
+    from .track import Track
 
 
 class Album(Base):
@@ -32,5 +36,7 @@ class Album(Base):
         index=True,
     )
 
-    artist = relationship("Artist", backref="albums", lazy="selectin")
+    artist: Mapped["Artist"] = relationship("Artist", back_populates="albums", lazy="selectin")
     cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")
+    owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
+    tracks: Mapped[List["Track"]] = relationship("Track", back_populates="album", lazy="selectin")

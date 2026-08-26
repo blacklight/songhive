@@ -15,6 +15,7 @@ from ...services import acl, audit, deletion, music
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
+from .._include import IncludeQuery, get_include
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -23,6 +24,14 @@ from ..deps import (
     require_access,
 )
 from ..middleware.rate_limit import rate_limit_account
+from ..responses import (
+    ArtistSummary,
+    TrackSummary,
+    UserSummary,
+    build_artist_summary,
+    build_track_summary,
+    build_user_summary,
+)
 from ._common import HasOwnerId, redact_owner
 from .tracks import _enqueue_track_enrichment
 
@@ -43,6 +52,9 @@ class AlbumResponse(BaseModel):
     description: Optional[str] = None
     owner_id: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+    artist: Optional[ArtistSummary] = None
+    owner: Optional[UserSummary] = None
+    tracks: Optional[List[TrackSummary]] = None
 
 
 class AlbumUpdate(BaseModel):
@@ -68,6 +80,52 @@ async def _cover_url(storage: StorageService, album) -> Optional[str]:
     return album.cover_url
 
 
+def _album_track_sort_key(t: Track):
+    """Return a sort key for an album's tracks."""
+    return (t.disc_number or 0, t.track_number or 0, t.created_at)
+
+
+async def _build_album_response(
+    album,
+    user: Optional[User],
+    storage: StorageService,
+    include: IncludeQuery,
+) -> AlbumResponse:
+    """Build an AlbumResponse with optional nested summaries."""
+    artist = None
+    if "artist" in include and album.artist:
+        artist = await build_artist_summary(album.artist, storage)
+    owner = None
+    owner_id = redact_owner(cast(HasOwnerId, album), user)
+    if "owner" in include and owner_id is not None and album.owner:
+        owner = await build_user_summary(album.owner)
+    tracks = None
+    if "tracks" in include:
+        album_tracks = getattr(album, "tracks", None)
+        if album_tracks is not None:
+            track_list: List[TrackSummary] = []
+            for t in sorted(album_tracks, key=_album_track_sort_key):
+                summary = await build_track_summary(t, storage)
+                if summary is not None:
+                    track_list.append(summary)
+            tracks = track_list
+
+    return AlbumResponse(
+        id=str(album.id),
+        title=album.title,
+        artist_id=album.artist_id,
+        musicbrainz_id=album.musicbrainz_id,
+        release_year=album.release_year,
+        cover_url=await _cover_url(storage, album),
+        description=album.description,
+        owner_id=owner_id,
+        visibility=album.visibility,
+        artist=artist,
+        owner=owner,
+        tracks=tracks,
+    )
+
+
 @router.get("/", response_model=List[AlbumResponse])
 async def list_albums(
     response: Response,
@@ -79,6 +137,7 @@ async def list_albums(
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks"})),
 ):
     """List or search albums visible to the requester."""
     total = await music.count_albums(
@@ -98,22 +157,10 @@ async def list_albums(
         user=user,
         limit=pagination.limit,
         offset=pagination.offset,
+        include=set(include.values),
     )
     pagination.set_total(response, total)
-    return [
-        AlbumResponse(
-            id=str(a.id),
-            title=a.title,
-            artist_id=a.artist_id,
-            musicbrainz_id=a.musicbrainz_id,
-            release_year=a.release_year,
-            cover_url=await _cover_url(storage, a),
-            description=a.description,
-            owner_id=redact_owner(cast(HasOwnerId, a), user),
-            visibility=a.visibility,
-        )
-        for a in rows
-    ]
+    return [await _build_album_response(a, user, storage, include) for a in rows]
 
 
 @router.get(
@@ -126,23 +173,14 @@ async def get_album(
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks"})),
 ):
     """Get an album by ID."""
-    album = await music.get_album(db, album_id)
+    album = await music.get_album(db, album_id, include=set(include.values))
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    return AlbumResponse(
-        id=str(album.id),
-        title=album.title,
-        artist_id=album.artist_id,
-        musicbrainz_id=album.musicbrainz_id,
-        release_year=album.release_year,
-        cover_url=await _cover_url(storage, album),
-        description=album.description,
-        owner_id=redact_owner(cast(HasOwnerId, album), user),
-        visibility=album.visibility,
-    )
+    return await _build_album_response(album, user, storage, include)
 
 
 @router.patch("/{album_id}", response_model=AlbumResponse)
@@ -152,9 +190,10 @@ async def update_album(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks"})),
 ):
     """Partially update an album."""
-    album = await music.get_album(db, album_id)
+    album = await music.get_album(db, album_id, include=set(include.values))
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
@@ -175,17 +214,7 @@ async def update_album(
 
     await db.commit()
 
-    return AlbumResponse(
-        id=str(album.id),
-        title=album.title,
-        artist_id=album.artist_id,
-        musicbrainz_id=album.musicbrainz_id,
-        release_year=album.release_year,
-        cover_url=await _cover_url(storage, album),
-        description=album.description,
-        owner_id=redact_owner(cast(HasOwnerId, album), current_user),
-        visibility=album.visibility,
-    )
+    return await _build_album_response(album, current_user, storage, include)
 
 
 @router.delete("/{album_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])

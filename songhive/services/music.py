@@ -20,6 +20,97 @@ from ..models.user import User
 from .acl import apply_access_filter
 
 
+def _track_selectin_options(include: Optional[Set[str]]) -> List[Any]:
+    """Return selectinload options for Track queries."""
+    options: List[Any] = [selectinload(Track.audio_file)]
+    if include:
+        if "artist" in include:
+            options.append(selectinload(Track.artist))
+        if "album" in include:
+            options.append(selectinload(Track.album))
+        if "owner" in include:
+            options.append(selectinload(Track.owner))
+    return options
+
+
+def _album_selectin_options(include: Optional[Set[str]]) -> List[Any]:
+    """Return selectinload options for Album queries."""
+    options: List[Any] = [
+        selectinload(Album.artist),
+        selectinload(Album.cover_file),
+    ]
+    if include:
+        if "owner" in include:
+            options.append(selectinload(Album.owner))
+        if "tracks" in include:
+            options.append(
+                selectinload(Album.tracks).options(
+                    selectinload(Track.artist),
+                    selectinload(Track.album),
+                    selectinload(Track.audio_file),
+                )
+            )
+    return options
+
+
+def _artist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
+    """Return selectinload options for Artist queries."""
+    options: List[Any] = [selectinload(Artist.image_file)]
+    if include:
+        if "albums" in include:
+            options.append(
+                selectinload(Artist.albums).options(
+                    selectinload(Album.artist),
+                    selectinload(Album.cover_file),
+                )
+            )
+        if "tracks" in include:
+            options.append(
+                selectinload(Artist.tracks).options(
+                    selectinload(Track.artist),
+                    selectinload(Track.album),
+                    selectinload(Track.audio_file),
+                )
+            )
+    return options
+
+
+def _library_selectin_options(include: Optional[Set[str]]) -> List[Any]:
+    """Return selectinload options for Library queries."""
+    options: List[Any] = []
+    if include:
+        if "owner" in include:
+            options.append(selectinload(Library.owner))
+        if "tracks" in include:
+            options.append(
+                selectinload(Library.tracks).options(
+                    selectinload(Track.artist),
+                    selectinload(Track.album),
+                    selectinload(Track.audio_file),
+                )
+            )
+    return options
+
+
+def _playlist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
+    """Return selectinload options for Playlist queries."""
+    options: List[Any] = []
+    if include:
+        if "owner" in include:
+            options.append(selectinload(Playlist.owner))
+        if "tracks" in include:
+            options.append(
+                selectinload(Playlist.tracks).options(
+                    selectinload(PlaylistTrack.track).options(
+                        selectinload(Track.artist),
+                        selectinload(Track.album),
+                        selectinload(Track.audio_file),
+                    )
+                )
+            )
+    return options
+
+
 def _build_artists_stmt(query: Optional[str] = None) -> Select[Any]:
     """Build a statement for listing/counting artists."""
     stmt = select(Artist)
@@ -33,9 +124,10 @@ async def list_artists(
     query: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
+    include: Optional[Set[str]] = None,
 ) -> List[Artist]:
     """List artists with optional search."""
-    stmt = _build_artists_stmt(query=query).options(selectinload(Artist.image_file))
+    stmt = _build_artists_stmt(query=query).options(*_artist_selectin_options(include))
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -53,10 +145,14 @@ async def count_artists(
     return result.scalar() or 0
 
 
-async def get_artist(session: AsyncSession, artist_id: str) -> Optional[Artist]:
+async def get_artist(
+    session: AsyncSession,
+    artist_id: str,
+    include: Optional[Set[str]] = None,
+) -> Optional[Artist]:
     """Get an artist by ID."""
     result = await session.execute(
-        select(Artist).options(selectinload(Artist.image_file)).where(Artist.id == artist_id)
+        select(Artist).options(*_artist_selectin_options(include)).where(Artist.id == artist_id)
     )
     return cast(Optional[Artist], result.scalar_one_or_none())
 
@@ -89,6 +185,7 @@ async def list_albums(
     user: Optional[User] = None,
     limit: int = 20,
     offset: int = 0,
+    include: Optional[Set[str]] = None,
 ) -> List[Album]:
     """List albums with optional filters, honouring the requester's ACL."""
     stmt = _build_albums_stmt(
@@ -96,7 +193,7 @@ async def list_albums(
         artist_id=artist_id,
         year_from=year_from,
         year_to=year_to,
-    ).options(selectinload(Album.artist), selectinload(Album.cover_file))
+    ).options(*_album_selectin_options(include))
     stmt = apply_access_filter(stmt, Album, user, "album")
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -123,11 +220,13 @@ async def count_albums(
     return result.scalar() or 0
 
 
-async def get_album(session: AsyncSession, album_id: str) -> Optional[Album]:
+async def get_album(
+    session: AsyncSession,
+    album_id: str,
+    include: Optional[Set[str]] = None,
+) -> Optional[Album]:
     """Get an album by ID."""
-    result = await session.execute(
-        select(Album).options(selectinload(Album.artist), selectinload(Album.cover_file)).where(Album.id == album_id)
-    )
+    result = await session.execute(select(Album).options(*_album_selectin_options(include)).where(Album.id == album_id))
     return cast(Optional[Album], result.scalar_one_or_none())
 
 
@@ -214,6 +313,7 @@ async def list_tracks(
     user: Optional[User] = None,
     limit: int = 20,
     offset: int = 0,
+    include: Optional[Set[str]] = None,
 ) -> List[Track]:
     """List tracks with optional filters, honouring the requester's ACL."""
     stmt = _build_tracks_stmt(
@@ -225,11 +325,7 @@ async def list_tracks(
         year_from=year_from,
         year_to=year_to,
         library_id=library_id,
-    ).options(
-        selectinload(Track.artist),
-        selectinload(Track.album),
-        selectinload(Track.audio_file),
-    )
+    ).options(*_track_selectin_options(include))
     stmt = apply_access_filter(stmt, Track, user, "track")
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -264,17 +360,13 @@ async def count_tracks(
     return result.scalar() or 0
 
 
-async def get_track(session: AsyncSession, track_id: str) -> Optional[Track]:
+async def get_track(
+    session: AsyncSession,
+    track_id: str,
+    include: Optional[Set[str]] = None,
+) -> Optional[Track]:
     """Get a track by ID."""
-    result = await session.execute(
-        select(Track)
-        .options(
-            selectinload(Track.artist),
-            selectinload(Track.album),
-            selectinload(Track.audio_file),
-        )
-        .where(Track.id == track_id)
-    )
+    result = await session.execute(select(Track).options(*_track_selectin_options(include)).where(Track.id == track_id))
     return cast(Optional[Track], result.scalar_one_or_none())
 
 
@@ -284,17 +376,15 @@ async def list_library_tracks(
     user: Optional[User] = None,
     limit: int = 20,
     offset: int = 0,
+    include: Optional[Set[str]] = None,
 ) -> List[Track]:
     """List tracks that are members of ``library_id``."""
     stmt = (
         select(Track)
-        .options(
-            selectinload(Track.artist),
-            selectinload(Track.album),
-            selectinload(Track.audio_file),
-        )
+        .options(*_track_selectin_options(include))
         .join(LibraryTrack, LibraryTrack.track_id == Track.id)
         .where(LibraryTrack.library_id == library_id)
+        .order_by(Track.created_at)
     )
     stmt = apply_access_filter(stmt, Track, user, "track")
     stmt = stmt.offset(offset).limit(limit)
@@ -321,9 +411,10 @@ async def list_playlists(
     user: Optional[User] = None,
     limit: int = 20,
     offset: int = 0,
+    include: Optional[Set[str]] = None,
 ) -> List[Playlist]:
     """List playlists visible to ``user``."""
-    stmt = select(Playlist)
+    stmt = select(Playlist).options(*_playlist_selectin_options(include))
     stmt = apply_access_filter(stmt, Playlist, user, "playlist")
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -341,9 +432,16 @@ async def count_playlists(
     return result.scalar() or 0
 
 
-async def get_playlist(session: AsyncSession, playlist_id: str) -> Optional[Playlist]:
+async def get_playlist(
+    session: AsyncSession,
+    playlist_id: str,
+    include: Optional[Set[str]] = None,
+) -> Optional[Playlist]:
     """Get a playlist by ID."""
-    return cast(Optional[Playlist], await session.get(Playlist, playlist_id))
+    result = await session.execute(
+        select(Playlist).options(*_playlist_selectin_options(include)).where(Playlist.id == playlist_id)
+    )
+    return cast(Optional[Playlist], result.scalar_one_or_none())
 
 
 async def list_libraries(
@@ -351,9 +449,10 @@ async def list_libraries(
     user: Optional[User] = None,
     limit: int = 20,
     offset: int = 0,
+    include: Optional[Set[str]] = None,
 ) -> List[Library]:
     """List libraries visible to ``user``."""
-    stmt = select(Library)
+    stmt = select(Library).options(*_library_selectin_options(include))
     stmt = apply_access_filter(stmt, Library, user, "library")
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -371,9 +470,16 @@ async def count_libraries(
     return result.scalar() or 0
 
 
-async def get_library(session: AsyncSession, library_id: str) -> Optional[Library]:
+async def get_library(
+    session: AsyncSession,
+    library_id: str,
+    include: Optional[Set[str]] = None,
+) -> Optional[Library]:
     """Get a library by ID."""
-    return cast(Optional[Library], await session.get(Library, library_id))
+    result = await session.execute(
+        select(Library).options(*_library_selectin_options(include)).where(Library.id == library_id)
+    )
+    return cast(Optional[Library], result.scalar_one_or_none())
 
 
 async def list_radios(
@@ -595,15 +701,12 @@ async def list_playlist_tracks(
     user: Optional[User] = None,
     limit: int = 20,
     offset: int = 0,
+    include: Optional[Set[str]] = None,
 ) -> List[Track]:
     """List tracks that are members of ``playlist_id`` in playlist order."""
     stmt = (
         select(Track)
-        .options(
-            selectinload(Track.artist),
-            selectinload(Track.album),
-            selectinload(Track.audio_file),
-        )
+        .options(*_track_selectin_options(include))
         .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
         .where(PlaylistTrack.playlist_id == playlist_id)
         .order_by(PlaylistTrack.position)

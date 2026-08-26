@@ -6,12 +6,8 @@ import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
 import * as librariesApi from "@/api/libraries";
-import * as artistsApi from "@/api/artists";
-import * as albumsApi from "@/api/albums";
 import type { LibraryResponse, LibraryUpdate } from "@/api/libraries";
 import type { TrackResponse } from "@/api/tracks";
-import type { ArtistResponse } from "@/api/artists";
-import type { AlbumResponse } from "@/api/albums";
 import LibraryEditView from "./LibraryEditView.vue";
 
 vi.mock("@/api/libraries", () => ({
@@ -22,14 +18,6 @@ vi.mock("@/api/libraries", () => ({
   uploadTrack: vi.fn(),
   bulkUploadTracks: vi.fn(),
   scanLibrary: vi.fn(),
-}));
-
-vi.mock("@/api/artists", () => ({
-  getArtist: vi.fn(),
-}));
-
-vi.mock("@/api/albums", () => ({
-  getAlbum: vi.fn(),
 }));
 
 vi.mock("@/api/tracks", () => ({
@@ -77,31 +65,18 @@ function createTrack(id: string, title: string): TrackResponse {
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
     owner_id: "user-1",
-  };
-}
-
-function createArtist(id: string, name: string): ArtistResponse {
-  return {
-    id,
-    name,
-    musicbrainz_id: null,
-    bio: null,
-    image_file_id: null,
-    image_url: null,
-  };
-}
-
-function createAlbum(id: string, title: string): AlbumResponse {
-  return {
-    id,
-    title,
-    artist_id: "artist-1",
-    musicbrainz_id: null,
-    release_year: 2024,
-    cover_url: null,
-    description: null,
-    owner_id: "user-1",
-    visibility: "public",
+    artist: { id: "artist-1", name: "The Larks", image_url: null },
+    album: {
+      id: "album-1",
+      title: "Meadowland",
+      artist_id: "artist-1",
+      artist: null,
+      musicbrainz_id: null,
+      release_year: 2024,
+      cover_url: null,
+      owner_id: "user-1",
+      visibility: "public",
+    },
   };
 }
 
@@ -138,8 +113,6 @@ describe("LibraryEditView", () => {
     vi.mocked(librariesApi.uploadTrack).mockResolvedValue({});
     vi.mocked(librariesApi.bulkUploadTracks).mockResolvedValue({});
     vi.mocked(librariesApi.scanLibrary).mockResolvedValue({});
-    vi.mocked(artistsApi.getArtist).mockRejectedValue(new Error("not found"));
-    vi.mocked(albumsApi.getAlbum).mockRejectedValue(new Error("not found"));
   });
 
   afterEach(() => {
@@ -325,17 +298,11 @@ describe("LibraryEditView", () => {
     });
   });
 
-  it("enriches existing library tracks for the TrackList", async () => {
+  it("displays artist and album metadata from included track summaries", async () => {
     setAuthenticated("user-1");
     vi.mocked(librariesApi.listLibraryTracks).mockResolvedValue([
       createTrack("track-1", "Song One"),
     ]);
-    vi.mocked(artistsApi.getArtist).mockResolvedValue(
-      createArtist("artist-1", "The Larks"),
-    );
-    vi.mocked(albumsApi.getAlbum).mockResolvedValue(
-      createAlbum("album-1", "Meadowland"),
-    );
 
     await mountAt("/libraries/library-1/edit");
     await flushPromises();

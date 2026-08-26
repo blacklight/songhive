@@ -2,12 +2,16 @@
 Artist model.
 """
 
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
+
+if TYPE_CHECKING:
+    from .album import Album
+    from .track import Track
 
 
 class Artist(Base):
@@ -24,3 +28,5 @@ class Artist(Base):
     )
 
     image_file = relationship("StoredFile", foreign_keys=[image_file_id], lazy="selectin")
+    albums: Mapped[List["Album"]] = relationship("Album", back_populates="artist", lazy="selectin")
+    tracks: Mapped[List["Track"]] = relationship("Track", back_populates="artist", lazy="selectin")

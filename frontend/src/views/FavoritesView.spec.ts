@@ -5,8 +5,6 @@ import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import * as favoritesApi from "@/api/favorites";
 import * as tracksApi from "@/api/tracks";
-import * as artistsApi from "@/api/artists";
-import * as albumsApi from "@/api/albums";
 import type { TrackResponse } from "@/api/tracks";
 import type { QueueTrack } from "@/player/types";
 import { useToastStore } from "@/stores/toast";
@@ -21,14 +19,6 @@ vi.mock("@/api/favorites", () => ({
 vi.mock("@/api/tracks", () => ({
   getTrack: vi.fn(),
   deleteTrack: vi.fn(),
-}));
-
-vi.mock("@/api/artists", () => ({
-  getArtist: vi.fn(),
-}));
-
-vi.mock("@/api/albums", () => ({
-  getAlbum: vi.fn(),
 }));
 
 function createTestRouter() {
@@ -58,7 +48,7 @@ function createTrack(id: string, title: string): TrackResponse {
     id,
     title,
     artist_id: "artist-1",
-    album_id: null,
+    album_id: "album-1",
     track_number: null,
     disc_number: null,
     duration: 185,
@@ -66,11 +56,28 @@ function createTrack(id: string, title: string): TrackResponse {
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
     owner_id: "user-1",
+    artist: { id: "artist-1", name: "Artist One", image_url: null },
+    album: {
+      id: "album-1",
+      title: "Album One",
+      artist_id: "artist-1",
+      artist: null,
+      musicbrainz_id: null,
+      release_year: null,
+      cover_url: "https://example.com/cover.jpg",
+      owner_id: "user-1",
+      visibility: "public",
+    },
   };
 }
 
 function asQueueTrack(track: TrackResponse): QueueTrack {
-  return { ...track, artist_name: "" };
+  return {
+    ...track,
+    artist_name: track.artist?.name ?? "",
+    album_title: track.album?.title,
+    artwork_url: track.album?.cover_url ?? track.artist?.image_url ?? undefined,
+  };
 }
 
 describe("FavoritesView", () => {
@@ -83,16 +90,6 @@ describe("FavoritesView", () => {
     vi.mocked(tracksApi.getTrack).mockResolvedValue(
       createTrack("track-1", "Song One"),
     );
-    vi.mocked(artistsApi.getArtist).mockResolvedValue({
-      id: "artist-1",
-      name: "",
-    });
-    vi.mocked(albumsApi.getAlbum).mockResolvedValue({
-      id: "album-1",
-      title: "",
-      artist_id: "artist-1",
-      visibility: "public",
-    });
     vi.mocked(favoritesApi.removeFavorite).mockResolvedValue();
   });
 
@@ -119,8 +116,12 @@ describe("FavoritesView", () => {
       limit: 20,
       offset: 0,
     });
-    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1");
-    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-2");
+    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
+      include: "artist,album",
+    });
+    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-2", {
+      include: "artist,album",
+    });
     expect(wrapper.text()).toContain("Song One");
     expect(wrapper.text()).toContain("Song Two");
   });
@@ -230,35 +231,22 @@ describe("FavoritesView", () => {
     expect(wrapper.text()).not.toContain("network failure");
   });
 
-  it("loads artist and album details for resolved favorite tracks", async () => {
-    vi.mocked(artistsApi.getArtist).mockResolvedValue({
-      id: "artist-1",
-      name: "Artist One",
-    });
-    vi.mocked(albumsApi.getAlbum).mockResolvedValue({
-      id: "album-1",
-      title: "Album One",
-      artist_id: "artist-1",
-      cover_url: "https://example.com/cover.jpg",
-      visibility: "public",
-    });
-
+  it("displays artist and album metadata from included track summaries", async () => {
     vi.mocked(favoritesApi.listFavorites).mockResolvedValue([
       createFavorite("f1", "track-1"),
     ]);
-    vi.mocked(tracksApi.getTrack).mockResolvedValue({
-      ...createTrack("track-1", "Song One"),
-      artist_id: "artist-1",
-      album_id: "album-1",
-    });
+    vi.mocked(tracksApi.getTrack).mockResolvedValue(
+      createTrack("track-1", "Song One"),
+    );
 
     wrapper = mount(FavoritesView, {
       global: { plugins: [createTestRouter()] },
     });
     await flushPromises();
 
-    expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
-    expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1");
+    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
+      include: "artist,album",
+    });
     expect(wrapper.text()).toContain("Artist One");
     expect(wrapper.text()).toContain("Album One");
   });

@@ -7,13 +7,17 @@ Track model.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import JSON, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._enums import Visibility
 from .base import Base, TZDateTime
+
+if TYPE_CHECKING:
+    from .album import Album
+    from .artist import Artist
 
 
 class Track(Base):
@@ -50,6 +54,7 @@ class Track(Base):
         index=True,
     )
 
-    artist = relationship("Artist", backref="tracks", lazy="selectin")
-    album = relationship("Album", backref="tracks", lazy="selectin")
+    artist: Mapped["Artist"] = relationship("Artist", back_populates="tracks", lazy="selectin")
+    album: Mapped[Optional["Album"]] = relationship("Album", back_populates="tracks", lazy="selectin")
     audio_file = relationship("StoredFile", foreign_keys=[audio_file_id], lazy="selectin")
+    owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")

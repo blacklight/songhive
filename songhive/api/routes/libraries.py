@@ -34,6 +34,7 @@ from ...services.import_ import DuplicateTrackError, ImportResult, import_audio_
 from ...services.storage import StorageService
 from ...tasks.import_ import process_upload, scan_directory
 from .._common import Pagination, client_ip, get_pagination
+from .._include import IncludeQuery, get_include
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -42,8 +43,9 @@ from ..deps import (
     require_access,
 )
 from ..middleware.rate_limit import rate_limit_account
+from ..responses import TrackSummary, UserSummary, build_track_summary, build_user_summary
 from ._common import HasOwnerId, redact_owner
-from .tracks import TrackResponse
+from .tracks import TrackResponse, _build_track_response
 
 router = APIRouter(prefix="/libraries")
 
@@ -59,6 +61,8 @@ class LibraryResponse(BaseModel):
     description: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
     can_write: bool = False
+    owner: Optional[UserSummary] = None
+    tracks: Optional[List[TrackSummary]] = None
 
 
 def _can_write_library(user: Optional[User], library: Library) -> bool:
@@ -114,28 +118,63 @@ class BulkUploadResult(BaseModel):
     error: Optional[str] = None
 
 
+def _library_track_sort_key(track):
+    """Return a sort key for a library's tracks."""
+    return track.created_at
+
+
+async def _build_library_response(
+    library: Library,
+    user: Optional[User],
+    storage: StorageService,
+    include: IncludeQuery,
+) -> LibraryResponse:
+    """Build a LibraryResponse with optional nested summaries."""
+    owner = None
+    owner_id = redact_owner(cast(HasOwnerId, library), user)
+    if "owner" in include and owner_id is not None and library.owner:
+        owner = await build_user_summary(library.owner)
+    tracks = None
+    if "tracks" in include and library.tracks is not None:
+        track_list: List[TrackSummary] = []
+        for t in sorted(library.tracks, key=_library_track_sort_key):
+            summary = await build_track_summary(t, storage)
+            if summary is not None:
+                track_list.append(summary)
+        tracks = track_list
+
+    return LibraryResponse(
+        id=str(library.id),
+        name=library.name,
+        owner_id=owner_id,
+        description=library.description,
+        visibility=library.visibility,
+        can_write=_can_write_library(user, library),
+        owner=owner,
+        tracks=tracks,
+    )
+
+
 @router.get("/", response_model=List[LibraryResponse])
 async def list_libraries(
     response: Response,
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
 ):
     """List libraries visible to the requester."""
     total = await music.count_libraries(db, user=user)
-    rows = await music.list_libraries(db, user=user, limit=pagination.limit, offset=pagination.offset)
+    rows = await music.list_libraries(
+        db,
+        user=user,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        include=set(include.values),
+    )
     pagination.set_total(response, total)
-    return [
-        LibraryResponse(
-            id=str(lib.id),
-            name=lib.name,
-            owner_id=redact_owner(cast(HasOwnerId, lib), user),
-            description=lib.description,
-            visibility=lib.visibility,
-            can_write=_can_write_library(user, lib),
-        )
-        for lib in rows
-    ]
+    return [await _build_library_response(lib, user, storage, include) for lib in rows]
 
 
 @router.post("/", response_model=LibraryResponse, status_code=201)
@@ -174,41 +213,27 @@ async def get_library(
     library_id: str,
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
 ):
     """Get a library by ID."""
-    library = await music.get_library(db, library_id)
+    library = await music.get_library(db, library_id, include=set(include.values))
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    return LibraryResponse(
-        id=str(library.id),
-        name=library.name,
-        owner_id=redact_owner(cast(HasOwnerId, library), user),
-        description=library.description,
-        visibility=library.visibility,
-        can_write=_can_write_library(user, library),
-    )
+    return await _build_library_response(library, user, storage, include)
 
 
 async def _track_response(
     storage: StorageService,
     track,
     user: Optional[User],
+    include: Optional[IncludeQuery] = None,
 ) -> TrackResponse:
     """Build a TrackResponse with audio URL."""
-    return TrackResponse(
-        id=str(track.id),
-        title=track.title,
-        artist_id=track.artist_id,
-        album_id=track.album_id,
-        track_number=track.track_number,
-        disc_number=track.disc_number,
-        duration=track.duration,
-        genre=track.genre,
-        audio_url=await storage.get_url(track.audio_file) if track.audio_file_id else None,
-        owner_id=redact_owner(track, user),
-        visibility=track.visibility,
-    )
+    if include is None:
+        include = IncludeQuery(values=set())
+    return await _build_track_response(track, user, storage, include)
 
 
 @router.post("/{library_id}/tracks", status_code=201)
@@ -639,6 +664,7 @@ async def list_library_tracks_route(
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "album", "owner"})),
 ):
     """List tracks that are members of the library."""
     library = await music.get_library(db, library_id)
@@ -652,10 +678,15 @@ async def list_library_tracks_route(
 
     total = await music.count_library_tracks(db, library_id=library_id, user=user)
     rows = await music.list_library_tracks(
-        db, library_id=library_id, user=user, limit=pagination.limit, offset=pagination.offset
+        db,
+        library_id=library_id,
+        user=user,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        include=set(include.values),
     )
     pagination.set_total(response, total)
-    return [await _track_response(storage, row, user) for row in rows]
+    return [await _track_response(storage, row, user, include) for row in rows]
 
 
 @router.patch("/{library_id}", response_model=LibraryResponse)
@@ -664,9 +695,11 @@ async def update_library(
     body: LibraryUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
 ):
     """Partially update a library."""
-    library = await music.get_library(db, library_id)
+    library = await music.get_library(db, library_id, include=set(include.values))
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
@@ -685,14 +718,7 @@ async def update_library(
 
     await db.commit()
 
-    return LibraryResponse(
-        id=str(library.id),
-        name=library.name,
-        owner_id=library.owner_id,
-        description=library.description,
-        visibility=library.visibility,
-        can_write=True,
-    )
+    return await _build_library_response(library, current_user, storage, include)
 
 
 @router.delete("/{library_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])

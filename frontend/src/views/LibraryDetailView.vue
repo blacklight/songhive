@@ -17,7 +17,6 @@ import { getApiErrorMessage } from "@/api/client";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
-import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import type { QueueTrack } from "@/player/types";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
@@ -49,16 +48,13 @@ const {
   listLibraryTracks(libraryId.value, {
     limit: params.limit,
     offset: params.offset,
+    include: "artist,album",
   }),
 );
 
 const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
   useEntityMeta(library);
 
-const { enrich: trackEnrich } = useTrackEnrichment(
-  tracks,
-  computed(() => library.value?.name ?? ""),
-);
 const { isOwner } = useOwnership(
   computed(() => library.value?.owner_id ?? null),
 );
@@ -228,7 +224,6 @@ watch(
           :tracks="tracks"
           :loading="tracksLoading"
           :context="library.name"
-          :enrich="trackEnrich"
           :removable-from="removableFrom"
           :deletable="true"
           @share="onTrackShare"

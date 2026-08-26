@@ -4,32 +4,14 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import * as librariesApi from "@/api/libraries";
-import * as artistsApi from "@/api/artists";
-import * as albumsApi from "@/api/albums";
 import type { LibraryResponse } from "@/api/libraries";
-import type { ArtistResponse } from "@/api/artists";
-import type { AlbumResponse } from "@/api/albums";
 import type { TrackResponse } from "@/api/tracks";
-import TrackList from "@/components/library/TrackList.vue";
 import LibraryDetailView from "./LibraryDetailView.vue";
 
 vi.mock("@/api/libraries", () => ({
   getLibrary: vi.fn(),
   listLibraryTracks: vi.fn(),
   deleteLibrary: vi.fn(),
-}));
-
-vi.mock("@/api/artists", () => ({
-  getArtist: vi.fn(),
-}));
-
-vi.mock("@/api/albums", () => ({
-  getAlbum: vi.fn(),
-}));
-
-vi.mock("@/api/tracks", () => ({
-  listTracks: vi.fn(),
-  deleteTrack: vi.fn(),
 }));
 
 function createTestRouter() {
@@ -55,31 +37,6 @@ function createLibrary(id: string, name: string): LibraryResponse {
   };
 }
 
-function createArtist(id: string, name: string): ArtistResponse {
-  return {
-    id,
-    name,
-    musicbrainz_id: null,
-    bio: null,
-    image_file_id: null,
-    image_url: null,
-  };
-}
-
-function createAlbum(id: string, title: string): AlbumResponse {
-  return {
-    id,
-    title,
-    artist_id: "artist-1",
-    musicbrainz_id: null,
-    release_year: 2024,
-    cover_url: null,
-    description: null,
-    owner_id: "user-1",
-    visibility: "public",
-  };
-}
-
 function createTrack(id: string, title: string): TrackResponse {
   return {
     id,
@@ -93,6 +50,18 @@ function createTrack(id: string, title: string): TrackResponse {
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
     owner_id: "user-1",
+    artist: { id: "artist-1", name: "The Larks", image_url: null },
+    album: {
+      id: "album-1",
+      title: "Meadowland",
+      artist_id: "artist-1",
+      artist: null,
+      musicbrainz_id: null,
+      release_year: 2024,
+      cover_url: null,
+      owner_id: "user-1",
+      visibility: "public",
+    },
   };
 }
 
@@ -106,8 +75,6 @@ describe("LibraryDetailView", () => {
       createLibrary("library-1", "Main Library"),
     );
     vi.mocked(librariesApi.listLibraryTracks).mockResolvedValue([]);
-    vi.mocked(artistsApi.getArtist).mockRejectedValue(new Error("not found"));
-    vi.mocked(albumsApi.getAlbum).mockRejectedValue(new Error("not found"));
   });
 
   afterEach(() => {
@@ -136,6 +103,7 @@ describe("LibraryDetailView", () => {
     expect(librariesApi.listLibraryTracks).toHaveBeenCalledWith("library-1", {
       limit: 20,
       offset: 0,
+      include: "artist,album",
     });
 
     expect(wrapper.text()).toContain("Main Library");
@@ -191,37 +159,20 @@ describe("LibraryDetailView", () => {
     expect(fetcher).toHaveBeenLastCalledWith("library-1", {
       limit: 20,
       offset: 20,
+      include: "artist,album",
     });
     expect(wrapper.text()).toContain("Song 19");
     expect(wrapper.text()).toContain("Song 20");
   });
 
-  it("enriches tracks with artist and album metadata for the TrackList", async () => {
+  it("displays artist and album metadata from included track summaries", async () => {
     vi.mocked(librariesApi.listLibraryTracks).mockResolvedValue([
       createTrack("track-1", "Song One"),
     ]);
-    vi.mocked(artistsApi.getArtist).mockResolvedValue(
-      createArtist("artist-1", "The Larks"),
-    );
-    vi.mocked(albumsApi.getAlbum).mockResolvedValue(
-      createAlbum("album-1", "Meadowland"),
-    );
 
     await mountAt("/libraries/library-1");
     await flushPromises();
 
-    const trackList = wrapper.findComponent(TrackList);
-    expect(trackList.exists()).toBe(true);
-
-    const enrich = trackList.props("enrich") as Map<
-      string,
-      { artist_name?: string; album_title?: string }
-    >;
-    expect(enrich?.get("track-1")).toEqual({
-      artist_name: "The Larks",
-      album_title: "Meadowland",
-      artwork_url: undefined,
-    });
     expect(wrapper.text()).toContain("The Larks");
     expect(wrapper.text()).toContain("Meadowland");
   });

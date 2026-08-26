@@ -24,7 +24,12 @@ function createTestRouter() {
   });
 }
 
-function createTrack(id: string, title: string): TrackResponse {
+function createTrack(
+  id: string,
+  title: string,
+  artistName?: string,
+  albumTitle?: string,
+): TrackResponse {
   return {
     id,
     title,
@@ -37,6 +42,22 @@ function createTrack(id: string, title: string): TrackResponse {
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
     owner_id: "user-1",
+    artist: artistName
+      ? { id: "artist-1", name: artistName, image_url: null }
+      : null,
+    album: albumTitle
+      ? {
+          id: "album-1",
+          title: albumTitle,
+          artist_id: "artist-1",
+          artist: null,
+          musicbrainz_id: null,
+          release_year: null,
+          cover_url: null,
+          owner_id: "user-1",
+          visibility: "public",
+        }
+      : null,
   };
 }
 
@@ -46,6 +67,7 @@ describe("TracksView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.useFakeTimers();
+    vi.clearAllMocks();
     vi.mocked(tracksApi.listTracks).mockResolvedValue([]);
   });
 
@@ -69,8 +91,29 @@ describe("TracksView", () => {
       q: "",
       limit: 20,
       offset: 0,
+      include: "artist,album",
     });
     expect(wrapper.text()).toContain("Song One");
+  });
+
+  it("fetches and displays artist and album names", async () => {
+    vi.mocked(tracksApi.listTracks).mockResolvedValue([
+      createTrack("track-1", "Song One", "The Artist", "The Album"),
+    ]);
+
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(tracksApi.listTracks).toHaveBeenCalledWith({
+      q: "",
+      limit: 20,
+      offset: 0,
+      include: "artist,album",
+    });
+    expect(wrapper.text()).toContain("The Artist");
+    expect(wrapper.text()).toContain("The Album");
   });
 
   it("shows the empty state", async () => {
@@ -130,6 +173,7 @@ describe("TracksView", () => {
       q: "query",
       limit: 20,
       offset: 0,
+      include: "artist,album",
     });
     expect(wrapper.text()).toContain("Searched Song");
     expect(wrapper.text()).not.toContain("First Song");
@@ -162,6 +206,7 @@ describe("TracksView", () => {
       q: "",
       limit: 20,
       offset: 20,
+      include: "artist,album",
     });
     expect(wrapper.text()).toContain("Song 19");
     expect(wrapper.text()).toContain("Song 20");

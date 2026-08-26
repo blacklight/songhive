@@ -11,11 +11,18 @@ export function listAlbums(params?: {
   year_to?: number;
   limit?: number;
   offset?: number;
+  include?: string;
 }): Promise<AlbumResponse[]> {
   return apiRequest<AlbumResponse[]>("/albums/", { query: params });
 }
 
-export function getAlbum(id: string): Promise<AlbumResponse> {
+export function getAlbum(
+  id: string,
+  params?: { include?: string },
+): Promise<AlbumResponse> {
+  if (params) {
+    return apiRequest<AlbumResponse>(`/albums/${id}`, { query: params });
+  }
   return apiRequest<AlbumResponse>(`/albums/${id}`);
 }
 

@@ -17,7 +17,6 @@ import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
-import type { TrackEnrich } from "@/player/enrich";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
@@ -66,22 +65,11 @@ const {
     album_id: albumId.value,
     limit: params.limit,
     offset: params.offset,
+    include: "artist,album",
   }),
 );
 
 const artistName = computed(() => artist.value?.name ?? "");
-
-const trackEnrich = computed<Map<string, TrackEnrich>>(() => {
-  const map = new Map<string, TrackEnrich>();
-  for (const track of tracks.value) {
-    map.set(track.id, {
-      artist_name: artistName.value,
-      album_title: album.value?.title,
-      artwork_url: album.value?.cover_url ?? undefined,
-    });
-  }
-  return map;
-});
 
 const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
   useEntityMeta(album);
@@ -318,7 +306,6 @@ watch(
           :tracks="tracks"
           :loading="tracksLoading"
           :context="artistName"
-          :enrich="trackEnrich"
           :show-artwork="true"
           :deletable="true"
           @share="onTrackShare"

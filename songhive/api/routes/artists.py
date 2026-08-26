@@ -13,8 +13,15 @@ from ...services import acl, audit, deletion, music
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
+from .._include import IncludeQuery, get_include
 from ..deps import get_current_user, get_db, get_storage_service
 from ..middleware.rate_limit import rate_limit_account
+from ..responses import (
+    AlbumSummary,
+    TrackSummary,
+    build_album_summary,
+    build_track_summary,
+)
 
 router = APIRouter(prefix="/artists")
 
@@ -30,6 +37,8 @@ class ArtistResponse(BaseModel):
     bio: Optional[str] = None
     image_file_id: Optional[str] = None
     image_url: Optional[str] = None
+    albums: Optional[List[AlbumSummary]] = None
+    tracks: Optional[List[TrackSummary]] = None
 
 
 async def _image_url(artist, storage: StorageService) -> Optional[str]:
@@ -39,41 +48,42 @@ async def _image_url(artist, storage: StorageService) -> Optional[str]:
     return artist.image_url
 
 
-@router.get("/", response_model=List[ArtistResponse])
-async def list_artists(
-    response: Response,
-    q: Optional[str] = Query(None, description="Search query"),
-    pagination: Pagination = Depends(get_pagination),
-    db: AsyncSession = Depends(get_db),
-    storage: StorageService = Depends(get_storage_service),
-):
-    """List or search artists."""
-    total = await music.count_artists(db, query=q)
-    rows = await music.list_artists(db, query=q, limit=pagination.limit, offset=pagination.offset)
-    pagination.set_total(response, total)
-    return [
-        ArtistResponse(
-            id=str(a.id),
-            name=a.name,
-            musicbrainz_id=a.musicbrainz_id,
-            bio=a.bio,
-            image_file_id=a.image_file_id,
-            image_url=await _image_url(a, storage),
-        )
-        for a in rows
-    ]
+def _artist_album_sort_key(album):
+    """Return a sort key for an artist's albums."""
+    return (album.release_year or 0, album.created_at)
 
 
-@router.get("/{artist_id}", response_model=ArtistResponse)
-async def get_artist(
-    artist_id: str,
-    db: AsyncSession = Depends(get_db),
-    storage: StorageService = Depends(get_storage_service),
-):
-    """Get an artist by ID."""
-    artist = await music.get_artist(db, artist_id)
-    if artist is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+def _artist_track_sort_key(track):
+    """Return a sort key for an artist's tracks."""
+    return (track.album_id or "", track.disc_number or 0, track.track_number or 0, track.created_at)
+
+
+async def _build_artist_response(
+    artist,
+    storage: StorageService,
+    include: IncludeQuery,
+) -> ArtistResponse:
+    """Build an ArtistResponse with optional nested summaries."""
+    albums = None
+    if "albums" in include:
+        artist_albums = getattr(artist, "albums", None)
+        if artist_albums is not None:
+            album_list: List[AlbumSummary] = []
+            for a in sorted(artist_albums, key=_artist_album_sort_key):
+                album_summary = await build_album_summary(a, storage)
+                if album_summary is not None:
+                    album_list.append(album_summary)
+            albums = album_list
+    tracks = None
+    if "tracks" in include:
+        artist_tracks = getattr(artist, "tracks", None)
+        if artist_tracks is not None:
+            track_list: List[TrackSummary] = []
+            for t in sorted(artist_tracks, key=_artist_track_sort_key):
+                track_summary = await build_track_summary(t, storage)
+                if track_summary is not None:
+                    track_list.append(track_summary)
+            tracks = track_list
 
     return ArtistResponse(
         id=str(artist.id),
@@ -82,7 +92,46 @@ async def get_artist(
         bio=artist.bio,
         image_file_id=artist.image_file_id,
         image_url=await _image_url(artist, storage),
+        albums=albums,
+        tracks=tracks,
     )
+
+
+@router.get("/", response_model=List[ArtistResponse])
+async def list_artists(
+    response: Response,
+    q: Optional[str] = Query(None, description="Search query"),
+    pagination: Pagination = Depends(get_pagination),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks"})),
+):
+    """List or search artists."""
+    total = await music.count_artists(db, query=q)
+    rows = await music.list_artists(
+        db,
+        query=q,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        include=set(include.values),
+    )
+    pagination.set_total(response, total)
+    return [await _build_artist_response(a, storage, include) for a in rows]
+
+
+@router.get("/{artist_id}", response_model=ArtistResponse)
+async def get_artist(
+    artist_id: str,
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks"})),
+):
+    """Get an artist by ID."""
+    artist = await music.get_artist(db, artist_id, include=set(include.values))
+    if artist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    return await _build_artist_response(artist, storage, include)
 
 
 @router.delete("/{artist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])

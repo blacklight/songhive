@@ -18,6 +18,7 @@ from ...services.auth import get_user_by_id
 from ...services.federation import publish_track_activity, unpublish_track_activity
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
+from .._include import IncludeQuery, get_include
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -26,6 +27,14 @@ from ..deps import (
     require_access,
 )
 from ..middleware.rate_limit import rate_limit_account
+from ..responses import (
+    AlbumSummary,
+    ArtistSummary,
+    UserSummary,
+    build_album_summary,
+    build_artist_summary,
+    build_user_summary,
+)
 from ._common import HasOwnerId, redact_owner
 
 router = APIRouter(prefix="/tracks")
@@ -48,6 +57,9 @@ class TrackResponse(BaseModel):
     audio_url: Optional[str] = None
     owner_id: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+    artist: Optional[ArtistSummary] = None
+    album: Optional[AlbumSummary] = None
+    owner: Optional[UserSummary] = None
 
 
 class TrackUpdate(BaseModel):
@@ -141,6 +153,42 @@ async def _handle_visibility_changes(
             await db.commit()
 
 
+async def _build_track_response(
+    track,
+    user: Optional[User],
+    storage: StorageService,
+    include: IncludeQuery,
+) -> TrackResponse:
+    """Build a TrackResponse with optional nested summaries."""
+    artist = None
+    if "artist" in include and track.artist:
+        artist = await build_artist_summary(track.artist, storage)
+    album = None
+    if "album" in include and track.album:
+        album = await build_album_summary(track.album, storage)
+    owner = None
+    owner_id = redact_owner(cast(HasOwnerId, track), user)
+    if "owner" in include and owner_id is not None and track.owner:
+        owner = await build_user_summary(track.owner)
+
+    return TrackResponse(
+        id=str(track.id),
+        title=track.title,
+        artist_id=track.artist_id,
+        album_id=track.album_id,
+        track_number=track.track_number,
+        disc_number=track.disc_number,
+        duration=track.duration,
+        genre=track.genre,
+        audio_url=await storage.get_url(track.audio_file) if track.audio_file_id else None,
+        owner_id=owner_id,
+        visibility=track.visibility,
+        artist=artist,
+        album=album,
+        owner=owner,
+    )
+
+
 @router.get("/", response_model=List[TrackResponse])
 async def list_tracks(
     response: Response,
@@ -155,6 +203,7 @@ async def list_tracks(
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "album", "owner"})),
 ):
     """List or search tracks visible to the requester."""
     total = await music.count_tracks(
@@ -180,24 +229,10 @@ async def list_tracks(
         user=user,
         limit=pagination.limit,
         offset=pagination.offset,
+        include=set(include.values),
     )
     pagination.set_total(response, total)
-    return [
-        TrackResponse(
-            id=str(t.id),
-            title=t.title,
-            artist_id=t.artist_id,
-            album_id=t.album_id,
-            track_number=t.track_number,
-            disc_number=t.disc_number,
-            duration=t.duration,
-            genre=t.genre,
-            audio_url=await storage.get_url(t.audio_file) if t.audio_file_id else None,
-            owner_id=redact_owner(cast(HasOwnerId, t), user),
-            visibility=t.visibility,
-        )
-        for t in rows
-    ]
+    return [await _build_track_response(t, user, storage, include) for t in rows]
 
 
 @router.get(
@@ -210,25 +245,14 @@ async def get_track(
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "album", "owner"})),
 ):
     """Get a track by ID."""
-    track = await music.get_track(db, track_id)
+    track = await music.get_track(db, track_id, include=set(include.values))
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    return TrackResponse(
-        id=str(track.id),
-        title=track.title,
-        artist_id=track.artist_id,
-        album_id=track.album_id,
-        track_number=track.track_number,
-        disc_number=track.disc_number,
-        duration=track.duration,
-        genre=track.genre,
-        audio_url=await storage.get_url(track.audio_file) if track.audio_file_id else None,
-        owner_id=redact_owner(cast(HasOwnerId, track), user),
-        visibility=track.visibility,
-    )
+    return await _build_track_response(track, user, storage, include)
 
 
 @router.patch("/{track_id}", response_model=TrackResponse)
@@ -240,9 +264,11 @@ async def update_track(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "album", "owner"})),
 ):
     """Partially update a track."""
-    track = await music.get_track(db, track_id)
+    service_include = set(include.values) | {"artist"}
+    track = await music.get_track(db, track_id, include=service_include)
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
@@ -269,19 +295,7 @@ async def update_track(
         track, previous_visibility=previous_visibility, request=request, background_tasks=background_tasks, db=db
     )
 
-    return TrackResponse(
-        id=str(track.id),
-        title=track.title,
-        artist_id=track.artist_id,
-        album_id=track.album_id,
-        track_number=track.track_number,
-        disc_number=track.disc_number,
-        duration=track.duration,
-        genre=track.genre,
-        audio_url=await storage.get_url(track.audio_file) if track.audio_file_id else None,
-        owner_id=redact_owner(cast(HasOwnerId, track), current_user),
-        visibility=track.visibility,
-    )
+    return await _build_track_response(track, current_user, storage, include)
 
 
 @router.delete("/bulk", status_code=status.HTTP_200_OK, dependencies=[Depends(rate_limit_account)])

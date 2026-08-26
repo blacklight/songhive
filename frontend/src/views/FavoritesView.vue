@@ -10,7 +10,6 @@ import { getTrack, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import { useShareDialog } from "@/composables/useShareDialog";
-import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
@@ -29,8 +28,6 @@ const error = ref<string | null>(null);
 const limit = 20;
 const hasMore = ref(false);
 const activeTab = ref<"tracks" | "albums" | "artists" | "playlists">("tracks");
-
-const { enrich: trackEnrich } = useTrackEnrichment(tracks);
 
 function getErrorMessage(err: unknown): string {
   return (
@@ -55,14 +52,18 @@ async function load(initial = false) {
     }
 
     const resolved = await Promise.all(
-      batch.map((favorite) => getTrack(favorite.track_id).catch(() => null)),
+      batch.map((favorite) =>
+        getTrack(favorite.track_id, { include: "artist,album" }).catch(
+          () => null,
+        ),
+      ),
     );
     const newTracks = resolved.filter(
       (track): track is TrackResponse => track !== null,
     );
 
-    // Reassign (rather than push) so the useTrackEnrichment watcher, which
-    // is shallow by default, fires for both the initial load and loadMore.
+    // Reassign (rather than push) so the tracks list is treated as a new
+    // reference, triggering any downstream watchers.
     favorites.value = [...favorites.value, ...batch];
     tracks.value = [...tracks.value, ...newTracks];
 
@@ -183,7 +184,6 @@ onMounted(() => load(true));
         v-else
         :tracks="tracks"
         :loading="loading"
-        :enrich="trackEnrich"
         :favorite-label="t('common.unfavorite')"
         :deletable="true"
         @toggle-favorite="onToggleFavorite"

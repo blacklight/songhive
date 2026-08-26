@@ -16,6 +16,7 @@ from ...services import acl, audit, deletion, music
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
+from .._include import IncludeQuery, get_include
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -24,8 +25,9 @@ from ..deps import (
     require_access,
 )
 from ..middleware.rate_limit import rate_limit_account
+from ..responses import TrackSummary, UserSummary, build_track_summary, build_user_summary
 from ._common import HasOwnerId, redact_owner
-from .tracks import TrackResponse
+from .tracks import TrackResponse, _build_track_response
 
 router = APIRouter(prefix="/playlists")
 
@@ -40,6 +42,8 @@ class PlaylistResponse(BaseModel):
     owner_id: Optional[str] = None
     description: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+    owner: Optional[UserSummary] = None
+    tracks: Optional[List[TrackSummary]] = None
 
 
 class PlaylistCreate(BaseModel):
@@ -63,27 +67,59 @@ class RemovePlaylistTracksRequest(BaseModel):
     track_ids: List[str]
 
 
+async def _build_playlist_response(
+    playlist: Playlist,
+    user: Optional[User],
+    storage: StorageService,
+    include: IncludeQuery,
+) -> PlaylistResponse:
+    """Build a PlaylistResponse with optional nested summaries."""
+    owner = None
+    owner_id = redact_owner(cast(HasOwnerId, playlist), user)
+    if "owner" in include and owner_id is not None and playlist.owner:
+        owner = await build_user_summary(playlist.owner)
+    tracks = None
+    if "tracks" in include:
+        playlist_tracks = getattr(playlist, "tracks", None)
+        if playlist_tracks is not None:
+            track_list: List[TrackSummary] = []
+            for pt in sorted(playlist_tracks, key=lambda pt: pt.position):
+                summary = await build_track_summary(pt.track, storage)
+                if summary is not None:
+                    track_list.append(summary)
+            tracks = track_list
+
+    return PlaylistResponse(
+        id=str(playlist.id),
+        name=playlist.name,
+        owner_id=owner_id,
+        description=playlist.description,
+        visibility=playlist.visibility,
+        owner=owner,
+        tracks=tracks,
+    )
+
+
 @router.get("/", response_model=List[PlaylistResponse])
 async def list_playlists(
     response: Response,
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
 ):
     """List playlists visible to the requester."""
     total = await music.count_playlists(db, user=user)
-    rows = await music.list_playlists(db, user=user, limit=pagination.limit, offset=pagination.offset)
+    rows = await music.list_playlists(
+        db,
+        user=user,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        include=set(include.values),
+    )
     pagination.set_total(response, total)
-    return [
-        PlaylistResponse(
-            id=str(p.id),
-            name=p.name,
-            owner_id=redact_owner(cast(HasOwnerId, p), user),
-            description=p.description,
-            visibility=p.visibility,
-        )
-        for p in rows
-    ]
+    return [await _build_playlist_response(p, user, storage, include) for p in rows]
 
 
 @router.post("/", response_model=PlaylistResponse, status_code=201)
@@ -121,19 +157,15 @@ async def get_playlist(
     playlist_id: str,
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
 ):
     """Get a playlist by ID."""
-    playlist = await music.get_playlist(db, playlist_id)
+    playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
     # ``require_access`` already loads the row and raises 404 when missing.
     assert playlist is not None
 
-    return PlaylistResponse(
-        id=str(playlist.id),
-        name=playlist.name,
-        owner_id=redact_owner(cast(HasOwnerId, playlist), user),
-        description=playlist.description,
-        visibility=playlist.visibility,
-    )
+    return await _build_playlist_response(playlist, user, storage, include)
 
 
 async def _resolve_track_ids(
@@ -168,12 +200,10 @@ async def _track_response(
     storage: StorageService,
     track,
     user: Optional[User],
+    include: IncludeQuery,
 ) -> TrackResponse:
     """Build a TrackResponse with audio URL."""
-    response = TrackResponse.model_validate(track)
-    response.audio_url = await storage.get_url(track.audio_file) if track.audio_file_id else None
-    response.owner_id = redact_owner(track, user)
-    return response
+    return await _build_track_response(track, user, storage, include)
 
 
 @router.post("/{playlist_id}/tracks", status_code=status.HTTP_201_CREATED)
@@ -233,6 +263,7 @@ async def list_playlist_tracks_route(
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "album", "owner"})),
 ):
     """List tracks that are members of the playlist."""
     playlist = await music.get_playlist(db, playlist_id)
@@ -241,10 +272,15 @@ async def list_playlist_tracks_route(
 
     total = await music.count_playlist_tracks(db, playlist_id=playlist_id, user=user)
     rows = await music.list_playlist_tracks(
-        db, playlist_id=playlist_id, user=user, limit=pagination.limit, offset=pagination.offset
+        db,
+        playlist_id=playlist_id,
+        user=user,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        include=set(include.values),
     )
     pagination.set_total(response, total)
-    return [await _track_response(storage, row, user) for row in rows]
+    return [await _track_response(storage, row, user, include) for row in rows]
 
 
 @router.post("/{playlist_id}/tracks/remove", status_code=status.HTTP_200_OK)

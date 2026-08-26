@@ -2,13 +2,16 @@
 Playlist model.
 """
 
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._enums import Visibility
 from .base import Base
+
+if TYPE_CHECKING:
+    from .track import Track
 
 
 class Playlist(Base):
@@ -27,6 +30,7 @@ class Playlist(Base):
     )
 
     owner = relationship("User", backref="playlists", lazy="selectin")
+    tracks: Mapped[List["PlaylistTrack"]] = relationship("PlaylistTrack", back_populates="playlist", lazy="selectin")
 
 
 class PlaylistTrack(Base):
@@ -36,5 +40,5 @@ class PlaylistTrack(Base):
     track_id: Mapped[str] = mapped_column(ForeignKey("tracks.id"), index=True)
     position: Mapped[int] = mapped_column(Integer)
 
-    playlist = relationship("Playlist", backref="tracks", lazy="selectin")
-    track = relationship("Track", lazy="selectin")
+    playlist: Mapped["Playlist"] = relationship("Playlist", back_populates="tracks", lazy="selectin")
+    track: Mapped["Track"] = relationship("Track", lazy="selectin")
