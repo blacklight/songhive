@@ -377,8 +377,8 @@ async def test_fetch_release_returns_none_for_unexpected_status(musicbrainz_conf
 
 
 @pytest.mark.asyncio
-async def test_fetch_cover_image_returns_none_when_release_has_no_url(mock_client):
-    """fetch_cover_image returns None when fetch_release cannot resolve a URL."""
+async def test_fetch_cover_image_returns_none_when_disabled(mock_client):
+    """fetch_cover_image returns None when cover art fetching is disabled."""
     config = MusicBrainzConfig(enabled=True, fetch_cover_art=False)
     service = MusicBrainzService(config, client=mock_client)
     result = await service.fetch_cover_image("release-1")
@@ -387,19 +387,32 @@ async def test_fetch_cover_image_returns_none_when_release_has_no_url(mock_clien
 
 @pytest.mark.asyncio
 async def test_fetch_cover_image_handles_download_exception(musicbrainz_config, mock_client):
-    """fetch_cover_image returns None when the cover download fails."""
+    """fetch_cover_image returns None when the cover request raises an exception."""
     service = MusicBrainzService(musicbrainz_config, client=mock_client)
-    release_response = Mock(
-        status_code=200,
-        url="https://example.com/cover.jpg",
-        headers={},
-        content=b"",
-        raise_for_status=Mock(),
-    )
-    mock_client.get = AsyncMock(side_effect=[release_response, RuntimeError("network")])
+    mock_client.get = AsyncMock(side_effect=RuntimeError("network"))
 
     result = await service.fetch_cover_image("release-1")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_cover_image_follows_redirect(musicbrainz_config, mock_client):
+    """fetch_cover_image follows 3xx redirects from the Cover Art Archive."""
+    service = MusicBrainzService(musicbrainz_config, client=mock_client)
+    redirect = Mock(
+        status_code=307,
+        headers={"location": "https://example.com/cover.jpg"},
+    )
+    image = Mock(
+        status_code=200,
+        url="https://example.com/cover.jpg",
+        content=b"\x89PNG\r\n\x1a\nfake",
+        headers={},
+    )
+    mock_client.get = AsyncMock(side_effect=[redirect, image])
+
+    result = await service.fetch_cover_image("release-1")
+    assert result == b"\x89PNG\r\n\x1a\nfake"
 
 
 @pytest.mark.asyncio

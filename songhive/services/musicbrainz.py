@@ -24,6 +24,10 @@ from ..services.storage import StorageService
 
 logger = logging.getLogger(__name__)
 
+# The Cover Art Archive /front endpoint can return a chain of 307/302
+# redirects before the actual image, so follow them manually up to this many.
+_MAX_COVER_ART_REDIRECTS = 10
+
 
 def _escape_query_term(term: str) -> str:
     """Quote a MusicBrainz query term so spaces and special chars are handled."""
@@ -40,7 +44,11 @@ class MusicBrainzService:
         client: Optional[httpx.AsyncClient] = None,
     ):
         self.config = config
-        self._client = client or httpx.AsyncClient(timeout=30.0)
+        self._client = client or httpx.AsyncClient(
+            timeout=30.0,
+            follow_redirects=True,
+            headers={"User-Agent": config.user_agent},
+        )
         self._lock = asyncio.Lock()
         self._last_request: Optional[float] = None
         if config.enabled:
@@ -137,23 +145,42 @@ class MusicBrainzService:
 
         if response.status_code == 200:
             return str(response.url)
-        if response.status_code == 307:
-            return str(response.headers.get("location"))
+        if 300 <= response.status_code < 400:
+            return str(response.headers.get("location") or "")
         return None
 
     async def fetch_cover_image(self, release_id: str) -> Optional[bytes]:
         """Download the front cover image bytes for a release."""
-        url = await self.fetch_release(release_id)
-        if url is None:
+        if not self.config.fetch_cover_art:
             return None
 
-        try:
-            response = await self._client.get(url, follow_redirects=True)
-            response.raise_for_status()
-            return response.content
-        except Exception as exc:
-            logger.debug("Could not download cover art from %s: %s", url, exc)
+        url = f"https://coverartarchive.org/release/{release_id}/front"
+        for _ in range(_MAX_COVER_ART_REDIRECTS):
+            try:
+                response = await self._client.get(url)
+            except Exception as exc:
+                logger.debug("Could not download cover art for %s: %s", release_id, exc)
+                return None
+
+            if 200 <= response.status_code < 300:
+                data = response.content
+                if isinstance(data, bytes) and data:
+                    return data
+                return None
+
+            if 300 <= response.status_code < 400:
+                location = response.headers.get("location")
+                if not location:
+                    logger.debug("Cover art redirect for %s has no Location header", release_id)
+                    return None
+                url = str(location)
+                continue
+
+            logger.debug("Cover art request for %s returned %s", release_id, response.status_code)
             return None
+
+        logger.debug("Too many cover art redirects for %s", release_id)
+        return None
 
     async def _store_cover_art(
         self,
