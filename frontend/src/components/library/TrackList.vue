@@ -43,11 +43,13 @@ export interface Props {
   emptyLabel?: string;
   removableFrom?: RemovableFrom;
   deletable?: boolean;
+  autoScroll?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
   showArtwork: false,
+  autoScroll: true,
 });
 
 const emit = defineEmits<{
@@ -102,6 +104,7 @@ onUnmounted(() => {
 });
 
 function scrollToCurrent() {
+  if (!props.autoScroll) return;
   const currentTrack = player.currentTrack;
   if (!currentTrack || !listRef.value) return;
 
