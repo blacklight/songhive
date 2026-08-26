@@ -45,6 +45,7 @@ from ..deps import (
 from ..middleware.rate_limit import rate_limit_account
 from ..responses import TrackSummary, UserSummary, build_track_summary, build_user_summary
 from ._common import HasOwnerId, redact_owner
+from ._images import remove_entity_image, upload_entity_image
 from .tracks import TrackResponse, _build_track_response
 
 router = APIRouter(prefix="/libraries")
@@ -60,6 +61,8 @@ class LibraryResponse(BaseModel):
     owner_id: Optional[str] = None
     description: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+    image_url: Optional[str] = None
+    cover_url: Optional[str] = None
     can_write: bool = False
     owner: Optional[UserSummary] = None
     tracks: Optional[List[TrackSummary]] = None
@@ -123,6 +126,20 @@ def _library_track_sort_key(track):
     return track.created_at
 
 
+async def _library_image_url(library: Library, storage: StorageService) -> Optional[str]:
+    """Resolve a library's image URL from its stored file."""
+    if library.image_file_id and library.image_file:
+        return await storage.get_url(library.image_file)
+    return None
+
+
+async def _library_cover_url(library: Library, storage: StorageService) -> Optional[str]:
+    """Resolve a library's cover art URL from its stored file."""
+    if library.cover_file_id and library.cover_file:
+        return await storage.get_url(library.cover_file)
+    return None
+
+
 async def _build_library_response(
     library: Library,
     user: Optional[User],
@@ -149,6 +166,8 @@ async def _build_library_response(
         owner_id=owner_id,
         description=library.description,
         visibility=library.visibility,
+        image_url=await _library_image_url(library, storage),
+        cover_url=await _library_cover_url(library, storage),
         can_write=_can_write_library(user, library),
         owner=owner,
         tracks=tracks,
@@ -297,7 +316,8 @@ async def upload_track(
             },
         )
 
-    track_response = await _track_response(storage, result.track, user)
+    track = await music.get_track(db, result.track.id)
+    track_response = await _track_response(storage, track, user)
     return {
         "track": track_response,
         "upload_id": str(result.upload.id),
@@ -693,6 +713,7 @@ async def list_library_tracks_route(
 async def update_library(
     library_id: str,
     body: LibraryUpdate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
@@ -716,6 +737,182 @@ async def update_library(
     if body.visibility is not None:
         library.visibility = body.visibility.value
 
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library.update",
+        target_type="library",
+        target_id=library_id,
+        details={
+            "name": library.name,
+            "visibility": library.visibility,
+            "image_file_id": library.image_file_id,
+            "cover_file_id": library.cover_file_id,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_library_response(library, current_user, storage, include)
+
+
+@router.post("/{library_id}/image", response_model=LibraryResponse)
+async def upload_library_image(
+    library_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+):
+    """Upload a library image."""
+    library = await music.get_library(db, library_id, include=set(include.values))
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "library", library_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    stored = await upload_entity_image(
+        db,
+        storage,
+        library,
+        "image_file_id",
+        file,
+        current_user,
+        owner_id=library.owner_id,
+    )
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library.update",
+        target_type="library",
+        target_id=library_id,
+        details={"image_file_id": stored.id},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_library_response(library, current_user, storage, include)
+
+
+@router.post("/{library_id}/cover", response_model=LibraryResponse)
+async def upload_library_cover(
+    library_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+):
+    """Upload library cover art."""
+    library = await music.get_library(db, library_id, include=set(include.values))
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "library", library_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    stored = await upload_entity_image(
+        db,
+        storage,
+        library,
+        "cover_file_id",
+        file,
+        current_user,
+        owner_id=library.owner_id,
+    )
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library.update",
+        target_type="library",
+        target_id=library_id,
+        details={"cover_file_id": stored.id},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_library_response(library, current_user, storage, include)
+
+
+@router.delete("/{library_id}/image", response_model=LibraryResponse)
+async def delete_library_image(
+    library_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+):
+    """Remove a library image."""
+    library = await music.get_library(db, library_id, include=set(include.values))
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "library", library_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    await remove_entity_image(library, "image_file_id")
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library.update",
+        target_type="library",
+        target_id=library_id,
+        details={"image_file_id": None},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_library_response(library, current_user, storage, include)
+
+
+@router.delete("/{library_id}/cover", response_model=LibraryResponse)
+async def delete_library_cover(
+    library_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+):
+    """Remove library cover art."""
+    library = await music.get_library(db, library_id, include=set(include.values))
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "library", library_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    await remove_entity_image(library, "cover_file_id")
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="library.update",
+        target_type="library",
+        target_id=library_id,
+        details={"cover_file_id": None},
+        ip_address=client_ip(request),
+    )
     await db.commit()
 
     return await _build_library_response(library, current_user, storage, include)

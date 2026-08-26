@@ -7,9 +7,21 @@ be reused across the API without creating import cycles.
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import inspect
 
 from ..models._enums import Visibility
 from ..services.storage import StorageService
+
+
+def _is_loaded(obj, attr: str) -> bool:
+    """Return True when ``attr`` has already been loaded on ``obj``."""
+    try:
+        state = inspect(obj)
+        if not state.unloaded or attr not in state.unloaded:
+            return True
+        return False
+    except Exception:
+        return False
 
 
 class ArtistSummary(BaseModel):
@@ -20,6 +32,7 @@ class ArtistSummary(BaseModel):
     id: str
     name: str
     image_url: Optional[str] = None
+    cover_url: Optional[str] = None
 
 
 class UserSummary(BaseModel):
@@ -64,6 +77,8 @@ class TrackSummary(BaseModel):
     disc_number: Optional[int] = None
     duration: Optional[float] = None
     audio_url: Optional[str] = None
+    image_url: Optional[str] = None
+    release_year: Optional[int] = None
     owner_id: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
 
@@ -72,7 +87,7 @@ async def build_artist_summary(
     artist,
     storage: StorageService,
 ) -> Optional[ArtistSummary]:
-    """Build an ArtistSummary, resolving the image URL when possible."""
+    """Build an ArtistSummary, resolving the image and cover URLs when possible."""
     if artist is None:
         return None
 
@@ -80,10 +95,15 @@ async def build_artist_summary(
     if artist.image_file_id and artist.image_file:
         image_url = await storage.get_url(artist.image_file)
 
+    cover_url = None
+    if artist.cover_file_id and artist.cover_file:
+        cover_url = await storage.get_url(artist.cover_file)
+
     return ArtistSummary(
         id=str(artist.id),
         name=artist.name,
         image_url=image_url,
+        cover_url=cover_url,
     )
 
 
@@ -112,29 +132,59 @@ async def build_album_summary(
     )
 
 
+def _track_release_year(track) -> Optional[int]:
+    """Return the track's year, falling back to the album's year when loaded."""
+    if track.release_year is not None:
+        return track.release_year
+    if track.album_id and _is_loaded(track, "album") and track.album is not None:
+        return track.album.release_year
+    return None
+
+
+async def _track_image_url(track, storage: StorageService) -> Optional[str]:
+    """Return the track's image URL, falling back to the album cover when loaded."""
+    if track.image_file_id and track.image_file:
+        return await storage.get_url(track.image_file)
+    if track.album_id and _is_loaded(track, "album") and track.album is not None:
+        if track.album.cover_file_id and track.album.cover_file:
+            return await storage.get_url(track.album.cover_file)
+        return track.album.cover_url
+    return None
+
+
 async def build_track_summary(
     track,
     storage: StorageService,
 ) -> Optional[TrackSummary]:
-    """Build a TrackSummary, resolving the audio URL and artist/album when possible."""
+    """Build a TrackSummary, resolving the audio URL, cover, and effective year."""
     if track is None:
         return None
 
     audio_url = None
-    if track.audio_file_id and track.audio_file:
+    if track.audio_file_id and _is_loaded(track, "audio_file") and track.audio_file:
         audio_url = await storage.get_url(track.audio_file)
+
+    artist = None
+    if _is_loaded(track, "artist") and track.artist is not None:
+        artist = await build_artist_summary(track.artist, storage)
+
+    album = None
+    if _is_loaded(track, "album") and track.album is not None:
+        album = await build_album_summary(track.album, storage)
 
     return TrackSummary(
         id=str(track.id),
         title=track.title,
         artist_id=track.artist_id,
-        artist=await build_artist_summary(track.artist, storage),
+        artist=artist,
         album_id=track.album_id,
-        album=await build_album_summary(track.album, storage),
+        album=album,
         track_number=track.track_number,
         disc_number=track.disc_number,
         duration=track.duration,
         audio_url=audio_url,
+        image_url=await _track_image_url(track, storage),
+        release_year=_track_release_year(track),
         owner_id=track.owner_id,
         visibility=track.visibility,
     )

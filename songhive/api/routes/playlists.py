@@ -5,7 +5,18 @@ Playlist routes.
 import asyncio
 from typing import List, Optional, cast
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +38,7 @@ from ..deps import (
 from ..middleware.rate_limit import rate_limit_account
 from ..responses import TrackSummary, UserSummary, build_track_summary, build_user_summary
 from ._common import HasOwnerId, redact_owner
+from ._images import remove_entity_image, upload_entity_image
 from .tracks import TrackResponse, _build_track_response
 
 router = APIRouter(prefix="/playlists")
@@ -42,6 +54,8 @@ class PlaylistResponse(BaseModel):
     owner_id: Optional[str] = None
     description: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+    image_url: Optional[str] = None
+    cover_url: Optional[str] = None
     owner: Optional[UserSummary] = None
     tracks: Optional[List[TrackSummary]] = None
 
@@ -51,6 +65,14 @@ class PlaylistCreate(BaseModel):
 
     name: str
     description: Optional[str] = None
+
+
+class PlaylistUpdate(BaseModel):
+    """Playlist partial update."""
+
+    name: Optional[str] = None
+    description: Optional[str] = None
+    visibility: Optional[Visibility] = None
 
 
 class AddPlaylistTracksRequest(BaseModel):
@@ -65,6 +87,20 @@ class RemovePlaylistTracksRequest(BaseModel):
     """Request body for removing tracks from a playlist."""
 
     track_ids: List[str]
+
+
+async def _playlist_image_url(playlist: Playlist, storage: StorageService) -> Optional[str]:
+    """Resolve a playlist's image URL from its stored file."""
+    if playlist.image_file_id and playlist.image_file:
+        return await storage.get_url(playlist.image_file)
+    return None
+
+
+async def _playlist_cover_url(playlist: Playlist, storage: StorageService) -> Optional[str]:
+    """Resolve a playlist's cover art URL from its stored file."""
+    if playlist.cover_file_id and playlist.cover_file:
+        return await storage.get_url(playlist.cover_file)
+    return None
 
 
 async def _build_playlist_response(
@@ -95,6 +131,8 @@ async def _build_playlist_response(
         owner_id=owner_id,
         description=playlist.description,
         visibility=playlist.visibility,
+        image_url=await _playlist_image_url(playlist, storage),
+        cover_url=await _playlist_cover_url(playlist, storage),
         owner=owner,
         tracks=tracks,
     )
@@ -166,6 +204,215 @@ async def get_playlist(
     assert playlist is not None
 
     return await _build_playlist_response(playlist, user, storage, include)
+
+
+@router.patch("/{playlist_id}", response_model=PlaylistResponse)
+async def update_playlist(
+    playlist_id: str,
+    body: PlaylistUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+):
+    """Partially update a playlist."""
+    playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    if body.name is not None:
+        playlist.name = body.name
+    if body.description is not None:
+        playlist.description = body.description
+    if body.visibility is not None:
+        playlist.visibility = body.visibility.value
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="playlist.update",
+        target_type="playlist",
+        target_id=playlist_id,
+        details={
+            "name": playlist.name,
+            "visibility": playlist.visibility,
+            "image_file_id": playlist.image_file_id,
+            "cover_file_id": playlist.cover_file_id,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_playlist_response(playlist, current_user, storage, include)
+
+
+@router.post("/{playlist_id}/image", response_model=PlaylistResponse)
+async def upload_playlist_image(
+    playlist_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+):
+    """Upload a playlist image."""
+    playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    stored = await upload_entity_image(
+        db,
+        storage,
+        playlist,
+        "image_file_id",
+        file,
+        current_user,
+        owner_id=playlist.owner_id,
+    )
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="playlist.update",
+        target_type="playlist",
+        target_id=playlist_id,
+        details={"image_file_id": stored.id},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_playlist_response(playlist, current_user, storage, include)
+
+
+@router.post("/{playlist_id}/cover", response_model=PlaylistResponse)
+async def upload_playlist_cover(
+    playlist_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+):
+    """Upload playlist cover art."""
+    playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    stored = await upload_entity_image(
+        db,
+        storage,
+        playlist,
+        "cover_file_id",
+        file,
+        current_user,
+        owner_id=playlist.owner_id,
+    )
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="playlist.update",
+        target_type="playlist",
+        target_id=playlist_id,
+        details={"cover_file_id": stored.id},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_playlist_response(playlist, current_user, storage, include)
+
+
+@router.delete("/{playlist_id}/image", response_model=PlaylistResponse)
+async def delete_playlist_image(
+    playlist_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+):
+    """Remove a playlist image."""
+    playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    await remove_entity_image(playlist, "image_file_id")
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="playlist.update",
+        target_type="playlist",
+        target_id=playlist_id,
+        details={"image_file_id": None},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_playlist_response(playlist, current_user, storage, include)
+
+
+@router.delete("/{playlist_id}/cover", response_model=PlaylistResponse)
+async def delete_playlist_cover(
+    playlist_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+):
+    """Remove playlist cover art."""
+    playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    await remove_entity_image(playlist, "cover_file_id")
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="playlist.update",
+        target_type="playlist",
+        target_id=playlist_id,
+        details={"cover_file_id": None},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_playlist_response(playlist, current_user, storage, include)
 
 
 async def _resolve_track_ids(

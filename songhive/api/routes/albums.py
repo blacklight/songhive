@@ -4,7 +4,18 @@ Album routes.
 
 from typing import List, Optional, cast
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +44,7 @@ from ..responses import (
     build_user_summary,
 )
 from ._common import HasOwnerId, redact_owner
+from ._images import remove_entity_image, upload_entity_image
 from .tracks import _enqueue_track_enrichment
 
 router = APIRouter(prefix="/albums")
@@ -187,6 +199,7 @@ async def get_album(
 async def update_album(
     album_id: str,
     body: AlbumUpdate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
@@ -212,6 +225,100 @@ async def update_album(
     if body.visibility is not None:
         album.visibility = body.visibility.value
 
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="album.update",
+        target_type="album",
+        target_id=album_id,
+        details={
+            "title": album.title,
+            "release_year": album.release_year,
+            "visibility": album.visibility,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_album_response(album, current_user, storage, include)
+
+
+@router.post("/{album_id}/cover", response_model=AlbumResponse)
+async def upload_album_cover(
+    album_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks"})),
+):
+    """Upload album cover art."""
+    album = await music.get_album(db, album_id, include=set(include.values))
+    if album is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "album", album_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    stored = await upload_entity_image(
+        db,
+        storage,
+        album,
+        "cover_file_id",
+        file,
+        current_user,
+        owner_id=album.owner_id,
+    )
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="album.update",
+        target_type="album",
+        target_id=album_id,
+        details={"cover_file_id": stored.id},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return await _build_album_response(album, current_user, storage, include)
+
+
+@router.delete("/{album_id}/cover", response_model=AlbumResponse)
+async def delete_album_cover(
+    album_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks"})),
+):
+    """Remove album cover art."""
+    album = await music.get_album(db, album_id, include=set(include.values))
+    if album is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "album", album_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    await remove_entity_image(album, "cover_file_id")
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="album.update",
+        target_type="album",
+        target_id=album_id,
+        details={"cover_file_id": None},
+        ip_address=client_ip(request),
+    )
     await db.commit()
 
     return await _build_album_response(album, current_user, storage, include)
