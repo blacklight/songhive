@@ -16,6 +16,7 @@ import { getApiErrorMessage, ApiError } from "@/api/client";
 import { useOwnership } from "@/composables/useOwnership";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
+import { getPublicUrl, isPublicResource } from "@/utils/share";
 import { formatDateTime } from "@/i18n";
 import AppModal from "@/components/feedback/AppModal.vue";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -28,6 +29,7 @@ export interface Props {
   itemId: string;
   title: string;
   ownerId?: string | null;
+  visibility?: string | null;
 }
 
 const props = defineProps<Props>();
@@ -38,7 +40,52 @@ const confirm = useConfirmStore();
 const toast = useToastStore();
 const { isOwner } = useOwnership(computed(() => props.ownerId ?? null));
 
-const activeTab = ref<"grants" | "urls">("grants");
+type TabKey = "grants" | "urls" | "public";
+
+const activeTab = ref<TabKey>("grants");
+
+const isPublic = computed(() =>
+  isPublicResource(props.visibility, props.itemType),
+);
+
+const publicUrl = computed(() =>
+  isPublic.value ? getPublicUrl(props.itemType, props.itemId) : null,
+);
+
+const availableTabs = computed(() => {
+  const tabs: { key: TabKey; label: string; icon: string }[] = [];
+  if (isOwner.value) {
+    tabs.push({
+      key: "grants",
+      label: t("browse.share.shareGrants"),
+      icon: "users",
+    });
+    tabs.push({
+      key: "urls",
+      label: t("browse.share.shareUrls"),
+      icon: "link",
+    });
+  }
+  if (publicUrl.value) {
+    tabs.push({
+      key: "public",
+      label: t("browse.share.publicUrl"),
+      icon: "globe",
+    });
+  }
+  return tabs;
+});
+
+function firstAvailableTab(): TabKey {
+  return availableTabs.value[0]?.key ?? "grants";
+}
+
+function ensureActiveTab() {
+  const available = availableTabs.value.map((tab) => tab.key);
+  if (!available.includes(activeTab.value)) {
+    activeTab.value = firstAvailableTab();
+  }
+}
 
 const grants = ref<ShareGrantResponse[]>([]);
 const grantsLoading = ref(false);
@@ -135,7 +182,7 @@ async function loadUrls() {
 function load() {
   if (activeTab.value === "grants") {
     loadGrants();
-  } else {
+  } else if (activeTab.value === "urls") {
     loadUrls();
   }
 }
@@ -264,6 +311,7 @@ watch(
   [() => props.open, () => props.itemId, activeTab],
   () => {
     if (props.open) {
+      ensureActiveTab();
       load();
     }
   },
@@ -274,6 +322,7 @@ watch(
   () => props.open,
   (open) => {
     if (!open) {
+      activeTab.value = "grants";
       userId.value = "";
       expiresAt.value = "";
       newUrl.value = null;
@@ -291,22 +340,16 @@ watch(
     :title="t('browse.share.shareTitle', { name: props.title })"
     @close="close"
   >
-    <div class="share-dialog__tabs">
+    <div v-if="availableTabs.length > 0" class="share-dialog__tabs">
       <AppButton
+        v-for="tab in availableTabs"
+        :key="tab.key"
         size="sm"
-        icon="users"
-        :variant="activeTab === 'grants' ? 'primary' : 'ghost'"
-        @click="activeTab = 'grants'"
+        :icon="tab.icon"
+        :variant="activeTab === tab.key ? 'primary' : 'ghost'"
+        @click="activeTab = tab.key"
       >
-        {{ t("browse.share.shareGrants") }}
-      </AppButton>
-      <AppButton
-        size="sm"
-        icon="link"
-        :variant="activeTab === 'urls' ? 'primary' : 'ghost'"
-        @click="activeTab = 'urls'"
-      >
-        {{ t("browse.share.shareUrls") }}
+        {{ tab.label }}
       </AppButton>
     </div>
 
@@ -355,7 +398,7 @@ watch(
       </AppTable>
     </div>
 
-    <div v-else class="share-dialog__panel">
+    <div v-else-if="activeTab === 'urls'" class="share-dialog__panel">
       <div v-if="newUrl" class="share-dialog__new-url">
         <AppInput
           :model-value="newUrl"
@@ -423,6 +466,19 @@ watch(
           </AppButton>
         </template>
       </AppTable>
+    </div>
+
+    <div v-else-if="activeTab === 'public'" class="share-dialog__panel">
+      <div v-if="publicUrl" class="share-dialog__new-url">
+        <AppInput
+          :model-value="publicUrl"
+          :label="t('browse.share.publicUrl')"
+          disabled
+        />
+        <AppButton size="sm" icon="copy" @click="copyToClipboard(publicUrl)">
+          {{ t("common.copy") }}
+        </AppButton>
+      </div>
     </div>
   </AppModal>
 </template>

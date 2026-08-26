@@ -365,7 +365,10 @@
       "revokeUrlConfirm": "Are you sure you want to revoke this public link?",
       "emptyGrants": "Not shared with any users.",
       "emptyUrls": "No public links.",
-      "openInApp": "Log in to open in the app"
+      "openInApp": "Log in to open in the app",
+      "publicUrl": "Public URL",
+      "publicUrlHint": "Anyone can view this public page.",
+      "preview": "Preview"
     },
     "contextMenu": {
       "playNext": "Play next",

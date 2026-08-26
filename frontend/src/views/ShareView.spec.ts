@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
+import { createPinia, setActivePinia } from "pinia";
 import { i18n } from "@/i18n";
 import { ApiError } from "@/api/client";
 import * as sharesApi from "@/api/shares";
@@ -59,6 +60,7 @@ describe("ShareView", () => {
   let wrapper: ReturnType<typeof mount>;
 
   beforeEach(() => {
+    setActivePinia(createPinia());
     vi.clearAllMocks();
     vi.mocked(sharesApi.resolveShareUrl).mockResolvedValue(
       createTrackPayload(),
@@ -229,5 +231,52 @@ describe("ShareView", () => {
 
     expect(sharesApi.resolveShareUrl).toHaveBeenLastCalledWith("second");
     expect(document.body.textContent).toContain("Song Two");
+  });
+
+  it("offers a public URL tab and copies it for public items", async () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    await mountAt("public-track");
+
+    const publicTab = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("browse.share.publicUrl"),
+    );
+    expect(publicTab).toBeDefined();
+
+    await publicTab?.click();
+    await flushPromises();
+
+    const urlInput = document.body.querySelector(
+      'input[type="text"]',
+    ) as HTMLInputElement;
+    expect(urlInput?.value).toBe("http://localhost:3000/tracks/track-1");
+
+    const copyButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.copy"));
+    await copyButton?.click();
+    await flushPromises();
+
+    expect(writeText).toHaveBeenCalledWith(
+      "http://localhost:3000/tracks/track-1",
+    );
+  });
+
+  it("does not show a public URL tab for private items", async () => {
+    vi.mocked(sharesApi.resolveShareUrl).mockResolvedValue({
+      ...createTrackPayload(),
+      visibility: "private",
+    });
+
+    await mountAt("private-track");
+
+    const publicTab = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("browse.share.publicUrl"),
+    );
+    expect(publicTab).toBeUndefined();
   });
 });

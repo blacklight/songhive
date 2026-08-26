@@ -113,7 +113,13 @@ async function onToggleFavorite(track: QueueTrack) {
 }
 
 function onTrackShare(track: QueueTrack) {
-  openShare("track", track.id, track.title, track.owner_id ?? null);
+  openShare(
+    "track",
+    track.id,
+    track.title,
+    track.owner_id ?? null,
+    track.visibility,
+  );
 }
 
 async function onTracksRemoved(trackIds: string[]) {
@@ -211,6 +217,7 @@ onMounted(() => load(true));
       :item-id="shareTarget.itemId"
       :title="shareTarget.title"
       :owner-id="shareTarget.ownerId"
+      :visibility="shareTarget.visibility"
       @close="closeShare"
     />
   </div>

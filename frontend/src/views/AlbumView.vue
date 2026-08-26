@@ -76,6 +76,8 @@ const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
   useEntityMeta(album);
 const { isOwner } = useOwnership(computed(() => album.value?.owner_id ?? null));
 
+const isPublic = computed(() => album.value?.visibility === "public");
+
 const deleteAlbum = useEntityDelete({
   delete: deleteAlbumApi,
   entity: t("browse.entities.album"),
@@ -101,7 +103,13 @@ const {
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 function onTrackShare(track: QueueTrack) {
-  openShare("track", track.id, track.title, track.owner_id ?? null);
+  openShare(
+    "track",
+    track.id,
+    track.title,
+    track.owner_id ?? null,
+    track.visibility,
+  );
 }
 
 async function onTracksRemoved() {
@@ -114,7 +122,7 @@ const actions = computed(() => [
     label: t("common.share"),
     icon: "share-nodes",
     variant: "secondary" as const,
-    visible: isOwner.value,
+    visible: isOwner.value || isPublic.value,
   },
   {
     key: "add-to-library",
@@ -152,6 +160,7 @@ function onAction(key: string) {
         album.value.id,
         album.value.title,
         album.value.owner_id,
+        album.value.visibility,
       );
       break;
     case "add-to-library":
@@ -368,6 +377,7 @@ watch(
       :item-id="shareTarget.itemId"
       :title="shareTarget.title"
       :owner-id="shareTarget.ownerId"
+      :visibility="shareTarget.visibility"
       @close="closeShare"
     />
 

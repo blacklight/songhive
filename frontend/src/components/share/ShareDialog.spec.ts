@@ -371,4 +371,61 @@ describe("ShareDialog", () => {
 
     expect(document.body.textContent).toContain("create failed");
   });
+
+  it("shows a public URL tab for public items viewed by non-owners", async () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      ownerId: "user-2",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const publicTab = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("browse.share.publicUrl"),
+    );
+    expect(publicTab).toBeDefined();
+    await publicTab?.click();
+    await flushPromises();
+
+    const urlInput = document.body.querySelector(
+      'input[type="text"]',
+    ) as HTMLInputElement;
+    expect(urlInput?.value).toBe("http://localhost:3000/albums/album-1");
+
+    const copyButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.copy"));
+    await copyButton?.click();
+    await flushPromises();
+
+    expect(writeText).toHaveBeenCalledWith(
+      "http://localhost:3000/albums/album-1",
+    );
+  });
+
+  it("shows all three tabs for the owner of a public item", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      ownerId: "user-1",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const tabLabels = ["shareGrants", "shareUrls", "publicUrl"].map((key) =>
+      i18n.global.t(`browse.share.${key}`),
+    );
+    for (const label of tabLabels) {
+      expect(
+        Array.from(document.body.querySelectorAll("button")).some(
+          (b) => b.textContent === label,
+        ),
+      ).toBe(true);
+    }
+  });
 });

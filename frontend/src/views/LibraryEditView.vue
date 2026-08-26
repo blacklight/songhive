@@ -105,7 +105,13 @@ const removableFrom = computed(() =>
 );
 
 function onTrackShare(track: QueueTrack) {
-  openShare("track", track.id, track.title, track.owner_id ?? null);
+  openShare(
+    "track",
+    track.id,
+    track.title,
+    track.owner_id ?? null,
+    track.visibility,
+  );
 }
 
 async function onTracksRemoved() {
@@ -519,6 +525,7 @@ watch(
       :item-id="shareTarget.itemId"
       :title="shareTarget.title"
       :owner-id="shareTarget.ownerId"
+      :visibility="shareTarget.visibility"
       @close="closeShare"
     />
   </div>

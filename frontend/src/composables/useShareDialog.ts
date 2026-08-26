@@ -6,6 +6,7 @@ export interface ShareTarget {
   itemId: string;
   title: string;
   ownerId: string | null;
+  visibility: string | null;
 }
 
 export function useShareDialog() {
@@ -17,12 +18,14 @@ export function useShareDialog() {
     itemId: string,
     title: string,
     ownerId?: string | null,
+    visibility?: string | null,
   ) {
     shareTarget.value = {
       itemType,
       itemId,
       title,
       ownerId: ownerId ?? null,
+      visibility: visibility ?? null,
     };
     shareOpen.value = true;
   }

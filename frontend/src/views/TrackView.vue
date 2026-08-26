@@ -58,6 +58,8 @@ const queueTrack = computed(() => {
 const { ownerName, visibilityText } = useEntityMeta(track);
 const { isOwner } = useOwnership(computed(() => track.value?.owner_id ?? null));
 
+const isPublic = computed(() => track.value?.visibility === "public");
+
 const deleteTrack = useEntityDelete({
   delete: deleteTrackApi,
   entity: t("browse.entities.track"),
@@ -94,7 +96,7 @@ const actions = computed(() => [
     label: t("common.share"),
     icon: "share-nodes",
     variant: "secondary" as const,
-    visible: isOwner.value,
+    visible: isOwner.value || isPublic.value,
   },
   {
     key: "add-to-library",
@@ -131,6 +133,7 @@ function onAction(key: string) {
         track.value.id,
         track.value.title,
         track.value.owner_id,
+        track.value.visibility,
       );
       break;
     case "add-to-library":
@@ -287,6 +290,7 @@ watch(
       :item-id="shareTarget.itemId"
       :title="shareTarget.title"
       :owner-id="shareTarget.ownerId"
+      :visibility="shareTarget.visibility"
       @close="closeShare"
     />
 

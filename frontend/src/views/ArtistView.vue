@@ -107,7 +107,13 @@ const {
 } = deleteArtist;
 
 function onTrackShare(track: QueueTrack) {
-  openShare("track", track.id, track.title, track.owner_id ?? null);
+  openShare(
+    "track",
+    track.id,
+    track.title,
+    track.owner_id ?? null,
+    track.visibility,
+  );
 }
 
 async function onTracksRemoved() {
@@ -115,6 +121,13 @@ async function onTracksRemoved() {
 }
 
 const actions = computed(() => [
+  {
+    key: "share",
+    label: t("common.share"),
+    icon: "share-nodes",
+    variant: "secondary" as const,
+    visible: true,
+  },
   {
     key: "add-to-library",
     label: t("browse.addToCollection.addToLibrary"),
@@ -139,6 +152,9 @@ const actions = computed(() => [
 function onAction(key: string) {
   if (!artist.value) return;
   switch (key) {
+    case "share":
+      openShare("artist", artist.value.id, artist.value.name, null, null);
+      break;
     case "add-to-library":
       openAddDialog("library");
       break;
@@ -333,6 +349,7 @@ watch(
       :item-id="shareTarget.itemId"
       :title="shareTarget.title"
       :owner-id="shareTarget.ownerId"
+      :visibility="shareTarget.visibility"
       @close="closeShare"
     />
 

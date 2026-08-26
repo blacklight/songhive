@@ -5,6 +5,7 @@ import type { ShareItemType } from "@/api/shares";
 const SHARE_ITEM_TYPES: ShareItemType[] = [
   "track",
   "album",
+  "artist",
   "playlist",
   "library",
 ];
@@ -23,6 +24,41 @@ export interface SharePreview {
   ownerId?: string | null;
   visibility?: string;
   coverUrl?: string;
+}
+
+const PUBLIC_URL_PATHS: Record<ShareItemType, string> = {
+  track: "tracks",
+  album: "albums",
+  artist: "artists",
+  playlist: "playlists",
+  library: "libraries",
+};
+
+/**
+ * Build the canonical public page URL for a shareable entity, or ``null`` when
+ * the type has no public page (e.g. an unresolvable share payload).
+ */
+export function getPublicUrl(
+  itemType: ShareItemType | "unknown",
+  itemId?: string,
+): string | null {
+  if (itemType === "unknown" || !itemId) return null;
+  const plural = PUBLIC_URL_PATHS[itemType];
+  if (!plural) return null;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}/${plural}/${itemId}`;
+}
+
+/**
+ * Return whether a resource should be considered publicly shareable by URL.
+ * Artists have no visibility field and are treated as public by default.
+ */
+export function isPublicResource(
+  visibility?: string | null,
+  itemType?: ShareItemType | "unknown",
+): boolean {
+  if (itemType === "artist") return true;
+  return visibility === "public";
 }
 
 function isShareItemType(value: unknown): value is ShareItemType {
@@ -67,16 +103,33 @@ function inferItemType(
   }
 
   if (
-    typeof item.release_year === "number" ||
-    typeof item.cover_url === "string" ||
-    typeof item.musicbrainz_id === "string"
+    typeof item.title === "string" &&
+    (typeof item.release_year === "number" ||
+      typeof item.cover_url === "string" ||
+      typeof item.musicbrainz_id === "string")
   ) {
     return "album";
   }
 
-  if (typeof item.name === "string") {
-    // Playlists and libraries have the same public shape, so we cannot
-    // distinguish them from fields alone. The caller can still render a
+  if (typeof item.name === "string" && typeof item.title !== "string") {
+    if (
+      typeof item.bio === "string" ||
+      typeof item.image_url === "string" ||
+      typeof item.musicbrainz_id === "string"
+    ) {
+      return "artist";
+    }
+
+    if (typeof item.can_write === "boolean") {
+      return "library";
+    }
+
+    if (typeof item.visibility === "string") {
+      return "playlist";
+    }
+
+    // Playlists and libraries both use ``name`` and ``visibility`` and can be
+    // hard to distinguish when fields are sparse. The caller can still render a
     // generic preview with a name.
     return "unknown";
   }

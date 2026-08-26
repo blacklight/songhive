@@ -4,9 +4,16 @@ import { useI18n } from "vue-i18n";
 import { useRoute, RouterLink } from "vue-router";
 import { resolveShareUrl } from "@/api/shares";
 import { ApiError } from "@/api/client";
-import { parseSharePayload, enrichSharePreview } from "@/utils/share";
+import { useToastStore } from "@/stores/toast";
+import {
+  getPublicUrl,
+  isPublicResource,
+  parseSharePayload,
+  enrichSharePreview,
+} from "@/utils/share";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppInput from "@/components/ui/AppInput.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import type { SharePreview } from "@/utils/share";
@@ -15,11 +22,32 @@ type ShareError = "expired" | "revoked" | "notFound" | "unknown";
 
 const { t } = useI18n();
 const route = useRoute();
+const toast = useToastStore();
 
 const token = computed(() => String(route.params.token));
 const loading = ref(false);
 const error = ref<ShareError | null>(null);
 const preview = ref<SharePreview | null>(null);
+const activeTab = ref<"preview" | "public">("preview");
+
+const publicUrl = computed(() => {
+  if (!preview.value?.id) return null;
+  if (!isPublicResource(preview.value.visibility, preview.value.type)) {
+    return null;
+  }
+  return getPublicUrl(preview.value.type, preview.value.id);
+});
+
+const showTabs = computed(() => !!publicUrl.value);
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.push({ type: "success", message: t("browse.share.urlCopied") });
+  } catch {
+    toast.push({ type: "error", message: t("browse.share.copyFailed") });
+  }
+}
 
 const loginRoute = computed(() => ({
   path: "/login",
@@ -66,6 +94,7 @@ async function load() {
   loading.value = true;
   error.value = null;
   preview.value = null;
+  activeTab.value = "preview";
 
   try {
     const result = await resolveShareUrl(token.value);
@@ -132,52 +161,93 @@ watch(
         {{ t("browse.share.sharedItem", { type: typeLabel }) }}
       </AppPageTitle>
 
-      <div class="share-view__header">
-        <img
-          v-if="preview.coverUrl"
-          :src="preview.coverUrl"
-          :alt="preview.title"
-          class="share-view__cover"
-        />
+      <div v-if="showTabs" class="share-view__tabs">
+        <AppButton
+          size="sm"
+          icon="eye"
+          :variant="activeTab === 'preview' ? 'primary' : 'ghost'"
+          @click="activeTab = 'preview'"
+        >
+          {{ t("browse.share.preview") }}
+        </AppButton>
+        <AppButton
+          size="sm"
+          icon="globe"
+          :variant="activeTab === 'public' ? 'primary' : 'ghost'"
+          @click="activeTab = 'public'"
+        >
+          {{ t("browse.share.publicUrl") }}
+        </AppButton>
+      </div>
 
-        <div class="share-view__info">
-          <h2 class="share-view__name">{{ preview.title }}</h2>
+      <div v-if="!showTabs || activeTab === 'preview'" class="share-view__body">
+        <div class="share-view__header">
+          <img
+            v-if="preview.coverUrl"
+            :src="preview.coverUrl"
+            :alt="preview.title"
+            class="share-view__cover"
+          />
 
-          <p v-if="preview.description" class="share-view__description">
-            {{ preview.description }}
-          </p>
+          <div class="share-view__info">
+            <h2 class="share-view__name">{{ preview.title }}</h2>
 
-          <div class="share-view__meta">
-            <span v-if="preview.artistName" class="share-view__meta-item">
-              {{ t("browse.entities.artist") }} {{ preview.artistName }}
-            </span>
+            <p v-if="preview.description" class="share-view__description">
+              {{ preview.description }}
+            </p>
 
-            <span v-if="preview.albumTitle" class="share-view__meta-item">
-              {{ t("browse.entities.album") }} {{ preview.albumTitle }}
-            </span>
+            <div class="share-view__meta">
+              <span v-if="preview.artistName" class="share-view__meta-item">
+                {{ t("browse.entities.artist") }} {{ preview.artistName }}
+              </span>
 
-            <span v-if="preview.releaseYear" class="share-view__meta-item">
-              {{ t("browse.detail.year") }} {{ preview.releaseYear }}
-            </span>
+              <span v-if="preview.albumTitle" class="share-view__meta-item">
+                {{ t("browse.entities.album") }} {{ preview.albumTitle }}
+              </span>
 
-            <span v-if="preview.duration" class="share-view__meta-item">
-              {{ t("browse.detail.duration") }}
-              {{ formatTime(preview.duration) }}
-            </span>
+              <span v-if="preview.releaseYear" class="share-view__meta-item">
+                {{ t("browse.detail.year") }} {{ preview.releaseYear }}
+              </span>
 
-            <span v-if="visibilityLabel" class="share-view__meta-item">
-              {{ t("browse.detail.visibility") }} {{ visibilityLabel }}
-            </span>
+              <span v-if="preview.duration" class="share-view__meta-item">
+                {{ t("browse.detail.duration") }}
+                {{ formatTime(preview.duration) }}
+              </span>
+
+              <span v-if="visibilityLabel" class="share-view__meta-item">
+                {{ t("browse.detail.visibility") }} {{ visibilityLabel }}
+              </span>
+            </div>
           </div>
+        </div>
+
+        <div class="share-view__actions">
+          <RouterLink :to="loginRoute">
+            <AppButton size="sm" icon="right-to-bracket" variant="secondary">
+              {{ t("browse.share.openInApp") }}
+            </AppButton>
+          </RouterLink>
         </div>
       </div>
 
-      <div class="share-view__actions">
-        <RouterLink :to="loginRoute">
-          <AppButton size="sm" icon="right-to-bracket" variant="secondary">
-            {{ t("browse.share.openInApp") }}
+      <div v-else-if="activeTab === 'public'" class="share-view__panel">
+        <p class="share-view__hint">
+          {{ t("browse.share.publicUrlHint") }}
+        </p>
+        <div class="share-view__public-url">
+          <AppInput
+            :model-value="publicUrl ?? ''"
+            :label="t('browse.share.publicUrl')"
+            disabled
+          />
+          <AppButton
+            size="sm"
+            icon="copy"
+            @click="publicUrl && copyToClipboard(publicUrl)"
+          >
+            {{ t("common.copy") }}
           </AppButton>
-        </RouterLink>
+        </div>
       </div>
     </template>
   </div>
@@ -257,5 +327,38 @@ watch(
   display: inline-flex;
   align-items: center;
   word-break: break-word;
+}
+
+.share-view__tabs {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.share-view__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.share-view__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.share-view__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.share-view__public-url {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface-secondary);
 }
 </style>

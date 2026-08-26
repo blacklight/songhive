@@ -60,6 +60,8 @@ const { isOwner } = useOwnership(
   computed(() => library.value?.owner_id ?? null),
 );
 
+const isPublic = computed(() => library.value?.visibility === "public");
+
 const deleteLibrary = useEntityDelete({
   delete: deleteLibraryApi,
   entity: t("browse.entities.library"),
@@ -85,7 +87,13 @@ const {
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 function onTrackShare(track: QueueTrack) {
-  openShare("track", track.id, track.title, track.owner_id ?? null);
+  openShare(
+    "track",
+    track.id,
+    track.title,
+    track.owner_id ?? null,
+    track.visibility,
+  );
 }
 
 const removableFrom = computed(() => {
@@ -108,7 +116,7 @@ const actions = computed(() => [
     label: t("common.share"),
     icon: "share-nodes",
     variant: "secondary" as const,
-    visible: isOwner.value,
+    visible: isOwner.value || isPublic.value,
   },
   {
     key: "delete",
@@ -128,6 +136,7 @@ function onAction(key: string) {
         library.value.id,
         library.value.name,
         library.value.owner_id,
+        library.value.visibility,
       );
       break;
     case "delete":
@@ -269,6 +278,7 @@ watch(
         :item-id="shareTarget.itemId"
         :title="shareTarget.title"
         :owner-id="shareTarget.ownerId"
+        :visibility="shareTarget.visibility"
         @close="closeShare"
       />
 

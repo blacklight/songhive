@@ -62,6 +62,8 @@ const { isOwner } = useOwnership(
   computed(() => playlist.value?.owner_id ?? null),
 );
 
+const isPublic = computed(() => playlist.value?.visibility === "public");
+
 const deletePlaylist = useEntityDelete({
   delete: deletePlaylistApi,
   entity: t("browse.entities.playlist"),
@@ -99,7 +101,13 @@ const removableFrom = computed(() => {
 });
 
 function onTrackShare(track: QueueTrack) {
-  openShare("track", track.id, track.title, track.owner_id ?? null);
+  openShare(
+    "track",
+    track.id,
+    track.title,
+    track.owner_id ?? null,
+    track.visibility,
+  );
 }
 
 async function onTracksRemoved() {
@@ -112,7 +120,7 @@ const actions = computed(() => [
     label: t("common.share"),
     icon: "share-nodes",
     variant: "secondary" as const,
-    visible: isOwner.value,
+    visible: isOwner.value || isPublic.value,
   },
   {
     key: "delete",
@@ -132,6 +140,7 @@ function onAction(key: string) {
         playlist.value.id,
         playlist.value.name,
         playlist.value.owner_id,
+        playlist.value.visibility,
       );
       break;
     case "delete":
@@ -274,6 +283,7 @@ watch(
         :item-id="shareTarget.itemId"
         :title="shareTarget.title"
         :owner-id="shareTarget.ownerId"
+        :visibility="shareTarget.visibility"
         @close="closeShare"
       />
 

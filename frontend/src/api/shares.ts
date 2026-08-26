@@ -7,7 +7,8 @@ export type ShareTokenCreate = components["schemas"]["ShareTokenCreate"];
 export type ShareTokenCreated = components["schemas"]["ShareTokenCreated"];
 export type ShareTokenResponse = components["schemas"]["ShareTokenResponse"];
 
-export type ShareItemType = "track" | "album" | "playlist" | "library";
+export type ShareItemType =
+  "track" | "album" | "artist" | "playlist" | "library";
 
 export function listShareGrants(params: {
   item_type: string;
