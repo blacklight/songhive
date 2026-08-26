@@ -46,26 +46,26 @@ const artistText = computed(
       <span :title="props.album.title" class="album-card__title">{{
         props.album.title
       }}</span>
+      <RouterLink
+        v-if="artistLink"
+        :to="artistLink"
+        :title="artistText"
+        class="album-card__artist"
+        @click.stop
+      >
+        {{ artistText }}
+      </RouterLink>
+      <span
+        v-else-if="props.artistName"
+        :title="props.artistName"
+        class="album-card__artist"
+      >
+        {{ props.artistName }}
+      </span>
       <span v-if="props.album.release_year" class="album-card__year">
         {{ props.album.release_year }}
       </span>
     </RouterLink>
-    <RouterLink
-      v-if="artistLink"
-      :to="artistLink"
-      :title="artistText"
-      class="album-card__artist"
-      @click.stop
-    >
-      {{ artistText }}
-    </RouterLink>
-    <span
-      v-else-if="props.artistName"
-      :title="props.artistName"
-      class="album-card__artist"
-    >
-      {{ props.artistName }}
-    </span>
   </div>
 </template>
 
@@ -90,10 +90,6 @@ const artistText = computed(
   color: var(--color-text);
   text-decoration: none;
   transition: background-color var(--transition-fast);
-}
-
-.album-card__main:hover {
-  background-color: var(--color-bg-hover);
 }
 
 .album-card__cover {
