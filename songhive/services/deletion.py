@@ -76,13 +76,45 @@ class DeletionResult:
 async def _count_stored_file_references(session: AsyncSession, stored_file_id: str) -> int:
     """Return the number of rows referencing ``stored_file_id``."""
     audio_refs = await session.scalar(select(func.count(Track.id)).where(Track.audio_file_id == stored_file_id))
+    track_image_refs = await session.scalar(select(func.count(Track.id)).where(Track.image_file_id == stored_file_id))
     upload_refs = await session.scalar(select(func.count(Upload.id)).where(Upload.stored_file_id == stored_file_id))
     album_refs = await session.scalar(select(func.count(Album.id)).where(Album.cover_file_id == stored_file_id))
-    artist_refs = await session.scalar(select(func.count(Artist.id)).where(Artist.image_file_id == stored_file_id))
+    artist_image_refs = await session.scalar(
+        select(func.count(Artist.id)).where(Artist.image_file_id == stored_file_id)
+    )
+    artist_cover_refs = await session.scalar(
+        select(func.count(Artist.id)).where(Artist.cover_file_id == stored_file_id)
+    )
+    library_image_refs = await session.scalar(
+        select(func.count(Library.id)).where(Library.image_file_id == stored_file_id)
+    )
+    library_cover_refs = await session.scalar(
+        select(func.count(Library.id)).where(Library.cover_file_id == stored_file_id)
+    )
+    playlist_image_refs = await session.scalar(
+        select(func.count(Playlist.id)).where(Playlist.image_file_id == stored_file_id)
+    )
+    playlist_cover_refs = await session.scalar(
+        select(func.count(Playlist.id)).where(Playlist.cover_file_id == stored_file_id)
+    )
     transcoded_refs = await session.scalar(
         select(func.count(TranscodedFile.id)).where(TranscodedFile.stored_file_id == stored_file_id)
     )
-    return sum([audio_refs or 0, upload_refs or 0, album_refs or 0, artist_refs or 0, transcoded_refs or 0])
+    return sum(
+        [
+            audio_refs or 0,
+            track_image_refs or 0,
+            upload_refs or 0,
+            album_refs or 0,
+            artist_image_refs or 0,
+            artist_cover_refs or 0,
+            library_image_refs or 0,
+            library_cover_refs or 0,
+            playlist_image_refs or 0,
+            playlist_cover_refs or 0,
+            transcoded_refs or 0,
+        ]
+    )
 
 
 async def _maybe_delete_stored_file(
@@ -256,9 +288,15 @@ async def delete_stored_file(
     # Orphan uploads that point directly at this file but have no track.
     await session.execute(delete(Upload).where(Upload.stored_file_id == file_id))
 
-    # Remove non-audio uses of the file (cover art, artist images).
+    # Remove non-audio uses of the file (cover art, images).
     await session.execute(update(Album).where(Album.cover_file_id == file_id).values(cover_file_id=None))
     await session.execute(update(Artist).where(Artist.image_file_id == file_id).values(image_file_id=None))
+    await session.execute(update(Artist).where(Artist.cover_file_id == file_id).values(cover_file_id=None))
+    await session.execute(update(Library).where(Library.image_file_id == file_id).values(image_file_id=None))
+    await session.execute(update(Library).where(Library.cover_file_id == file_id).values(cover_file_id=None))
+    await session.execute(update(Playlist).where(Playlist.image_file_id == file_id).values(image_file_id=None))
+    await session.execute(update(Playlist).where(Playlist.cover_file_id == file_id).values(cover_file_id=None))
+    await session.execute(update(Track).where(Track.image_file_id == file_id).values(image_file_id=None))
 
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "file", ShareGrant.item_id == file_id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "file", ShareToken.item_id == file_id))
