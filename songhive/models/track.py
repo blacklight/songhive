@@ -35,7 +35,7 @@ class Track(Base):
         insert_default=0,
         server_default="0",
     )
-    musicbrainz_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, unique=True, index=True)
+    musicbrainz_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     musicbrainz_enriched_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
     genre: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     audio_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)

@@ -6,6 +6,7 @@ import {
   listFiles,
   uploadFile,
   deleteFile,
+  type FileUploadResult,
   type StoredFileResponse,
 } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
@@ -29,9 +30,12 @@ const toast = useToastStore();
 
 const visibility = ref<Visibility>("public");
 const uploading = ref(false);
-const progress = ref(0);
 const uploadError = ref<string | null>(null);
-const selectedFileName = ref<string | null>(null);
+const uploadFailures = ref<{ name: string; message: string }[]>([]);
+const selectedFiles = ref<File[]>([]);
+const currentFileIndex = ref(0);
+const currentFileProgress = ref(0);
+const lastUploadTotal = ref(0);
 const fileInput = ref<HTMLInputElement | null>(null);
 const libraries = ref<LibraryResponse[]>([]);
 const selectedLibraryId = ref("");
@@ -54,15 +58,44 @@ const libraryOptions = computed(() => [
   })),
 ]);
 
-const chooseFileLabel = computed(() =>
-  selectedFileName.value ? selectedFileName.value : t("pages.files.selectFile"),
-);
+const chooseFileLabel = computed(() => {
+  if (uploading.value) return t("pages.files.uploading");
+  if (selectedFiles.value.length === 1) return selectedFiles.value[0].name;
+  if (selectedFiles.value.length > 1) {
+    return t("pages.files.selectedFiles", {
+      count: selectedFiles.value.length,
+    });
+  }
+  return t("pages.files.selectFile");
+});
 
-const progressLabel = computed(() =>
-  progress.value > 0
-    ? t("pages.files.uploadProgress", { percent: progress.value })
-    : t("pages.files.uploading"),
-);
+const overallProgress = computed(() => {
+  if (selectedFiles.value.length === 0) return 0;
+  const completed = currentFileIndex.value * 100;
+  const current = currentFileProgress.value;
+  return Math.round((completed + current) / selectedFiles.value.length);
+});
+
+const progressLabel = computed(() => {
+  if (
+    selectedFiles.value.length > 1 &&
+    currentFileIndex.value < selectedFiles.value.length
+  ) {
+    const file = selectedFiles.value[currentFileIndex.value];
+    return t("pages.files.uploadingFile", {
+      current: currentFileIndex.value + 1,
+      total: selectedFiles.value.length,
+      name: file?.name ?? "",
+      percent: overallProgress.value,
+    });
+  }
+  if (currentFileProgress.value > 0) {
+    return t("pages.files.uploadProgress", {
+      percent: currentFileProgress.value,
+    });
+  }
+  return t("pages.files.uploading");
+});
 
 const {
   items: files,
@@ -107,7 +140,7 @@ onMounted(async () => {
 });
 
 function resetInput() {
-  progress.value = 0;
+  currentFileProgress.value = 0;
   if (fileInput.value) {
     fileInput.value.value = "";
   }
@@ -119,40 +152,105 @@ function onSelectClick() {
 
 async function onFileChange(event: Event) {
   const target = event.target as HTMLInputElement;
-  const file = target.files?.[0];
-  if (!file) {
+  const files = target.files ? Array.from(target.files) : [];
+  if (files.length === 0) {
     resetInput();
     return;
   }
 
   uploadError.value = null;
+  uploadFailures.value = [];
   uploading.value = true;
-  progress.value = 0;
-  selectedFileName.value = file.name;
+  currentFileIndex.value = 0;
+  currentFileProgress.value = 0;
+  selectedFiles.value = files;
+  lastUploadTotal.value = files.length;
+
+  const results: FileUploadResult[] = [];
+  const libraryId = selectedLibraryId.value || undefined;
 
   try {
-    const libraryId = selectedLibraryId.value || undefined;
-    const response = await uploadFile(
-      file,
-      visibility.value,
-      (percent) => {
-        progress.value = percent;
-      },
-      libraryId,
-    );
-    toast.push({ type: "success", message: t("pages.files.uploadSuccess") });
-    if (response.trackId) {
-      await router.push({ name: "track", params: { id: response.trackId } });
-    } else {
-      await router.push({ name: "file", params: { id: response.id } });
+    for (let i = 0; i < files.length; i++) {
+      currentFileIndex.value = i;
+      currentFileProgress.value = 0;
+      const file = files[i];
+      try {
+        const result = await uploadFile(
+          file,
+          visibility.value,
+          (percent) => {
+            currentFileProgress.value = percent;
+          },
+          libraryId,
+        );
+        results.push(result);
+      } catch (err) {
+        uploadFailures.value.push({
+          name: file.name,
+          message: getErrorMessage(err),
+        });
+      } finally {
+        currentFileProgress.value = 100;
+      }
     }
-  } catch (err) {
-    uploadError.value = t("pages.files.uploadError", {
-      message: getErrorMessage(err),
-    });
+
+    if (uploadFailures.value.length === 0) {
+      toast.push({
+        type: "success",
+        message:
+          results.length === 1
+            ? t("pages.files.uploadSuccess")
+            : t("pages.files.uploadSuccessPlural", { count: results.length }),
+      });
+    } else if (results.length === 0) {
+      toast.push({
+        type: "error",
+        message:
+          files.length === 1
+            ? t("pages.files.uploadError", {
+                message: uploadFailures.value[0].message,
+              })
+            : t("pages.files.uploadAllFailed", { count: files.length }),
+      });
+    } else {
+      toast.push({
+        type: "warning",
+        message: t("pages.files.uploadPartial", {
+          success: results.length,
+          total: files.length,
+        }),
+      });
+    }
+
+    if (uploadFailures.value.length === 0 && results.length === 1) {
+      if (results[0].trackId) {
+        await router.push({
+          name: "track",
+          params: { id: results[0].trackId },
+        });
+      } else {
+        await router.push({ name: "file", params: { id: results[0].id } });
+      }
+    } else {
+      await refresh();
+    }
+
+    if (uploadFailures.value.length > 0) {
+      uploadError.value =
+        files.length === 1
+          ? t("pages.files.uploadError", {
+              message: uploadFailures.value[0].message,
+            })
+          : t("pages.files.uploadPartial", {
+              success: results.length,
+              total: files.length,
+            });
+    }
   } finally {
     uploading.value = false;
-    selectedFileName.value = null;
+    selectedFiles.value = [];
+    currentFileIndex.value = 0;
+    currentFileProgress.value = 0;
     resetInput();
   }
 }
@@ -201,6 +299,7 @@ async function onFileChange(event: Event) {
         <input
           ref="fileInput"
           type="file"
+          multiple
           class="files-view__file-input"
           @change="onFileChange"
         />
@@ -210,24 +309,42 @@ async function onFileChange(event: Event) {
         v-if="uploading"
         class="files-view__progress"
         role="progressbar"
-        :aria-valuenow="progress"
+        :aria-valuenow="overallProgress"
         aria-valuemin="0"
         aria-valuemax="100"
         :aria-label="progressLabel"
       >
         <div
           class="files-view__progress-bar"
-          :style="{ width: `${progress}%` }"
+          :style="{ width: `${overallProgress}%` }"
         />
       </div>
 
-      <p v-if="uploading && progress > 0" class="files-view__progress-text">
+      <p v-if="uploading" class="files-view__progress-text">
         {{ progressLabel }}
       </p>
 
       <div v-if="uploadError" class="files-view__error" role="alert">
         <span>{{ uploadError }}</span>
       </div>
+
+      <ul
+        v-if="uploadFailures.length > 0 && lastUploadTotal > 1"
+        class="files-view__error-list"
+        role="list"
+      >
+        <li
+          v-for="(failure, index) in uploadFailures"
+          :key="`${failure.name}-${index}`"
+        >
+          {{
+            t("pages.files.fileUploadError", {
+              name: failure.name,
+              message: failure.message,
+            })
+          }}
+        </li>
+      </ul>
     </section>
 
     <BulkEditableGrid
@@ -333,6 +450,17 @@ async function onFileChange(event: Event) {
   background-color: var(--color-surface);
   color: var(--color-danger);
   font-size: 0.9375rem;
+}
+
+.files-view__error-list {
+  margin: 0;
+  padding: 0 0 0 var(--space-5);
+  color: var(--color-danger);
+  font-size: 0.9375rem;
+}
+
+.files-view__error-list li {
+  margin-bottom: var(--space-1);
 }
 
 .files-view__upload {

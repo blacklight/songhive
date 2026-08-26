@@ -677,3 +677,153 @@ async def test_enrich_no_match_marks_enriched(
     result = await service.enrich_track(db_session, str(track.id))
     assert result is False
     assert track.musicbrainz_enriched_at is not None
+
+
+@pytest.mark.asyncio
+async def test_enrich_track_allows_duplicate_musicbrainz_id(
+    db_session,
+    musicbrainz_config,
+    recording_result,
+    recording_details,
+    monkeypatch,
+):
+    """Multiple tracks may map to the same MusicBrainz recording."""
+    artist = Artist(name="Test Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(title="Test Album", artist_id=artist.id)
+    db_session.add(album)
+    await db_session.flush()
+
+    track1 = Track(title="Test Song", artist_id=artist.id, album_id=album.id)
+    track2 = Track(title="Test Song 2", artist_id=artist.id, album_id=album.id)
+    db_session.add_all([track1, track2])
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_recordings",
+        lambda **_: recording_result,
+    )
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.get_recording_by_id",
+        lambda *_: recording_details,
+    )
+
+    result1 = await service.enrich_track(db_session, str(track1.id))
+    result2 = await service.enrich_track(db_session, str(track2.id))
+
+    assert result1 is True
+    assert result2 is True
+    assert track1.musicbrainz_id == "recording-1"
+    assert track2.musicbrainz_id == "recording-1"
+    assert track1.musicbrainz_enriched_at is not None
+    assert track2.musicbrainz_enriched_at is not None
+
+
+@pytest.mark.asyncio
+async def test_find_or_create_artist_handles_concurrent_insert(
+    db_session,
+    musicbrainz_config,
+    monkeypatch,
+):
+    """A unique conflict while creating an artist falls back to the existing row."""
+    from sqlalchemy.exc import IntegrityError
+
+    existing = Artist(name="Test Artist", musicbrainz_id="artist-mbid-1")
+    db_session.add(existing)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+
+    calls = 0
+
+    async def _fake_execute(stmt):
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            return SimpleNamespace(scalar_one_or_none=lambda: None)
+        return SimpleNamespace(scalar_one_or_none=lambda: existing)
+
+    async def _fake_flush(*_, **__):
+        raise IntegrityError("unique", None, Exception("UNIQUE constraint failed"))
+
+    monkeypatch.setattr(db_session, "execute", _fake_execute)
+    monkeypatch.setattr(db_session, "flush", _fake_flush)
+
+    artist = await service._find_or_create_artist(db_session, "Other Name", mbid="artist-mbid-1")
+    assert artist is existing
+
+
+@pytest.mark.asyncio
+async def test_find_or_create_artist_re_raises_non_unique_integrity_error(
+    db_session,
+    musicbrainz_config,
+    monkeypatch,
+):
+    """A non-unique IntegrityError while creating an artist is re-raised."""
+    from sqlalchemy.exc import IntegrityError
+
+    service = MusicBrainzService(musicbrainz_config)
+
+    monkeypatch.setattr(
+        db_session,
+        "execute",
+        AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None)),
+    )
+    monkeypatch.setattr(
+        db_session,
+        "flush",
+        AsyncMock(side_effect=IntegrityError("stmt", None, Exception("FOREIGN KEY constraint failed"))),
+    )
+
+    with pytest.raises(IntegrityError):
+        await service._find_or_create_artist(db_session, "Artist", mbid="artist-mbid-1")
+
+
+@pytest.mark.asyncio
+async def test_find_or_create_album_handles_concurrent_insert(
+    db_session,
+    musicbrainz_config,
+    monkeypatch,
+):
+    """A unique conflict while creating an album falls back to the existing row."""
+    from sqlalchemy.exc import IntegrityError
+
+    existing_artist = Artist(name="Test Artist")
+    db_session.add(existing_artist)
+    await db_session.flush()
+
+    existing = Album(
+        title="Test Album",
+        artist_id=existing_artist.id,
+        musicbrainz_id="release-1",
+    )
+    db_session.add(existing)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+
+    calls = 0
+
+    async def _fake_execute(stmt):
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            return SimpleNamespace(scalar_one_or_none=lambda: None)
+        return SimpleNamespace(scalar_one_or_none=lambda: existing)
+
+    async def _fake_flush(*_, **__):
+        raise IntegrityError("unique", None, Exception("UNIQUE constraint failed"))
+
+    monkeypatch.setattr(db_session, "execute", _fake_execute)
+    monkeypatch.setattr(db_session, "flush", _fake_flush)
+
+    album = await service._find_or_create_album(
+        db_session,
+        title="Other Album",
+        artist_id=existing_artist.id,
+        mbid="release-1",
+    )
+    assert album is existing

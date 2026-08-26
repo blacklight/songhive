@@ -308,4 +308,75 @@ describe("FilesView", () => {
 
     expect(fileInput.value).toBe("");
   });
+
+  it("bulk-uploads multiple files and refreshes the list", async () => {
+    vi.mocked(uploadFile)
+      .mockResolvedValueOnce(createStoredFile("f1"))
+      .mockResolvedValueOnce(createStoredFile("f2"));
+
+    await mountView();
+
+    const fileInput = wrapper.find('input[type="file"]')
+      .element as HTMLInputElement;
+    const file1 = new File(["a"], "song1.mp3", { type: "audio/mpeg" });
+    const file2 = new File(["b"], "song2.mp3", { type: "audio/mpeg" });
+    setFiles(fileInput, [file1, file2]);
+    fileInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(uploadFile).toHaveBeenCalledTimes(2);
+    expect(uploadFile).toHaveBeenNthCalledWith(
+      1,
+      file1,
+      "public",
+      expect.any(Function),
+      undefined,
+    );
+    expect(uploadFile).toHaveBeenNthCalledWith(
+      2,
+      file2,
+      "public",
+      expect.any(Function),
+      undefined,
+    );
+    expect(router.push).not.toHaveBeenCalled();
+    expect(toast.toasts).toHaveLength(1);
+    expect(toast.toasts[0].type).toBe("success");
+    expect(toast.toasts[0].message).toBe(
+      i18n.global.t("pages.files.uploadSuccessPlural", { count: 2 }),
+    );
+  });
+
+  it("shows per-file errors for a partially failed bulk upload", async () => {
+    vi.mocked(uploadFile)
+      .mockResolvedValueOnce(createStoredFile("f1"))
+      .mockRejectedValueOnce(new Error("network failure"));
+
+    await mountView();
+
+    const fileInput = wrapper.find('input[type="file"]')
+      .element as HTMLInputElement;
+    const file1 = new File(["a"], "song1.mp3", { type: "audio/mpeg" });
+    const file2 = new File(["b"], "song2.mp3", { type: "audio/mpeg" });
+    setFiles(fileInput, [file1, file2]);
+    fileInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(uploadFile).toHaveBeenCalledTimes(2);
+    expect(router.push).not.toHaveBeenCalled();
+    expect(toast.toasts).toHaveLength(1);
+    expect(toast.toasts[0].type).toBe("warning");
+    expect(wrapper.text()).toContain(
+      i18n.global.t("pages.files.uploadPartial", {
+        success: 1,
+        total: 2,
+      }),
+    );
+    expect(wrapper.text()).toContain(
+      i18n.global.t("pages.files.fileUploadError", {
+        name: file2.name,
+        message: "network failure",
+      }),
+    );
+  });
 });

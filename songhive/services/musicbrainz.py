@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 import httpx
 import musicbrainzngs
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from ..config.schema import MusicBrainzConfig
@@ -23,6 +24,14 @@ from ..models.track import Track
 from ..services.storage import StorageService
 
 logger = logging.getLogger(__name__)
+
+
+def _is_unique_constraint_error(exc: IntegrityError) -> bool:
+    """Return True when an IntegrityError is a uniqueness constraint violation."""
+    cause = getattr(exc, "orig", None)
+    message = str(cause) if cause is not None else str(exc)
+    return "unique" in message.lower()
+
 
 # The Cover Art Archive /front endpoint can return a chain of 307/302
 # redirects before the actual image, so follow them manually up to this many.
@@ -445,8 +454,27 @@ class MusicBrainzService:
             return artist
 
         artist = Artist(name=name, musicbrainz_id=mbid)
-        session.add(artist)
-        await session.flush()
+        try:
+            async with session.begin_nested():
+                session.add(artist)
+                await session.flush([artist])
+        except IntegrityError as exc:
+            if not _is_unique_constraint_error(exc):
+                raise
+
+            if mbid:
+                result = await session.execute(select(Artist).where(Artist.musicbrainz_id == mbid).limit(1))
+                artist = cast(Optional[Artist], result.scalar_one_or_none())
+                if artist:
+                    return artist
+
+            result = await session.execute(select(Artist).where(func.lower(Artist.name) == name.lower()).limit(1))
+            artist = cast(Optional[Artist], result.scalar_one_or_none())
+            if artist:
+                return artist
+
+            raise
+
         return artist
 
     async def _find_or_create_album(
@@ -486,8 +514,34 @@ class MusicBrainzService:
             owner_id=owner_id,
             visibility=visibility or "private",
         )
-        session.add(album)
-        await session.flush()
+        try:
+            async with session.begin_nested():
+                session.add(album)
+                await session.flush([album])
+        except IntegrityError as exc:
+            if not _is_unique_constraint_error(exc):
+                raise
+
+            if mbid:
+                result = await session.execute(select(Album).where(Album.musicbrainz_id == mbid).limit(1))
+                album = cast(Optional[Album], result.scalar_one_or_none())
+                if album:
+                    return album
+
+            result = await session.execute(
+                select(Album)
+                .where(
+                    func.lower(Album.title) == title.lower(),
+                    Album.artist_id == artist_id,
+                )
+                .limit(1)
+            )
+            album = cast(Optional[Album], result.scalar_one_or_none())
+            if album:
+                return album
+
+            raise
+
         return album
 
     async def _maybe_store_cover_art(
