@@ -454,6 +454,7 @@
     "removeFromQueue": "Remove {title} from queue",
     "nowPlaying": "Now playing",
     "goToAlbum": "Go to album {title}",
+    "goToArtist": "Go to artist {name}",
     "albumArtwork": "Album artwork"
   }
 }

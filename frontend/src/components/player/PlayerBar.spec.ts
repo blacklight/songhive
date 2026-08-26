@@ -38,6 +38,11 @@ function createTestRouter() {
     routes: [
       { path: "/", component: { template: "<div/>" } },
       { path: "/albums/:id", name: "album", component: { template: "<div/>" } },
+      {
+        path: "/artists/:id",
+        name: "artist",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -86,6 +91,21 @@ describe("PlayerBar", () => {
     expect(wrapper.find(".player-bar__full").exists()).toBe(true);
     expect(wrapper.find(".now-playing").exists()).toBe(true);
     expect(wrapper.text()).toContain(tracks[0].title);
+
+    const full = wrapper.find(".player-bar__full");
+    expect(full.find(".now-playing__artist").text()).toBe(
+      tracks[0].artist_name,
+    );
+    expect(
+      full
+        .find('a.now-playing__artwork--link[href="/albums/album-a"]')
+        .exists(),
+    ).toBe(true);
+    expect(
+      full
+        .find('a.now-playing__artist--link[href="/artists/artist-a"]')
+        .exists(),
+    ).toBe(true);
   });
 
   it("Play/Pause button toggles playback state", async () => {
@@ -166,6 +186,7 @@ describe("PlayerBar", () => {
     expect(mini.find(".player-bar__mini-info").exists()).toBe(true);
     expect(mini.find(".player-bar__mini-play").exists()).toBe(true);
     expect(mini.find(".player-bar__mini-next").exists()).toBe(true);
+    expect(mini.find(".player-bar__mini-expand").exists()).toBe(true);
   });
 
   it("expanded layout can be toggled on mobile", async () => {
@@ -173,7 +194,7 @@ describe("PlayerBar", () => {
     store.playAll([makeTrack("a")], 0);
     await flushPromises();
 
-    const expandButton = wrapper.find(".player-bar__mini-info");
+    const expandButton = wrapper.find(".player-bar__mini-expand");
     expect(expandButton.exists()).toBe(true);
 
     await expandButton.trigger("click");
@@ -181,5 +202,27 @@ describe("PlayerBar", () => {
 
     expect(wrapper.classes()).toContain("player-bar--expanded");
     expect(wrapper.find(".player-bar__expanded").exists()).toBe(true);
+  });
+
+  it("renders artist name and album/artist links in the mini layout", async () => {
+    const { wrapper, store } = await mountPlayerBar();
+    const track = makeTrack("a");
+    store.playAll([track], 0);
+    await flushPromises();
+
+    const mini = wrapper.find(".player-bar__mini");
+    const artist = mini.find(".now-playing__artist");
+    expect(artist.exists()).toBe(true);
+    expect(artist.text()).toBe(track.artist_name);
+
+    const albumLink = mini.find(
+      'a.now-playing__artwork--link[href="/albums/album-a"]',
+    );
+    expect(albumLink.exists()).toBe(true);
+
+    const artistLink = mini.find(
+      'a.now-playing__artist--link[href="/artists/artist-a"]',
+    );
+    expect(artistLink.exists()).toBe(true);
   });
 });

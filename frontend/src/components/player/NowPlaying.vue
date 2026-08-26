@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
+import { RouterLink } from "vue-router";
 import { usePlayerStore } from "@/stores/player";
 import AppIcon from "@/components/ui/AppIcon.vue";
 
@@ -14,14 +14,6 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n();
 const store = usePlayerStore();
-const router = useRouter();
-
-function goToAlbum() {
-  const albumId = store.currentTrack?.album_id;
-  if (albumId) {
-    router.push(`/albums/${albumId}`);
-  }
-}
 </script>
 
 <template>
@@ -31,28 +23,26 @@ function goToAlbum() {
     role="region"
     :aria-label="t('player.nowPlaying')"
   >
-    <button
-      v-if="store.currentTrack?.artwork_url && !props.mini"
-      class="now-playing__artwork"
-      :class="{ 'now-playing__artwork--link': store.currentTrack?.album_id }"
+    <RouterLink
+      v-if="store.currentTrack?.artwork_url && store.currentTrack?.album_id"
+      :to="`/albums/${store.currentTrack.album_id}`"
+      class="now-playing__artwork now-playing__artwork--link"
       :aria-label="
-        store.currentTrack?.album_id
-          ? t('player.goToAlbum', {
-              title: store.currentTrack?.album_title || '',
-            }).trim()
-          : t('player.albumArtwork')
+        t('player.goToAlbum', {
+          title: store.currentTrack?.album_title || '',
+        }).trim()
       "
-      @click="goToAlbum"
+      :title="store.currentTrack?.album_title"
     >
       <img
-        :src="store.currentTrack?.artwork_url"
+        :src="store.currentTrack.artwork_url"
         alt=""
         class="now-playing__img"
       />
-    </button>
+    </RouterLink>
     <img
-      v-else-if="store.currentTrack?.artwork_url && props.mini"
-      :src="store.currentTrack?.artwork_url"
+      v-else-if="store.currentTrack?.artwork_url"
+      :src="store.currentTrack.artwork_url"
       alt=""
       class="now-playing__artwork now-playing__img"
     />
@@ -64,8 +54,21 @@ function goToAlbum() {
       <p class="now-playing__title" :title="store.currentTrack?.title">
         {{ store.currentTrack?.title }}
       </p>
+      <RouterLink
+        v-if="store.currentTrack?.artist_id"
+        :to="`/artists/${store.currentTrack.artist_id}`"
+        class="now-playing__artist now-playing__artist--link"
+        :title="store.currentTrack?.artist_name"
+        :aria-label="
+          t('player.goToArtist', {
+            name: store.currentTrack?.artist_name || '',
+          }).trim()
+        "
+      >
+        {{ store.currentTrack?.artist_name }}
+      </RouterLink>
       <p
-        v-if="!props.mini"
+        v-else
         class="now-playing__artist"
         :title="store.currentTrack?.artist_name"
       >
@@ -96,6 +99,7 @@ function goToAlbum() {
 }
 
 .now-playing__artwork--link {
+  display: inline-flex;
   cursor: pointer;
   transition: transform var(--transition-fast);
 }
@@ -141,6 +145,23 @@ function goToAlbum() {
 .now-playing__artist {
   font-size: 0.875rem;
   color: var(--color-text-muted);
+}
+
+.now-playing__artist--link {
+  display: block;
+  text-decoration: none;
+}
+
+.now-playing__artist--link:hover,
+.now-playing__artist--link:focus-visible {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+.now-playing__artist--link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .now-playing--mini .now-playing__artwork {

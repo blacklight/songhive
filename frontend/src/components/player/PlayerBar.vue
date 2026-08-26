@@ -91,13 +91,9 @@ function queueReturnTarget() {
     </div>
 
     <div class="player-bar__mini">
-      <button
-        class="player-bar__mini-info"
-        :aria-label="t('player.expandPlayer')"
-        @click="toggleExpanded"
-      >
+      <div class="player-bar__mini-info">
         <NowPlaying mini />
-      </button>
+      </div>
 
       <div class="player-bar__mini-controls">
         <AppButton
@@ -119,6 +115,16 @@ function queueReturnTarget() {
           :disabled="!store.hasNext && store.repeat === 'off'"
           icon="forward-step"
           @click="store.next"
+        />
+
+        <AppButton
+          variant="ghost"
+          size="sm"
+          class="player-bar__mini-expand"
+          :aria-label="t('player.expandPlayer')"
+          :title="t('player.expandPlayer')"
+          icon="chevron-up"
+          @click="toggleExpanded"
         />
       </div>
     </div>
@@ -231,16 +237,6 @@ function queueReturnTarget() {
   min-width: 0;
   display: flex;
   align-items: center;
-  border: none;
-  background: transparent;
-  padding: 0;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.player-bar__mini-info:hover {
-  color: var(--color-accent);
 }
 
 .player-bar__mini-controls {
@@ -291,7 +287,8 @@ function queueReturnTarget() {
 .player-bar .player-bar__queue-toggle,
 .player-bar .player-bar__collapse,
 .player-bar .player-bar__mini-play,
-.player-bar .player-bar__mini-next {
+.player-bar .player-bar__mini-next,
+.player-bar .player-bar__mini-expand {
   font-size: 1.25rem;
 }
 
