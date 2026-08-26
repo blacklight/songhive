@@ -28,8 +28,20 @@ class Playlist(Base):
         default=Visibility.PRIVATE.value,
         index=True,
     )
+    image_file_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("stored_files.id"),
+        nullable=True,
+        index=True,
+    )
+    cover_file_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("stored_files.id"),
+        nullable=True,
+        index=True,
+    )
 
     owner = relationship("User", backref="playlists", lazy="selectin")
+    image_file = relationship("StoredFile", foreign_keys=[image_file_id], lazy="selectin")
+    cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")
     tracks: Mapped[List["PlaylistTrack"]] = relationship("PlaylistTrack", back_populates="playlist", lazy="selectin")
 
 

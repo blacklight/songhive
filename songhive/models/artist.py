@@ -26,7 +26,13 @@ class Artist(Base):
         nullable=True,
         index=True,
     )
+    cover_file_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("stored_files.id"),
+        nullable=True,
+        index=True,
+    )
 
     image_file = relationship("StoredFile", foreign_keys=[image_file_id], lazy="selectin")
+    cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")
     albums: Mapped[List["Album"]] = relationship("Album", back_populates="artist", lazy="selectin")
     tracks: Mapped[List["Track"]] = relationship("Track", back_populates="artist", lazy="selectin")

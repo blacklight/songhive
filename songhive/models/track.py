@@ -39,6 +39,12 @@ class Track(Base):
     musicbrainz_enriched_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
     genre: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     audio_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
+    image_file_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("stored_files.id"),
+        nullable=True,
+        index=True,
+    )
+    release_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     raw_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
     audio_mime_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -57,4 +63,5 @@ class Track(Base):
     artist: Mapped["Artist"] = relationship("Artist", back_populates="tracks", lazy="selectin")
     album: Mapped[Optional["Album"]] = relationship("Album", back_populates="tracks", lazy="selectin")
     audio_file = relationship("StoredFile", foreign_keys=[audio_file_id], lazy="selectin")
+    image_file = relationship("StoredFile", foreign_keys=[image_file_id], lazy="selectin")
     owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
