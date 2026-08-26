@@ -234,3 +234,6 @@ volumes/
 
 # Git Worktrees
 .worktrees/
+
+# Vue/Vite files
+.vite/
