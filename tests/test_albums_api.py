@@ -243,3 +243,95 @@ async def test_get_album_with_cover_file_returns_download_url(
     response = client.get(f"/api/v1/albums/{album.id}", headers=auth_headers(regular_user))
     assert response.status_code == 200
     assert response.json()["cover_url"] == f"/api/v1/files/{stored.id}/download"
+
+
+def _patch_album_enrich(monkeypatch, *, count: int = 1):
+    """Replace the album enrichment helper with a no-op that reports ``count``."""
+
+    def _enqueue(track_id, force=True):
+        return True
+
+    async def _track_ids_for_album(*args, **kwargs):
+        return [f"track-{i}" for i in range(count)]
+
+    monkeypatch.setattr(
+        "songhive.api.routes.albums._enqueue_track_enrichment",
+        _enqueue,
+    )
+    monkeypatch.setattr(
+        "songhive.services.music.get_track_ids_for_album",
+        _track_ids_for_album,
+    )
+
+
+def test_enrich_album_allows_owner(client, sample_albums, regular_user, auth_headers, monkeypatch):
+    """Owners can request MusicBrainz enrichment for an album's tracks."""
+    _patch_album_enrich(monkeypatch, count=3)
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+
+    response = client.post(
+        f"/api/v1/albums/{album.id}/enrich",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["album_id"] == str(album.id)
+    assert data["enqueued"] == 0  # mocked tracks do not exist
+
+
+def test_enrich_album_denied_for_other_user(client, sample_albums, other_user, auth_headers, monkeypatch):
+    """Non-owners cannot request enrichment for someone else's album."""
+    _patch_album_enrich(monkeypatch, count=3)
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+
+    response = client.post(
+        f"/api/v1/albums/{album.id}/enrich",
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == 403
+
+
+def test_enrich_album_requires_auth(client, sample_albums, monkeypatch):
+    """Anonymous users cannot request album enrichment."""
+    _patch_album_enrich(monkeypatch, count=1)
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+
+    response = client.post(f"/api/v1/albums/{album.id}/enrich")
+    assert response.status_code == 401
+
+
+def test_enrich_missing_album_returns_404(client, auth_headers, regular_user, monkeypatch):
+    """Requesting enrichment for a missing album returns 404."""
+    _patch_album_enrich(monkeypatch, count=1)
+    response = client.post(
+        "/api/v1/albums/00000000-0000-0000-0000-000000000000/enrich",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_enrich_album_logs_audit_entry(
+    client, db_session, sample_albums, regular_user, auth_headers, monkeypatch
+):
+    """Enriching an album creates an audit log entry."""
+    from sqlalchemy import select
+
+    from songhive.models.audit_log import AuditLog
+
+    _patch_album_enrich(monkeypatch, count=3)
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+
+    response = client.post(
+        f"/api/v1/albums/{album.id}/enrich",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    result = await db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "album.enrich",
+            AuditLog.target_id == str(album.id),
+        )
+    )
+    assert result is not None

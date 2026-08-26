@@ -395,3 +395,96 @@ def test_public_private_public_uses_fresh_object_id(client, sample_tracks, regul
     assert second_object_id != first_object_id
     uuid.UUID(first_object_id)
     uuid.UUID(second_object_id)
+
+
+def _patch_track_enrich(monkeypatch):
+    """Replace the enrichment helper with a no-op success."""
+    monkeypatch.setattr(
+        "songhive.api.routes.tracks._enqueue_track_enrichment",
+        lambda track_id, force=True: True,
+    )
+
+
+def test_enrich_track_allows_owner(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """Owners can request MusicBrainz enrichment for their track."""
+    _patch_track_enrich(monkeypatch)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/enrich",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["track_id"] == str(track.id)
+    assert data["enqueued"] is True
+
+
+def test_enrich_track_allows_admin(client, sample_tracks, admin_user, auth_headers, monkeypatch):
+    """Admins can request MusicBrainz enrichment for any track."""
+    _patch_track_enrich(monkeypatch)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/enrich",
+        headers=auth_headers(admin_user),
+    )
+    assert response.status_code == 200
+
+
+def test_enrich_track_denied_for_other_user(client, sample_tracks, other_user, auth_headers, monkeypatch):
+    """Non-owners cannot request enrichment for someone else's track."""
+    _patch_track_enrich(monkeypatch)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/enrich",
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == 403
+
+
+def test_enrich_track_requires_auth(client, sample_tracks, monkeypatch):
+    """Anonymous users cannot request enrichment."""
+    _patch_track_enrich(monkeypatch)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+
+    response = client.post(f"/api/v1/tracks/{track.id}/enrich")
+    assert response.status_code == 401
+
+
+def test_enrich_missing_track_returns_404(client, auth_headers, regular_user, monkeypatch):
+    """Requesting enrichment for a missing track returns 404."""
+    _patch_track_enrich(monkeypatch)
+    response = client.post(
+        "/api/v1/tracks/00000000-0000-0000-0000-000000000000/enrich",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_enrich_track_logs_audit_entry(
+    client, db_session, sample_tracks, regular_user, auth_headers, monkeypatch
+):
+    """Enriching a track creates an audit log entry."""
+    from sqlalchemy import select
+
+    from songhive.models.audit_log import AuditLog
+
+    _patch_track_enrich(monkeypatch)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/enrich",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    result = await db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "track.enrich",
+            AuditLog.target_id == str(track.id),
+        )
+    )
+    assert result is not None

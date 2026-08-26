@@ -95,12 +95,10 @@ async def test_cleanup_orphaned_files_removes_only_orphans(db_session, local_sto
 
 
 def test_cleanup_orphaned_files_task_config():
-    """The cleanup task is registered, routed, and scheduled for 03:00 UTC."""
+    """The cleanup task is registered and scheduled for 03:00 UTC."""
     assert "songhive.tasks.storage.cleanup_orphaned_files" in celery_app.tasks
 
-    routes = celery_app.conf.task_routes
-    assert "songhive.tasks.storage.*" in routes
-    assert routes["songhive.tasks.storage.*"] == {"queue": "storage"}
+    assert celery_app.conf.task_default_queue == "celery"
 
     schedule = celery_app.conf.beat_schedule["cleanup-orphaned-files"]
     assert schedule["task"] == "songhive.tasks.storage.cleanup_orphaned_files"

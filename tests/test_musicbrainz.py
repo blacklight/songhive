@@ -2,6 +2,7 @@
 MusicBrainz enrichment tests.
 """
 
+import datetime
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -478,7 +479,7 @@ class _FakeMBService:
     def __init__(self, config):
         pass
 
-    async def enrich_track(self, session, track_id, storage_service):
+    async def enrich_track(self, session, track_id, storage_service, force=False):
         return True
 
 
@@ -486,7 +487,7 @@ class _FailingMBService:
     def __init__(self, config):
         pass
 
-    async def enrich_track(self, session, track_id, storage_service):
+    async def enrich_track(self, session, track_id, storage_service, force=False):
         raise RuntimeError("boom")
 
 
@@ -534,3 +535,132 @@ def test_enrich_track_task_returns_false_on_exception(monkeypatch, tmp_path, cap
     result = enrich_track("track-1")
     assert result is False
     assert "MusicBrainz enrichment failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_enrich_fills_missing_metadata(
+    db_session,
+    musicbrainz_config,
+    mock_client,
+    recording_result,
+    recording_details,
+    local_storage_service,
+    monkeypatch,
+):
+    """Enrichment populates missing title, artist, album, cover, and metadata."""
+    from songhive.models.stored_file import StoredFile
+
+    unknown_artist = Artist(name="Unknown Artist")
+    db_session.add(unknown_artist)
+    await db_session.flush()
+
+    audio_file = StoredFile(
+        storage_path="files/song",
+        storage_backend="local",
+        content_type="audio/mpeg",
+        size=1,
+        sha256="a" * 64,
+        original_filename="unknown_song.mp3",
+    )
+    db_session.add(audio_file)
+    await db_session.flush()
+
+    track = Track(
+        title="unknown_song",
+        artist_id=unknown_artist.id,
+        audio_file_id=str(audio_file.id),
+        audio_mime_type="audio/mpeg",
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config, client=mock_client)
+
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_recordings",
+        lambda **_: recording_result,
+    )
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.get_recording_by_id",
+        lambda *_: recording_details,
+    )
+
+    result = await service.enrich_track(
+        db_session,
+        str(track.id),
+        storage_service=local_storage_service,
+    )
+
+    assert result is True
+    assert track.title == "Test Song"
+    assert track.musicbrainz_id == "recording-1"
+    assert track.musicbrainz_enriched_at is not None
+
+    enriched_artist = await db_session.get(Artist, track.artist_id)
+    assert enriched_artist is not None
+    assert enriched_artist.name == "Test Artist"
+    assert enriched_artist.musicbrainz_id == "artist-mbid-1"
+
+    album = await db_session.get(Album, track.album_id)
+    assert album is not None
+    assert album.title == "Test Album"
+    assert album.musicbrainz_id == "release-1"
+    assert album.cover_file_id is not None
+
+
+@pytest.mark.asyncio
+async def test_enrich_skips_already_enriched_without_force(
+    db_session,
+    musicbrainz_config,
+    monkeypatch,
+):
+    """enrich_track skips tracks that were already enriched unless forced."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(title="Song", artist_id=artist.id)
+    track.musicbrainz_enriched_at = datetime.datetime.now(datetime.timezone.utc)
+    db_session.add(track)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    search_mock = Mock(return_value={"recording-list": []})
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_recordings",
+        search_mock,
+    )
+
+    result = await service.enrich_track(db_session, str(track.id))
+    assert result is False
+    search_mock.assert_not_called()
+
+    result = await service.enrich_track(db_session, str(track.id), force=True)
+    assert result is False
+    search_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_enrich_no_match_marks_enriched(
+    db_session,
+    musicbrainz_config,
+    monkeypatch,
+):
+    """When MusicBrainz has no match the track is marked as enriched."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(title="Song", artist_id=artist.id)
+    db_session.add(track)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_recordings",
+        lambda **_: {"recording-list": []},
+    )
+
+    result = await service.enrich_track(db_session, str(track.id))
+    assert result is False
+    assert track.musicbrainz_enriched_at is not None

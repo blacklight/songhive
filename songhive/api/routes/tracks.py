@@ -2,6 +2,7 @@
 Track routes.
 """
 
+import logging
 import uuid
 from typing import List, Optional, cast
 
@@ -28,6 +29,7 @@ from ..middleware.rate_limit import rate_limit_account
 from ._common import HasOwnerId, redact_owner
 
 router = APIRouter(prefix="/tracks")
+logger = logging.getLogger(__name__)
 
 
 class TrackResponse(BaseModel):
@@ -69,6 +71,25 @@ class BulkTrackDeleteResponse(BaseModel):
 
     deleted: int
     track_ids: List[str]
+
+
+class TrackEnrichResponse(BaseModel):
+    """Track metadata enrichment result."""
+
+    track_id: str
+    enqueued: bool
+
+
+def _enqueue_track_enrichment(track_id: str, force: bool = True) -> bool:
+    """Enqueue a MusicBrainz enrichment task and ignore broker errors."""
+    try:
+        from ...tasks.musicbrainz import enrich_track
+
+        enrich_track.delay(track_id, force=force)  # type: ignore
+        return True
+    except Exception as exc:
+        logger.warning("Could not enqueue MusicBrainz enrichment for %s: %s", track_id, exc)
+        return False
 
 
 async def _handle_visibility_changes(
@@ -362,3 +383,43 @@ async def delete_track(
         )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{track_id}/enrich", response_model=TrackEnrichResponse)
+async def enrich_track_route(
+    track_id: str,
+    request: Request,
+    _: bool = Depends(require_access("track")),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enqueue MusicBrainz enrichment for a single track."""
+    track = await music.get_track(db, track_id)
+    if track is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "track", track_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    enqueued = _enqueue_track_enrichment(track_id, force=True)
+    if not enqueued:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not enqueue enrichment",
+        )
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="track.enrich",
+        target_type="track",
+        target_id=track_id,
+        details={"title": track.title, "musicbrainz_id": track.musicbrainz_id},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return TrackEnrichResponse(track_id=track_id, enqueued=True)

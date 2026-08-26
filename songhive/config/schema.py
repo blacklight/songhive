@@ -267,7 +267,7 @@ class ServerConfig(BaseSettings):
 class MusicBrainzConfig(BaseSettings):
     """MusicBrainz enrichment configuration."""
 
-    enabled: bool = Field(default=False, description="Enable MusicBrainz enrichment")
+    enabled: bool = Field(default=True, description="Enable MusicBrainz enrichment")
     user_agent: str = Field(
         default=f"Songhive/{_app_short_version()} ( https://git.fabiomanganiello.com/songhive )",
         description="User-Agent sent to MusicBrainz",

@@ -3,13 +3,18 @@ MusicBrainz enrichment service.
 """
 
 import asyncio
+import datetime
 import io
 import logging
+import re
 import time
-from typing import Any, Dict, Optional, cast
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import httpx
 import musicbrainzngs
+from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
 from ..config.schema import MusicBrainzConfig
 from ..models.album import Album
@@ -18,6 +23,12 @@ from ..models.track import Track
 from ..services.storage import StorageService
 
 logger = logging.getLogger(__name__)
+
+
+def _escape_query_term(term: str) -> str:
+    """Quote a MusicBrainz query term so spaces and special chars are handled."""
+    escaped = term.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 class MusicBrainzService:
@@ -70,11 +81,11 @@ class MusicBrainzService:
         if query is None:
             parts = []
             if artist:
-                parts.append(f"artist:{artist}")
+                parts.append(f"artist:{_escape_query_term(artist)}")
             if title:
-                parts.append(f"recording:{title}")
+                parts.append(f"recording:{_escape_query_term(title)}")
             if release:
-                parts.append(f"release:{release}")
+                parts.append(f"release:{_escape_query_term(release)}")
             query = " ".join(parts)
 
         if not query:
@@ -178,9 +189,15 @@ class MusicBrainzService:
         session,
         track_id: str,
         storage_service: Optional[StorageService] = None,
+        force: bool = False,
     ) -> bool:
         """
         Enrich a track with MusicBrainz data and optionally cover art.
+
+        Missing fields (title, artist, album, year, track number, disc number,
+        duration) are populated from MusicBrainz when a match is found. If no
+        match can be found, the track is marked as enriched so it is not
+        processed again.
 
         :returns: ``True`` if the track was updated.
         """
@@ -191,26 +208,36 @@ class MusicBrainzService:
         if track is None:
             return False
 
+        if not force and track.musicbrainz_enriched_at is not None:
+            logger.debug("Track %s already enriched; skipping", track_id)
+            return False
+
         recording = await self._find_best_recording(track, artist, album)
         if recording is None:
+            self._mark_enriched(track)
+            await session.commit()
             return False
 
         recording_id = recording.get("id")
         if not recording_id:
+            self._mark_enriched(track)
+            await session.commit()
             return False
 
         details = await self._fetch_recording_details(recording_id, recording)
-        release_id = self._apply_musicbrainz_ids(track, artist, album, recording, details)
-        if storage_service and album and release_id:
-            await self._maybe_store_cover_art(
-                session,
-                album,
-                release_id,
-                storage_service,
-                owner_id=track.owner_id,
-            )
+        release = self._best_release(recording, details, album)
+        await self._apply_metadata(
+            session,
+            track,
+            artist,
+            album,
+            recording,
+            details,
+            release,
+            storage_service,
+        )
 
-        self._store_raw_metadata(track, recording, details)
+        self._mark_enriched(track)
         await session.commit()
         return True
 
@@ -220,14 +247,21 @@ class MusicBrainzService:
         track_id: str,
     ) -> tuple[Optional[Track], Optional[Artist], Optional[Album]]:
         """Fetch the track and its associated artist and album."""
-        track = await session.get(Track, track_id)
+        result = await session.execute(
+            select(Track)
+            .options(
+                selectinload(Track.artist),
+                selectinload(Track.album).selectinload(Album.artist),
+                selectinload(Track.audio_file),
+            )
+            .where(Track.id == track_id)
+        )
+        track = cast(Optional[Track], result.scalar_one_or_none())
         if track is None:
             logger.warning("Track %s not found for MusicBrainz enrichment", track_id)
             return None, None, None
 
-        artist = await session.get(Artist, track.artist_id) if track.artist_id else None
-        album = await session.get(Album, track.album_id) if track.album_id else None
-        return track, artist, album
+        return track, track.artist, track.album
 
     async def _find_best_recording(
         self,
@@ -257,29 +291,177 @@ class MusicBrainzService:
             logger.debug("Could not fetch recording %s: %s", recording_id, exc)
             return {"recording": recording}
 
-    def _apply_musicbrainz_ids(
+    def _best_release(
         self,
+        recording: Dict[str, Any],
+        details: Dict[str, Any],
+        album: Optional[Album],
+    ) -> Optional[Dict[str, Any]]:
+        """Return the most relevant release for a recording."""
+        rec = details.get("recording") if details else None
+        if not rec:
+            rec = recording
+
+        releases: List[Dict[str, Any]] = rec.get("release-list") or rec.get("releases") or []
+        if not releases:
+            releases = recording.get("release-list") or recording.get("releases") or []
+        if not releases:
+            return None
+
+        if album and album.title:
+            for release in releases:
+                title = release.get("title")
+                if title and title.lower() == album.title.lower():
+                    return release
+
+        return releases[0]
+
+    async def _apply_metadata(
+        self,
+        session,
         track: Track,
         artist: Optional[Artist],
         album: Optional[Album],
         recording: Dict[str, Any],
         details: Dict[str, Any],
-    ) -> Optional[str]:
-        """Populate MusicBrainz IDs on the track, artist, and album."""
+        release: Optional[Dict[str, Any]],
+        storage_service: Optional[StorageService],
+    ) -> None:
+        """Populate missing metadata from a MusicBrainz recording and release."""
         recording_id = recording.get("id")
         if recording_id and track.musicbrainz_id is None:
             track.musicbrainz_id = recording_id
 
-        if track.artist_id and artist and artist.musicbrainz_id is None:
-            artist_mbid = _first_artist_id(recording)
-            if artist_mbid:
-                artist.musicbrainz_id = artist_mbid
+        recording_title = _recording_title(recording)
+        if recording_title and _is_missing_title(track):
+            track.title = recording_title
 
-        release_id = _first_release_id(details)
-        if album and album.musicbrainz_id is None and release_id:
-            album.musicbrainz_id = release_id
+        recording_duration = _recording_duration(recording)
+        if recording_duration is not None and track.duration is None:
+            track.duration = recording_duration
 
-        return release_id
+        new_artist: Optional[Artist] = None
+        artist_name, artist_mbid = _recording_artist(recording)
+        if artist_name and _is_missing_artist(artist):
+            new_artist = await self._find_or_create_artist(session, artist_name, artist_mbid)
+            track.artist_id = str(new_artist.id)
+        elif (
+            artist
+            and artist_mbid
+            and artist.musicbrainz_id is None
+            and (_is_missing_artist(artist) or _normalize_name(artist.name) == _normalize_name(artist_name or ""))
+        ):
+            artist.musicbrainz_id = artist_mbid
+
+        release_title = _release_title(release)
+        release_year = _release_year(release)
+        release_id = _release_id(release)
+
+        track_number = _release_track_number(release)
+        if track_number is not None and track.track_number is None:
+            track.track_number = track_number
+
+        disc_number = _release_disc_number(release)
+        if disc_number is not None and track.disc_number is None:
+            track.disc_number = disc_number
+
+        target_artist_id = str(new_artist.id) if new_artist else track.artist_id
+        if _is_missing_album(album) and release_title and target_artist_id:
+            new_album = await self._find_or_create_album(
+                session,
+                title=release_title,
+                artist_id=target_artist_id,
+                mbid=release_id,
+                year=release_year,
+                owner_id=track.owner_id,
+                visibility=track.visibility,
+            )
+            track.album_id = str(new_album.id)
+            album = new_album
+        elif album and release_title:
+            if _is_missing_album(album) and release_title:
+                album.title = release_title
+            if release_id and album.musicbrainz_id is None:
+                album.musicbrainz_id = release_id
+            if release_year and album.release_year is None:
+                album.release_year = release_year
+            if _is_missing_artist(album.artist) and target_artist_id:
+                album.artist_id = target_artist_id
+
+        if storage_service and album and release_id:
+            await self._maybe_store_cover_art(
+                session,
+                album,
+                release_id,
+                storage_service,
+                owner_id=track.owner_id,
+            )
+
+        self._store_raw_metadata(track, recording, details)
+
+    async def _find_or_create_artist(
+        self,
+        session,
+        name: str,
+        mbid: Optional[str] = None,
+    ) -> Artist:
+        """Return an existing artist by MBID or name, or create one."""
+        if mbid:
+            result = await session.execute(select(Artist).where(Artist.musicbrainz_id == mbid).limit(1))
+            artist = cast(Optional[Artist], result.scalar_one_or_none())
+            if artist:
+                return artist
+
+        result = await session.execute(select(Artist).where(func.lower(Artist.name) == name.lower()).limit(1))
+        artist = cast(Optional[Artist], result.scalar_one_or_none())
+        if artist:
+            return artist
+
+        artist = Artist(name=name, musicbrainz_id=mbid)
+        session.add(artist)
+        await session.flush()
+        return artist
+
+    async def _find_or_create_album(
+        self,
+        session,
+        title: str,
+        artist_id: str,
+        mbid: Optional[str] = None,
+        year: Optional[int] = None,
+        owner_id: Optional[str] = None,
+        visibility: Optional[str] = None,
+    ) -> Album:
+        """Return an existing album by MBID or title/artist, or create one."""
+        if mbid:
+            result = await session.execute(select(Album).where(Album.musicbrainz_id == mbid).limit(1))
+            album = cast(Optional[Album], result.scalar_one_or_none())
+            if album:
+                return album
+
+        result = await session.execute(
+            select(Album)
+            .where(
+                func.lower(Album.title) == title.lower(),
+                Album.artist_id == artist_id,
+            )
+            .limit(1)
+        )
+        album = cast(Optional[Album], result.scalar_one_or_none())
+        if album:
+            return album
+
+        album = Album(
+            title=title,
+            artist_id=artist_id,
+            musicbrainz_id=mbid,
+            release_year=year,
+            owner_id=owner_id,
+            visibility=visibility or "private",
+        )
+        session.add(album)
+        await session.flush()
+        return album
 
     async def _maybe_store_cover_art(
         self,
@@ -312,6 +494,59 @@ class MusicBrainzService:
         raw["mb_recording"] = details.get("recording", recording)
         track.raw_metadata = raw
 
+    @staticmethod
+    def _mark_enriched(track: Track) -> None:
+        """Mark a track as having been processed by MusicBrainz."""
+        track.musicbrainz_enriched_at = datetime.datetime.now(datetime.timezone.utc)
+
+
+def _recording_title(recording: Dict[str, Any]) -> Optional[str]:
+    """Return a recording title, if present."""
+    title = recording.get("title")
+    return title if isinstance(title, str) and title.strip() else None
+
+
+def _recording_duration(recording: Dict[str, Any]) -> Optional[float]:
+    """Return a recording duration in seconds, if present."""
+    length = recording.get("length")
+    if length is None:
+        return None
+    try:
+        return float(length) / 1000.0
+    except (TypeError, ValueError):
+        return None
+
+
+def _recording_artist(recording: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    """Return the artist name and MusicBrainz ID from a recording."""
+    phrase = recording.get("artist-credit-phrase")
+    if isinstance(phrase, str) and phrase.strip():
+        return phrase.strip(), _first_artist_id(recording)
+
+    credit = recording.get("artist-credit")
+    if not isinstance(credit, list):
+        return None, None
+
+    parts: List[str] = []
+    mbid: Optional[str] = None
+    for entry in credit:
+        if not isinstance(entry, dict):
+            continue
+        if mbid is None:
+            artist = entry.get("artist", {})
+            if isinstance(artist, dict):
+                mbid = artist.get("id")
+        name = entry.get("name")
+        if not name and isinstance(entry.get("artist"), dict):
+            name = entry["artist"].get("name")
+        if name:
+            parts.append(str(name))
+            join = entry.get("joinphrase")
+            if join:
+                parts.append(str(join))
+
+    return ("".join(parts).strip() or None), mbid
+
 
 def _first_artist_id(recording: Dict[str, Any]) -> Optional[str]:
     """Return the first artist ID from a recording search result."""
@@ -323,6 +558,114 @@ def _first_artist_id(recording: Dict[str, Any]) -> Optional[str]:
             if isinstance(artist, dict):
                 return artist.get("id")
     return None
+
+
+def _release_title(release: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Return a release title, if present."""
+    if not release:
+        return None
+    title = release.get("title")
+    return title if isinstance(title, str) and title.strip() else None
+
+
+def _release_id(release: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Return a release MusicBrainz ID, if present."""
+    if not release:
+        return None
+    return release.get("id")
+
+
+def _release_year(release: Optional[Dict[str, Any]]) -> Optional[int]:
+    """Return the release year, if present."""
+    if not release:
+        return None
+
+    date = release.get("date") or release.get("first-release-date")
+    if not date and isinstance(release.get("release-events"), list):
+        events = release["release-events"]
+        if events:
+            date = events[0].get("date")
+
+    if not date:
+        return None
+
+    match = re.search(r"\d{4}", str(date))
+    return int(match.group(0)) if match else None
+
+
+def _release_track_number(release: Optional[Dict[str, Any]]) -> Optional[int]:
+    """Return the track number on the first medium, if present and numeric."""
+    if not release:
+        return None
+
+    media_list = release.get("medium-list") or release.get("media") or []
+    for medium in media_list:
+        tracks = medium.get("track-list") or medium.get("track") or []
+        if not isinstance(tracks, list):
+            tracks = [tracks]
+        for track in tracks:
+            number = track.get("number")
+            if number is None:
+                continue
+            match = re.match(r"(\d+)", str(number))
+            if match:
+                return int(match.group(1))
+
+    return None
+
+
+def _release_disc_number(release: Optional[Dict[str, Any]]) -> Optional[int]:
+    """Return the medium/disc number, if present."""
+    if not release:
+        return None
+
+    media_list = release.get("medium-list") or release.get("media") or []
+    for medium in media_list:
+        tracks = medium.get("track-list") or medium.get("track") or []
+        if not isinstance(tracks, list):
+            tracks = [tracks]
+        if tracks:
+            position = medium.get("position")
+            if position is not None:
+                try:
+                    return int(position)
+                except (TypeError, ValueError):
+                    pass
+            return 1
+
+    return None
+
+
+def _is_missing_title(track: Track) -> bool:
+    """Return ``True`` when the track title is missing or derived from the filename."""
+    if not track.title or not track.title.strip():
+        return True
+
+    if track.audio_file and track.audio_file.original_filename:
+        return track.title == Path(track.audio_file.original_filename).stem
+
+    return False
+
+
+def _is_missing_artist(artist: Optional[Artist]) -> bool:
+    """Return ``True`` when the artist name is missing or a generic placeholder."""
+    if artist is None:
+        return True
+    name = (artist.name or "").strip()
+    return not name or name == "Unknown Artist"
+
+
+def _is_missing_album(album: Optional[Album]) -> bool:
+    """Return ``True`` when the album title is missing or a generic placeholder."""
+    if album is None:
+        return True
+    title = (album.title or "").strip()
+    return not title or title == "Unknown Album"
+
+
+def _normalize_name(name: Optional[str]) -> str:
+    """Return a lowercased, stripped name for comparison."""
+    return (name or "").strip().lower()
 
 
 def _first_release_id(details: Dict[str, Any]) -> Optional[str]:

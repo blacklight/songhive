@@ -11,10 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name="songhive.tasks.musicbrainz.enrich_track")
-def enrich_track(track_id: str) -> bool:
+def enrich_track(track_id: str, force: bool = False) -> bool:
     """
     Enqueue MusicBrainz enrichment for a single track.
 
+    :param track_id: The track to enrich.
+    :param force: Re-enrich even if the track has already been processed.
     :returns: ``True`` if metadata was updated.
     """
     from ..config import load_config
@@ -34,7 +36,7 @@ def enrich_track(track_id: str) -> bool:
 
     async def _run() -> bool:
         async with get_session() as session:
-            return await mb_service.enrich_track(session, track_id, storage_service)
+            return await mb_service.enrich_track(session, track_id, storage_service, force=force)
 
     try:
         return asyncio.run(_run())

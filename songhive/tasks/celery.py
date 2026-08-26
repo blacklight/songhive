@@ -66,15 +66,7 @@ def make_celery(
         result_serializer="json",
         timezone="UTC",
         enable_utc=True,
-        task_routes={
-            "songhive.tasks.import_.*": {"queue": "import"},
-            "songhive.tasks.federation.*": {"queue": "federation"},
-            "songhive.tasks.transcoding.*": {"queue": "transcoding"},
-            "songhive.tasks.email.*": {"queue": "email"},
-            "songhive.tasks.storage.*": {"queue": "storage"},
-            "songhive.tasks.musicbrainz.*": {"queue": "musicbrainz"},
-            "songhive.tasks.api_tokens.*": {"queue": "default"},
-        },
+        task_default_queue="celery",
         beat_schedule={
             "cleanup-orphaned-files": {
                 "task": "songhive.tasks.storage.cleanup_orphaned_files",

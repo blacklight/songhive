@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models._enums import Visibility
+from ...models.track import Track
 from ...models.user import User
 from ...services import acl, audit, deletion, music
 from ...services.federation import unpublish_track_activity
@@ -23,6 +24,7 @@ from ..deps import (
 )
 from ..middleware.rate_limit import rate_limit_account
 from ._common import HasOwnerId, redact_owner
+from .tracks import _enqueue_track_enrichment
 
 router = APIRouter(prefix="/albums")
 
@@ -50,6 +52,13 @@ class AlbumUpdate(BaseModel):
     release_year: Optional[int] = None
     description: Optional[str] = None
     visibility: Optional[Visibility] = None
+
+
+class AlbumEnrichResponse(BaseModel):
+    """Album metadata enrichment result."""
+
+    album_id: str
+    enqueued: int
 
 
 async def _cover_url(storage: StorageService, album) -> Optional[str]:
@@ -241,3 +250,47 @@ async def delete_album(
             )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{album_id}/enrich", response_model=AlbumEnrichResponse)
+async def enrich_album(
+    album_id: str,
+    request: Request,
+    _: bool = Depends(require_access("album")),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enqueue MusicBrainz enrichment for all tracks in an album."""
+    album = await music.get_album(db, album_id)
+    if album is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "album", album_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user)
+    enqueued = 0
+    for track_id in track_ids:
+        track = await db.get(Track, track_id)
+        if track is None:
+            continue
+        if (current_user.is_admin or track.owner_id == current_user.id) and _enqueue_track_enrichment(
+            track_id, force=True
+        ):
+            enqueued += 1
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="album.enrich",
+        target_type="album",
+        target_id=album_id,
+        details={"title": album.title, "enqueued": enqueued},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return AlbumEnrichResponse(album_id=album_id, enqueued=enqueued)

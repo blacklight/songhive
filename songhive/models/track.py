@@ -6,13 +6,14 @@ Track model.
 ``"federation"`` ( ActivityPub / federation).
 """
 
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import JSON, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._enums import Visibility
-from .base import Base
+from .base import Base, TZDateTime
 
 
 class Track(Base):
@@ -31,6 +32,7 @@ class Track(Base):
         server_default="0",
     )
     musicbrainz_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, unique=True, index=True)
+    musicbrainz_enriched_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
     genre: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     audio_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
     raw_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

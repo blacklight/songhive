@@ -54,6 +54,17 @@ blocked_instances = []
 # allowed_instances = ["good.example", "friend.example"]
 # blocked_instances = ["evil.example", "spammers.example"]
 
+[musicbrainz]
+# Enable MusicBrainz metadata + Cover Art Archive enrichment for uploaded tracks.
+enabled = true
+# User-Agent string sent to MusicBrainz. Include a contact URL or email per
+# MusicBrainz policy when running a public instance.
+# user_agent = "Songhive/0.0 ( https://example.com )"
+# Maximum MusicBrainz API requests per second (per worker).
+# rate_limit_per_second = 1.0
+# Fetch cover art from the Cover Art Archive when a matching release is found.
+# fetch_cover_art = true
+
 [auth]
 registration_mode = "open"
 require_email_verification = false
