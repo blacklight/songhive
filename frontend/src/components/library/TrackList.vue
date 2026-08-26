@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { usePlayerStore } from "@/stores/player";
@@ -11,6 +11,7 @@ import AppTable, { type Column } from "@/components/ui/AppTable.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppModal from "@/components/feedback/AppModal.vue";
+import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ContextMenu from "@/components/ui/ContextMenu.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import { formatTime } from "@/utils/time";
@@ -81,6 +82,30 @@ const confirmMode = ref<"single" | "bulk">("single");
 const confirmTrack = ref<QueueTrack | null>(null);
 const confirmIsDelete = ref(false);
 const isRemoving = ref(false);
+
+const COMPACT_BREAKPOINT = "(max-width: 1279.98px)";
+const isCompact = ref(
+  typeof window !== "undefined" &&
+    window.matchMedia(COMPACT_BREAKPOINT).matches,
+);
+let compactMediaQuery: MediaQueryList | null = null;
+
+function updateCompact() {
+  isCompact.value = compactMediaQuery ? compactMediaQuery.matches : false;
+}
+
+onMounted(() => {
+  if (typeof window === "undefined") return;
+  compactMediaQuery = window.matchMedia(COMPACT_BREAKPOINT);
+  updateCompact();
+  compactMediaQuery.addEventListener("change", updateCompact);
+});
+
+onUnmounted(() => {
+  if (compactMediaQuery) {
+    compactMediaQuery.removeEventListener("change", updateCompact);
+  }
+});
 
 function openAddDialog(mode: "library" | "playlist") {
   addDialogMode.value = mode;
@@ -604,6 +629,13 @@ async function onMenuSelect(key: string) {
 
       <div v-if="canEdit" class="track-list__bulk">
         <template v-if="bulkMode">
+          <AppCheckbox
+            v-if="isCompact"
+            :model-value="allSelected"
+            :indeterminate="someSelected"
+            :label="t('browse.bulkEdit.selectAll')"
+            @update:model-value="toggleAll"
+          />
           <AppButton
             v-if="props.deletable"
             variant="danger"
@@ -647,6 +679,7 @@ async function onMenuSelect(key: string) {
     </div>
 
     <AppTable
+      v-if="!isCompact"
       :columns="columns"
       :rows="rows"
       :row-key="rowKey"
@@ -718,6 +751,79 @@ async function onMenuSelect(key: string) {
         />
       </template>
     </AppTable>
+    <ul
+      v-else
+      class="track-list__compact"
+      role="list"
+      :aria-busy="props.loading ? 'true' : 'false'"
+    >
+      <template v-if="props.loading">
+        <li
+          v-for="i in 3"
+          :key="`loading-${i}`"
+          class="track-list__compact-item track-list__compact-item--loading"
+        >
+          <SkeletonLoader variant="list-row" />
+        </li>
+      </template>
+      <li v-else-if="rows.length === 0" class="track-list__compact-empty">
+        {{
+          props.emptyLabel ??
+          t("browse.list.empty", { entity: t("browse.entities.tracks") })
+        }}
+      </li>
+      <template v-else>
+        <li
+          v-for="(row, index) in rows"
+          :key="rowKey(row, index)"
+          class="track-list__compact-item"
+        >
+          <div v-if="bulkMode && canEdit" class="track-list__compact-select">
+            <AppCheckbox
+              :model-value="asTrackRow(row).selected"
+              :aria-label="t('browse.bulkEdit.selectAll')"
+              @update:model-value="toggleRow(asTrackRow(row).track)"
+            />
+          </div>
+          <span v-else class="track-list__compact-number" aria-hidden="true">
+            {{ asTrackRow(row).num }}
+          </span>
+
+          <button
+            type="button"
+            class="track-list__compact-main"
+            @click="play(asTrackRow(row).index)"
+          >
+            <span
+              class="track-list__compact-title"
+              :title="asTrackRow(row).track.title"
+            >
+              {{ asTrackRow(row).track.title }}
+            </span>
+            <span
+              class="track-list__compact-artist"
+              :title="asTrackRow(row).artist"
+            >
+              {{ asTrackRow(row).artist }}
+            </span>
+          </button>
+
+          <span class="track-list__compact-duration">
+            {{ asTrackRow(row).duration }}
+          </span>
+
+          <AppButton
+            variant="ghost"
+            size="sm"
+            :aria-label="t('browse.detail.actions')"
+            :title="t('browse.detail.actions')"
+            icon="ellipsis-vertical"
+            :disabled="bulkMode"
+            @click="openMenu($event, asTrackRow(row).track)"
+          />
+        </li>
+      </template>
+    </ul>
 
     <ContextMenu
       :open="menuOpen"
@@ -786,11 +892,14 @@ async function onMenuSelect(key: string) {
 .track-list__header {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: var(--space-3);
 }
 
 .track-list__bulk {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-2);
 }
 
@@ -852,5 +961,98 @@ async function onMenuSelect(key: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.track-list__compact {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--color-text);
+}
+
+.track-list__compact-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  min-width: 0;
+  transition: background-color 0.2s;
+}
+
+.track-list__compact-item:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.track-list__compact-item--loading {
+  padding: var(--space-2) 0;
+}
+
+.track-list__compact-empty {
+  padding: var(--space-6) var(--space-3);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.track-list__compact-number,
+.track-list__compact-select {
+  width: 1.25rem;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.track-list__compact-select {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.track-list__compact-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+}
+
+.track-list__compact-main:hover .track-list__compact-title {
+  color: var(--color-accent-contrast);
+}
+
+.track-list__compact-title {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.track-list__compact-artist {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.track-list__compact-duration {
+  flex-shrink: 0;
+  min-width: 2.5rem;
+  text-align: right;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
 }
 </style>
