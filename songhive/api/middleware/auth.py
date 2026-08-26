@@ -33,10 +33,19 @@ def decode_access_token(token: str, secret_key: str) -> Optional[str]:
 
 
 def extract_token(request: Request) -> Optional[str]:
-    """Extract a Bearer token from the Authorization header."""
+    """Extract an access token from the Authorization header or access_token cookie.
+
+    Cookies are supported because browser media tags (<img>, <audio>) cannot
+    send custom Authorization headers. The cookie is kept in sync by the SPA
+    auth store.
+    """
     auth_header: str = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         return auth_header[7:]
+
+    token = request.cookies.get("access_token")
+    if token:
+        return token
     return None
 
 
