@@ -72,6 +72,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/ArtistView.vue"),
       },
       {
+        path: "artists/:id/edit",
+        name: "artistEdit",
+        component: () => import("@/views/ArtistEditView.vue"),
+        meta: { requiresAuth: true },
+      },
+      {
         path: "albums",
         name: "albums",
         component: () => import("@/views/AlbumsView.vue"),
@@ -113,9 +119,12 @@ const routes: RouteRecordRaw[] = [
         name: "playlist",
         component: () => import("@/views/PlaylistView.vue"),
       },
-      placeholder("playlists/:id/edit", "playlistEdit", 5, {
-        requiresAuth: true,
-      }),
+      {
+        path: "playlists/:id/edit",
+        name: "playlistEdit",
+        component: () => import("@/views/PlaylistEditView.vue"),
+        meta: { requiresAuth: true },
+      },
       {
         path: "libraries",
         name: "libraries",
