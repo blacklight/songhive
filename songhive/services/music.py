@@ -275,7 +275,7 @@ def _build_tracks_stmt(
     library_id: Optional[str] = None,
 ) -> Select[Any]:
     """Build a statement for listing/counting tracks."""
-    stmt = select(Track)
+    stmt = select(Track).order_by(Track.created_at, Track.id)
     if artist_id:
         stmt = stmt.where(Track.artist_id == artist_id)
     if album_id:
@@ -314,9 +314,15 @@ async def list_tracks(
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
-) -> List[Track]:
-    """List tracks with optional filters, honouring the requester's ACL."""
-    stmt = _build_tracks_stmt(
+    around_track_id: Optional[str] = None,
+) -> Tuple[List[Track], int]:
+    """List tracks with optional filters, honouring the requester's ACL.
+
+    If ``around_track_id`` is given, the returned chunk is centered on that
+    track (when it matches the filters and is accessible to the requester).
+    The second return value is the effective offset of the returned chunk.
+    """
+    base_stmt = _build_tracks_stmt(
         session,
         query=query,
         artist_id=artist_id,
@@ -325,11 +331,33 @@ async def list_tracks(
         year_from=year_from,
         year_to=year_to,
         library_id=library_id,
-    ).options(*_track_selectin_options(include))
-    stmt = apply_access_filter(stmt, Track, user, "track")
-    stmt = stmt.offset(offset).limit(limit)
+    )
+    base_stmt = apply_access_filter(base_stmt, Track, user, "track")
+
+    effective_offset = max(0, offset)
+    if around_track_id:
+        around = await get_track(session, around_track_id, include=None)
+        if around is not None:
+            exists_stmt = base_stmt.where(Track.id == around.id).limit(1)
+            exists = (await session.execute(exists_stmt)).scalar_one_or_none()
+            if exists is not None:
+                before_stmt = select(func.count()).select_from(
+                    base_stmt.where(
+                        or_(
+                            Track.created_at < around.created_at,
+                            and_(
+                                Track.created_at == around.created_at,
+                                Track.id < around.id,
+                            ),
+                        )
+                    ).subquery()
+                )
+                count_before = (await session.execute(before_stmt)).scalar() or 0
+                effective_offset = max(0, count_before - limit // 2)
+
+    stmt = base_stmt.options(*_track_selectin_options(include)).offset(effective_offset).limit(limit)
     result = await session.execute(stmt)
-    return list(result.scalars().all())
+    return list(result.scalars().all()), effective_offset
 
 
 async def count_tracks(

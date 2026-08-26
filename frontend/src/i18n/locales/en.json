@@ -266,6 +266,7 @@
       "searchPlaceholder": "Search {entity}…",
       "empty": "No {entity} found.",
       "loadMore": "Load more",
+      "loadPrevious": "Load previous",
       "createPlaylist": "Create playlist",
       "createLibrary": "Create library",
       "newPlaylist": "New playlist",

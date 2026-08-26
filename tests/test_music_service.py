@@ -184,29 +184,29 @@ async def test_list_and_count_tracks_with_filters(db_session, regular_user):
     await _add_to_library(db_session, library, track1, regular_user)
 
     # Search query (non-PostgreSQL ILIKE branch)
-    by_query = await music.list_tracks(db_session, query="alpha", user=regular_user)
+    by_query, _ = await music.list_tracks(db_session, query="alpha", user=regular_user)
     assert len(by_query) == 1
     assert by_query[0].id == track1.id
     assert await music.count_tracks(db_session, query="alpha", user=regular_user) == 1
 
-    by_artist = await music.list_tracks(db_session, artist_id=artist.id, user=regular_user)
+    by_artist, _ = await music.list_tracks(db_session, artist_id=artist.id, user=regular_user)
     assert len(by_artist) == 2
 
-    by_album = await music.list_tracks(db_session, album_id=album.id, user=regular_user)
+    by_album, _ = await music.list_tracks(db_session, album_id=album.id, user=regular_user)
     assert len(by_album) == 1
     assert by_album[0].id == track1.id
 
-    by_genre = await music.list_tracks(db_session, genre="rock", user=regular_user)
+    by_genre, _ = await music.list_tracks(db_session, genre="rock", user=regular_user)
     assert len(by_genre) == 1
     assert by_genre[0].id == track1.id
 
-    by_library = await music.list_tracks(db_session, library_id=library.id, user=regular_user)
+    by_library, _ = await music.list_tracks(db_session, library_id=library.id, user=regular_user)
     assert len(by_library) == 1
     assert by_library[0].id == track1.id
     assert await music.count_tracks(db_session, library_id=library.id, user=regular_user) == 1
 
     # Year range covering the album and the track with no album
-    by_year = await music.list_tracks(
+    by_year, _ = await music.list_tracks(
         db_session,
         year_from=2020,
         year_to=2022,
@@ -215,7 +215,7 @@ async def test_list_and_count_tracks_with_filters(db_session, regular_user):
     assert len(by_year) == 2
 
     # Search query combined with year range
-    by_query_year = await music.list_tracks(
+    by_query_year, _ = await music.list_tracks(
         db_session,
         query="song",
         year_from=2020,

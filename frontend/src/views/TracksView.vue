@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useEntityList } from "@/composables/useEntityList";
+import { useChunkList } from "@/composables/useChunkList";
 import { useShareDialog } from "@/composables/useShareDialog";
-import { listTracks, type TrackResponse } from "@/api/tracks";
+import { listTracksWithMeta, type TrackResponse } from "@/api/tracks";
 import type { QueueTrack } from "@/player/types";
 import { useAuthStore } from "@/stores/auth";
+import { usePlayerStore } from "@/stores/player";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
@@ -15,20 +16,28 @@ import ShareDialog from "@/components/share/ShareDialog.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
+const player = usePlayerStore();
 const {
   items,
   loading,
   error,
   query,
   hasMore,
+  hasPrevious,
   load,
   loadMore,
+  loadPrevious,
+  loadAround,
   search,
   retry,
   refresh,
-} = useEntityList<TrackResponse>((params) =>
-  listTracks({ ...params, include: "artist,album" }),
-);
+} = useChunkList<TrackResponse>(async (params) => {
+  const result = await listTracksWithMeta({
+    ...params,
+    include: "artist,album",
+  });
+  return { items: result.tracks, offset: result.offset, total: result.total };
+});
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 function onTrackShare(track: QueueTrack) {
@@ -45,7 +54,24 @@ async function onRemoved() {
   await refresh();
 }
 
-onMounted(() => load());
+onMounted(() => {
+  if (player.currentTrack?.id) {
+    void loadAround(player.currentTrack.id);
+  } else {
+    void load();
+  }
+});
+
+watch(
+  () => player.currentTrack?.id,
+  (currentTrackId, previousTrackId) => {
+    if (!currentTrackId || currentTrackId === previousTrackId) return;
+    const current = player.currentTrack;
+    if (current && !items.value.some((t) => t.id === current.id)) {
+      void loadAround(current.id);
+    }
+  },
+);
 </script>
 
 <template>
@@ -77,14 +103,27 @@ onMounted(() => load());
       }}</AppButton>
     </div>
 
-    <TrackList
-      v-else
-      :tracks="items"
-      :loading="loading"
-      :deletable="authStore.isAuthenticated"
-      @share="onTrackShare"
-      @removed="onRemoved"
-    />
+    <template v-else>
+      <div v-if="hasPrevious" class="tracks-view__load-previous">
+        <AppButton
+          icon="chevron-up"
+          variant="secondary"
+          :loading="loading"
+          :disabled="loading"
+          @click="loadPrevious"
+        >
+          {{ t("browse.list.loadPrevious") }}
+        </AppButton>
+      </div>
+
+      <TrackList
+        :tracks="items"
+        :loading="loading"
+        :deletable="authStore.isAuthenticated"
+        @share="onTrackShare"
+        @removed="onRemoved"
+      />
+    </template>
 
     <ShareDialog
       v-if="shareTarget"
@@ -138,6 +177,11 @@ onMounted(() => load());
   border-radius: var(--radius-md);
   background-color: var(--color-surface);
   color: var(--color-danger);
+}
+
+.tracks-view__load-previous {
+  display: flex;
+  justify-content: center;
 }
 
 .tracks-view__footer {

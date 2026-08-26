@@ -199,6 +199,7 @@ async def list_tracks(
     year_from: Optional[int] = Query(None),
     year_to: Optional[int] = Query(None),
     library_id: Optional[str] = Query(None),
+    around_track_id: Optional[str] = Query(None, description="Center the returned chunk on this track"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
@@ -217,7 +218,7 @@ async def list_tracks(
         library_id=library_id,
         user=user,
     )
-    rows = await music.list_tracks(
+    rows, effective_offset = await music.list_tracks(
         db,
         query=q,
         artist_id=artist_id,
@@ -230,8 +231,10 @@ async def list_tracks(
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),
+        around_track_id=around_track_id,
     )
     pagination.set_total(response, total)
+    response.headers["X-List-Offset"] = str(effective_offset)
     return [await _build_track_response(t, user, storage, include) for t in rows]
 
 

@@ -1,4 +1,9 @@
-import { getAuthHeader, ApiError, apiRequest } from "./client";
+import {
+  getAuthHeader,
+  ApiError,
+  apiRequest,
+  apiRequestWithHeaders,
+} from "./client";
 import { buildUrl } from "./config";
 import type { components } from "./types";
 
@@ -18,6 +23,37 @@ export function listTracks(params?: {
   include?: string;
 }): Promise<TrackResponse[]> {
   return apiRequest<TrackResponse[]>("/tracks/", { query: params });
+}
+
+export interface ListTracksResult {
+  tracks: TrackResponse[];
+  offset: number;
+  total: number;
+}
+
+export async function listTracksWithMeta(params?: {
+  q?: string;
+  artist_id?: string;
+  album_id?: string;
+  genre?: string;
+  year_from?: number;
+  year_to?: number;
+  library_id?: string;
+  limit?: number;
+  offset?: number;
+  include?: string;
+  around_track_id?: string;
+}): Promise<ListTracksResult> {
+  const response = await apiRequestWithHeaders<TrackResponse[]>("/tracks/", {
+    query: params,
+  });
+  const offsetHeader = response.headers.get("X-List-Offset");
+  const totalHeader = response.headers.get("X-Total-Count");
+  return {
+    tracks: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
+    total: totalHeader ? parseInt(totalHeader, 10) : response.body.length,
+  };
 }
 
 export function getTrack(

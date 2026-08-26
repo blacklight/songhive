@@ -98,10 +98,10 @@ export function getAuthHeader(): string | null {
   return token ? `Bearer ${token}` : null;
 }
 
-export async function apiRequest<T>(
+async function fetchRequest(
   path: string,
   options: RequestOptions = {},
-): Promise<T> {
+): Promise<Response> {
   const url = buildUrl(`${API_PREFIX}${path}`, options.query);
   const headers: HeadersInit = {
     Accept: "application/json",
@@ -161,10 +161,10 @@ export async function apiRequest<T>(
       throw await ApiError.fromResponse(retry, body);
     }
 
-    return handleResponse<T>(retry);
+    return retry;
   }
 
-  return handleResponse<T>(response);
+  return response;
 }
 
 async function safeReadBody(response: Response): Promise<unknown> {
@@ -183,4 +183,35 @@ async function handleResponse<T>(response: Response): Promise<T> {
     throw await ApiError.fromResponse(response, body);
   }
   return body as T;
+}
+
+export interface ApiResponse<T> {
+  body: T;
+  headers: Headers;
+}
+
+async function handleResponseWithHeaders<T>(
+  response: Response,
+): Promise<ApiResponse<T>> {
+  const body = await safeReadBody(response);
+  if (!response.ok) {
+    throw await ApiError.fromResponse(response, body);
+  }
+  return { body: body as T, headers: response.headers };
+}
+
+export async function apiRequestWithHeaders<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<ApiResponse<T>> {
+  const response = await fetchRequest(path, options);
+  return handleResponseWithHeaders<T>(response);
+}
+
+export async function apiRequest<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
+  const response = await fetchRequest(path, options);
+  return handleResponse<T>(response);
 }

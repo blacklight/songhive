@@ -488,3 +488,40 @@ async def test_enrich_track_logs_audit_entry(
         )
     )
     assert result is not None
+
+
+@pytest.mark.asyncio
+async def test_list_tracks_around_track_id(client, db_session, regular_user, auth_headers):
+    """The around_track_id parameter returns a chunk centered on the target track."""
+    artist = Artist(name="Around Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    tracks = []
+    for i in range(25):
+        track = Track(
+            title=f"Track {i}",
+            artist_id=artist.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+        )
+        db_session.add(track)
+        tracks.append(track)
+    await db_session.flush()
+
+    target = tracks[15]
+    headers = auth_headers(regular_user)
+    response = client.get(
+        "/api/v1/tracks",
+        params={
+            "around_track_id": target.id,
+            "limit": 10,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 10
+    assert int(response.headers["X-List-Offset"]) == 10
+    assert data[5]["id"] == target.id

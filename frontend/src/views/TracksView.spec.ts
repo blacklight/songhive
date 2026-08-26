@@ -4,11 +4,11 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import * as tracksApi from "@/api/tracks";
-import type { TrackResponse } from "@/api/tracks";
+import type { TrackResponse, ListTracksResult } from "@/api/tracks";
 import TracksView from "./TracksView.vue";
 
 vi.mock("@/api/tracks", () => ({
-  listTracks: vi.fn(),
+  listTracksWithMeta: vi.fn(),
   deleteTrack: vi.fn(),
 }));
 
@@ -61,6 +61,17 @@ function createTrack(
   };
 }
 
+function createListResult(
+  tracks: TrackResponse[],
+  total?: number,
+): ListTracksResult {
+  return {
+    tracks,
+    offset: 0,
+    total: total ?? tracks.length,
+  };
+}
+
 describe("TracksView", () => {
   let wrapper: ReturnType<typeof mount>;
 
@@ -68,7 +79,9 @@ describe("TracksView", () => {
     setActivePinia(createPinia());
     vi.useFakeTimers();
     vi.clearAllMocks();
-    vi.mocked(tracksApi.listTracks).mockResolvedValue([]);
+    vi.mocked(tracksApi.listTracksWithMeta).mockResolvedValue(
+      createListResult([]),
+    );
   });
 
   afterEach(() => {
@@ -78,39 +91,43 @@ describe("TracksView", () => {
   });
 
   it("fetches tracks on mount", async () => {
-    vi.mocked(tracksApi.listTracks).mockResolvedValue([
-      createTrack("track-1", "Song One"),
-    ]);
+    vi.mocked(tracksApi.listTracksWithMeta).mockResolvedValue(
+      createListResult([createTrack("track-1", "Song One")]),
+    );
 
     wrapper = mount(TracksView, {
       global: { plugins: [createTestRouter()] },
     });
     await flushPromises();
 
-    expect(tracksApi.listTracks).toHaveBeenCalledWith({
+    expect(tracksApi.listTracksWithMeta).toHaveBeenCalledWith({
       q: "",
       limit: 20,
       offset: 0,
       include: "artist,album",
+      around_track_id: undefined,
     });
     expect(wrapper.text()).toContain("Song One");
   });
 
   it("fetches and displays artist and album names", async () => {
-    vi.mocked(tracksApi.listTracks).mockResolvedValue([
-      createTrack("track-1", "Song One", "The Artist", "The Album"),
-    ]);
+    vi.mocked(tracksApi.listTracksWithMeta).mockResolvedValue(
+      createListResult([
+        createTrack("track-1", "Song One", "The Artist", "The Album"),
+      ]),
+    );
 
     wrapper = mount(TracksView, {
       global: { plugins: [createTestRouter()] },
     });
     await flushPromises();
 
-    expect(tracksApi.listTracks).toHaveBeenCalledWith({
+    expect(tracksApi.listTracksWithMeta).toHaveBeenCalledWith({
       q: "",
       limit: 20,
       offset: 0,
       include: "artist,album",
+      around_track_id: undefined,
     });
     expect(wrapper.text()).toContain("The Artist");
     expect(wrapper.text()).toContain("The Album");
@@ -130,7 +147,7 @@ describe("TracksView", () => {
   });
 
   it("shows an error banner with a retry button", async () => {
-    vi.mocked(tracksApi.listTracks).mockRejectedValue(
+    vi.mocked(tracksApi.listTracksWithMeta).mockRejectedValue(
       new Error("network failure"),
     );
 
@@ -141,9 +158,9 @@ describe("TracksView", () => {
 
     expect(wrapper.text()).toContain("network failure");
 
-    vi.mocked(tracksApi.listTracks).mockResolvedValue([
-      createTrack("track-1", "Song One"),
-    ]);
+    vi.mocked(tracksApi.listTracksWithMeta).mockResolvedValue(
+      createListResult([createTrack("track-1", "Song One")]),
+    );
     await wrapper.find("button").trigger("click");
     await flushPromises();
 
@@ -152,10 +169,14 @@ describe("TracksView", () => {
   });
 
   it("debounces search and resets the list", async () => {
-    const fetcher = vi.mocked(tracksApi.listTracks);
+    const fetcher = vi.mocked(tracksApi.listTracksWithMeta);
     fetcher
-      .mockResolvedValueOnce([createTrack("track-1", "First Song")])
-      .mockResolvedValueOnce([createTrack("track-2", "Searched Song")]);
+      .mockResolvedValueOnce(
+        createListResult([createTrack("track-1", "First Song")]),
+      )
+      .mockResolvedValueOnce(
+        createListResult([createTrack("track-2", "Searched Song")]),
+      );
 
     wrapper = mount(TracksView, {
       global: { plugins: [createTestRouter()] },
@@ -174,20 +195,26 @@ describe("TracksView", () => {
       limit: 20,
       offset: 0,
       include: "artist,album",
+      around_track_id: undefined,
     });
     expect(wrapper.text()).toContain("Searched Song");
     expect(wrapper.text()).not.toContain("First Song");
   });
 
   it("loads the next page", async () => {
-    const fetcher = vi.mocked(tracksApi.listTracks);
+    const fetcher = vi.mocked(tracksApi.listTracksWithMeta);
     fetcher
       .mockResolvedValueOnce(
-        Array.from({ length: 20 }, (_, i) =>
-          createTrack(`track-${i}`, `Song ${i}`),
+        createListResult(
+          Array.from({ length: 20 }, (_, i) =>
+            createTrack(`track-${i}`, `Song ${i}`),
+          ),
+          21,
         ),
       )
-      .mockResolvedValueOnce([createTrack("track-20", "Song 20")]);
+      .mockResolvedValueOnce(
+        createListResult([createTrack("track-20", "Song 20")], 21),
+      );
 
     wrapper = mount(TracksView, {
       global: { plugins: [createTestRouter()] },
@@ -207,6 +234,7 @@ describe("TracksView", () => {
       limit: 20,
       offset: 20,
       include: "artist,album",
+      around_track_id: undefined,
     });
     expect(wrapper.text()).toContain("Song 19");
     expect(wrapper.text()).toContain("Song 20");
