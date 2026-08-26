@@ -127,6 +127,10 @@ describe("AlbumView", () => {
     expect(wrapper.text()).toContain("The Larks");
     expect(wrapper.text()).toContain("Song One");
     expect(wrapper.text()).toContain("A lovely album.");
+    expect(wrapper.find(".album-view__visibility i").classes()).toContain(
+      "fa-globe",
+    );
+    expect(wrapper.find(".album-view__owner").text()).toContain("user-1");
   });
 
   it("shows an error banner with a retry button", async () => {

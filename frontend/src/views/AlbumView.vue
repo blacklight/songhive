@@ -83,7 +83,8 @@ const trackEnrich = computed<Map<string, TrackEnrich>>(() => {
   return map;
 });
 
-const { ownerName, visibilityText } = useEntityMeta(album);
+const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
+  useEntityMeta(album);
 const { isOwner } = useOwnership(computed(() => album.value?.owner_id ?? null));
 
 const deleteAlbum = useEntityDelete({
@@ -217,14 +218,29 @@ watch(
           </span>
 
           <div class="album-view__meta">
-            <span v-if="album.release_year" class="album-view__meta-item">
-              {{ t("browse.detail.year") }} {{ album.release_year }}
+            <span class="album-view__meta-item">
+              <span v-if="album.release_year" class="album-view__meta-item">
+                <i class="fa-solid fa-calendar" />
+                {{ album.release_year }}
+              </span>
             </span>
             <span class="album-view__meta-item">
-              {{ t("browse.detail.visibility") }} {{ visibilityText }}
-            </span>
-            <span v-if="ownerName" class="album-view__meta-item">
-              {{ t("browse.detail.owner") }} {{ ownerName }}
+              <span
+                v-if="ownerName"
+                :title="ownerName"
+                class="album-view__owner"
+              >
+                <AppAvatar
+                  v-if="ownerAvatarUrl"
+                  :src="ownerAvatarUrl"
+                  :name="ownerName"
+                  width="16px"
+                />
+                {{ ownerName }}
+              </span>
+              <span :title="visibilityText" class="album-view__visibility">
+                <i :class="visibilityIcon" />
+              </span>
             </span>
           </div>
 
@@ -421,10 +437,33 @@ watch(
 .album-view__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  flex-direction: column;
+  gap: var(--space-2);
   color: var(--color-text-muted);
   font-size: 0.875rem;
   word-break: break-word;
+}
+
+.album-view__meta-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.album-view__owner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.album-view__visibility {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+:deep(.album-view__owner img) {
+  margin: 0;
 }
 
 .album-view__description {
