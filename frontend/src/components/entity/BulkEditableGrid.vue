@@ -383,6 +383,11 @@ defineSlots<{
 
 .bulk-editable-grid__item-wrapper {
   position: relative;
+  padding: var(--space-3);
+}
+
+.bulk-editable-grid__item-wrapper:hover {
+  background-color: var(--color-surface-raised);
 }
 
 .bulk-editable-grid__item-wrapper--list {
@@ -393,7 +398,7 @@ defineSlots<{
 
 .bulk-editable-grid__item-checkbox {
   position: absolute;
-  top: var(--space-2);
+  top: calc(0.75 * var(--space-3));
   right: var(--space-2);
   background: var(--color-surface);
   border-radius: var(--radius-sm);
@@ -402,7 +407,7 @@ defineSlots<{
 
 .bulk-editable-grid__item-delete {
   position: absolute;
-  top: var(--space-2);
+  top: calc(0.75 * var(--space-3));
   right: var(--space-2);
   z-index: 1;
   opacity: 0;
