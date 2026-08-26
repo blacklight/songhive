@@ -9,6 +9,11 @@ import ConfirmDialog from "@/components/feedback/ConfirmDialog.vue";
 </template>
 
 <style>
+html,
+body {
+  scroll-padding-bottom: calc(5rem + var(--space-4));
+}
+
 body {
   font-family:
     -apple-system, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans",
