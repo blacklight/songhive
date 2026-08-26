@@ -16,6 +16,7 @@ import os
 import signal
 import sys
 from collections.abc import Iterable
+from textwrap import dedent
 from typing import Any, Awaitable, Callable, Optional, cast
 
 from .config import SonghiveConfig, load_config
@@ -144,6 +145,29 @@ def _run_uvicorn(config):
     )
 
 
+def _print_cli_banner():
+    from .version import __version__
+
+    logger.info(
+        dedent(
+            rf"""
+           ┏━[━━]━┓                                                ┏━[━━]━┓
+           ┃      ┃                                                ┃      ┃
+        ━━━┫      ┣━━━━━━━━━━━━━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━━━┫      ┣━━━
+
+        ⟦▸⟧   _______  _____  __   _  ______ _     _ _____ _    _ _______  ⟦▸⟧
+        ⟦▹⟧   |______ |     | | \  | |  ____ |_____|   |    \  /  |______  ⟦▹⟧
+        ⟦▪⟧   ______| |_____| |  \_| |_____| |     | __|__   \/   |______  ⟦▪⟧
+        ⟦▫⟧                                                                ⟦▫⟧
+              version: {__version__}
+        ━━━┫      ┣━━━━━━━━━━━━━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━━━┫      ┣━━━
+           ┃      ┃                                                ┃      ┃
+           ┗━[━━]━┛                                                ┗━[━━]━┛
+        """
+        )
+    )
+
+
 def main():
     """
     Songhive application entry point.
@@ -171,6 +195,7 @@ def main():
     try:
         from a2wsgi import ASGIMiddleware  # noqa: F401
 
+        _print_cli_banner()
         _run_tornado(config)
     except ImportError:
         logger.warning(
