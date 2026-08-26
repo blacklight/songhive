@@ -58,6 +58,36 @@ onMounted(() => void instanceStore.load());
             <dt>{{ t("pages.about.description") }}</dt>
             <dd>{{ appDescription }}</dd>
           </div>
+          <div class="about-view__row">
+            <dt>{{ t("pages.about.projectUrl") }}</dt>
+            <dd>
+              <a
+                href="https://git.fabiomanganiello.com/songhive"
+                target="_blank"
+              >
+                git.fabiomanganiello.com/songhive
+              </a>
+            </dd>
+          </div>
+          <div class="about-view__row">
+            <dt>{{ t("pages.about.githubUrl") }}</dt>
+            <dd>
+              <a href="https://github.com/blacklight/songhive" target="_blank">
+                github.com/blacklight/songhive
+              </a>
+            </dd>
+          </div>
+          <div class="about-view__row">
+            <dt>{{ t("pages.about.issueTracker") }}</dt>
+            <dd>
+              <a
+                href="https://github.com/blacklight/songhive/issues"
+                target="_blank"
+              >
+                github.com/blacklight/songhive/issues
+              </a>
+            </dd>
+          </div>
         </dl>
 
         <div v-if="hasLinks" class="about-view__links">
@@ -164,5 +194,11 @@ onMounted(() => void instanceStore.load());
     grid-template-columns: 1fr;
     gap: var(--space-1);
   }
+}
+
+a {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--color-text-muted);
 }
 </style>
