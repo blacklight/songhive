@@ -66,6 +66,23 @@ export const useAuthStore = defineStore("auth", () => {
     if (user.value)
       localStorage.setItem(STORAGE_USER, JSON.stringify(user.value));
     else localStorage.removeItem(STORAGE_USER);
+
+    syncAccessTokenCookie();
+  }
+
+  function syncAccessTokenCookie() {
+    if (typeof document === "undefined") return;
+
+    if (accessToken.value) {
+      let cookie = `access_token=${encodeURIComponent(accessToken.value)}; Path=/; SameSite=Lax`;
+      if (expiresAt.value) {
+        cookie += `; Expires=${new Date(expiresAt.value).toUTCString()}`;
+      }
+      document.cookie = cookie;
+    } else {
+      document.cookie =
+        "access_token=; Path=/; SameSite=Lax; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    }
   }
 
   function setTokens(access: string, refresh: string, expiresIn: number) {
@@ -131,6 +148,11 @@ export const useAuthStore = defineStore("auth", () => {
 
   function bootstrap(): Promise<void> {
     if (bootstrapped && status.value !== "idle") return bootstrapped;
+
+    // Ensure the browser cookie is in sync with the token loaded from
+    // localStorage on page reload, so <img> and <audio> requests are
+    // authenticated.
+    syncAccessTokenCookie();
 
     bootstrapped = (async () => {
       if (accessToken.value && refreshToken.value) {
