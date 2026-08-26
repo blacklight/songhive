@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRoute, RouterLink } from "vue-router";
+import { useRoute, useRouter, RouterLink } from "vue-router";
 import {
   getTrack,
   deleteTrack as deleteTrackApi,
@@ -28,6 +28,7 @@ import ShareDialog from "@/components/share/ShareDialog.vue";
 
 const { t } = useI18n();
 const route = useRoute();
+const router = useRouter();
 const player = usePlayerStore();
 const authStore = useAuthStore();
 const trackId = computed(() => String(route.params.id));
@@ -99,6 +100,13 @@ const actions = computed(() => [
     visible: isOwner.value || isPublic.value,
   },
   {
+    key: "edit",
+    label: t("common.edit"),
+    icon: "pen-to-square",
+    variant: "secondary" as const,
+    visible: isOwner.value,
+  },
+  {
     key: "add-to-library",
     label: t("browse.addToCollection.addToLibrary"),
     icon: "folder-plus",
@@ -121,7 +129,7 @@ const actions = computed(() => [
   },
 ]);
 
-function onAction(key: string) {
+async function onAction(key: string) {
   if (!track.value) return;
   switch (key) {
     case "play":
@@ -135,6 +143,12 @@ function onAction(key: string) {
         track.value.owner_id,
         track.value.visibility,
       );
+      break;
+    case "edit":
+      await router.push({
+        name: "trackEdit",
+        params: { id: track.value.id },
+      });
       break;
     case "add-to-library":
       openAddDialog("library");

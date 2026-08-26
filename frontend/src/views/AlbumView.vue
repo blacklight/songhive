@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRoute, RouterLink } from "vue-router";
+import { useRoute, useRouter, RouterLink } from "vue-router";
 import {
   useEntityList,
   type EntityListParams,
@@ -34,6 +34,7 @@ import DeleteModal from "@/components/entity/DeleteModal.vue";
 
 const { t } = useI18n();
 const route = useRoute();
+const router = useRouter();
 const authStore = useAuthStore();
 const toastStore = useToastStore();
 const albumId = computed(() => String(route.params.id));
@@ -125,6 +126,13 @@ const actions = computed(() => [
     visible: isOwner.value || isPublic.value,
   },
   {
+    key: "edit",
+    label: t("common.edit"),
+    icon: "pen-to-square",
+    variant: "secondary" as const,
+    visible: isOwner.value,
+  },
+  {
     key: "add-to-library",
     label: t("browse.addToCollection.addToLibrary"),
     icon: "folder-plus",
@@ -151,7 +159,7 @@ const actions = computed(() => [
   },
 ]);
 
-function onAction(key: string) {
+async function onAction(key: string) {
   if (!album.value) return;
   switch (key) {
     case "share":
@@ -162,6 +170,12 @@ function onAction(key: string) {
         album.value.owner_id,
         album.value.visibility,
       );
+      break;
+    case "edit":
+      await router.push({
+        name: "albumEdit",
+        params: { id: album.value.id },
+      });
       break;
     case "add-to-library":
       openAddDialog("library");

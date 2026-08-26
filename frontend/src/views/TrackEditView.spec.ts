@@ -120,11 +120,12 @@ describe("TrackEditView", () => {
     const inputs = document.body.querySelectorAll(
       'input[type="text"], input[type="number"]',
     );
-    // Order: title, genre, track number, disc number
+    // Order: title, genre, track number, disc number, release year
     const titleInput = inputs[0] as HTMLInputElement;
     const genreInput = inputs[1] as HTMLInputElement;
     const trackNumberInput = inputs[2] as HTMLInputElement;
     const discNumberInput = inputs[3] as HTMLInputElement;
+    const releaseYearInput = inputs[4] as HTMLInputElement;
     const visibilityInput = document.body.querySelector(
       "select",
     ) as HTMLSelectElement;
@@ -137,6 +138,8 @@ describe("TrackEditView", () => {
     trackNumberInput.dispatchEvent(new Event("input"));
     discNumberInput.value = "";
     discNumberInput.dispatchEvent(new Event("input"));
+    releaseYearInput.value = "";
+    releaseYearInput.dispatchEvent(new Event("input"));
     visibilityInput.value = "local";
     visibilityInput.dispatchEvent(new Event("change"));
     await flushPromises();
@@ -153,6 +156,7 @@ describe("TrackEditView", () => {
       genre: "Pop",
       track_number: 2,
       disc_number: null,
+      release_year: null,
       visibility: "local",
     };
     expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-1", expectedBody);

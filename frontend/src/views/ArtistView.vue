@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
   useEntityList,
   type EntityListParams,
@@ -31,6 +31,7 @@ import DeleteModal from "@/components/entity/DeleteModal.vue";
 
 const { t } = useI18n();
 const route = useRoute();
+const router = useRouter();
 const authStore = useAuthStore();
 const artistId = computed(() => String(route.params.id));
 
@@ -129,6 +130,13 @@ const actions = computed(() => [
     visible: true,
   },
   {
+    key: "edit",
+    label: t("common.edit"),
+    icon: "pen-to-square",
+    variant: "secondary" as const,
+    visible: canDeleteArtist.value,
+  },
+  {
     key: "add-to-library",
     label: t("browse.addToCollection.addToLibrary"),
     icon: "folder-plus",
@@ -149,11 +157,17 @@ const actions = computed(() => [
   },
 ]);
 
-function onAction(key: string) {
+async function onAction(key: string) {
   if (!artist.value) return;
   switch (key) {
     case "share":
       openShare("artist", artist.value.id, artist.value.name, null, null);
+      break;
+    case "edit":
+      await router.push({
+        name: "artistEdit",
+        params: { id: artist.value.id },
+      });
       break;
     case "add-to-library":
       openAddDialog("library");
@@ -311,6 +325,7 @@ watch(
         <TrackList
           :tracks="tracks"
           :loading="tracksLoading"
+          :auto-scroll="false"
           :context="artist.name"
           :deletable="true"
           @share="onTrackShare"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
   useEntityList,
   type EntityListParams,
@@ -31,6 +31,7 @@ import DeleteModal from "@/components/entity/DeleteModal.vue";
 
 const { t } = useI18n();
 const route = useRoute();
+const router = useRouter();
 const authStore = useAuthStore();
 const playlistId = computed(() => String(route.params.id));
 
@@ -123,6 +124,13 @@ const actions = computed(() => [
     visible: isOwner.value || isPublic.value,
   },
   {
+    key: "edit",
+    label: t("common.edit"),
+    icon: "pen-to-square",
+    variant: "secondary" as const,
+    visible: isOwner.value,
+  },
+  {
     key: "delete",
     label: t("common.delete"),
     icon: "trash",
@@ -131,7 +139,7 @@ const actions = computed(() => [
   },
 ]);
 
-function onAction(key: string) {
+async function onAction(key: string) {
   if (!playlist.value) return;
   switch (key) {
     case "share":
@@ -142,6 +150,12 @@ function onAction(key: string) {
         playlist.value.owner_id,
         playlist.value.visibility,
       );
+      break;
+    case "edit":
+      await router.push({
+        name: "playlistEdit",
+        params: { id: playlist.value.id },
+      });
       break;
     case "delete":
       deletePlaylist.open(playlist.value.id);
@@ -193,9 +207,25 @@ watch(
 
     <template v-else-if="playlist">
       <div class="playlist-view__header">
-        <AppPageTitle class="playlist-view__name" icon="list">{{
-          playlist.name
-        }}</AppPageTitle>
+        <div v-if="playlist.cover_url" class="playlist-view__cover-container">
+          <img
+            :src="playlist.cover_url"
+            :alt="playlist.name"
+            class="playlist-view__cover"
+          />
+        </div>
+
+        <div class="playlist-view__title-row">
+          <AppAvatar
+            :src="playlist.image_url ?? undefined"
+            :name="playlist.name"
+            size="lg"
+            class="playlist-view__image"
+          />
+          <AppPageTitle class="playlist-view__name">{{
+            playlist.name
+          }}</AppPageTitle>
+        </div>
 
         <p v-if="playlist.description" class="playlist-view__description">
           {{ playlist.description }}
@@ -328,6 +358,34 @@ watch(
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.playlist-view__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.playlist-view__cover-container {
+  width: 100%;
+  background: var(--color-surface-media-backfill);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: var(--radius-md);
+}
+
+.playlist-view__cover {
+  width: 100%;
+  max-width: 800px;
+  max-height: 16rem;
+  object-fit: cover;
+}
+
+.playlist-view__image {
+  width: 3.5rem;
+  height: 3.5rem;
+  flex-shrink: 0;
 }
 
 .playlist-view__name {

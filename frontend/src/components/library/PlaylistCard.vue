@@ -62,6 +62,7 @@ const visibilityIcon = computed(() => {
     @click="emit('click', props.playlist)"
   >
     <AppAvatar
+      :src="props.playlist.image_url ?? undefined"
       :name="props.playlist.name"
       size="lg"
       class="playlist-card__avatar"

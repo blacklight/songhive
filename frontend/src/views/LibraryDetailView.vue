@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
   useEntityList,
   type EntityListParams,
@@ -30,6 +30,7 @@ import DeleteModal from "@/components/entity/DeleteModal.vue";
 
 const { t } = useI18n();
 const route = useRoute();
+const router = useRouter();
 const libraryId = computed(() => String(route.params.id));
 
 const library = ref<LibraryResponse | null>(null);
@@ -119,6 +120,13 @@ const actions = computed(() => [
     visible: isOwner.value || isPublic.value,
   },
   {
+    key: "edit",
+    label: t("common.edit"),
+    icon: "pen-to-square",
+    variant: "secondary" as const,
+    visible: isOwner.value,
+  },
+  {
     key: "delete",
     label: t("common.delete"),
     icon: "trash",
@@ -127,7 +135,7 @@ const actions = computed(() => [
   },
 ]);
 
-function onAction(key: string) {
+async function onAction(key: string) {
   if (!library.value) return;
   switch (key) {
     case "share":
@@ -138,6 +146,12 @@ function onAction(key: string) {
         library.value.owner_id,
         library.value.visibility,
       );
+      break;
+    case "edit":
+      await router.push({
+        name: "libraryEdit",
+        params: { id: library.value.id },
+      });
       break;
     case "delete":
       deleteLibrary.open(library.value.id);
@@ -189,9 +203,28 @@ watch(
 
     <template v-else-if="library">
       <div class="library-detail-view__header">
-        <AppPageTitle class="library-detail-view__name" icon="folder-open">{{
-          library.name
-        }}</AppPageTitle>
+        <div
+          v-if="library.cover_url"
+          class="library-detail-view__cover-container"
+        >
+          <img
+            :src="library.cover_url"
+            :alt="library.name"
+            class="library-detail-view__cover"
+          />
+        </div>
+
+        <div class="library-detail-view__title-row">
+          <AppAvatar
+            :src="library.image_url ?? undefined"
+            :name="library.name"
+            size="lg"
+            class="library-detail-view__image"
+          />
+          <AppPageTitle class="library-detail-view__name">{{
+            library.name
+          }}</AppPageTitle>
+        </div>
 
         <p v-if="library.description" class="library-detail-view__description">
           {{ library.description }}
@@ -250,6 +283,7 @@ watch(
         <TrackList
           :tracks="tracks"
           :loading="tracksLoading"
+          :auto-scroll="false"
           :context="library.name"
           :removable-from="removableFrom"
           :deletable="true"
@@ -323,6 +357,34 @@ watch(
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.library-detail-view__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.library-detail-view__cover-container {
+  width: 100%;
+  background: var(--color-surface-media-backfill);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: var(--radius-md);
+}
+
+.library-detail-view__cover {
+  width: 100%;
+  max-width: 800px;
+  max-height: 16rem;
+  object-fit: cover;
+}
+
+.library-detail-view__image {
+  width: 3.5rem;
+  height: 3.5rem;
+  flex-shrink: 0;
 }
 
 .library-detail-view__name {

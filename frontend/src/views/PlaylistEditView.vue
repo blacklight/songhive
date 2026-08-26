@@ -3,20 +3,22 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import {
-  getTrack,
-  updateTrack,
-  deleteTrack,
-  uploadTrackImage,
-  deleteTrackImage,
-  type TrackResponse,
-  type TrackUpdate,
-} from "@/api/tracks";
+  getPlaylist,
+  updatePlaylist,
+  deletePlaylist,
+  uploadPlaylistImage,
+  deletePlaylistImage,
+  uploadPlaylistCover,
+  deletePlaylistCover,
+  type PlaylistResponse,
+  type PlaylistUpdate,
+  type Visibility,
+} from "@/api/playlists";
 import { getApiErrorMessage } from "@/api/client";
 import { useOwnership } from "@/composables/useOwnership";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
-import type { Visibility } from "@/api/libraries";
-import { parseNumber, toVisibility } from "@/utils/entity";
+import { toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
@@ -30,24 +32,26 @@ const router = useRouter();
 const confirm = useConfirmStore();
 const toast = useToastStore();
 
-const trackId = computed(() => String(route.params.id));
-const track = ref<TrackResponse | null>(null);
+const playlistId = computed(() => String(route.params.id));
+const playlist = ref<PlaylistResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
-const title = ref("");
-const genre = ref("");
-const trackNumber = ref("");
-const discNumber = ref("");
-const releaseYear = ref("");
+const name = ref("");
+const description = ref("");
 const visibility = ref<Visibility>("private");
 const isSaving = ref(false);
 const isDeleting = ref(false);
 const isUploadingImage = ref(false);
+const isUploadingCover = ref(false);
 const isRemovingImage = ref(false);
+const isRemovingCover = ref(false);
 const imageError = ref<string | null>(null);
+const coverError = ref<string | null>(null);
 
-const { isOwner } = useOwnership(computed(() => track.value?.owner_id ?? null));
+const { isOwner } = useOwnership(
+  computed(() => playlist.value?.owner_id ?? null),
+);
 
 const visibilityOptions = computed(() => [
   { value: "private", label: t("browse.visibility.private") },
@@ -56,23 +60,17 @@ const visibilityOptions = computed(() => [
 ]);
 
 function resetForm() {
-  title.value = track.value?.title ?? "";
-  genre.value = track.value?.genre ?? "";
-  trackNumber.value =
-    track.value?.track_number != null ? String(track.value.track_number) : "";
-  discNumber.value =
-    track.value?.disc_number != null ? String(track.value.disc_number) : "";
-  releaseYear.value =
-    track.value?.release_year != null ? String(track.value.release_year) : "";
-  visibility.value = toVisibility(track.value?.visibility);
+  name.value = playlist.value?.name ?? "";
+  description.value = playlist.value?.description ?? "";
+  visibility.value = toVisibility(playlist.value?.visibility);
   error.value = null;
 }
 
-async function loadTrack() {
+async function loadPlaylist() {
   loading.value = true;
   error.value = null;
   try {
-    track.value = await getTrack(trackId.value);
+    playlist.value = await getPlaylist(playlistId.value);
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -83,12 +81,12 @@ async function loadTrack() {
 }
 
 async function load() {
-  track.value = null;
-  await loadTrack();
-  if (!track.value) return;
+  playlist.value = null;
+  await loadPlaylist();
+  if (!playlist.value) return;
 
   if (!isOwner.value) {
-    await router.replace(`/tracks/${trackId.value}`);
+    await router.replace(`/playlists/${playlistId.value}`);
     return;
   }
 
@@ -96,24 +94,21 @@ async function load() {
 }
 
 async function onSubmit() {
-  if (!title.value.trim()) return;
+  if (!name.value.trim()) return;
 
   isSaving.value = true;
   error.value = null;
 
-  const body: TrackUpdate = {
-    title: title.value.trim(),
-    genre: genre.value.trim() || null,
-    track_number: parseNumber(trackNumber.value),
-    disc_number: parseNumber(discNumber.value),
-    release_year: parseNumber(releaseYear.value),
+  const body: PlaylistUpdate = {
+    name: name.value.trim(),
+    description: description.value.trim() || null,
     visibility: visibility.value,
   };
 
   try {
-    await updateTrack(trackId.value, body);
+    await updatePlaylist(playlistId.value, body);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
-    await router.push(`/tracks/${trackId.value}`);
+    await router.push(`/playlists/${playlistId.value}`);
   } catch (err) {
     error.value = t("browse.edit.saveError", {
       message:
@@ -126,11 +121,11 @@ async function onSubmit() {
 }
 
 async function onDelete() {
-  if (!track.value) return;
+  if (!playlist.value) return;
 
   const confirmed = await confirm.open({
     title: t("common.delete"),
-    message: t("browse.edit.deleteConfirm", { name: track.value.title }),
+    message: t("browse.edit.deleteConfirm", { name: playlist.value.name }),
     danger: true,
     confirmLabel: t("common.delete"),
   });
@@ -138,9 +133,9 @@ async function onDelete() {
 
   isDeleting.value = true;
   try {
-    await deleteTrack(trackId.value);
+    await deletePlaylist(playlistId.value);
     toast.push({ type: "success", message: t("browse.edit.deleted") });
-    await router.push("/tracks");
+    await router.push("/playlists");
   } catch (err) {
     error.value = t("browse.edit.saveError", {
       message:
@@ -152,9 +147,9 @@ async function onDelete() {
   }
 }
 
-async function refreshTrack() {
+async function refreshPlaylist() {
   try {
-    track.value = await getTrack(trackId.value);
+    playlist.value = await getPlaylist(playlistId.value);
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -163,13 +158,13 @@ async function refreshTrack() {
 }
 
 async function onUploadImage(file: File) {
-  if (!track.value) return;
+  if (!playlist.value) return;
   imageError.value = null;
   isUploadingImage.value = true;
   try {
-    await uploadTrackImage(trackId.value, file);
+    await uploadPlaylistImage(playlistId.value, file);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
-    await refreshTrack();
+    await refreshPlaylist();
   } catch (err) {
     imageError.value = t("browse.libraryManagement.uploadError", {
       message:
@@ -182,13 +177,13 @@ async function onUploadImage(file: File) {
 }
 
 async function onRemoveImage() {
-  if (!track.value) return;
+  if (!playlist.value) return;
   imageError.value = null;
   isRemovingImage.value = true;
   try {
-    await deleteTrackImage(trackId.value);
+    await deletePlaylistImage(playlistId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
-    await refreshTrack();
+    await refreshPlaylist();
   } catch (err) {
     imageError.value = t("browse.libraryManagement.uploadError", {
       message:
@@ -200,6 +195,44 @@ async function onRemoveImage() {
   }
 }
 
+async function onUploadCover(file: File) {
+  if (!playlist.value) return;
+  coverError.value = null;
+  isUploadingCover.value = true;
+  try {
+    await uploadPlaylistCover(playlistId.value, file);
+    toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
+    await refreshPlaylist();
+  } catch (err) {
+    coverError.value = t("browse.libraryManagement.uploadError", {
+      message:
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown")),
+    });
+  } finally {
+    isUploadingCover.value = false;
+  }
+}
+
+async function onRemoveCover() {
+  if (!playlist.value) return;
+  coverError.value = null;
+  isRemovingCover.value = true;
+  try {
+    await deletePlaylistCover(playlistId.value);
+    toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
+    await refreshPlaylist();
+  } catch (err) {
+    coverError.value = t("browse.libraryManagement.uploadError", {
+      message:
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown")),
+    });
+  } finally {
+    isRemovingCover.value = false;
+  }
+}
+
 onMounted(() => load());
 watch(
   () => route.params.id,
@@ -208,46 +241,33 @@ watch(
 </script>
 
 <template>
-  <div class="track-edit-view">
-    <div v-if="loading && !track" class="track-edit-view__skeleton">
+  <div class="playlist-edit-view">
+    <div v-if="loading && !playlist" class="playlist-edit-view__skeleton">
       <SkeletonLoader variant="page" />
     </div>
 
-    <div v-else-if="error" class="track-edit-view__error" role="alert">
+    <div v-else-if="error" class="playlist-edit-view__error" role="alert">
       <span>{{ error }}</span>
       <AppButton size="sm" icon="rotate-right" @click="load">
         {{ t("common.retry") }}
       </AppButton>
     </div>
 
-    <template v-else-if="track && isOwner">
-      <AppPageTitle class="track-edit-view__title" icon="pen-to-square">
-        {{ t("browse.edit.editTrack") }}
+    <template v-else-if="playlist && isOwner">
+      <AppPageTitle class="playlist-edit-view__title" icon="pen-to-square">
+        {{ "Edit playlist" }}
       </AppPageTitle>
 
-      <form class="track-edit-view__form" @submit.prevent="onSubmit">
+      <form class="playlist-edit-view__form" @submit.prevent="onSubmit">
         <AppInput
-          v-model="title"
-          :label="t('browse.edit.title')"
+          v-model="name"
+          :label="t('browse.edit.name')"
           :required="true"
         />
-        <AppInput v-model="genre" :label="t('browse.detail.genre')" />
-        <div class="track-edit-view__row">
-          <AppInput
-            v-model="trackNumber"
-            type="number"
-            :label="t('browse.detail.trackNumber')"
-          />
-          <AppInput
-            v-model="discNumber"
-            type="number"
-            :label="t('browse.detail.discNumber')"
-          />
-        </div>
         <AppInput
-          v-model="releaseYear"
-          type="number"
-          :label="t('browse.edit.releaseYear')"
+          v-model="description"
+          as="textarea"
+          :label="t('browse.edit.description')"
         />
         <AppSelect
           v-model="visibility"
@@ -255,7 +275,7 @@ watch(
           :options="visibilityOptions"
         />
 
-        <div class="track-edit-view__actions">
+        <div class="playlist-edit-view__actions">
           <AppButton type="submit" :loading="isSaving" icon="floppy-disk">
             {{ t("common.save") }}
           </AppButton>
@@ -272,48 +292,62 @@ watch(
       </form>
 
       <section
-        class="track-edit-view__section"
-        aria-labelledby="track-image-heading"
+        class="playlist-edit-view__section"
+        aria-labelledby="playlist-images-heading"
       >
         <AppPageTitle
-          id="track-image-heading"
+          id="playlist-images-heading"
           :level="2"
-          class="track-edit-view__section-title"
+          class="playlist-edit-view__section-title"
           icon="image"
         >
-          {{ "Track image" }}
+          {{ "Images" }}
         </AppPageTitle>
 
-        <ImageUploadField
-          :label="'Track image'"
-          :image-url="track.image_url"
-          :upload-label="'Upload image'"
-          :remove-label="'Remove image'"
-          accept="image/*"
-          :loading="isUploadingImage"
-          :removing="isRemovingImage"
-          :error="imageError ?? undefined"
-          @upload="onUploadImage"
-          @remove="onRemoveImage"
-        />
+        <div class="playlist-edit-view__image-fields">
+          <ImageUploadField
+            :label="'Playlist image'"
+            :image-url="playlist.image_url"
+            :upload-label="'Upload image'"
+            :remove-label="'Remove image'"
+            accept="image/*"
+            :loading="isUploadingImage"
+            :removing="isRemovingImage"
+            :error="imageError ?? undefined"
+            @upload="onUploadImage"
+            @remove="onRemoveImage"
+          />
+          <ImageUploadField
+            :label="'Playlist cover'"
+            :image-url="playlist.cover_url"
+            :upload-label="'Upload cover'"
+            :remove-label="'Remove cover'"
+            accept="image/*"
+            :loading="isUploadingCover"
+            :removing="isRemovingCover"
+            :error="coverError ?? undefined"
+            @upload="onUploadCover"
+            @remove="onRemoveCover"
+          />
+        </div>
       </section>
     </template>
   </div>
 </template>
 
 <style scoped>
-.track-edit-view {
+.playlist-edit-view {
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
   max-width: 48rem;
 }
 
-.track-edit-view__skeleton {
+.playlist-edit-view__skeleton {
   min-height: 16rem;
 }
 
-.track-edit-view__error {
+.playlist-edit-view__error {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -324,38 +358,39 @@ watch(
   color: var(--color-danger);
 }
 
-.track-edit-view__title {
+.playlist-edit-view__title {
   margin: 0;
   font-size: 1.75rem;
 }
 
-.track-edit-view__form {
+.playlist-edit-view__form {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
 
-.track-edit-view__row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
-}
-
-.track-edit-view__actions {
+.playlist-edit-view__actions {
   display: flex;
   gap: var(--space-3);
   align-items: center;
   flex-wrap: wrap;
 }
 
-.track-edit-view__section {
+.playlist-edit-view__section {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
 
-.track-edit-view__section-title {
+.playlist-edit-view__section-title {
   margin: 0;
   font-size: 1.25rem;
+}
+
+.playlist-edit-view__image-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-4);
+  align-items: start;
 }
 </style>

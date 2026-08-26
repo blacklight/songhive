@@ -14,6 +14,10 @@ import {
   uploadTrack,
   bulkUploadTracks,
   scanLibrary,
+  uploadLibraryImage,
+  deleteLibraryImage,
+  uploadLibraryCover,
+  deleteLibraryCover,
   type LibraryResponse,
   type LibraryUpdate,
   type Visibility,
@@ -30,6 +34,7 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import ImageUploadField from "@/components/ui/ImageUploadField.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -63,6 +68,13 @@ const bulkFileInput = ref<HTMLInputElement | null>(null);
 const scanPath = ref("");
 const isScanning = ref(false);
 const scanError = ref<string | null>(null);
+
+const isUploadingImage = ref(false);
+const isUploadingCover = ref(false);
+const isRemovingImage = ref(false);
+const isRemovingCover = ref(false);
+const imageError = ref<string | null>(null);
+const coverError = ref<string | null>(null);
 
 const { isOwner } = useOwnership(
   computed(() => library.value?.owner_id ?? null),
@@ -300,6 +312,92 @@ async function onScan() {
   }
 }
 
+async function refreshLibrary() {
+  try {
+    library.value = await getLibrary(libraryId.value);
+  } catch (err) {
+    error.value =
+      getApiErrorMessage(err) ||
+      (err instanceof Error ? err.message : t("errors.unknown"));
+  }
+}
+
+async function onUploadImage(file: File) {
+  if (!library.value) return;
+  imageError.value = null;
+  isUploadingImage.value = true;
+  try {
+    await uploadLibraryImage(libraryId.value, file);
+    toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
+    await refreshLibrary();
+  } catch (err) {
+    imageError.value = t("browse.libraryManagement.uploadError", {
+      message:
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown")),
+    });
+  } finally {
+    isUploadingImage.value = false;
+  }
+}
+
+async function onRemoveImage() {
+  if (!library.value) return;
+  imageError.value = null;
+  isRemovingImage.value = true;
+  try {
+    await deleteLibraryImage(libraryId.value);
+    toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
+    await refreshLibrary();
+  } catch (err) {
+    imageError.value = t("browse.libraryManagement.uploadError", {
+      message:
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown")),
+    });
+  } finally {
+    isRemovingImage.value = false;
+  }
+}
+
+async function onUploadCover(file: File) {
+  if (!library.value) return;
+  coverError.value = null;
+  isUploadingCover.value = true;
+  try {
+    await uploadLibraryCover(libraryId.value, file);
+    toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
+    await refreshLibrary();
+  } catch (err) {
+    coverError.value = t("browse.libraryManagement.uploadError", {
+      message:
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown")),
+    });
+  } finally {
+    isUploadingCover.value = false;
+  }
+}
+
+async function onRemoveCover() {
+  if (!library.value) return;
+  coverError.value = null;
+  isRemovingCover.value = true;
+  try {
+    await deleteLibraryCover(libraryId.value);
+    toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
+    await refreshLibrary();
+  } catch (err) {
+    coverError.value = t("browse.libraryManagement.uploadError", {
+      message:
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown")),
+    });
+  } finally {
+    isRemovingCover.value = false;
+  }
+}
+
 onMounted(() => load());
 watch(
   () => route.params.id,
@@ -357,6 +455,47 @@ watch(
           </AppButton>
         </div>
       </form>
+
+      <section
+        class="library-edit-view__section"
+        aria-labelledby="library-images-heading"
+      >
+        <AppPageTitle
+          id="library-images-heading"
+          :level="2"
+          class="library-edit-view__section-title"
+          icon="image"
+        >
+          {{ "Images" }}
+        </AppPageTitle>
+
+        <div class="library-edit-view__image-fields">
+          <ImageUploadField
+            :label="'Library image'"
+            :image-url="library.image_url"
+            :upload-label="'Upload image'"
+            :remove-label="'Remove image'"
+            accept="image/*"
+            :loading="isUploadingImage"
+            :removing="isRemovingImage"
+            :error="imageError ?? undefined"
+            @upload="onUploadImage"
+            @remove="onRemoveImage"
+          />
+          <ImageUploadField
+            :label="'Library cover'"
+            :image-url="library.cover_url"
+            :upload-label="'Upload cover'"
+            :remove-label="'Remove cover'"
+            accept="image/*"
+            :loading="isUploadingCover"
+            :removing="isRemovingCover"
+            :error="coverError ?? undefined"
+            @upload="onUploadCover"
+            @remove="onRemoveCover"
+          />
+        </div>
+      </section>
 
       <section
         class="library-edit-view__section"
@@ -496,6 +635,7 @@ watch(
         <TrackList
           :tracks="tracks"
           :loading="tracksLoading"
+          :auto-scroll="false"
           :context="library.name"
           :removable-from="removableFrom"
           :deletable="true"
@@ -627,7 +767,14 @@ watch(
   display: grid;
   grid-template-columns: 1fr auto;
   gap: var(--space-3);
-  align-items: end;
+  align-items: center;
+}
+
+.library-edit-view__image-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-4);
+  align-items: start;
 }
 
 .library-edit-view__inline-error {

@@ -62,6 +62,7 @@ const visibilityIcon = computed(() => {
     @click="emit('click', props.library)"
   >
     <AppAvatar
+      :src="props.library.image_url ?? undefined"
       :name="props.library.name"
       size="lg"
       class="library-card__avatar"

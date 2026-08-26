@@ -6,6 +6,8 @@ import {
   getAlbum,
   updateAlbum,
   deleteAlbum,
+  uploadAlbumCover,
+  deleteAlbumCover,
   type AlbumResponse,
   type AlbumUpdate,
 } from "@/api/albums";
@@ -19,6 +21,7 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import ImageUploadField from "@/components/ui/ImageUploadField.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 
 const { t } = useI18n();
@@ -38,6 +41,9 @@ const description = ref("");
 const visibility = ref<Visibility>("private");
 const isSaving = ref(false);
 const isDeleting = ref(false);
+const isUploadingCover = ref(false);
+const isRemovingCover = ref(false);
+const coverError = ref<string | null>(null);
 
 const { isOwner } = useOwnership(computed(() => album.value?.owner_id ?? null));
 
@@ -138,6 +144,54 @@ async function onDelete() {
   }
 }
 
+async function refreshAlbum() {
+  try {
+    album.value = await getAlbum(albumId.value);
+  } catch (err) {
+    error.value =
+      getApiErrorMessage(err) ||
+      (err instanceof Error ? err.message : t("errors.unknown"));
+  }
+}
+
+async function onUploadCover(file: File) {
+  if (!album.value) return;
+  coverError.value = null;
+  isUploadingCover.value = true;
+  try {
+    await uploadAlbumCover(albumId.value, file);
+    toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
+    await refreshAlbum();
+  } catch (err) {
+    coverError.value = t("browse.libraryManagement.uploadError", {
+      message:
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown")),
+    });
+  } finally {
+    isUploadingCover.value = false;
+  }
+}
+
+async function onRemoveCover() {
+  if (!album.value) return;
+  coverError.value = null;
+  isRemovingCover.value = true;
+  try {
+    await deleteAlbumCover(albumId.value);
+    toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
+    await refreshAlbum();
+  } catch (err) {
+    coverError.value = t("browse.libraryManagement.uploadError", {
+      message:
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown")),
+    });
+  } finally {
+    isRemovingCover.value = false;
+  }
+}
+
 onMounted(() => load());
 watch(
   () => route.params.id,
@@ -200,6 +254,33 @@ watch(
           </AppButton>
         </div>
       </form>
+
+      <section
+        class="album-edit-view__section"
+        aria-labelledby="album-cover-heading"
+      >
+        <AppPageTitle
+          id="album-cover-heading"
+          :level="2"
+          class="album-edit-view__section-title"
+          icon="image"
+        >
+          {{ "Cover art" }}
+        </AppPageTitle>
+
+        <ImageUploadField
+          :label="'Cover art'"
+          :image-url="album.cover_url"
+          :upload-label="'Upload cover'"
+          :remove-label="'Remove cover'"
+          accept="image/*"
+          :loading="isUploadingCover"
+          :removing="isRemovingCover"
+          :error="coverError ?? undefined"
+          @upload="onUploadCover"
+          @remove="onRemoveCover"
+        />
+      </section>
     </template>
   </div>
 </template>
@@ -243,5 +324,16 @@ watch(
   gap: var(--space-3);
   align-items: center;
   flex-wrap: wrap;
+}
+
+.album-edit-view__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.album-edit-view__section-title {
+  margin: 0;
+  font-size: 1.25rem;
 }
 </style>
