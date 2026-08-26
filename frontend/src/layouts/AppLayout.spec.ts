@@ -30,6 +30,51 @@ function createTestRouter() {
             name: "albums",
             component: { template: "<div/>" },
           },
+          {
+            path: "albums/:id",
+            name: "album",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "playlists",
+            name: "playlists",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "playlists/:id",
+            name: "playlist",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "libraries",
+            name: "libraries",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "libraries/:id",
+            name: "library",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "tracks",
+            name: "tracks",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "tracks/:id",
+            name: "track",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "files",
+            name: "files",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "files/:id",
+            name: "file",
+            component: { template: "<div/>" },
+          },
         ],
       },
       { path: "/login", component: { template: "<div/>" } },
@@ -37,6 +82,22 @@ function createTestRouter() {
       { path: "/:pathMatch(.*)*", component: { template: "<div/>" } },
     ],
   });
+}
+
+function authenticateStore(store: ReturnType<typeof useAuthStore>) {
+  store.accessToken = "token";
+  store.refreshToken = "refresh";
+  store.expiresAt = Date.now() + 10000;
+  store.user = {
+    id: "u1",
+    username: "alice",
+    display_name: null,
+    bio: null,
+    avatar_url: null,
+    links: [],
+  } as UserResponse;
+  store.role = null;
+  store.status = "authenticated";
 }
 
 async function mountLayout() {
@@ -194,4 +255,32 @@ describe("AppLayout", () => {
     expect(home!.classes()).not.toContain("router-link-active");
     expect(artists!.classes()).toContain("router-link-active");
   });
+
+  it.each([
+    { path: "/albums/abc", label: "Albums" },
+    { path: "/artists/abc", label: "Artists" },
+    { path: "/playlists/abc", label: "Playlists" },
+    { path: "/libraries/abc", label: "Library" },
+    { path: "/tracks/abc", label: "Tracks" },
+    { path: "/files/abc", label: "Files" },
+  ])(
+    "highlights the $label nav item while viewing $path",
+    async ({ path, label }) => {
+      const { wrapper, store, router } = await mountLayout();
+      authenticateStore(store);
+      await router.push(path);
+      await flushPromises();
+
+      const link = wrapper
+        .findAll(".app-layout__nav li a")
+        .find((a) => a.text().trim() === label);
+      const home = wrapper
+        .findAll(".app-layout__nav li a")
+        .find((a) => a.text().trim() === "Home");
+      expect(link).toBeTruthy();
+      expect(home).toBeTruthy();
+      expect(link!.classes()).toContain("router-link-active");
+      expect(home!.classes()).not.toContain("router-link-active");
+    },
+  );
 });

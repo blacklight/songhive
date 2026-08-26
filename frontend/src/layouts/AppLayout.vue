@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { RouterLink, RouterView, useRouter } from "vue-router";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useInstanceStore } from "@/stores/instance";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -14,6 +14,7 @@ const { t } = useI18n();
 const authStore = useAuthStore();
 const instanceStore = useInstanceStore();
 const router = useRouter();
+const route = useRoute();
 const isMobileMenuOpen = ref(false);
 
 const displayName = computed(() => {
@@ -36,6 +37,13 @@ type NavItem = {
   requiresAuth: boolean;
   icon: string;
 };
+
+function isNavItemActive(item: NavItem): boolean {
+  if (item.to === "/") {
+    return route.path === "/";
+  }
+  return route.path === item.to || route.path.startsWith(`${item.to}/`);
+}
 
 const navItems = computed<NavItem[]>(() => [
   { name: t("nav.home"), to: "/", requiresAuth: false, icon: "house" },
@@ -141,6 +149,7 @@ const loginItem = {
             <RouterLink
               :to="item.to"
               class="app-layout__nav-link"
+              :class="{ 'router-link-active': isNavItemActive(item) }"
               :active-class="item.to === '/' ? '' : undefined"
               :exact-active-class="
                 item.to === '/' ? 'router-link-active' : undefined
