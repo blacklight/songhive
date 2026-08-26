@@ -3,6 +3,7 @@ Music service: CRUD operations for artists, albums, tracks, playlists,
 libraries, and radios.
 """
 
+import contextlib
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 from sqlalchemy import Select, and_, func, or_, select
@@ -22,12 +23,20 @@ from .acl import apply_access_filter
 
 def _track_selectin_options(include: Optional[Set[str]]) -> List[Any]:
     """Return selectinload options for Track queries."""
-    options: List[Any] = [selectinload(Track.audio_file)]
+    options: List[Any] = [
+        selectinload(Track.audio_file),
+        selectinload(Track.image_file),
+    ]
     if include:
         if "artist" in include:
             options.append(selectinload(Track.artist))
         if "album" in include:
-            options.append(selectinload(Track.album))
+            options.append(
+                selectinload(Track.album).options(
+                    selectinload(Album.artist),
+                    selectinload(Album.cover_file),
+                )
+            )
         if "owner" in include:
             options.append(selectinload(Track.owner))
     return options
@@ -46,8 +55,12 @@ def _album_selectin_options(include: Optional[Set[str]]) -> List[Any]:
             options.append(
                 selectinload(Album.tracks).options(
                     selectinload(Track.artist),
-                    selectinload(Track.album),
+                    selectinload(Track.album).options(
+                        selectinload(Album.artist),
+                        selectinload(Album.cover_file),
+                    ),
                     selectinload(Track.audio_file),
+                    selectinload(Track.image_file),
                 )
             )
     return options
@@ -55,7 +68,10 @@ def _album_selectin_options(include: Optional[Set[str]]) -> List[Any]:
 
 def _artist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
     """Return selectinload options for Artist queries."""
-    options: List[Any] = [selectinload(Artist.image_file)]
+    options: List[Any] = [
+        selectinload(Artist.image_file),
+        selectinload(Artist.cover_file),
+    ]
     if include:
         if "albums" in include:
             options.append(
@@ -68,8 +84,12 @@ def _artist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
             options.append(
                 selectinload(Artist.tracks).options(
                     selectinload(Track.artist),
-                    selectinload(Track.album),
+                    selectinload(Track.album).options(
+                        selectinload(Album.artist),
+                        selectinload(Album.cover_file),
+                    ),
                     selectinload(Track.audio_file),
+                    selectinload(Track.image_file),
                 )
             )
     return options
@@ -77,7 +97,10 @@ def _artist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
 
 def _library_selectin_options(include: Optional[Set[str]]) -> List[Any]:
     """Return selectinload options for Library queries."""
-    options: List[Any] = []
+    options: List[Any] = [
+        selectinload(Library.image_file),
+        selectinload(Library.cover_file),
+    ]
     if include:
         if "owner" in include:
             options.append(selectinload(Library.owner))
@@ -85,8 +108,12 @@ def _library_selectin_options(include: Optional[Set[str]]) -> List[Any]:
             options.append(
                 selectinload(Library.tracks).options(
                     selectinload(Track.artist),
-                    selectinload(Track.album),
+                    selectinload(Track.album).options(
+                        selectinload(Album.artist),
+                        selectinload(Album.cover_file),
+                    ),
                     selectinload(Track.audio_file),
+                    selectinload(Track.image_file),
                 )
             )
     return options
@@ -94,7 +121,10 @@ def _library_selectin_options(include: Optional[Set[str]]) -> List[Any]:
 
 def _playlist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
     """Return selectinload options for Playlist queries."""
-    options: List[Any] = []
+    options: List[Any] = [
+        selectinload(Playlist.image_file),
+        selectinload(Playlist.cover_file),
+    ]
     if include:
         if "owner" in include:
             options.append(selectinload(Playlist.owner))
@@ -103,8 +133,12 @@ def _playlist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
                 selectinload(Playlist.tracks).options(
                     selectinload(PlaylistTrack.track).options(
                         selectinload(Track.artist),
-                        selectinload(Track.album),
+                        selectinload(Track.album).options(
+                            selectinload(Album.artist),
+                            selectinload(Album.cover_file),
+                        ),
                         selectinload(Track.audio_file),
+                        selectinload(Track.image_file),
                     )
                 )
             )
@@ -145,16 +179,37 @@ async def count_artists(
     return result.scalar() or 0
 
 
+async def _refresh_include(session: AsyncSession, obj: Any, include: Optional[Set[str]]) -> None:
+    """Eagerly load any requested relationships so they are populated for reads."""
+    if obj is None or not include:
+        return
+    with contextlib.suppress(Exception):
+        await session.refresh(obj, list(include))
+
+    if "album" in include and getattr(obj, "album", None) is not None:
+        with contextlib.suppress(Exception):
+            await session.refresh(obj.album, ["cover_file", "artist"])
+    if "artist" in include and getattr(obj, "artist", None) is not None:
+        with contextlib.suppress(Exception):
+            await session.refresh(obj.artist, ["image_file"])
+
+
 async def get_artist(
     session: AsyncSession,
     artist_id: str,
     include: Optional[Set[str]] = None,
 ) -> Optional[Artist]:
     """Get an artist by ID."""
-    result = await session.execute(
-        select(Artist).options(*_artist_selectin_options(include)).where(Artist.id == artist_id)
+    stmt = (
+        select(Artist)
+        .options(*_artist_selectin_options(include))
+        .where(Artist.id == artist_id)
+        .execution_options(populate_existing=True)
     )
-    return cast(Optional[Artist], result.scalar_one_or_none())
+    result = await session.execute(stmt)
+    artist = result.scalar_one_or_none()
+    await _refresh_include(session, artist, include)
+    return cast(Optional[Artist], artist)
 
 
 def _build_albums_stmt(
@@ -226,8 +281,16 @@ async def get_album(
     include: Optional[Set[str]] = None,
 ) -> Optional[Album]:
     """Get an album by ID."""
-    result = await session.execute(select(Album).options(*_album_selectin_options(include)).where(Album.id == album_id))
-    return cast(Optional[Album], result.scalar_one_or_none())
+    stmt = (
+        select(Album)
+        .options(*_album_selectin_options(include))
+        .where(Album.id == album_id)
+        .execution_options(populate_existing=True)
+    )
+    result = await session.execute(stmt)
+    album = result.scalar_one_or_none()
+    await _refresh_include(session, album, include)
+    return cast(Optional[Album], album)
 
 
 def _apply_tracks_query(
@@ -394,8 +457,16 @@ async def get_track(
     include: Optional[Set[str]] = None,
 ) -> Optional[Track]:
     """Get a track by ID."""
-    result = await session.execute(select(Track).options(*_track_selectin_options(include)).where(Track.id == track_id))
-    return cast(Optional[Track], result.scalar_one_or_none())
+    stmt = (
+        select(Track)
+        .options(*_track_selectin_options(include))
+        .where(Track.id == track_id)
+        .execution_options(populate_existing=True)
+    )
+    result = await session.execute(stmt)
+    track = result.scalar_one_or_none()
+    await _refresh_include(session, track, include)
+    return cast(Optional[Track], track)
 
 
 async def list_library_tracks(
@@ -466,10 +537,16 @@ async def get_playlist(
     include: Optional[Set[str]] = None,
 ) -> Optional[Playlist]:
     """Get a playlist by ID."""
-    result = await session.execute(
-        select(Playlist).options(*_playlist_selectin_options(include)).where(Playlist.id == playlist_id)
+    stmt = (
+        select(Playlist)
+        .options(*_playlist_selectin_options(include))
+        .where(Playlist.id == playlist_id)
+        .execution_options(populate_existing=True)
     )
-    return cast(Optional[Playlist], result.scalar_one_or_none())
+    result = await session.execute(stmt)
+    playlist = result.scalar_one_or_none()
+    await _refresh_include(session, playlist, include)
+    return cast(Optional[Playlist], playlist)
 
 
 async def list_libraries(
@@ -504,10 +581,16 @@ async def get_library(
     include: Optional[Set[str]] = None,
 ) -> Optional[Library]:
     """Get a library by ID."""
-    result = await session.execute(
-        select(Library).options(*_library_selectin_options(include)).where(Library.id == library_id)
+    stmt = (
+        select(Library)
+        .options(*_library_selectin_options(include))
+        .where(Library.id == library_id)
+        .execution_options(populate_existing=True)
     )
-    return cast(Optional[Library], result.scalar_one_or_none())
+    result = await session.execute(stmt)
+    library = result.scalar_one_or_none()
+    await _refresh_include(session, library, include)
+    return cast(Optional[Library], library)
 
 
 async def list_radios(
