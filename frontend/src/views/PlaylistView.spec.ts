@@ -23,6 +23,8 @@ function createTestRouter() {
     routes: [
       { path: "/", component: { template: "<div/>" } },
       { path: "/playlists/:id", component: { template: "<div/>" } },
+      { path: "/artists/:id", component: { template: "<div/>" } },
+      { path: "/albums/:id", component: { template: "<div/>" } },
     ],
   });
 }

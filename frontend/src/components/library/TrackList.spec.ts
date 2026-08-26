@@ -261,6 +261,86 @@ describe("TrackList", () => {
     expect(router.currentRoute.value.path).toBe("/albums/album-1");
   });
 
+  it("renders artist and album as router links in the table", async () => {
+    const tracks = [
+      makeTrack({
+        artist: { id: "artist-1", name: "Artist Name" },
+        album: {
+          id: "album-1",
+          title: "Album Title",
+          artist_id: "artist-1",
+          visibility: "public",
+        },
+      }),
+    ];
+    ({ wrapper } = mountTrackList({ tracks }));
+    await flushPromises();
+
+    const links = wrapper.findAll(".track-list__link");
+    expect(links.length).toBe(2);
+    expect(links[0]!.attributes("href")).toBe("/artists/artist-1");
+    expect(links[0]!.text()).toBe("Artist Name");
+    expect(links[1]!.attributes("href")).toBe("/albums/album-1");
+    expect(links[1]!.text()).toBe("Album Title");
+  });
+
+  it("falls back to plain text when artist and album ids are missing", async () => {
+    const tracks = [
+      makeTrack({
+        artist_id: "",
+        album_id: null,
+        artist: { id: "artist-1", name: "Artist Name" },
+        album: {
+          id: "album-1",
+          title: "Album Title",
+          artist_id: "artist-1",
+          visibility: "public",
+        },
+      }),
+    ];
+    ({ wrapper } = mountTrackList({ tracks }));
+    await flushPromises();
+
+    expect(wrapper.findAll(".track-list__link").length).toBe(0);
+    expect(wrapper.text()).toContain("Artist Name");
+    expect(wrapper.text()).toContain("Album Title");
+  });
+
+  it("renders the artist as a router link in the compact view", async () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes("max-width"),
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+
+    try {
+      const tracks = [
+        makeTrack({ artist: { id: "artist-1", name: "Artist Name" } }),
+      ];
+      ({ wrapper } = mountTrackList({ tracks }));
+      await flushPromises();
+
+      const artistLink = wrapper.find("a.track-list__compact-artist");
+      expect(artistLink.exists()).toBe(true);
+      expect(artistLink.attributes("href")).toBe("/artists/artist-1");
+      expect(artistLink.text()).toBe("Artist Name");
+    } finally {
+      Object.defineProperty(window, "matchMedia", {
+        writable: true,
+        configurable: true,
+        value: originalMatchMedia,
+      });
+    }
+  });
+
   it("updates the player queue when enqueue is selected", async () => {
     const tracks = [makeTrack()];
     ({ wrapper } = mountTrackList({ tracks, context: "Artist" }));

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
+import { RouterLink, useRouter } from "vue-router";
 import { usePlayerStore } from "@/stores/player";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
@@ -728,13 +728,37 @@ async function onMenuSelect(key: string) {
       </template>
 
       <template #row-artist="{ row }">
-        <span :title="asTrackRow(row).artist" class="track-list__cell-text">
+        <RouterLink
+          v-if="asTrackRow(row).track.artist_id"
+          :to="`/artists/${asTrackRow(row).track.artist_id}`"
+          :title="asTrackRow(row).artist"
+          class="track-list__link"
+        >
+          {{ asTrackRow(row).artist }}
+        </RouterLink>
+        <span
+          v-else
+          :title="asTrackRow(row).artist"
+          class="track-list__cell-text"
+        >
           {{ asTrackRow(row).artist }}
         </span>
       </template>
 
       <template #row-album="{ row }">
-        <span :title="asTrackRow(row).album" class="track-list__cell-text">
+        <RouterLink
+          v-if="asTrackRow(row).track.album_id"
+          :to="`/albums/${asTrackRow(row).track.album_id}`"
+          :title="asTrackRow(row).album"
+          class="track-list__link"
+        >
+          {{ asTrackRow(row).album }}
+        </RouterLink>
+        <span
+          v-else
+          :title="asTrackRow(row).album"
+          class="track-list__cell-text"
+        >
           {{ asTrackRow(row).album }}
         </span>
       </template>
@@ -789,24 +813,31 @@ async function onMenuSelect(key: string) {
             {{ asTrackRow(row).num }}
           </span>
 
-          <button
-            type="button"
-            class="track-list__compact-main"
-            @click="play(asTrackRow(row).index)"
-          >
-            <span
+          <div class="track-list__compact-main">
+            <button
+              type="button"
               class="track-list__compact-title"
               :title="asTrackRow(row).track.title"
+              @click="play(asTrackRow(row).index)"
             >
               {{ asTrackRow(row).track.title }}
-            </span>
+            </button>
+            <RouterLink
+              v-if="asTrackRow(row).track.artist_id"
+              :to="`/artists/${asTrackRow(row).track.artist_id}`"
+              :title="asTrackRow(row).artist"
+              class="track-list__compact-artist"
+            >
+              {{ asTrackRow(row).artist }}
+            </RouterLink>
             <span
+              v-else
               class="track-list__compact-artist"
               :title="asTrackRow(row).artist"
             >
               {{ asTrackRow(row).artist }}
             </span>
-          </button>
+          </div>
 
           <span class="track-list__compact-duration">
             {{ asTrackRow(row).duration }}
@@ -938,6 +969,20 @@ async function onMenuSelect(key: string) {
   white-space: nowrap;
 }
 
+.track-list__link {
+  color: var(--color-accent-contrast);
+  text-decoration: none;
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-list__link:hover {
+  text-decoration: underline;
+}
+
 .track-list__artwork {
   width: 1.5rem;
   height: 1.5rem;
@@ -1018,6 +1063,14 @@ async function onMenuSelect(key: string) {
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-1);
+}
+
+.track-list__compact-title {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
   background: transparent;
   border: none;
   color: var(--color-text);
@@ -1027,16 +1080,8 @@ async function onMenuSelect(key: string) {
   font: inherit;
 }
 
-.track-list__compact-main:hover .track-list__compact-title {
+.track-list__compact-title:hover {
   color: var(--color-accent-contrast);
-}
-
-.track-list__compact-title {
-  width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 500;
 }
 
 .track-list__compact-artist {
@@ -1046,6 +1091,16 @@ async function onMenuSelect(key: string) {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+  text-decoration: none;
+}
+
+a.track-list__compact-artist {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+a.track-list__compact-artist:hover {
+  text-decoration: underline;
 }
 
 .track-list__compact-duration {

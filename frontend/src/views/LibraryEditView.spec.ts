@@ -33,6 +33,8 @@ function createTestRouter() {
       { path: "/libraries/:id", component: { template: "<div/>" } },
       { path: "/libraries/:id/edit", component: { template: "<div/>" } },
       { path: "/libraries", component: { template: "<div/>" } },
+      { path: "/artists/:id", component: { template: "<div/>" } },
+      { path: "/albums/:id", component: { template: "<div/>" } },
     ],
   });
 }

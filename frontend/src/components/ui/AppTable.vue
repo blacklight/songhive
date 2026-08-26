@@ -136,4 +136,20 @@ function cellStyle(column: Column): Record<string, string> | undefined {
 .app-table[aria-busy="true"] td {
   border-bottom: none;
 }
+
+.app-table__cell--artist {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+.app-table__cell--album {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.app-table__cell--duration {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
 </style>
