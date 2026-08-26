@@ -45,6 +45,24 @@ export function deleteAlbum(id: string, recursive = true): Promise<void> {
   });
 }
 
+export function uploadAlbumCover(
+  id: string,
+  file: File,
+): Promise<AlbumResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiRequest<AlbumResponse>(`/albums/${id}/cover`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function deleteAlbumCover(id: string): Promise<AlbumResponse> {
+  return apiRequest<AlbumResponse>(`/albums/${id}/cover`, {
+    method: "DELETE",
+  });
+}
+
 export function enrichAlbum(id: string): Promise<AlbumEnrichResponse> {
   return apiRequest<AlbumEnrichResponse>(`/albums/${id}/enrich`, {
     method: "POST",

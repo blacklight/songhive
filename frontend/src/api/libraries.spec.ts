@@ -10,6 +10,10 @@ import {
   uploadTrack,
   bulkUploadTracks,
   scanLibrary,
+  uploadLibraryImage,
+  deleteLibraryImage,
+  uploadLibraryCover,
+  deleteLibraryCover,
   type LibraryResponse,
   type LibraryCreate,
   type LibraryUpdate,
@@ -149,6 +153,52 @@ describe("libraries api", () => {
     expect(apiRequest).toHaveBeenCalledWith("/libraries/lib1/scan", {
       method: "POST",
       body,
+    });
+  });
+
+  it("uploadLibraryImage posts a multipart FormData with the file field", async () => {
+    apiRequest.mockResolvedValueOnce(sampleLibrary);
+    const file = new File([""], "image.jpg", { type: "image/jpeg" });
+    await uploadLibraryImage("lib1", file);
+
+    const [path, options] = apiRequest.mock.calls[0] as [
+      string,
+      { method: string; body: FormData },
+    ];
+    expect(path).toBe("/libraries/lib1/image");
+    expect(options.method).toBe("POST");
+    expect(options.body).toBeInstanceOf(FormData);
+    expect(options.body.get("file")).toBe(file);
+  });
+
+  it("deleteLibraryImage sends a DELETE request", async () => {
+    apiRequest.mockResolvedValueOnce(sampleLibrary);
+    await deleteLibraryImage("lib1");
+    expect(apiRequest).toHaveBeenCalledWith("/libraries/lib1/image", {
+      method: "DELETE",
+    });
+  });
+
+  it("uploadLibraryCover posts a multipart FormData with the file field", async () => {
+    apiRequest.mockResolvedValueOnce(sampleLibrary);
+    const file = new File([""], "cover.jpg", { type: "image/jpeg" });
+    await uploadLibraryCover("lib1", file);
+
+    const [path, options] = apiRequest.mock.calls[0] as [
+      string,
+      { method: string; body: FormData },
+    ];
+    expect(path).toBe("/libraries/lib1/cover");
+    expect(options.method).toBe("POST");
+    expect(options.body).toBeInstanceOf(FormData);
+    expect(options.body.get("file")).toBe(file);
+  });
+
+  it("deleteLibraryCover sends a DELETE request", async () => {
+    apiRequest.mockResolvedValueOnce(sampleLibrary);
+    await deleteLibraryCover("lib1");
+    expect(apiRequest).toHaveBeenCalledWith("/libraries/lib1/cover", {
+      method: "DELETE",
     });
   });
 });

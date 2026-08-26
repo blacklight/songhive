@@ -7,6 +7,8 @@ import {
   deleteTrack,
   deleteTracks,
   downloadTrack,
+  uploadTrackImage,
+  deleteTrackImage,
   type TrackResponse,
   type TrackUpdate,
 } from "./tracks";
@@ -109,6 +111,29 @@ describe("tracks api", () => {
       body: { track_ids: ["t1", "t2"] },
     });
     expect(result).toEqual(response);
+  });
+
+  it("uploadTrackImage posts a multipart FormData with the file field", async () => {
+    apiRequest.mockResolvedValueOnce(sampleTrack);
+    const file = new File([""], "image.jpg", { type: "image/jpeg" });
+    await uploadTrackImage("t1", file);
+
+    const [path, options] = apiRequest.mock.calls[0] as [
+      string,
+      { method: string; body: FormData },
+    ];
+    expect(path).toBe("/tracks/t1/image");
+    expect(options.method).toBe("POST");
+    expect(options.body).toBeInstanceOf(FormData);
+    expect(options.body.get("file")).toBe(file);
+  });
+
+  it("deleteTrackImage sends a DELETE request", async () => {
+    apiRequest.mockResolvedValueOnce(sampleTrack);
+    await deleteTrackImage("t1");
+    expect(apiRequest).toHaveBeenCalledWith("/tracks/t1/image", {
+      method: "DELETE",
+    });
   });
 });
 

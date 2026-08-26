@@ -97,6 +97,24 @@ export function deleteTrack(id: string): Promise<void> {
   return apiRequest<void>(`/tracks/${id}`, { method: "DELETE" });
 }
 
+export function uploadTrackImage(
+  id: string,
+  file: File,
+): Promise<TrackResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiRequest<TrackResponse>(`/tracks/${id}/image`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function deleteTrackImage(id: string): Promise<TrackResponse> {
+  return apiRequest<TrackResponse>(`/tracks/${id}/image`, {
+    method: "DELETE",
+  });
+}
+
 export function deleteTracks(
   trackIds: string[],
 ): Promise<BulkTrackDeleteResponse> {

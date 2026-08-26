@@ -48,6 +48,42 @@ export function deleteLibrary(id: string, recursive = false): Promise<void> {
   });
 }
 
+export function uploadLibraryImage(
+  id: string,
+  file: File,
+): Promise<LibraryResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiRequest<LibraryResponse>(`/libraries/${id}/image`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function deleteLibraryImage(id: string): Promise<LibraryResponse> {
+  return apiRequest<LibraryResponse>(`/libraries/${id}/image`, {
+    method: "DELETE",
+  });
+}
+
+export function uploadLibraryCover(
+  id: string,
+  file: File,
+): Promise<LibraryResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiRequest<LibraryResponse>(`/libraries/${id}/cover`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function deleteLibraryCover(id: string): Promise<LibraryResponse> {
+  return apiRequest<LibraryResponse>(`/libraries/${id}/cover`, {
+    method: "DELETE",
+  });
+}
+
 export function listLibraryTracks(
   id: string,
   params?: { limit?: number; offset?: number; include?: string },

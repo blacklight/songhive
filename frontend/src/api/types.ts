@@ -357,6 +357,58 @@ export interface paths {
     delete: operations["delete_artist_api_v1_artists__artist_id__delete"];
     options?: never;
     head?: never;
+    /**
+     * Update Artist
+     * @description Partially update an artist.
+     */
+    patch: operations["update_artist_api_v1_artists__artist_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/artists/{artist_id}/image": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload Artist Image
+     * @description Upload an artist image.
+     */
+    post: operations["upload_artist_image_api_v1_artists__artist_id__image_post"];
+    /**
+     * Delete Artist Image
+     * @description Remove an artist image.
+     */
+    delete: operations["delete_artist_image_api_v1_artists__artist_id__image_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/artists/{artist_id}/cover": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload Artist Cover
+     * @description Upload artist cover art.
+     */
+    post: operations["upload_artist_cover_api_v1_artists__artist_id__cover_post"];
+    /**
+     * Delete Artist Cover
+     * @description Remove artist cover art.
+     */
+    delete: operations["delete_artist_cover_api_v1_artists__artist_id__cover_delete"];
+    options?: never;
+    head?: never;
     patch?: never;
     trace?: never;
   };
@@ -406,6 +458,30 @@ export interface paths {
      * @description Partially update an album.
      */
     patch: operations["update_album_api_v1_albums__album_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/albums/{album_id}/cover": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload Album Cover
+     * @description Upload album cover art.
+     */
+    post: operations["upload_album_cover_api_v1_albums__album_id__cover_post"];
+    /**
+     * Delete Album Cover
+     * @description Remove album cover art.
+     */
+    delete: operations["delete_album_cover_api_v1_albums__album_id__cover_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/albums/{album_id}/enrich": {
@@ -474,6 +550,30 @@ export interface paths {
      * @description Partially update a track.
      */
     patch: operations["update_track_api_v1_tracks__track_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/tracks/{track_id}/image": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload Track Image
+     * @description Upload a track image.
+     */
+    post: operations["upload_track_image_api_v1_tracks__track_id__image_post"];
+    /**
+     * Delete Track Image
+     * @description Remove a track image.
+     */
+    delete: operations["delete_track_image_api_v1_tracks__track_id__image_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/tracks/bulk": {
@@ -559,6 +659,58 @@ export interface paths {
      * @description Delete a playlist and, optionally, its tracks.
      */
     delete: operations["delete_playlist_api_v1_playlists__playlist_id__delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Playlist
+     * @description Partially update a playlist.
+     */
+    patch: operations["update_playlist_api_v1_playlists__playlist_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/playlists/{playlist_id}/image": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload Playlist Image
+     * @description Upload a playlist image.
+     */
+    post: operations["upload_playlist_image_api_v1_playlists__playlist_id__image_post"];
+    /**
+     * Delete Playlist Image
+     * @description Remove a playlist image.
+     */
+    delete: operations["delete_playlist_image_api_v1_playlists__playlist_id__image_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/playlists/{playlist_id}/cover": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload Playlist Cover
+     * @description Upload playlist cover art.
+     */
+    post: operations["upload_playlist_cover_api_v1_playlists__playlist_id__cover_post"];
+    /**
+     * Delete Playlist Cover
+     * @description Remove playlist cover art.
+     */
+    delete: operations["delete_playlist_cover_api_v1_playlists__playlist_id__cover_delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -759,6 +911,54 @@ export interface paths {
      */
     post: operations["scan_library_api_v1_libraries__library_id__scan_post"];
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/libraries/{library_id}/image": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload Library Image
+     * @description Upload a library image.
+     */
+    post: operations["upload_library_image_api_v1_libraries__library_id__image_post"];
+    /**
+     * Delete Library Image
+     * @description Remove a library image.
+     */
+    delete: operations["delete_library_image_api_v1_libraries__library_id__image_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/libraries/{library_id}/cover": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload Library Cover
+     * @description Upload library cover art.
+     */
+    post: operations["upload_library_cover_api_v1_libraries__library_id__cover_post"];
+    /**
+     * Delete Library Cover
+     * @description Remove library cover art.
+     */
+    delete: operations["delete_library_cover_api_v1_libraries__library_id__cover_delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -1540,8 +1740,10 @@ export interface paths {
      * Resolve Share Url
      * @description Resolve a raw share token to the item it grants access to.
      *
-     *     The raw token is exchanged for a short-lived ``share_token`` cookie so the
-     *     long-lived secret is not persisted in browser state or access logs.
+     *     Browser requests receive an HTML preview page. API clients that send
+     *     ``Accept: application/json`` are redirected to the item's public JSON
+     *     endpoint. Audio files and the ``?download=true`` flag redirect to the
+     *     direct download URL.
      */
     get: operations["resolve_share_url_api_v1_share__token__get"];
     put?: never;
@@ -2329,6 +2531,8 @@ export interface components {
       image_file_id?: string | null;
       /** Image Url */
       image_url?: string | null;
+      /** Cover Url */
+      cover_url?: string | null;
       /** Albums */
       albums?: components["schemas"]["AlbumSummary"][] | null;
       /** Tracks */
@@ -2345,6 +2549,18 @@ export interface components {
       name: string;
       /** Image Url */
       image_url?: string | null;
+      /** Cover Url */
+      cover_url?: string | null;
+    };
+    /**
+     * ArtistUpdate
+     * @description Artist partial update.
+     */
+    ArtistUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Bio */
+      bio?: string | null;
     };
     /**
      * AuditLogResponse
@@ -2419,13 +2635,53 @@ export interface components {
       /** Scope */
       scope?: string | null;
     };
+    /** Body_upload_album_cover_api_v1_albums__album_id__cover_post */
+    Body_upload_album_cover_api_v1_albums__album_id__cover_post: {
+      /** File */
+      file: string;
+    };
+    /** Body_upload_artist_cover_api_v1_artists__artist_id__cover_post */
+    Body_upload_artist_cover_api_v1_artists__artist_id__cover_post: {
+      /** File */
+      file: string;
+    };
+    /** Body_upload_artist_image_api_v1_artists__artist_id__image_post */
+    Body_upload_artist_image_api_v1_artists__artist_id__image_post: {
+      /** File */
+      file: string;
+    };
     /** Body_upload_file_api_v1_files_upload_post */
     Body_upload_file_api_v1_files_upload_post: {
       /** File */
       file: string;
     };
+    /** Body_upload_library_cover_api_v1_libraries__library_id__cover_post */
+    Body_upload_library_cover_api_v1_libraries__library_id__cover_post: {
+      /** File */
+      file: string;
+    };
+    /** Body_upload_library_image_api_v1_libraries__library_id__image_post */
+    Body_upload_library_image_api_v1_libraries__library_id__image_post: {
+      /** File */
+      file: string;
+    };
+    /** Body_upload_playlist_cover_api_v1_playlists__playlist_id__cover_post */
+    Body_upload_playlist_cover_api_v1_playlists__playlist_id__cover_post: {
+      /** File */
+      file: string;
+    };
+    /** Body_upload_playlist_image_api_v1_playlists__playlist_id__image_post */
+    Body_upload_playlist_image_api_v1_playlists__playlist_id__image_post: {
+      /** File */
+      file: string;
+    };
     /** Body_upload_track_api_v1_libraries__library_id__tracks_post */
     Body_upload_track_api_v1_libraries__library_id__tracks_post: {
+      /** File */
+      file: string;
+    };
+    /** Body_upload_track_image_api_v1_tracks__track_id__image_post */
+    Body_upload_track_image_api_v1_tracks__track_id__image_post: {
       /** File */
       file: string;
     };
@@ -2589,6 +2845,10 @@ export interface components {
        * @default private
        */
       visibility: string;
+      /** Image Url */
+      image_url?: string | null;
+      /** Cover Url */
+      cover_url?: string | null;
       /**
        * Can Write
        * @default false
@@ -2742,9 +3002,24 @@ export interface components {
        * @default private
        */
       visibility: string;
+      /** Image Url */
+      image_url?: string | null;
+      /** Cover Url */
+      cover_url?: string | null;
       owner?: components["schemas"]["UserSummary"] | null;
       /** Tracks */
       tracks?: components["schemas"]["TrackSummary"][] | null;
+    };
+    /**
+     * PlaylistUpdate
+     * @description Playlist partial update.
+     */
+    PlaylistUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      visibility?: components["schemas"]["Visibility"] | null;
     };
     /**
      * PublicUserResponse
@@ -3101,6 +3376,10 @@ export interface components {
       genre?: string | null;
       /** Audio Url */
       audio_url?: string | null;
+      /** Image Url */
+      image_url?: string | null;
+      /** Release Year */
+      release_year?: number | null;
       /** Owner Id */
       owner_id?: string | null;
       /**
@@ -3135,6 +3414,10 @@ export interface components {
       duration?: number | null;
       /** Audio Url */
       audio_url?: string | null;
+      /** Image Url */
+      image_url?: string | null;
+      /** Release Year */
+      release_year?: number | null;
       /** Owner Id */
       owner_id?: string | null;
       /**
@@ -3156,6 +3439,8 @@ export interface components {
       track_number?: number | null;
       /** Disc Number */
       disc_number?: number | null;
+      /** Release Year */
+      release_year?: number | null;
       visibility?: components["schemas"]["Visibility"] | null;
     };
     /**
@@ -4172,6 +4457,188 @@ export interface operations {
       };
     };
   };
+  update_artist_api_v1_artists__artist_id__patch: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: albums, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        artist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ArtistUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ArtistResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_artist_image_api_v1_artists__artist_id__image_post: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: albums, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        artist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_artist_image_api_v1_artists__artist_id__image_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ArtistResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_artist_image_api_v1_artists__artist_id__image_delete: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: albums, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        artist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ArtistResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_artist_cover_api_v1_artists__artist_id__cover_post: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: albums, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        artist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_artist_cover_api_v1_artists__artist_id__cover_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ArtistResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_artist_cover_api_v1_artists__artist_id__cover_delete: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: albums, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        artist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ArtistResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_albums_api_v1_albums__get: {
     parameters: {
       query?: {
@@ -4315,6 +4782,78 @@ export interface operations {
       };
     };
   };
+  upload_album_cover_api_v1_albums__album_id__cover_post: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: artist, owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        album_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_album_cover_api_v1_albums__album_id__cover_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AlbumResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_album_cover_api_v1_albums__album_id__cover_delete: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: artist, owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        album_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AlbumResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   enrich_album_api_v1_albums__album_id__enrich_post: {
     parameters: {
       query?: never;
@@ -4357,6 +4896,8 @@ export interface operations {
         year_from?: number | null;
         year_to?: number | null;
         library_id?: string | null;
+        /** @description Center the returned chunk on this track */
+        around_track_id?: string | null;
         limit?: number;
         offset?: number;
         /** @description Comma-separated relations to include. Allowed: album, artist, owner */
@@ -4468,6 +5009,78 @@ export interface operations {
         "application/json": components["schemas"]["TrackUpdate"];
       };
     };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TrackResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_track_image_api_v1_tracks__track_id__image_post: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: album, artist, owner */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        track_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_track_image_api_v1_tracks__track_id__image_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TrackResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_track_image_api_v1_tracks__track_id__image_delete: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: album, artist, owner */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        track_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {
@@ -4676,6 +5289,188 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_playlist_api_v1_playlists__playlist_id__patch: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        playlist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PlaylistUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlaylistResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_playlist_image_api_v1_playlists__playlist_id__image_post: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        playlist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_playlist_image_api_v1_playlists__playlist_id__image_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlaylistResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_playlist_image_api_v1_playlists__playlist_id__image_delete: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        playlist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlaylistResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_playlist_cover_api_v1_playlists__playlist_id__cover_post: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        playlist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_playlist_cover_api_v1_playlists__playlist_id__cover_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlaylistResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_playlist_cover_api_v1_playlists__playlist_id__cover_delete: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        playlist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlaylistResponse"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -5173,6 +5968,150 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_library_image_api_v1_libraries__library_id__image_post: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_library_image_api_v1_libraries__library_id__image_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LibraryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_library_image_api_v1_libraries__library_id__image_delete: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LibraryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_library_cover_api_v1_libraries__library_id__cover_post: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_library_cover_api_v1_libraries__library_id__cover_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LibraryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_library_cover_api_v1_libraries__library_id__cover_delete: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated relations to include. Allowed: owner, tracks */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LibraryResponse"];
         };
       };
       /** @description Validation Error */
@@ -6559,7 +7498,9 @@ export interface operations {
   };
   resolve_share_url_api_v1_share__token__get: {
     parameters: {
-      query?: never;
+      query?: {
+        download?: boolean;
+      };
       header?: never;
       path: {
         token: string;

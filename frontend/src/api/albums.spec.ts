@@ -5,6 +5,8 @@ import {
   getAlbum,
   updateAlbum,
   deleteAlbum,
+  uploadAlbumCover,
+  deleteAlbumCover,
   type AlbumResponse,
   type AlbumUpdate,
 } from "./albums";
@@ -84,6 +86,29 @@ describe("albums api", () => {
     expect(apiRequest).toHaveBeenCalledWith("/albums/al1", {
       method: "DELETE",
       query: { recursive: true },
+    });
+  });
+
+  it("uploadAlbumCover posts a multipart FormData with the file field", async () => {
+    apiRequest.mockResolvedValueOnce(sampleAlbum);
+    const file = new File([""], "cover.jpg", { type: "image/jpeg" });
+    await uploadAlbumCover("al1", file);
+
+    const [path, options] = apiRequest.mock.calls[0] as [
+      string,
+      { method: string; body: FormData },
+    ];
+    expect(path).toBe("/albums/al1/cover");
+    expect(options.method).toBe("POST");
+    expect(options.body).toBeInstanceOf(FormData);
+    expect(options.body.get("file")).toBe(file);
+  });
+
+  it("deleteAlbumCover sends a DELETE request", async () => {
+    apiRequest.mockResolvedValueOnce(sampleAlbum);
+    await deleteAlbumCover("al1");
+    expect(apiRequest).toHaveBeenCalledWith("/albums/al1/cover", {
+      method: "DELETE",
     });
   });
 });

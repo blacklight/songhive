@@ -3,6 +3,7 @@ import { apiRequest } from "./client";
 
 export type PlaylistResponse = components["schemas"]["PlaylistResponse"];
 export type PlaylistCreate = components["schemas"]["PlaylistCreate"];
+export type PlaylistUpdate = components["schemas"]["PlaylistUpdate"];
 export type Visibility = components["schemas"]["Visibility"];
 export type TrackResponse = components["schemas"]["TrackResponse"];
 
@@ -24,8 +25,24 @@ export function createPlaylist(
   });
 }
 
-export function getPlaylist(id: string): Promise<PlaylistResponse> {
+export function getPlaylist(
+  id: string,
+  params?: { include?: string },
+): Promise<PlaylistResponse> {
+  if (params) {
+    return apiRequest<PlaylistResponse>(`/playlists/${id}`, { query: params });
+  }
   return apiRequest<PlaylistResponse>(`/playlists/${id}`);
+}
+
+export function updatePlaylist(
+  id: string,
+  body: PlaylistUpdate,
+): Promise<PlaylistResponse> {
+  return apiRequest<PlaylistResponse>(`/playlists/${id}`, {
+    method: "PATCH",
+    body,
+  });
 }
 
 export interface AddTracksToPlaylistRequest {
@@ -71,6 +88,42 @@ export function deletePlaylist(id: string, recursive = false): Promise<void> {
   return apiRequest<void>(`/playlists/${id}`, {
     method: "DELETE",
     query: { recursive },
+  });
+}
+
+export function uploadPlaylistImage(
+  id: string,
+  file: File,
+): Promise<PlaylistResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiRequest<PlaylistResponse>(`/playlists/${id}/image`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function deletePlaylistImage(id: string): Promise<PlaylistResponse> {
+  return apiRequest<PlaylistResponse>(`/playlists/${id}/image`, {
+    method: "DELETE",
+  });
+}
+
+export function uploadPlaylistCover(
+  id: string,
+  file: File,
+): Promise<PlaylistResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiRequest<PlaylistResponse>(`/playlists/${id}/cover`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function deletePlaylistCover(id: string): Promise<PlaylistResponse> {
+  return apiRequest<PlaylistResponse>(`/playlists/${id}/cover`, {
+    method: "DELETE",
   });
 }
 
