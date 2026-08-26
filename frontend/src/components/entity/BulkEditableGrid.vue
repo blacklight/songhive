@@ -331,8 +331,16 @@ defineSlots<{
 
 .bulk-editable-grid__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
+}
+
+@media (max-width: 767px) {
+  .bulk-editable-grid__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 .bulk-editable-grid__search {
