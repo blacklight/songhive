@@ -452,7 +452,8 @@ watch(
   gap: var(--space-2);
   padding: var(--space-3);
   border-radius: var(--radius-md);
-  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface-secondary);
 }
 
 .share-dialog__error {
