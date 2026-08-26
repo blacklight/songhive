@@ -148,6 +148,7 @@ export const usePlayerStore = defineStore("player", () => {
   );
 
   function playTrack(track: QueueTrack, queueContext?: QueueTrack[]) {
+    const previousTrackId = currentTrack.value?.id;
     const newQueue =
       queueContext && queueContext.length > 0 ? queueContext : [track];
     queue.value = newQueue;
@@ -156,7 +157,7 @@ export const usePlayerStore = defineStore("player", () => {
     if (index.value < 0) index.value = 0;
 
     const startAt =
-      restoredPosition.value !== null && currentTrack.value?.id === track.id
+      restoredPosition.value !== null && previousTrackId === track.id
         ? restoredPosition.value
         : 0;
     restoredPosition.value = null;
@@ -167,17 +168,19 @@ export const usePlayerStore = defineStore("player", () => {
     isPlaying.value = true;
     engine?.load(track, startAt);
     engine?.play();
+    persistNow();
   }
 
   function playAll(tracks: QueueTrack[], startIndex = 0) {
     if (tracks.length === 0) return;
+    const previousTrackId = currentTrack.value?.id;
     queue.value = [...tracks];
     originalQueue.value = [];
     index.value = Math.min(Math.max(startIndex, 0), tracks.length - 1);
 
+    const track = queue.value[index.value];
     const startAt =
-      restoredPosition.value !== null &&
-      currentTrack.value?.id === queue.value[index.value].id
+      restoredPosition.value !== null && previousTrackId === track.id
         ? restoredPosition.value
         : 0;
     restoredPosition.value = null;
@@ -186,13 +189,15 @@ export const usePlayerStore = defineStore("player", () => {
     duration.value = 0;
     playbackState.value = "loading";
     isPlaying.value = true;
-    engine?.load(queue.value[index.value], startAt);
+    engine?.load(track, startAt);
     engine?.play();
+    persistNow();
   }
 
   function enqueue(track: QueueTrack) {
     queue.value.push(track);
     if (originalQueue.value.length > 0) originalQueue.value.push(track);
+    persistNow();
   }
 
   function enqueueNext(track: QueueTrack) {
@@ -206,6 +211,7 @@ export const usePlayerStore = defineStore("player", () => {
         origIdx >= 0 ? origIdx + 1 : originalQueue.value.length;
       originalQueue.value.splice(insertOrigAt, 0, track);
     }
+    persistNow();
   }
 
   function removeAt(i: number) {
@@ -234,6 +240,7 @@ export const usePlayerStore = defineStore("player", () => {
         isPlaying.value = false;
       }
     }
+    persistNow();
   }
 
   function clear() {
@@ -245,11 +252,20 @@ export const usePlayerStore = defineStore("player", () => {
     playbackState.value = "idle";
     isPlaying.value = false;
     engine?.destroy();
+    persistNow();
   }
 
   function play() {
     if (!currentTrack.value) return;
     isPlaying.value = true;
+    if (playbackState.value === "idle" || playbackState.value === "error") {
+      const startAt = restoredPosition.value ?? 0;
+      restoredPosition.value = null;
+      currentTime.value = 0;
+      duration.value = 0;
+      playbackState.value = "loading";
+      engine?.load(currentTrack.value, startAt);
+    }
     engine?.play();
   }
 
@@ -281,6 +297,7 @@ export const usePlayerStore = defineStore("player", () => {
     const track = currentTrack.value;
     if (track) engine?.load(track);
     engine?.play();
+    persistNow();
   }
 
   function prev() {
@@ -306,12 +323,14 @@ export const usePlayerStore = defineStore("player", () => {
     const track = currentTrack.value;
     if (track) engine?.load(track);
     engine?.play();
+    persistNow();
   }
 
   function seek(seconds: number) {
     const clamped = Math.min(Math.max(seconds, 0), duration.value || 0);
     currentTime.value = clamped;
     engine?.seek(clamped);
+    persistNow();
   }
 
   function setVolume(v: number) {
@@ -349,6 +368,7 @@ export const usePlayerStore = defineStore("player", () => {
       index.value = 0;
       shuffle.value = true;
     }
+    persistNow();
   }
 
   function cycleRepeat() {
@@ -380,18 +400,31 @@ export const usePlayerStore = defineStore("player", () => {
 
   // Persistence: debounce localStorage writes to at most once per second.
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function doPersist() {
+    localStorage.setItem(STORAGE_QUEUE, JSON.stringify(queue.value));
+    localStorage.setItem(STORAGE_INDEX, String(index.value));
+    localStorage.setItem(STORAGE_POSITION, String(currentTime.value));
+    localStorage.setItem(STORAGE_SHUFFLE, String(shuffle.value));
+    localStorage.setItem(STORAGE_REPEAT, repeat.value);
+    localStorage.setItem(STORAGE_VOLUME, String(volume.value));
+    localStorage.setItem(STORAGE_MUTED, String(muted.value));
+  }
+
   function persist() {
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
       persistTimer = null;
-      localStorage.setItem(STORAGE_QUEUE, JSON.stringify(queue.value));
-      localStorage.setItem(STORAGE_INDEX, String(index.value));
-      localStorage.setItem(STORAGE_POSITION, String(currentTime.value));
-      localStorage.setItem(STORAGE_SHUFFLE, String(shuffle.value));
-      localStorage.setItem(STORAGE_REPEAT, repeat.value);
-      localStorage.setItem(STORAGE_VOLUME, String(volume.value));
-      localStorage.setItem(STORAGE_MUTED, String(muted.value));
+      doPersist();
     }, 1000);
+  }
+
+  function persistNow() {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    doPersist();
   }
 
   watch(

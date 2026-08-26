@@ -400,6 +400,9 @@ describe("usePlayerStore", () => {
   it("debounces position persistence writes", async () => {
     const store = usePlayerStore();
     store.playTrack(makeTrack("a"));
+    // playTrack persists the new track state immediately, so clear the
+    // position so we can observe the debounce of updateTime.
+    localStorage.removeItem("songhive.player.position");
 
     for (let i = 1; i <= 10; i++) {
       store.updateTime(i);
@@ -431,6 +434,47 @@ describe("usePlayerStore", () => {
     store.playAll(store.queue, 1);
 
     expect(engine.load).toHaveBeenCalledWith(store.queue[1], 33);
+    expect(store.restoredPosition).toBeNull();
+  });
+
+  it("playTrack does not resume from restoredPosition when selecting a different track", () => {
+    localStorage.setItem(
+      "songhive.player.queue",
+      JSON.stringify([makeTrack("a")]),
+    );
+    localStorage.setItem("songhive.player.index", "0");
+    localStorage.setItem("songhive.player.position", "33");
+
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+
+    const track = makeTrack("b");
+    store.playTrack(track);
+
+    expect(engine.load).toHaveBeenCalledWith(track, 0);
+    expect(store.restoredPosition).toBeNull();
+  });
+
+  it("play loads the restored track and position after a page refresh", () => {
+    localStorage.setItem(
+      "songhive.player.queue",
+      JSON.stringify([makeTrack("a")]),
+    );
+    localStorage.setItem("songhive.player.index", "0");
+    localStorage.setItem("songhive.player.position", "42");
+
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+
+    expect(store.playbackState).toBe("idle");
+    store.play();
+
+    expect(engine.load).toHaveBeenCalledWith(store.currentTrack, 42);
+    expect(engine.play).toHaveBeenCalled();
+    expect(store.isPlaying).toBe(true);
+    expect(store.playbackState).toBe("loading");
     expect(store.restoredPosition).toBeNull();
   });
 });
