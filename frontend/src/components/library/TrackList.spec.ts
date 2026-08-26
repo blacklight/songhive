@@ -91,6 +91,7 @@ async function clickMenuItem(text: string) {
 
 describe("TrackList", () => {
   let wrapper: ReturnType<typeof mountTrackList>["wrapper"];
+  let originalScrollIntoView: typeof Element.prototype.scrollIntoView;
 
   beforeEach(() => {
     localStorage.clear();
@@ -101,11 +102,16 @@ describe("TrackList", () => {
       expiresAt: Date.now() + 60000,
       user: { id: "user-1", username: "user" } as UserResponse,
     });
+
+    originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView =
+      vi.fn() as typeof Element.prototype.scrollIntoView;
   });
 
   afterEach(() => {
     wrapper?.unmount();
     document.body.innerHTML = "";
+    Element.prototype.scrollIntoView = originalScrollIntoView;
   });
 
   it("renders track metadata and uses context as the artist fallback", async () => {
@@ -626,5 +632,45 @@ describe("TrackList", () => {
         value: originalMatchMedia,
       });
     }
+  });
+
+  it("scrolls the currently playing track into view on mount", async () => {
+    const tracks = [
+      makeTrack(),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+    ];
+    const queueTracks = tracks.map((t) =>
+      toQueueTrack(t, { artist_name: "Artist" }),
+    );
+
+    const player = usePlayerStore();
+    player.playTrack(queueTracks[0]!, queueTracks);
+
+    ({ wrapper } = mountTrackList({ tracks, context: "Artist" }));
+    await flushPromises();
+
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  });
+
+  it("scrolls the track into view when play is pressed for the first time", async () => {
+    const tracks = [
+      makeTrack(),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+    ];
+    ({ wrapper } = mountTrackList({ tracks, context: "Artist" }));
+    await flushPromises();
+
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+
+    await wrapper.find(".track-list__title-btn").trigger("click");
+    await flushPromises();
+
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "nearest",
+    });
   });
 });

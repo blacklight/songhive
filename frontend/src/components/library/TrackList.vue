@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink, useRouter } from "vue-router";
 import { usePlayerStore } from "@/stores/player";
@@ -82,6 +82,7 @@ const confirmMode = ref<"single" | "bulk">("single");
 const confirmTrack = ref<QueueTrack | null>(null);
 const confirmIsDelete = ref(false);
 const isRemoving = ref(false);
+const listRef = ref<HTMLElement | null>(null);
 
 const COMPACT_BREAKPOINT = "(max-width: 1279.98px)";
 const isCompact = ref(
@@ -94,18 +95,42 @@ function updateCompact() {
   isCompact.value = compactMediaQuery ? compactMediaQuery.matches : false;
 }
 
-onMounted(() => {
-  if (typeof window === "undefined") return;
-  compactMediaQuery = window.matchMedia(COMPACT_BREAKPOINT);
-  updateCompact();
-  compactMediaQuery.addEventListener("change", updateCompact);
-});
-
 onUnmounted(() => {
   if (compactMediaQuery) {
     compactMediaQuery.removeEventListener("change", updateCompact);
   }
 });
+
+function scrollToCurrent() {
+  const currentTrack = player.currentTrack;
+  if (!currentTrack || !listRef.value) return;
+
+  const currentRow = listRef.value.querySelector(
+    ".track-list__row--current, .track-list__compact-item--current",
+  ) as HTMLElement | null;
+  if (!currentRow || typeof currentRow.scrollIntoView !== "function") return;
+
+  currentRow.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+onMounted(() => {
+  if (typeof window === "undefined") return;
+  compactMediaQuery = window.matchMedia(COMPACT_BREAKPOINT);
+  updateCompact();
+  compactMediaQuery.addEventListener("change", updateCompact);
+
+  if (player.currentTrack) {
+    void nextTick(scrollToCurrent);
+  }
+});
+
+watch(
+  () => player.currentTrack,
+  () => {
+    if (typeof window === "undefined") return;
+    void nextTick(scrollToCurrent);
+  },
+);
 
 function openAddDialog(mode: "library" | "playlist") {
   addDialogMode.value = mode;
@@ -126,6 +151,18 @@ const enrichedTracks = computed<QueueTrack[]>(() => {
       ...fromMap,
     });
   });
+});
+
+watch(enrichedTracks, (newTracks, oldTracks) => {
+  const currentTrack = player.currentTrack;
+  if (!currentTrack || typeof window === "undefined") return;
+
+  const wasPresent = oldTracks.some((t) => t.id === currentTrack.id);
+  const isPresent = newTracks.some((t) => t.id === currentTrack.id);
+
+  if (!wasPresent && isPresent) {
+    void nextTick(scrollToCurrent);
+  }
 });
 
 interface TrackListRow extends Record<string, unknown> {
@@ -219,7 +256,11 @@ function rowClass(row: Record<string, unknown>): string | undefined {
 function play(index: number) {
   const track = enrichedTracks.value[index];
   if (!track) return;
+  const wasCurrent = isCurrentTrack(track);
   player.playTrack(track, enrichedTracks.value);
+  if (wasCurrent) {
+    void nextTick(scrollToCurrent);
+  }
   emit("play", index);
 }
 
@@ -629,7 +670,7 @@ async function onMenuSelect(key: string) {
 </script>
 
 <template>
-  <div class="track-list">
+  <div ref="listRef" class="track-list">
     <div class="track-list__header">
       <AppButton
         variant="primary"

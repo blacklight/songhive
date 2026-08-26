@@ -39,6 +39,14 @@ function getPanelRef() {
 
 useFocusTrap(isOpen, getPanelRef);
 
+function scrollToCurrent() {
+  const current = panelRef.value?.querySelector<HTMLElement>(
+    ".queue-panel__item--current",
+  );
+  if (!current || typeof current.scrollIntoView !== "function") return;
+  current.scrollIntoView({ behavior: "auto", block: "nearest" });
+}
+
 watch(
   () => props.open,
   (open) => {
@@ -48,6 +56,7 @@ watch(
           'button, [href], input, [tabindex]:not([tabindex="-1"])',
         );
         first?.focus();
+        scrollToCurrent();
       });
     } else if (props.returnFocusTo) {
       nextTick(() => {
