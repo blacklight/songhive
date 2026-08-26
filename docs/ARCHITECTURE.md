@@ -478,7 +478,18 @@ Two independent mechanisms for sharing private content:
 |---------------|---------------|----------------------|-----------------------------------------|
 | Share grant   | `ShareGrant`  | `/api/v1/shares`     | Owner grants a named user access        |
 | Share URL     | `ShareToken`  | `/api/v1/share-urls` | Revocable short link; token hash stored |
-| URL resolver  | —             | `/api/v1/share/{token}` | Resolves raw token → 302 + cookie    |
+| URL resolver  | —             | `/api/v1/share/{token}` | Resolves raw token → HTML, JSON, or direct audio download |
+
+The URL resolver is content-negotiated:
+
+- Browsers and crawlers receive a rendered HTML preview page with OpenGraph
+  metadata, an audio player for tracks, and track listings for albums,
+  playlists, libraries, and artists.
+- API clients that send `Accept: application/json` (including the web UI's
+  share preview) still receive a `302` redirect to the item's public JSON
+  endpoint, with a short-lived `share_token` cookie.
+- Audio file shares redirect directly to the file download URL, and
+  `?download=true` forces a direct audio download for tracks or files.
 
 The ACL service (`services/acl.py`) checks grants and tokens transparently
 via the `require_access` FastAPI dependency used by resource routes.
