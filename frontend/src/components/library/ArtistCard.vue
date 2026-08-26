@@ -44,7 +44,6 @@ const emit = defineEmits<{ click: [artist: ArtistResponse] }>();
   gap: var(--space-2);
   min-width: 0;
   width: 100%;
-  padding: var(--space-4);
   border-radius: var(--radius-lg);
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -61,6 +60,7 @@ const emit = defineEmits<{ click: [artist: ArtistResponse] }>();
   width: 6rem;
   height: 6rem;
   flex-shrink: 0;
+  margin-top: var(--space-4);
 }
 
 .artist-card__name {
@@ -70,6 +70,7 @@ const emit = defineEmits<{ click: [artist: ArtistResponse] }>();
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-bottom: var(--space-4);
 }
 
 .artist-card__bio {

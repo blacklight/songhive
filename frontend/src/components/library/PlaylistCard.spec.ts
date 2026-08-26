@@ -47,7 +47,12 @@ describe("PlaylistCard", () => {
 
     expect(wrapper.text()).toContain("Road Trip");
     expect(wrapper.text()).toContain("A mix for the highway.");
-    expect(wrapper.text()).toContain(i18n.global.t("browse.visibility.public"));
+    expect(wrapper.find(".playlist-card__visibility").attributes("title")).toBe(
+      i18n.global.t("browse.visibility.public"),
+    );
+    expect(wrapper.find(".playlist-card__visibility i").classes()).toContain(
+      "fa-globe",
+    );
 
     await wrapper.find("a").trigger("click");
     await flushPromises();

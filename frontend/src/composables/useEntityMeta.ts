@@ -20,6 +20,15 @@ export function useEntityMeta(entity: MaybeRef<EntityMeta | null | undefined>) {
     return e.owner_id;
   });
 
+  const ownerAvatarUrl = computed(() => {
+    const e = toValue(entity);
+    if (!e?.owner_id) return "";
+    if (authStore.user?.id === e.owner_id) {
+      return authStore.user.avatar_url ?? "";
+    }
+    return "";
+  });
+
   const visibilityText = computed(() => {
     const e = toValue(entity);
     if (!e?.visibility) return "";
@@ -31,5 +40,16 @@ export function useEntityMeta(entity: MaybeRef<EntityMeta | null | undefined>) {
     return labels[e.visibility] ?? e.visibility;
   });
 
-  return { ownerName, visibilityText };
+  const visibilityIcon = computed(() => {
+    const e = toValue(entity);
+    if (!e?.visibility) return "";
+    const icons: Record<string, string> = {
+      private: "fas fa-lock",
+      local: "fas fa-home",
+      public: "fas fa-globe",
+    };
+    return icons[e.visibility] ?? "mdi-help-circle";
+  });
+
+  return { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon };
 }

@@ -63,4 +63,43 @@ describe("useEntityMeta", () => {
     const wrapper = createMeta({ owner_id: "owner-1", visibility: "custom" });
     expect(wrapper.vm.visibilityText).toBe("custom");
   });
+
+  it("returns an empty avatar URL when the entity is not the current user", () => {
+    const authStore = useAuthStore();
+    authStore.user = {
+      id: "user-1",
+      username: "alice",
+      avatar_url: "https://example.com/alice.png",
+    } as never;
+
+    const wrapper = createMeta({ owner_id: "owner-1", visibility: "public" });
+    expect(wrapper.vm.ownerAvatarUrl).toBe("");
+  });
+
+  it("returns the current user's avatar URL when they own the entity", () => {
+    const authStore = useAuthStore();
+    authStore.user = {
+      id: "owner-1",
+      username: "alice",
+      avatar_url: "https://example.com/alice.png",
+    } as never;
+
+    const wrapper = createMeta({ owner_id: "owner-1", visibility: "public" });
+    expect(wrapper.vm.ownerAvatarUrl).toBe("https://example.com/alice.png");
+  });
+
+  it("returns the correct visibility icon", () => {
+    expect(
+      createMeta({ owner_id: "owner-1", visibility: "public" }).vm
+        .visibilityIcon,
+    ).toBe("fas fa-globe");
+    expect(
+      createMeta({ owner_id: "owner-1", visibility: "local" }).vm
+        .visibilityIcon,
+    ).toBe("fas fa-home");
+    expect(
+      createMeta({ owner_id: "owner-1", visibility: "private" }).vm
+        .visibilityIcon,
+    ).toBe("fas fa-lock");
+  });
 });
