@@ -16,7 +16,7 @@ import os
 import signal
 import sys
 from collections.abc import Iterable
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, Awaitable, Callable, Optional, cast
 
 from .config import SonghiveConfig, load_config
 from .migrations import ensure_migrated
@@ -39,6 +39,13 @@ def _build_tornado_app(config: SonghiveConfig, fastapi_app) -> Any:
 
     wsgi_app = ASGIMiddleware(cast(Callable[[Any, Any, Any], Awaitable[None]], fastapi_app))
     container = WSGIContainer(cast(Callable[[dict[str, Any], Any], Iterable[bytes]], cast(object, wsgi_app)))
+
+    # a2wsgi runs the ASGI app in a dedicated event loop; FastAPI routes (and
+    # the shared Redis client) are bound to that loop, so store a reference so
+    # shutdown can close Redis on the correct loop.
+    a2wsgi_loop = getattr(wsgi_app, "loop", None)
+    if a2wsgi_loop is not None:
+        fastapi_app.state._a2wsgi_loop = a2wsgi_loop
 
     return Application(
         [
@@ -99,7 +106,18 @@ def _run_tornado(config: SonghiveConfig):
     try:
         loop.run_forever()
     finally:
-        loop.run_until_complete(close_redis_client())
+        # a2wsgi may run FastAPI in a dedicated event loop. The shared Redis
+        # client is bound to that loop, so close it there to avoid
+        # "Future attached to a different loop" on shutdown.
+        a2wsgi_loop: Optional[asyncio.AbstractEventLoop] = getattr(fastapi_app.state, "_a2wsgi_loop", None)
+        if a2wsgi_loop is not None and a2wsgi_loop is not loop:
+            future = asyncio.run_coroutine_threadsafe(close_redis_client(), a2wsgi_loop)
+            try:
+                future.result()
+            finally:
+                a2wsgi_loop.call_soon_threadsafe(a2wsgi_loop.stop)
+        else:
+            loop.run_until_complete(close_redis_client())
         loop.close()
         logger.info("Server stopped.")
 
