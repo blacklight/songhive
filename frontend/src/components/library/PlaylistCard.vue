@@ -161,6 +161,11 @@ const visibilityIcon = computed(() => {
   justify-content: flex-end;
 }
 
+.playlist-card__owner .app-avatar--initials {
+  margin: 0 var(--space-1) 0 0;
+  font-size: 0.55rem;
+}
+
 :deep(.playlist-card__owner img) {
   margin: 0;
 }

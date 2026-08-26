@@ -75,8 +75,6 @@ function onError() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-right: var(--space-3);
-  margin-bottom: var(--space-2);
   border-radius: var(--radius-full);
   object-fit: cover;
   background-color: var(--color-surface-raised);
