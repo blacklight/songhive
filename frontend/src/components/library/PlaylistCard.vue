@@ -15,15 +15,25 @@ const emit = defineEmits<{ click: [playlist: PlaylistResponse] }>();
 const { t } = useI18n();
 const authStore = useAuthStore();
 
-const ownerName = computed(() => {
+const owner = computed(() => {
   const ownerId = props.playlist.owner_id;
-  if (!ownerId) return "";
+  if (!ownerId) return null;
   if (authStore.user?.id === ownerId) {
-    return authStore.user.display_name ?? authStore.user.username;
+    return authStore.user;
   }
   // The backend only returns owner_id for other users; resolving their
   // display names requires a denormalized field or a user lookup.
-  return ownerId;
+  return null;
+});
+
+const ownerName = computed(() => {
+  if (!owner?.value) return "";
+  return owner.value.display_name ?? owner.value.username;
+});
+
+const ownerAvatarUrl = computed(() => {
+  if (!owner?.value) return "";
+  return owner.value.avatar_url ?? "";
 });
 
 const visibilityText = computed(() => {
@@ -33,6 +43,15 @@ const visibilityText = computed(() => {
     public: t("browse.visibility.public"),
   };
   return labels[props.playlist.visibility] ?? props.playlist.visibility;
+});
+
+const visibilityIcon = computed(() => {
+  const icons: Record<string, string> = {
+    private: "fas fa-lock",
+    local: "fas fa-home",
+    public: "fas fa-globe",
+  };
+  return icons[props.playlist.visibility] ?? "mdi-help-circle";
 });
 </script>
 
@@ -58,11 +77,18 @@ const visibilityText = computed(() => {
       {{ props.playlist.description }}
     </span>
     <div class="playlist-card__meta">
-      <span :title="visibilityText" class="playlist-card__visibility">{{
-        visibilityText
-      }}</span>
       <span v-if="ownerName" :title="ownerName" class="playlist-card__owner">
-        {{ t("browse.detail.owner") }} {{ ownerName }}
+        <AppAvatar
+          v-if="ownerAvatarUrl"
+          :src="ownerAvatarUrl"
+          :name="ownerName"
+          width="16px"
+        />
+
+        {{ ownerName }}
+      </span>
+      <span :title="visibilityText" class="playlist-card__visibility">
+        <i :class="visibilityIcon" />
       </span>
     </div>
   </RouterLink>
@@ -106,10 +132,12 @@ const visibilityText = computed(() => {
 
 .playlist-card__meta {
   display: flex;
+  font-size: 0.75rem;
+  opacity: 0.75;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  font-size: 0.875rem;
+  gap: calc(0.5 * var(--space-1));
   color: var(--color-text-muted);
+  margin-top: var(--space-1);
 }
 
 .playlist-card__visibility,
@@ -118,5 +146,22 @@ const visibilityText = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.playlist-card__owner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.playlist-card__visibility {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+:deep(.playlist-card__owner img) {
+  margin: 0;
 }
 </style>

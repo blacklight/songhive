@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { ref } from "vue";
 
 export interface Props {
   src?: string;
   name: string;
   size?: "sm" | "md" | "lg";
+  width?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -13,11 +15,26 @@ const props = withDefaults(defineProps<Props>(), {
 
 const hasError = ref(false);
 
-const sizeClass = {
+const sizeClasses = {
   sm: "app-avatar--sm",
   md: "app-avatar--md",
   lg: "app-avatar--lg",
 };
+
+const hasAvatar = computed(() => !!props.src && !hasError.value);
+
+const classes = computed(() => {
+  let classes = ["app-avatar"];
+  if (!hasAvatar.value) {
+    classes.push("app-avatar--initials");
+  }
+
+  if (props.width) {
+    return classes;
+  }
+
+  return ["app-avatar", sizeClasses[props.size] || sizeClasses.md];
+});
 
 function initials(name: string): string {
   return name
@@ -35,15 +52,18 @@ function onError() {
 
 <template>
   <img
-    v-if="props.src && !hasError"
+    v-if="hasAvatar"
     :src="props.src"
     :alt="props.name"
-    :class="['app-avatar', sizeClass[props.size]]"
+    :class="classes"
+    :width="props.width"
+    :height="props.width"
     @error="onError"
   />
   <div
     v-else
-    :class="['app-avatar', 'app-avatar--initials', sizeClass[props.size]]"
+    :class="classes"
+    :style="{ width: props.width, height: props.width }"
   >
     {{ initials(props.name) }}
   </div>

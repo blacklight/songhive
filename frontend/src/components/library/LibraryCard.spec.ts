@@ -48,8 +48,11 @@ describe("LibraryCard", () => {
 
     expect(wrapper.text()).toContain("Main Library");
     expect(wrapper.text()).toContain("My personal collection.");
-    expect(wrapper.text()).toContain(
+    expect(wrapper.find(".library-card__visibility").attributes("title")).toBe(
       i18n.global.t("browse.visibility.private"),
+    );
+    expect(wrapper.find(".library-card__visibility i").classes()).toContain(
+      "fa-lock",
     );
 
     await wrapper.find("a").trigger("click");

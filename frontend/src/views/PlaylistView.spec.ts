@@ -96,6 +96,9 @@ describe("PlaylistView", () => {
     expect(wrapper.text()).toContain("Road Trip");
     expect(wrapper.text()).toContain("A mix for the highway.");
     expect(wrapper.text()).toContain("Song One");
+    expect(wrapper.find(".playlist-view__visibility i").classes()).toContain(
+      "fa-globe",
+    );
   });
 
   it("shows an empty state when the playlist has no tracks", async () => {

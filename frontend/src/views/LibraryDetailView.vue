@@ -20,6 +20,7 @@ import { useShareDialog } from "@/composables/useShareDialog";
 import { useTrackEnrichment } from "@/composables/useTrackEnrichment";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import type { QueueTrack } from "@/player/types";
+import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
@@ -51,7 +52,8 @@ const {
   }),
 );
 
-const { ownerName, visibilityText } = useEntityMeta(library);
+const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
+  useEntityMeta(library);
 
 const { enrich: trackEnrich } = useTrackEnrichment(
   tracks,
@@ -156,11 +158,21 @@ watch(
         </p>
 
         <div class="library-detail-view__meta">
-          <span class="library-detail-view__meta-item">
-            {{ t("browse.detail.visibility") }} {{ visibilityText }}
+          <span
+            v-if="ownerName"
+            :title="ownerName"
+            class="library-detail-view__owner"
+          >
+            <AppAvatar
+              v-if="ownerAvatarUrl"
+              :src="ownerAvatarUrl"
+              :name="ownerName"
+              width="16px"
+            />
+            {{ ownerName }}
           </span>
-          <span v-if="ownerName" class="library-detail-view__meta-item">
-            {{ t("browse.detail.owner") }} {{ ownerName }}
+          <span :title="visibilityText" class="library-detail-view__visibility">
+            <i :class="visibilityIcon" />
           </span>
         </div>
 
@@ -309,6 +321,23 @@ watch(
   color: var(--color-text-muted);
   font-size: 0.875rem;
   word-break: break-word;
+  align-items: center;
+}
+
+.library-detail-view__owner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.library-detail-view__visibility {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+:deep(.library-detail-view__owner img) {
+  margin: 0;
 }
 
 .library-detail-view__header-actions {

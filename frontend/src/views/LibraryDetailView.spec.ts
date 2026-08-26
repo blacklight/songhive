@@ -141,6 +141,9 @@ describe("LibraryDetailView", () => {
     expect(wrapper.text()).toContain("Main Library");
     expect(wrapper.text()).toContain("Main music library.");
     expect(wrapper.text()).toContain("Song One");
+    expect(
+      wrapper.find(".library-detail-view__visibility i").classes(),
+    ).toContain("fa-globe");
   });
 
   it("shows an error banner with a retry button", async () => {
