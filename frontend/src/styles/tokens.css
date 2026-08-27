@@ -5,14 +5,16 @@
   --accent: #fcd34d;
   --color-bg: #f9f8f7;
   --color-bg-menu: #1f2937;
-  --color-text-menu: #f9fafb;
   --color-surface: #ffffff;
   --color-surface-raised: #fbc775;
   --color-surface-hover: #f3f4f6;
   --color-surface-active: #e5e7eb;
   --color-surface-secondary: #f3f4f6;
   --color-text: #111827;
+  --color-text-secondary: #374151;
   --color-text-muted: #6b7280;
+  --color-text-hover: #1f2937;
+  --color-text-menu: #f9fafb;
   --color-surface-media-backfill: #081227;
   --color-border: #d1d5db;
   --color-accent: var(--accent);
@@ -64,17 +66,19 @@
 
 [data-theme="dark"] {
   --accent: #fcd34d;
-  --color-bg: #1f2937;
+  --color-bg: #1f2927;
   --color-bg-menu: #2f3937;
-  --color-text-menu: #f9fafb;
   --color-surface: #374151;
-  --color-surface-raised: #4b5563;
+  --color-surface-raised: var(--accent);
   --color-surface-hover: #374151;
   --color-surface-active: #1f2937;
   --color-surface-secondary: #4b5563;
   --color-surface-media-backfill: #081227;
   --color-text: #f9fafb;
+  --color-text-secondary: #d1d5db;
   --color-text-muted: #9ca3af;
+  --color-text-hover: #f3f4f6;
+  --color-text-menu: #f9fafb;
   --color-border: #4b5563;
   --color-accent: var(--accent);
   --color-accent-contrast: #111827;
