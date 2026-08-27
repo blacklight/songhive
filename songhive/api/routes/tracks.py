@@ -315,6 +315,9 @@ async def update_track(
             detail="Access denied",
         )
 
+    previous_artist_id = track.artist_id
+    previous_album_id = track.album_id
+
     previous_visibility = track.visibility
     if body.title is not None:
         track.title = body.title
@@ -355,6 +358,12 @@ async def update_track(
     if body.artist_name is not None or body.album_title is not None:
         await db.flush()
         await db.refresh(track, ["artist", "album"])
+        await deletion.cleanup_empty_artist_and_album(
+            db,
+            storage,
+            previous_artist_id,
+            previous_album_id,
+        )
 
     details: Dict[str, Any] = {
         "title": track.title,

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import select
 
 from songhive.models._enums import Visibility
 from songhive.models.album import Album
@@ -978,3 +979,239 @@ def test_update_track_ignores_empty_artist_name(
     )
     assert response.status_code == 200
     assert response.json()["artist_id"] == original_artist_id
+
+
+@pytest.mark.asyncio
+async def test_delete_track_cleans_up_empty_artist_and_album(
+    client,
+    db_session,
+    regular_user,
+    auth_headers,
+):
+    """Deleting a track removes its artist and album when no tracks remain."""
+    artist = Artist(name="Lone Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Lone Album",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    track = Track(
+        title="Lone Track",
+        artist_id=artist.id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    artist_id = str(artist.id)
+    album_id = str(album.id)
+
+    response = client.delete(f"/api/v1/tracks/{track.id}", headers=auth_headers(regular_user))
+    assert response.status_code == 204
+
+    artist_result = await db_session.execute(select(Artist).where(Artist.id == artist_id))
+    assert artist_result.scalar_one_or_none() is None
+
+    album_result = await db_session.execute(select(Album).where(Album.id == album_id))
+    assert album_result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_delete_track_keeps_artist_and_album_with_other_tracks(
+    client,
+    db_session,
+    regular_user,
+    auth_headers,
+):
+    """Deleting one track of several does not remove the shared artist/album."""
+    artist = Artist(name="Shared Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Shared Album",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    tracks = []
+    for title in ("Track One", "Track Two"):
+        track = Track(
+            title=title,
+            artist_id=artist.id,
+            album_id=album.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PRIVATE.value,
+        )
+        db_session.add(track)
+        tracks.append(track)
+    await db_session.flush()
+
+    artist_id = str(artist.id)
+    album_id = str(album.id)
+
+    response = client.delete(f"/api/v1/tracks/{tracks[0].id}", headers=auth_headers(regular_user))
+    assert response.status_code == 204
+
+    artist_result = await db_session.execute(select(Artist).where(Artist.id == artist_id))
+    assert artist_result.scalar_one_or_none() is not None
+
+    album_result = await db_session.execute(select(Album).where(Album.id == album_id))
+    assert album_result.scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
+async def test_update_track_cleans_up_empty_old_artist_and_album(
+    client,
+    db_session,
+    regular_user,
+    auth_headers,
+):
+    """Changing a track's artist and album removes the now-empty old ones."""
+    old_artist = Artist(name="Old Artist")
+    db_session.add(old_artist)
+    await db_session.flush()
+
+    old_album = Album(
+        title="Old Album",
+        artist_id=old_artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(old_album)
+    await db_session.flush()
+
+    track = Track(
+        title="Moving Track",
+        artist_id=old_artist.id,
+        album_id=old_album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    old_artist_id = str(old_artist.id)
+    old_album_id = str(old_album.id)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={
+            "artist_name": "New Artist",
+            "album_title": "New Album",
+        },
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    old_artist_result = await db_session.execute(select(Artist).where(Artist.id == old_artist_id))
+    assert old_artist_result.scalar_one_or_none() is None
+
+    old_album_result = await db_session.execute(select(Album).where(Album.id == old_album_id))
+    assert old_album_result.scalar_one_or_none() is None
+
+    new_artist_result = await db_session.execute(select(Artist).where(Artist.name == "New Artist"))
+    new_artist = new_artist_result.scalar_one_or_none()
+    assert new_artist is not None
+
+    new_album_result = await db_session.execute(select(Album).where(Album.title == "New Album"))
+    new_album = new_album_result.scalar_one_or_none()
+    assert new_album is not None
+    assert str(new_album.artist_id) == str(new_artist.id)
+
+
+@pytest.mark.asyncio
+async def test_update_track_keeps_old_artist_with_other_tracks(
+    client,
+    db_session,
+    regular_user,
+    auth_headers,
+):
+    """Changing the artist of one track does not delete an artist used elsewhere."""
+    old_artist = Artist(name="Still Used Artist")
+    db_session.add(old_artist)
+    await db_session.flush()
+
+    for title in ("Track One", "Track Two"):
+        track = Track(
+            title=title,
+            artist_id=old_artist.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PRIVATE.value,
+        )
+        db_session.add(track)
+    await db_session.flush()
+
+    track = await db_session.execute(select(Track).where(Track.title == "Track One"))
+    track = track.scalar_one()
+    old_artist_id = str(old_artist.id)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"artist_name": "New Artist"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    old_artist_result = await db_session.execute(select(Artist).where(Artist.id == old_artist_id))
+    assert old_artist_result.scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
+async def test_update_track_removes_old_album_when_cleared(
+    client,
+    db_session,
+    regular_user,
+    auth_headers,
+):
+    """Clearing a track's album removes the old empty album but keeps the artist."""
+    artist = Artist(name="Album-Less Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Emptying Album",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    track = Track(
+        title="Unalbum Track",
+        artist_id=artist.id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    album_id = str(album.id)
+    artist_id = str(artist.id)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"album_title": ""},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    album_result = await db_session.execute(select(Album).where(Album.id == album_id))
+    assert album_result.scalar_one_or_none() is None
+
+    artist_result = await db_session.execute(select(Artist).where(Artist.id == artist_id))
+    assert artist_result.scalar_one_or_none() is not None

@@ -207,6 +207,13 @@ async def _delete_track_dependents(
     if delete_audio_file and track.audio_file is not None:
         await _maybe_delete_stored_file(session, storage, track.audio_file)
 
+    await cleanup_empty_artist_and_album(
+        session,
+        storage,
+        str(track.artist_id) if track.artist_id is not None else None,
+        str(track.album_id) if track.album_id is not None else None,
+    )
+
     return unpublish
 
 
@@ -537,3 +544,56 @@ async def delete_library(
     await session.execute(delete(Library).where(Library.id == library.id))
 
     return deletion
+
+
+async def _delete_empty_album(session: AsyncSession, storage: StorageService, album_id: Optional[str]) -> None:
+    """Delete an album if no tracks reference it."""
+    if album_id is None:
+        return
+
+    track_count = await session.scalar(select(func.count(Track.id)).where(Track.album_id == album_id))
+    if track_count:
+        return
+
+    album = await session.get(Album, album_id)
+    if album is None:
+        return
+
+    await delete_album(session, storage, str(album.id), recursive=False, is_admin=True)
+
+
+async def _delete_empty_artist(session: AsyncSession, storage: StorageService, artist_id: Optional[str]) -> None:
+    """Delete an artist (and any empty albums it owns) if it has no tracks."""
+    if artist_id is None:
+        return
+
+    track_count = await session.scalar(select(func.count(Track.id)).where(Track.artist_id == artist_id))
+    if track_count:
+        return
+
+    album_ids = list((await session.execute(select(Album.id).where(Album.artist_id == artist_id))).scalars().all())
+    for album_id in album_ids:
+        await _delete_empty_album(session, storage, str(album_id))
+
+    album_count = await session.scalar(select(func.count(Album.id)).where(Album.artist_id == artist_id))
+    if album_count:
+        return
+
+    artist = await session.get(Artist, artist_id)
+    if artist is None:
+        return
+
+    await delete_artist(session, storage, str(artist.id), recursive=False, is_admin=True)
+
+
+async def cleanup_empty_artist_and_album(
+    session: AsyncSession,
+    storage: StorageService,
+    artist_id: Optional[str],
+    album_id: Optional[str] = None,
+) -> None:
+    """Remove an artist/album from the database once it no longer has tracks."""
+    if album_id is not None:
+        await _delete_empty_album(session, storage, album_id)
+    if artist_id is not None:
+        await _delete_empty_artist(session, storage, artist_id)
