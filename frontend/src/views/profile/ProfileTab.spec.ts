@@ -4,12 +4,17 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import { createPinia, setActivePinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
+import * as authApi from "@/api/auth";
 import * as usersApi from "@/api/users";
 import ProfileTab from "./ProfileTab.vue";
 
 vi.mock("@/api/users", () => ({
   getMe: vi.fn(),
   updateMe: vi.fn(),
+}));
+
+vi.mock("@/api/auth", () => ({
+  resendVerificationEmail: vi.fn(),
 }));
 
 function createTestRouter() {
@@ -29,7 +34,11 @@ describe("ProfileTab", () => {
       display_name: "Alice Updated",
       bio: "Updated bio",
       avatar_url: "https://example.com/avatar.png",
+      email_verified: true,
       links: [{ name: "Home", url: "https://example.com" }],
+    });
+    vi.mocked(authApi.resendVerificationEmail).mockResolvedValue({
+      success: true,
     });
 
     const store = useAuthStore();
@@ -43,6 +52,7 @@ describe("ProfileTab", () => {
       display_name: "Alice",
       bio: "Hello",
       avatar_url: null,
+      email_verified: true,
       links: [{ name: "Home", url: "https://example.com" }],
     };
     store.status = "authenticated";
@@ -151,5 +161,31 @@ describe("ProfileTab", () => {
 
     expect(labels).toContain(i18n.global.t("profile.resendVerification"));
     expect(labels).toContain(i18n.global.t("profile.deleteAccount"));
+  });
+
+  it("enables resend verification for an unverified user", async () => {
+    const store = useAuthStore();
+    store.user = { ...store.user!, email_verified: false };
+
+    const router = createTestRouter();
+    await router.push("/profile");
+    await router.isReady();
+
+    const wrapper = mount(ProfileTab, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const resendButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("profile.resendVerification"));
+    expect(resendButton?.attributes("disabled")).toBeUndefined();
+
+    await resendButton?.trigger("click");
+    await flushPromises();
+
+    expect(authApi.resendVerificationEmail).toHaveBeenCalledWith({
+      username_or_email: "alice",
+    });
   });
 });

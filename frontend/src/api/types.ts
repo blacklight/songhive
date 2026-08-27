@@ -104,6 +104,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/auth/verify-email/resend": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resend verification email
+     * @description Request a new verification email for an account. A fresh token is sent to the user's email address if the account exists, is active, and has not yet been verified. The endpoint always returns a generic success response to avoid revealing whether an account exists or is verified.
+     */
+    post: operations["resend_verification_email_endpoint_api_v1_auth_verify_email_resend_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/auth/password-reset/request": {
     parameters: {
       query?: never;
@@ -3136,6 +3156,25 @@ export interface components {
       role: string;
     };
     /**
+     * ResendVerificationRequest
+     * @description Request body for resending a verification email.
+     */
+    ResendVerificationRequest: {
+      /** Username Or Email */
+      username_or_email: string;
+    };
+    /**
+     * ResendVerificationResponse
+     * @description Generic response returned after a verification resend request.
+     */
+    ResendVerificationResponse: {
+      /**
+       * Success
+       * @default true
+       */
+      success: boolean;
+    };
+    /**
      * RemoveLibraryTracksRequest
      * @description Request body for removing tracks from a library.
      */
@@ -3534,6 +3573,8 @@ export interface components {
       bio?: string | null;
       /** Avatar Url */
       avatar_url?: string | null;
+      /** Email Verified */
+      email_verified?: boolean | null;
       role?: components["schemas"]["UserRole"] | null;
       /** Links */
       links?: components["schemas"]["UserLinkOutput"][];
@@ -3968,6 +4009,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["VerifyEmailResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  resend_verification_email_endpoint_api_v1_auth_verify_email_resend_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ResendVerificationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ResendVerificationResponse"];
         };
       };
       /** @description Validation Error */

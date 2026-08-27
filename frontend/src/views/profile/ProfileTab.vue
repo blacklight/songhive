@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
+import { resendVerificationEmail } from "@/api/auth";
 import { uploadFile } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
 import type { UserProfileUpdate } from "@/api/users";
@@ -31,6 +32,18 @@ const isLoading = ref(false);
 const error = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const isUploading = ref(false);
+const isResendingVerification = ref(false);
+
+const isVerificationResendDisabled = computed(() => {
+  return !authStore.user || Boolean(authStore.user.email_verified);
+});
+
+const verificationResendHint = computed(() => {
+  if (authStore.user?.email_verified) {
+    return t("profile.resendVerificationVerified");
+  }
+  return t("profile.resendVerificationHint");
+});
 
 watch(
   () => authStore.user,
@@ -79,6 +92,30 @@ async function onFileChange(event: Event) {
   } finally {
     isUploading.value = false;
     if (target) target.value = "";
+  }
+}
+
+async function onResendVerification() {
+  if (!authStore.user || isResendingVerification.value) return;
+
+  isResendingVerification.value = true;
+  try {
+    await resendVerificationEmail({
+      username_or_email: authStore.user.username,
+    });
+    toast.push({
+      type: "success",
+      message: t("profile.resendVerificationSuccess"),
+    });
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: t("profile.resendVerificationError", {
+        message: getApiErrorMessage(err, t("errors.unknown")),
+      }),
+    });
+  } finally {
+    isResendingVerification.value = false;
   }
 }
 
@@ -219,11 +256,16 @@ async function onSubmit() {
 
     <div class="profile-tab__gated">
       <div class="profile-tab__gated-item">
-        <AppButton type="button" disabled>
+        <AppButton
+          type="button"
+          :disabled="isVerificationResendDisabled"
+          :loading="isResendingVerification"
+          @click="onResendVerification"
+        >
           {{ t("profile.resendVerification") }}
         </AppButton>
         <p class="profile-tab__hint">
-          {{ t("profile.resendVerificationDisabled") }}
+          {{ verificationResendHint }}
         </p>
       </div>
 

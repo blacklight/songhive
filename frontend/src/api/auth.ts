@@ -70,6 +70,24 @@ export function verifyEmail(body: VerifyEmailRequest): Promise<unknown> {
   });
 }
 
+export interface ResendVerificationRequest {
+  username_or_email: string;
+}
+
+export interface ResendVerificationResponse {
+  success: boolean;
+}
+
+export function resendVerificationEmail(
+  body: ResendVerificationRequest,
+): Promise<ResendVerificationResponse> {
+  return apiRequest<ResendVerificationResponse>("/auth/verify-email/resend", {
+    method: "POST",
+    body,
+    skipAuth: true,
+  });
+}
+
 export function passwordResetRequest(
   body: PasswordResetRequestRequest,
 ): Promise<unknown> {
