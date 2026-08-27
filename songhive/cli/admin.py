@@ -3,6 +3,7 @@ Admin CLI commands.
 
 Usage:
     songhive admin init-db
+    songhive admin migrate
     songhive admin create-user --username <name> --email <email> --password <pw> [--admin | --role <role>]
     songhive admin promote-user --username <name>
     songhive admin demote-user --username <name>
@@ -12,6 +13,10 @@ Usage:
     songhive admin import-dir --path <dir> --library-id <uuid> [--owner <username>]
     songhive admin create-invite --created-by <username> [--max-uses <n>] [--expires-at <iso>]
     songhive admin list-invites
+    songhive admin provision-federation-keys
+    songhive admin rehash-audio [--dry-run]
+    songhive admin sync-tags \
+        (--track-id <id> | --album-id <id> | --artist-id <id> | --library-id <id> | --all) [--dry-run]
 """
 
 import argparse
@@ -22,14 +27,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+import aiofiles
+import aiofiles.os
 from kombu.exceptions import OperationalError as KombuOperationalError
+from sqlalchemy import select, update
 
 from ..config import load_config
 from ..migrations import ensure_migrated
 from ..models.base import get_session, init_db
+from ..models.stored_file import StoredFile
+from ..models.track import Track
+from ..models.transcoded_file import TranscodedFile
+from ..models.upload import Upload
 from ..models.user import User, UserRole
+from ..services import music
 from ..services.auth import create_user, get_user_by_username
 from ..services.federation import ensure_user_actor
+from ..services.storage import StorageService, audio_hash
+from ..storage import get_storage
+from ..storage.s3 import S3Storage
 from ..tasks.import_ import _AUDIO_EXTENSIONS, scan_directory
 from ..users import manager as user_manager
 from ..users.invites import InviteError, create_invite, list_invites
@@ -101,6 +117,34 @@ def _create_admin_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "provision-federation-keys",
         help="Provision ActivityPub actor keys for users that are missing them",
+    )
+
+    # rehash-audio
+    rehash_parser = subparsers.add_parser(
+        "rehash-audio",
+        help="Migrate audio StoredFile rows to audio-only SHA-256 hashes",
+    )
+    rehash_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report files that would migrate without making changes",
+    )
+
+    # sync-tags
+    sync_tags_parser = subparsers.add_parser(
+        "sync-tags",
+        help="Enqueue tag sync for one or more tracks",
+    )
+    sync_tags_group = sync_tags_parser.add_mutually_exclusive_group(required=True)
+    sync_tags_group.add_argument("--track-id", help="Sync a single track by ID")
+    sync_tags_group.add_argument("--album-id", help="Sync all tracks in an album")
+    sync_tags_group.add_argument("--artist-id", help="Sync all tracks by an artist")
+    sync_tags_group.add_argument("--library-id", help="Sync all tracks in a library")
+    sync_tags_group.add_argument("--all", action="store_true", help="Sync all tracks")
+    sync_tags_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the number of tracks that would be queued without enqueuing",
     )
 
     return parser
@@ -373,6 +417,152 @@ async def _handle_provision_federation_keys(*_):
     print(f"Provisioned federation keys for {total} user(s) on {domain}")
 
 
+async def _merge_stored_file(session, storage, duplicate: StoredFile, survivor: StoredFile) -> None:
+    """Point all known references to ``survivor`` and remove ``duplicate``."""
+    duplicate_id = str(duplicate.id)
+    survivor_id = str(survivor.id)
+
+    await session.execute(update(Track).where(Track.audio_file_id == duplicate_id).values(audio_file_id=survivor_id))
+    await session.execute(
+        update(Upload).where(Upload.stored_file_id == duplicate_id).values(stored_file_id=survivor_id)
+    )
+    await session.execute(
+        update(TranscodedFile).where(TranscodedFile.stored_file_id == duplicate_id).values(stored_file_id=survivor_id)
+    )
+
+    old_path = duplicate.storage_path
+    await session.delete(duplicate)
+    await session.flush()
+    try:
+        await storage.delete(old_path)
+    except Exception:
+        pass
+
+
+async def _handle_rehash_audio(args):
+    """Migrate existing audio StoredFile rows to audio-only hashes."""
+    config = load_config([])
+    init_db(config.database.url)
+
+    storage = get_storage(config.storage)
+    storage_service = StorageService(storage, config.storage)
+
+    migrated = 0
+    merged = 0
+    skipped = 0
+    failed = 0
+
+    async with get_session() as session:
+        result = await session.execute(select(StoredFile).where(StoredFile.content_type.ilike("audio/%")))
+        rows = list(result.scalars().all())
+
+        for stored_file in rows:
+            local_path = await storage_service.backend.retrieve(stored_file.storage_path)
+            if local_path is None:
+                failed += 1
+                continue
+
+            try:
+                new_hash = await audio_hash(local_path)
+            except RuntimeError:
+                failed += 1
+                continue
+
+            if new_hash == stored_file.sha256:
+                skipped += 1
+                continue
+
+            if args.dry_run:
+                migrated += 1
+                continue
+
+            existing = await session.scalar(select(StoredFile).where(StoredFile.sha256 == new_hash))
+            if existing is not None:
+                await _merge_stored_file(session, storage, stored_file, existing)
+                merged += 1
+            else:
+                prefix = stored_file.storage_path.split("/")[0] if "/" in stored_file.storage_path else "files"
+                new_path = f"{prefix}/{new_hash[:2]}/{new_hash[2:4]}/{new_hash}"
+
+                try:
+                    size = (await asyncio.to_thread(os.stat, local_path)).st_size
+                    with open(local_path, "rb") as f:
+                        await storage_service.backend.store(f, new_path, content_type=stored_file.content_type)
+                except Exception:
+                    failed += 1
+                    continue
+
+                old_path = stored_file.storage_path
+                stored_file.storage_path = new_path
+                stored_file.sha256 = new_hash
+                stored_file.size = size
+
+                try:
+                    await storage_service.backend.delete(old_path)
+                except Exception:
+                    pass
+
+                if isinstance(storage_service.backend, S3Storage):
+                    try:
+                        await aiofiles.os.remove(local_path)
+                    except Exception:
+                        pass
+
+                migrated += 1
+
+        await session.commit()
+
+    if args.dry_run:
+        print(
+            f"Would rehash {migrated} audio file(s), {skipped} already audio-hashed, "
+            f"{failed} failed, {merged} would merge."
+        )
+    else:
+        print(
+            f"Rehashed {migrated} audio file(s), merged {merged} duplicate(s), "
+            f"{skipped} already audio-hashed, {failed} failed."
+        )
+
+
+async def _handle_sync_tags(args):
+    """Enqueue tag sync for the requested scope of tracks."""
+    from ..tasks.tags import sync_track_tags
+
+    config = load_config([])
+    init_db(config.database.url)
+
+    admin_user = User(role="admin")
+
+    async with get_session() as session:
+        track_ids = await music.resolve_track_ids_for_sync(
+            session,
+            track_id=args.track_id,
+            album_id=args.album_id,
+            artist_id=args.artist_id,
+            library_id=args.library_id,
+            all_=args.all,
+            user=admin_user,
+        )
+
+    if not track_ids:
+        print("No matching tracks found.")
+        return
+
+    if args.dry_run:
+        print(f"Would enqueue tag sync for {len(track_ids)} track(s).")
+        return
+
+    try:
+        for track_id in track_ids:
+            sync_track_tags.delay(track_id)  # type: ignore
+    except (KombuOperationalError, OSError):
+        print(f"Found {len(track_ids)} track(s) to sync.")
+        print("Celery broker is not available; start the worker to process the queue.", file=sys.stderr)
+        return
+
+    print(f"Enqueued tag sync for {len(track_ids)} track(s).")
+
+
 def admin_main(argv=None):
     """Entry point for admin CLI commands."""
     parser = _create_admin_parser()
@@ -407,6 +597,8 @@ def admin_main(argv=None):
         "create-invite": _handle_create_invite,
         "list-invites": _handle_list_invites,
         "provision-federation-keys": _handle_provision_federation_keys,
+        "rehash-audio": _handle_rehash_audio,
+        "sync-tags": _handle_sync_tags,
     }
 
     handler = handlers.get(args.command)
