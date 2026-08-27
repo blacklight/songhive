@@ -550,6 +550,16 @@ def test_enrich_track_task_returns_false_on_exception(monkeypatch, tmp_path, cap
     assert "MusicBrainz enrichment failed" in caplog.text
 
 
+def test_enrich_track_task_enqueues_sync_tags(monkeypatch, tmp_path):
+    """A successful enrichment enqueues sync_track_tags for the same track."""
+    _patch_mb_task_env(monkeypatch, tmp_path)
+    sync_mock = Mock()
+    monkeypatch.setattr("songhive.tasks.musicbrainz.sync_track_tags", sync_mock)
+    result = enrich_track("track-1")
+    assert result is True
+    sync_mock.delay.assert_called_once_with("track-1")
+
+
 @pytest.mark.asyncio
 async def test_enrich_fills_missing_metadata(
     db_session,

@@ -4,6 +4,8 @@ Admin CLI command tests.
 
 import asyncio
 import os
+import shutil
+import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -13,8 +15,11 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from songhive.cli import admin as cli_admin
-from songhive.config.schema import SonghiveConfig
+from songhive.config.schema import SonghiveConfig, StorageConfig
+from songhive.models.artist import Artist
 from songhive.models.base import Base
+from songhive.models.stored_file import StoredFile
+from songhive.models.track import Track
 from songhive.models.user import User  # noqa: F401
 from songhive.services.auth import create_user
 from songhive.users.invites import create_invite
@@ -1134,3 +1139,110 @@ def test_admin_main_import_dir(tmp_path, monkeypatch, capsys):
     cli_admin.admin_main(["import-dir", "--path", str(import_dir), "--library-id", "lib-1"])
     captured = capsys.readouterr()
     assert "Import queued with task id: task-id" in captured.out
+
+
+def test_admin_main_sync_tags_all_dry_run(tmp_path, monkeypatch, capsys):
+    """``sync-tags --all --dry-run`` counts matching tracks without enqueuing."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'sync.db'}"
+    monkeypatch.setattr(
+        cli_admin,
+        "load_config",
+        lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
+    )
+    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
+
+    async def _create_track():
+        engine = create_async_engine(db_url)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            artist = Artist(name="Test Artist")
+            session.add(artist)
+            await session.flush()
+            track = Track(title="Test Track", artist_id=artist.id, owner_id=None)
+            session.add(track)
+            await session.commit()
+
+    asyncio.run(_create_track())
+
+    cli_admin.admin_main(["sync-tags", "--all", "--dry-run"])
+    captured = capsys.readouterr()
+    assert "Would enqueue tag sync for 1 track(s)." in captured.out
+
+
+def test_admin_main_rehash_audio_dry_run(tmp_path, monkeypatch, capsys):
+    """``rehash-audio --dry-run`` reports files that would be migrated."""
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not available")
+
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'rehash.db'}"
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+
+    audio_path = tmp_path / "sample.mp3"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=1000:duration=0.5",
+            "-b:a",
+            "128k",
+            "-ac",
+            "1",
+            "-ar",
+            "44100",
+            "-c:a",
+            "libmp3lame",
+            str(audio_path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    shutil.copy(audio_path, media_dir / "sample.mp3")
+
+    async def _setup():
+        engine = create_async_engine(db_url)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            stored_file = StoredFile(
+                sha256="0" * 64,
+                size=0,
+                storage_path="sample.mp3",
+                storage_backend="local",
+                content_type="audio/mpeg",
+                owner_id=None,
+                visibility="private",
+            )
+            session.add(stored_file)
+            await session.commit()
+
+    asyncio.run(_setup())
+
+    from songhive.storage import get_storage
+
+    def _load_config(argv=None):
+        return SonghiveConfig(
+            database={"url": db_url},
+            storage={"backend": "local", "local_path": str(media_dir)},
+            federation={"enabled": False},
+        )
+
+    monkeypatch.setattr(cli_admin, "load_config", _load_config)
+    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
+    monkeypatch.setattr(
+        cli_admin,
+        "get_storage",
+        lambda cfg: get_storage(StorageConfig(backend="local", local_path=str(media_dir))),
+    )
+
+    cli_admin.admin_main(["rehash-audio", "--dry-run"])
+    captured = capsys.readouterr()
+    assert "Would rehash 1 audio file(s)" in captured.out

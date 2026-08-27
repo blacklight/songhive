@@ -128,6 +128,42 @@ def test_update_track(client, sample_tracks, regular_user, auth_headers):
     assert data["disc_number"] == 2
 
 
+def test_update_track_enqueues_tag_sync(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """Updating tag-relevant track metadata enqueues a sync for that track."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    sync_mock = MagicMock()
+    monkeypatch.setattr("songhive.api.routes.tracks._enqueue_track_tag_sync", sync_mock)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"title": "Updated Title"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    sync_mock.assert_called_once_with(str(track.id))
+
+
+def test_update_track_visibility_does_not_enqueue_tag_sync(
+    client, sample_tracks, regular_user, auth_headers, monkeypatch
+):
+    """Updating only visibility does not enqueue a tag sync."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    sync_mock = MagicMock()
+    monkeypatch.setattr("songhive.api.routes.tracks._enqueue_track_tag_sync", sync_mock)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"visibility": "public"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    sync_mock.assert_not_called()
+
+
 def test_delete_track(client, sample_tracks, regular_user, auth_headers):
     """Owners can delete a track."""
     track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)

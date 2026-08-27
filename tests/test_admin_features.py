@@ -9,11 +9,13 @@ integration.
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import status
 from sqlalchemy import select
 
+from songhive.models._enums import Visibility
 from songhive.models.artist import Artist
 from songhive.models.audit_log import AuditLog
 from songhive.models.report import Report
@@ -503,3 +505,42 @@ async def test_admin_main_reset_password(db_session, monkeypatch, capsys):
 
     # Password was hashed using the same user object.
     assert user.password_hash != old_hash
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_tags_endpoint(client, db_session, make_user, auth_headers, monkeypatch):
+    """Admins can enqueue tag sync for a single track and the action is audited."""
+    admin = await make_user("admin", role="admin")
+
+    artist = Artist(name="Test Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Test Track",
+        artist_id=artist.id,
+        owner_id=str(admin.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    sync_mock = MagicMock()
+    monkeypatch.setattr("songhive.api.routes.admin.sync_track_tags", sync_mock)
+
+    response = client.post(
+        "/api/v1/admin/sync-tags",
+        headers=auth_headers(admin),
+        json={"track_id": str(track.id)},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["enqueued"] == 1
+    assert data["status"] == "queued"
+    sync_mock.delay.assert_called_once_with(str(track.id))
+
+    result = await db_session.execute(select(AuditLog).where(AuditLog.action == "tags.sync"))
+    log = result.scalar_one_or_none()
+    assert log is not None
+    assert log.actor_id == str(admin.id)
+    assert log.details["enqueued"] == 1
