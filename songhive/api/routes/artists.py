@@ -34,6 +34,7 @@ from ..responses import (
     build_album_summary,
     build_track_summary,
 )
+from ..routes.tracks import _enqueue_track_tag_sync
 from ._images import remove_entity_image, upload_entity_image
 
 router = APIRouter(prefix="/artists")
@@ -206,6 +207,11 @@ async def update_artist(
         ip_address=client_ip(request),
     )
     await db.commit()
+
+    if "name" in body.model_dump(exclude_unset=True):
+        track_ids = await music.get_track_ids_for_artist(db, artist_id, user=current_user)
+        for track_id in track_ids:
+            _enqueue_track_tag_sync(track_id)
 
     return await _build_artist_response(artist, storage, include)
 

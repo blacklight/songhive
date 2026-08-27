@@ -124,6 +124,34 @@ def _enqueue_track_enrichment(track_id: str, force: bool = True) -> bool:
         return False
 
 
+_TAG_SYNC_FIELDS = {
+    "title",
+    "artist_name",
+    "album_title",
+    "genre",
+    "track_number",
+    "disc_number",
+    "release_year",
+}
+
+
+def _should_sync_tags(body: TrackUpdate) -> bool:
+    """Return True when the update payload contains tag-relevant metadata."""
+    return any(field in body.model_dump(exclude_unset=True) for field in _TAG_SYNC_FIELDS)
+
+
+def _enqueue_track_tag_sync(track_id: str) -> bool:
+    """Enqueue a tag-sync task and ignore broker errors."""
+    try:
+        from ...tasks.tags import sync_track_tags
+
+        sync_track_tags.delay(track_id)  # type: ignore
+        return True
+    except Exception as exc:
+        logger.warning("Could not enqueue tag sync for %s: %s", track_id, exc)
+        return False
+
+
 async def _handle_visibility_changes(
     track: Track,
     previous_visibility: str,
@@ -389,6 +417,9 @@ async def update_track(
         track, previous_visibility=previous_visibility, request=request, background_tasks=background_tasks, db=db
     )
 
+    if _should_sync_tags(body):
+        _enqueue_track_tag_sync(track_id)
+
     return await _build_track_response(track, current_user, storage, include)
 
 
@@ -433,6 +464,7 @@ async def upload_track_image(
         ip_address=client_ip(request),
     )
     await db.commit()
+    _enqueue_track_tag_sync(track_id)
 
     return await _build_track_response(track, current_user, storage, include)
 
@@ -469,6 +501,7 @@ async def delete_track_image(
         ip_address=client_ip(request),
     )
     await db.commit()
+    _enqueue_track_tag_sync(track_id)
 
     return await _build_track_response(track, current_user, storage, include)
 

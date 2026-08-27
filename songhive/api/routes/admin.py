@@ -21,6 +21,7 @@ from ...services import stats as stats_service
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from ...tasks.storage import cleanup_orphaned_files
+from ...tasks.tags import sync_track_tags
 from ...users import invites as invite_service
 from ...users import manager as user_manager
 from ...users import oauth as oauth_client_service
@@ -779,3 +780,77 @@ async def storage_cleanup(
     await db.commit()
 
     return {"task_id": result.id, "status": "queued"}
+
+
+class SyncTagsRequest(BaseModel):
+    """Request body for bulk tag sync triggers."""
+
+    track_id: Optional[str] = None
+    album_id: Optional[str] = None
+    artist_id: Optional[str] = None
+    library_id: Optional[str] = None
+    all: bool = False
+
+
+class SyncTagsResponse(BaseModel):
+    """Response returned after a bulk tag sync trigger."""
+
+    enqueued: int
+    status: str
+
+
+@router.post(
+    "/sync-tags",
+    response_model=SyncTagsResponse,
+    dependencies=[Depends(rate_limit_account), Depends(require_admin)],
+)
+async def sync_tags(
+    body: SyncTagsRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Enqueue tag sync for one or more tracks (admin only)."""
+    if not any((body.track_id, body.album_id, body.artist_id, body.library_id, body.all)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one scope is required")
+
+    track_ids = await music.resolve_track_ids_for_sync(
+        db,
+        track_id=body.track_id,
+        album_id=body.album_id,
+        artist_id=body.artist_id,
+        library_id=body.library_id,
+        all_=body.all,
+        user=admin,
+    )
+
+    enqueued = 0
+    try:
+        for track_id in track_ids:
+            sync_track_tags.delay(track_id)  # type: ignore
+            enqueued += 1
+    except (KombuOperationalError, RedisConnectionError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Celery broker unavailable",
+        ) from exc
+
+    scope = {
+        "track_id": body.track_id,
+        "album_id": body.album_id,
+        "artist_id": body.artist_id,
+        "library_id": body.library_id,
+        "all": body.all,
+    }
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="tags.sync",
+        target_type="storage",
+        target_id=None,
+        details={"scope": scope, "enqueued": enqueued},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return SyncTagsResponse(enqueued=enqueued, status="queued")

@@ -46,7 +46,7 @@ from ..responses import (
 )
 from ._common import HasOwnerId, redact_owner
 from ._images import remove_entity_image, upload_entity_image
-from .tracks import _enqueue_track_enrichment
+from .tracks import _enqueue_track_enrichment, _enqueue_track_tag_sync
 
 router = APIRouter(prefix="/albums")
 
@@ -244,6 +244,11 @@ async def update_album(
     )
     await db.commit()
 
+    if any(field in body.model_dump(exclude_unset=True) for field in ("title", "release_year")):
+        track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user)
+        for track_id in track_ids:
+            _enqueue_track_tag_sync(track_id)
+
     return await _build_album_response(album, current_user, storage, include)
 
 
@@ -288,6 +293,9 @@ async def upload_album_cover(
         ip_address=client_ip(request),
     )
     await db.commit()
+    track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user)
+    for track_id in track_ids:
+        _enqueue_track_tag_sync(track_id)
 
     return await _build_album_response(album, current_user, storage, include)
 
@@ -324,6 +332,9 @@ async def delete_album_cover(
         ip_address=client_ip(request),
     )
     await db.commit()
+    track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user)
+    for track_id in track_ids:
+        _enqueue_track_tag_sync(track_id)
 
     return await _build_album_response(album, current_user, storage, include)
 
