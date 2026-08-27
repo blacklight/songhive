@@ -34,8 +34,8 @@ from ..responses import (
     build_album_summary,
     build_track_summary,
 )
-from ..routes.tracks import _enqueue_track_tag_sync
 from ._images import remove_entity_image, upload_entity_image
+from .tracks import _enqueue_track_tag_sync
 
 router = APIRouter(prefix="/artists")
 
