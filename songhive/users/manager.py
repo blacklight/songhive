@@ -391,6 +391,30 @@ async def verify_email(session: AsyncSession, token: str) -> User | None:
     return user
 
 
+async def generate_verification_email_token(
+    session: AsyncSession,
+    username_or_email: str,
+) -> Tuple[Optional[User], Optional[str]]:
+    """
+    Generate a fresh email-verification token for a user and return the raw token.
+
+    The user must exist, be active, and not already have a verified email
+    address. The previous verification token, if any, is replaced.
+
+    If no eligible user is found, ``(None, None)`` is returned so callers can
+    return a generic success response without leaking account status.
+    """
+    user = await get_user_by_username_or_email(session, username_or_email)
+    if user is None or not user.is_active or user.email_verified:
+        return None, None
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    user.email_verification_token = token_hash
+    await session.flush()
+    return user, raw_token
+
+
 async def request_password_reset(
     session: AsyncSession,
     config: SonghiveConfig,
