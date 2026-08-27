@@ -239,7 +239,7 @@ async def audio_hash(file_path: Path) -> str:
         "-i",
         str(file_path),
         "-map",
-        "0:a",
+        "0:a:0",
         "-c",
         "copy",
         "-f",
@@ -255,7 +255,10 @@ async def audio_hash(file_path: Path) -> str:
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg failed with return code {proc.returncode}: {stderr.decode(errors='replace')}")
 
-    line = stdout.decode(errors="replace").strip()
-    if "=" not in line:
-        raise RuntimeError(f"unexpected ffmpeg streamhash output: {line!r}")
-    return line.split("=", 1)[1].strip()
+    for line in stdout.decode(errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "=" in line:
+            return line.split("=", 1)[1].strip()
+    raise RuntimeError(f"unexpected ffmpeg streamhash output: {stdout!r}")
