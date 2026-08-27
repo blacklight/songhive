@@ -67,7 +67,7 @@ def _audio_hash(path: Path) -> str:
             "-i",
             str(path),
             "-map",
-            "0:a",
+            "0:a:0",
             "-c",
             "copy",
             "-f",
@@ -80,7 +80,7 @@ def _audio_hash(path: Path) -> str:
         capture_output=True,
         text=True,
     )
-    line = result.stdout.strip().splitlines()[-1]
+    line = result.stdout.strip().splitlines()[0]
     return line.split("=", 1)[1]
 
 
@@ -140,6 +140,28 @@ def test_write_metadata_cover_round_trip(fmt, tmp_path):
     assert result.title == "Covered"
     assert result.cover_art == PNG_DATA
     assert result.cover_art_mime == "image/png"
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_write_metadata_clear_cover_art(fmt, tmp_path, full_meta):
+    """Clearing cover art removes any previously embedded picture."""
+    path = _make_silence(tmp_path, fmt)
+    first = AudioMetadataWrite(
+        **{
+            **full_meta.__dict__,
+            "cover_art": JPEG_DATA,
+            "cover_art_mime": "image/jpeg",
+        }
+    )
+    write_metadata(path, first)
+
+    write_metadata(path, AudioMetadataWrite(clear_cover_art=True))
+    result = extract_metadata(path)
+
+    assert result.title == "Test Title"
+    assert result.artist == "Test Artist"
+    assert result.album == "Test Album"
+    assert result.cover_art is None
 
 
 @pytest.mark.parametrize("fmt", FORMATS)

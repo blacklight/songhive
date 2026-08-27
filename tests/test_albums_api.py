@@ -4,12 +4,15 @@ Tests for the album API endpoints.
 
 import io
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
 from songhive.models._enums import Visibility
 from songhive.models.album import Album
 from songhive.models.artist import Artist
+from songhive.models.stored_file import StoredFile
+from songhive.models.track import Track
 
 
 @pytest.fixture
@@ -371,6 +374,59 @@ def test_upload_and_delete_album_cover(client, sample_albums, regular_user, auth
     delete = client.delete(f"/api/v1/albums/{album.id}/cover", headers=headers)
     assert delete.status_code == 200
     assert delete.json()["cover_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_album_cover_cascade_skips_tracks_with_own_image(
+    client, db_session, sample_albums, regular_user, auth_headers, monkeypatch
+):
+    """Album cover upload only re-syncs tracks that lack a track-level image."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+    headers = auth_headers(regular_user)
+
+    stored = StoredFile(
+        sha256="a" * 64,
+        size=4,
+        storage_path="covers/test.jpg",
+        storage_backend="local",
+        content_type="image/jpeg",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(stored)
+    await db_session.flush()
+
+    track_with_image = Track(
+        title="Track With Image",
+        artist_id=album.artist_id,
+        album_id=album.id,
+        image_file_id=str(stored.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    track_without_image = Track(
+        title="Track Without Image",
+        artist_id=album.artist_id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add_all([track_with_image, track_without_image])
+    await db_session.commit()
+
+    sync_mock = MagicMock()
+    monkeypatch.setattr("songhive.api.routes.albums._enqueue_track_tag_sync", sync_mock)
+
+    cover = client.post(
+        f"/api/v1/albums/{album.id}/cover",
+        files={"file": ("cover.jpg", io.BytesIO(b"fake cover"), "image/jpeg")},
+        headers=headers,
+    )
+    assert cover.status_code == 200
+
+    enqueued_ids = [call.args[0] for call in sync_mock.call_args_list]
+    assert str(track_without_image.id) in enqueued_ids
+    assert str(track_with_image.id) not in enqueued_ids
 
 
 @pytest.fixture

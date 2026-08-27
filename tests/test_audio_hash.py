@@ -88,6 +88,42 @@ async def test_audio_hash_differs_for_different_audio(ext: str, tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+async def test_audio_hash_uses_first_audio_stream(tmp_path: Path) -> None:
+    """Files with multiple audio streams hash only the first stream."""
+    first = tmp_path / "first.mp3"
+    second = tmp_path / "second.mp3"
+    multi = tmp_path / "multi.mkv"
+
+    _generate_audio(first, frequency=1000)
+    _generate_audio(second, frequency=1200)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(first),
+            "-i",
+            str(second),
+            "-map",
+            "0:a",
+            "-map",
+            "1:a",
+            "-c",
+            "copy",
+            str(multi),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    first_hash = await audio_hash(first)
+    multi_hash = await audio_hash(multi)
+
+    assert len(multi_hash) == 64
+    assert multi_hash == first_hash
+
+
+@pytest.mark.asyncio
 async def test_audio_hash_raises_on_ffmpeg_error(tmp_path: Path) -> None:
     """A non-zero ffmpeg exit code raises RuntimeError with the stderr message."""
     bad_file = tmp_path / "not_audio.txt"

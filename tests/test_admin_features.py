@@ -544,3 +544,74 @@ async def test_admin_sync_tags_endpoint(client, db_session, make_user, auth_head
     assert log is not None
     assert log.actor_id == str(admin.id)
     assert log.details["enqueued"] == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_tags_endpoint_unknown_track_is_noop(client, db_session, make_user, auth_headers, monkeypatch):
+    """Requesting a tag sync for a nonexistent track reports nothing enqueued."""
+    admin = await make_user("admin", role="admin")
+
+    sync_mock = MagicMock()
+    monkeypatch.setattr("songhive.api.routes.admin.sync_track_tags", sync_mock)
+
+    response = client.post(
+        "/api/v1/admin/sync-tags",
+        headers=auth_headers(admin),
+        json={"track_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["enqueued"] == 0
+    assert data["status"] == "queued"
+    sync_mock.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_tags_endpoint_partial_enqueue_on_broker_failure(
+    client, db_session, make_user, auth_headers, monkeypatch
+):
+    """A broker failure mid-batch returns 503 but audits the partial count."""
+    admin = await make_user("admin", role="admin")
+    artist = Artist(name="Test Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    tracks = [
+        Track(
+            title=f"Track {i}",
+            artist_id=artist.id,
+            owner_id=str(admin.id),
+            visibility=Visibility.PRIVATE.value,
+        )
+        for i in range(3)
+    ]
+    db_session.add_all(tracks)
+    await db_session.commit()
+
+    class _FailingCelery:
+        def __init__(self):
+            self.call_count = 0
+
+        def delay(self, track_id):
+            self.call_count += 1
+            if self.call_count > 1:
+                from kombu.exceptions import OperationalError as KombuOperationalError
+
+                raise KombuOperationalError("broker down")
+
+    sync_mock = MagicMock()
+    sync_mock.delay = _FailingCelery().delay
+    monkeypatch.setattr("songhive.api.routes.admin.sync_track_tags", sync_mock)
+
+    response = client.post(
+        "/api/v1/admin/sync-tags",
+        headers=auth_headers(admin),
+        json={"all": True},
+    )
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+    result = await db_session.execute(select(AuditLog).where(AuditLog.action == "tags.sync"))
+    log = result.scalar_one_or_none()
+    assert log is not None
+    assert log.actor_id == str(admin.id)
+    assert log.details["enqueued"] == 1

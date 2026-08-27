@@ -16,8 +16,8 @@ from songhive.models.artist import Artist
 from songhive.models.base import Base
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
-from songhive.music.metadata import extract_metadata
-from songhive.tasks.tags import _build_metadata, _resolve_cover_file, sync_track_tags
+from songhive.music.metadata import AudioMetadataWrite, extract_metadata
+from songhive.tasks.tags import _build_metadata, _prepare_cover_art, _resolve_cover_file, sync_track_tags
 
 
 def _make_silence(tmp_path: Path, ext: str = "mp3") -> Path:
@@ -247,7 +247,8 @@ def test_build_metadata_uses_track_and_album():
     assert meta.track_number == 5
     assert meta.disc_number == 2
     assert meta.genre == "Pop"
-    assert meta.year == 2022
+    # Track year takes precedence over album year.
+    assert meta.year == 2021
 
 
 def test_resolve_cover_file_prefers_track_image():
@@ -266,3 +267,15 @@ def test_resolve_cover_file_prefers_track_image():
 
     track.album = None
     assert _resolve_cover_file(track) is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_cover_art_clears_when_no_cover_resolves():
+    """_prepare_cover_art flags embedded cover art for clearing when no cover is found."""
+    track = MagicMock()
+    track.image_file = None
+    track.album = None
+    meta = AudioMetadataWrite(title="Title")
+    result = await _prepare_cover_art(MagicMock(), track, meta)
+    assert result is None
+    assert meta.clear_cover_art is True
