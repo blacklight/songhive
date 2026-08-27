@@ -563,8 +563,4 @@ watch(
   display: flex;
   justify-content: center;
 }
-
-:deep(.track-list) {
-  margin-top: -2.5rem;
-}
 </style>
