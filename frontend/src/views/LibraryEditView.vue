@@ -25,7 +25,7 @@ import {
 import type { TrackResponse } from "@/api/tracks";
 import { toVisibility } from "@/utils/entity";
 import { getApiErrorMessage } from "@/api/client";
-import { useOwnership } from "@/composables/useOwnership";
+import { useCanManage } from "@/composables/useCanManage";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
@@ -76,7 +76,7 @@ const isRemovingCover = ref(false);
 const imageError = ref<string | null>(null);
 const coverError = ref<string | null>(null);
 
-const { isOwner } = useOwnership(
+const { canManage } = useCanManage(
   computed(() => library.value?.owner_id ?? null),
 );
 
@@ -110,7 +110,7 @@ const removableFrom = computed(() =>
     ? {
         type: "library" as const,
         id: library.value.id,
-        canRemove: isOwner.value,
+        canRemove: canManage.value,
         name: library.value.name,
       }
     : undefined,
@@ -156,7 +156,7 @@ async function load() {
   await loadLibrary();
   if (!library.value) return;
 
-  if (!isOwner.value) {
+  if (!canManage.value) {
     await router.replace(`/libraries/${libraryId.value}`);
     return;
   }
@@ -418,7 +418,7 @@ watch(
       </AppButton>
     </div>
 
-    <template v-else-if="library && isOwner">
+    <template v-else-if="library && canManage">
       <AppPageTitle class="library-edit-view__title" icon="pen-to-square">
         {{ t("browse.edit.editLibrary") }}
       </AppPageTitle>

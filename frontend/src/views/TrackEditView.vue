@@ -12,7 +12,7 @@ import {
   type TrackUpdate,
 } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
-import { useOwnership } from "@/composables/useOwnership";
+import { useCanManage } from "@/composables/useCanManage";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import type { Visibility } from "@/api/libraries";
@@ -49,7 +49,9 @@ const isUploadingImage = ref(false);
 const isRemovingImage = ref(false);
 const imageError = ref<string | null>(null);
 
-const { isOwner } = useOwnership(computed(() => track.value?.owner_id ?? null));
+const { canManage } = useCanManage(
+  computed(() => track.value?.owner_id ?? null),
+);
 
 const visibilityOptions = computed(() => [
   { value: "private", label: t("browse.visibility.private") },
@@ -91,7 +93,7 @@ async function load() {
   await loadTrack();
   if (!track.value) return;
 
-  if (!isOwner.value) {
+  if (!canManage.value) {
     await router.replace(`/tracks/${trackId.value}`);
     return;
   }
@@ -226,7 +228,7 @@ watch(
       </AppButton>
     </div>
 
-    <template v-else-if="track && isOwner">
+    <template v-else-if="track && canManage">
       <AppPageTitle class="track-edit-view__title" icon="pen-to-square">
         {{ t("browse.edit.editTrack") }}
       </AppPageTitle>

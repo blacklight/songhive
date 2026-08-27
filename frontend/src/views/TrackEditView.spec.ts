@@ -63,6 +63,12 @@ function setAuthenticated(userId = "user-1") {
   authStore.user = { id: userId, username: "alice" } as never;
 }
 
+function setAdmin(userId = "admin-1") {
+  setAuthenticated(userId);
+  const authStore = useAuthStore();
+  authStore.role = "admin";
+}
+
 describe("TrackEditView", () => {
   let wrapper: ReturnType<typeof mount>;
 
@@ -126,6 +132,17 @@ describe("TrackEditView", () => {
       include: "artist,album",
     });
     expect(router.currentRoute.value.path).toBe("/tracks/track-1");
+  });
+
+  it("loads the track form for an admin who is not the owner", async () => {
+    setAdmin("admin-1");
+    const router = await mountAt("/tracks/track-1/edit");
+
+    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
+      include: "artist,album",
+    });
+    expect(wrapper.text()).toContain("Edit track");
+    expect(router.currentRoute.value.path).toBe("/tracks/track-1/edit");
   });
 
   it("submits the update form with the correct body", async () => {

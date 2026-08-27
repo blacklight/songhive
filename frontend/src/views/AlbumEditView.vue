@@ -12,7 +12,7 @@ import {
   type AlbumUpdate,
 } from "@/api/albums";
 import { getApiErrorMessage } from "@/api/client";
-import { useOwnership } from "@/composables/useOwnership";
+import { useCanManage } from "@/composables/useCanManage";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import type { Visibility } from "@/api/libraries";
@@ -45,7 +45,9 @@ const isUploadingCover = ref(false);
 const isRemovingCover = ref(false);
 const coverError = ref<string | null>(null);
 
-const { isOwner } = useOwnership(computed(() => album.value?.owner_id ?? null));
+const { canManage } = useCanManage(
+  computed(() => album.value?.owner_id ?? null),
+);
 
 const visibilityOptions = computed(() => [
   { value: "private", label: t("browse.visibility.private") },
@@ -81,7 +83,7 @@ async function load() {
   await loadAlbum();
   if (!album.value) return;
 
-  if (!isOwner.value) {
+  if (!canManage.value) {
     await router.replace(`/albums/${albumId.value}`);
     return;
   }
@@ -212,7 +214,7 @@ watch(
       </AppButton>
     </div>
 
-    <template v-else-if="album && isOwner">
+    <template v-else-if="album && canManage">
       <AppPageTitle class="album-edit-view__title" icon="pen-to-square">
         {{ t("browse.edit.editAlbum") }}
       </AppPageTitle>

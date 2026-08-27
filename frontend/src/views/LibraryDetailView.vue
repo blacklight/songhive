@@ -14,6 +14,7 @@ import {
 } from "@/api/libraries";
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
+import { useCanManage } from "@/composables/useCanManage";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
@@ -71,6 +72,9 @@ const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
   useEntityMeta(library);
 
 const { isOwner } = useOwnership(
+  computed(() => library.value?.owner_id ?? null),
+);
+const { canManage } = useCanManage(
   computed(() => library.value?.owner_id ?? null),
 );
 
@@ -150,7 +154,7 @@ const actions = computed(() => [
     label: t("common.edit"),
     icon: "pen-to-square",
     variant: "secondary" as const,
-    visible: isOwner.value,
+    visible: canManage.value,
   },
   {
     key: "delete",

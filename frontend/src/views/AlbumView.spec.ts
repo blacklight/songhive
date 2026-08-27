@@ -3,6 +3,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
+import { useAuthStore } from "@/stores/auth";
 import * as albumsApi from "@/api/albums";
 import * as artistsApi from "@/api/artists";
 import * as tracksApi from "@/api/tracks";
@@ -59,6 +60,21 @@ function createArtist(id: string, name: string): ArtistResponse {
     image_file_id: null,
     image_url: null,
   };
+}
+
+function setAuthenticated(userId = "user-1") {
+  const authStore = useAuthStore();
+  authStore.accessToken = "token";
+  authStore.refreshToken = "refresh";
+  authStore.expiresAt = Date.now() + 10000;
+  authStore.status = "authenticated";
+  authStore.user = { id: userId, username: "alice" } as never;
+}
+
+function setAdmin(userId = "admin-1") {
+  setAuthenticated(userId);
+  const authStore = useAuthStore();
+  authStore.role = "admin";
 }
 
 function createTrack(id: string, title: string): TrackResponse {
@@ -214,5 +230,12 @@ describe("AlbumView", () => {
 
     expect(albumsApi.getAlbum).toHaveBeenLastCalledWith("album-2");
     expect(wrapper.text()).toContain("Sunset");
+  });
+
+  it("shows the edit action for an admin who is not the owner", async () => {
+    setAdmin("admin-1");
+    await mountAt("/albums/album-1");
+
+    expect(wrapper.text()).toContain(i18n.global.t("common.edit"));
   });
 });

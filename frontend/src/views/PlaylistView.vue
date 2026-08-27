@@ -14,11 +14,11 @@ import {
 } from "@/api/playlists";
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
+import { useCanManage } from "@/composables/useCanManage";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
-import { useAuthStore } from "@/stores/auth";
 import type { QueueTrack } from "@/player/types";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -33,7 +33,6 @@ import SortControl from "@/components/ui/SortControl.vue";
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
-const authStore = useAuthStore();
 const playlistId = computed(() => String(route.params.id));
 
 const playlist = ref<PlaylistResponse | null>(null);
@@ -75,6 +74,9 @@ const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
 const { isOwner } = useOwnership(
   computed(() => playlist.value?.owner_id ?? null),
 );
+const { canManage } = useCanManage(
+  computed(() => playlist.value?.owner_id ?? null),
+);
 
 const isPublic = computed(() => playlist.value?.visibility === "public");
 
@@ -102,7 +104,7 @@ const {
 
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
-const canRemove = computed(() => isOwner.value || authStore.isAdmin);
+const canRemove = computed(() => canManage.value);
 
 const removableFrom = computed(() => {
   if (!playlist.value) return undefined;
@@ -155,7 +157,7 @@ const actions = computed(() => [
     label: t("common.edit"),
     icon: "pen-to-square",
     variant: "secondary" as const,
-    visible: isOwner.value,
+    visible: canManage.value,
   },
   {
     key: "delete",

@@ -17,6 +17,7 @@ import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
+import { useCanManage } from "@/composables/useCanManage";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
@@ -76,6 +77,9 @@ const artistName = computed(() => artist.value?.name ?? "");
 const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
   useEntityMeta(album);
 const { isOwner } = useOwnership(computed(() => album.value?.owner_id ?? null));
+const { canManage } = useCanManage(
+  computed(() => album.value?.owner_id ?? null),
+);
 
 const isPublic = computed(() => album.value?.visibility === "public");
 
@@ -130,7 +134,7 @@ const actions = computed(() => [
     label: t("common.edit"),
     icon: "pen-to-square",
     variant: "secondary" as const,
-    visible: isOwner.value,
+    visible: canManage.value,
   },
   {
     key: "add-to-library",

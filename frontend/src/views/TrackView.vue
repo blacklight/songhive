@@ -12,6 +12,7 @@ import { getAlbum, type AlbumResponse } from "@/api/albums";
 import { getApiErrorMessage } from "@/api/client";
 import { usePlayerStore } from "@/stores/player";
 import { useAuthStore } from "@/stores/auth";
+import { useCanManage } from "@/composables/useCanManage";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
@@ -57,6 +58,9 @@ const queueTrack = computed(() => {
 
 const { ownerName, visibilityText } = useEntityMeta(track);
 const { isOwner } = useOwnership(computed(() => track.value?.owner_id ?? null));
+const { canManage } = useCanManage(
+  computed(() => track.value?.owner_id ?? null),
+);
 
 const isPublic = computed(() => track.value?.visibility === "public");
 
@@ -103,7 +107,7 @@ const actions = computed(() => [
     label: t("common.edit"),
     icon: "pen-to-square",
     variant: "secondary" as const,
-    visible: isOwner.value,
+    visible: canManage.value,
   },
   {
     key: "add-to-library",

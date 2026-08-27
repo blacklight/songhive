@@ -98,6 +98,12 @@ function setAuthenticated(userId = "user-1") {
   authStore.user = { id: userId, username: "alice" } as never;
 }
 
+function setAdmin(userId = "admin-1") {
+  setAuthenticated(userId);
+  const authStore = useAuthStore();
+  authStore.role = "admin";
+}
+
 describe("LibraryEditView", () => {
   let wrapper: ReturnType<typeof mount>;
 
@@ -158,6 +164,15 @@ describe("LibraryEditView", () => {
 
     expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1");
     expect(router.currentRoute.value.path).toBe("/libraries/library-1");
+  });
+
+  it("loads the library form for an admin who is not the owner", async () => {
+    setAdmin("admin-1");
+    const router = await mountAt("/libraries/library-1/edit");
+
+    expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1");
+    expect(wrapper.text()).toContain("Edit library");
+    expect(router.currentRoute.value.path).toBe("/libraries/library-1/edit");
   });
 
   it("submits the metadata form with the correct body", async () => {

@@ -54,6 +54,12 @@ function setAuthenticated(userId = "user-1") {
   authStore.user = { id: userId, username: "alice" } as never;
 }
 
+function setAdmin(userId = "admin-1") {
+  setAuthenticated(userId);
+  const authStore = useAuthStore();
+  authStore.role = "admin";
+}
+
 describe("AlbumEditView", () => {
   let wrapper: ReturnType<typeof mount>;
 
@@ -110,6 +116,15 @@ describe("AlbumEditView", () => {
 
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1");
     expect(router.currentRoute.value.path).toBe("/albums/album-1");
+  });
+
+  it("loads the album form for an admin who is not the owner", async () => {
+    setAdmin("admin-1");
+    const router = await mountAt("/albums/album-1/edit");
+
+    expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1");
+    expect(wrapper.text()).toContain("Edit album");
+    expect(router.currentRoute.value.path).toBe("/albums/album-1/edit");
   });
 
   it("submits the update form with the correct body", async () => {

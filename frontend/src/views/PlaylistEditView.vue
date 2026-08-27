@@ -15,7 +15,7 @@ import {
   type Visibility,
 } from "@/api/playlists";
 import { getApiErrorMessage } from "@/api/client";
-import { useOwnership } from "@/composables/useOwnership";
+import { useCanManage } from "@/composables/useCanManage";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import { toVisibility } from "@/utils/entity";
@@ -49,7 +49,7 @@ const isRemovingCover = ref(false);
 const imageError = ref<string | null>(null);
 const coverError = ref<string | null>(null);
 
-const { isOwner } = useOwnership(
+const { canManage } = useCanManage(
   computed(() => playlist.value?.owner_id ?? null),
 );
 
@@ -85,7 +85,7 @@ async function load() {
   await loadPlaylist();
   if (!playlist.value) return;
 
-  if (!isOwner.value) {
+  if (!canManage.value) {
     await router.replace(`/playlists/${playlistId.value}`);
     return;
   }
@@ -253,7 +253,7 @@ watch(
       </AppButton>
     </div>
 
-    <template v-else-if="playlist && isOwner">
+    <template v-else-if="playlist && canManage">
       <AppPageTitle class="playlist-edit-view__title" icon="pen-to-square">
         {{ "Edit playlist" }}
       </AppPageTitle>
