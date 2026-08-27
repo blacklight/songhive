@@ -395,7 +395,7 @@ defineSlots<{
 }
 
 .bulk-editable-grid__item-wrapper:hover {
-  background-color: var(--color-surface-raised);
+  background-color: var(--color-surface-hover);
 }
 
 .bulk-editable-grid__item-wrapper--list {
