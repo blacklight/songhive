@@ -41,6 +41,11 @@ function createTestRouter() {
       { path: "/", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
+      {
+        path: "/tracks/:id/edit",
+        name: "trackEdit",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -266,6 +271,35 @@ describe("TrackList", () => {
 
     await clickMenuItem(i18n.global.t("browse.contextMenu.goToAlbum"));
     expect(router.currentRoute.value.path).toBe("/albums/album-1");
+  });
+
+  it("navigates to the track edit view from the context menu when the user can manage the track", async () => {
+    const router = createTestRouter();
+    const tracks = [makeTrack({ owner_id: "user-1" })];
+    ({ wrapper } = mountTrackList({ tracks, context: "Artist" }, router));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    await clickMenuItem(i18n.global.t("browse.contextMenu.editTrack"));
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/tracks/track-1/edit");
+    expect(router.currentRoute.value.name).toBe("trackEdit");
+  });
+
+  it("does not show the edit option when the user cannot manage the track", async () => {
+    const tracks = [makeTrack({ owner_id: "user-2" })];
+    ({ wrapper } = mountTrackList({ tracks, context: "Artist" }));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    expect(
+      findMenuLabel(i18n.global.t("browse.contextMenu.editTrack")),
+    ).toBeUndefined();
   });
 
   it("renders artist and album as router links in the table", async () => {

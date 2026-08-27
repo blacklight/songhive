@@ -316,7 +316,7 @@ function toggleRow(track: QueueTrack) {
   }
 }
 
-function canDelete(track: QueueTrack): boolean {
+function canManageTrack(track: QueueTrack): boolean {
   return canManageItem(authStore, track);
 }
 
@@ -545,7 +545,15 @@ const menuItems = computed(() => {
     });
   }
 
-  if (track && canDelete(track)) {
+  if (track && canManageTrack(track)) {
+    items.push({
+      key: "edit-track",
+      label: t("browse.contextMenu.editTrack"),
+      icon: "pen-to-square",
+    });
+  }
+
+  if (track && canManageTrack(track)) {
     items.push({
       key: "enrich",
       label: t("browse.contextMenu.enrich"),
@@ -553,7 +561,7 @@ const menuItems = computed(() => {
     });
   }
 
-  if (props.deletable && track && canDelete(track)) {
+  if (props.deletable && track && canManageTrack(track)) {
     items.push({
       key: "delete-track",
       label: t("browse.contextMenu.deleteTrack"),
@@ -634,6 +642,12 @@ async function onMenuSelect(key: string) {
       break;
     case "remove-from-collection":
       openSingleRemove(track);
+      break;
+    case "edit-track":
+      await router.push({
+        name: "trackEdit",
+        params: { id: track.id },
+      });
       break;
     case "delete-track":
       openSingleDelete(track);

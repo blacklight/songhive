@@ -52,7 +52,6 @@ const queueTrack = computed(() => {
   return toQueueTrack(track.value, {
     artist_name: artist.value?.name ?? "",
     album_title: album.value?.title,
-    artwork_url: album.value?.cover_url ?? undefined,
   });
 });
 

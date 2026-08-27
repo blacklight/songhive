@@ -384,6 +384,7 @@
       "removeFromLibrary": "Remove from library",
       "removeFromPlaylist": "Remove from playlist",
       "deleteTrack": "Delete track",
+      "editTrack": "Edit track",
       "enrich": "Fetch metadata"
     },
     "enrich": {
