@@ -104,30 +104,17 @@ async def upload_file(
     includes an ``X-Duplicate: true`` header and the caller's ``owner_id`` and
     ``visibility`` are ignored; they only apply to newly created rows.
 
-    Audio files are additionally imported into the selected library (or the
-    caller's default ``Uploads`` library) so they become tracks and are not
-    garbage-collected as orphans.
+    Audio files are imported directly through ``import_audio_file`` so the
+    audio-only content hash is used for both the stored file and the track.
+    This avoids creating a second full-file ``StoredFile`` row for the same
+    audio upload.
     """
     content_type = file.content_type or "application/octet-stream"
-    try:
-        stored_file, is_duplicate = await storage.store_file(
-            db,
-            file.file,
-            content_type=content_type,
-            original_filename=file.filename,
-            owner_id=current_user.id,
-            visibility=visibility.value,
-            return_duplicate=True,
-        )
-    except FileSizeLimitExceededError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large") from exc
-
-    if is_duplicate:
-        response.headers["X-Duplicate"] = "true"
-
+    stored_file: Optional[StoredFile] = None
+    is_duplicate = False
     track_id: Optional[str] = None
+
     if content_type.startswith("audio/"):
-        storage._rewind(file.file)
         library = await _get_target_library(db, current_user, library_id)
         try:
             result = await import_audio_file(
@@ -141,11 +128,36 @@ async def upload_file(
                 source="upload",
                 content_type=content_type,
             )
+            stored_file = result.stored_file
+            is_duplicate = result.was_duplicate
             track_id = str(result.track.id)
         except DuplicateTrackError as exc:
             track_id = exc.existing_track_id
+            if exc.stored_file_id is not None:
+                stored_file = await db.get(StoredFile, exc.stored_file_id)
+            is_duplicate = exc.was_duplicate
+        except FileSizeLimitExceededError as exc:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large") from exc
         except Exception as exc:
-            logger.warning("Could not import audio file %s as track: %s", stored_file.id, exc)
+            logger.warning("Could not import audio file as track: %s", exc)
+
+    if stored_file is None:
+        storage._rewind(file.file)
+        try:
+            stored_file, is_duplicate = await storage.store_file(
+                db,
+                file.file,
+                content_type=content_type,
+                original_filename=file.filename,
+                owner_id=current_user.id,
+                visibility=visibility.value,
+                return_duplicate=True,
+            )
+        except FileSizeLimitExceededError as exc:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large") from exc
+
+    if is_duplicate:
+        response.headers["X-Duplicate"] = "true"
 
     if track_id is not None:
         response.headers["X-Track-Id"] = track_id

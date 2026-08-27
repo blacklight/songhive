@@ -5,10 +5,13 @@ Tests for the file storage API endpoints.
 import hashlib
 import io
 import logging
+from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
 
 from songhive.models._enums import Visibility
+from songhive.models.stored_file import StoredFile
 from songhive.services.metadata import AudioMetadata
 
 
@@ -544,6 +547,109 @@ def test_upload_audio_file_imports_as_track(files_client, regular_user, auth_hea
     assert libraries_response.status_code == 200
     library_names = {lib["name"] for lib in libraries_response.json()}
     assert "Uploads" in library_names
+
+
+async def test_upload_audio_file_creates_single_stored_file(
+    files_client, regular_user, auth_headers, monkeypatch, db_session
+):
+    """Uploading an audio file creates exactly one StoredFile row.
+
+    The audio-only hash should be used for deduplication, and the endpoint
+    must not create a second full-file StoredFile alongside the track file.
+    """
+    content = b"fake audio content for audio hash test"
+    full_hash = hashlib.sha256(content).hexdigest()
+    audio_hash = "0" * 64
+
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Audio Hashed Song",
+            artist="Audio Hashed Artist",
+            album="Audio Hashed Album",
+            mimetype="audio/mpeg",
+        ),
+    )
+    monkeypatch.setattr(
+        "songhive.services.import_.audio_hash",
+        AsyncMock(return_value=audio_hash),
+    )
+
+    headers = auth_headers(regular_user)
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("hashed.mp3", io.BytesIO(content), "audio/mpeg")},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["sha256"] == audio_hash
+    assert data["sha256"] != full_hash
+    assert "X-Track-Id" in response.headers
+
+    track_response = files_client.get(
+        f"/api/v1/tracks/{response.headers['X-Track-Id']}",
+        headers=headers,
+    )
+    assert track_response.status_code == 200
+    track = track_response.json()
+    assert track["audio_url"] == data["url"]
+
+    files_for_content = list(
+        (await db_session.execute(select(StoredFile).where(StoredFile.size == len(content)))).scalars().all()
+    )
+    assert len(files_for_content) == 1
+    assert str(files_for_content[0].id) == data["id"]
+
+
+async def test_upload_audio_duplicate_uses_canonical_stored_file(
+    files_client, regular_user, auth_headers, monkeypatch, db_session
+):
+    """Re-uploading the same audio returns the canonical StoredFile and track."""
+    content = b"same audio for duplicate test"
+    audio_hash = "0" * 64
+
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Same Song",
+            artist="Same Artist",
+            album="Same Album",
+            mimetype="audio/mpeg",
+        ),
+    )
+    monkeypatch.setattr(
+        "songhive.services.import_.audio_hash",
+        AsyncMock(return_value=audio_hash),
+    )
+
+    headers = auth_headers(regular_user)
+    first = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("same.mp3", io.BytesIO(content), "audio/mpeg")},
+        headers=headers,
+    )
+    assert first.status_code == 200
+    first_data = first.json()
+    first_track_id = first.headers["X-Track-Id"]
+
+    second = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("same.mp3", io.BytesIO(content), "audio/mpeg")},
+        headers=headers,
+    )
+    assert second.status_code == 200
+    second_data = second.json()
+    assert second.headers.get("X-Duplicate") == "true"
+    assert second.headers["X-Track-Id"] == first_track_id
+    assert second_data["id"] == first_data["id"]
+    assert second_data["sha256"] == audio_hash
+
+    files_for_content = list(
+        (await db_session.execute(select(StoredFile).where(StoredFile.size == len(content)))).scalars().all()
+    )
+    assert len(files_for_content) == 1
 
 
 def test_upload_audio_file_ignores_failed_import(files_client, regular_user, auth_headers, monkeypatch):

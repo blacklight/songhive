@@ -34,9 +34,16 @@ logger = logging.getLogger(__name__)
 class DuplicateTrackError(Exception):
     """Raised when an upload matches an existing track."""
 
-    def __init__(self, existing_track_id: str):
+    def __init__(
+        self,
+        existing_track_id: str,
+        stored_file_id: Optional[str] = None,
+        was_duplicate: bool = False,
+    ):
         super().__init__(f"Duplicate of track {existing_track_id}")
         self.existing_track_id = existing_track_id
+        self.stored_file_id = stored_file_id
+        self.was_duplicate = was_duplicate
 
 
 @dataclass
@@ -456,13 +463,13 @@ async def import_audio_file(
     if was_duplicate and not force:
         existing = await _find_duplicate_by_bytes(session, str(stored_file.id), owner_id)
         if existing:
-            raise DuplicateTrackError(str(existing.id))
+            raise DuplicateTrackError(str(existing.id), str(stored_file.id), was_duplicate=True)
 
     metadata = await _extract_metadata_from_file(storage_service, stored_file)
 
     existing_meta = await _find_duplicate_by_metadata(session, library_id, metadata)
     if existing_meta and not force:
-        raise DuplicateTrackError(str(existing_meta.id))
+        raise DuplicateTrackError(str(existing_meta.id), str(stored_file.id), was_duplicate=was_duplicate)
 
     artist, album = await _resolve_artist_and_album(session, metadata, owner_id, visibility)
     track = await _create_track_record(
