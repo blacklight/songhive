@@ -1014,7 +1014,11 @@ async def resolve_track_ids_for_sync(
 ) -> List[str]:
     """Resolve track IDs for a tag sync operation based on the provided scope."""
     if track_id:
-        return [track_id]
+        stmt = select(Track.id).where(Track.id == track_id)
+        stmt = apply_access_filter(stmt, Track, user, "track")
+        result = await session.execute(stmt)
+        row = result.scalar_one_or_none()
+        return [str(row)] if row is not None else []
     if album_id:
         return await get_track_ids_for_album(session, album_id, user=user)
     if artist_id:
