@@ -21,6 +21,9 @@ export function listTracks(params?: {
   limit?: number;
   offset?: number;
   include?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
+  favorited?: boolean;
 }): Promise<TrackResponse[]> {
   return apiRequest<TrackResponse[]>("/tracks/", { query: params });
 }
@@ -43,6 +46,9 @@ export async function listTracksWithMeta(params?: {
   offset?: number;
   include?: string;
   around_track_id?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
+  favorited?: boolean;
 }): Promise<ListTracksResult> {
   const response = await apiRequestWithHeaders<TrackResponse[]>("/tracks/", {
     query: params,

@@ -9,6 +9,8 @@ export function listArtists(params?: {
   limit?: number;
   offset?: number;
   include?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }): Promise<ArtistResponse[]> {
   return apiRequest<ArtistResponse[]>("/artists/", { query: params });
 }

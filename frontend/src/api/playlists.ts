@@ -10,6 +10,8 @@ export type TrackResponse = components["schemas"]["TrackResponse"];
 export function listPlaylists(params?: {
   limit?: number;
   offset?: number;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }): Promise<PlaylistResponse[]> {
   return apiRequest<PlaylistResponse[]>("/playlists/", { query: params });
 }
@@ -68,7 +70,13 @@ export function addTracksToPlaylist(
 
 export function listPlaylistTracks(
   id: string,
-  params?: { limit?: number; offset?: number; include?: string },
+  params?: {
+    limit?: number;
+    offset?: number;
+    include?: string;
+    sort_by?: string;
+    sort_dir?: "asc" | "desc";
+  },
 ): Promise<TrackResponse[]> {
   return apiRequest<TrackResponse[]>(`/playlists/${id}/tracks`, {
     query: params,

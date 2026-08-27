@@ -12,6 +12,8 @@ export function listAlbums(params?: {
   limit?: number;
   offset?: number;
   include?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }): Promise<AlbumResponse[]> {
   return apiRequest<AlbumResponse[]>("/albums/", { query: params });
 }

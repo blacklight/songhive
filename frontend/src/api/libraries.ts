@@ -12,6 +12,8 @@ export type Visibility = components["schemas"]["Visibility"];
 export function listLibraries(params?: {
   limit?: number;
   offset?: number;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }): Promise<LibraryResponse[]> {
   return apiRequest<LibraryResponse[]>("/libraries/", { query: params });
 }
@@ -86,7 +88,13 @@ export function deleteLibraryCover(id: string): Promise<LibraryResponse> {
 
 export function listLibraryTracks(
   id: string,
-  params?: { limit?: number; offset?: number; include?: string },
+  params?: {
+    limit?: number;
+    offset?: number;
+    include?: string;
+    sort_by?: string;
+    sort_dir?: "asc" | "desc";
+  },
 ): Promise<TrackResponse[]> {
   return apiRequest<TrackResponse[]>(`/libraries/${id}/tracks`, {
     query: params,
