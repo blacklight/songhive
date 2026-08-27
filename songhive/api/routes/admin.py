@@ -825,15 +825,17 @@ async def sync_tags(
     )
 
     enqueued = 0
+    broker_error: Optional[Exception] = None
     try:
         for track_id in track_ids:
-            sync_track_tags.delay(track_id)  # type: ignore
-            enqueued += 1
+            try:
+                sync_track_tags.delay(track_id)  # type: ignore
+                enqueued += 1
+            except (KombuOperationalError, RedisConnectionError, OSError) as exc:
+                broker_error = exc
+                break
     except (KombuOperationalError, RedisConnectionError, OSError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Celery broker unavailable",
-        ) from exc
+        broker_error = exc
 
     scope = {
         "track_id": body.track_id,
@@ -852,5 +854,11 @@ async def sync_tags(
         ip_address=client_ip(request),
     )
     await db.commit()
+
+    if broker_error is not None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Celery broker unavailable",
+        ) from broker_error
 
     return SyncTagsResponse(enqueued=enqueued, status="queued")
