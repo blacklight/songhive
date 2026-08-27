@@ -148,9 +148,8 @@ def _run_uvicorn(config):
 def _print_cli_banner():
     from .version import __version__
 
-    logger.info(
-        dedent(
-            rf"""
+    banner = dedent(
+        rf"""
            ┏━[━━]━┓                                                ┏━[━━]━┓
            ┃      ┃                                                ┃      ┃
         ━━━┫      ┣━━━━━━━━━━━━━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━━━┫      ┣━━━
@@ -164,8 +163,9 @@ def _print_cli_banner():
            ┃      ┃                                                ┃      ┃
            ┗━[━━]━┛                                                ┗━[━━]━┛
         """
-        )
     )
+
+    logger.info(banner)
 
 
 def main():
