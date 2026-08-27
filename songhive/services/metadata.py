@@ -52,6 +52,7 @@ class AudioMetadataWrite:
     year: Optional[int] = None
     cover_art: Optional[bytes] = None
     cover_art_mime: Optional[str] = None
+    clear_cover_art: bool = False
 
 
 def _first(values) -> Optional[str]:
@@ -292,10 +293,21 @@ def _cover_mime(data: bytes, mime: Optional[str]) -> str:
 
 def _write_mp3_tags(audio: MP3, meta: AudioMetadataWrite) -> None:
     """Write ID3v2.4 tags to an MP3 file."""
-    if audio.tags is None:
+    needs_tags = (
+        meta.title is not None
+        or meta.artist is not None
+        or meta.album is not None
+        or meta.track_number is not None
+        or meta.disc_number is not None
+        or meta.genre is not None
+        or meta.year is not None
+        or meta.cover_art is not None
+    )
+    if audio.tags is None and needs_tags:
         audio.add_tags()
     tags = audio.tags
-    assert tags is not None
+    if tags is None:
+        return
 
     if meta.title is not None:
         tags["TIT2"] = TIT2(encoding=3, text=meta.title)
@@ -311,53 +323,81 @@ def _write_mp3_tags(audio: MP3, meta: AudioMetadataWrite) -> None:
         tags["TCON"] = TCON(encoding=3, text=meta.genre)
     if meta.year is not None:
         tags["TDRC"] = TDRC(encoding=3, text=str(meta.year))
-    if meta.cover_art is not None:
+    if meta.cover_art is not None or meta.clear_cover_art:
         for key in list(tags.keys()):
             if key.startswith("APIC"):
                 del tags[key]
-        mime = _cover_mime(meta.cover_art, meta.cover_art_mime)
-        tags["APIC"] = APIC(
-            encoding=3,
-            mime=mime,
-            type=3,
-            desc="cover",
-            data=meta.cover_art,
-        )
+        if meta.cover_art is not None:
+            mime = _cover_mime(meta.cover_art, meta.cover_art_mime)
+            tags["APIC"] = APIC(
+                encoding=3,
+                mime=mime,
+                type=3,
+                desc="cover",
+                data=meta.cover_art,
+            )
 
 
 def _write_flac_tags(audio: FLAC, meta: AudioMetadataWrite) -> None:
     """Write Vorbis Comments and a picture to a FLAC file."""
-    if audio.tags is None:
+    needs_tags = (
+        meta.title is not None
+        or meta.artist is not None
+        or meta.album is not None
+        or meta.track_number is not None
+        or meta.disc_number is not None
+        or meta.genre is not None
+        or meta.year is not None
+        or meta.cover_art is not None
+    )
+    if audio.tags is None and needs_tags:
         audio.add_tags()
 
-    if meta.title is not None:
-        audio["title"] = meta.title
-    if meta.artist is not None:
-        audio["artist"] = meta.artist
-    if meta.album is not None:
-        audio["album"] = meta.album
-    if meta.track_number is not None:
-        audio["tracknumber"] = str(meta.track_number)
-    if meta.disc_number is not None:
-        audio["discnumber"] = str(meta.disc_number)
-    if meta.genre is not None:
-        audio["genre"] = meta.genre
-    if meta.year is not None:
-        audio["date"] = str(meta.year)
-    if meta.cover_art is not None:
+    if audio.tags is not None:
+        if meta.title is not None:
+            audio["title"] = meta.title
+        if meta.artist is not None:
+            audio["artist"] = meta.artist
+        if meta.album is not None:
+            audio["album"] = meta.album
+        if meta.track_number is not None:
+            audio["tracknumber"] = str(meta.track_number)
+        if meta.disc_number is not None:
+            audio["discnumber"] = str(meta.disc_number)
+        if meta.genre is not None:
+            audio["genre"] = meta.genre
+        if meta.year is not None:
+            audio["date"] = str(meta.year)
+
+    if meta.cover_art is not None or meta.clear_cover_art:
         audio.clear_pictures()
-        pic = Picture()
-        pic.type = 3
-        pic.mime = _cover_mime(meta.cover_art, meta.cover_art_mime)
-        pic.desc = "cover"
-        pic.data = meta.cover_art
-        audio.add_picture(pic)
+        if meta.cover_art is not None:
+            pic = Picture()
+            pic.type = 3
+            pic.mime = _cover_mime(meta.cover_art, meta.cover_art_mime)
+            pic.desc = "cover"
+            pic.data = meta.cover_art
+            audio.add_picture(pic)
 
 
 def _write_ogg_tags(audio, meta: AudioMetadataWrite) -> None:
     """Write Vorbis Comments and a METADATA_BLOCK_PICTURE to an Ogg file."""
-    if audio.tags is None:
+    needs_tags = (
+        meta.title is not None
+        or meta.artist is not None
+        or meta.album is not None
+        or meta.track_number is not None
+        or meta.disc_number is not None
+        or meta.genre is not None
+        or meta.year is not None
+        or meta.cover_art is not None
+    )
+    if audio.tags is None and needs_tags:
         audio.add_tags()
+
+    tags = audio.tags
+    if tags is None:
+        return
 
     if meta.title is not None:
         audio["title"] = meta.title
@@ -373,19 +413,36 @@ def _write_ogg_tags(audio, meta: AudioMetadataWrite) -> None:
         audio["genre"] = meta.genre
     if meta.year is not None:
         audio["date"] = str(meta.year)
-    if meta.cover_art is not None:
-        pic = Picture()
-        pic.type = 3
-        pic.mime = _cover_mime(meta.cover_art, meta.cover_art_mime)
-        pic.desc = "cover"
-        pic.data = meta.cover_art
-        audio["METADATA_BLOCK_PICTURE"] = [base64.b64encode(pic.write()).decode("ascii")]
+    if meta.cover_art is not None or meta.clear_cover_art:
+        if "METADATA_BLOCK_PICTURE" in tags:
+            del tags["METADATA_BLOCK_PICTURE"]
+        if meta.cover_art is not None:
+            pic = Picture()
+            pic.type = 3
+            pic.mime = _cover_mime(meta.cover_art, meta.cover_art_mime)
+            pic.desc = "cover"
+            pic.data = meta.cover_art
+            audio["METADATA_BLOCK_PICTURE"] = [base64.b64encode(pic.write()).decode("ascii")]
 
 
 def _write_mp4_tags(audio: MP4, meta: AudioMetadataWrite) -> None:
     """Write iTunes-style atoms to an MP4/M4A file."""
-    if audio.tags is None:
+    needs_tags = (
+        meta.title is not None
+        or meta.artist is not None
+        or meta.album is not None
+        or meta.track_number is not None
+        or meta.disc_number is not None
+        or meta.genre is not None
+        or meta.year is not None
+        or meta.cover_art is not None
+    )
+    if audio.tags is None and needs_tags:
         audio.add_tags()
+
+    tags = audio.tags
+    if tags is None:
+        return
 
     if meta.title is not None:
         audio["\xa9nam"] = [meta.title]
@@ -401,10 +458,13 @@ def _write_mp4_tags(audio: MP4, meta: AudioMetadataWrite) -> None:
         audio["\xa9gen"] = [meta.genre]
     if meta.year is not None:
         audio["\xa9day"] = [str(meta.year)]
-    if meta.cover_art is not None:
-        mime = _cover_mime(meta.cover_art, meta.cover_art_mime)
-        imageformat = MP4Cover.FORMAT_PNG if mime.lower() == "image/png" else MP4Cover.FORMAT_JPEG
-        audio["covr"] = [MP4Cover(meta.cover_art, imageformat=imageformat)]
+    if meta.cover_art is not None or meta.clear_cover_art:
+        if "covr" in tags:
+            del tags["covr"]
+        if meta.cover_art is not None:
+            mime = _cover_mime(meta.cover_art, meta.cover_art_mime)
+            imageformat = MP4Cover.FORMAT_PNG if mime.lower() == "image/png" else MP4Cover.FORMAT_JPEG
+            audio["covr"] = [MP4Cover(meta.cover_art, imageformat=imageformat)]
 
 
 def write_metadata(file_path: Path, meta: AudioMetadataWrite) -> None:
