@@ -775,13 +775,20 @@ async def get_track_ids_for_album(
     session: AsyncSession,
     album_id: str,
     user: Optional[User] = None,
+    without_image: bool = False,
 ) -> List[str]:
-    """Return the IDs of accessible tracks that belong to ``album_id``."""
+    """Return the IDs of accessible tracks that belong to ``album_id``.
+
+    When ``without_image`` is True, only tracks without a track-level image
+    override are returned.
+    """
     stmt = (
         select(Track.id)
         .where(Track.album_id == album_id)
         .order_by(Track.track_number, Track.disc_number, Track.created_at)
     )
+    if without_image:
+        stmt = stmt.where(Track.image_file_id.is_(None))
     stmt = apply_access_filter(stmt, Track, user, "track")
     result = await session.execute(stmt)
     return [str(row) for row in result.scalars().all()]

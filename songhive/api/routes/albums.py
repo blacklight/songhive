@@ -293,7 +293,7 @@ async def upload_album_cover(
         ip_address=client_ip(request),
     )
     await db.commit()
-    track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user)
+    track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user, without_image=True)
     for track_id in track_ids:
         _enqueue_track_tag_sync(track_id)
 
@@ -332,7 +332,7 @@ async def delete_album_cover(
         ip_address=client_ip(request),
     )
     await db.commit()
-    track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user)
+    track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user, without_image=True)
     for track_id in track_ids:
         _enqueue_track_tag_sync(track_id)
 
