@@ -73,4 +73,9 @@ function onToggleDirection() {
   align-items: flex-end;
   gap: var(--space-2);
 }
+
+.app-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+}
 </style>
