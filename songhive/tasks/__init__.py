@@ -1,4 +1,4 @@
-from . import api_tokens, email, federation, import_, musicbrainz, storage, transcoding
+from . import api_tokens, email, federation, import_, musicbrainz, storage, tags, transcoding
 from .celery import celery_app
 
 __all__ = [
@@ -9,5 +9,6 @@ __all__ = [
     "import_",
     "musicbrainz",
     "storage",
+    "tags",
     "transcoding",
 ]

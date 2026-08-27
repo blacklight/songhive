@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from .celery import celery_app
+from .tags import sync_track_tags
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,15 @@ def enrich_track(track_id: str, force: bool = False) -> bool:
             return await mb_service.enrich_track(session, track_id, storage_service, force=force)
 
     try:
-        return asyncio.run(_run())
+        result = asyncio.run(_run())
     except Exception as exc:
         logger.exception("MusicBrainz enrichment failed for track %s: %s", track_id, exc)
         return False
+
+    if result:
+        try:
+            sync_track_tags.delay(track_id)  # type: ignore
+        except Exception as exc:
+            logger.warning("Could not enqueue tag sync after MusicBrainz enrichment for %s: %s", track_id, exc)
+
+    return result
