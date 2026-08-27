@@ -40,7 +40,12 @@ def get_redis_client(config: SonghiveConfig) -> Redis:
 async def close_redis_client() -> None:
     """Close the shared async Redis client, if it has been initialized."""
     global _redis_client
-    if _redis_client is not None:
-        await _redis_client.aclose()
-        _redis_client = None
-        logger.info("Closed shared Redis client")
+    client = _redis_client
+    _redis_client = None
+    if client is not None:
+        try:
+            await client.aclose()
+        except Exception:
+            logger.exception("Error closing shared Redis client")
+        else:
+            logger.info("Closed shared Redis client")

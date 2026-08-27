@@ -2,6 +2,7 @@
 Tests for the shared Redis service helper.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -90,3 +91,45 @@ async def test_get_redis_client_after_close_creates_new_client(monkeypatch):
 
     await close_redis_client()
     assert get_redis_client(config) is second
+
+
+@pytest.mark.asyncio
+async def test_close_redis_client_clears_singleton_on_error(monkeypatch):
+    """Test that the singleton is reset even when aclose raises."""
+    fake = _fake_redis()
+    fake.aclose = AsyncMock(side_effect=RuntimeError("event loop is closed"))
+    monkeypatch.setattr(redis_module.Redis, "from_url", MagicMock(return_value=fake))
+
+    config = SonghiveConfig()
+    client = get_redis_client(config)
+    assert client is fake
+
+    await close_redis_client()
+
+    fake.aclose.assert_awaited_once()
+    assert redis_module._redis_client is None
+
+
+def test_redis_client_recreated_across_event_loops(monkeypatch):
+    """Celery tasks call asyncio.run for each task; the client must not be reused."""
+    first = _fake_redis()
+    second = _fake_redis()
+    from_url = MagicMock(side_effect=[first, second])
+    monkeypatch.setattr(redis_module.Redis, "from_url", from_url)
+
+    config = SonghiveConfig()
+
+    async def _use():
+        client = get_redis_client(config)
+        assert client is first
+        await close_redis_client()
+
+    async def _use_again():
+        client = get_redis_client(config)
+        assert client is second
+        await close_redis_client()
+
+    asyncio.run(_use())
+    asyncio.run(_use_again())
+
+    assert from_url.call_count == 2

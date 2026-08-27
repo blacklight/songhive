@@ -7,7 +7,7 @@ import logging
 from ..config import load_config
 from ..models.base import get_session, init_db
 from ..services.api_token_tracker import flush_all_api_token_usage
-from ..services.redis import get_redis_client
+from ..services.redis import close_redis_client, get_redis_client
 from .celery import celery_app
 
 logger = logging.getLogger(__name__)
@@ -27,9 +27,12 @@ def flush_usage_timestamps():
         config = load_config([])
         init_db(config.database.url)
         redis = get_redis_client(config)
-        async with get_session() as db:
-            count = await flush_all_api_token_usage(db, redis)
-            await db.commit()
-            logger.info("Flushed %d API token usage timestamps", count)
+        try:
+            async with get_session() as db:
+                count = await flush_all_api_token_usage(db, redis)
+                await db.commit()
+                logger.info("Flushed %d API token usage timestamps", count)
+        finally:
+            await close_redis_client()
 
     asyncio.run(_flush())

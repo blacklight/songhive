@@ -47,7 +47,7 @@ def sync_track_tags(track_id: str) -> bool:
 async def _sync_track_tags(track_id: str, config) -> bool:
     """Acquire a lock and orchestrate the tag-rewrite pipeline."""
     from ..models.base import get_session
-    from ..services.redis import get_redis_client
+    from ..services.redis import close_redis_client, get_redis_client
     from ..services.storage import StorageService as _StorageService
     from ..storage import get_storage
 
@@ -88,6 +88,7 @@ async def _sync_track_tags(track_id: str, config) -> bool:
     finally:
         await _release_sync_lock(redis, lock_key)
         await _remove_temp_files(storage_service, temp_paths)
+        await close_redis_client()
 
 
 def _lock_key(track_id: str) -> str:
