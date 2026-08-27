@@ -992,3 +992,40 @@ async def count_playlist_tracks(
     stmt = apply_access_filter(stmt, Track, user, "track")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
+
+
+async def resolve_track_ids_for_sync(
+    session: AsyncSession,
+    *,
+    track_id: Optional[str] = None,
+    album_id: Optional[str] = None,
+    artist_id: Optional[str] = None,
+    library_id: Optional[str] = None,
+    all_: bool = False,
+    user: Optional[User] = None,
+    batch_size: int = 1000,
+) -> List[str]:
+    """Resolve track IDs for a tag sync operation based on the provided scope."""
+    if track_id:
+        return [track_id]
+    if album_id:
+        return await get_track_ids_for_album(session, album_id, user=user)
+    if artist_id:
+        return await get_track_ids_for_artist(session, artist_id, user=user)
+
+    if library_id is not None or all_:
+        track_ids: List[str] = []
+        total = await count_tracks(session, library_id=library_id, user=user)
+        for offset in range(0, total, batch_size):
+            tracks, _ = await list_tracks(
+                session,
+                library_id=library_id,
+                user=user,
+                limit=batch_size,
+                offset=offset,
+                include=None,
+            )
+            track_ids.extend(str(track.id) for track in tracks)
+        return track_ids
+
+    return []

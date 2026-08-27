@@ -5,6 +5,7 @@ Storage service: content-addressable media file management.
 import asyncio
 import hashlib
 import os
+import shutil
 import stat
 import tempfile
 from pathlib import Path
@@ -85,6 +86,7 @@ class StorageService:
         prefix: str = "files",
         owner_id: Optional[str] = None,
         visibility: str = Visibility.PRIVATE.value,
+        content_hash: Optional[str] = None,
         return_duplicate: Literal[False] = False,
     ) -> StoredFile: ...
 
@@ -99,6 +101,7 @@ class StorageService:
         prefix: str = "files",
         owner_id: Optional[str] = None,
         visibility: str = Visibility.PRIVATE.value,
+        content_hash: Optional[str] = None,
         return_duplicate: Literal[True] = True,
     ) -> tuple[StoredFile, bool]: ...
 
@@ -112,6 +115,7 @@ class StorageService:
         prefix: str = "files",
         owner_id: Optional[str] = None,
         visibility: str = Visibility.PRIVATE.value,
+        content_hash: Optional[str] = None,
         return_duplicate: bool = False,
     ) -> Union[StoredFile, tuple[StoredFile, bool]]:
         """
@@ -133,7 +137,8 @@ class StorageService:
         tmp_path = Path(tmp_name)
 
         try:
-            hash_hex, size = await self._write_and_hash(file, tmp_path)
+            file_hash, size = await self._write_and_hash(file, tmp_path)
+            hash_hex = content_hash if content_hash is not None else file_hash
             path = f"{prefix}/{hash_hex[:2]}/{hash_hex[2:4]}/{hash_hex}"
 
             existing = await session.scalar(select(StoredFile).where(StoredFile.sha256 == hash_hex))
@@ -219,3 +224,38 @@ async def count_files(
     stmt = apply_access_filter(stmt, StoredFile, user, "file")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
+
+
+async def audio_hash(file_path: Path) -> str:
+    """
+    Compute a SHA-256 hash of the raw audio bitstream only.
+
+    Container metadata such as tags and cover art are ignored, so two files
+    with identical audio content but different metadata produce the same hash.
+    """
+    ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
+    proc = await asyncio.create_subprocess_exec(
+        ffmpeg_bin,
+        "-i",
+        str(file_path),
+        "-map",
+        "0:a",
+        "-c",
+        "copy",
+        "-f",
+        "streamhash",
+        "-hash",
+        "sha256",
+        "-",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed with return code {proc.returncode}: {stderr.decode(errors='replace')}")
+
+    line = stdout.decode(errors="replace").strip()
+    if "=" not in line:
+        raise RuntimeError(f"unexpected ffmpeg streamhash output: {line!r}")
+    return line.split("=", 1)[1].strip()

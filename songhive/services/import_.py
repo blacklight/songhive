@@ -2,13 +2,19 @@
 Import service: handle file uploads, extract metadata, create library entries.
 """
 
+import asyncio
 import io
+import logging
 import mimetypes
 import os
+import stat
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Optional, Tuple, cast
 
+import aiofiles
+import aiofiles.os
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +26,9 @@ from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..models.upload import Upload
 from .metadata import AudioMetadata, extract_metadata
-from .storage import StorageService
+from .storage import StorageService, audio_hash
+
+logger = logging.getLogger(__name__)
 
 
 class DuplicateTrackError(Exception):
@@ -150,6 +158,62 @@ def _guess_content_type(filename: str) -> str:
     return mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
 
+def _is_audio_content_type(content_type: str) -> bool:
+    """Return True for MIME types that should use audio-only hashing."""
+    return content_type.startswith("audio/")
+
+
+async def _store_uploaded_audio_file(
+    session: AsyncSession,
+    storage_service: StorageService,
+    file: BinaryIO,
+    content_type: str,
+    filename: str,
+    owner_id: Optional[str],
+    visibility: str,
+) -> Tuple[StoredFile, bool]:
+    fd, tmp_name = tempfile.mkstemp()
+    os.close(fd)
+    os.chmod(tmp_name, stat.S_IRUSR | stat.S_IWUSR)
+    tmp_path = Path(tmp_name)
+
+    try:
+        async with aiofiles.open(tmp_path, "wb") as dest:
+            while True:
+                chunk = await asyncio.to_thread(file.read, storage_service.CHUNK_SIZE)
+                if not chunk:
+                    break
+                await dest.write(chunk)
+
+        try:
+            hash_hex = await audio_hash(tmp_path)
+        except RuntimeError as exc:
+            logger.warning(
+                "Could not compute audio-only hash for %s: %s; falling back to full-file hash",
+                filename,
+                exc,
+            )
+            hash_hex = None
+
+        with open(tmp_path, "rb") as f:
+            return cast(
+                Tuple[StoredFile, bool],
+                await storage_service.store_file(
+                    session,
+                    f,
+                    content_type,
+                    original_filename=filename,
+                    owner_id=owner_id,
+                    visibility=visibility,
+                    content_hash=hash_hex,
+                    return_duplicate=True,
+                ),
+            )
+    finally:
+        if await aiofiles.os.path.exists(tmp_path):
+            await aiofiles.os.remove(tmp_path)
+
+
 async def _store_uploaded_file(
     session: AsyncSession,
     storage_service: StorageService,
@@ -160,6 +224,17 @@ async def _store_uploaded_file(
     visibility: str,
 ) -> Tuple[StoredFile, bool]:
     """Store the uploaded audio file and return it with a duplicate flag."""
+    if _is_audio_content_type(content_type):
+        return await _store_uploaded_audio_file(
+            session=session,
+            storage_service=storage_service,
+            file=file,
+            content_type=content_type,
+            filename=filename,
+            owner_id=owner_id,
+            visibility=visibility,
+        )
+
     return cast(
         Tuple[StoredFile, bool],
         await storage_service.store_file(
