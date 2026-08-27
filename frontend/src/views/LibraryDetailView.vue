@@ -461,6 +461,10 @@ watch(
   margin: 0;
 }
 
+:deep(.library-detail-view__owner .app-avatar--initials) {
+  font-size: 0.55rem;
+}
+
 .library-detail-view__header-actions {
   margin-top: var(--space-2);
 }

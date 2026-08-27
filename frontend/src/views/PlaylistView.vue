@@ -463,6 +463,10 @@ watch(
   margin: 0;
 }
 
+:deep(.playlist-view__owner .app-avatar--initials) {
+  font-size: 0.55rem;
+}
+
 .playlist-view__header-actions {
   margin-top: var(--space-2);
 }

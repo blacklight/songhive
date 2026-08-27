@@ -501,6 +501,10 @@ watch(
   margin: 0;
 }
 
+:deep(.album-view__owner .app-avatar--initials) {
+  font-size: 0.55rem;
+}
+
 .album-view__description {
   margin: var(--space-2) 0 0;
   color: var(--color-text-muted);
