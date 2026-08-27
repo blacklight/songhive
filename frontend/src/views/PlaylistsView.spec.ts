@@ -81,6 +81,8 @@ describe("PlaylistsView", () => {
       q: "",
       limit: 20,
       offset: 0,
+      sort_by: "name",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Road Trip");
   });
@@ -124,6 +126,8 @@ describe("PlaylistsView", () => {
       q: "query",
       limit: 20,
       offset: 0,
+      sort_by: "name",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Searched Playlist");
     expect(wrapper.text()).not.toContain("First Playlist");
@@ -157,6 +161,8 @@ describe("PlaylistsView", () => {
       q: "",
       limit: 20,
       offset: 20,
+      sort_by: "name",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Playlist 19");
     expect(wrapper.text()).toContain("Playlist 20");

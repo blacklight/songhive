@@ -13,6 +13,9 @@ import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
+import SortControl, {
+  type Option as SortOption,
+} from "@/components/ui/SortControl.vue";
 
 export interface Props<T extends ManageableItem> {
   title: string;
@@ -38,6 +41,9 @@ export interface Props<T extends ManageableItem> {
   search: (q: string) => void | Promise<void>;
   loadMore: () => void | Promise<void>;
   retry: () => void | Promise<void>;
+  sortBy?: string;
+  sortDir?: "asc" | "desc";
+  sortOptions?: SortOption[];
 }
 
 const props = withDefaults(defineProps<Props<T>>(), {
@@ -50,14 +56,30 @@ const props = withDefaults(defineProps<Props<T>>(), {
   layout: "grid",
   gridMinWidth: "12rem",
   itemClass: undefined,
+  sortBy: undefined,
+  sortDir: undefined,
+  sortOptions: undefined,
 });
 
 const emit = defineEmits<{
   "update:query": [value: string];
+  sort: [field: string, direction: "asc" | "desc"];
 }>();
 
 const { t } = useI18n();
 const authStore = useAuthStore();
+
+const firstSortOption = computed(() =>
+  props.sortOptions && props.sortOptions.length > 0
+    ? props.sortOptions[0]
+    : undefined,
+);
+
+const currentSortField = computed(
+  () => props.sortBy ?? firstSortOption.value?.value ?? "",
+);
+
+const currentSortDir = computed(() => props.sortDir ?? "asc");
 
 const bulk = useBulkDelete<T>({
   deleteOne: props.deleteOne,
@@ -120,6 +142,10 @@ function onRetry() {
   void props.retry();
 }
 
+function onSort(field: string, direction: "asc" | "desc") {
+  emit("sort", field, direction);
+}
+
 defineSlots<{
   "header-actions"?: (props: { bulkMode: boolean }) => unknown;
   card?: (props: { item: T; bulkMode: boolean }) => unknown;
@@ -175,6 +201,16 @@ defineSlots<{
           </AppButton>
         </template>
       </div>
+    </div>
+
+    <div v-if="firstSortOption" class="bulk-editable-grid__sort">
+      <SortControl
+        :model-value="currentSortField"
+        :direction="currentSortDir"
+        :options="props.sortOptions ?? []"
+        @update:model-value="(field) => onSort(field, currentSortDir)"
+        @update:direction="(dir) => onSort(currentSortField, dir)"
+      />
     </div>
 
     <SearchBar
@@ -345,6 +381,11 @@ defineSlots<{
 
 .bulk-editable-grid__search {
   max-width: 32rem;
+}
+
+.bulk-editable-grid__sort {
+  display: flex;
+  justify-content: flex-start;
 }
 
 .bulk-editable-grid__skeleton--grid {

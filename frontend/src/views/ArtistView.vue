@@ -28,6 +28,7 @@ import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
+import SortControl from "@/components/ui/SortControl.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -52,16 +53,27 @@ const {
   loading: albumsLoading,
   error: albumsError,
   hasMore: albumsHasMore,
+  sortBy: albumSortBy,
+  sortDir: albumSortDir,
   load: loadAlbums,
   loadMore: loadMoreAlbums,
+  setSort: setAlbumSort,
   retry: retryAlbums,
-} = useEntityList<AlbumResponse>((params: EntityListParams) =>
-  listAlbums({
-    q: params.q,
-    artist_id: artistId.value,
-    limit: params.limit,
-    offset: params.offset,
-  }),
+} = useEntityList<AlbumResponse>(
+  (params: EntityListParams) =>
+    listAlbums({
+      q: params.q,
+      artist_id: artistId.value,
+      limit: params.limit,
+      offset: params.offset,
+      sort_by: params.sort_by,
+      sort_dir: params.sort_dir,
+    }),
+  {
+    defaultSortBy: "title",
+    syncQuery: true,
+    queryKey: "albums",
+  },
 );
 
 const {
@@ -69,18 +81,30 @@ const {
   loading: tracksLoading,
   error: tracksError,
   hasMore: tracksHasMore,
+  sortBy: trackSortBy,
+  sortDir: trackSortDir,
   load: loadTracks,
   loadMore: loadMoreTracks,
+  setSort: setTrackSort,
   retry: retryTracks,
   refresh: refreshTracks,
-} = useEntityList<TrackResponse>((params: EntityListParams) =>
-  listTracks({
-    q: params.q,
-    artist_id: artistId.value,
-    limit: params.limit,
-    offset: params.offset,
-    include: "artist,album",
-  }),
+} = useEntityList<TrackResponse>(
+  (params: EntityListParams) =>
+    listTracks({
+      q: params.q,
+      artist_id: artistId.value,
+      limit: params.limit,
+      offset: params.offset,
+      sort_by: params.sort_by,
+      sort_dir: params.sort_dir,
+      include: "artist,album",
+    }),
+  {
+    defaultSortBy: "created_at",
+    defaultSortDir: "desc",
+    syncQuery: true,
+    queryKey: "tracks",
+  },
 );
 
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
@@ -119,6 +143,29 @@ function onTrackShare(track: QueueTrack) {
 
 async function onTracksRemoved() {
   await refreshTracks();
+}
+
+const albumSortOptions = computed(() => [
+  { value: "title", label: t("sort.fields.title") },
+  { value: "created_at", label: t("sort.fields.created_at") },
+  { value: "updated_at", label: t("sort.fields.updated_at") },
+  { value: "release_year", label: t("sort.fields.release_year") },
+]);
+
+const trackSortOptions = computed(() => [
+  { value: "created_at", label: t("sort.fields.created_at") },
+  { value: "title", label: t("sort.fields.title") },
+  { value: "album_title", label: t("sort.fields.album_title") },
+  { value: "updated_at", label: t("sort.fields.updated_at") },
+  { value: "release_year", label: t("sort.fields.release_year") },
+]);
+
+function onAlbumSort(field: string, direction: "asc" | "desc") {
+  void setAlbumSort(field, direction);
+}
+
+function onTrackSort(field: string, direction: "asc" | "desc") {
+  void setTrackSort(field, direction);
 }
 
 const actions = computed(() => [
@@ -248,14 +295,24 @@ watch(
         class="artist-view__section"
         aria-labelledby="artist-albums-heading"
       >
-        <AppPageTitle
-          id="artist-albums-heading"
-          :level="2"
-          class="artist-view__section-title"
-          icon="compact-disc"
-        >
-          {{ t("browse.detail.discography") }}
-        </AppPageTitle>
+        <div class="artist-view__section-header">
+          <AppPageTitle
+            id="artist-albums-heading"
+            :level="2"
+            class="artist-view__section-title"
+            icon="compact-disc"
+          >
+            {{ t("browse.detail.discography") }}
+          </AppPageTitle>
+
+          <SortControl
+            :model-value="albumSortBy"
+            :direction="albumSortDir"
+            :options="albumSortOptions"
+            @update:model-value="(field) => onAlbumSort(field, albumSortDir)"
+            @update:direction="(dir) => onAlbumSort(albumSortBy, dir)"
+          />
+        </div>
 
         <div
           v-if="albumsLoading && albums.length === 0"
@@ -306,14 +363,24 @@ watch(
         class="artist-view__section"
         aria-labelledby="artist-tracks-heading"
       >
-        <AppPageTitle
-          id="artist-tracks-heading"
-          :level="2"
-          class="artist-view__section-title"
-          icon="music"
-        >
-          {{ t("browse.detail.tracks") }}
-        </AppPageTitle>
+        <div class="artist-view__section-header">
+          <AppPageTitle
+            id="artist-tracks-heading"
+            :level="2"
+            class="artist-view__section-title"
+            icon="music"
+          >
+            {{ t("browse.detail.tracks") }}
+          </AppPageTitle>
+
+          <SortControl
+            :model-value="trackSortBy"
+            :direction="trackSortDir"
+            :options="trackSortOptions"
+            @update:model-value="(field) => onTrackSort(field, trackSortDir)"
+            @update:direction="(dir) => onTrackSort(trackSortBy, dir)"
+          />
+        </div>
 
         <div v-if="tracksError" class="artist-view__section-error" role="alert">
           <span>{{ tracksError }}</span>
@@ -470,6 +537,14 @@ watch(
 .artist-view__section-title {
   margin: 0;
   font-size: 1.25rem;
+}
+
+.artist-view__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
 .artist-view__grid {

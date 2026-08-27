@@ -47,7 +47,13 @@ describe("useEntityList", () => {
     expect(wrapper.vm.items.length).toBe(20);
     expect(wrapper.vm.hasMore).toBe(true);
     expect(wrapper.vm.loading).toBe(false);
-    expect(fetcher).toHaveBeenCalledWith({ q: "", limit: 20, offset: 0 });
+    expect(fetcher).toHaveBeenCalledWith({
+      q: "",
+      limit: 20,
+      offset: 0,
+      sort_by: "name",
+      sort_dir: "asc",
+    });
   });
 
   it("appends on loadMore and clears hasMore when the page is short", async () => {
@@ -64,7 +70,13 @@ describe("useEntityList", () => {
 
     expect(wrapper.vm.items.length).toBe(22);
     expect(wrapper.vm.hasMore).toBe(false);
-    expect(fetcher).toHaveBeenLastCalledWith({ q: "", limit: 20, offset: 20 });
+    expect(fetcher).toHaveBeenLastCalledWith({
+      q: "",
+      limit: 20,
+      offset: 20,
+      sort_by: "name",
+      sort_dir: "asc",
+    });
   });
 
   it("debounces search and resets the list", async () => {
@@ -87,6 +99,8 @@ describe("useEntityList", () => {
       q: "query",
       limit: 20,
       offset: 0,
+      sort_by: "name",
+      sort_dir: "asc",
     });
   });
 
@@ -120,7 +134,13 @@ describe("useEntityList", () => {
 
     expect(wrapper.vm.items.length).toBe(21);
     expect(wrapper.vm.error).toBeNull();
-    expect(fetcher).toHaveBeenLastCalledWith({ q: "", limit: 20, offset: 20 });
+    expect(fetcher).toHaveBeenLastCalledWith({
+      q: "",
+      limit: 20,
+      offset: 20,
+      sort_by: "name",
+      sort_dir: "asc",
+    });
   });
 
   it("refresh resets and reloads the list", async () => {
@@ -158,6 +178,8 @@ describe("useEntityList", () => {
       q: "",
       limit: 20,
       offset: 0,
+      sort_by: "name",
+      sort_dir: "asc",
     });
   });
 
@@ -185,6 +207,8 @@ describe("useEntityList", () => {
       q: "",
       limit: 20,
       offset: 20,
+      sort_by: "name",
+      sort_dir: "asc",
     });
   });
 });

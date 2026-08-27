@@ -106,6 +106,8 @@ describe("TracksView", () => {
       offset: 0,
       include: "artist,album",
       around_track_id: undefined,
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
     expect(wrapper.text()).toContain("Song One");
   });
@@ -128,6 +130,8 @@ describe("TracksView", () => {
       offset: 0,
       include: "artist,album",
       around_track_id: undefined,
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
     expect(wrapper.text()).toContain("The Artist");
     expect(wrapper.text()).toContain("The Album");
@@ -196,6 +200,8 @@ describe("TracksView", () => {
       offset: 0,
       include: "artist,album",
       around_track_id: undefined,
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
     expect(wrapper.text()).toContain("Searched Song");
     expect(wrapper.text()).not.toContain("First Song");
@@ -235,6 +241,8 @@ describe("TracksView", () => {
       offset: 20,
       include: "artist,album",
       around_track_id: undefined,
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
     expect(wrapper.text()).toContain("Song 19");
     expect(wrapper.text()).toContain("Song 20");

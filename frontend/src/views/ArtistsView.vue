@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { useEntityList } from "@/composables/useEntityList";
 import { listArtists, deleteArtist, type ArtistResponse } from "@/api/artists";
@@ -13,12 +13,28 @@ const {
   error,
   query,
   hasMore,
+  sortBy,
+  sortDir,
   load,
   loadMore,
   search,
+  setSort,
   retry,
   refresh,
-} = useEntityList<ArtistResponse>(listArtists);
+} = useEntityList<ArtistResponse>(listArtists, {
+  defaultSortBy: "name",
+  syncQuery: true,
+});
+
+const sortOptions = computed(() => [
+  { value: "name", label: t("sort.fields.name") },
+  { value: "created_at", label: t("sort.fields.created_at") },
+  { value: "updated_at", label: t("sort.fields.updated_at") },
+]);
+
+function onSort(field: string, direction: "asc" | "desc") {
+  void setSort(field, direction);
+}
 
 onMounted(() => load());
 </script>
@@ -41,12 +57,16 @@ onMounted(() => load());
       :search="search"
       :load-more="loadMore"
       :retry="retry"
+      :sort-by="sortBy"
+      :sort-dir="sortDir"
+      :sort-options="sortOptions"
       :recursive="true"
       :recursive-label="
         t('browse.delete.recursive', {
           contents: `${t('browse.entities.albums')} / ${t('browse.entities.tracks')}`,
         })
       "
+      @sort="onSort"
     >
       <template #card="{ item, bulkMode }">
         <ArtistCard

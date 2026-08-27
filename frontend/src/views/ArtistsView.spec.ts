@@ -60,6 +60,8 @@ describe("ArtistsView", () => {
       q: "",
       limit: 20,
       offset: 0,
+      sort_by: "name",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Artist One");
   });
@@ -121,6 +123,8 @@ describe("ArtistsView", () => {
       q: "query",
       limit: 20,
       offset: 0,
+      sort_by: "name",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Searched Artist");
     expect(wrapper.text()).not.toContain("First Artist");
@@ -153,6 +157,8 @@ describe("ArtistsView", () => {
       q: "",
       limit: 20,
       offset: 20,
+      sort_by: "name",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Artist 19");
     expect(wrapper.text()).toContain("Artist 20");

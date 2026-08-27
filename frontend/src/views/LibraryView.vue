@@ -29,12 +29,18 @@ const {
   error,
   query,
   hasMore,
+  sortBy,
+  sortDir,
   load,
   loadMore,
   search,
+  setSort,
   retry,
   refresh,
-} = useEntityList<LibraryResponse>(listLibraries);
+} = useEntityList<LibraryResponse>(listLibraries, {
+  defaultSortBy: "name",
+  syncQuery: true,
+});
 
 const isCreateOpen = ref(false);
 const name = ref("");
@@ -50,6 +56,16 @@ const visibilityOptions = computed(() => [
   { value: "local", label: t("browse.visibility.local") },
   { value: "public", label: t("browse.visibility.public") },
 ]);
+
+const sortOptions = computed(() => [
+  { value: "name", label: t("sort.fields.name") },
+  { value: "created_at", label: t("sort.fields.created_at") },
+  { value: "updated_at", label: t("sort.fields.updated_at") },
+]);
+
+function onSort(field: string, direction: "asc" | "desc") {
+  void setSort(field, direction);
+}
 
 onMounted(() => load());
 
@@ -108,11 +124,15 @@ async function onCreate() {
       :search="search"
       :load-more="loadMore"
       :retry="retry"
+      :sort-by="sortBy"
+      :sort-dir="sortDir"
+      :sort-options="sortOptions"
       :recursive="true"
       :recursive-label="
         t('browse.delete.recursive', { contents: t('browse.entities.tracks') })
       "
       grid-min-width="16rem"
+      @sort="onSort"
     >
       <template #header-actions="{ bulkMode }">
         <AppButton

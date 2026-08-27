@@ -104,6 +104,8 @@ describe("LibraryDetailView", () => {
       limit: 20,
       offset: 0,
       include: "artist,album",
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
 
     expect(wrapper.text()).toContain("Main Library");
@@ -160,6 +162,8 @@ describe("LibraryDetailView", () => {
       limit: 20,
       offset: 20,
       include: "artist,album",
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
     expect(wrapper.text()).toContain("Song 19");
     expect(wrapper.text()).toContain("Song 20");

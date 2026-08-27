@@ -23,6 +23,21 @@
     "share": "Share",
     "download": "Download"
   },
+  "sort": {
+    "label": "Sort by",
+    "ascending": "Ascending",
+    "descending": "Descending",
+    "fields": {
+      "name": "Name",
+      "title": "Title",
+      "artist_name": "Artist",
+      "album_title": "Album",
+      "created_at": "Date added",
+      "updated_at": "Date updated",
+      "release_year": "Release year",
+      "position": "Playlist order"
+    }
+  },
   "theme": {
     "light": "Light",
     "dark": "Dark",

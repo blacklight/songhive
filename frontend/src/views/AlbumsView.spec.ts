@@ -64,6 +64,8 @@ describe("AlbumsView", () => {
       limit: 20,
       offset: 0,
       include: "artist",
+      sort_by: "title",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Meadowland");
   });
@@ -126,6 +128,8 @@ describe("AlbumsView", () => {
       limit: 20,
       offset: 0,
       include: "artist",
+      sort_by: "title",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Searched Album");
     expect(wrapper.text()).not.toContain("First Album");
@@ -159,6 +163,8 @@ describe("AlbumsView", () => {
       limit: 20,
       offset: 20,
       include: "artist",
+      sort_by: "title",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Album 19");
     expect(wrapper.text()).toContain("Album 20");

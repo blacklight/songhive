@@ -28,6 +28,7 @@ import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
+import SortControl from "@/components/ui/SortControl.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -44,16 +45,28 @@ const {
   loading: tracksLoading,
   error: tracksError,
   hasMore: tracksHasMore,
+  sortBy: trackSortBy,
+  sortDir: trackSortDir,
   load: loadTracks,
   loadMore: loadMoreTracks,
+  setSort: setTrackSort,
   retry: retryTracks,
   refresh: refreshTracks,
-} = useEntityList<TrackResponse>((params: EntityListParams) =>
-  listPlaylistTracks(playlistId.value, {
-    limit: params.limit,
-    offset: params.offset,
-    include: "artist,album",
-  }),
+} = useEntityList<TrackResponse>(
+  (params: EntityListParams) =>
+    listPlaylistTracks(playlistId.value, {
+      limit: params.limit,
+      offset: params.offset,
+      sort_by: params.sort_by,
+      sort_dir: params.sort_dir,
+      include: "artist,album",
+    }),
+  {
+    defaultSortBy: "position",
+    defaultSortDir: "asc",
+    syncQuery: true,
+    queryKey: "tracks",
+  },
 );
 
 const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
@@ -113,6 +126,20 @@ function onTrackShare(track: QueueTrack) {
 
 async function onTracksRemoved() {
   await refreshTracks();
+}
+
+const trackSortOptions = computed(() => [
+  { value: "position", label: t("sort.fields.position") },
+  { value: "created_at", label: t("sort.fields.created_at") },
+  { value: "title", label: t("sort.fields.title") },
+  { value: "artist_name", label: t("sort.fields.artist_name") },
+  { value: "album_title", label: t("sort.fields.album_title") },
+  { value: "updated_at", label: t("sort.fields.updated_at") },
+  { value: "release_year", label: t("sort.fields.release_year") },
+]);
+
+function onTrackSort(field: string, direction: "asc" | "desc") {
+  void setTrackSort(field, direction);
 }
 
 const actions = computed(() => [
@@ -261,14 +288,24 @@ watch(
         class="playlist-view__section"
         aria-labelledby="playlist-tracks-heading"
       >
-        <AppPageTitle
-          id="playlist-tracks-heading"
-          :level="2"
-          class="playlist-view__section-title"
-          icon="music"
-        >
-          {{ t("browse.detail.tracks") }}
-        </AppPageTitle>
+        <div class="playlist-view__section-header">
+          <AppPageTitle
+            id="playlist-tracks-heading"
+            :level="2"
+            class="playlist-view__section-title"
+            icon="music"
+          >
+            {{ t("browse.detail.tracks") }}
+          </AppPageTitle>
+
+          <SortControl
+            :model-value="trackSortBy"
+            :direction="trackSortDir"
+            :options="trackSortOptions"
+            @update:model-value="(field) => onTrackSort(field, trackSortDir)"
+            @update:direction="(dir) => onTrackSort(trackSortBy, dir)"
+          />
+        </div>
 
         <div
           v-if="tracksError"
@@ -439,6 +476,14 @@ watch(
 .playlist-view__section-title {
   margin: 0;
   font-size: 1.25rem;
+}
+
+.playlist-view__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
 .playlist-view__footer {

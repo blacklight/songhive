@@ -1,4 +1,5 @@
 import { computed, ref, type Ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { getApiErrorMessage } from "@/api/client";
 import { useDebounce } from "./useDebounce";
 
@@ -7,6 +8,8 @@ export interface ChunkListParams {
   limit: number;
   offset: number;
   around_track_id?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
   [k: string]: unknown;
 }
 
@@ -20,10 +23,33 @@ export type ChunkListFetcher<T> = (
   params: ChunkListParams,
 ) => Promise<ChunkListResult<T>>;
 
+export interface UseChunkListOptions {
+  defaultLimit?: number;
+  defaultSortBy?: string;
+  defaultSortDir?: "asc" | "desc";
+  syncQuery?: boolean;
+  queryKey?: string;
+}
+
 export function useChunkList<T>(
   fetcher: ChunkListFetcher<T>,
-  defaultLimit = 20,
+  options: number | UseChunkListOptions = {},
 ) {
+  const opts: UseChunkListOptions =
+    typeof options === "number" ? { defaultLimit: options } : options;
+
+  const defaultLimit = opts.defaultLimit ?? 20;
+  const defaultSortBy = opts.defaultSortBy ?? "created_at";
+  const defaultSortDir = opts.defaultSortDir ?? "desc";
+  const syncQuery = opts.syncQuery ?? false;
+  const queryKey = opts.queryKey ?? "";
+
+  const byKey = queryKey ? `${queryKey}_sort_by` : "sort_by";
+  const dirKey = queryKey ? `${queryKey}_sort_dir` : "sort_dir";
+
+  const route = syncQuery ? useRoute() : null;
+  const router = syncQuery ? useRouter() : null;
+
   const items: Ref<T[]> = ref([]);
   const loading = ref(false);
   const error: Ref<string | null> = ref(null);
@@ -34,10 +60,38 @@ export function useChunkList<T>(
   const total = ref(0);
   const lastWasReset = ref(false);
 
+  function getInitialSortBy(): string {
+    if (!route) return defaultSortBy;
+    const value = route.query[byKey];
+    return typeof value === "string" ? value : defaultSortBy;
+  }
+
+  function getInitialSortDir(): "asc" | "desc" {
+    if (!route) return defaultSortDir;
+    const value = route.query[dirKey];
+    return value === "desc" ? "desc" : value === "asc" ? "asc" : defaultSortDir;
+  }
+
+  const sortBy = ref<string>(getInitialSortBy());
+  const sortDir = ref<"asc" | "desc">(getInitialSortDir());
+
   const hasMore = computed(
     () => startOffset.value + items.value.length < total.value,
   );
   const hasPrevious = computed(() => startOffset.value > 0);
+
+  async function updateQueryString() {
+    if (!router || !route) return;
+    const newQuery = { ...route.query };
+    if (sortBy.value === defaultSortBy && sortDir.value === defaultSortDir) {
+      delete newQuery[byKey];
+      delete newQuery[dirKey];
+    } else {
+      newQuery[byKey] = sortBy.value;
+      newQuery[dirKey] = sortDir.value;
+    }
+    await router.replace({ query: newQuery });
+  }
 
   async function doLoad(
     targetOffset: number,
@@ -55,6 +109,8 @@ export function useChunkList<T>(
         limit: limit.value,
         offset: targetOffset,
         around_track_id: aroundTrackId,
+        sort_by: sortBy.value,
+        sort_dir: sortDir.value,
       });
 
       if (mode === "replace") {
@@ -116,6 +172,16 @@ export function useChunkList<T>(
     return load(true);
   }, 300);
 
+  async function setSort(field: string, dir: "asc" | "desc") {
+    if (field === sortBy.value && dir === sortDir.value) return;
+    sortBy.value = field;
+    sortDir.value = dir;
+    currentOffset.value = 0;
+    startOffset.value = 0;
+    await updateQueryString();
+    return load(true);
+  }
+
   function refresh() {
     return load(true);
   }
@@ -133,6 +199,8 @@ export function useChunkList<T>(
     offset: currentOffset,
     startOffset,
     total,
+    sortBy,
+    sortDir,
     hasMore,
     hasPrevious,
     load,
@@ -140,6 +208,7 @@ export function useChunkList<T>(
     loadPrevious,
     loadAround,
     search,
+    setSort,
     refresh,
     retry,
   };

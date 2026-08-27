@@ -133,6 +133,8 @@ describe("ArtistView", () => {
       artist_id: "artist-1",
       limit: 20,
       offset: 0,
+      sort_by: "title",
+      sort_dir: "asc",
     });
     expect(tracksApi.listTracks).toHaveBeenCalledWith({
       q: "",
@@ -140,6 +142,8 @@ describe("ArtistView", () => {
       limit: 20,
       offset: 0,
       include: "artist,album",
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
 
     expect(wrapper.text()).toContain("The Larks");
@@ -196,6 +200,8 @@ describe("ArtistView", () => {
       limit: 20,
       offset: 20,
       include: "artist,album",
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
     expect(wrapper.text()).toContain("Song 19");
     expect(wrapper.text()).toContain("Song 20");

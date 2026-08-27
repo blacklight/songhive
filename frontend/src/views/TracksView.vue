@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useChunkList } from "@/composables/useChunkList";
 import { useShareDialog } from "@/composables/useShareDialog";
@@ -13,6 +13,7 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
+import SortControl from "@/components/ui/SortControl.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -24,21 +25,40 @@ const {
   query,
   hasMore,
   hasPrevious,
+  sortBy,
+  sortDir,
   load,
   loadMore,
   loadPrevious,
   loadAround,
   search,
+  setSort,
   retry,
   refresh,
-} = useChunkList<TrackResponse>(async (params) => {
-  const result = await listTracksWithMeta({
-    ...params,
-    include: "artist,album",
-  });
-  return { items: result.tracks, offset: result.offset, total: result.total };
-});
+} = useChunkList<TrackResponse>(
+  async (params) => {
+    const result = await listTracksWithMeta({
+      ...params,
+      include: "artist,album",
+    });
+    return { items: result.tracks, offset: result.offset, total: result.total };
+  },
+  {
+    defaultSortBy: "created_at",
+    defaultSortDir: "desc",
+    syncQuery: true,
+  },
+);
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
+
+const sortOptions = computed(() => [
+  { value: "created_at", label: t("sort.fields.created_at") },
+  { value: "title", label: t("sort.fields.title") },
+  { value: "artist_name", label: t("sort.fields.artist_name") },
+  { value: "album_title", label: t("sort.fields.album_title") },
+  { value: "updated_at", label: t("sort.fields.updated_at") },
+  { value: "release_year", label: t("sort.fields.release_year") },
+]);
 
 function onTrackShare(track: QueueTrack) {
   openShare(
@@ -80,21 +100,31 @@ watch(
       t("nav.tracks")
     }}</AppPageTitle>
 
-    <!--
-      :debounce="0" avoids stacking with useEntityList's 300 ms debounce;
-      the composable owns the real debounce.
-    -->
-    <SearchBar
-      :model-value="query"
-      :debounce="0"
-      class="tracks-view__search"
-      :placeholder="
-        t('browse.list.searchPlaceholder', {
-          entity: t('browse.entities.tracks'),
-        })
-      "
-      @update:model-value="search"
-    />
+    <div class="tracks-view__controls">
+      <SortControl
+        :model-value="sortBy"
+        :direction="sortDir"
+        :options="sortOptions"
+        @update:model-value="(field) => setSort(field, sortDir)"
+        @update:direction="(dir) => setSort(sortBy, dir)"
+      />
+
+      <!--
+        :debounce="0" avoids stacking with useChunkList's 300 ms debounce;
+        the composable owns the real debounce.
+      -->
+      <SearchBar
+        :model-value="query"
+        :debounce="0"
+        class="tracks-view__search"
+        :placeholder="
+          t('browse.list.searchPlaceholder', {
+            entity: t('browse.entities.tracks'),
+          })
+        "
+        @update:model-value="search"
+      />
+    </div>
 
     <div v-if="error" class="tracks-view__error" role="alert">
       <span>{{ error }}</span>
@@ -164,8 +194,16 @@ watch(
   font-size: 1.5rem;
 }
 
+.tracks-view__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
 .tracks-view__search {
   max-width: 32rem;
+  flex: 1;
 }
 
 .tracks-view__error {

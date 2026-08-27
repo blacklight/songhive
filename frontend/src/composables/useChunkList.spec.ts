@@ -62,6 +62,8 @@ describe("useChunkList", () => {
       limit: 20,
       offset: 0,
       around_track_id: undefined,
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
   });
 
@@ -89,6 +91,8 @@ describe("useChunkList", () => {
       limit: 20,
       offset: 20,
       around_track_id: undefined,
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
   });
 
@@ -145,6 +149,8 @@ describe("useChunkList", () => {
       limit: 20,
       offset: 0,
       around_track_id: "track-30",
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
   });
 
@@ -171,6 +177,8 @@ describe("useChunkList", () => {
       limit: 20,
       offset: 0,
       around_track_id: undefined,
+      sort_by: "created_at",
+      sort_dir: "desc",
     });
   });
 });

@@ -1,33 +1,72 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import {
-  listFavorites,
-  removeFavorite,
-  type FavoriteResponse,
-} from "@/api/favorites";
-import { getTrack, type TrackResponse } from "@/api/tracks";
+import { useChunkList } from "@/composables/useChunkList";
+import { useShareDialog } from "@/composables/useShareDialog";
+import { removeFavorite } from "@/api/favorites";
+import { listTracksWithMeta, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
-import { useShareDialog } from "@/composables/useShareDialog";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import SearchBar from "@/components/ui/SearchBar.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
+import SortControl from "@/components/ui/SortControl.vue";
 
 const { t } = useI18n();
 const toast = useToastStore();
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
-const favorites = ref<FavoriteResponse[]>([]);
-const tracks = ref<TrackResponse[]>([]);
-const loading = ref(false);
-const error = ref<string | null>(null);
-const limit = 20;
-const hasMore = ref(false);
+const {
+  items,
+  loading,
+  error,
+  query,
+  hasMore,
+  total,
+  sortBy,
+  sortDir,
+  load,
+  loadMore,
+  search,
+  setSort,
+  retry,
+} = useChunkList<TrackResponse>(
+  async (params) => {
+    const result = await listTracksWithMeta({
+      ...params,
+      favorited: true,
+      include: "artist,album",
+    });
+    return { items: result.tracks, offset: result.offset, total: result.total };
+  },
+  {
+    defaultSortBy: "created_at",
+    defaultSortDir: "desc",
+    syncQuery: true,
+  },
+);
+
 const activeTab = ref<"tracks" | "albums" | "artists" | "playlists">("tracks");
+
+const sortOptions = computed(() => [
+  { value: "created_at", label: t("sort.fields.created_at") },
+  { value: "title", label: t("sort.fields.title") },
+  { value: "artist_name", label: t("sort.fields.artist_name") },
+  { value: "album_title", label: t("sort.fields.album_title") },
+  { value: "updated_at", label: t("sort.fields.updated_at") },
+  { value: "release_year", label: t("sort.fields.release_year") },
+]);
+
+const tabs = [
+  { key: "tracks" as const, label: t("pages.favorites.tracks") },
+  { key: "albums" as const, label: t("pages.favorites.albums") },
+  { key: "artists" as const, label: t("pages.favorites.artists") },
+  { key: "playlists" as const, label: t("pages.favorites.playlists") },
+];
 
 function getErrorMessage(err: unknown): string {
   return (
@@ -36,68 +75,11 @@ function getErrorMessage(err: unknown): string {
   );
 }
 
-async function load(initial = false) {
-  const offset = initial ? 0 : favorites.value.length;
-
-  loading.value = true;
-  if (initial) {
-    error.value = null;
-  }
-
-  try {
-    const batch = await listFavorites({ limit, offset });
-    if (initial) {
-      favorites.value = [];
-      tracks.value = [];
-    }
-
-    const resolved = await Promise.all(
-      batch.map((favorite) =>
-        getTrack(favorite.track_id, { include: "artist,album" }).catch(
-          () => null,
-        ),
-      ),
-    );
-    const newTracks = resolved.filter(
-      (track): track is TrackResponse => track !== null,
-    );
-
-    // Reassign (rather than push) so the tracks list is treated as a new
-    // reference, triggering any downstream watchers.
-    favorites.value = [...favorites.value, ...batch];
-    tracks.value = [...tracks.value, ...newTracks];
-
-    // hasMore is derived from the raw favorites count, before any tracks fail
-    // to resolve, so pagination does not stop early on missing tracks.
-    hasMore.value = batch.length === limit;
-  } catch (err) {
-    if (initial) {
-      error.value = getErrorMessage(err);
-    } else {
-      // A loadMore failure should not hide the already-loaded list or reset
-      // pagination. Surface the error as a toast and leave the page as-is.
-      toast.push({ type: "error", message: getErrorMessage(err) });
-    }
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function loadMore() {
-  await load();
-}
-
-async function retry() {
-  await load(true);
-}
-
 async function onToggleFavorite(track: QueueTrack) {
   try {
     await removeFavorite(track.id);
-    tracks.value = tracks.value.filter((t) => t.id !== track.id);
-    favorites.value = favorites.value.filter(
-      (favorite) => favorite.track_id !== track.id,
-    );
+    items.value = items.value.filter((t) => t.id !== track.id);
+    total.value = Math.max(0, total.value - 1);
     toast.push({
       type: "success",
       message: t("pages.favorites.removeSuccess"),
@@ -124,20 +106,11 @@ function onTrackShare(track: QueueTrack) {
 
 async function onTracksRemoved(trackIds: string[]) {
   const removed = new Set(trackIds);
-  tracks.value = tracks.value.filter((track) => !removed.has(track.id));
-  favorites.value = favorites.value.filter(
-    (favorite) => !removed.has(favorite.track_id),
-  );
+  items.value = items.value.filter((track) => !removed.has(track.id));
+  total.value = Math.max(0, total.value - trackIds.length);
 }
 
-const tabs = [
-  { key: "tracks" as const, label: t("pages.favorites.tracks") },
-  { key: "albums" as const, label: t("pages.favorites.albums") },
-  { key: "artists" as const, label: t("pages.favorites.artists") },
-  { key: "playlists" as const, label: t("pages.favorites.playlists") },
-];
-
-onMounted(() => load(true));
+onMounted(() => load());
 </script>
 
 <template>
@@ -164,6 +137,27 @@ onMounted(() => load(true));
     </p>
 
     <template v-if="activeTab === 'tracks'">
+      <div class="favorites-view__controls">
+        <SortControl
+          :model-value="sortBy"
+          :direction="sortDir"
+          :options="sortOptions"
+          @update:model-value="(field) => setSort(field, sortDir)"
+          @update:direction="(dir) => setSort(sortBy, dir)"
+        />
+        <SearchBar
+          :model-value="query"
+          :debounce="0"
+          class="favorites-view__search"
+          :placeholder="
+            t('browse.list.searchPlaceholder', {
+              entity: t('browse.entities.tracks'),
+            })
+          "
+          @update:model-value="search"
+        />
+      </div>
+
       <div v-if="error" class="favorites-view__error" role="alert">
         <span>{{ error }}</span>
         <AppButton size="sm" icon="rotate-right" @click="retry">{{
@@ -172,23 +166,19 @@ onMounted(() => load(true));
       </div>
 
       <div
-        v-else-if="loading && tracks.length === 0"
+        v-else-if="loading && items.length === 0"
         class="favorites-view__skeleton"
       >
         <SkeletonLoader variant="page" />
       </div>
 
-      <div v-else-if="tracks.length === 0" class="favorites-view__empty">
-        {{
-          favorites.length === 0
-            ? t("pages.favorites.empty")
-            : t("pages.favorites.emptyWithFavorites")
-        }}
+      <div v-else-if="items.length === 0" class="favorites-view__empty">
+        {{ t("pages.favorites.empty") }}
       </div>
 
       <TrackList
         v-else
-        :tracks="tracks"
+        :tracks="items"
         :loading="loading"
         :favorite-label="t('common.unfavorite')"
         :deletable="true"
@@ -245,6 +235,18 @@ onMounted(() => load(true));
   margin: 0;
   color: var(--color-text-muted);
   font-size: 0.9375rem;
+}
+
+.favorites-view__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.favorites-view__search {
+  max-width: 32rem;
+  flex: 1;
 }
 
 .favorites-view__error {

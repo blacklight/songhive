@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { useEntityList } from "@/composables/useEntityList";
 import { listAlbums, deleteAlbum, type AlbumResponse } from "@/api/albums";
@@ -13,14 +13,33 @@ const {
   error,
   query,
   hasMore,
+  sortBy,
+  sortDir,
   load,
   loadMore,
   search,
+  setSort,
   retry,
   refresh,
-} = useEntityList<AlbumResponse>((params) =>
-  listAlbums({ ...params, include: "artist" }),
+} = useEntityList<AlbumResponse>(
+  (params) => listAlbums({ ...params, include: "artist" }),
+  {
+    defaultSortBy: "title",
+    syncQuery: true,
+  },
 );
+
+const sortOptions = computed(() => [
+  { value: "title", label: t("sort.fields.title") },
+  { value: "artist_name", label: t("sort.fields.artist_name") },
+  { value: "created_at", label: t("sort.fields.created_at") },
+  { value: "updated_at", label: t("sort.fields.updated_at") },
+  { value: "release_year", label: t("sort.fields.release_year") },
+]);
+
+function onSort(field: string, direction: "asc" | "desc") {
+  void setSort(field, direction);
+}
 
 onMounted(() => load());
 </script>
@@ -43,10 +62,14 @@ onMounted(() => load());
       :search="search"
       :load-more="loadMore"
       :retry="retry"
+      :sort-by="sortBy"
+      :sort-dir="sortDir"
+      :sort-options="sortOptions"
       :recursive="true"
       :recursive-label="
         t('browse.delete.recursive', { contents: t('browse.entities.tracks') })
       "
+      @sort="onSort"
     >
       <template #card="{ item, bulkMode }">
         <AlbumCard

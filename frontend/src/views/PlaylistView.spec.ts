@@ -106,6 +106,8 @@ describe("PlaylistView", () => {
       limit: 20,
       offset: 0,
       include: "artist,album",
+      sort_by: "position",
+      sort_dir: "asc",
     });
 
     expect(wrapper.text()).toContain("Road Trip");

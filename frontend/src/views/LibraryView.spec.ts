@@ -82,6 +82,8 @@ describe("LibraryView", () => {
       q: "",
       limit: 20,
       offset: 0,
+      sort_by: "name",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Main Library");
   });
@@ -123,6 +125,8 @@ describe("LibraryView", () => {
       q: "query",
       limit: 20,
       offset: 0,
+      sort_by: "name",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Searched Library");
     expect(wrapper.text()).not.toContain("First Library");
@@ -156,6 +160,8 @@ describe("LibraryView", () => {
       q: "",
       limit: 20,
       offset: 20,
+      sort_by: "name",
+      sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Library 19");
     expect(wrapper.text()).toContain("Library 20");
