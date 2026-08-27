@@ -6,12 +6,13 @@ libraries, and radios.
 import contextlib
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, and_, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..models.album import Album
 from ..models.artist import Artist
+from ..models.favorite import Favorite
 from ..models.library import Library
 from ..models.library_track import LibraryTrack
 from ..models.playlist import Playlist, PlaylistTrack
@@ -145,6 +146,25 @@ def _playlist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
     return options
 
 
+def _order_clause(expr: Any, direction: str, nulls_last: bool = False) -> Any:
+    """Return an ascending or descending order clause for ``expr``."""
+    clause = expr.asc() if direction == "asc" else expr.desc()
+    if nulls_last:
+        clause = clause.nulls_last()
+    return clause
+
+
+def _apply_sort(
+    stmt: Select[Any],
+    field: Any,
+    direction: str,
+    secondary: Any,
+    nulls_last: bool = False,
+) -> Select[Any]:
+    """Apply a primary and secondary sort to ``stmt``."""
+    return stmt.order_by(_order_clause(field, direction, nulls_last), _order_clause(secondary, direction))
+
+
 def _build_artists_stmt(query: Optional[str] = None) -> Select[Any]:
     """Build a statement for listing/counting artists."""
     stmt = select(Artist)
@@ -159,9 +179,13 @@ async def list_artists(
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
+    sort_by: str = "name",
+    sort_dir: str = "asc",
 ) -> List[Artist]:
-    """List artists with optional search."""
+    """List artists with optional search and sorting."""
+    field = getattr(Artist, sort_by)
     stmt = _build_artists_stmt(query=query).options(*_artist_selectin_options(include))
+    stmt = _apply_sort(stmt, field, sort_dir, Artist.id)
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -241,6 +265,8 @@ async def list_albums(
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
+    sort_by: str = "title",
+    sort_dir: str = "asc",
 ) -> List[Album]:
     """List albums with optional filters, honouring the requester's ACL."""
     stmt = _build_albums_stmt(
@@ -250,6 +276,14 @@ async def list_albums(
         year_to=year_to,
     ).options(*_album_selectin_options(include))
     stmt = apply_access_filter(stmt, Album, user, "album")
+    field = (
+        select(Artist.name).where(Artist.id == Album.artist_id).scalar_subquery()
+        if sort_by == "artist_name"
+        else getattr(Album, sort_by)
+    )
+
+    nulls_last = sort_by in {"release_year"}
+    stmt = _apply_sort(stmt, field, sort_dir, Album.id, nulls_last)
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -309,7 +343,6 @@ def _apply_tracks_query(
         ts_query = func.plainto_tsquery("english", query)
         track_search_vector = Track.search_vector  # type: ignore
         stmt = stmt.where(track_search_vector.op("@@")(ts_query))
-        stmt = stmt.order_by(func.ts_rank(track_search_vector, ts_query).desc())
     else:
         stmt = stmt.join(Artist, Track.artist_id == Artist.id)
         if year_from is None and year_to is None:
@@ -326,6 +359,37 @@ def _apply_tracks_query(
     return stmt
 
 
+def _track_sort_clause(sort_by: str, sort_dir: str) -> Tuple[Any, ...]:
+    """Return ORDER BY clauses for a track list based on the requested field."""
+    artist_name = select(Artist.name).where(Artist.id == Track.artist_id).scalar_subquery()
+    album_title = select(Album.title).where(Album.id == Track.album_id).scalar_subquery()
+    album_release_year = select(Album.release_year).where(Album.id == Track.album_id).scalar_subquery()
+
+    field_map = {
+        "created_at": Track.created_at,
+        "title": Track.title,
+        "artist_name": artist_name,
+        "album_title": album_title,
+        "updated_at": Track.updated_at,
+        "release_year": func.coalesce(Track.release_year, album_release_year),
+    }
+    field = field_map.get(sort_by, Track.created_at)
+    nulls_last = sort_by in {"release_year", "album_title"}
+    primary = _order_clause(field, sort_dir, nulls_last)
+    secondary = _order_clause(Track.id, sort_dir)
+    return (primary, secondary)
+
+
+def _playlist_track_sort_clause(sort_by: str, sort_dir: str) -> Tuple[Any, ...]:
+    """Return ORDER BY clauses for a playlist track list."""
+    if sort_by == "position":
+        primary = _order_clause(PlaylistTrack.position, sort_dir)
+        secondary = _order_clause(Track.id, sort_dir)
+    else:
+        return _track_sort_clause(sort_by, sort_dir)
+    return (primary, secondary)
+
+
 def _build_tracks_stmt(
     session: AsyncSession,
     *,
@@ -336,9 +400,11 @@ def _build_tracks_stmt(
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
+    favorited: Optional[bool] = None,
+    user: Optional[User] = None,
 ) -> Select[Any]:
     """Build a statement for listing/counting tracks."""
-    stmt = select(Track).order_by(Track.created_at, Track.id)
+    stmt = select(Track)
     if artist_id:
         stmt = stmt.where(Track.artist_id == artist_id)
     if album_id:
@@ -357,6 +423,12 @@ def _build_tracks_stmt(
 
     if library_id:
         stmt = stmt.join(LibraryTrack, LibraryTrack.track_id == Track.id).where(LibraryTrack.library_id == library_id)
+
+    if favorited:
+        if user is None:
+            stmt = stmt.where(false())
+        else:
+            stmt = stmt.join(Favorite, and_(Favorite.track_id == Track.id, Favorite.user_id == user.id))
 
     if query:
         stmt = _apply_tracks_query(session, stmt, query=query, year_from=year_from, year_to=year_to)
@@ -378,12 +450,16 @@ async def list_tracks(
     offset: int = 0,
     include: Optional[Set[str]] = None,
     around_track_id: Optional[str] = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+    favorited: Optional[bool] = None,
 ) -> Tuple[List[Track], int]:
     """List tracks with optional filters, honouring the requester's ACL.
 
-    If ``around_track_id`` is given, the returned chunk is centered on that
-    track (when it matches the filters and is accessible to the requester).
-    The second return value is the effective offset of the returned chunk.
+    If ``around_track_id`` is given and the default sort order is active, the
+    returned chunk is centered on that track (when it matches the filters and
+    is accessible to the requester). The second return value is the effective
+    offset of the returned chunk.
     """
     base_stmt = _build_tracks_stmt(
         session,
@@ -394,11 +470,23 @@ async def list_tracks(
         year_from=year_from,
         year_to=year_to,
         library_id=library_id,
+        favorited=favorited,
+        user=user,
     )
     base_stmt = apply_access_filter(base_stmt, Track, user, "track")
 
+    # Album tracks are always ordered by disc and track number.
+    if album_id:
+        base_stmt = base_stmt.order_by(
+            _order_clause(Track.disc_number, "asc", nulls_last=True),
+            _order_clause(Track.track_number, "asc", nulls_last=True),
+            Track.id,
+        )
+    else:
+        base_stmt = base_stmt.order_by(*_track_sort_clause(sort_by, sort_dir))
+
     effective_offset = max(0, offset)
-    if around_track_id:
+    if around_track_id and not album_id and not query and sort_by == "created_at" and sort_dir == "desc":
         around = await get_track(session, around_track_id, include=None)
         if around is not None:
             exists_stmt = base_stmt.where(Track.id == around.id).limit(1)
@@ -407,10 +495,10 @@ async def list_tracks(
                 before_stmt = select(func.count()).select_from(
                     base_stmt.where(
                         or_(
-                            Track.created_at < around.created_at,
+                            Track.created_at > around.created_at,
                             and_(
                                 Track.created_at == around.created_at,
-                                Track.id < around.id,
+                                Track.id > around.id,
                             ),
                         )
                     ).subquery()
@@ -434,6 +522,7 @@ async def count_tracks(
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
     user: Optional[User] = None,
+    favorited: Optional[bool] = None,
 ) -> int:
     """Return the total number of tracks matching the filters and ACL."""
     stmt = _build_tracks_stmt(
@@ -445,6 +534,8 @@ async def count_tracks(
         year_from=year_from,
         year_to=year_to,
         library_id=library_id,
+        favorited=favorited,
+        user=user,
     )
     stmt = apply_access_filter(stmt, Track, user, "track")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
@@ -476,6 +567,8 @@ async def list_library_tracks(
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
 ) -> List[Track]:
     """List tracks that are members of ``library_id``."""
     stmt = (
@@ -483,9 +576,9 @@ async def list_library_tracks(
         .options(*_track_selectin_options(include))
         .join(LibraryTrack, LibraryTrack.track_id == Track.id)
         .where(LibraryTrack.library_id == library_id)
-        .order_by(Track.created_at)
     )
     stmt = apply_access_filter(stmt, Track, user, "track")
+    stmt = stmt.order_by(*_track_sort_clause(sort_by, sort_dir))
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -511,10 +604,14 @@ async def list_playlists(
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
+    sort_by: str = "name",
+    sort_dir: str = "asc",
 ) -> List[Playlist]:
     """List playlists visible to ``user``."""
+    field = getattr(Playlist, sort_by)
     stmt = select(Playlist).options(*_playlist_selectin_options(include))
     stmt = apply_access_filter(stmt, Playlist, user, "playlist")
+    stmt = _apply_sort(stmt, field, sort_dir, Playlist.id)
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -555,10 +652,14 @@ async def list_libraries(
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
+    sort_by: str = "name",
+    sort_dir: str = "asc",
 ) -> List[Library]:
     """List libraries visible to ``user``."""
+    field = getattr(Library, sort_by)
     stmt = select(Library).options(*_library_selectin_options(include))
     stmt = apply_access_filter(stmt, Library, user, "library")
+    stmt = _apply_sort(stmt, field, sort_dir, Library.id)
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -813,16 +914,18 @@ async def list_playlist_tracks(
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
+    sort_by: str = "position",
+    sort_dir: str = "asc",
 ) -> List[Track]:
-    """List tracks that are members of ``playlist_id`` in playlist order."""
+    """List tracks that are members of ``playlist_id``."""
     stmt = (
         select(Track)
         .options(*_track_selectin_options(include))
         .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
         .where(PlaylistTrack.playlist_id == playlist_id)
-        .order_by(PlaylistTrack.position)
     )
     stmt = apply_access_filter(stmt, Track, user, "track")
+    stmt = stmt.order_by(*_playlist_track_sort_clause(sort_by, sort_dir))
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
