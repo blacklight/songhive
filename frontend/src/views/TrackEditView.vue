@@ -36,6 +36,8 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const title = ref("");
+const artistName = ref("");
+const albumTitle = ref("");
 const genre = ref("");
 const trackNumber = ref("");
 const discNumber = ref("");
@@ -57,6 +59,8 @@ const visibilityOptions = computed(() => [
 
 function resetForm() {
   title.value = track.value?.title ?? "";
+  artistName.value = track.value?.artist?.name ?? "";
+  albumTitle.value = track.value?.album?.title ?? "";
   genre.value = track.value?.genre ?? "";
   trackNumber.value =
     track.value?.track_number != null ? String(track.value.track_number) : "";
@@ -72,7 +76,7 @@ async function loadTrack() {
   loading.value = true;
   error.value = null;
   try {
-    track.value = await getTrack(trackId.value);
+    track.value = await getTrack(trackId.value, { include: "artist,album" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -96,13 +100,15 @@ async function load() {
 }
 
 async function onSubmit() {
-  if (!title.value.trim()) return;
+  if (!title.value.trim() || !artistName.value.trim()) return;
 
   isSaving.value = true;
   error.value = null;
 
   const body: TrackUpdate = {
     title: title.value.trim(),
+    artist_name: artistName.value.trim(),
+    album_title: albumTitle.value.trim() || null,
     genre: genre.value.trim() || null,
     track_number: parseNumber(trackNumber.value),
     disc_number: parseNumber(discNumber.value),
@@ -231,6 +237,12 @@ watch(
           :label="t('browse.edit.title')"
           :required="true"
         />
+        <AppInput
+          v-model="artistName"
+          :label="t('browse.edit.artist')"
+          :required="true"
+        />
+        <AppInput v-model="albumTitle" :label="t('browse.edit.album')" />
         <AppInput v-model="genre" :label="t('browse.detail.genre')" />
         <div class="track-edit-view__row">
           <AppInput

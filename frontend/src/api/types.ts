@@ -3433,6 +3433,10 @@ export interface components {
     TrackUpdate: {
       /** Title */
       title?: string | null;
+      /** Artist Name */
+      artist_name?: string | null;
+      /** Album Title */
+      album_title?: string | null;
       /** Genre */
       genre?: string | null;
       /** Track Number */

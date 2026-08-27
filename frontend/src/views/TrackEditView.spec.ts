@@ -44,6 +44,13 @@ function createTrack(
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
     owner_id: ownerId,
+    artist: { id: "artist-1", name: "Sample Artist" },
+    album: {
+      id: "album-1",
+      title: "Sample Album",
+      artist_id: "artist-1",
+      visibility: "public",
+    },
   };
 }
 
@@ -92,15 +99,21 @@ describe("TrackEditView", () => {
     setAuthenticated("user-1");
     const router = await mountAt("/tracks/track-1/edit");
 
-    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1");
+    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
+      include: "artist,album",
+    });
     expect(wrapper.text()).toContain("Edit track");
 
     const inputs = document.body.querySelectorAll(
       'input[type="text"], input[type="number"]',
     );
     const titleInput = inputs[0] as HTMLInputElement;
-    const genreInput = inputs[1] as HTMLInputElement;
+    const artistInput = inputs[1] as HTMLInputElement;
+    const albumInput = inputs[2] as HTMLInputElement;
+    const genreInput = inputs[3] as HTMLInputElement;
     expect(titleInput.value).toBe("Song One");
+    expect(artistInput.value).toBe("Sample Artist");
+    expect(albumInput.value).toBe("Sample Album");
     expect(genreInput.value).toBe("Rock");
     expect(router.currentRoute.value.path).toBe("/tracks/track-1/edit");
   });
@@ -109,7 +122,9 @@ describe("TrackEditView", () => {
     setAuthenticated("user-2");
     const router = await mountAt("/tracks/track-1/edit");
 
-    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1");
+    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
+      include: "artist,album",
+    });
     expect(router.currentRoute.value.path).toBe("/tracks/track-1");
   });
 
@@ -120,18 +135,24 @@ describe("TrackEditView", () => {
     const inputs = document.body.querySelectorAll(
       'input[type="text"], input[type="number"]',
     );
-    // Order: title, genre, track number, disc number, release year
+    // Order: title, artist, album, genre, track number, disc number, release year
     const titleInput = inputs[0] as HTMLInputElement;
-    const genreInput = inputs[1] as HTMLInputElement;
-    const trackNumberInput = inputs[2] as HTMLInputElement;
-    const discNumberInput = inputs[3] as HTMLInputElement;
-    const releaseYearInput = inputs[4] as HTMLInputElement;
+    const artistInput = inputs[1] as HTMLInputElement;
+    const albumInput = inputs[2] as HTMLInputElement;
+    const genreInput = inputs[3] as HTMLInputElement;
+    const trackNumberInput = inputs[4] as HTMLInputElement;
+    const discNumberInput = inputs[5] as HTMLInputElement;
+    const releaseYearInput = inputs[6] as HTMLInputElement;
     const visibilityInput = document.body.querySelector(
       "select",
     ) as HTMLSelectElement;
 
     titleInput.value = "Song One Updated";
     titleInput.dispatchEvent(new Event("input"));
+    artistInput.value = "Sample Artist";
+    artistInput.dispatchEvent(new Event("input"));
+    albumInput.value = "Sample Album";
+    albumInput.dispatchEvent(new Event("input"));
     genreInput.value = "Pop";
     genreInput.dispatchEvent(new Event("input"));
     trackNumberInput.value = "2";
@@ -153,6 +174,8 @@ describe("TrackEditView", () => {
 
     const expectedBody: TrackUpdate = {
       title: "Song One Updated",
+      artist_name: "Sample Artist",
+      album_title: "Sample Album",
       genre: "Pop",
       track_number: 2,
       disc_number: null,

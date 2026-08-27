@@ -315,6 +315,8 @@
       "editTrack": "Edit track",
       "editLibrary": "Edit library",
       "title": "Title",
+      "artist": "Artist",
+      "album": "Album",
       "description": "Description",
       "releaseYear": "Release year",
       "name": "Name",
