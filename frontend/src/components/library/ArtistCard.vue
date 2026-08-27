@@ -26,13 +26,6 @@ const emit = defineEmits<{ click: [artist: ArtistResponse] }>();
     <span :title="props.artist.name" class="artist-card__name">{{
       props.artist.name
     }}</span>
-    <span
-      v-if="props.artist.bio"
-      :title="props.artist.bio"
-      class="artist-card__bio"
-    >
-      {{ props.artist.bio }}
-    </span>
   </RouterLink>
 </template>
 

@@ -21,7 +21,6 @@ function createArtist() {
   return {
     id: "artist-1",
     name: "The Wrens",
-    bio: "Short-lived indie rock band.",
     image_url: "https://example.com/wrens.jpg",
   };
 }
@@ -40,7 +39,6 @@ describe("ArtistCard", () => {
     });
 
     expect(wrapper.text()).toContain("The Wrens");
-    expect(wrapper.text()).toContain("Short-lived indie rock band.");
 
     await wrapper.find("a").trigger("click");
     await flushPromises();
