@@ -4,6 +4,7 @@ Tests for the track API endpoints.
 
 import io
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -525,7 +526,7 @@ async def test_list_tracks_around_track_id(client, db_session, regular_user, aut
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 10
-    assert int(response.headers["X-List-Offset"]) == 10
+    assert int(response.headers["X-List-Offset"]) == 4
     assert data[5]["id"] == target.id
 
 
@@ -593,3 +594,234 @@ def test_upload_and_delete_track_image(client, sample_tracks, regular_user, auth
     delete = client.delete(f"/api/v1/tracks/{track.id}/image", headers=headers)
     assert delete.status_code == 200
     assert delete.json()["image_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_tracks_for_album_sorted_by_disc_and_track_number(client, db_session, regular_user, auth_headers):
+    """Tracks filtered by album are always returned in disc/track order."""
+    artist = Artist(name="Sort Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Sort Album",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    tracks = [
+        Track(
+            title="Track 2",
+            artist_id=artist.id,
+            album_id=album.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            disc_number=1,
+            track_number=2,
+        ),
+        Track(
+            title="Track 1",
+            artist_id=artist.id,
+            album_id=album.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            disc_number=1,
+            track_number=1,
+        ),
+        Track(
+            title="Disc 2 Track 1",
+            artist_id=artist.id,
+            album_id=album.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            disc_number=2,
+            track_number=1,
+        ),
+    ]
+    for track in tracks:
+        db_session.add(track)
+    await db_session.commit()
+
+    response = client.get(
+        f"/api/v1/tracks?album_id={album.id}&sort_by=title&sort_dir=desc",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert [track["title"] for track in data] == [
+        "Track 1",
+        "Track 2",
+        "Disc 2 Track 1",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_tracks_sorted_by_release_year(client, db_session, regular_user, auth_headers):
+    """Sorting tracks by release year falls back to the album's release year."""
+    artist = Artist(name="Release Year Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Release Year Album",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        release_year=1999,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    tracks = [
+        Track(
+            title="Album Track",
+            artist_id=artist.id,
+            album_id=album.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=None,
+        ),
+        Track(
+            title="Explicit 2020",
+            artist_id=artist.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=2020,
+        ),
+        Track(
+            title="Older Album",
+            artist_id=artist.id,
+            album_id=album.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=1985,
+        ),
+    ]
+    for track in tracks:
+        db_session.add(track)
+    await db_session.commit()
+
+    response = client.get(
+        "/api/v1/tracks?sort_by=release_year&sort_dir=asc",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert [track["title"] for track in data] == [
+        "Older Album",
+        "Album Track",
+        "Explicit 2020",
+    ]
+
+
+@pytest.fixture
+async def sortable_tracks(db_session, regular_user):
+    """Create artists, albums and tracks that exercise every track sort key."""
+    artists = [
+        Artist(name="Artist A"),
+        Artist(name="Artist B"),
+        Artist(name="Artist C"),
+    ]
+    for artist in artists:
+        db_session.add(artist)
+    await db_session.flush()
+
+    albums = [
+        Album(
+            title="Alpha Album",
+            artist_id=artists[0].id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=1999,
+            created_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        ),
+        Album(
+            title="Beta Album",
+            artist_id=artists[2].id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=2020,
+            created_at=datetime(2020, 1, 2, tzinfo=timezone.utc),
+            updated_at=datetime(2020, 1, 2, tzinfo=timezone.utc),
+        ),
+    ]
+    for album in albums:
+        db_session.add(album)
+    await db_session.flush()
+
+    tracks = [
+        Track(
+            title="Alpha",
+            artist_id=artists[0].id,
+            album_id=albums[0].id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=None,
+            created_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2023, 1, 1, tzinfo=timezone.utc),
+        ),
+        Track(
+            title="Beta",
+            artist_id=artists[2].id,
+            album_id=albums[1].id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=2020,
+            created_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+        ),
+        Track(
+            title="Gamma",
+            artist_id=artists[1].id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=None,
+            created_at=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
+        ),
+    ]
+    for track in tracks:
+        db_session.add(track)
+    await db_session.commit()
+    return tracks
+
+
+@pytest.mark.parametrize(
+    "sort_by,sort_dir,expected",
+    [
+        ("title", "asc", ["Alpha", "Beta", "Gamma"]),
+        ("title", "desc", ["Gamma", "Beta", "Alpha"]),
+        ("artist_name", "asc", ["Alpha", "Gamma", "Beta"]),
+        ("artist_name", "desc", ["Beta", "Gamma", "Alpha"]),
+        ("album_title", "asc", ["Alpha", "Beta", "Gamma"]),
+        ("album_title", "desc", ["Beta", "Alpha", "Gamma"]),
+        ("release_year", "asc", ["Alpha", "Beta", "Gamma"]),
+        ("release_year", "desc", ["Beta", "Alpha", "Gamma"]),
+        ("created_at", "asc", ["Alpha", "Beta", "Gamma"]),
+        ("created_at", "desc", ["Gamma", "Beta", "Alpha"]),
+        ("updated_at", "asc", ["Gamma", "Beta", "Alpha"]),
+        ("updated_at", "desc", ["Alpha", "Beta", "Gamma"]),
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_tracks_sorts(
+    client,
+    regular_user,
+    auth_headers,
+    sortable_tracks,
+    sort_by,
+    sort_dir,
+    expected,
+):
+    """The track list endpoint honours every supported sort key and direction."""
+    response = client.get(
+        f"/api/v1/tracks?sort_by={sort_by}&sort_dir={sort_dir}",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert [track["title"] for track in data] == expected

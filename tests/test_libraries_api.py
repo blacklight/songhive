@@ -3,10 +3,14 @@ Tests for the library API endpoints.
 """
 
 import io
+from datetime import datetime, timezone
 
 import pytest
 
 from songhive.models._enums import Visibility
+from songhive.models.artist import Artist
+from songhive.models.library import Library
+from songhive.models.library_track import LibraryTrack
 from songhive.models.track import Track
 from songhive.services.metadata import AudioMetadata
 
@@ -696,3 +700,130 @@ def test_library_image_unsupported_type(client, sample_libraries, regular_user, 
         headers=auth_headers(regular_user),
     )
     assert response.status_code == 415
+
+
+@pytest.fixture
+async def sortable_libraries(db_session, regular_user):
+    """Create libraries with distinct names, creation and update times."""
+    libraries = [
+        Library(
+            name="C Library",
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            created_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2023, 1, 1, tzinfo=timezone.utc),
+        ),
+        Library(
+            name="A Library",
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            created_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+        ),
+        Library(
+            name="B Library",
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            created_at=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
+        ),
+    ]
+    for library in libraries:
+        db_session.add(library)
+    await db_session.commit()
+    return libraries
+
+
+@pytest.mark.parametrize(
+    "sort_by,sort_dir,expected",
+    [
+        ("name", "asc", ["A Library", "B Library", "C Library"]),
+        ("name", "desc", ["C Library", "B Library", "A Library"]),
+        ("created_at", "asc", ["C Library", "A Library", "B Library"]),
+        ("created_at", "desc", ["B Library", "A Library", "C Library"]),
+        ("updated_at", "asc", ["B Library", "A Library", "C Library"]),
+        ("updated_at", "desc", ["C Library", "A Library", "B Library"]),
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_libraries_sorts(
+    client,
+    regular_user,
+    auth_headers,
+    sortable_libraries,
+    sort_by,
+    sort_dir,
+    expected,
+):
+    """The library list endpoint honours every supported sort key and direction."""
+    response = client.get(
+        f"/api/v1/libraries?sort_by={sort_by}&sort_dir={sort_dir}",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert [library["name"] for library in data] == expected
+
+
+@pytest.fixture
+async def sortable_library_tracks(db_session, regular_user):
+    """Create a library with tracks that can be sorted by title."""
+    library = Library(
+        name="Sort Library",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(library)
+    await db_session.flush()
+
+    artist = Artist(name="Sample Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    tracks = [
+        Track(
+            title="C Track",
+            artist_id=artist.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+        ),
+        Track(
+            title="A Track",
+            artist_id=artist.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+        ),
+        Track(
+            title="B Track",
+            artist_id=artist.id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+        ),
+    ]
+    for track in tracks:
+        db_session.add(track)
+    await db_session.flush()
+
+    for track in tracks:
+        db_session.add(LibraryTrack(library_id=library.id, track_id=track.id))
+    await db_session.commit()
+
+    return library, tracks
+
+
+@pytest.mark.asyncio
+async def test_list_library_tracks_sorted_by_title(
+    client,
+    regular_user,
+    auth_headers,
+    sortable_library_tracks,
+):
+    """Tracks within a library can be sorted by title."""
+    library, _ = sortable_library_tracks
+    response = client.get(
+        f"/api/v1/libraries/{library.id}/tracks?sort_by=title&sort_dir=asc",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert [track["title"] for track in data] == ["A Track", "B Track", "C Track"]

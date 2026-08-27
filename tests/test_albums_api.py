@@ -3,6 +3,7 @@ Tests for the album API endpoints.
 """
 
 import io
+from datetime import datetime, timezone
 
 import pytest
 
@@ -370,3 +371,85 @@ def test_upload_and_delete_album_cover(client, sample_albums, regular_user, auth
     delete = client.delete(f"/api/v1/albums/{album.id}/cover", headers=headers)
     assert delete.status_code == 200
     assert delete.json()["cover_url"] is None
+
+
+@pytest.fixture
+async def sortable_albums(db_session, regular_user):
+    """Create artists and albums that exercise every album sort key."""
+    artists = [
+        Artist(name="A Artist"),
+        Artist(name="B Artist"),
+        Artist(name="C Artist"),
+    ]
+    for artist in artists:
+        db_session.add(artist)
+    await db_session.flush()
+
+    albums = [
+        Album(
+            title="C Album",
+            artist_id=artists[0].id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=2020,
+            created_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+        ),
+        Album(
+            title="A Album",
+            artist_id=artists[1].id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=1999,
+            created_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2023, 1, 1, tzinfo=timezone.utc),
+        ),
+        Album(
+            title="B Album",
+            artist_id=artists[2].id,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            release_year=None,
+            created_at=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
+        ),
+    ]
+    for album in albums:
+        db_session.add(album)
+    await db_session.commit()
+    return albums
+
+
+@pytest.mark.parametrize(
+    "sort_by,sort_dir,expected",
+    [
+        ("title", "asc", ["A Album", "B Album", "C Album"]),
+        ("title", "desc", ["C Album", "B Album", "A Album"]),
+        ("artist_name", "asc", ["C Album", "A Album", "B Album"]),
+        ("artist_name", "desc", ["B Album", "A Album", "C Album"]),
+        ("release_year", "asc", ["A Album", "C Album", "B Album"]),
+        ("release_year", "desc", ["C Album", "A Album", "B Album"]),
+        ("created_at", "asc", ["A Album", "C Album", "B Album"]),
+        ("created_at", "desc", ["B Album", "C Album", "A Album"]),
+        ("updated_at", "asc", ["B Album", "C Album", "A Album"]),
+        ("updated_at", "desc", ["A Album", "C Album", "B Album"]),
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_albums_sorts(
+    client,
+    regular_user,
+    auth_headers,
+    sortable_albums,
+    sort_by,
+    sort_dir,
+    expected,
+):
+    """The album list endpoint honours every supported sort key and direction."""
+    response = client.get(
+        f"/api/v1/albums?sort_by={sort_by}&sort_dir={sort_dir}",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert [album["title"] for album in data] == expected

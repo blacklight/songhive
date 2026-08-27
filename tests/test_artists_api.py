@@ -3,6 +3,7 @@ Tests for the artist API endpoints.
 """
 
 import io
+from datetime import datetime, timezone
 
 import pytest
 
@@ -84,3 +85,49 @@ def test_admin_upload_and_delete_artist_images(client, admin_user, sample_artist
     delete_cover = client.delete(f"/api/v1/artists/{artist.id}/cover", headers=headers)
     assert delete_cover.status_code == 200
     assert delete_cover.json()["cover_url"] is None
+
+
+@pytest.fixture
+async def sortable_artists(db_session):
+    """Create artists with distinct names, creation and update times."""
+    artists = [
+        Artist(
+            name="C",
+            created_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2023, 1, 1, tzinfo=timezone.utc),
+        ),
+        Artist(
+            name="A",
+            created_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+        ),
+        Artist(
+            name="B",
+            created_at=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2021, 1, 1, tzinfo=timezone.utc),
+        ),
+    ]
+    for artist in artists:
+        db_session.add(artist)
+    await db_session.commit()
+    return artists
+
+
+@pytest.mark.parametrize(
+    "sort_by,sort_dir,expected",
+    [
+        ("name", "asc", ["A", "B", "C"]),
+        ("name", "desc", ["C", "B", "A"]),
+        ("created_at", "asc", ["C", "A", "B"]),
+        ("created_at", "desc", ["B", "A", "C"]),
+        ("updated_at", "asc", ["B", "A", "C"]),
+        ("updated_at", "desc", ["C", "A", "B"]),
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_artists_sorts(client, sortable_artists, sort_by, sort_dir, expected):
+    """The artist list endpoint honours every supported sort key and direction."""
+    response = client.get(f"/api/v1/artists?sort_by={sort_by}&sort_dir={sort_dir}")
+    assert response.status_code == 200
+    data = response.json()
+    assert [artist["name"] for artist in data] == expected
