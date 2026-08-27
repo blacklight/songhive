@@ -1074,7 +1074,7 @@ async function onMenuSelect(key: string) {
 }
 
 .track-list__link {
-  color: var(--color-accent-contrast);
+  color: var(--color-text-secondary);
   text-decoration: none;
   display: block;
   width: 100%;

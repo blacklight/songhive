@@ -290,17 +290,14 @@ const loginItem = {
   transition: background-color var(--transition-fast);
 }
 
-.app-layout__nav a:hover,
-.app-layout__nav a.router-link-active {
-  color: var(--color-accent-contrast);
+.app-layout__nav a:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-hover);
 }
 
 .app-layout__nav a.router-link-active {
   background-color: var(--color-surface-raised);
-}
-
-.app-layout__nav a:hover {
-  background-color: var(--color-surface-hover);
+  color: var(--color-accent-contrast);
 }
 
 .app-layout__brand {

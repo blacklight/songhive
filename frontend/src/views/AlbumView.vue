@@ -459,7 +459,7 @@ watch(
 }
 
 .album-view__artist {
-  color: var(--color-accent-contrast);
+  color: var(--color-text-secondary);
   text-decoration: none;
   font-size: 1.125rem;
   word-break: break-word;

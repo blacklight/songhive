@@ -78,7 +78,7 @@ function onError() {
   border-radius: var(--radius-full);
   object-fit: cover;
   background-color: var(--color-surface-raised);
-  color: var(--color-text);
+  color: var(--color-accent-contrast);
   font-weight: 600;
 }
 

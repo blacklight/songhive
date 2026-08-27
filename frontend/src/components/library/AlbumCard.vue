@@ -121,7 +121,7 @@ const artistText = computed(
   display: inline-block;
   max-width: 100%;
   font-size: 0.875rem;
-  color: var(--color-accent-contrast);
+  color: var(--color-text-secondary);
   text-decoration: none;
   overflow: hidden;
   text-overflow: ellipsis;
