@@ -14,8 +14,7 @@ import {
   type ArtistUpdate,
 } from "@/api/artists";
 import { getApiErrorMessage } from "@/api/client";
-import { useOwnership } from "@/composables/useOwnership";
-import { useAuthStore } from "@/stores/auth";
+import { useCanManage } from "@/composables/useCanManage";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -29,7 +28,6 @@ const route = useRoute();
 const router = useRouter();
 const confirm = useConfirmStore();
 const toast = useToastStore();
-const authStore = useAuthStore();
 
 const artistId = computed(() => String(route.params.id));
 const artist = ref<ArtistResponse | null>(null);
@@ -47,9 +45,7 @@ const isRemovingCover = ref(false);
 const imageError = ref<string | null>(null);
 const coverError = ref<string | null>(null);
 
-const { isOwner } = useOwnership(
-  computed(() => (authStore.isAdmin ? (authStore.user?.id ?? null) : null)),
-);
+const { canManage } = useCanManage();
 
 function resetForm() {
   name.value = artist.value?.name ?? "";
@@ -76,7 +72,7 @@ async function load() {
   await loadArtist();
   if (!artist.value) return;
 
-  if (!isOwner.value) {
+  if (!canManage.value) {
     await router.replace(`/artists/${artistId.value}`);
     return;
   }
@@ -243,9 +239,9 @@ watch(
       </AppButton>
     </div>
 
-    <template v-else-if="artist && isOwner">
+    <template v-else-if="artist && canManage">
       <AppPageTitle class="artist-edit-view__title" icon="pen-to-square">
-        {{ "Edit artist" }}
+        {{ t("browse.edit.editArtist") }}
       </AppPageTitle>
 
       <form class="artist-edit-view__form" @submit.prevent="onSubmit">

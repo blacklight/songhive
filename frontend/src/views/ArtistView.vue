@@ -17,6 +17,7 @@ import { getApiErrorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
+import { useCanManage } from "@/composables/useCanManage";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
@@ -131,6 +132,8 @@ const {
   canDelete: canDeleteArtist,
 } = deleteArtist;
 
+const { canManage } = useCanManage();
+
 function onTrackShare(track: QueueTrack) {
   openShare(
     "track",
@@ -181,7 +184,7 @@ const actions = computed(() => [
     label: t("common.edit"),
     icon: "pen-to-square",
     variant: "secondary" as const,
-    visible: canDeleteArtist.value,
+    visible: canManage.value,
   },
   {
     key: "add-to-library",

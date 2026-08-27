@@ -3,6 +3,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
+import { useAuthStore } from "@/stores/auth";
 import * as artistsApi from "@/api/artists";
 import * as albumsApi from "@/api/albums";
 import * as tracksApi from "@/api/tracks";
@@ -87,6 +88,21 @@ function createTrack(id: string, title: string): TrackResponse {
       visibility: "public",
     },
   };
+}
+
+function setAuthenticated(userId = "user-1") {
+  const authStore = useAuthStore();
+  authStore.accessToken = "token";
+  authStore.refreshToken = "refresh";
+  authStore.expiresAt = Date.now() + 10000;
+  authStore.status = "authenticated";
+  authStore.user = { id: userId, username: "alice" } as never;
+}
+
+function setAdmin(userId = "admin-1") {
+  setAuthenticated(userId);
+  const authStore = useAuthStore();
+  authStore.role = "admin";
 }
 
 describe("ArtistView", () => {
@@ -224,5 +240,19 @@ describe("ArtistView", () => {
 
     expect(artistsApi.getArtist).toHaveBeenLastCalledWith("artist-2");
     expect(wrapper.text()).toContain("Night Owls");
+  });
+
+  it("shows the edit action for an admin", async () => {
+    setAdmin("admin-1");
+    await mountAt("/artists/artist-1");
+
+    expect(wrapper.text()).toContain(i18n.global.t("common.edit"));
+  });
+
+  it("hides the edit action for non-admin users", async () => {
+    setAuthenticated("user-1");
+    await mountAt("/artists/artist-1");
+
+    expect(wrapper.text()).not.toContain(i18n.global.t("common.edit"));
   });
 });
