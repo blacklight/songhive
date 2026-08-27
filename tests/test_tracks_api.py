@@ -825,3 +825,156 @@ async def test_list_tracks_sorts(
     assert response.status_code == 200
     data = response.json()
     assert [track["title"] for track in data] == expected
+
+
+@pytest.mark.asyncio
+async def test_update_track_creates_artist_and_album(
+    client,
+    db_session,
+    regular_user,
+    auth_headers,
+):
+    """Updating a track with unknown artist/album names creates them."""
+    artist = Artist(name="Original Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Original Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}?include=artist,album",
+        json={
+            "title": "Renamed Track",
+            "artist_name": "New Artist",
+            "album_title": "New Album",
+        },
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["title"] == "Renamed Track"
+    assert data["artist"]["name"] == "New Artist"
+    assert data["album"]["title"] == "New Album"
+
+    new_artist = await db_session.get(Artist, data["artist_id"])
+    new_album = await db_session.get(Album, data["album_id"])
+    assert new_artist is not None
+    assert new_artist.name == "New Artist"
+    assert new_album is not None
+    assert new_album.title == "New Album"
+    assert str(new_album.artist_id) == str(new_artist.id)
+
+    db_session.expunge(track)
+    reloaded = await db_session.get(Track, track.id)
+    assert str(reloaded.artist_id) == data["artist_id"]
+    assert str(reloaded.album_id) == data["album_id"]
+
+
+@pytest.mark.asyncio
+async def test_update_track_reuses_existing_artist_and_album(
+    client,
+    db_session,
+    regular_user,
+    auth_headers,
+):
+    """Updating a track reuses artist/album records that already exist."""
+    artist = Artist(name="Existing Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    album = Album(
+        title="Existing Album",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    other_artist = Artist(name="Other Artist")
+    db_session.add(other_artist)
+    await db_session.flush()
+    track = Track(
+        title="Some Track",
+        artist_id=other_artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={
+            "artist_name": "Existing Artist",
+            "album_title": "Existing Album",
+        },
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["artist_id"] == str(artist.id)
+    assert data["album_id"] == str(album.id)
+
+
+@pytest.mark.asyncio
+async def test_update_track_removes_album(
+    client,
+    db_session,
+    regular_user,
+    auth_headers,
+):
+    """Sending an empty album title removes the track from its album."""
+    artist = Artist(name="Solo Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    album = Album(
+        title="Solo Album",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+    track = Track(
+        title="Solo Track",
+        artist_id=artist.id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"album_title": ""},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["album_id"] is None
+
+
+def test_update_track_ignores_empty_artist_name(
+    client,
+    sample_tracks,
+    regular_user,
+    auth_headers,
+):
+    """Updating a track with a blank artist name leaves the artist unchanged."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    original_artist_id = str(track.artist_id)
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"artist_name": "   "},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    assert response.json()["artist_id"] == original_artist_id

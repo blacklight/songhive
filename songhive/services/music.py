@@ -203,6 +203,53 @@ async def count_artists(
     return result.scalar() or 0
 
 
+async def find_or_create_artist(session: AsyncSession, name: str) -> Artist:
+    """Find an artist by case-insensitive name, or create one."""
+    result = await session.execute(select(Artist).where(func.lower(Artist.name) == name.lower()).limit(1))
+    artist = cast(Optional[Artist], result.scalar_one_or_none())
+    if artist:
+        return artist
+
+    artist = Artist(name=name)
+    session.add(artist)
+    await session.flush()
+    return artist
+
+
+async def find_or_create_album(
+    session: AsyncSession,
+    *,
+    title: str,
+    artist_id: str,
+    year: Optional[int] = None,
+    owner_id: Optional[str] = None,
+    visibility: Optional[str] = None,
+) -> Album:
+    """Find an album by title and artist, or create one."""
+    result = await session.execute(
+        select(Album)
+        .where(
+            func.lower(Album.title) == title.lower(),
+            Album.artist_id == artist_id,
+        )
+        .limit(1)
+    )
+    album = cast(Optional[Album], result.scalar_one_or_none())
+    if album:
+        return album
+
+    album = Album(
+        title=title,
+        artist_id=artist_id,
+        release_year=year,
+        owner_id=owner_id,
+        visibility=visibility or "private",
+    )
+    session.add(album)
+    await session.flush()
+    return album
+
+
 async def _refresh_include(session: AsyncSession, obj: Any, include: Optional[Set[str]]) -> None:
     """Eagerly load any requested relationships so they are populated for reads."""
     if obj is None or not include:

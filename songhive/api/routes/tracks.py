@@ -4,7 +4,7 @@ Track routes.
 
 import logging
 import uuid
-from typing import List, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 from fastapi import (
     APIRouter,
@@ -83,6 +83,8 @@ class TrackUpdate(BaseModel):
     """Track partial update."""
 
     title: Optional[str] = None
+    artist_name: Optional[str] = None
+    album_title: Optional[str] = None
     genre: Optional[str] = None
     track_number: Optional[int] = None
     disc_number: Optional[int] = None
@@ -316,6 +318,29 @@ async def update_track(
     previous_visibility = track.visibility
     if body.title is not None:
         track.title = body.title
+
+    artist = None
+    if body.artist_name is not None:
+        name = (body.artist_name or "").strip()
+        if name:
+            artist = await music.find_or_create_artist(db, name)
+            track.artist_id = str(artist.id)
+
+    album = None
+    if body.album_title is not None:
+        title = (body.album_title or "").strip()
+        if title:
+            album = await music.find_or_create_album(
+                db,
+                title=title,
+                artist_id=track.artist_id,
+                owner_id=track.owner_id,
+                visibility=track.visibility,
+            )
+            track.album_id = str(album.id)
+        else:
+            track.album_id = None
+
     if body.genre is not None:
         track.genre = body.genre
     if body.track_number is not None:
@@ -327,17 +352,27 @@ async def update_track(
     if body.visibility is not None:
         track.visibility = body.visibility.value
 
+    if body.artist_name is not None or body.album_title is not None:
+        await db.flush()
+        await db.refresh(track, ["artist", "album"])
+
+    details: Dict[str, Any] = {
+        "title": track.title,
+        "release_year": track.release_year,
+        "visibility": track.visibility,
+    }
+    if body.artist_name is not None:
+        details["artist_name"] = artist.name if artist is not None else None
+    if body.album_title is not None:
+        details["album_title"] = album.title if album is not None else None
+
     await audit.log_action(
         db,
         actor_id=current_user.id,
         action="track.update",
         target_type="track",
         target_id=track_id,
-        details={
-            "title": track.title,
-            "release_year": track.release_year,
-            "visibility": track.visibility,
-        },
+        details=details,
         ip_address=client_ip(request),
     )
     await db.commit()
