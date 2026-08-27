@@ -31,7 +31,6 @@ const instanceStore = useInstanceStore();
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-4);
   background-color: var(--color-bg);
   color: var(--color-text);
 }
