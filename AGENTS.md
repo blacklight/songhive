@@ -84,7 +84,19 @@
 - Frontend is a Vue.js 3 + TypeScript SPA in `frontend/`; builds to
   `songhive/static/`.
 - Celery tasks are organized by domain: `tasks/import_.py`,
-  `tasks/federation.py`, `tasks/transcoding.py`.
+  `tasks/federation.py`, `tasks/tags.py`, `tasks/transcoding.py`.
+- Audio file storage uses audio-only SHA-256 hashing (via ffmpeg `streamhash`)
+  so that tags and cover art can be rewritten without changing the stored path
+  or invalidating the content hash. Run `songhive admin rehash-audio` once to
+  migrate legacy audio `StoredFile` rows to audio-only hashes.
+- Track metadata is rewritten into embedded tags by the `sync_track_tags`
+  Celery task (`tasks/tags.py`). It resolves cover art in the order
+  track image → album cover → none, acquires a Redis lock per track, and
+  re-uploads the file in place for S3 backends.
+- Manual tag sync can be triggered via `songhive admin sync-tags` or
+  `POST /api/v1/admin/sync-tags`. For large S3 libraries, the migration and
+  bulk tag rewrites incur download/upload transfer costs; consider routing
+  `sync_track_tags` to a dedicated `tags` Celery queue with limited concurrency.
 - When type-checking the Tornado + FastAPI bootstrap in `songhive/app.py`, the
   bridge through `a2wsgi.ASGIMiddleware` and `tornado.wsgi.WSGIContainer` can
   trigger structural mismatches because `FastAPI.__call__` uses Starlette's

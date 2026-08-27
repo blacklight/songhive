@@ -524,6 +524,47 @@ asynchronously. `EmailNotConfiguredError` is raised when the SMTP host or
 
 ---
 
+## Track Metadata and Audio-Only Content Hashing
+
+Uploaded audio files are deduplicated and addressed by an **audio-only SHA-256
+hash**. The hash is computed with `ffmpeg -map 0:a -c copy -f streamhash` over
+the raw audio bitstream, ignoring container metadata, embedded tags, and cover
+art. This means:
+
+- Two files containing the same recording but with different tags have the same
+  hash and share a single `StoredFile` row and storage path.
+- Tags and cover art can be rewritten in place without changing `sha256` or
+  `storage_path`; only `StoredFile.size` is updated.
+
+The tag rewrite is performed by the `sync_track_tags` Celery task
+(`songhive/tasks/tags.py`). The task:
+
+1. Acquires a Redis lock at `sync_tags:{track_id}` (`nx=True`, `ex=300`).
+2. Loads the track with its artist, album, audio file, track image, and album
+   cover relations.
+3. Resolves cover art in this order:
+   1. Track `image_file_id`
+   2. Album `cover_file_id`
+   3. No cover
+4. Retrieves the audio file locally, writes the current DB metadata into the
+   embedded tags using `mutagen`, and updates `StoredFile.size`.
+5. For S3, re-uploads the rewritten file to the same key; for local storage,
+   the file is already in place.
+6. Releases the lock.
+
+Tag sync is triggered automatically by metadata-mutating API operations
+(track/album/artist `PATCH`, track/album cover upload and delete) and by
+successful MusicBrainz enrichment. Manual bulk triggers are provided by
+`POST /api/v1/admin/sync-tags` and `songhive admin sync-tags` (with optional
+`--track-id`, `--album-id`, `--artist-id`, `--library-id`, or `--all`).
+
+To migrate an existing library that was stored before audio-only hashing, run
+`songhive admin rehash-audio` (with `--dry-run` to preview). The command
+re-hashes audio files, moves/renames the backing files to the new hash-based
+paths, and merges duplicate `StoredFile` rows.
+
+---
+
 ## Storage Backends
 
 | Backend | Class          | Description                                     |
