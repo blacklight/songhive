@@ -147,6 +147,7 @@ async def _prepare_cover_art(
     """
     cover_file = _resolve_cover_file(track)
     if cover_file is None:
+        meta.clear_cover_art = True
         return None
 
     cover_local_path = await storage_service.backend.retrieve(cover_file.storage_path)
@@ -241,10 +242,10 @@ def _build_metadata(track: Track) -> AudioMetadataWrite:
     artist_name = track.artist.name if track.artist is not None else None
     album_title = track.album.title if track.album is not None else None
     year = None
-    if track.album is not None and track.album.release_year is not None:
-        year = track.album.release_year
-    elif track.release_year is not None:
+    if track.release_year is not None:
         year = track.release_year
+    elif track.album is not None and track.album.release_year is not None:
+        year = track.album.release_year
 
     return AudioMetadataWrite(
         title=track.title,
