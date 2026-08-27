@@ -27,6 +27,7 @@ from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
+from .._sorting import SortParams, get_sort
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -147,6 +148,7 @@ async def list_albums(
     year_to: Optional[int] = Query(None),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
+    sort: SortParams = Depends(get_sort({"title", "artist_name", "created_at", "updated_at", "release_year"}, "title")),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks"})),
@@ -170,6 +172,8 @@ async def list_albums(
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),
+        sort_by=sort.field,
+        sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
     return [await _build_album_response(a, user, storage, include) for a in rows]

@@ -35,6 +35,7 @@ from ...services.storage import StorageService
 from ...tasks.import_ import process_upload, scan_directory
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
+from .._sorting import SortParams, get_sort
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -179,6 +180,7 @@ async def list_libraries(
     response: Response,
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
+    sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
@@ -191,6 +193,8 @@ async def list_libraries(
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),
+        sort_by=sort.field,
+        sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
     return [await _build_library_response(lib, user, storage, include) for lib in rows]
@@ -682,6 +686,13 @@ async def list_library_tracks_route(
     library_id: str,
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
+    sort: SortParams = Depends(
+        get_sort(
+            {"created_at", "title", "artist_name", "album_title", "updated_at", "release_year"},
+            "created_at",
+            "desc",
+        )
+    ),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     include: IncludeQuery = Depends(get_include({"artist", "album", "owner"})),
@@ -704,6 +715,8 @@ async def list_library_tracks_route(
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),
+        sort_by=sort.field,
+        sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
     return [await _track_response(storage, row, user, include) for row in rows]

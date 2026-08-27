@@ -25,6 +25,7 @@ from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
+from .._sorting import SortParams, get_sort
 from ..deps import get_current_user, get_db, get_storage_service
 from ..middleware.rate_limit import rate_limit_account
 from ..responses import (
@@ -130,6 +131,7 @@ async def list_artists(
     response: Response,
     q: Optional[str] = Query(None, description="Search query"),
     pagination: Pagination = Depends(get_pagination),
+    sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     include: IncludeQuery = Depends(get_include({"albums", "tracks"})),
@@ -142,6 +144,8 @@ async def list_artists(
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),
+        sort_by=sort.field,
+        sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
     return [await _build_artist_response(a, storage, include) for a in rows]

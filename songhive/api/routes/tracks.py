@@ -30,6 +30,7 @@ from ...services.federation import publish_track_activity, unpublish_track_activ
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
+from .._sorting import SortParams, get_sort
 from ..deps import (
     get_current_user,
     get_current_user_optional,
@@ -218,9 +219,17 @@ async def list_tracks(
     year_from: Optional[int] = Query(None),
     year_to: Optional[int] = Query(None),
     library_id: Optional[str] = Query(None),
+    favorited: Optional[bool] = Query(None, description="Only return tracks favorited by the current user"),
     around_track_id: Optional[str] = Query(None, description="Center the returned chunk on this track"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
+    sort: SortParams = Depends(
+        get_sort(
+            {"created_at", "title", "artist_name", "album_title", "updated_at", "release_year"},
+            "created_at",
+            "desc",
+        )
+    ),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     include: IncludeQuery = Depends(get_include({"artist", "album", "owner"})),
@@ -236,6 +245,7 @@ async def list_tracks(
         year_to=year_to,
         library_id=library_id,
         user=user,
+        favorited=favorited,
     )
     rows, effective_offset = await music.list_tracks(
         db,
@@ -251,6 +261,9 @@ async def list_tracks(
         offset=pagination.offset,
         include=set(include.values),
         around_track_id=around_track_id,
+        sort_by=sort.field,
+        sort_dir=sort.direction,
+        favorited=favorited,
     )
     pagination.set_total(response, total)
     response.headers["X-List-Offset"] = str(effective_offset)
