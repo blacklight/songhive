@@ -800,6 +800,119 @@ async def test_login_blocks_unverified_user_until_verified(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resend_verification_email_for_unverified_user(client, db_session, monkeypatch):
+    """Resending a verification email queues a new token for an unverified user."""
+    client.app.state.config.auth.require_email_verification = True
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_verification_email", mock_task)
+
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "resend-alice",
+            "email": "resend-alice@example.com",
+            "password": "secret",
+        },
+    )
+
+    original_token = mock_task.calls[0][0][2]
+
+    response = client.post(
+        "/api/v1/auth/verify-email/resend",
+        json={"username_or_email": "resend-alice"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["success"] is True
+
+    assert len(mock_task.calls) == 2
+    to_address, username, token = mock_task.calls[1][0]
+    assert to_address == "resend-alice@example.com"
+    assert username == "resend-alice"
+    assert len(token) >= 32
+    assert token != original_token
+
+    user = await get_user_by_username(db_session, "resend-alice")
+    assert user is not None
+    assert user.email_verification_token == hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_resend_verification_email_returns_generic_success_for_verified_user(client, db_session, monkeypatch):
+    """Resending for an already-verified user returns success but sends nothing."""
+    client.app.state.config.auth.require_email_verification = True
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_verification_email", mock_task)
+
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "resend-verified",
+            "email": "resend-verified@example.com",
+            "password": "secret",
+        },
+    )
+
+    token = mock_task.calls[0][0][2]
+    client.post("/api/v1/auth/verify-email", json={"token": token})
+
+    response = client.post(
+        "/api/v1/auth/verify-email/resend",
+        json={"username_or_email": "resend-verified"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["success"] is True
+    assert len(mock_task.calls) == 1
+
+    user = await get_user_by_username(db_session, "resend-verified")
+    assert user is not None
+    assert user.email_verified is True
+
+
+@pytest.mark.asyncio
+async def test_resend_verification_email_returns_generic_success_for_missing_user(client, monkeypatch):
+    """Resending for a non-existent user returns a generic success response."""
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_verification_email", mock_task)
+
+    response = client.post(
+        "/api/v1/auth/verify-email/resend",
+        json={"username_or_email": "nobody@example.com"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["success"] is True
+    assert len(mock_task.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_resend_verification_email_uses_email_lookup(client, db_session, monkeypatch):
+    """Resending by email address works the same as by username."""
+    client.app.state.config.auth.require_email_verification = True
+    mock_task = _MockCeleryTask()
+    monkeypatch.setattr("songhive.api.routes.auth.send_verification_email", mock_task)
+
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "resend-by-email",
+            "email": "resend-by-email@example.com",
+            "password": "secret",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/auth/verify-email/resend",
+        json={"username_or_email": "resend-by-email@example.com"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["success"] is True
+
+    assert len(mock_task.calls) == 2
+    user = await get_user_by_username(db_session, "resend-by-email")
+    assert user is not None
+    assert user.email_verification_token is not None
+
+
+@pytest.mark.asyncio
 async def test_password_reset_request_sends_email_for_existing_user(client, db_session, monkeypatch):
     """Test that a reset request queues an email for a real user."""
     client.post(

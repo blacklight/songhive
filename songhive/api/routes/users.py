@@ -65,6 +65,7 @@ class UserResponse(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
+    email_verified: Optional[bool] = None
     role: Optional[UserRole] = None
     links: List[UserLinkOutput] = Field(default_factory=list)
 

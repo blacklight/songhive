@@ -26,6 +26,7 @@ from ...users.manager import (
     confirm_password_reset,
     register_user,
     request_password_reset,
+    generate_verification_email_token,
     verify_email,
 )
 from ...users.oauth import (
@@ -114,6 +115,18 @@ class VerifyEmailRequest(BaseModel):
 
 class VerifyEmailResponse(BaseModel):
     """Response returned after a successful email verification."""
+
+    success: bool = True
+
+
+class ResendVerificationRequest(BaseModel):
+    """Request body for resending a verification email."""
+
+    username_or_email: str = Field(..., min_length=1)
+
+
+class ResendVerificationResponse(BaseModel):
+    """Generic response returned after a verification resend request."""
 
     success: bool = True
 
@@ -308,6 +321,32 @@ async def verify_email_endpoint(
             detail="Invalid or expired verification token",
         )
     return VerifyEmailResponse()
+
+
+@router.post(
+    "/verify-email/resend",
+    response_model=ResendVerificationResponse,
+    summary="Resend verification email",
+    description=(
+        "Request a new verification email for an account. A fresh token is sent "
+        "to the user's email address if the account exists, is active, and has "
+        "not yet been verified. The endpoint always returns a generic success "
+        "response to avoid revealing whether an account exists or is verified."
+    ),
+)
+async def resend_verification_email_endpoint(
+    body: ResendVerificationRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+    redis: Redis = Depends(get_redis),
+):
+    """Resend a verification email for an unverified, active account."""
+    await check_rate_limit(request, config, redis, identifier=body.username_or_email)
+    user, token = await generate_verification_email_token(db, body.username_or_email)
+    if user is not None and token is not None:
+        send_verification_email.delay(user.email, user.username, token)  # type: ignore
+    return ResendVerificationResponse()
 
 
 @router.post(
