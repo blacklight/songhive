@@ -131,7 +131,7 @@ describe("ProfileTab", () => {
     );
   });
 
-  it("renders the gated actions as disabled", async () => {
+  it("renders the remaining gated actions as disabled", async () => {
     const router = createTestRouter();
     await router.push("/profile");
     await router.isReady();
@@ -149,7 +149,6 @@ describe("ProfileTab", () => {
     );
     const labels = disabledButtons.map((b) => b.text());
 
-    expect(labels).toContain(i18n.global.t("profile.passwordChange"));
     expect(labels).toContain(i18n.global.t("profile.resendVerification"));
     expect(labels).toContain(i18n.global.t("profile.deleteAccount"));
   });

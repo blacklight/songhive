@@ -5,6 +5,7 @@ import { useRoute } from "vue-router";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ProfileTab from "./profile/ProfileTab.vue";
+import ChangePasswordTab from "./profile/ChangePasswordTab.vue";
 import ApiTokensTab from "./profile/ApiTokensTab.vue";
 import SessionsTab from "./profile/SessionsTab.vue";
 
@@ -15,19 +16,22 @@ const tab = computed(() => {
   const raw = route.query.tab;
   const value = Array.isArray(raw) ? raw[0] : raw;
   return typeof value === "string" &&
-    ["profile", "apiTokens", "sessions"].includes(value)
+    ["profile", "password", "apiTokens", "sessions"].includes(value)
     ? value
     : "profile";
 });
 
 const tabs = [
   { key: "profile", label: t("profile.tabs.profile"), icon: "user" },
+  { key: "password", label: t("profile.tabs.password"), icon: "lock" },
   { key: "apiTokens", label: t("profile.tabs.apiTokens"), icon: "key" },
   { key: "sessions", label: t("profile.tabs.sessions"), icon: "laptop" },
 ];
 
 const currentComponent = computed(() => {
   switch (tab.value) {
+    case "password":
+      return ChangePasswordTab;
     case "apiTokens":
       return ApiTokensTab;
     case "sessions":

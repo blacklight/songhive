@@ -23,6 +23,7 @@ from ..services.auth import (
     get_user_by_password_reset_token,
     get_user_by_username_or_email,
     hash_password,
+    verify_password,
 )
 from ..services.federation import ensure_user_actor
 from ..users.invites import get_invite, is_invite_valid
@@ -47,6 +48,14 @@ class RegistrationError(ValueError):
 
 class UserManagementError(ValueError):
     """Raised when an administrative user-management action cannot be fulfilled."""
+
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class PasswordChangeError(ValueError):
+    """Raised when a password change request cannot be fulfilled."""
 
     def __init__(self, message: str, status_code: int = 400):
         super().__init__(message)
@@ -193,6 +202,24 @@ async def register_user(
 
 async def change_password(session: AsyncSession, user: User, new_password: str) -> None:
     """Change a user's password."""
+    user.password_hash = hash_password(new_password)
+    await session.flush()
+
+
+async def change_user_password(
+    session: AsyncSession,
+    user: User,
+    current_password: str,
+    new_password: str,
+) -> None:
+    """Change a user's password after verifying their current password."""
+    if not current_password or not new_password:
+        raise PasswordChangeError("Current and new password are required")
+    if len(new_password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise PasswordChangeError("Password is too long")
+    if not verify_password(current_password, user.password_hash):
+        raise PasswordChangeError("Current password is incorrect")
+
     user.password_hash = hash_password(new_password)
     await session.flush()
 

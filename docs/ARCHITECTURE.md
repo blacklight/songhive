@@ -83,7 +83,7 @@ songhive/
 │   ├── errors.py           # RFC 7807 problem-detail exception handlers
 │   ├── routes/             # Route modules (one file per resource)
 │   │   ├── auth.py         # Login, registration, token refresh, password reset
-│   │   ├── users.py        # User profiles, avatar, links
+│   │   ├── users.py        # User profiles, avatar, links, password change
 │   │   ├── artists.py
 │   │   ├── albums.py
 │   │   ├── tracks.py

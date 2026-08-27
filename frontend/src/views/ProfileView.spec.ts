@@ -17,6 +17,7 @@ vi.mock("@/api/auth", () => ({
 vi.mock("@/api/users", () => ({
   getMe: vi.fn(),
   updateMe: vi.fn(),
+  changePassword: vi.fn(),
 }));
 
 function createTestRouter() {
@@ -105,6 +106,21 @@ describe("ProfileView", () => {
     expect(wrapper.text()).toContain(
       i18n.global.t("profile.sessions.disabled"),
     );
+  });
+
+  it("switches to the password tab", async () => {
+    const router = createTestRouter();
+    await router.push("/profile?tab=password");
+    await router.isReady();
+
+    const wrapper = mount(ProfileView, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(router.currentRoute.value.query.tab).toBe("password");
+    expect(wrapper.text()).toContain(i18n.global.t("profile.tabs.password"));
+    expect(wrapper.text()).toContain(i18n.global.t("profile.currentPassword"));
   });
 
   it("updates the query when a tab link is clicked", async () => {

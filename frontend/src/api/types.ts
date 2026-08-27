@@ -296,6 +296,26 @@ export interface paths {
     patch: operations["update_current_user_profile_api_v1_users_me_patch"];
     trace?: never;
   };
+  "/api/v1/users/me/password": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change My Password
+     * @description Change the authenticated user's password.
+     */
+    post: operations["change_my_password_api_v1_users_me_password_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/{username}": {
     parameters: {
       query?: never;
@@ -3479,6 +3499,27 @@ export interface components {
       links?: components["schemas"]["UserLinkInput"][] | null;
     };
     /**
+     * ChangePasswordRequest
+     * @description Request body for changing the authenticated user's password.
+     */
+    ChangePasswordRequest: {
+      /** Current Password */
+      current_password: string;
+      /** New Password */
+      new_password: string;
+    };
+    /**
+     * ChangePasswordResponse
+     * @description Response returned after a successful password change.
+     */
+    ChangePasswordResponse: {
+      /**
+       * Success
+       * @default true
+       */
+      success: boolean;
+    };
+    /**
      * UserResponse
      * @description Authenticated user profile response, including the internal user id.
      */
@@ -4315,6 +4356,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  change_my_password_api_v1_users_me_password_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChangePasswordRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChangePasswordResponse"];
         };
       };
       /** @description Validation Error */

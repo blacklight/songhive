@@ -220,15 +220,6 @@ async function onSubmit() {
     <div class="profile-tab__gated">
       <div class="profile-tab__gated-item">
         <AppButton type="button" disabled>
-          {{ t("profile.passwordChange") }}
-        </AppButton>
-        <p class="profile-tab__hint">
-          {{ t("profile.passwordChangeDisabled") }}
-        </p>
-      </div>
-
-      <div class="profile-tab__gated-item">
-        <AppButton type="button" disabled>
           {{ t("profile.resendVerification") }}
         </AppButton>
         <p class="profile-tab__hint">

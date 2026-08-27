@@ -13,12 +13,15 @@ from songhive.api.middleware.auth import create_access_token
 from songhive.api.routes.users import UserLinkInput, UserProfileUpdate, UserResponse
 from songhive.config.schema import SonghiveConfig
 from songhive.federation.actors import get_actor_url, get_federation_storage
+from songhive.models.audit_log import AuditLog
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
 from songhive.services.auth import create_user, verify_password
 from songhive.users.manager import (
+    PasswordChangeError,
     RegistrationError,
     change_password,
+    change_user_password,
     deactivate_user,
     register_user,
     update_profile,
@@ -376,6 +379,32 @@ async def test_change_password(db_session):
     await change_password(db_session, user, "new-password")
     assert verify_password("new-password", user.password_hash)
     assert verify_password("old-password", user.password_hash) is False
+
+
+@pytest.mark.asyncio
+async def test_change_user_password_verifies_current(db_session):
+    """Test that change_user_password requires the current password."""
+    user = await create_user(db_session, "alice", "alice@example.com", "old-password")
+    await change_user_password(db_session, user, "old-password", "new-password")
+    assert verify_password("new-password", user.password_hash)
+    assert verify_password("old-password", user.password_hash) is False
+
+
+@pytest.mark.asyncio
+async def test_change_user_password_rejects_wrong_current(db_session):
+    """Test that change_user_password rejects an incorrect current password."""
+    user = await create_user(db_session, "alice", "alice@example.com", "old-password")
+    with pytest.raises(PasswordChangeError, match="Current password is incorrect"):
+        await change_user_password(db_session, user, "wrong-password", "new-password")
+
+
+@pytest.mark.asyncio
+async def test_change_user_password_rejects_too_long(db_session):
+    """Test that change_user_password rejects passwords over bcrypt's 72-byte limit."""
+    user = await create_user(db_session, "alice", "alice@example.com", "old-password")
+    long_password = "a" * 80
+    with pytest.raises(PasswordChangeError, match="too long"):
+        await change_user_password(db_session, user, "old-password", long_password)
 
 
 @pytest.mark.asyncio
@@ -933,3 +962,107 @@ async def test_patch_me_endpoint_syncs_federation_actor(client, db_session, conf
         {"type": "PropertyValue", "name": "Website", "value": "https://example.com"},
         {"type": "PropertyValue", "name": "Mastodon", "value": "https://mastodon.example.com/@alice"},
     ]
+
+
+def test_change_password_endpoint_unauthenticated(client):
+    """Test that the change password endpoint requires authentication."""
+    response = client.post(
+        "/api/v1/users/me/password",
+        json={"current_password": "old", "new_password": "new"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_change_password_endpoint_success(client, db_session, config):
+    """Test changing a password and revoking existing refresh tokens."""
+    user = await create_user(db_session, "alice", "alice@example.com", "old-password")
+    await db_session.flush()
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "old-password"},
+    )
+    assert login.status_code == 200
+    tokens = login.json()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.post(
+        "/api/v1/users/me/password",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"current_password": "old-password", "new_password": "new-password"},
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+    old_login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "old-password"},
+    )
+    assert old_login.status_code == 401
+
+    new_login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "new-password"},
+    )
+    assert new_login.status_code == 200
+
+    refresh = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
+    )
+    assert refresh.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_change_password_endpoint_wrong_current(client, db_session, config):
+    """Test that an incorrect current password is rejected."""
+    user = await create_user(db_session, "alice", "alice@example.com", "old-password")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.post(
+        "/api/v1/users/me/password",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"current_password": "wrong-password", "new_password": "new-password"},
+    )
+    assert response.status_code == 400
+    assert "current password" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_change_password_endpoint_too_long(client, db_session, config):
+    """Test that an overly long new password is rejected."""
+    user = await create_user(db_session, "alice", "alice@example.com", "old-password")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    long_password = "a" * 80
+    response = client.post(
+        "/api/v1/users/me/password",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"current_password": "old-password", "new_password": long_password},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_change_password_endpoint_creates_audit_log(client, db_session, config):
+    """Test that a successful password change writes an audit log."""
+    user = await create_user(db_session, "alice", "alice@example.com", "old-password")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.post(
+        "/api/v1/users/me/password",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"current_password": "old-password", "new_password": "new-password"},
+    )
+    assert response.status_code == 200
+
+    result = await db_session.execute(select(AuditLog).where(AuditLog.action == "user.change_password"))
+    log = result.scalar_one_or_none()
+    assert log is not None
+    assert log.actor_id == user.id
+    assert log.target_id == user.id
+    assert log.target_type == "user"
