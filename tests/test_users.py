@@ -576,6 +576,12 @@ def test_user_profile_update_accepts_http_and_https_avatar_urls():
     assert http_update.avatar_url == "http://example.com/avatar.png"
 
 
+def test_user_profile_update_accepts_null_avatar_url():
+    """Test that UserProfileUpdate accepts null to clear the avatar."""
+    update = UserProfileUpdate(avatar_url=None)
+    assert update.avatar_url is None
+
+
 def test_user_model_rejects_unsafe_avatar_url():
     """Test that the User model rejects avatar URLs with unsafe schemes."""
     with pytest.raises(ValueError, match="Avatar URL must start with http:// or https://"):
@@ -823,6 +829,24 @@ async def test_patch_me_endpoint(client, db_session, config):
     }
     for field in sensitive_fields:
         assert field not in data, f"Sensitive field {field!r} leaked into /me response"
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_clears_avatar_url(client, db_session, config):
+    """Test that PATCH /me can clear the user's avatar URL."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    user.avatar_url = "https://example.com/avatar.png"
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"avatar_url": None},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["avatar_url"] is None
 
 
 @pytest.mark.asyncio
