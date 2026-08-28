@@ -105,16 +105,9 @@ const nextDisabled = computed(() => !store.hasNext && store.repeat === "off");
   padding: var(--space-2);
 }
 
-.player-controls__play:hover:not(:disabled),
-.player-controls__prev:hover:not(:disabled),
-.player-controls__next:hover:not(:disabled) {
-  color: var(--color-accent);
-}
-
 .player-controls__shuffle--active,
 .player-controls__repeat--all,
 .player-controls__repeat--one {
-  color: var(--color-accent);
   background-color: var(--color-surface-raised);
 }
 
