@@ -7,6 +7,7 @@ import logging
 from typing import Any, ClassVar, Optional, Set, Union
 from urllib.parse import urlsplit
 
+import tornado.ioloop
 import tornado.websocket
 
 from ..api.middleware.auth import decode_access_token
@@ -92,6 +93,7 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
             return
 
         self.user_id = str(user.id)
+        self._io_loop = tornado.ioloop.IOLoop.current()
         EventWebSocket._connections.add(self)
 
     def on_message(self, message: Union[str, bytes]) -> None:
@@ -123,6 +125,14 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
         EventWebSocket._connections.discard(self)
 
     @classmethod
+    def _send(cls, conn: "EventWebSocket", message: str) -> None:
+        """Write a message to a connection, removing it if it has closed."""
+        try:
+            conn.write_message(message)
+        except tornado.websocket.WebSocketClosedError:
+            cls._connections.discard(conn)
+
+    @classmethod
     def broadcast(
         cls,
         event_type: str,
@@ -140,7 +150,13 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
         for conn in list(cls._connections):
             if topic is not None and conn.topics and topic not in conn.topics:
                 continue
-            try:
-                conn.write_message(message)
-            except tornado.websocket.WebSocketClosedError:
-                cls._connections.discard(conn)
+            io_loop = getattr(conn, "_io_loop", None)
+            if io_loop is None:
+                # Backward compatibility for older connections; write
+                # synchronously when the IOLoop is not available.
+                cls._send(conn, message)
+            else:
+                # Schedule the write on the connection's IOLoop. This is
+                # thread-safe and avoids races when broadcast() is called from
+                # outside the IOLoop thread (e.g. Celery or tests).
+                io_loop.add_callback(cls._send, conn, message)

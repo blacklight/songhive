@@ -51,13 +51,13 @@ class TestEventWebSocket(tornado.testing.AsyncHTTPTestCase):
         )
         self.engine = create_async_engine(self.config.database.url, poolclass=NullPool)
         init_db(engine=self.engine, force=True)
-        asyncio.run(self._create_tables())
-        asyncio.run(self._seed())
+        super().setUp()
+        self.io_loop.run_sync(self._create_tables)
+        self.io_loop.run_sync(self._seed)
         self.token = create_access_token(str(self.user.id), self.config.auth.secret_key)
         self.inactive_token = create_access_token(str(self.inactive.id), self.config.auth.secret_key)
         EventWebSocket._connections.clear()
         EventWebSocket._allowed_origins = None
-        super().setUp()
 
     def tearDown(self):
         self.io_loop.run_sync(self.engine.dispose)
@@ -83,7 +83,20 @@ class TestEventWebSocket(tornado.testing.AsyncHTTPTestCase):
     def _ws_connect(self, path: str, token: str | None = None, headers: dict | None = None):
         url = self._ws_url(path, token)
         request = HTTPRequest(url, headers=headers or {})
-        return self.io_loop.run_sync(lambda: websocket_connect(request))
+
+        async def _connect():
+            client = await websocket_connect(request)
+            # websocket_connect returns as soon as the HTTP upgrade succeeds,
+            # but the server-side open() coroutine (which adds the connection
+            # to EventWebSocket._connections) may still be running. Wait for it
+            # to finish, or for the connection to be rejected and closed.
+            for _ in range(500):
+                if EventWebSocket._connections or client.close_code is not None:
+                    break
+                await asyncio.sleep(0.01)
+            return client
+
+        return self.io_loop.run_sync(_connect)
 
     def _write(self, client, message: str) -> None:
         self.io_loop.run_sync(lambda: client.write_message(message))
