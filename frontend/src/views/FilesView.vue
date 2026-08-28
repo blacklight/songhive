@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink, useRouter } from "vue-router";
 import {
@@ -10,6 +10,7 @@ import {
   type StoredFileResponse,
 } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
+import { buildUrl } from "@/api/config";
 import {
   listLibraries,
   type Visibility,
@@ -122,6 +123,50 @@ function fileIcon(file: StoredFileResponse): string {
   if (file.content_type.startsWith("video/")) return "video";
   return "file";
 }
+
+function isImage(file: StoredFileResponse): boolean {
+  return file.content_type.startsWith("image/");
+}
+
+function isAudio(file: StoredFileResponse): boolean {
+  return file.content_type.startsWith("audio/");
+}
+
+function previewUrl(file: StoredFileResponse): string {
+  return buildUrl(file.url, { disposition: "inline" });
+}
+
+const currentAudio = ref<HTMLAudioElement | null>(null);
+const playingFileId = ref<string | null>(null);
+
+function stopAudio() {
+  currentAudio.value?.pause();
+  currentAudio.value = null;
+  playingFileId.value = null;
+}
+
+function toggleAudio(file: StoredFileResponse, event?: MouseEvent) {
+  event?.stopPropagation();
+  if (playingFileId.value === file.id) {
+    stopAudio();
+    return;
+  }
+
+  stopAudio();
+  const audio = new Audio(previewUrl(file));
+  audio.onended = () => {
+    if (playingFileId.value === file.id) {
+      stopAudio();
+    }
+  };
+  currentAudio.value = audio;
+  playingFileId.value = file.id;
+  void audio.play();
+}
+
+onUnmounted(() => {
+  stopAudio();
+});
 
 function getErrorMessage(err: unknown): string {
   return (
@@ -367,18 +412,43 @@ async function onFileChange(event: Event) {
       item-class="files-view__item"
     >
       <template #card="{ item, bulkMode }">
-        <RouterLink
-          :to="{ name: 'file', params: { id: item.id } }"
+        <div
           class="files-view__card"
           :class="{ 'files-view__card--bulk': bulkMode }"
         >
-          <AppIcon :name="fileIcon(item)" spacing="right" />
-          <span class="files-view__name">{{ fileName(item) }}</span>
+          <img
+            v-if="isImage(item)"
+            :src="previewUrl(item)"
+            :alt="fileName(item)"
+            class="files-view__thumb"
+          />
+          <button
+            v-else-if="isAudio(item)"
+            type="button"
+            class="files-view__play"
+            :aria-label="
+              playingFileId === item.id ? t('common.pause') : t('common.play')
+            "
+            @click="(e) => toggleAudio(item, e)"
+          >
+            <AppIcon :name="playingFileId === item.id ? 'pause' : 'play'" />
+          </button>
+          <AppIcon v-else :name="fileIcon(item)" class="files-view__icon" />
+
+          <RouterLink
+            v-if="!bulkMode"
+            :to="{ name: 'file', params: { id: item.id } }"
+            class="files-view__name"
+          >
+            {{ fileName(item) }}
+          </RouterLink>
+          <span v-else class="files-view__name">{{ fileName(item) }}</span>
+
           <span class="files-view__meta">
             {{ formatBytes(item.size) }} ·
             {{ t(`browse.visibility.${toVisibility(item.visibility)}`) }}
           </span>
-        </RouterLink>
+        </div>
       </template>
     </BulkEditableGrid>
   </div>
@@ -411,9 +481,13 @@ async function onFileChange(event: Event) {
 }
 
 .files-view__card {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  grid-template-areas:
+    "preview name"
+    "preview meta";
+  gap: var(--space-1) var(--space-3);
+  align-items: start;
   flex: 1;
   min-width: 0;
   color: var(--color-text);
@@ -426,18 +500,67 @@ async function onFileChange(event: Event) {
 }
 
 .files-view__name {
-  flex: 1;
+  grid-area: name;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
+  color: var(--color-text);
+  text-decoration: none;
+  align-self: end;
+}
+
+.files-view__name:hover {
+  text-decoration: underline;
+}
+
+.files-view__thumb,
+.files-view__play,
+.files-view__icon {
+  grid-area: preview;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--radius-sm);
+  align-self: start;
+}
+
+.files-view__thumb {
+  object-fit: cover;
+  background-color: var(--color-surface-raised);
+}
+
+.files-view__play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface-secondary);
+  color: var(--color-text-secondary);
+  font-size: 1.125rem;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.files-view__play:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-hover);
+}
+
+.files-view__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  color: var(--color-text-muted);
 }
 
 .files-view__meta {
+  grid-area: meta;
   font-size: 0.875rem;
   color: var(--color-text-muted);
   white-space: nowrap;
+  align-self: start;
 }
 
 .files-view__error {

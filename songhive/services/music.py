@@ -449,6 +449,7 @@ def _build_tracks_stmt(
     library_id: Optional[str] = None,
     favorited: Optional[bool] = None,
     user: Optional[User] = None,
+    file_id: Optional[str] = None,
 ) -> Select[Any]:
     """Build a statement for listing/counting tracks."""
     stmt = select(Track)
@@ -458,6 +459,14 @@ def _build_tracks_stmt(
         stmt = stmt.where(Track.album_id == album_id)
     if genre:
         stmt = stmt.where(Track.genre == genre)
+    if file_id:
+        stmt = stmt.where(
+            or_(
+                Track.audio_file_id == file_id,
+                Track.image_file_id == file_id,
+                Track.album_id.in_(select(Album.id).where(Album.cover_file_id == file_id)),
+            )
+        )
 
     if year_from is not None or year_to is not None:
         stmt = stmt.outerjoin(Album, Track.album_id == Album.id)
@@ -500,6 +509,7 @@ async def list_tracks(
     sort_by: str = "created_at",
     sort_dir: str = "desc",
     favorited: Optional[bool] = None,
+    file_id: Optional[str] = None,
 ) -> Tuple[List[Track], int]:
     """List tracks with optional filters, honouring the requester's ACL.
 
@@ -519,6 +529,7 @@ async def list_tracks(
         library_id=library_id,
         favorited=favorited,
         user=user,
+        file_id=file_id,
     )
     base_stmt = apply_access_filter(base_stmt, Track, user, "track")
 
@@ -570,6 +581,7 @@ async def count_tracks(
     library_id: Optional[str] = None,
     user: Optional[User] = None,
     favorited: Optional[bool] = None,
+    file_id: Optional[str] = None,
 ) -> int:
     """Return the total number of tracks matching the filters and ACL."""
     stmt = _build_tracks_stmt(
@@ -583,6 +595,7 @@ async def count_tracks(
         library_id=library_id,
         favorited=favorited,
         user=user,
+        file_id=file_id,
     )
     stmt = apply_access_filter(stmt, Track, user, "track")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))

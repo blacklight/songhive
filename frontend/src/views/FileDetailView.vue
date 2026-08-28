@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRoute } from "vue-router";
+import { RouterLink, useRoute } from "vue-router";
 import {
   getFile,
   deleteFile as deleteFileApi,
   type StoredFileResponse,
 } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
-import { API_PREFIX, buildUrl } from "@/api/config";
+import { buildUrl } from "@/api/config";
 import { useToastStore } from "@/stores/toast";
 import { formatBytes, toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -34,13 +34,25 @@ const displayName = computed(() =>
     : t("pages.files.untitledFile"),
 );
 
+const isImage = computed(
+  () => file.value?.content_type.startsWith("image/") ?? false,
+);
+
+const isAudio = computed(
+  () => file.value?.content_type.startsWith("audio/") ?? false,
+);
+
+const previewUrl = computed(() =>
+  file.value ? buildUrl(file.value.url, { disposition: "inline" }) : undefined,
+);
+
 const downloadUrl = computed(() =>
   file.value
-    ? buildUrl(`${API_PREFIX}/files/${file.value.id}/download`, {
-        disposition: "attachment",
-      })
+    ? buildUrl(file.value.url, { disposition: "attachment" })
     : undefined,
 );
+
+const tracks = computed(() => file.value?.tracks ?? []);
 
 const deleteFile = useEntityDelete({
   delete: deleteFileApi,
@@ -116,6 +128,28 @@ watch(
         displayName
       }}</AppPageTitle>
 
+      <section
+        v-if="isImage || isAudio"
+        class="file-detail-view__preview"
+        :aria-label="t('pages.files.preview')"
+      >
+        <img
+          v-if="isImage"
+          :src="previewUrl"
+          :alt="displayName"
+          class="file-detail-view__image"
+        />
+        <audio
+          v-else-if="isAudio"
+          controls
+          :src="previewUrl"
+          class="file-detail-view__audio"
+          preload="metadata"
+        >
+          {{ displayName }}
+        </audio>
+      </section>
+
       <section class="file-detail-view__meta">
         <div class="file-detail-view__row">
           <span class="file-detail-view__label">
@@ -190,6 +224,28 @@ watch(
             {{ t("common.delete") }}
           </AppButton>
         </div>
+      </section>
+
+      <section v-if="tracks.length > 0" class="file-detail-view__tracks">
+        <h2 class="file-detail-view__tracks-title">
+          {{ t("pages.files.associatedTracks") }}
+        </h2>
+        <ul class="file-detail-view__track-list">
+          <li v-for="track in tracks" :key="track.id">
+            <RouterLink
+              :to="{ name: 'track', params: { id: track.id } }"
+              class="file-detail-view__track-link"
+            >
+              <AppIcon name="music" spacing="right" />
+              <span class="file-detail-view__track-title">{{
+                track.title
+              }}</span>
+              <span v-if="track.artist" class="file-detail-view__track-artist">
+                {{ track.artist.name }}
+              </span>
+            </RouterLink>
+          </li>
+        </ul>
       </section>
     </template>
 
@@ -318,5 +374,78 @@ watch(
 
 .file-detail-view__download:hover {
   filter: brightness(0.95);
+}
+
+.file-detail-view__preview {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+}
+
+.file-detail-view__image {
+  max-width: 100%;
+  max-height: 32rem;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+}
+
+.file-detail-view__audio {
+  width: 100%;
+  max-width: 40rem;
+}
+
+.file-detail-view__tracks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+}
+
+.file-detail-view__tracks-title {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.file-detail-view__track-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.file-detail-view__track-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  text-decoration: none;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast);
+}
+
+.file-detail-view__track-link:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.file-detail-view__track-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.file-detail-view__track-artist {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
 }
 </style>

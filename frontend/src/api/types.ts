@@ -3384,6 +3384,8 @@ export interface components {
       original_filename?: string | null;
       /** Url */
       url: string;
+      /** Tracks */
+      tracks?: components["schemas"]["TrackSummary"][] | null;
     };
     /**
      * TokenPairResponse
