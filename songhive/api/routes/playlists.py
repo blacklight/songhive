@@ -25,6 +25,11 @@ from ...models.playlist import Playlist
 from ...models.user import User
 from ...services import acl, audit, deletion, music
 from ...services.federation import unpublish_track_activity
+from ...services.hashtags import (
+    add_hashtags_to_entity,
+    remove_hashtag_from_entity,
+    validate_hashtag_name,
+)
 from ...services.storage import StorageService
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
@@ -37,8 +42,8 @@ from ..deps import (
     require_access,
 )
 from ..middleware.rate_limit import rate_limit_account
-from ..responses import TrackSummary, UserSummary, build_track_summary, build_user_summary
-from ._common import HasOwnerId, redact_owner
+from ..responses import TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
+from ._common import HashtagListRequest, HasOwnerId, redact_owner
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import TrackResponse, _build_track_response
 
@@ -59,6 +64,7 @@ class PlaylistResponse(BaseModel):
     cover_url: Optional[str] = None
     owner: Optional[UserSummary] = None
     tracks: Optional[List[TrackSummary]] = None
+    hashtags: List[str] = []
 
 
 class PlaylistCreate(BaseModel):
@@ -104,6 +110,13 @@ async def _playlist_cover_url(playlist: Playlist, storage: StorageService) -> Op
     return None
 
 
+def _playlist_hashtags(playlist: Playlist) -> List[str]:
+    """Return loaded hashtag names, avoiding a lazy load."""
+    if not _is_loaded(playlist, "hashtags"):
+        return []
+    return [h.name for h in playlist.hashtags]
+
+
 async def _build_playlist_response(
     playlist: Playlist,
     user: Optional[User],
@@ -136,6 +149,7 @@ async def _build_playlist_response(
         cover_url=await _playlist_cover_url(playlist, storage),
         owner=owner,
         tracks=tracks,
+        hashtags=_playlist_hashtags(playlist),
     )
 
 
@@ -147,7 +161,7 @@ async def list_playlists(
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
 ):
     """List playlists visible to the requester."""
     total = await music.count_playlists(db, user=user)
@@ -200,7 +214,7 @@ async def get_playlist(
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
 ):
     """Get a playlist by ID."""
     playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
@@ -218,7 +232,7 @@ async def update_playlist(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
 ):
     """Partially update a playlist."""
     playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
@@ -265,7 +279,7 @@ async def upload_playlist_image(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
 ):
     """Upload a playlist image."""
     playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
@@ -310,7 +324,7 @@ async def upload_playlist_cover(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
 ):
     """Upload playlist cover art."""
     playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
@@ -354,7 +368,7 @@ async def delete_playlist_image(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
 ):
     """Remove a playlist image."""
     playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
@@ -390,7 +404,7 @@ async def delete_playlist_cover(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
 ):
     """Remove playlist cover art."""
     playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
@@ -655,3 +669,97 @@ async def delete_playlist(
             )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{playlist_id}/hashtags", response_model=PlaylistResponse)
+async def add_playlist_hashtags(
+    playlist_id: str,
+    request: Request,
+    body: HashtagListRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+):
+    """Add hashtags to a playlist."""
+    playlist = await music.get_playlist(db, playlist_id, include={"owner"})
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    try:
+        await add_hashtags_to_entity(
+            db,
+            "playlist",
+            playlist_id,
+            body.hashtags,
+            user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    playlist = await music.get_playlist(db, playlist_id, include=set(include.values) | {"owner", "hashtags"})
+    assert playlist is not None
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="hashtag.add",
+        target_type="playlist",
+        target_id=playlist_id,
+        details={"hashtags": [validate_hashtag_name(h) for h in body.hashtags]},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+    return await _build_playlist_response(playlist, current_user, storage, include)
+
+
+@router.delete("/{playlist_id}/hashtags/{hashtag}", response_model=PlaylistResponse)
+async def remove_playlist_hashtag(
+    playlist_id: str,
+    hashtag: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+):
+    """Remove a hashtag from a playlist."""
+    playlist = await music.get_playlist(db, playlist_id, include={"owner"})
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    try:
+        await remove_hashtag_from_entity(db, "playlist", playlist_id, hashtag)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    playlist = await music.get_playlist(db, playlist_id, include=set(include.values) | {"owner", "hashtags"})
+    assert playlist is not None
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="hashtag.remove",
+        target_type="playlist",
+        target_id=playlist_id,
+        details={"hashtag": validate_hashtag_name(hashtag)},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+    return await _build_playlist_response(playlist, current_user, storage, include)

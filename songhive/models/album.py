@@ -12,6 +12,7 @@ from .base import Base
 
 if TYPE_CHECKING:
     from .artist import Artist
+    from .hashtag import Hashtag, HashtagAlbum
     from .track import Track
 
 
@@ -40,3 +41,15 @@ class Album(Base):
     cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")
     owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
     tracks: Mapped[List["Track"]] = relationship("Track", back_populates="album", lazy="selectin")
+    hashtags: Mapped[List["Hashtag"]] = relationship(
+        "Hashtag",
+        secondary="hashtag_albums",
+        viewonly=True,
+        lazy="selectin",
+    )
+    hashtag_associations: Mapped[List["HashtagAlbum"]] = relationship(
+        "HashtagAlbum",
+        back_populates="album",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )

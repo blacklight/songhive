@@ -29,7 +29,13 @@ export function createLibrary(
   });
 }
 
-export function getLibrary(id: string): Promise<LibraryResponse> {
+export function getLibrary(
+  id: string,
+  params?: { include?: string },
+): Promise<LibraryResponse> {
+  if (params) {
+    return apiRequest<LibraryResponse>(`/libraries/${id}`, { query: params });
+  }
   return apiRequest<LibraryResponse>(`/libraries/${id}`);
 }
 

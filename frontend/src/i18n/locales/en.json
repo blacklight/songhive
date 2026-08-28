@@ -1,4 +1,26 @@
 {
+  "hashtags": {
+    "title": "Hashtags",
+    "label": "Hashtags",
+    "placeholder": "Add hashtags…",
+    "ariaLabel": "Hashtags",
+    "hint": "Lowercase letters, numbers, and underscores; at least one letter. Separate with commas or spaces.",
+    "emptyTag": "Please enter a hashtag.",
+    "tooLong": "Hashtag must be 64 characters or less.",
+    "invalidCharacters": "Hashtags may only contain lowercase letters, numbers, and underscores.",
+    "noLetter": "Hashtags must contain at least one letter.",
+    "removeTag": "Remove {tag}",
+    "itemCount": "{count} items",
+    "searchPlaceholder": "Search hashtags…",
+    "allHashtags": "All hashtags",
+    "taggedItems": "Tagged items",
+    "empty": "No hashtags found.",
+    "emptyItems": "No items tagged with this hashtag.",
+    "deleteConfirm": "Delete the hashtag \"{name}\" and remove it from all items?",
+    "deleteSuccess": "Hashtag deleted.",
+    "deleteError": "Could not delete hashtag: {message}",
+    "saveError": "Could not save hashtags: {message}"
+  },
   "common": {
     "save": "Save",
     "cancel": "Cancel",
@@ -35,7 +57,10 @@
       "created_at": "Date added",
       "updated_at": "Date updated",
       "release_year": "Release year",
-      "position": "Playlist order"
+      "position": "Playlist order",
+      "item_count": "Item count",
+      "first_used": "First used",
+      "last_used": "Last used"
     }
   },
   "theme": {
@@ -111,6 +136,7 @@
     "history": "History",
     "favorites": "Favorites",
     "files": "Files",
+    "hashtags": "Hashtags",
     "radio": "Radio",
     "about": "About",
     "admin": "Admin",
@@ -325,6 +351,7 @@
       "owner": "Owner",
       "visibility": "Visibility",
       "actions": "Actions",
+      "hashtags": "Hashtags",
       "playAll": "Play all"
     },
     "visibility": {
@@ -343,6 +370,7 @@
       "description": "Description",
       "releaseYear": "Release year",
       "name": "Name",
+      "hashtags": "Hashtags",
       "saveSuccess": "Saved.",
       "saveError": "Could not save: {message}",
       "deleteConfirm": "Are you sure you want to delete \"{name}\"?",

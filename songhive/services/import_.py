@@ -25,6 +25,7 @@ from ..models.library_track import LibraryTrack
 from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..models.upload import Upload
+from .hashtags import add_hashtags_to_entity, extract_hashtags_from_metadata
 from .metadata import AudioMetadata, extract_metadata
 from .storage import StorageService, audio_hash
 
@@ -502,6 +503,16 @@ async def import_audio_file(
         metadata=metadata,
         content_type=content_type,
     )
+
+    auto_tags = extract_hashtags_from_metadata(metadata)
+    if auto_tags:
+        await add_hashtags_to_entity(
+            session,
+            "track",
+            str(track.id),
+            auto_tags,
+            user_id=owner_id,
+        )
 
     _maybe_enqueue_enrichment(track, enrich)
     return ImportResult(

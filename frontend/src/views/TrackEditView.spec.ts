@@ -106,7 +106,7 @@ describe("TrackEditView", () => {
     const router = await mountAt("/tracks/track-1/edit");
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "artist,album",
+      include: "artist,album,hashtags",
     });
     expect(wrapper.text()).toContain("Edit track");
 
@@ -129,7 +129,7 @@ describe("TrackEditView", () => {
     const router = await mountAt("/tracks/track-1/edit");
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "artist,album",
+      include: "artist,album,hashtags",
     });
     expect(router.currentRoute.value.path).toBe("/tracks/track-1");
   });
@@ -139,7 +139,7 @@ describe("TrackEditView", () => {
     const router = await mountAt("/tracks/track-1/edit");
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "artist,album",
+      include: "artist,album,hashtags",
     });
     expect(wrapper.text()).toContain("Edit track");
     expect(router.currentRoute.value.path).toBe("/tracks/track-1/edit");

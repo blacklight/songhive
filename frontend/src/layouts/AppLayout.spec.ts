@@ -137,6 +137,7 @@ describe("AppLayout", () => {
       "Albums",
       "Tracks",
       "Playlists",
+      "Hashtags",
       "About",
     ]);
     expect(wrapper.find(".app-layout__login").exists()).toBe(true);
@@ -171,6 +172,7 @@ describe("AppLayout", () => {
       "Albums",
       "Tracks",
       "Playlists",
+      "Hashtags",
       "History",
       "Favorites",
       "Files",

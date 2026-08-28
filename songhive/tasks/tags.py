@@ -14,6 +14,7 @@ from ..models.album import Album
 from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..music.metadata import AudioMetadataWrite, write_metadata
+from ..services.hashtags import add_hashtags_to_entity, extract_hashtags_from_track
 from ..services.metadata import _guess_image_mime
 from ..services.storage import StorageService
 from ..storage import S3Storage
@@ -68,6 +69,17 @@ async def _sync_track_tags(track_id: str, config) -> bool:
                 return True
 
             meta = _build_metadata(track)
+
+            auto_tags = extract_hashtags_from_track(track)
+            if auto_tags:
+                await add_hashtags_to_entity(
+                    session,
+                    "track",
+                    track_id,
+                    auto_tags,
+                    user_id=track.owner_id,
+                )
+
             cover_path = await _prepare_cover_art(storage_service, track, meta)
             if cover_path is not None:
                 temp_paths.append(cover_path)

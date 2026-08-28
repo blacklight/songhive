@@ -7,7 +7,7 @@ Track model.
 """
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import JSON, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -18,6 +18,7 @@ from .base import Base, TZDateTime
 if TYPE_CHECKING:
     from .album import Album
     from .artist import Artist
+    from .hashtag import Hashtag, HashtagTrack
 
 
 class Track(Base):
@@ -65,3 +66,15 @@ class Track(Base):
     audio_file = relationship("StoredFile", foreign_keys=[audio_file_id], lazy="selectin")
     image_file = relationship("StoredFile", foreign_keys=[image_file_id], lazy="selectin")
     owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
+    hashtags: Mapped[List["Hashtag"]] = relationship(
+        "Hashtag",
+        secondary="hashtag_tracks",
+        viewonly=True,
+        lazy="selectin",
+    )
+    hashtag_associations: Mapped[List["HashtagTrack"]] = relationship(
+        "HashtagTrack",
+        back_populates="track",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )

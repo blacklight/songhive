@@ -5,13 +5,16 @@ Visibility uses the standard ``Visibility`` enum. The prompt's
 "followers-only" semantics map to ``Visibility.LOCAL``.
 """
 
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._enums import Visibility
 from .base import Base
+
+if TYPE_CHECKING:
+    from .hashtag import Hashtag, HashtagLibrary
 
 
 class Library(Base):
@@ -49,4 +52,16 @@ class Library(Base):
         backref="libraries",
         lazy="selectin",
         viewonly=True,
+    )
+    hashtags: Mapped[List["Hashtag"]] = relationship(
+        "Hashtag",
+        secondary="hashtag_libraries",
+        viewonly=True,
+        lazy="selectin",
+    )
+    hashtag_associations: Mapped[List["HashtagLibrary"]] = relationship(
+        "HashtagLibrary",
+        back_populates="library",
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )

@@ -1,12 +1,19 @@
 """Shared helpers for FastAPI route modules."""
 
-from typing import Optional, Protocol
+from typing import List, Optional, Protocol
 
 from fastapi import HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.user import User
 from ...services import acl
+
+
+class HashtagListRequest(BaseModel):
+    """Add/remove hashtags on a resource."""
+
+    hashtags: List[str]
 
 
 class HasOwnerId(Protocol):

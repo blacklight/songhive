@@ -94,7 +94,9 @@ describe("ArtistEditView", () => {
     setAdmin("admin-1");
     const router = await mountAt("/artists/artist-1/edit");
 
-    expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
+    expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1", {
+      include: "hashtags",
+    });
     expect(wrapper.text()).toContain("Edit artist");
 
     const nameInput = document.body.querySelector(
@@ -112,7 +114,9 @@ describe("ArtistEditView", () => {
     setAuthenticated("user-1");
     const router = await mountAt("/artists/artist-1/edit");
 
-    expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
+    expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1", {
+      include: "hashtags",
+    });
     expect(router.currentRoute.value.path).toBe("/artists/artist-1");
   });
 

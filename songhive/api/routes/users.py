@@ -16,13 +16,16 @@ from ...models.user_link import UserLink
 from ...services import audit
 from ...services.auth import get_user_by_username
 from ...services.federation import unpublish_track_activity
+from ...services.hashtags import get_items_for_hashtag, list_hashtags
 from ...services.storage import StorageService
 from ...users import manager as user_manager
 from ...users.manager import DELETE_ACCOUNT_CONFIRMATION, PasswordChangeError, change_user_password, update_profile
 from ...users.tokens import revoke_all_user_refresh_tokens
-from .._common import client_ip
-from ..deps import get_config, get_current_user, get_db, get_redis, get_storage_service
+from .._common import Pagination, client_ip, get_pagination
+from .._sorting import SortParams, get_sort
+from ..deps import get_config, get_current_user, get_current_user_optional, get_db, get_redis, get_storage_service
 from ..middleware.rate_limit import rate_limit_account
+from .hashtags import HashtagSummaryResponse, TaggedItemResponse
 
 router = APIRouter(prefix="/users")
 
@@ -257,6 +260,68 @@ async def delete_current_user(
                 )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{user_id}/hashtags", response_model=List[HashtagSummaryResponse])
+async def list_user_hashtags(
+    response: Response,
+    user_id: str,
+    user: Optional[User] = Depends(get_current_user_optional),
+    pagination: Pagination = Depends(get_pagination),
+    sort: SortParams = Depends(get_sort({"name", "item_count", "first_used", "last_used"}, "name")),
+    db: AsyncSession = Depends(get_db),
+):
+    """List hashtags for resources owned by a specific user."""
+    target = await db.get(User, user_id)
+    if target is None or not target.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    summaries, total = await list_hashtags(
+        db,
+        user=user,
+        target_user_id=target.id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        sort_by=sort.field,
+        sort_dir=sort.direction,
+    )
+    pagination.set_total(response, total)
+    return [HashtagSummaryResponse.model_validate(s) for s in summaries]
+
+
+@router.get("/{user_id}/hashtags/{hashtag}", response_model=List[TaggedItemResponse])
+async def list_user_hashtag_items(
+    response: Response,
+    user_id: str,
+    hashtag: str,
+    user: Optional[User] = Depends(get_current_user_optional),
+    pagination: Pagination = Depends(get_pagination),
+    sort: SortParams = Depends(get_sort({"type", "created_at"}, "created_at")),
+    db: AsyncSession = Depends(get_db),
+):
+    """List items for a hashtag on resources owned by a specific user."""
+    target = await db.get(User, user_id)
+    if target is None or not target.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    items, total = await get_items_for_hashtag(
+        db,
+        hashtag_name=hashtag,
+        user=user,
+        target_user_id=target.id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        sort_by=sort.field,
+        sort_dir=sort.direction,
+    )
+    pagination.set_total(response, total)
+    return [TaggedItemResponse.model_validate(i) for i in items]
 
 
 @router.get("/{username}", response_model=PublicUserResponse)

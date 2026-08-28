@@ -26,6 +26,8 @@ import type { TrackResponse } from "@/api/tracks";
 import { toVisibility } from "@/utils/entity";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
+import { useEntityHashtags } from "@/composables/useEntityHashtags";
+import HashtagInput from "@/components/hashtags/HashtagInput.vue";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
@@ -79,6 +81,8 @@ const coverError = ref<string | null>(null);
 const { canManage } = useCanManage(
   computed(() => library.value?.owner_id ?? null),
 );
+
+const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
 
 const {
   items: tracks,
@@ -134,6 +138,7 @@ function resetForm() {
   name.value = library.value?.name ?? "";
   description.value = library.value?.description ?? "";
   visibility.value = toVisibility(library.value?.visibility);
+  resetHashtags(library.value?.hashtags ?? null);
   error.value = null;
 }
 
@@ -141,7 +146,7 @@ async function loadLibrary() {
   loading.value = true;
   error.value = null;
   try {
-    library.value = await getLibrary(libraryId.value);
+    library.value = await getLibrary(libraryId.value, { include: "hashtags" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -179,6 +184,7 @@ async function onSubmit() {
 
   try {
     await updateLibrary(libraryId.value, body);
+    await syncHashtags("libraries", libraryId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/libraries/${libraryId.value}`);
   } catch (err) {
@@ -314,7 +320,7 @@ async function onScan() {
 
 async function refreshLibrary() {
   try {
-    library.value = await getLibrary(libraryId.value);
+    library.value = await getLibrary(libraryId.value, { include: "hashtags" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -438,6 +444,13 @@ watch(
           v-model="visibility"
           :label="t('browse.detail.visibility')"
           :options="visibilityOptions"
+        />
+
+        <HashtagInput
+          v-if="canManage"
+          v-model="hashtags"
+          :placeholder="t('hashtags.placeholder')"
+          :aria-label="t('hashtags.label')"
         />
 
         <div class="library-edit-view__actions">

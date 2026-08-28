@@ -144,7 +144,9 @@ describe("LibraryEditView", () => {
     setAuthenticated("user-1");
     const router = await mountAt("/libraries/library-1/edit");
 
-    expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1");
+    expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1", {
+      include: "hashtags",
+    });
     expect(wrapper.text()).toContain("Edit library");
 
     const nameInput = document.body.querySelector(
@@ -162,7 +164,9 @@ describe("LibraryEditView", () => {
     setAuthenticated("user-2");
     const router = await mountAt("/libraries/library-1/edit");
 
-    expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1");
+    expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1", {
+      include: "hashtags",
+    });
     expect(router.currentRoute.value.path).toBe("/libraries/library-1");
   });
 
@@ -170,7 +174,9 @@ describe("LibraryEditView", () => {
     setAdmin("admin-1");
     const router = await mountAt("/libraries/library-1/edit");
 
-    expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1");
+    expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1", {
+      include: "hashtags",
+    });
     expect(wrapper.text()).toContain("Edit library");
     expect(router.currentRoute.value.path).toBe("/libraries/library-1/edit");
   });
@@ -294,8 +300,9 @@ describe("LibraryEditView", () => {
     setAuthenticated("user-1");
     await mountAt("/libraries/library-1/edit");
 
-    const textInputs = document.body.querySelectorAll('input[type="text"]');
-    const scanPathInput = textInputs[1] as HTMLInputElement;
+    const scanPathInput = document.body.querySelector(
+      '.library-edit-view__scan-row input[type="text"]',
+    ) as HTMLInputElement;
 
     scanPathInput.value = "/music/scan";
     scanPathInput.dispatchEvent(new Event("input"));
@@ -379,8 +386,9 @@ describe("LibraryEditView", () => {
 
     await mountAt("/libraries/library-1/edit");
 
-    const textInputs = document.body.querySelectorAll('input[type="text"]');
-    const scanPathInput = textInputs[1] as HTMLInputElement;
+    const scanPathInput = document.body.querySelector(
+      '.library-edit-view__scan-row input[type="text"]',
+    ) as HTMLInputElement;
 
     scanPathInput.value = "/bad/path";
     scanPathInput.dispatchEvent(new Event("input"));

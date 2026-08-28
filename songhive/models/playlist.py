@@ -11,6 +11,7 @@ from ._enums import Visibility
 from .base import Base
 
 if TYPE_CHECKING:
+    from .hashtag import Hashtag, HashtagPlaylist
     from .track import Track
 
 
@@ -44,6 +45,18 @@ class Playlist(Base):
     image_file = relationship("StoredFile", foreign_keys=[image_file_id], lazy="selectin")
     cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")
     tracks: Mapped[List["PlaylistTrack"]] = relationship("PlaylistTrack", back_populates="playlist", lazy="selectin")
+    hashtags: Mapped[List["Hashtag"]] = relationship(
+        "Hashtag",
+        secondary="hashtag_playlists",
+        viewonly=True,
+        lazy="selectin",
+    )
+    hashtag_associations: Mapped[List["HashtagPlaylist"]] = relationship(
+        "HashtagPlaylist",
+        back_populates="playlist",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
 
 class PlaylistTrack(Base):

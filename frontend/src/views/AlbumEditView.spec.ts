@@ -96,7 +96,9 @@ describe("AlbumEditView", () => {
     setAuthenticated("user-1");
     const router = await mountAt("/albums/album-1/edit");
 
-    expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1");
+    expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
+      include: "hashtags",
+    });
     expect(wrapper.text()).toContain("Edit album");
 
     const titleInput = document.body.querySelector(
@@ -114,7 +116,9 @@ describe("AlbumEditView", () => {
     setAuthenticated("user-2");
     const router = await mountAt("/albums/album-1/edit");
 
-    expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1");
+    expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
+      include: "hashtags",
+    });
     expect(router.currentRoute.value.path).toBe("/albums/album-1");
   });
 
@@ -122,7 +126,9 @@ describe("AlbumEditView", () => {
     setAdmin("admin-1");
     const router = await mountAt("/albums/album-1/edit");
 
-    expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1");
+    expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
+      include: "hashtags",
+    });
     expect(wrapper.text()).toContain("Edit album");
     expect(router.currentRoute.value.path).toBe("/albums/album-1/edit");
   });

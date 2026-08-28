@@ -13,6 +13,8 @@ import {
 } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
+import { useEntityHashtags } from "@/composables/useEntityHashtags";
+import HashtagInput from "@/components/hashtags/HashtagInput.vue";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import type { Visibility } from "@/api/libraries";
@@ -53,6 +55,8 @@ const { canManage } = useCanManage(
   computed(() => track.value?.owner_id ?? null),
 );
 
+const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
+
 const visibilityOptions = computed(() => [
   { value: "private", label: t("browse.visibility.private") },
   { value: "local", label: t("browse.visibility.local") },
@@ -71,6 +75,7 @@ function resetForm() {
   releaseYear.value =
     track.value?.release_year != null ? String(track.value.release_year) : "";
   visibility.value = toVisibility(track.value?.visibility);
+  resetHashtags(track.value?.hashtags ?? null);
   error.value = null;
 }
 
@@ -78,7 +83,9 @@ async function loadTrack() {
   loading.value = true;
   error.value = null;
   try {
-    track.value = await getTrack(trackId.value, { include: "artist,album" });
+    track.value = await getTrack(trackId.value, {
+      include: "artist,album,hashtags",
+    });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -120,6 +127,7 @@ async function onSubmit() {
 
   try {
     await updateTrack(trackId.value, body);
+    await syncHashtags("tracks", trackId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/tracks/${trackId.value}`);
   } catch (err) {
@@ -162,7 +170,7 @@ async function onDelete() {
 
 async function refreshTrack() {
   try {
-    track.value = await getTrack(trackId.value);
+    track.value = await getTrack(trackId.value, { include: "hashtags" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -267,6 +275,13 @@ watch(
           v-model="visibility"
           :label="t('browse.detail.visibility')"
           :options="visibilityOptions"
+        />
+
+        <HashtagInput
+          v-if="canManage"
+          v-model="hashtags"
+          :placeholder="t('hashtags.placeholder')"
+          :aria-label="t('hashtags.label')"
         />
 
         <div class="track-edit-view__actions">

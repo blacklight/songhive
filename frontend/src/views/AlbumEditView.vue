@@ -13,6 +13,8 @@ import {
 } from "@/api/albums";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
+import { useEntityHashtags } from "@/composables/useEntityHashtags";
+import HashtagInput from "@/components/hashtags/HashtagInput.vue";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import type { Visibility } from "@/api/libraries";
@@ -49,6 +51,8 @@ const { canManage } = useCanManage(
   computed(() => album.value?.owner_id ?? null),
 );
 
+const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
+
 const visibilityOptions = computed(() => [
   { value: "private", label: t("browse.visibility.private") },
   { value: "local", label: t("browse.visibility.local") },
@@ -61,6 +65,7 @@ function resetForm() {
     album.value?.release_year != null ? String(album.value.release_year) : "";
   description.value = album.value?.description ?? "";
   visibility.value = toVisibility(album.value?.visibility);
+  resetHashtags(album.value?.hashtags ?? null);
   error.value = null;
 }
 
@@ -68,7 +73,7 @@ async function loadAlbum() {
   loading.value = true;
   error.value = null;
   try {
-    album.value = await getAlbum(albumId.value);
+    album.value = await getAlbum(albumId.value, { include: "hashtags" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -106,6 +111,7 @@ async function onSubmit() {
 
   try {
     await updateAlbum(albumId.value, body);
+    await syncHashtags("albums", albumId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/albums/${albumId.value}`);
   } catch (err) {
@@ -148,7 +154,7 @@ async function onDelete() {
 
 async function refreshAlbum() {
   try {
-    album.value = await getAlbum(albumId.value);
+    album.value = await getAlbum(albumId.value, { include: "hashtags" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -239,6 +245,13 @@ watch(
           v-model="visibility"
           :label="t('browse.detail.visibility')"
           :options="visibilityOptions"
+        />
+
+        <HashtagInput
+          v-if="canManage"
+          v-model="hashtags"
+          :placeholder="t('hashtags.placeholder')"
+          :aria-label="t('hashtags.label')"
         />
 
         <div class="album-edit-view__actions">

@@ -40,6 +40,8 @@ def _track_selectin_options(include: Optional[Set[str]]) -> List[Any]:
             )
         if "owner" in include:
             options.append(selectinload(Track.owner))
+        if "hashtags" in include:
+            options.append(selectinload(Track.hashtags))
     return options
 
 
@@ -64,6 +66,8 @@ def _album_selectin_options(include: Optional[Set[str]]) -> List[Any]:
                     selectinload(Track.image_file),
                 )
             )
+        if "hashtags" in include:
+            options.append(selectinload(Album.hashtags))
     return options
 
 
@@ -93,6 +97,8 @@ def _artist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
                     selectinload(Track.image_file),
                 )
             )
+        if "hashtags" in include:
+            options.append(selectinload(Artist.hashtags))
     return options
 
 
@@ -117,6 +123,8 @@ def _library_selectin_options(include: Optional[Set[str]]) -> List[Any]:
                     selectinload(Track.image_file),
                 )
             )
+        if "hashtags" in include:
+            options.append(selectinload(Library.hashtags))
     return options
 
 
@@ -143,6 +151,8 @@ def _playlist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
                     )
                 )
             )
+        if "hashtags" in include:
+            options.append(selectinload(Playlist.hashtags))
     return options
 
 
