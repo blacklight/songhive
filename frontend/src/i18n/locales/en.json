@@ -247,8 +247,6 @@
     "passwordChangeSuccess": "Password changed. Please log in again.",
     "passwordChangeError": "Could not change password: {message}",
     "resendVerification": "Resend verification email",
-    "resendVerificationHint": "Click to receive a new verification email.",
-    "resendVerificationVerified": "Your email address is already verified.",
     "resendVerificationSuccess": "A new verification email has been sent. Check your inbox.",
     "resendVerificationError": "Could not resend verification email: {message}",
     "deleteAccount": "Delete account",

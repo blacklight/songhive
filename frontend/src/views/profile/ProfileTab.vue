@@ -34,15 +34,8 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const isUploading = ref(false);
 const isResendingVerification = ref(false);
 
-const isVerificationResendDisabled = computed(() => {
-  return !authStore.user || Boolean(authStore.user.email_verified);
-});
-
-const verificationResendHint = computed(() => {
-  if (authStore.user?.email_verified) {
-    return t("profile.resendVerificationVerified");
-  }
-  return t("profile.resendVerificationHint");
+const showResendVerification = computed(() => {
+  return !!authStore.user && authStore.user.email_verified !== true;
 });
 
 watch(
@@ -255,18 +248,14 @@ async function onSubmit() {
     </AppButton>
 
     <div class="profile-tab__gated">
-      <div class="profile-tab__gated-item">
+      <div v-if="showResendVerification" class="profile-tab__gated-item">
         <AppButton
           type="button"
-          :disabled="isVerificationResendDisabled"
           :loading="isResendingVerification"
           @click="onResendVerification"
         >
           {{ t("profile.resendVerification") }}
         </AppButton>
-        <p class="profile-tab__hint">
-          {{ verificationResendHint }}
-        </p>
       </div>
 
       <div class="profile-tab__gated-item">

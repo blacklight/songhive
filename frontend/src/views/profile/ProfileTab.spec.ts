@@ -141,7 +141,7 @@ describe("ProfileTab", () => {
     );
   });
 
-  it("renders the remaining gated actions as disabled", async () => {
+  it("hides resend verification when the user does not need it", async () => {
     const router = createTestRouter();
     await router.push("/profile");
     await router.isReady();
@@ -151,16 +151,15 @@ describe("ProfileTab", () => {
     });
     await flushPromises();
 
-    const submitButtons = wrapper.findAll(
-      'button[type="submit"], button[type="button"]',
-    );
-    const disabledButtons = submitButtons.filter(
-      (b) => b.attributes("disabled") === "",
-    );
-    const labels = disabledButtons.map((b) => b.text());
+    const resendButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("profile.resendVerification"));
+    expect(resendButton).toBeUndefined();
 
-    expect(labels).toContain(i18n.global.t("profile.resendVerification"));
-    expect(labels).toContain(i18n.global.t("profile.deleteAccount"));
+    const deleteAccountButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("profile.deleteAccount"));
+    expect(deleteAccountButton?.attributes("disabled")).toBe("");
   });
 
   it("enables resend verification for an unverified user", async () => {
