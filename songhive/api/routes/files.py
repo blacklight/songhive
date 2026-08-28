@@ -24,6 +24,7 @@ from ...storage import FileSizeLimitExceededError
 from .._common import Pagination, client_ip, get_pagination
 from ..deps import get_current_user, get_current_user_optional, get_db, get_storage_service, require_access
 from ..middleware.rate_limit import rate_limit, rate_limit_account
+from ..responses import TrackSummary, build_track_summary
 from ._common import HasOwnerId, redact_owner
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class StoredFileResponse(BaseModel):
     visibility: str = Visibility.PRIVATE.value
     original_filename: Optional[str] = None
     url: str
+    tracks: Optional[List[TrackSummary]] = None
 
 
 @router.post(
@@ -222,10 +224,20 @@ async def get_file_metadata(
     storage: StorageService = Depends(get_storage_service),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get metadata for a stored file."""
+    """Get metadata for a stored file, including associated tracks."""
     stored_file = await db.get(StoredFile, file_id)
     # ``require_access`` already loads the row and raises 404 when missing.
     assert stored_file is not None
+
+    track_rows, _ = await music.list_tracks(
+        db,
+        file_id=file_id,
+        user=user,
+        limit=1000,
+        include={"artist", "album"},
+    )
+    track_summaries = [await build_track_summary(t, storage) for t in track_rows]
+    tracks = [t for t in track_summaries if t is not None]
 
     url = await storage.get_url(stored_file)
     return StoredFileResponse(
@@ -237,6 +249,7 @@ async def get_file_metadata(
         visibility=stored_file.visibility,
         original_filename=stored_file.original_filename,
         url=url,
+        tracks=tracks,
     )
 
 

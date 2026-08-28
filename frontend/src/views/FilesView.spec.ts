@@ -44,7 +44,10 @@ function setFiles(input: HTMLInputElement, files: File[]) {
   });
 }
 
-function createStoredFile(id: string): StoredFileResponse {
+function createStoredFile(
+  id: string,
+  overrides?: Partial<StoredFileResponse>,
+): StoredFileResponse {
   return {
     id,
     content_type: "image/png",
@@ -53,7 +56,8 @@ function createStoredFile(id: string): StoredFileResponse {
     owner_id: "user-1",
     visibility: "public",
     original_filename: "avatar.png",
-    url: "/api/v1/files/f1/download",
+    url: `/api/v1/files/${id}/download`,
+    ...overrides,
   };
 }
 
@@ -378,5 +382,62 @@ describe("FilesView", () => {
         message: "network failure",
       }),
     );
+  });
+
+  it("renders image thumbnails, play buttons and icons in the list", async () => {
+    vi.mocked(listFiles).mockResolvedValue([
+      createStoredFile("f1", {
+        content_type: "image/png",
+        original_filename: "avatar.png",
+      }),
+      createStoredFile("f2", {
+        content_type: "audio/mpeg",
+        original_filename: "song.mp3",
+      }),
+      createStoredFile("f3", {
+        content_type: "text/plain",
+        original_filename: "notes.txt",
+      }),
+    ]);
+
+    await mountView();
+
+    const images = wrapper.findAll("img");
+    expect(images).toHaveLength(1);
+    expect(images[0].attributes("src")).toBe(
+      "/api/v1/files/f1/download?disposition=inline",
+    );
+
+    const playButtons = wrapper.findAll(".files-view__play");
+    expect(playButtons).toHaveLength(1);
+    const playIcon = playButtons[0].find("i");
+    expect(playIcon.classes()).toContain("fa-play");
+
+    const fileIcons = wrapper.findAll(".files-view__icon");
+    expect(fileIcons).toHaveLength(1);
+  });
+
+  it("toggles the audio preview play button", async () => {
+    vi.mocked(listFiles).mockResolvedValue([
+      createStoredFile("f1", {
+        content_type: "audio/mpeg",
+        original_filename: "song.mp3",
+      }),
+    ]);
+
+    await mountView();
+
+    const button = wrapper.find(".files-view__play");
+    expect(button.find("i").classes()).toContain("fa-play");
+
+    await button.trigger("click");
+    await flushPromises();
+
+    expect(button.find("i").classes()).toContain("fa-pause");
+
+    await button.trigger("click");
+    await flushPromises();
+
+    expect(button.find("i").classes()).toContain("fa-play");
   });
 });

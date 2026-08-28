@@ -11,7 +11,10 @@ import pytest
 from sqlalchemy import select
 
 from songhive.models._enums import Visibility
+from songhive.models.album import Album
+from songhive.models.artist import Artist
 from songhive.models.stored_file import StoredFile
+from songhive.models.track import Track
 from songhive.services.metadata import AudioMetadata
 
 
@@ -902,3 +905,187 @@ def test_list_files_pagination(files_client, regular_user, auth_headers):
     second = files_client.get("/api/v1/files/?limit=2&offset=2", headers=headers)
     assert second.status_code == 200
     assert len(second.json()) == 1
+
+
+def test_get_file_metadata_includes_uploaded_track(files_client, regular_user, auth_headers, monkeypatch):
+    """File metadata includes the track created from an uploaded audio file."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="File Preview Song",
+            artist="File Preview Artist",
+            album="File Preview Album",
+            mimetype="audio/mpeg",
+        ),
+    )
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("preview.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    track_id = response.headers["X-Track-Id"]
+
+    metadata = files_client.get(f"/api/v1/files/{data['id']}", headers=headers)
+    assert metadata.status_code == 200
+    tracks = metadata.json()["tracks"]
+    assert len(tracks) == 1
+    assert tracks[0]["id"] == track_id
+    assert tracks[0]["title"] == "File Preview Song"
+
+
+async def test_get_file_metadata_includes_track_image_file(files_client, regular_user, auth_headers, db_session):
+    """File metadata for an image includes tracks that use it as track art."""
+    from io import BytesIO
+
+    from songhive.services.storage import StorageService
+    from songhive.storage import get_storage
+
+    config = files_client.app.state.config.storage
+    storage = StorageService(get_storage(config), config)
+
+    image = await storage.store_file(
+        db_session,
+        BytesIO(b"image content"),
+        content_type="image/png",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(image)
+    await db_session.flush()
+
+    artist = Artist(name="Cover Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Cover Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        image_file_id=image.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    headers = auth_headers(regular_user)
+    metadata = files_client.get(f"/api/v1/files/{image.id}", headers=headers)
+    assert metadata.status_code == 200
+    tracks = metadata.json()["tracks"]
+    assert len(tracks) == 1
+    assert tracks[0]["id"] == str(track.id)
+    assert tracks[0]["title"] == "Cover Track"
+
+
+async def test_get_file_metadata_includes_album_cover_tracks(files_client, regular_user, auth_headers, db_session):
+    """File metadata for an album cover includes tracks from that album."""
+    from io import BytesIO
+
+    from songhive.services.storage import StorageService
+    from songhive.storage import get_storage
+
+    config = files_client.app.state.config.storage
+    storage = StorageService(get_storage(config), config)
+
+    cover = await storage.store_file(
+        db_session,
+        BytesIO(b"cover content"),
+        content_type="image/png",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(cover)
+    await db_session.flush()
+
+    artist = Artist(name="Album Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Covered Album",
+        artist_id=artist.id,
+        cover_file_id=cover.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    track = Track(
+        title="Album Track",
+        artist_id=artist.id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    headers = auth_headers(regular_user)
+    metadata = files_client.get(f"/api/v1/files/{cover.id}", headers=headers)
+    assert metadata.status_code == 200
+    tracks = metadata.json()["tracks"]
+    assert len(tracks) == 1
+    assert tracks[0]["id"] == str(track.id)
+
+
+async def test_get_file_metadata_tracks_filtered_by_visibility(
+    files_client, regular_user, other_user, auth_headers, db_session
+):
+    """Associated tracks in file metadata are filtered by the requester's ACL."""
+    from io import BytesIO
+
+    from songhive.services.storage import StorageService
+    from songhive.storage import get_storage
+
+    config = files_client.app.state.config.storage
+    storage = StorageService(get_storage(config), config)
+
+    file_like = BytesIO(b"audio content")
+    stored_file = await storage.store_file(
+        db_session,
+        file_like,
+        content_type="audio/mpeg",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(stored_file)
+    await db_session.flush()
+
+    artist = Artist(name="ACL Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    public_track = Track(
+        title="Public Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        audio_file_id=stored_file.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    private_track = Track(
+        title="Private Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        audio_file_id=stored_file.id,
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(public_track)
+    db_session.add(private_track)
+    await db_session.commit()
+
+    public_metadata = files_client.get(f"/api/v1/files/{stored_file.id}")
+    assert public_metadata.status_code == 200
+    tracks = public_metadata.json()["tracks"]
+    assert len(tracks) == 1
+    assert tracks[0]["title"] == "Public Track"
+
+    owner_headers = auth_headers(regular_user)
+    owner_metadata = files_client.get(f"/api/v1/files/{stored_file.id}", headers=owner_headers)
+    assert owner_metadata.status_code == 200
+    owner_tracks = owner_metadata.json()["tracks"]
+    assert len(owner_tracks) == 2
+    assert {t["title"] for t in owner_tracks} == {"Public Track", "Private Track"}

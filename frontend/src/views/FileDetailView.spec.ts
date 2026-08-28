@@ -22,6 +22,11 @@ function createTestRouter() {
         name: "file",
         component: { template: "<div/>" },
       },
+      {
+        path: "/tracks/:id",
+        name: "track",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -40,6 +45,27 @@ function createStoredFile(
     original_filename: "avatar.png",
     url: `/api/v1/files/${id}/download`,
     ...overrides,
+  };
+}
+
+function createTrackSummary(id: string, title: string, artistName?: string) {
+  return {
+    id,
+    title,
+    artist_id: "artist-1",
+    artist: artistName
+      ? { id: "artist-1", name: artistName, image_url: null, cover_url: null }
+      : null,
+    album_id: null,
+    album: null,
+    track_number: null,
+    disc_number: null,
+    duration: null,
+    audio_url: null,
+    image_url: null,
+    release_year: null,
+    owner_id: "user-1",
+    visibility: "public",
   };
 }
 
@@ -183,5 +209,58 @@ describe("FileDetailView", () => {
     expect(toast.toasts[0].message).toBe(
       i18n.global.t("pages.files.copyFailed"),
     );
+  });
+
+  it("renders a large image preview for image files", async () => {
+    vi.mocked(getFile).mockResolvedValue(
+      createStoredFile("f1", { content_type: "image/png" }),
+    );
+    await mountAt("f1");
+
+    const img = wrapper.find(".file-detail-view__image");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe(
+      "/api/v1/files/f1/download?disposition=inline",
+    );
+  });
+
+  it("renders an audio player for audio files", async () => {
+    vi.mocked(getFile).mockResolvedValue(
+      createStoredFile("f1", {
+        content_type: "audio/mpeg",
+        original_filename: "song.mp3",
+      }),
+    );
+    await mountAt("f1");
+
+    const audio = wrapper.find(".file-detail-view__audio");
+    expect(audio.exists()).toBe(true);
+    expect(audio.element.src).toBe(
+      "/api/v1/files/f1/download?disposition=inline",
+    );
+    expect(wrapper.find(".file-detail-view__image").exists()).toBe(false);
+  });
+
+  it("renders links to associated tracks", async () => {
+    vi.mocked(getFile).mockResolvedValue(
+      createStoredFile("f1", {
+        tracks: [
+          createTrackSummary("t1", "First Track", "Test Artist"),
+          createTrackSummary("t2", "Second Track"),
+        ],
+      }),
+    );
+    await mountAt("f1");
+
+    expect(wrapper.text()).toContain(
+      i18n.global.t("pages.files.associatedTracks"),
+    );
+
+    const links = wrapper.findAll(".file-detail-view__track-link");
+    expect(links).toHaveLength(2);
+    expect(links[0].attributes("href")).toBe("/tracks/t1");
+    expect(links[0].text()).toContain("First Track");
+    expect(links[0].text()).toContain("Test Artist");
+    expect(links[1].attributes("href")).toBe("/tracks/t2");
   });
 });
