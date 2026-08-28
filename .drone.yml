@@ -90,6 +90,9 @@ steps:
       include:
         - songhive/**
 
+  depends_on:
+    - frontend-build
+
 ###
 ### Frontend Lint
 ###
