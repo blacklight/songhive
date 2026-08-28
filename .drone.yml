@@ -100,13 +100,15 @@ steps:
 - name: frontend-lint
   image: node:20
   commands:
-    - cd frontend && npm ci --ignore-scripts && npm run lint && ./node_modules/.bin/prettier --check src
+    - cd frontend && npm run lint && ./node_modules/.bin/prettier --check src
   when:
     event:
       - push
     paths:
       include:
         - frontend/**
+  depends_on:
+    - frontend-build
 
 ###
 ### Frontend tests
@@ -115,13 +117,15 @@ steps:
 - name: frontend-tests
   image: node:20
   commands:
-    - cd frontend && npm ci --ignore-scripts && npm run test
+    - cd frontend && npm run test
   when:
     event:
       - push
     paths:
       include:
         - frontend/**
+  depends_on:
+    - frontend-build
 
 ###
 ### Upload test coverage to Codacy
