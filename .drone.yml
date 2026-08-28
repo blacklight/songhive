@@ -52,6 +52,23 @@ steps:
         - songhive/**
 
 ###
+### Build frontend
+###
+
+- name: frontend-build
+  image: node:20
+  commands:
+    - cd frontend && npm ci && npm run build
+
+  when:
+    event:
+      - push
+    paths:
+      include:
+        - songhive/**
+        - frontend/**
+
+###
 ### Run tests
 ###
 
