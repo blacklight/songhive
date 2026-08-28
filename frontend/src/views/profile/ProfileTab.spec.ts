@@ -107,6 +107,56 @@ describe("ProfileTab", () => {
     });
   });
 
+  it("does not show the remove avatar button when there is no avatar", async () => {
+    const router = createTestRouter();
+    await router.push("/profile");
+    await router.isReady();
+
+    const wrapper = mount(ProfileTab, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const removeButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("profile.avatarRemove"));
+    expect(removeButton).toBeUndefined();
+  });
+
+  it("removes the avatar when the remove button is clicked", async () => {
+    const store = useAuthStore();
+    store.user = {
+      ...store.user!,
+      avatar_url: "https://example.com/avatar.png",
+    };
+    vi.mocked(usersApi.updateMe).mockResolvedValue({
+      ...store.user!,
+      avatar_url: null,
+    });
+
+    const router = createTestRouter();
+    await router.push("/profile");
+    await router.isReady();
+
+    const wrapper = mount(ProfileTab, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const removeButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("profile.avatarRemove"));
+    expect(removeButton).toBeDefined();
+
+    await removeButton!.trigger("click");
+    await flushPromises();
+
+    expect(usersApi.updateMe).toHaveBeenCalledWith({ avatar_url: null });
+    expect(
+      (wrapper.find('input[type="url"]').element as HTMLInputElement).value,
+    ).toBe("");
+  });
+
   it("rejects link URLs that do not start with http:// or https://", async () => {
     const router = createTestRouter();
     await router.push("/profile");
