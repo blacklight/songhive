@@ -44,10 +44,13 @@ const error = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const isUploading = ref(false);
 const isResendingVerification = ref(false);
+const isRemovingAvatar = ref(false);
 
 const showResendVerification = computed(() => {
   return !!authStore.user && authStore.user.email_verified !== true;
 });
+
+const hasAvatar = computed(() => !!avatarUrl.value);
 
 watch(
   () => authStore.user,
@@ -120,6 +123,28 @@ async function onResendVerification() {
     });
   } finally {
     isResendingVerification.value = false;
+  }
+}
+
+async function removeAvatar() {
+  if (isRemovingAvatar.value) return;
+
+  isRemovingAvatar.value = true;
+  try {
+    await authStore.updateProfile({ avatar_url: null });
+    toast.push({
+      type: "success",
+      message: t("profile.avatarRemoveSuccess"),
+    });
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: t("profile.avatarRemoveError", {
+        message: getApiErrorMessage(err, t("errors.unknown")),
+      }),
+    });
+  } finally {
+    isRemovingAvatar.value = false;
   }
 }
 
@@ -224,16 +249,31 @@ async function onSubmit() {
           type="url"
           :label="t('profile.avatarUrl')"
           :hint="t('profile.avatar')"
+          :disabled="isUploading || isRemovingAvatar"
         />
-        <AppButton
-          type="button"
-          variant="secondary"
-          :loading="isUploading"
-          icon="upload"
-          @click="triggerFileInput"
-        >
-          {{ t("profile.avatarUpload") }}
-        </AppButton>
+        <div class="profile-tab__avatar-actions">
+          <AppButton
+            type="button"
+            variant="secondary"
+            :loading="isUploading"
+            :disabled="isRemovingAvatar"
+            icon="upload"
+            @click="triggerFileInput"
+          >
+            {{ t("profile.avatarUpload") }}
+          </AppButton>
+          <AppButton
+            v-if="hasAvatar"
+            type="button"
+            variant="danger"
+            :loading="isRemovingAvatar"
+            :disabled="isUploading"
+            icon="trash-can"
+            @click="removeAvatar"
+          >
+            {{ t("profile.avatarRemove") }}
+          </AppButton>
+        </div>
         <input
           ref="fileInput"
           type="file"
@@ -395,6 +435,11 @@ async function onSubmit() {
   display: flex;
   flex: 1;
   flex-direction: column;
+  gap: var(--space-2);
+}
+
+.profile-tab__avatar-actions {
+  display: flex;
   gap: var(--space-2);
 }
 
