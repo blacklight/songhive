@@ -82,12 +82,12 @@ async function onToggleFavorite(track: QueueTrack) {
     total.value = Math.max(0, total.value - 1);
     toast.push({
       type: "success",
-      message: t("pages.favorites.removeSuccess"),
+      message: t("common.favoriteRemoved"),
     });
   } catch (err) {
     toast.push({
       type: "error",
-      message: t("pages.favorites.removeError", {
+      message: t("common.favoriteRemoveError", {
         message: getErrorMessage(err),
       }),
     });
@@ -181,6 +181,7 @@ onMounted(() => load());
         :tracks="items"
         :loading="loading"
         :favorite-label="t('common.unfavorite')"
+        :favorite-managed="true"
         :deletable="true"
         @toggle-favorite="onToggleFavorite"
         @share="onTrackShare"

@@ -42,6 +42,10 @@
     "pause": "Pause",
     "favorite": "Favorite",
     "unfavorite": "Unfavorite",
+    "favoriteAdded": "Added to favorites.",
+    "favoriteRemoved": "Removed from favorites.",
+    "favoriteAddError": "Could not add favorite: {message}",
+    "favoriteRemoveError": "Could not remove favorite: {message}",
     "share": "Share",
     "download": "Download"
   },
@@ -176,9 +180,7 @@
       "playlists": "Playlists",
       "entityTypesGated": "Favoriting albums, artists, and playlists is not available yet.",
       "empty": "You have no favorite tracks yet.",
-      "emptyWithFavorites": "Could not load your favorite tracks.",
-      "removeSuccess": "Removed from favorites.",
-      "removeError": "Could not remove favorite: {message}"
+      "emptyWithFavorites": "Could not load your favorite tracks."
     },
     "files": {
       "title": "Files",

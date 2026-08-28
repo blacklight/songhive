@@ -10,6 +10,7 @@ import { toQueueTrack, type TrackEnrich } from "@/player/enrich";
 import AppTable, { type Column } from "@/components/ui/AppTable.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import AppModal from "@/components/feedback/AppModal.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ContextMenu from "@/components/ui/ContextMenu.vue";
@@ -18,6 +19,7 @@ import { formatTime } from "@/utils/time";
 import { getApiErrorMessage } from "@/api/client";
 import { removeTracksFromLibrary } from "@/api/libraries";
 import { removeTracksFromPlaylist } from "@/api/playlists";
+import { addFavorite, removeFavorite } from "@/api/favorites";
 import {
   deleteTrack,
   deleteTracks,
@@ -40,6 +42,7 @@ export interface Props {
   showArtwork?: boolean;
   enrich?: Map<string, TrackEnrich>;
   favoriteLabel?: string;
+  favoriteManaged?: boolean;
   emptyLabel?: string;
   removableFrom?: RemovableFrom;
   deletable?: boolean;
@@ -50,6 +53,7 @@ const props = withDefaults(defineProps<Props>(), {
   loading: false,
   showArtwork: false,
   autoScroll: true,
+  favoriteManaged: false,
 });
 
 const emit = defineEmits<{
@@ -85,6 +89,7 @@ const confirmTrack = ref<QueueTrack | null>(null);
 const confirmIsDelete = ref(false);
 const isRemoving = ref(false);
 const listRef = ref<HTMLElement | null>(null);
+const favoritedOverrides = ref<Record<string, boolean>>({});
 
 const COMPACT_BREAKPOINT = "(max-width: 1279.98px)";
 const isCompact = ref(
@@ -149,10 +154,15 @@ const enrichedTracks = computed<QueueTrack[]>(() => {
   const defaultEnrich: TrackEnrich = { artist_name: props.context ?? "" };
   return props.tracks.map((track) => {
     const fromMap = props.enrich?.get(track.id);
-    return toQueueTrack(track, {
+    const queueTrack = toQueueTrack(track, {
       ...defaultEnrich,
       ...fromMap,
     });
+    const override = favoritedOverrides.value[queueTrack.id];
+    if (override !== undefined) {
+      queueTrack.favorited = override;
+    }
+    return queueTrack;
   });
 });
 
@@ -236,6 +246,10 @@ const someSelected = computed(() => {
 
 function asTrackRow(row: Record<string, unknown>): TrackListRow {
   return row as TrackListRow;
+}
+
+function isTrackFavorited(track: QueueTrack): boolean {
+  return favoritedOverrides.value[track.id] ?? track.favorited ?? false;
 }
 
 function rowKey(row: Record<string, unknown>, index: number): string {
@@ -482,13 +496,11 @@ async function onConfirm() {
   }
 }
 
+const isFavoriteManaged = computed(() => props.favoriteManaged);
+
 const menuItems = computed(() => {
   const track = menuTrack.value;
   if (!track) return [];
-
-  const isUnfavorite =
-    props.favoriteLabel === t("common.unfavorite") ||
-    (!props.favoriteLabel && false);
 
   const items: {
     key: string;
@@ -570,11 +582,16 @@ const menuItems = computed(() => {
     });
   }
 
-  items.push({
-    key: "favorite",
-    label: props.favoriteLabel ?? t("common.favorite"),
-    icon: isUnfavorite ? "heart-crack" : "heart",
-  });
+  if (authStore.isAuthenticated) {
+    const favorited = isTrackFavorited(track);
+    items.push({
+      key: "favorite",
+      label:
+        props.favoriteLabel ??
+        (favorited ? t("common.unfavorite") : t("common.favorite")),
+      icon: favorited ? "heart-crack" : "heart",
+    });
+  }
 
   if (track.album_id) {
     items.push({
@@ -652,9 +669,39 @@ async function onMenuSelect(key: string) {
     case "delete-track":
       openSingleDelete(track);
       break;
-    case "favorite":
-      emit("toggle-favorite", track);
+    case "favorite": {
+      if (isFavoriteManaged.value) {
+        emit("toggle-favorite", track);
+        break;
+      }
+
+      const currentlyFavorited = isTrackFavorited(track);
+      try {
+        if (currentlyFavorited) {
+          await removeFavorite(track.id);
+          toastStore.push({
+            type: "success",
+            message: t("common.favoriteRemoved"),
+          });
+        } else {
+          await addFavorite(track.id);
+          toastStore.push({
+            type: "success",
+            message: t("common.favoriteAdded"),
+          });
+        }
+        favoritedOverrides.value[track.id] = !currentlyFavorited;
+        track.favorited = !currentlyFavorited;
+        emit("toggle-favorite", track);
+      } catch (err) {
+        const message = getApiErrorMessage(err) || t("errors.unknown");
+        const key = currentlyFavorited
+          ? "common.favoriteRemoveError"
+          : "common.favoriteAddError";
+        toastStore.push({ type: "error", message: t(key, { message }) });
+      }
       break;
+    }
     case "go-to-album":
       if (track.album_id) router.push(`/albums/${track.album_id}`);
       break;
@@ -820,6 +867,13 @@ async function onMenuSelect(key: string) {
           >
             {{ asTrackRow(row).track.title }}
           </span>
+          <AppIcon
+            v-if="isTrackFavorited(asTrackRow(row).track)"
+            name="heart"
+            variant="solid"
+            class="track-list__favorite-icon"
+            :aria-label="t('common.favorite')"
+          />
         </button>
       </template>
 
@@ -939,6 +993,13 @@ async function onMenuSelect(key: string) {
               @click="play(asTrackRow(row).index)"
             >
               {{ asTrackRow(row).track.title }}
+              <AppIcon
+                v-if="isTrackFavorited(asTrackRow(row).track)"
+                name="heart"
+                variant="solid"
+                class="track-list__favorite-icon"
+                :aria-label="t('common.favorite')"
+              />
             </button>
             <RouterLink
               v-if="asTrackRow(row).track.artist_id"
@@ -1106,6 +1167,12 @@ async function onMenuSelect(key: string) {
   height: 1.5rem;
   border-radius: var(--radius-sm);
   object-fit: cover;
+  flex-shrink: 0;
+}
+
+.track-list__favorite-icon {
+  color: var(--color-danger);
+  font-size: 0.75rem;
   flex-shrink: 0;
 }
 

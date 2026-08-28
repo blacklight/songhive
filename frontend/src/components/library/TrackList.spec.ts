@@ -8,6 +8,7 @@ import { useAuthStore } from "@/stores/auth";
 import type { UserResponse } from "@/api/users";
 import type { TrackResponse } from "@/player/types";
 import { toQueueTrack } from "@/player/enrich";
+import * as favoritesApi from "@/api/favorites";
 import * as librariesApi from "@/api/libraries";
 import * as tracksApi from "@/api/tracks";
 import TrackList from "./TrackList.vue";
@@ -30,6 +31,11 @@ vi.mock("@/api/tracks", () => ({
   deleteTrack: vi.fn(),
   deleteTracks: vi.fn().mockResolvedValue({ deleted: 0, track_ids: [] }),
   downloadTrack: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/api/favorites", () => ({
+  addFavorite: vi.fn(),
+  removeFavorite: vi.fn(),
 }));
 
 const actionsLabel = i18n.global.t("browse.detail.actions");
@@ -59,6 +65,7 @@ function makeTrack(overrides: Partial<TrackResponse> = {}): TrackResponse {
     track_number: 1,
     duration: 185,
     visibility: "public" as const,
+    favorited: false,
     ...overrides,
   };
 }
@@ -101,6 +108,7 @@ describe("TrackList", () => {
   beforeEach(() => {
     localStorage.clear();
     setActivePinia(createPinia());
+    vi.clearAllMocks();
     const authStore = useAuthStore();
     authStore.$patch({
       accessToken: "token",
@@ -190,8 +198,13 @@ describe("TrackList", () => {
     expect(wrapper.emitted("play-all")?.length).toBe(1);
   });
 
-  it("emits toggle-favorite from the context menu", async () => {
+  it("adds a favorite and emits toggle-favorite from the context menu", async () => {
     const tracks = [makeTrack()];
+    vi.mocked(favoritesApi.addFavorite).mockResolvedValue({
+      id: "favorite-1",
+      track_id: tracks[0].id,
+      created_at: new Date().toISOString(),
+    } as unknown as Awaited<ReturnType<typeof favoritesApi.addFavorite>>);
     ({ wrapper } = mountTrackList({ tracks }));
     await flushPromises();
 
@@ -199,7 +212,31 @@ describe("TrackList", () => {
     await flushPromises();
 
     await clickMenuItem(i18n.global.t("common.favorite"));
+    await flushPromises();
 
+    expect(favoritesApi.addFavorite).toHaveBeenCalledWith(tracks[0].id);
+    expect(wrapper.emitted("toggle-favorite")?.[0]).toEqual([
+      toQueueTrack({ ...tracks[0], favorited: true }, { artist_name: "" }),
+    ]);
+  });
+
+  it("emits toggle-favorite without calling the API when favorite is managed", async () => {
+    const tracks = [makeTrack({ favorited: true })];
+    ({ wrapper } = mountTrackList({
+      tracks,
+      favoriteLabel: i18n.global.t("common.unfavorite"),
+      favoriteManaged: true,
+    }));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    await clickMenuItem(i18n.global.t("common.unfavorite"));
+    await flushPromises();
+
+    expect(favoritesApi.removeFavorite).not.toHaveBeenCalled();
+    expect(favoritesApi.addFavorite).not.toHaveBeenCalled();
     expect(wrapper.emitted("toggle-favorite")?.[0]).toEqual([
       toQueueTrack(tracks[0], { artist_name: "" }),
     ]);

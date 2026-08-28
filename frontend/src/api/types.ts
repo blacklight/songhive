@@ -3566,6 +3566,11 @@ export interface components {
        * @default []
        */
       hashtags: string[];
+      /**
+       * Favorited
+       * @description Whether the track is a favorite of the current user.
+       */
+      favorited?: boolean | null;
     };
     /**
      * TrackSummary
