@@ -60,7 +60,8 @@
       "position": "Playlist order",
       "item_count": "Item count",
       "first_used": "First used",
-      "last_used": "Last used"
+      "last_used": "Last used",
+      "type": "Type"
     }
   },
   "theme": {

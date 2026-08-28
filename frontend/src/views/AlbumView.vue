@@ -32,6 +32,7 @@ import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
+import HashtagList from "@/components/hashtags/HashtagList.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -215,7 +216,7 @@ async function loadAlbum() {
   loading.value = true;
   error.value = null;
   try {
-    album.value = await getAlbum(albumId.value);
+    album.value = await getAlbum(albumId.value, { include: "hashtags" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -319,6 +320,10 @@ watch(
                 <i :class="visibilityIcon" />
               </span>
             </span>
+          </div>
+
+          <div v-if="album.hashtags?.length" class="album-view__hashtags">
+            <HashtagList :hashtags="album.hashtags" />
           </div>
 
           <p v-if="album.description" class="album-view__description">
@@ -518,6 +523,17 @@ watch(
 
 .album-view__header-actions {
   margin-top: var(--space-2);
+}
+
+.album-view__hashtags {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.album-view__hashtags-label {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
 }
 
 .album-view__section {

@@ -43,8 +43,7 @@ const page = computed(() => Math.floor(offset.value / LIMIT) + 1);
 
 const sortOptions = computed(() => [
   { value: "created_at", label: t("sort.fields.created_at") },
-  { value: "updated_at", label: t("sort.fields.updated_at") },
-  { value: "name", label: t("sort.fields.name") },
+  { value: "type", label: t("sort.fields.type") },
 ]);
 
 async function load() {

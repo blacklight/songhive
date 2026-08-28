@@ -33,11 +33,16 @@ function createTestRouter() {
       { path: "/", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
+      { path: "/hashtags/:name", component: { template: "<div/>" } },
     ],
   });
 }
 
-function createAlbum(id: string, title: string): AlbumResponse {
+function createAlbum(
+  id: string,
+  title: string,
+  hashtags: string[] = [],
+): AlbumResponse {
   return {
     id,
     title,
@@ -48,6 +53,7 @@ function createAlbum(id: string, title: string): AlbumResponse {
     description: "A lovely album.",
     owner_id: "user-1",
     visibility: "public",
+    hashtags,
   };
 }
 
@@ -142,7 +148,9 @@ describe("AlbumView", () => {
 
     await mountAt("/albums/album-1");
 
-    expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1");
+    expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
+      include: "hashtags",
+    });
     expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
     expect(tracksApi.listTracks).toHaveBeenCalledWith({
       q: "",
@@ -160,6 +168,24 @@ describe("AlbumView", () => {
       "fa-globe",
     );
     expect(wrapper.find(".album-view__owner").text()).toContain("user-1");
+  });
+
+  it("renders album hashtags", async () => {
+    vi.mocked(albumsApi.getAlbum).mockResolvedValue(
+      createAlbum("album-1", "Meadowland", ["rock", "indie"]),
+    );
+    await mountAt("/albums/album-1");
+
+    expect(wrapper.text()).toContain("rock");
+    expect(wrapper.text()).toContain("indie");
+  });
+
+  it("does not render an empty hashtag section", async () => {
+    await mountAt("/albums/album-1");
+
+    expect(wrapper.text()).not.toContain(
+      i18n.global.t("browse.detail.hashtags"),
+    );
   });
 
   it("shows an error banner with a retry button", async () => {
@@ -228,7 +254,9 @@ describe("AlbumView", () => {
     await router.push("/albums/album-2");
     await flushPromises();
 
-    expect(albumsApi.getAlbum).toHaveBeenLastCalledWith("album-2");
+    expect(albumsApi.getAlbum).toHaveBeenLastCalledWith("album-2", {
+      include: "hashtags",
+    });
     expect(wrapper.text()).toContain("Sunset");
   });
 

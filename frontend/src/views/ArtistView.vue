@@ -30,6 +30,7 @@ import ShareDialog from "@/components/share/ShareDialog.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import SortControl from "@/components/ui/SortControl.vue";
+import HashtagList from "@/components/hashtags/HashtagList.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -235,7 +236,7 @@ async function loadArtist() {
   loading.value = true;
   error.value = null;
   try {
-    artist.value = await getArtist(artistId.value);
+    artist.value = await getArtist(artistId.value, { include: "hashtags" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -286,6 +287,9 @@ watch(
             artist.name
           }}</AppPageTitle>
           <p v-if="artist.bio" class="artist-view__bio">{{ artist.bio }}</p>
+          <div v-if="artist.hashtags?.length" class="artist-view__hashtags">
+            <HashtagList :hashtags="artist.hashtags" />
+          </div>
         </div>
         <EntityActions
           class="artist-view__header-actions"
@@ -508,6 +512,12 @@ watch(
   color: var(--color-text-muted);
   max-width: 40rem;
   word-break: break-word;
+}
+
+.artist-view__hashtags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .artist-view__header-actions {

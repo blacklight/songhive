@@ -246,7 +246,7 @@ defineExpose({
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background-color: var(--color-surface);

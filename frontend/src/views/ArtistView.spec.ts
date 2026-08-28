@@ -33,11 +33,16 @@ function createTestRouter() {
       { path: "/", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
+      { path: "/hashtags/:name", component: { template: "<div/>" } },
     ],
   });
 }
 
-function createArtist(id: string, name: string): ArtistResponse {
+function createArtist(
+  id: string,
+  name: string,
+  hashtags: string[] = [],
+): ArtistResponse {
   return {
     id,
     name,
@@ -45,6 +50,7 @@ function createArtist(id: string, name: string): ArtistResponse {
     bio: "A great artist.",
     image_file_id: null,
     image_url: null,
+    hashtags,
   };
 }
 
@@ -75,6 +81,7 @@ function createTrack(id: string, title: string): TrackResponse {
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
     owner_id: "user-1",
+    hashtags: [],
     artist: { id: "artist-1", name: "The Larks", image_url: null },
     album: {
       id: "album-1",
@@ -143,7 +150,9 @@ describe("ArtistView", () => {
 
     await mountAt("/artists/artist-1");
 
-    expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
+    expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1", {
+      include: "hashtags",
+    });
     expect(albumsApi.listAlbums).toHaveBeenCalledWith({
       q: "",
       artist_id: "artist-1",
@@ -165,6 +174,17 @@ describe("ArtistView", () => {
     expect(wrapper.text()).toContain("The Larks");
     expect(wrapper.text()).toContain("Meadowland");
     expect(wrapper.text()).toContain("Song One");
+  });
+
+  it("renders artist hashtags", async () => {
+    vi.mocked(artistsApi.getArtist).mockResolvedValue(
+      createArtist("artist-1", "The Larks", ["rock", "indie"]),
+    );
+
+    await mountAt("/artists/artist-1");
+
+    expect(wrapper.text()).toContain("rock");
+    expect(wrapper.text()).toContain("indie");
   });
 
   it("shows an error banner with a retry button", async () => {
@@ -238,7 +258,9 @@ describe("ArtistView", () => {
     await router.push("/artists/artist-2");
     await flushPromises();
 
-    expect(artistsApi.getArtist).toHaveBeenLastCalledWith("artist-2");
+    expect(artistsApi.getArtist).toHaveBeenLastCalledWith("artist-2", {
+      include: "hashtags",
+    });
     expect(wrapper.text()).toContain("Night Owls");
   });
 

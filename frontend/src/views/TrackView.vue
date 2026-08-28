@@ -19,6 +19,7 @@ import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
+import HashtagList from "@/components/hashtags/HashtagList.vue";
 import { toQueueTrack } from "@/player/enrich";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -173,7 +174,7 @@ async function loadTrack() {
   album.value = null;
 
   try {
-    track.value = await getTrack(trackId.value);
+    track.value = await getTrack(trackId.value, { include: "hashtags" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -278,6 +279,10 @@ watch(
             <span v-if="ownerName" class="track-view__meta-item">
               {{ t("browse.detail.owner") }} {{ ownerName }}
             </span>
+          </div>
+
+          <div v-if="track.hashtags?.length" class="track-view__hashtags">
+            <HashtagList :hashtags="track.hashtags" />
           </div>
         </div>
 
@@ -387,5 +392,16 @@ watch(
 
 .track-view__link:hover {
   text-decoration: underline;
+}
+
+.track-view__hashtags {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.track-view__hashtags-label {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
 }
 </style>

@@ -90,6 +90,8 @@ const link = computed(() => {
   return `${base}/${props.id}`;
 });
 
+// TODO: Each card fetches its entity individually. Consider a batch-resolve
+// endpoint (e.g. POST /hashtags/{name}/items:resolve) to avoid N+1 requests.
 async function load() {
   loading.value = true;
   error.value = null;
