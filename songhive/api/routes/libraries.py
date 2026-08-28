@@ -1045,7 +1045,8 @@ async def add_library_hashtags(
         ) from exc
 
     library = await music.get_library(db, library_id, include=set(include.values) | {"owner", "hashtags"})
-    assert library is not None
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
     await audit.log_action(
         db,
         actor_id=current_user.id,
@@ -1089,7 +1090,8 @@ async def remove_library_hashtag(
         ) from exc
 
     library = await music.get_library(db, library_id, include=set(include.values) | {"owner", "hashtags"})
-    assert library is not None
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
     await audit.log_action(
         db,
         actor_id=current_user.id,

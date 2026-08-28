@@ -219,7 +219,8 @@ async def get_playlist(
     """Get a playlist by ID."""
     playlist = await music.get_playlist(db, playlist_id, include=set(include.values))
     # ``require_access`` already loads the row and raises 404 when missing.
-    assert playlist is not None
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
 
     return await _build_playlist_response(playlist, user, storage, include)
 
@@ -707,7 +708,8 @@ async def add_playlist_hashtags(
         ) from exc
 
     playlist = await music.get_playlist(db, playlist_id, include=set(include.values) | {"owner", "hashtags"})
-    assert playlist is not None
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
     await audit.log_action(
         db,
         actor_id=current_user.id,
@@ -751,7 +753,8 @@ async def remove_playlist_hashtag(
         ) from exc
 
     playlist = await music.get_playlist(db, playlist_id, include=set(include.values) | {"owner", "hashtags"})
-    assert playlist is not None
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
     await audit.log_action(
         db,
         actor_id=current_user.id,

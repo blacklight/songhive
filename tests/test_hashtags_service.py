@@ -15,6 +15,7 @@ from songhive.services.hashtags import (
     add_hashtags_to_entity,
     delete_hashtag_globally,
     extract_hashtags_from_metadata,
+    extract_hashtags_from_track,
     get_hashtags_for_entity,
     get_items_for_hashtag,
     list_hashtags,
@@ -241,6 +242,11 @@ class TestListingAndVisibility:
         assert total == 0
         assert items == []
 
+    async def test_get_items_for_invalid_hashtag_returns_empty(self, db_session):
+        items, total = await get_items_for_hashtag(db_session, "foo bar")
+        assert total == 0
+        assert items == []
+
 
 class TestDelete:
     """Tests for global hashtag deletion."""
@@ -251,9 +257,28 @@ class TestDelete:
         await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
 
         deleted = await delete_hashtag_globally(db_session, "rock")
-        assert deleted is True
+        assert deleted is not None
+        assert deleted.name == "rock"
         assert await get_hashtags_for_entity(db_session, "track", track.id) == []
 
-    async def test_delete_missing_hashtag_returns_false(self, db_session):
+    async def test_delete_missing_hashtag_returns_none(self, db_session):
         deleted = await delete_hashtag_globally(db_session, "nope")
-        assert deleted is False
+        assert deleted is None
+
+
+class TestExtraction:
+    """Tests for automatic hashtag extraction from metadata and tracks."""
+
+    def test_extract_from_track(self):
+        track = Track(
+            title="Test Track",
+            artist_id="artist-id",
+            genre="Rock, Pop; Chill",
+            raw_metadata={"TXXX:TAGS": ["#Synthwave", "Retrowave"]},
+            owner_id="user-id",
+        )
+        assert extract_hashtags_from_track(track) == ["rock", "pop", "chill", "synthwave", "retrowave"]
+
+    def test_extract_from_track_with_no_tags(self):
+        track = Track(title="Test Track", artist_id="artist-id")
+        assert extract_hashtags_from_track(track) == []

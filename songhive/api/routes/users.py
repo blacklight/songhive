@@ -16,7 +16,7 @@ from ...models.user_link import UserLink
 from ...services import audit
 from ...services.auth import get_user_by_username
 from ...services.federation import unpublish_track_activity
-from ...services.hashtags import get_items_for_hashtag, list_hashtags
+from ...services.hashtags import get_items_for_hashtag, list_hashtags, validate_hashtag_name
 from ...services.storage import StorageService
 from ...users import manager as user_manager
 from ...users.manager import DELETE_ACCOUNT_CONFIRMATION, PasswordChangeError, change_user_password, update_profile
@@ -309,6 +309,14 @@ async def list_user_hashtag_items(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+
+    try:
+        validate_hashtag_name(hashtag)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hashtag not found",
+        ) from None
 
     items, total = await get_items_for_hashtag(
         db,

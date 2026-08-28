@@ -19,6 +19,7 @@ from sqlalchemy import (
     true,
     union_all,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -37,6 +38,7 @@ from ..models.playlist import Playlist
 from ..models.track import Track
 from ..models.user import User
 from ..services.metadata import AudioMetadata
+from ..services.storage import is_unique_constraint_error
 from .acl import _list_access_predicate
 
 logger = logging.getLogger(__name__)
@@ -133,52 +135,40 @@ def _split_and_validate_tags(value: Optional[str]) -> List[str]:
     return results
 
 
+def _collect_tags(genre: Optional[str], raw_tags: Optional[dict]) -> List[str]:
+    """Collect valid hashtags from a genre string and raw tag/keyword fields."""
+    tags: List[str] = []
+
+    if genre:
+        tags.extend(_split_and_validate_tags(genre))
+
+    for key, values in (raw_tags or {}).items():
+        if key.upper() not in _HASHTAG_TAG_KEYS and key not in _HASHTAG_TAG_KEYS:
+            continue
+        for value in values:
+            tags.extend(_split_and_validate_tags(value))
+
+    seen: set[str] = set()
+    unique: List[str] = []
+    for tag in tags:
+        if tag not in seen:
+            seen.add(tag)
+            unique.append(tag)
+    return unique
+
+
 def extract_hashtags_from_metadata(metadata: AudioMetadata) -> List[str]:
     """
     Derive hashtags from genre and tag/keyword metadata fields.
 
     Preserves the order of discovery while deduplicating.
     """
-    tags: List[str] = []
-
-    if metadata.genre:
-        tags.extend(_split_and_validate_tags(metadata.genre))
-
-    for key, values in (metadata.raw_tags or {}).items():
-        if key.upper() not in _HASHTAG_TAG_KEYS and key not in _HASHTAG_TAG_KEYS:
-            continue
-        for value in values:
-            tags.extend(_split_and_validate_tags(value))
-
-    seen: set[str] = set()
-    unique: List[str] = []
-    for tag in tags:
-        if tag not in seen:
-            seen.add(tag)
-            unique.append(tag)
-    return unique
+    return _collect_tags(metadata.genre, metadata.raw_tags)
 
 
 def extract_hashtags_from_track(track: Track) -> List[str]:
     """Derive hashtags from a track's genre and raw tag fields."""
-    tags: List[str] = []
-
-    if track.genre:
-        tags.extend(_split_and_validate_tags(track.genre))
-
-    for key, values in (track.raw_metadata or {}).items():
-        if key.upper() not in _HASHTAG_TAG_KEYS and key not in _HASHTAG_TAG_KEYS:
-            continue
-        for value in values:
-            tags.extend(_split_and_validate_tags(value))
-
-    seen: set[str] = set()
-    unique: List[str] = []
-    for tag in tags:
-        if tag not in seen:
-            seen.add(tag)
-            unique.append(tag)
-    return unique
+    return _collect_tags(track.genre, track.raw_metadata)
 
 
 def _entity_access_predicate(
@@ -264,19 +254,34 @@ def _accessible_items_cte(
 async def get_or_create_hashtag(session: AsyncSession, name: str) -> Hashtag:
     """Return an existing hashtag by name or create a new one."""
     result = await session.execute(select(Hashtag).where(Hashtag.name == name).limit(1))
-    hashtag = result.scalar_one_or_none()
-    if hashtag is not None:
-        return hashtag
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        return existing
 
-    hashtag = Hashtag(name=name)
-    session.add(hashtag)
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            hashtag = Hashtag(name=name)
+            session.add(hashtag)
+            await session.flush()
+    except IntegrityError as exc:
+        if not is_unique_constraint_error(exc):
+            raise
+        result = await session.execute(select(Hashtag).where(Hashtag.name == name).limit(1))
+        existing = result.scalar_one_or_none()
+        if existing is None:
+            raise
+        return existing
+
     return hashtag
 
 
 async def _get_hashtag_by_name(session: AsyncSession, name: str) -> Optional[Hashtag]:
-    """Return a hashtag by its normalised name, or ``None``."""
-    result = await session.execute(select(Hashtag).where(Hashtag.name == validate_hashtag_name(name)).limit(1))
+    """Return a hashtag by its normalised name, or ``None`` for invalid input."""
+    try:
+        normalised = validate_hashtag_name(name)
+    except ValueError:
+        return None
+    result = await session.execute(select(Hashtag).where(Hashtag.name == normalised).limit(1))
     return result.scalar_one_or_none()
 
 
@@ -313,26 +318,21 @@ async def add_hashtags_to_entity(
     for name in normalised:
         hashtag = await get_or_create_hashtag(session, name)
 
-        # Avoid duplicate associations.
-        existing = await session.execute(
-            select(assoc_class)
-            .where(
-                assoc_class.hashtag_id == hashtag.id,
-                getattr(assoc_class, entity_col) == entity_id,
-            )
-            .limit(1)
-        )
-        if existing.scalar_one_or_none() is None:
-            assoc = assoc_class(
-                hashtag_id=hashtag.id,
-                **{entity_col: entity_id},
-                user_id=user_id,
-            )
-            session.add(assoc)
+        try:
+            async with session.begin_nested():
+                assoc = assoc_class(
+                    hashtag_id=hashtag.id,
+                    **{entity_col: entity_id},
+                    user_id=user_id,
+                )
+                session.add(assoc)
+                await session.flush()
+        except IntegrityError as exc:
+            if not is_unique_constraint_error(exc):
+                raise
 
         added.append(hashtag)
 
-    await session.flush()
     return added
 
 
@@ -427,7 +427,7 @@ async def list_hashtags(
     elif sort_by == "last_used":
         order = _order_clause(last_used, sort_dir, nulls_last=True)
     else:
-        order = _order_clause(Hashtag.name, "asc")
+        raise ValueError(f"Unsupported sort_by: {sort_by!r}")
 
     stmt = stmt.order_by(order, Hashtag.name)
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -475,7 +475,7 @@ async def get_items_for_hashtag(
     elif sort_by == "created_at":
         order = _order_clause(cte.c.created_at, sort_dir, nulls_last=True)
     else:
-        order = _order_clause(cte.c.created_at, "desc", nulls_last=True)
+        raise ValueError(f"Unsupported sort_by: {sort_by!r}")
 
     stmt = (
         select(cte.c.item_type, cte.c.item_id, cte.c.created_at)
@@ -492,12 +492,12 @@ async def get_items_for_hashtag(
     return [TaggedItem(type=row.item_type, id=row.item_id) for row in rows], total
 
 
-async def delete_hashtag_globally(session: AsyncSession, hashtag_name: str) -> bool:
+async def delete_hashtag_globally(session: AsyncSession, hashtag_name: str) -> Optional[Hashtag]:
     """Delete a hashtag and all its associations (admin only)."""
     hashtag = await _get_hashtag_by_name(session, hashtag_name)
     if hashtag is None:
-        return False
+        return None
 
     await session.delete(hashtag)
     await session.flush()
-    return True
+    return hashtag

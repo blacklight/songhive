@@ -16,6 +16,7 @@ from ...services.hashtags import (
     delete_hashtag_globally,
     get_items_for_hashtag,
     list_hashtags,
+    validate_hashtag_name,
 )
 from .._common import Pagination, client_ip, get_pagination
 from .._sorting import SortParams, get_sort
@@ -89,6 +90,14 @@ async def list_hashtag_items(
     db: AsyncSession = Depends(get_db),
 ):
     """List visible items for a specific hashtag."""
+    try:
+        validate_hashtag_name(hashtag)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hashtag not found",
+        ) from None
+
     items, total = await get_items_for_hashtag(
         db,
         hashtag_name=hashtag,
@@ -110,14 +119,16 @@ async def delete_global_hashtag(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a hashtag and all its associations (admin only)."""
-    from ...services.hashtags import _get_hashtag_by_name
-
-    target = await _get_hashtag_by_name(db, hashtag)
-    if target is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hashtag not found")
+    try:
+        validate_hashtag_name(hashtag)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hashtag not found",
+        ) from None
 
     deleted = await delete_hashtag_globally(db, hashtag)
-    if not deleted:
+    if deleted is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hashtag not found")
 
     await audit.log_action(
@@ -125,7 +136,7 @@ async def delete_global_hashtag(
         actor_id=admin.id,
         action="hashtag.delete",
         target_type="hashtag",
-        target_id=target.id,
+        target_id=deleted.id,
         details={"name": hashtag},
         ip_address=client_ip(request),
     )
