@@ -58,7 +58,11 @@ steps:
 - name: frontend-build
   image: node:20
   commands:
-    - cd frontend && npm ci && npm run build
+    # Skip lifecycle scripts: esbuild's postinstall rewrites and then
+    # immediately spawns its binary, which fails with ETXTBSY on the
+    # CI filesystem. The esbuild platform binary is already installed
+    # as an optional dependency, so the build works without the script.
+    - cd frontend && npm ci --ignore-scripts && npm run build
 
   when:
     event:
@@ -93,7 +97,7 @@ steps:
 - name: frontend-lint
   image: node:20
   commands:
-    - cd frontend && npm ci && npm run lint && ./node_modules/.bin/prettier --check src
+    - cd frontend && npm ci --ignore-scripts && npm run lint && ./node_modules/.bin/prettier --check src
   when:
     event:
       - push
@@ -108,7 +112,7 @@ steps:
 - name: frontend-tests
   image: node:20
   commands:
-    - cd frontend && npm ci && npm run test
+    - cd frontend && npm ci --ignore-scripts && npm run test
   when:
     event:
       - push
