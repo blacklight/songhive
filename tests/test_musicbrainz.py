@@ -16,7 +16,6 @@ from songhive.models.track import Track
 from songhive.services.musicbrainz import (
     MusicBrainzService,
     _first_artist_id,
-    _first_release_id,
     _guess_image_mime,
 )
 from songhive.services.storage import StorageService
@@ -454,13 +453,6 @@ def test_first_artist_id_returns_none_for_invalid_credit():
     assert _first_artist_id({"artist-credit": []}) is None
     assert _first_artist_id({"artist-credit": ["not-a-dict"]}) is None
     assert _first_artist_id({"artist-credit": [{"artist": "not-a-dict"}]}) is None
-
-
-def test_first_release_id_returns_none_for_invalid_details():
-    """_first_release_id returns None when no releases are present."""
-    assert _first_release_id({}) is None
-    assert _first_release_id({"recording": {}}) is None
-    assert _first_release_id({"recording": {"release-list": []}}) is None
 
 
 def test_guess_image_mime_branches():

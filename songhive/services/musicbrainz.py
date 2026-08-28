@@ -742,15 +742,6 @@ def _normalize_name(name: Optional[str]) -> str:
     return (name or "").strip().lower()
 
 
-def _first_release_id(details: Dict[str, Any]) -> Optional[str]:
-    """Return the first release ID from a recording detail response."""
-    recording = details.get("recording", {})
-    releases = recording.get("release-list", [])
-    if releases:
-        return releases[0].get("id")
-    return None
-
-
 def _guess_image_mime(data: bytes) -> str:
     """Guess an image MIME type from the first few bytes."""
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
