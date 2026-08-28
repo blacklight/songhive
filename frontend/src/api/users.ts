@@ -12,6 +12,11 @@ export type ChangePasswordRequest =
 export type ChangePasswordResponse =
   paths["/api/v1/users/me/password"]["post"]["responses"]["200"]["content"]["application/json"];
 
+export interface DeleteAccountRequest {
+  confirmation: string;
+  recursive: boolean;
+}
+
 export function getMe(): Promise<UserResponse> {
   return apiRequest<UserResponse>("/users/me");
 }
@@ -31,4 +36,8 @@ export function changePassword(
 
 export function getPublic(username: string): Promise<PublicUserResponse> {
   return apiRequest<PublicUserResponse>(`/users/${username}`);
+}
+
+export function deleteMe(body: DeleteAccountRequest): Promise<void> {
+  return apiRequest<void>("/users/me", { method: "DELETE", body });
 }

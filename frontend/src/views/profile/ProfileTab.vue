@@ -1,19 +1,30 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
 import { resendVerificationEmail } from "@/api/auth";
 import { uploadFile } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
-import type { UserProfileUpdate } from "@/api/users";
+import { deleteMe, type UserProfileUpdate } from "@/api/users";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
+import AppCheckbox from "@/components/ui/AppCheckbox.vue";
+import AppModal from "@/components/feedback/AppModal.vue";
 
 const { t } = useI18n();
+const router = useRouter();
 const authStore = useAuthStore();
 const toast = useToastStore();
+
+const DELETE_CONFIRMATION = "Yes, I really want to delete my account" as const;
+
+const showDeleteDialog = ref(false);
+const deleteConfirmation = ref("");
+const deleteRecursive = ref(false);
+const isDeleting = ref(false);
 
 interface Link {
   name: string;
@@ -109,6 +120,45 @@ async function onResendVerification() {
     });
   } finally {
     isResendingVerification.value = false;
+  }
+}
+
+function openDeleteDialog() {
+  error.value = null;
+  deleteConfirmation.value = "";
+  deleteRecursive.value = false;
+  showDeleteDialog.value = true;
+}
+
+function closeDeleteDialog() {
+  showDeleteDialog.value = false;
+}
+
+async function onDeleteAccount() {
+  if (deleteConfirmation.value.trim() !== DELETE_CONFIRMATION) {
+    error.value = t("profile.deleteAccountConfirmationError");
+    return;
+  }
+
+  isDeleting.value = true;
+  try {
+    await deleteMe({
+      confirmation: DELETE_CONFIRMATION,
+      recursive: deleteRecursive.value,
+    });
+    toast.push({
+      type: "success",
+      message: t("profile.deleteAccountSuccess"),
+    });
+    closeDeleteDialog();
+    await authStore.logout();
+    router.push("/");
+  } catch (err) {
+    error.value = t("profile.deleteAccountError", {
+      message: getApiErrorMessage(err, t("errors.unknown")),
+    });
+  } finally {
+    isDeleting.value = false;
   }
 }
 
@@ -259,14 +309,72 @@ async function onSubmit() {
       </div>
 
       <div class="profile-tab__gated-item">
-        <AppButton type="button" variant="danger" icon="trash-can" disabled>
+        <AppButton
+          type="button"
+          variant="danger"
+          icon="trash-can"
+          @click="openDeleteDialog"
+        >
           {{ t("profile.deleteAccount") }}
         </AppButton>
         <p class="profile-tab__hint">
-          {{ t("profile.deleteAccountDisabled") }}
+          {{ t("profile.deleteAccountHint") }}
         </p>
       </div>
     </div>
+
+    <AppModal
+      :open="showDeleteDialog"
+      :title="t('profile.deleteAccountDialogTitle')"
+      @close="closeDeleteDialog"
+    >
+      <div class="profile-tab__delete-dialog">
+        <p class="profile-tab__delete-warning">
+          {{ t("profile.deleteAccountWarning") }}
+        </p>
+
+        <AppCheckbox
+          v-model="deleteRecursive"
+          :label="t('profile.deleteAccountRecursiveLabel')"
+        />
+
+        <AppInput
+          v-model="deleteConfirmation"
+          type="text"
+          :label="t('profile.deleteAccountConfirmationLabel')"
+          :hint="t('profile.deleteAccountConfirmationHint')"
+        />
+
+        <p
+          v-if="error"
+          class="profile-tab__error"
+          role="alert"
+          aria-live="polite"
+        >
+          {{ error }}
+        </p>
+      </div>
+
+      <template #actions>
+        <AppButton
+          type="button"
+          variant="secondary"
+          :disabled="isDeleting"
+          @click="closeDeleteDialog"
+        >
+          {{ t("profile.deleteAccountCancel") }}
+        </AppButton>
+        <AppButton
+          type="button"
+          variant="danger"
+          :loading="isDeleting"
+          icon="trash-can"
+          @click="onDeleteAccount"
+        >
+          {{ t("profile.deleteAccountConfirm") }}
+        </AppButton>
+      </template>
+    </AppModal>
   </form>
 </template>
 
@@ -347,5 +455,18 @@ async function onSubmit() {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+.profile-tab__delete-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.profile-tab__delete-warning {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 </style>

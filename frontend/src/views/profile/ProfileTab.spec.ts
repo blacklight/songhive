@@ -11,6 +11,7 @@ import ProfileTab from "./ProfileTab.vue";
 vi.mock("@/api/users", () => ({
   getMe: vi.fn(),
   updateMe: vi.fn(),
+  deleteMe: vi.fn(),
 }));
 
 vi.mock("@/api/auth", () => ({
@@ -20,7 +21,10 @@ vi.mock("@/api/auth", () => ({
 function createTestRouter() {
   return createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: "/profile", component: { template: "<div/>" } }],
+    routes: [
+      { path: "/", component: { template: "<div/>" } },
+      { path: "/profile", component: { template: "<div/>" } },
+    ],
   });
 }
 
@@ -159,7 +163,8 @@ describe("ProfileTab", () => {
     const deleteAccountButton = wrapper
       .findAll("button")
       .find((b) => b.text() === i18n.global.t("profile.deleteAccount"));
-    expect(deleteAccountButton?.attributes("disabled")).toBe("");
+    expect(deleteAccountButton).toBeDefined();
+    expect(deleteAccountButton?.attributes("disabled")).toBeUndefined();
   });
 
   it("enables resend verification for an unverified user", async () => {
@@ -186,5 +191,114 @@ describe("ProfileTab", () => {
     expect(authApi.resendVerificationEmail).toHaveBeenCalledWith({
       username_or_email: "alice",
     });
+  });
+
+  it("opens the delete account dialog when the delete button is clicked", async () => {
+    const router = createTestRouter();
+    await router.push("/profile");
+    await router.isReady();
+
+    document.body.innerHTML = "";
+    const wrapper = mount(ProfileTab, {
+      global: { plugins: [router] },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const deleteAccountButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("profile.deleteAccount"));
+    await deleteAccountButton?.trigger("click");
+    await flushPromises();
+
+    expect(document.body.querySelector('[role="dialog"]')).toBeTruthy();
+    wrapper.unmount();
+  });
+
+  it("shows an error when the delete confirmation text does not match", async () => {
+    const router = createTestRouter();
+    await router.push("/profile");
+    await router.isReady();
+
+    document.body.innerHTML = "";
+    const wrapper = mount(ProfileTab, {
+      global: { plugins: [router] },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const deleteAccountButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("profile.deleteAccount"));
+    await deleteAccountButton?.trigger("click");
+    await flushPromises();
+
+    const confirmButtons = Array.from(
+      document.body.querySelectorAll("button"),
+    ).filter(
+      (b) =>
+        b.textContent?.trim() === i18n.global.t("profile.deleteAccountConfirm"),
+    );
+    const confirmButton = confirmButtons[confirmButtons.length - 1];
+    expect(confirmButton).toBeTruthy();
+    confirmButton!.click();
+    await flushPromises();
+
+    expect(document.body.textContent).toContain(
+      i18n.global.t("profile.deleteAccountConfirmationError"),
+    );
+    expect(usersApi.deleteMe).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("calls deleteMe and redirects after a confirmed delete", async () => {
+    const store = useAuthStore();
+    vi.spyOn(store, "logout").mockResolvedValue(undefined);
+    vi.mocked(usersApi.deleteMe).mockResolvedValue(undefined);
+
+    const router = createTestRouter();
+    await router.push("/profile");
+    await router.isReady();
+
+    document.body.innerHTML = "";
+    const wrapper = mount(ProfileTab, {
+      global: { plugins: [router] },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const deleteAccountButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("profile.deleteAccount"));
+    await deleteAccountButton?.trigger("click");
+    await flushPromises();
+
+    const textInputs = document.body.querySelectorAll('input[type="text"]');
+    const confirmationInput = textInputs[
+      textInputs.length - 1
+    ] as HTMLInputElement;
+    confirmationInput.value = "Yes, I really want to delete my account";
+    await confirmationInput.dispatchEvent(
+      new Event("input", { bubbles: true }),
+    );
+    await flushPromises();
+
+    const confirmButtons = Array.from(
+      document.body.querySelectorAll("button"),
+    ).filter(
+      (b) =>
+        b.textContent?.trim() === i18n.global.t("profile.deleteAccountConfirm"),
+    );
+    const confirmButton = confirmButtons[confirmButtons.length - 1];
+    confirmButton!.click();
+    await flushPromises();
+
+    expect(usersApi.deleteMe).toHaveBeenCalledWith({
+      confirmation: "Yes, I really want to delete my account",
+      recursive: false,
+    });
+    expect(store.logout).toHaveBeenCalled();
+    expect(router.currentRoute.value.path).toBe("/");
+    wrapper.unmount();
   });
 });
