@@ -241,3 +241,28 @@ def test_main_import_error_fallback(monkeypatch, _minimal_config, tmp_path):
             sys.modules["a2wsgi"] = orig_a2wsgi
 
     assert calls == [("uvicorn", _minimal_config)]
+
+
+def test_frontend_spa_served(client):
+    """Root and frontend routes fall back to the built index.html."""
+    response = client.get("/verify-email?token=abc123")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "<title>Songhive</title>" in response.text
+
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+
+
+def test_static_assets_served(client):
+    """Existing files in songhive/static are served directly."""
+    response = client.get("/favicon.ico")
+    assert response.status_code == 200
+
+
+def test_unknown_api_route_is_404(client):
+    """Unknown /api/... paths still produce a 404 problem detail."""
+    response = client.get("/api/v1/does-not-exist")
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/problem+json")

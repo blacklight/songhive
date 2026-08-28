@@ -5,10 +5,13 @@ FastAPI application factory.
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from pathlib import Path
+from typing import Any, AsyncGenerator, MutableMapping
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from starlette.types import Receive, Send
 
 from ..config.schema import SonghiveConfig
 from ..models.base import get_session, init_db
@@ -79,6 +82,42 @@ def _sync_settings_overlay(config: SonghiveConfig) -> tuple[SonghiveConfig, bool
     finally:
         if loop is not None:
             loop.close()
+
+
+def _setup_static_routes(app: FastAPI):
+    """
+    Serve the built frontend SPA as the default handler.
+
+    API/WebSocket/stream paths are excluded so unknown /api/... /ws/...
+    /stream/... routes still 404. The default is only reached when no API route
+    (or redirect-slashes partial match) matches, so it never shadows API
+    endpoints.
+    """
+    static_dir = Path(__file__).resolve().parent.parent / "static"
+    if (static_dir / "index.html").is_file():
+
+        async def _serve_static(scope: MutableMapping[str, Any], receive: Receive, send: Send) -> None:
+            if scope["type"] != "http":
+                raise HTTPException(status_code=404)
+
+            path = scope["path"].lstrip("/")
+            if path.startswith("api/") or path.startswith("ws/") or path.startswith("stream/"):
+                raise HTTPException(status_code=404)
+
+            # Federation/ActivityPub requests to disabled endpoints should 404,
+            # not receive the SPA HTML shell.
+            for name, value in scope.get("headers", []):
+                if name.lower() == b"accept" and b"application/activity+json" in value:
+                    raise HTTPException(status_code=404)
+
+            requested = (static_dir / path).resolve()
+            static_root = static_dir.resolve()
+            if requested.is_file() and str(requested).startswith(str(static_root)):
+                await FileResponse(requested)(scope, receive, send)
+            else:
+                await FileResponse(static_dir / "index.html")(scope, receive, send)
+
+        app.router.default = _serve_static
 
 
 def create_app(config: SonghiveConfig) -> FastAPI:
@@ -173,6 +212,8 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     if config.federation.enabled and config.federation.instance_domain:
         app.include_router(federation.router)
         _setup_federation(app, config)
+
+    _setup_static_routes(app)
 
     return app
 

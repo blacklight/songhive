@@ -610,7 +610,10 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |
 
-Build output is served as static files by the backend (or a CDN).
+Build output is served as static files by the backend (or a CDN). The FastAPI
+app sets `router.default` to an ASGI handler that serves files directly from
+`songhive/static/` and falls back to `index.html` for unhandled non-API paths,
+so the Vue Router handles deep links such as `/verify-email?token=...`.
 
 ---
 
