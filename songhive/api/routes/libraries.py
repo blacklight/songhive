@@ -5,7 +5,7 @@ Library routes.
 import asyncio
 import uuid
 from pathlib import Path
-from typing import List, Optional, cast
+from typing import List, Optional, Set, cast
 
 from fastapi import (
     APIRouter,
@@ -266,11 +266,12 @@ async def _track_response(
     track,
     user: Optional[User],
     include: Optional[IncludeQuery] = None,
+    favorited_track_ids: Optional[Set[str]] = None,
 ) -> TrackResponse:
     """Build a TrackResponse with audio URL."""
     if include is None:
         include = IncludeQuery(values=set())
-    return await _build_track_response(track, user, storage, include)
+    return await _build_track_response(track, user, storage, include, favorited_track_ids)
 
 
 @router.post("/{library_id}/tracks", status_code=201)
@@ -733,7 +734,12 @@ async def list_library_tracks_route(
         sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
-    return [await _track_response(storage, row, user, include) for row in rows]
+    favorited_ids = await music.get_favorited_track_ids(
+        db,
+        user,
+        {str(row.id) for row in rows},
+    )
+    return [await _track_response(storage, row, user, include, favorited_ids) for row in rows]
 
 
 @router.patch("/{library_id}", response_model=LibraryResponse)

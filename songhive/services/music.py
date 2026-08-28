@@ -630,6 +630,23 @@ async def get_track(
     return cast(Optional[Track], track)
 
 
+async def get_favorited_track_ids(
+    session: AsyncSession,
+    user: Optional[User],
+    track_ids: Set[str],
+) -> Set[str]:
+    """Return the subset of ``track_ids`` that the given user has favorited."""
+    if user is None or not track_ids:
+        return set()
+    result = await session.execute(
+        select(Favorite.track_id).where(
+            Favorite.user_id == user.id,
+            Favorite.track_id.in_(track_ids),
+        )
+    )
+    return {str(row) for row in result.scalars().all()}
+
+
 async def list_library_tracks(
     session: AsyncSession,
     library_id: str,

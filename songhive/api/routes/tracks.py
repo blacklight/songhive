@@ -4,7 +4,7 @@ Track routes.
 
 import logging
 import uuid
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Set, cast
 
 from fastapi import (
     APIRouter,
@@ -84,6 +84,7 @@ class TrackResponse(BaseModel):
     album: Optional[AlbumSummary] = None
     owner: Optional[UserSummary] = None
     hashtags: List[str] = []
+    favorited: Optional[bool] = None
 
 
 class TrackUpdate(BaseModel):
@@ -220,6 +221,7 @@ async def _build_track_response(
     user: Optional[User],
     storage: StorageService,
     include: IncludeQuery,
+    favorited_track_ids: Optional[Set[str]] = None,
 ) -> TrackResponse:
     """Build a TrackResponse with optional nested summaries."""
     artist = None
@@ -232,6 +234,8 @@ async def _build_track_response(
     owner_id = redact_owner(cast(HasOwnerId, track), user)
     if "owner" in include and owner_id is not None and track.owner:
         owner = await build_user_summary(track.owner)
+
+    favorited = bool(str(track.id) in (favorited_track_ids or []) if user else False)
 
     return TrackResponse(
         id=str(track.id),
@@ -251,6 +255,7 @@ async def _build_track_response(
         album=album,
         owner=owner,
         hashtags=_track_hashtags(track),
+        favorited=favorited,
     )
 
 
@@ -312,7 +317,12 @@ async def list_tracks(
     )
     pagination.set_total(response, total)
     response.headers["X-List-Offset"] = str(effective_offset)
-    return [await _build_track_response(t, user, storage, include) for t in rows]
+    favorited_ids = await music.get_favorited_track_ids(
+        db,
+        user,
+        {str(t.id) for t in rows},
+    )
+    return [await _build_track_response(t, user, storage, include, favorited_ids) for t in rows]
 
 
 @router.get(
@@ -332,7 +342,8 @@ async def get_track(
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    return await _build_track_response(track, user, storage, include)
+    favorited_ids = await music.get_favorited_track_ids(db, user, {track_id})
+    return await _build_track_response(track, user, storage, include, favorited_ids)
 
 
 @router.patch("/{track_id}", response_model=TrackResponse)

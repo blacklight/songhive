@@ -3,7 +3,7 @@ Playlist routes.
 """
 
 import asyncio
-from typing import List, Optional, cast
+from typing import List, Optional, Set, cast
 
 from fastapi import (
     APIRouter,
@@ -467,9 +467,10 @@ async def _track_response(
     track,
     user: Optional[User],
     include: IncludeQuery,
+    favorited_track_ids: Optional[Set[str]] = None,
 ) -> TrackResponse:
     """Build a TrackResponse with audio URL."""
-    return await _build_track_response(track, user, storage, include)
+    return await _build_track_response(track, user, storage, include, favorited_track_ids)
 
 
 @router.post("/{playlist_id}/tracks", status_code=status.HTTP_201_CREATED)
@@ -562,7 +563,12 @@ async def list_playlist_tracks_route(
         sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
-    return [await _track_response(storage, row, user, include) for row in rows]
+    favorited_ids = await music.get_favorited_track_ids(
+        db,
+        user,
+        {str(row.id) for row in rows},
+    )
+    return [await _track_response(storage, row, user, include, favorited_ids) for row in rows]
 
 
 @router.post("/{playlist_id}/tracks/remove", status_code=status.HTTP_200_OK)
