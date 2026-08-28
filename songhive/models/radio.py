@@ -15,8 +15,9 @@ class Radio(Base):
     __tablename__ = "radios"
 
     name: Mapped[str] = mapped_column(String(256))
-    owner_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"),
+    owner_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

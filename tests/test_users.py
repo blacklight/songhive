@@ -6,14 +6,21 @@ import asyncio
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from songhive.api.middleware.auth import create_access_token
 from songhive.api.routes.users import UserLinkInput, UserProfileUpdate, UserResponse
 from songhive.config.schema import SonghiveConfig
 from songhive.federation.actors import get_actor_url, get_federation_storage
+from songhive.models.album import Album
+from songhive.models.artist import Artist
 from songhive.models.audit_log import AuditLog
+from songhive.models.library import Library
+from songhive.models.library_track import LibraryTrack
+from songhive.models.playlist import Playlist, PlaylistTrack
+from songhive.models.radio import Radio
+from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
 from songhive.services.auth import create_user, verify_password
@@ -1066,3 +1073,172 @@ async def test_change_password_endpoint_creates_audit_log(client, db_session, co
     assert log.actor_id == user.id
     assert log.target_id == user.id
     assert log.target_type == "user"
+
+
+def test_delete_me_endpoint_unauthenticated(client):
+    """DELETE /me requires authentication."""
+    response = client.request(
+        "DELETE",
+        "/api/v1/users/me",
+        json={"confirmation": "Yes, I really want to delete my account"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_delete_me_endpoint_requires_confirmation(client, db_session, config):
+    """DELETE /me rejects requests with the wrong confirmation text."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.request(
+        "DELETE",
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"confirmation": "wrong"},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_delete_me_endpoint_success(client, db_session, config, fake_redis):
+    """DELETE /me removes the authenticated user and revokes tokens."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "secret"},
+    )
+    assert login.status_code == 200
+    tokens = login.json()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.request(
+        "DELETE",
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"confirmation": "Yes, I really want to delete my account"},
+    )
+    assert response.status_code == 204
+
+    result = await db_session.execute(select(User).where(User.id == user.id))
+    assert result.scalar_one_or_none() is None
+
+    log_result = await db_session.execute(select(AuditLog).where(AuditLog.action == "user.delete"))
+    log = log_result.scalar_one_or_none()
+    assert log is not None
+    assert log.target_id == str(user.id)
+    assert log.target_type == "user"
+
+    refresh = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
+    )
+    assert refresh.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_delete_me_endpoint_rejects_last_admin(client, db_session, config):
+    """The last active admin cannot delete their own account."""
+    user = await create_user(db_session, "admin", "admin@example.com", "secret", role="admin")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.request(
+        "DELETE",
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"confirmation": "Yes, I really want to delete my account"},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_delete_me_endpoint_recursive(client, db_session, config):
+    """DELETE /me with recursive=true removes all content created by the user."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(title="Track", artist_id=artist.id, owner_id=user.id)
+    album = Album(title="Album", artist_id=artist.id, owner_id=user.id)
+    library = Library(name="Library", owner_id=user.id)
+    playlist = Playlist(name="Playlist", owner_id=user.id)
+    radio = Radio(name="Radio", owner_id=user.id)
+    db_session.add_all([track, album, library, playlist, radio])
+    await db_session.flush()
+
+    # Add track to library and playlist so deletion exercises link tables.
+    db_session.add(LibraryTrack(library_id=library.id, track_id=track.id, added_by_id=user.id))
+    db_session.add(PlaylistTrack(playlist_id=playlist.id, track_id=track.id, position=0))
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.request(
+        "DELETE",
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "confirmation": "Yes, I really want to delete my account",
+            "recursive": True,
+        },
+    )
+    assert response.status_code == 204
+
+    result = await db_session.execute(select(User).where(User.id == user.id))
+    assert result.scalar_one_or_none() is None
+
+    for model in (Track, Album, Library, Playlist, Radio):
+        count = await db_session.scalar(select(func.count(model.id)))
+        assert count == 0
+
+    assert await db_session.scalar(select(func.count(LibraryTrack.library_id))) == 0
+    assert await db_session.scalar(select(func.count(PlaylistTrack.playlist_id))) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_me_endpoint_non_recursive(client, db_session, config):
+    """DELETE /me without recursive leaves content owned by no one."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(title="Track", artist_id=artist.id, owner_id=user.id)
+    album = Album(title="Album", artist_id=artist.id, owner_id=user.id)
+    library = Library(name="Library", owner_id=user.id)
+    playlist = Playlist(name="Playlist", owner_id=user.id)
+    radio = Radio(name="Radio", owner_id=user.id)
+    db_session.add_all([track, album, library, playlist, radio])
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.request(
+        "DELETE",
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"confirmation": "Yes, I really want to delete my account"},
+    )
+    assert response.status_code == 204
+
+    result = await db_session.execute(select(User).where(User.id == user.id))
+    assert result.scalar_one_or_none() is None
+
+    # Refresh objects from the database to see the SET NULL effects.
+    await db_session.refresh(track)
+    await db_session.refresh(album)
+    await db_session.refresh(library)
+    await db_session.refresh(playlist)
+    await db_session.refresh(radio)
+    assert track.owner_id is None
+    assert album.owner_id is None
+    assert library.owner_id is None
+    assert playlist.owner_id is None
+    assert radio.owner_id is None
+
+    for model in (Track, Album, Library, Playlist, Radio):
+        count = await db_session.scalar(select(func.count(model.id)))
+        assert count == 1

@@ -4,7 +4,7 @@ User profile routes.
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,10 +15,13 @@ from ...models.user import User, UserRole
 from ...models.user_link import UserLink
 from ...services import audit
 from ...services.auth import get_user_by_username
-from ...users.manager import PasswordChangeError, change_user_password, update_profile
+from ...services.federation import unpublish_track_activity
+from ...services.storage import StorageService
+from ...users import manager as user_manager
+from ...users.manager import DELETE_ACCOUNT_CONFIRMATION, PasswordChangeError, change_user_password, update_profile
 from ...users.tokens import revoke_all_user_refresh_tokens
 from .._common import client_ip
-from ..deps import get_config, get_current_user, get_db, get_redis
+from ..deps import get_config, get_current_user, get_db, get_redis, get_storage_service
 from ..middleware.rate_limit import rate_limit_account
 
 router = APIRouter(prefix="/users")
@@ -118,6 +121,13 @@ class ChangePasswordResponse(BaseModel):
     success: bool = True
 
 
+class DeleteAccountRequest(BaseModel):
+    """Request body for deleting the authenticated user's account."""
+
+    confirmation: str = Field(..., min_length=1)
+    recursive: bool = False
+
+
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_profile(current_user: User = Depends(get_current_user)):
     """Get the current authenticated user's profile."""
@@ -185,6 +195,68 @@ async def change_my_password(
     await db.commit()
 
     return ChangePasswordResponse()
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def delete_current_user(
+    request: Request,
+    body: DeleteAccountRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    redis: Redis = Depends(get_redis),
+):
+    """Delete the authenticated user's account."""
+    if body.confirmation.strip() != DELETE_ACCOUNT_CONFIRMATION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation text does not match",
+        )
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="user.delete",
+        target_type="user",
+        target_id=str(current_user.id),
+        details={
+            "recursive": body.recursive,
+            "username": current_user.username,
+        },
+        ip_address=client_ip(request),
+    )
+
+    try:
+        unpublish = await user_manager.delete_user(
+            db,
+            str(current_user.id),
+            recursive=body.recursive,
+            storage=storage,
+        )
+    except user_manager.UserManagementError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    await revoke_all_user_refresh_tokens(redis, current_user.id)
+
+    if unpublish:
+        config: SonghiveConfig = request.app.state.config
+        for info in unpublish:
+            if info.artist is not None and info.owner is not None:
+                background_tasks.add_task(
+                    unpublish_track_activity,
+                    info.track,
+                    info.artist,
+                    info.owner,
+                    config,
+                    info.federation_object_id,
+                )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{username}", response_model=PublicUserResponse)

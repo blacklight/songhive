@@ -10,13 +10,31 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 
 from pydantic import EmailStr, TypeAdapter, ValidationError
 from redis.asyncio import Redis
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import RegistrationMode, SonghiveConfig
+from ..models.album import Album
+from ..models.api_token import ApiToken
+from ..models.audit_log import AuditLog
+from ..models.favorite import Favorite
+from ..models.history import ListeningHistory
+from ..models.invite import Invite
+from ..models.library import Library
+from ..models.library_track import LibraryTrack
+from ..models.oauth_client import OAuth2Client
+from ..models.playlist import Playlist
+from ..models.radio import Radio
+from ..models.report import Report
+from ..models.setting import Setting
+from ..models.share_grant import ShareGrant
+from ..models.share_token import ShareToken
+from ..models.stored_file import StoredFile
+from ..models.track import Track
 from ..models.user import User, UserRole
 from ..models.user_link import UserLink
+from ..services import deletion
 from ..services.auth import (
     get_user_by_email_verification_token,
     get_user_by_id,
@@ -26,6 +44,7 @@ from ..services.auth import (
     verify_password,
 )
 from ..services.federation import ensure_user_actor
+from ..services.storage import StorageService
 from ..users.invites import get_invite, is_invite_valid
 from ..users.tokens import revoke_all_user_refresh_tokens
 
@@ -363,13 +382,114 @@ async def deactivate_user_by_id(
     return user
 
 
-async def delete_user(session: AsyncSession, user_id: str) -> None:
-    """Delete a user account and all dependent data."""
+DELETE_ACCOUNT_CONFIRMATION = "Yes, I really want to delete my account"
+
+
+async def _remove_user_references(session: AsyncSession, user: User) -> None:
+    """Remove or nullify all database references to a user before deletion.
+
+    This ensures the user row can be deleted even on databases (such as
+    SQLite without foreign-key enforcement) that do not automatically apply
+    ``ON DELETE`` actions.
+    """
+    # Remove rows that cannot exist without a referencing user.
+    await session.execute(delete(ApiToken).where(ApiToken.user_id == user.id))
+    await session.execute(delete(Favorite).where(Favorite.user_id == user.id))
+    await session.execute(delete(ListeningHistory).where(ListeningHistory.user_id == user.id))
+    await session.execute(delete(Invite).where(Invite.created_by == user.id))
+    await session.execute(delete(Report).where(Report.reporter_id == user.id))
+    await session.execute(delete(ShareGrant).where(ShareGrant.user_id == user.id))
+    await session.execute(delete(ShareGrant).where(ShareGrant.created_by == user.id))
+    await session.execute(delete(ShareToken).where(ShareToken.created_by == user.id))
+    await session.execute(delete(UserLink).where(UserLink.user_id == user.id))
+
+    # Nullify optional owner/reviewer fields on user-created content.
+    await session.execute(update(Album).where(Album.owner_id == user.id).values(owner_id=None))
+    await session.execute(update(AuditLog).where(AuditLog.actor_id == user.id).values(actor_id=None))
+    await session.execute(update(Library).where(Library.owner_id == user.id).values(owner_id=None))
+    await session.execute(update(LibraryTrack).where(LibraryTrack.added_by_id == user.id).values(added_by_id=None))
+    await session.execute(update(OAuth2Client).where(OAuth2Client.owner_id == user.id).values(owner_id=None))
+    await session.execute(update(Playlist).where(Playlist.owner_id == user.id).values(owner_id=None))
+    await session.execute(update(Radio).where(Radio.owner_id == user.id).values(owner_id=None))
+    await session.execute(update(Report).where(Report.reviewed_by == user.id).values(reviewed_by=None))
+    await session.execute(update(Setting).where(Setting.updated_by == user.id).values(updated_by=None))
+    await session.execute(update(StoredFile).where(StoredFile.owner_id == user.id).values(owner_id=None))
+    await session.execute(update(Track).where(Track.owner_id == user.id).values(owner_id=None))
+
+
+async def delete_user(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    recursive: bool = False,
+    storage: Optional[StorageService] = None,
+) -> List[deletion.UnpublishInfo]:
+    """Delete a user account and, optionally, all content created by the user."""
     user = await _get_user_or_raise(session, user_id)
     if user.role == UserRole.ADMIN and user.is_active and await _active_admin_count(session) <= 1:
         raise UserManagementError("Cannot delete the last active admin", 400)
+
+    unpublish: List[deletion.UnpublishInfo] = []
+
+    if recursive:
+        if storage is None:
+            raise UserManagementError("Storage service is required for recursive deletion", 500)
+
+        # Remove the user's radios first; they reference the user directly.
+        await session.execute(delete(Radio).where(Radio.owner_id == user.id))
+
+        # Remove user-owned playlists and libraries without deleting their tracks.
+        playlist_ids = list(
+            (await session.execute(select(Playlist.id).where(Playlist.owner_id == user.id))).scalars().all()
+        )
+        for playlist_id in playlist_ids:
+            try:
+                await deletion.delete_playlist(session, storage, str(playlist_id), recursive=False)
+            except deletion.DeletionError as exc:
+                if exc.status_code != 404:
+                    raise
+
+        library_ids = list(
+            (await session.execute(select(Library.id).where(Library.owner_id == user.id))).scalars().all()
+        )
+        for library_id in library_ids:
+            try:
+                await deletion.delete_library(session, storage, str(library_id), recursive=False)
+            except deletion.DeletionError as exc:
+                if exc.status_code != 404:
+                    raise
+
+        # Delete all tracks owned by the user.
+        track_ids = list((await session.execute(select(Track.id).where(Track.owner_id == user.id))).scalars().all())
+        if track_ids:
+            track_unpublish, _ = await deletion.delete_tracks_bulk(
+                session,
+                storage,
+                [str(track_id) for track_id in track_ids],
+                user=user,
+            )
+            unpublish.extend(track_unpublish)
+
+        # Delete any remaining albums owned by the user.
+        album_ids = list((await session.execute(select(Album.id).where(Album.owner_id == user.id))).scalars().all())
+        for album_id in album_ids:
+            try:
+                await deletion.delete_album(
+                    session,
+                    storage,
+                    str(album_id),
+                    recursive=False,
+                    user=user,
+                    is_admin=False,
+                )
+            except deletion.DeletionError as exc:
+                if exc.status_code != 404:
+                    raise
+
+    await _remove_user_references(session, user)
     await session.delete(user)
     await session.flush()
+    return unpublish
 
 
 async def verify_email(session: AsyncSession, token: str) -> User | None:
