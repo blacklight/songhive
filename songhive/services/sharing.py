@@ -17,13 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.share_grant import ShareGrant
 from ..models.share_token import ShareToken
-
-
-def _is_unique_constraint_error(exc: IntegrityError) -> bool:
-    """Return True if an IntegrityError is a uniqueness constraint violation."""
-    cause = getattr(exc, "orig", None)
-    message = str(cause) if cause is not None else str(exc)
-    return "unique" in message.lower()
+from ..storage.exc import is_unique_constraint_error
 
 
 def _now_utc() -> datetime:
@@ -68,7 +62,7 @@ async def create_share_grant(
             session.add(grant)
             await session.flush()
     except IntegrityError as exc:
-        if not _is_unique_constraint_error(exc):
+        if not is_unique_constraint_error(exc):
             raise
 
         # Duplicate grant; return the existing row.  The nested savepoint has

@@ -44,7 +44,7 @@ from ..services.auth import (
     verify_password,
 )
 from ..services.federation import ensure_user_actor
-from ..services.storage import StorageService
+from ..services.storage import StorageService, is_unique_constraint_error
 from ..users.invites import get_invite, is_invite_valid
 from ..users.tokens import revoke_all_user_refresh_tokens
 
@@ -120,13 +120,6 @@ def _validate_registration_input(
 
     if display_name is not None and len(display_name.strip()) > 128:
         raise RegistrationError("Display name is too long")
-
-
-def _is_unique_constraint_error(exc: IntegrityError) -> bool:
-    """Return True if an IntegrityError is a uniqueness constraint violation."""
-    cause = getattr(exc, "orig", None)
-    message = str(cause) if cause is not None else str(exc)
-    return "unique" in message.lower()
 
 
 async def _check_for_duplicates(session: AsyncSession, username: str, email: str) -> None:
@@ -208,7 +201,7 @@ async def register_user(
     try:
         await session.flush()
     except IntegrityError as exc:
-        if _is_unique_constraint_error(exc):
+        if is_unique_constraint_error(exc):
             await session.rollback()
             raise RegistrationError("Username or email already taken", status_code=409) from exc
         raise

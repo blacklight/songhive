@@ -16,7 +16,6 @@ from songhive.models.library import Library
 from songhive.models.track import Track
 from songhive.models.transcoded_file import TranscodedFile
 from songhive.models.upload import Upload
-from songhive.services import streaming
 from songhive.services.storage import StorageService
 from songhive.services.streaming import (
     cache_transcode,
@@ -260,20 +259,6 @@ async def test_resolve_track_file_upload_without_stored_file(db_session, regular
     await db_session.flush()
 
     assert await resolve_track_file(db_session, track.id) is None
-
-
-@pytest.mark.asyncio
-async def test_streaming_is_unique_constraint_error():
-    """_is_unique_constraint_error inspects the exception message/orig."""
-    from sqlalchemy.exc import IntegrityError
-
-    unique_exc = IntegrityError("stmt", None, Exception("UNIQUE constraint failed"))
-    non_unique_exc = IntegrityError("stmt", None, Exception("FOREIGN KEY constraint failed"))
-    message_exc = IntegrityError("UNIQUE", None, None)
-
-    assert streaming._is_unique_constraint_error(unique_exc) is True
-    assert streaming._is_unique_constraint_error(non_unique_exc) is False
-    assert streaming._is_unique_constraint_error(message_exc) is True
 
 
 @pytest.mark.asyncio

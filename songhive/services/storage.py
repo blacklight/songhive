@@ -22,6 +22,7 @@ from ..models._enums import Visibility
 from ..models.stored_file import StoredFile
 from ..models.user import User
 from ..storage.base import StorageBackend
+from ..storage.exc import is_unique_constraint_error
 from .acl import apply_access_filter
 
 
@@ -38,9 +39,7 @@ class StorageService:
     @staticmethod
     def _is_unique_constraint_error(exc: IntegrityError) -> bool:
         """Return True when an IntegrityError is a uniqueness constraint violation."""
-        cause = getattr(exc, "orig", None)
-        message = str(cause) if cause is not None else str(exc)
-        return "unique" in message.lower()
+        return is_unique_constraint_error(exc)
 
     def __init__(self, backend: StorageBackend, config: StorageConfig):
         self.backend = backend

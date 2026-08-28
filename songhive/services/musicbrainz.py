@@ -21,16 +21,9 @@ from ..config.schema import MusicBrainzConfig
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.track import Track
-from ..services.storage import StorageService
+from ..services.storage import StorageService, is_unique_constraint_error
 
 logger = logging.getLogger(__name__)
-
-
-def _is_unique_constraint_error(exc: IntegrityError) -> bool:
-    """Return True when an IntegrityError is a uniqueness constraint violation."""
-    cause = getattr(exc, "orig", None)
-    message = str(cause) if cause is not None else str(exc)
-    return "unique" in message.lower()
 
 
 # The Cover Art Archive /front endpoint can return a chain of 307/302
@@ -459,7 +452,7 @@ class MusicBrainzService:
                 session.add(artist)
                 await session.flush([artist])
         except IntegrityError as exc:
-            if not _is_unique_constraint_error(exc):
+            if not is_unique_constraint_error(exc):
                 raise
 
             if mbid:
@@ -519,7 +512,7 @@ class MusicBrainzService:
                 session.add(album)
                 await session.flush([album])
         except IntegrityError as exc:
-            if not _is_unique_constraint_error(exc):
+            if not is_unique_constraint_error(exc):
                 raise
 
             if mbid:

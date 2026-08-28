@@ -63,13 +63,6 @@ async def get_cached_transcode(
     return transcoded_file.stored_file
 
 
-def _is_unique_constraint_error(exc: IntegrityError) -> bool:
-    """Return True when an IntegrityError is a uniqueness constraint violation."""
-    cause = getattr(exc, "orig", None)
-    message = str(cause) if cause is not None else str(exc)
-    return "unique" in message.lower()
-
-
 async def cache_transcode(
     session: AsyncSession,
     storage_service: StorageService,
@@ -112,7 +105,7 @@ async def cache_transcode(
             session.add(transcoded_file)
             await session.flush()
     except IntegrityError as exc:
-        if not _is_unique_constraint_error(exc):
+        if not StorageService._is_unique_constraint_error(exc):
             raise
 
         # Another request cached the same transcode concurrently; reuse it.
