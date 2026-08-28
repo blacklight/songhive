@@ -13,11 +13,16 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from songhive.models._enums import Visibility
+from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.audit_log import AuditLog
+from songhive.models.library import Library
+from songhive.models.library_track import LibraryTrack
+from songhive.models.playlist import Playlist, PlaylistTrack
+from songhive.models.radio import Radio
 from songhive.models.report import Report
 from songhive.models.setting import Setting
 from songhive.models.track import Track
@@ -141,6 +146,120 @@ async def test_admin_delete_user_revokes_refresh_tokens(client, config, fake_red
     assert response.status_code == status.HTTP_204_NO_CONTENT
 
     assert await validate_refresh_token(token_pair.refresh_token, fake_redis) is None
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_user_non_recursive(client, db_session, make_user, auth_headers):
+    """Admin deletion without recursive leaves user content with no owner."""
+    admin = await make_user("admin", role="admin")
+    user = await make_user("alice")
+    headers = auth_headers(admin)
+
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(title="Track", artist_id=artist.id, owner_id=user.id)
+    album = Album(title="Album", artist_id=artist.id, owner_id=user.id)
+    library = Library(name="Library", owner_id=user.id)
+    playlist = Playlist(name="Playlist", owner_id=user.id)
+    radio = Radio(name="Radio", owner_id=user.id)
+    db_session.add_all([track, album, library, playlist, radio])
+    await db_session.flush()
+
+    response = client.delete(f"/api/v1/admin/users/{user.id}", headers=headers)
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+
+    for model in (Track, Album, Library, Playlist, Radio):
+        count = await db_session.scalar(select(func.count(model.id)))
+        assert count == 1
+
+    await db_session.refresh(track)
+    await db_session.refresh(album)
+    await db_session.refresh(library)
+    await db_session.refresh(playlist)
+    await db_session.refresh(radio)
+    assert track.owner_id is None
+    assert album.owner_id is None
+    assert library.owner_id is None
+    assert playlist.owner_id is None
+    assert radio.owner_id is None
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_user_recursive(client, db_session, make_user, auth_headers):
+    """Admin deletion with recursive=true removes all content created by the user."""
+    admin = await make_user("admin", role="admin")
+    user = await make_user("alice")
+    headers = auth_headers(admin)
+
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(title="Track", artist_id=artist.id, owner_id=user.id)
+    album = Album(title="Album", artist_id=artist.id, owner_id=user.id)
+    library = Library(name="Library", owner_id=user.id)
+    playlist = Playlist(name="Playlist", owner_id=user.id)
+    radio = Radio(name="Radio", owner_id=user.id)
+    db_session.add_all([track, album, library, playlist, radio])
+    await db_session.flush()
+
+    db_session.add(LibraryTrack(library_id=library.id, track_id=track.id, added_by_id=user.id))
+    db_session.add(PlaylistTrack(playlist_id=playlist.id, track_id=track.id, position=0))
+    await db_session.flush()
+
+    response = client.delete(f"/api/v1/admin/users/{user.id}?recursive=true", headers=headers)
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+
+    result = await db_session.execute(select(User).where(User.id == user.id))
+    assert result.scalar_one_or_none() is None
+
+    for model in (Track, Album, Library, Playlist, Radio):
+        count = await db_session.scalar(select(func.count(model.id)))
+        assert count == 0
+
+    assert await db_session.scalar(select(func.count(LibraryTrack.library_id))) == 0
+    assert await db_session.scalar(select(func.count(PlaylistTrack.playlist_id))) == 0
+
+
+@pytest.mark.asyncio
+async def test_admin_bulk_delete_user_recursive(client, db_session, make_user, auth_headers):
+    """Admin bulk deletion with recursive=true removes all content created by the users."""
+    admin = await make_user("admin", role="admin")
+    user1 = await make_user("alice")
+    user2 = await make_user("bob")
+    headers = auth_headers(admin)
+
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(title="Track", artist_id=artist.id, owner_id=user1.id)
+    album = Album(title="Album", artist_id=artist.id, owner_id=user1.id)
+    library = Library(name="Library", owner_id=user2.id)
+    playlist = Playlist(name="Playlist", owner_id=user2.id)
+    radio = Radio(name="Radio", owner_id=user2.id)
+    db_session.add_all([track, album, library, playlist, radio])
+    await db_session.flush()
+
+    response = client.post(
+        "/api/v1/admin/users/bulk",
+        headers=headers,
+        json={
+            "action": "delete",
+            "user_ids": [str(user1.id), str(user2.id)],
+            "recursive": True,
+        },
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["processed"] == 2
+    assert data["failed"] == []
+
+    for model in (Track, Album, Library, Playlist, Radio):
+        count = await db_session.scalar(select(func.count(model.id)))
+        assert count == 0
 
 
 @pytest.mark.asyncio

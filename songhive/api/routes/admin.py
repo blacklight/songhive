@@ -240,9 +240,12 @@ async def deactivate_user(
 async def delete_user(
     user_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     admin: User = Depends(require_admin),
+    storage: StorageService = Depends(get_storage_service),
+    recursive: bool = Query(False, description="Also delete all content created by the user"),
 ):
     """Delete a user account and all dependent data (admin only)."""
     await revoke_all_user_refresh_tokens(redis, user_id)
@@ -253,14 +256,27 @@ async def delete_user(
         action="user.delete",
         target_type="user",
         target_id=user_id,
-        details={},
+        details={"recursive": recursive},
         ip_address=client_ip(request),
     )
 
     try:
-        await user_manager.delete_user(db, user_id)
+        unpublish = await user_manager.delete_user(db, user_id, recursive=recursive, storage=storage)
     except user_manager.UserManagementError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    if unpublish:
+        config: SonghiveConfig = request.app.state.config
+        for info in unpublish:
+            if info.artist is not None and info.owner is not None:
+                background_tasks.add_task(
+                    unpublish_track_activity,
+                    info.track,
+                    info.artist,
+                    info.owner,
+                    config,
+                    info.federation_object_id,
+                )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -686,6 +702,7 @@ class BulkUserActionRequest(BaseModel):
 
     action: str
     user_ids: list[str] = Field(..., min_length=1, max_length=100)
+    recursive: bool = Field(False, description="Also delete all content created by the user (delete only)")
 
     @field_validator("action")
     @classmethod
@@ -711,12 +728,16 @@ class BulkUserActionResponse(BaseModel):
 async def bulk_user_action(
     body: BulkUserActionRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     admin: User = Depends(require_admin),
+    storage: StorageService = Depends(get_storage_service),
 ):
     """Apply a bulk action to a list of users (admin only)."""
     failed: list[dict] = []
+    unpublish: list[deletion.UnpublishInfo] = []
+    config: SonghiveConfig = request.app.state.config
 
     for user_id in body.user_ids:
         try:
@@ -727,7 +748,10 @@ async def bulk_user_action(
                     await user_manager.activate_user(db, user_id)
                 elif body.action == "delete":
                     await revoke_all_user_refresh_tokens(redis, user_id)
-                    await user_manager.delete_user(db, user_id)
+                    user_unpublish = await user_manager.delete_user(
+                        db, user_id, recursive=body.recursive, storage=storage
+                    )
+                    unpublish.extend(user_unpublish)
         except (user_manager.UserManagementError, SQLAlchemyError, RedisConnectionError) as exc:
             failed.append({"user_id": user_id, "error": str(exc)})
             continue
@@ -738,9 +762,20 @@ async def bulk_user_action(
             action=f"user.bulk_{body.action}",
             target_type="user",
             target_id=user_id,
-            details={},
+            details={"recursive": body.recursive} if body.action == "delete" else {},
             ip_address=client_ip(request),
         )
+
+    for info in unpublish:
+        if info.artist is not None and info.owner is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                info.track,
+                info.artist,
+                info.owner,
+                config,
+                info.federation_object_id,
+            )
 
     return BulkUserActionResponse(
         action=body.action,
