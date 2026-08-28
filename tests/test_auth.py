@@ -5,6 +5,7 @@ Authentication service and middleware tests.
 import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request, status
@@ -28,6 +29,10 @@ from songhive.services.auth import (
 from songhive.users import oauth as oauth_service
 
 SECRET_KEY = "a" * 32
+
+
+def _token_from_verification_url(url: str) -> Optional[str]:
+    return url.split("?", maxsplit=1)[-1].split("=", maxsplit=1)[-1] or None
 
 
 def test_hash_password_and_verify():
@@ -662,14 +667,15 @@ async def test_register_sends_verification_email_when_required(client, db_sessio
     assert data["email_verified"] is False
 
     assert len(mock_task.calls) == 1
-    to_address, username, token = mock_task.calls[0][0]
+    to_address, username = mock_task.calls[0][0]
+    verification_url = mock_task.calls[0][1]["verification_url"]
     assert to_address == "verify-alice@example.com"
     assert username == "verify-alice"
-    assert len(token) >= 32
+    assert "verify-email?" in verification_url
 
     user = await get_user_by_username(db_session, "verify-alice")
     assert user is not None
-    assert user.email_verification_token != token
+    assert user.email_verification_token is not None
     assert len(user.email_verification_token) == 64
 
 
@@ -712,7 +718,7 @@ async def test_verify_email_with_valid_token(client, db_session, monkeypatch):
     assert register_response.status_code == status.HTTP_201_CREATED
 
     assert len(mock_task.calls) == 1
-    token = mock_task.calls[0][0][2]
+    token = _token_from_verification_url(mock_task.calls[0][1]["verification_url"])
 
     response = client.post(
         "/api/v1/auth/verify-email",
@@ -755,7 +761,7 @@ async def test_verify_email_cannot_reuse_token(client, monkeypatch):
     )
 
     assert len(mock_task.calls) == 1
-    token = mock_task.calls[0][0][2]
+    token = _token_from_verification_url(mock_task.calls[0][1]["verification_url"])
 
     first = client.post("/api/v1/auth/verify-email", json={"token": token})
     assert first.status_code == status.HTTP_200_OK
@@ -781,7 +787,7 @@ async def test_login_blocks_unverified_user_until_verified(client, monkeypatch):
     )
 
     assert len(mock_task.calls) == 1
-    token = mock_task.calls[0][0][2]
+    token = _token_from_verification_url(mock_task.calls[0][1]["verification_url"])
 
     login_before = client.post(
         "/api/v1/auth/login",
@@ -815,7 +821,7 @@ async def test_resend_verification_email_for_unverified_user(client, db_session,
         },
     )
 
-    original_token = mock_task.calls[0][0][2]
+    original_token = _token_from_verification_url(mock_task.calls[0][1]["verification_url"])
 
     response = client.post(
         "/api/v1/auth/verify-email/resend",
@@ -825,11 +831,16 @@ async def test_resend_verification_email_for_unverified_user(client, db_session,
     assert response.json()["success"] is True
 
     assert len(mock_task.calls) == 2
-    to_address, username, token = mock_task.calls[1][0]
+    to_address, username = mock_task.calls[1][0]
+    verification_url = mock_task.calls[1][1]["verification_url"]
+    token = _token_from_verification_url(verification_url)
     assert to_address == "resend-alice@example.com"
     assert username == "resend-alice"
+    assert token is not None
     assert len(token) >= 32
     assert token != original_token
+    assert "verify-email?" in verification_url
+    assert f"token={token}" in verification_url
 
     user = await get_user_by_username(db_session, "resend-alice")
     assert user is not None
@@ -852,7 +863,7 @@ async def test_resend_verification_email_returns_generic_success_for_verified_us
         },
     )
 
-    token = mock_task.calls[0][0][2]
+    token = _token_from_verification_url(mock_task.calls[0][1]["verification_url"])
     client.post("/api/v1/auth/verify-email", json={"token": token})
 
     response = client.post(
@@ -907,6 +918,13 @@ async def test_resend_verification_email_uses_email_lookup(client, db_session, m
     assert response.json()["success"] is True
 
     assert len(mock_task.calls) == 2
+    to_address, username = mock_task.calls[1][0]
+    verification_url = mock_task.calls[1][1]["verification_url"]
+    token = _token_from_verification_url(verification_url)
+    assert to_address == "resend-by-email@example.com"
+    assert username == "resend-by-email"
+    assert "verify-email?" in verification_url
+    assert f"token={token}" in verification_url
     user = await get_user_by_username(db_session, "resend-by-email")
     assert user is not None
     assert user.email_verification_token is not None

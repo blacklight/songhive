@@ -9,6 +9,7 @@ import logging
 import smtplib
 import ssl
 from email.message import EmailMessage
+from email.utils import formatdate
 
 from ..config.schema import SonghiveConfig
 
@@ -41,6 +42,7 @@ def send_email(config: SonghiveConfig, to_address: str, subject: str, body: str)
     msg["From"] = from_address
     msg["To"] = to_address
     msg["Subject"] = subject
+    msg["Date"] = formatdate(localtime=True)
     msg.set_content(body)
 
     use_ssl = smtp_tls and smtp_port == 465
@@ -62,14 +64,18 @@ def send_email(config: SonghiveConfig, to_address: str, subject: str, body: str)
     return True
 
 
-def send_verification_email(config: SonghiveConfig, to_address: str, username: str, token: str) -> bool:
-    """Send an email containing a raw email-verification token."""
+def send_verification_email(
+    config: SonghiveConfig,
+    to_address: str,
+    username: str,
+    verification_url: str,
+) -> bool:
+    """Send an email containing a link to verify the email address."""
     subject = "Verify your Songhive account"
     body = (
         f"Hi {username},\n\n"
-        "Please verify your Songhive account by using the following token "
-        "with the /api/v1/auth/verify-email endpoint:\n\n"
-        f"{token}\n\n"
+        "Please verify your Songhive account by opening the following link:\n\n"
+        f"{verification_url}\n\n"
         "If you did not sign up for Songhive, you can ignore this email."
     )
     return send_email(config, to_address, subject, body)

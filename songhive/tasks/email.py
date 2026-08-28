@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name="songhive.tasks.email.send_verification_email")
-def send_verification_email(to_address: str, username: str, token: str) -> bool:
+def send_verification_email(to_address: str, username: str, verification_url: str) -> bool:
     """Send a verification email for a newly registered account."""
     config = load_config([])
     try:
-        return email_service.send_verification_email(config, to_address, username, token)
+        return email_service.send_verification_email(config, to_address, username, verification_url)
     except EmailNotConfiguredError as exc:
         logger.warning("Email not queued for verification: %s", exc)
         return False

@@ -4,6 +4,7 @@ Tests for the email sending infrastructure.
 
 import logging
 import smtplib
+from email.utils import parsedate_to_datetime
 
 import pytest
 
@@ -113,6 +114,8 @@ def test_send_email_success_with_auth(fake_smtp, email_config):
     assert msg["From"] == "songhive@example.com"
     assert msg["To"] == "user@example.com"
     assert msg["Subject"] == "Hello"
+    assert msg["Date"] is not None
+    assert parsedate_to_datetime(msg["Date"]) is not None
     assert msg.get_content().strip() == "Test body"
 
 
@@ -155,15 +158,16 @@ def test_send_email_returns_false_on_smtp_failure(fake_smtp, email_config, caplo
 
 
 def test_send_verification_email_content(fake_smtp, email_config):
-    """The verification helper sends a message with the raw token and endpoint."""
+    """The verification helper sends a message with a verification link."""
     token = "verification-token-123"
-    result = send_verification_email(email_config, "user@example.com", "alice", token)
+    verification_url = "http://example.com/verify-email?token=verification-token-123"
+    result = send_verification_email(email_config, "user@example.com", "alice", verification_url)
     assert result is True
 
     msg = fake_smtp.instances[0].sent[0]
     assert msg["Subject"] == "Verify your Songhive account"
+    assert verification_url in msg.get_content()
     assert token in msg.get_content()
-    assert "/api/v1/auth/verify-email" in msg.get_content()
     assert "alice" in msg.get_content()
 
 
@@ -195,11 +199,13 @@ def test_verification_task_sends_email(fake_smtp, email_config, monkeypatch):
     monkeypatch.setattr("songhive.tasks.email.load_config", lambda _: email_config)
 
     token = "task-verify-token"
-    result = send_verification_email_task.run("user@example.com", "alice", token)
+    verification_url = "http://example.com/verify-email?token=task-verify-token"
+    result = send_verification_email_task.run("user@example.com", "alice", verification_url)
     assert result is True
 
     msg = fake_smtp.instances[0].sent[0]
     assert msg["To"] == "user@example.com"
+    assert verification_url in msg.get_content()
     assert token in msg.get_content()
 
 
@@ -226,7 +232,9 @@ def test_verification_task_noops_when_not_configured(caplog, monkeypatch):
     monkeypatch.setattr("songhive.tasks.email.load_config", lambda _: config)
     caplog.set_level(logging.WARNING, logger="songhive.tasks.email")
 
-    result = send_verification_email_task.run("user@example.com", "alice", "token")
+    result = send_verification_email_task.run(
+        "user@example.com", "alice", "http://example.com/verify-email?token=token"
+    )
     assert result is False
     assert "Email not queued" in caplog.text
 

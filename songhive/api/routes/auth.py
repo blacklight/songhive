@@ -24,9 +24,9 @@ from ...tasks.email import send_password_reset_email, send_verification_email
 from ...users.manager import (
     RegistrationError,
     confirm_password_reset,
+    generate_verification_email_token,
     register_user,
     request_password_reset,
-    generate_verification_email_token,
     verify_email,
 )
 from ...users.oauth import (
@@ -186,6 +186,7 @@ class OAuth2IntrospectionResponse(BaseModel):
 )
 async def register(
     body: RegisterRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
 ):
@@ -204,7 +205,15 @@ async def register(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     if config.auth.require_email_verification and user.email_verification_token_raw:
-        send_verification_email.delay(user.email, user.username, user.email_verification_token_raw)
+        verification_url = (
+            f"{str(request.base_url).rstrip('/')}/verify-email?"
+            f"{urlencode({'token': user.email_verification_token_raw})}"
+        )
+        send_verification_email.delay(  # type: ignore
+            user.email,
+            user.username,
+            verification_url=verification_url,
+        )
 
     return RegisterResponse.model_validate(user)
 
@@ -345,7 +354,12 @@ async def resend_verification_email_endpoint(
     await check_rate_limit(request, config, redis, identifier=body.username_or_email)
     user, token = await generate_verification_email_token(db, body.username_or_email)
     if user is not None and token is not None:
-        send_verification_email.delay(user.email, user.username, token)  # type: ignore
+        verification_url = f"{str(request.base_url).rstrip('/')}/verify-email?{urlencode({'token': token})}"
+        send_verification_email.delay(  # type: ignore
+            user.email,
+            user.username,
+            verification_url=verification_url,
+        )
     return ResendVerificationResponse()
 
 
@@ -375,7 +389,7 @@ async def password_reset_request(
     await check_rate_limit(request, config, redis, identifier=body.username)
     user, token = await request_password_reset(db, config, body.username)
     if user is not None and token is not None:
-        send_password_reset_email.delay(user.email, user.username, token)
+        send_password_reset_email.delay(user.email, user.username, token)  # type: ignore
     return PasswordResetInitResponse()
 
 
