@@ -88,7 +88,7 @@ _HASHTAG_TAG_KEYS = {
     "----:com.apple.iTunes:KEYWORDS",
 }
 
-_TAG_SPLIT_RE = re.compile(r"[;,.\/\\]")
+_TAG_SPLIT_RE = re.compile(r"[;,\/\\]")
 
 _HASHTAG_RE = re.compile(r"^(?=.*[a-z])[a-z0-9_]+$")
 
