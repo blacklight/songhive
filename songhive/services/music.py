@@ -14,6 +14,7 @@ from ..models.album import Album
 from ..models.artist import Artist
 from ..models.favorite import Favorite
 from ..models.genre import Genre, GenreAlbum
+from ..models.hashtag import Hashtag, HashtagTrack
 from ..models.library import Library
 from ..models.library_track import LibraryTrack
 from ..models.playlist import Playlist, PlaylistTrack
@@ -470,6 +471,7 @@ def _build_tracks_stmt(
     artist_id: Optional[str] = None,
     album_id: Optional[str] = None,
     genre: Optional[str] = None,
+    hashtag: Optional[str] = None,
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
@@ -485,6 +487,12 @@ def _build_tracks_stmt(
         stmt = stmt.where(Track.album_id == album_id)
     if genre:
         stmt = stmt.where(Track.genre == genre)
+    if hashtag:
+        stmt = (
+            stmt.join(HashtagTrack, HashtagTrack.track_id == Track.id)
+            .join(Hashtag, Hashtag.id == HashtagTrack.hashtag_id)
+            .where(Hashtag.name == hashtag)
+        )
     if file_id:
         stmt = stmt.where(
             or_(
@@ -524,6 +532,7 @@ async def list_tracks(
     artist_id: Optional[str] = None,
     album_id: Optional[str] = None,
     genre: Optional[str] = None,
+    hashtag: Optional[str] = None,
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
@@ -550,6 +559,7 @@ async def list_tracks(
         artist_id=artist_id,
         album_id=album_id,
         genre=genre,
+        hashtag=hashtag,
         year_from=year_from,
         year_to=year_to,
         library_id=library_id,
@@ -602,6 +612,7 @@ async def count_tracks(
     artist_id: Optional[str] = None,
     album_id: Optional[str] = None,
     genre: Optional[str] = None,
+    hashtag: Optional[str] = None,
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
@@ -616,6 +627,7 @@ async def count_tracks(
         artist_id=artist_id,
         album_id=album_id,
         genre=genre,
+        hashtag=hashtag,
         year_from=year_from,
         year_to=year_to,
         library_id=library_id,

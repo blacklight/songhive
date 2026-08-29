@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { getApiErrorMessage } from "@/api/client";
+import { listTracksWithMeta } from "@/api/tracks";
+import type { TrackResponse } from "@/api/tracks";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
@@ -13,6 +15,7 @@ import AppTabs from "@/components/ui/AppTabs.vue";
 import SortControl from "@/components/ui/SortControl.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TaggedItemCard from "@/components/hashtags/TaggedItemCard.vue";
+import TrackList from "@/components/library/TrackList.vue";
 
 export interface Item {
   type: string;
@@ -46,6 +49,7 @@ export interface Props {
 const props = defineProps<Props>();
 
 const { t } = useI18n();
+const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 const confirm = useConfirmStore();
@@ -54,6 +58,7 @@ const toast = useToastStore();
 const LIMIT = 24;
 
 const items = ref<Item[]>([]);
+const tracks = ref<TrackResponse[]>([]);
 const total = ref(0);
 const offset = ref(0);
 const loading = ref(false);
@@ -66,6 +71,7 @@ const activeType = ref<string>("");
 const visibleTypes = ref<string[]>([]);
 
 const page = computed(() => Math.floor(offset.value / LIMIT) + 1);
+const isTrackActive = computed(() => activeType.value === "track");
 
 const icon = computed(() => (props.kind === "hashtag" ? "hashtag" : "tag"));
 
@@ -88,20 +94,50 @@ const sortOptions = computed(() => [
   { value: "created_at", label: t("sort.fields.created_at") },
 ]);
 
+function queryType(): string {
+  const raw = route.query.type;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === "string" ? value : "";
+}
+
+async function updateQueryType(type: string) {
+  const current = queryType();
+  if (current === type) return;
+  await router.replace({ query: { ...route.query, type } });
+}
+
 async function fetchItems() {
   error.value = null;
 
   try {
-    const result = await props.loadItems(props.name, {
-      limit: LIMIT,
-      offset: offset.value,
-      sort_by: sortBy.value,
-      sort_dir: sortDir.value,
-      type: activeType.value,
-    });
-    items.value = result.items;
-    total.value = result.total;
-    offset.value = result.offset;
+    if (activeType.value === "track") {
+      const result = await listTracksWithMeta({
+        limit: LIMIT,
+        offset: offset.value,
+        sort_by: sortBy.value,
+        sort_dir: sortDir.value,
+        include: "artist,album",
+        ...(props.kind === "genre"
+          ? { genre: props.name }
+          : { hashtag: props.name }),
+      });
+      tracks.value = result.tracks;
+      total.value = result.total;
+      offset.value = result.offset;
+      items.value = [];
+    } else {
+      const result = await props.loadItems(props.name, {
+        limit: LIMIT,
+        offset: offset.value,
+        sort_by: sortBy.value,
+        sort_dir: sortDir.value,
+        type: activeType.value,
+      });
+      items.value = result.items;
+      total.value = result.total;
+      offset.value = result.offset;
+      tracks.value = [];
+    }
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -123,6 +159,7 @@ async function loadVisibleTypes() {
   loading.value = true;
   error.value = null;
   items.value = [];
+  tracks.value = [];
   total.value = 0;
   offset.value = 0;
 
@@ -149,10 +186,12 @@ async function loadVisibleTypes() {
       return;
     }
 
-    activeType.value = visibleTypes.value[0];
+    const preferred = visibleTypes.value.find((type) => type === queryType());
+    activeType.value = preferred ?? visibleTypes.value[0];
     sortBy.value = "created_at";
     sortDir.value = "desc";
     await fetchItems();
+    await updateQueryType(activeType.value);
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -162,11 +201,16 @@ async function loadVisibleTypes() {
   }
 }
 
-function onTabChange(type: string) {
+async function onTabChange(type: string) {
+  if (type === activeType.value) return;
+
   activeType.value = type;
   offset.value = 0;
   sortBy.value = "created_at";
   sortDir.value = "desc";
+  items.value = [];
+  tracks.value = [];
+  await updateQueryType(type);
   void load();
 }
 
@@ -222,6 +266,28 @@ function retry() {
 }
 
 watch(
+  () => route.query.type,
+  (newType) => {
+    const value = Array.isArray(newType) ? newType[0] : newType;
+    const type = typeof value === "string" ? value : "";
+    if (
+      !type ||
+      !visibleTypes.value.includes(type) ||
+      activeType.value === type
+    ) {
+      return;
+    }
+    activeType.value = type;
+    offset.value = 0;
+    sortBy.value = "created_at";
+    sortDir.value = "desc";
+    items.value = [];
+    tracks.value = [];
+    void load();
+  },
+);
+
+watch(
   () => props.name,
   () => {
     visibleTypes.value = [];
@@ -273,7 +339,10 @@ onMounted(() => loadVisibleTypes());
       </div>
     </div>
 
-    <div v-if="loading && items.length === 0" class="tag-detail-view__skeleton">
+    <div
+      v-if="loading && !isTrackActive && items.length === 0"
+      class="tag-detail-view__skeleton"
+    >
       <SkeletonLoader variant="page" />
     </div>
 
@@ -285,12 +354,22 @@ onMounted(() => loadVisibleTypes());
     </div>
 
     <div
-      v-else-if="items.length === 0"
+      v-else-if="!isTrackActive && items.length === 0"
       class="tag-detail-view__empty"
       role="status"
     >
       {{ t(`${kind}s.emptyItems`) }}
     </div>
+
+    <TrackList
+      v-else-if="isTrackActive"
+      :tracks="tracks"
+      :loading="loading"
+      :show-artwork="true"
+      :deletable="authStore.isAdmin"
+      :auto-scroll="true"
+      @removed="load"
+    />
 
     <template v-else>
       <div class="tag-detail-view__grid" role="list">
@@ -301,15 +380,15 @@ onMounted(() => loadVisibleTypes());
           :type="item.type"
         />
       </div>
-
-      <AppPagination
-        v-if="total > LIMIT"
-        :page="page"
-        :total="total"
-        :per-page="LIMIT"
-        @update:page="onPageChange"
-      />
     </template>
+
+    <AppPagination
+      v-if="total > LIMIT"
+      :page="page"
+      :total="total"
+      :per-page="LIMIT"
+      @update:page="onPageChange"
+    />
   </div>
 </template>
 

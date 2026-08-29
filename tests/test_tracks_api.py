@@ -57,6 +57,24 @@ def test_list_tracks_filters_by_visibility(client, sample_tracks, regular_user, 
     assert _titles(owner) == {"Public Track", "Local Track", "Private Track"}
 
 
+def test_list_tracks_filters_by_hashtag(client, sample_tracks, regular_user, auth_headers):
+    """List endpoints can filter tracks by hashtag."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    headers = auth_headers(regular_user)
+    client.post(
+        f"/api/v1/tracks/{track.id}/hashtags",
+        json={"hashtags": ["rock"]},
+        headers=headers,
+    )
+
+    response = client.get("/api/v1/tracks", params={"hashtag": "rock"}, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == track.id
+    assert int(response.headers["X-Total-Count"]) == 1
+
+
 def test_get_public_track_redacts_owner_for_non_owner(client, sample_tracks, other_user, auth_headers):
     """Non-owners see a null owner_id for public tracks."""
     track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)

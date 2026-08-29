@@ -5,10 +5,15 @@ import { setActivePinia, createPinia } from "pinia";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
+import { listTracksWithMeta } from "@/api/tracks";
 import TagDetailView, {
   type ListParams,
   type ListResult,
 } from "./TagDetailView.vue";
+
+vi.mock("@/api/tracks", () => ({
+  listTracksWithMeta: vi.fn(),
+}));
 
 vi.mock("@/components/hashtags/TaggedItemCard.vue", () => ({
   default: {
@@ -40,6 +45,16 @@ function createListResult(
   return { items, total, offset };
 }
 
+function createTrack(id: string, title: string) {
+  return {
+    id,
+    title,
+    artist_id: `artist-${id}`,
+    artist: { id: `artist-${id}`, name: `Artist ${id}` },
+    album: null,
+  };
+}
+
 function findButtonByText(wrapper: ReturnType<typeof mount>, text: string) {
   return wrapper
     .findAll("button")
@@ -59,16 +74,25 @@ describe("TagDetailView", () => {
     deleteItem = vi.fn<(name: string) => Promise<unknown>>(() =>
       Promise.resolve(undefined),
     );
+    vi.mocked(listTracksWithMeta).mockResolvedValue({
+      tracks: [],
+      total: 0,
+      offset: 0,
+    });
   });
 
   afterEach(() => {
     wrapper?.unmount();
     document.body.innerHTML = "";
+    vi.clearAllMocks();
   });
 
-  async function mountView(props: Record<string, unknown> = {}) {
+  async function mountView(
+    props: Record<string, unknown> = {},
+    query: Record<string, string> = {},
+  ) {
     const router = createTestRouter();
-    await router.push("/");
+    await router.push({ path: "/", query });
     await router.isReady();
 
     wrapper = mount(TagDetailView, {
@@ -80,7 +104,16 @@ describe("TagDetailView", () => {
         deleteItem,
         ...props,
       },
-      global: { plugins: [router] },
+      global: {
+        plugins: [router],
+        stubs: {
+          TrackList: {
+            template:
+              '<div class="track-list-stub" :data-tracks="tracks.length">tracks:{{ tracks.length }}</div>',
+            props: ["tracks", "loading"],
+          },
+        },
+      },
     });
 
     await flushPromises();
@@ -116,6 +149,7 @@ describe("TagDetailView", () => {
         sort_dir: "desc",
       }),
     );
+    expect(listTracksWithMeta).not.toHaveBeenCalled();
 
     const tabs = wrapper.findAll(".app-tabs__tab");
     expect(tabs.length).toBe(1);
@@ -131,19 +165,59 @@ describe("TagDetailView", () => {
     expect(wrapper.text()).toContain("No items in this genre");
   });
 
-  it("switches visible tabs and reloads", async () => {
+  it("uses the URL query type as the active tab on mount", async () => {
+    loadItems.mockImplementation((_name: string, params: ListParams) => {
+      if (params.type === "album") {
+        return Promise.resolve(
+          createListResult([createItem("album", "album-1")], 3),
+        );
+      }
+      if (params.type === "track" && params.limit === 1) {
+        return Promise.resolve(
+          createListResult([createItem("track", "track-1")], 2),
+        );
+      }
+      return Promise.resolve(createListResult([], 0));
+    });
+    vi.mocked(listTracksWithMeta).mockResolvedValue({
+      tracks: [createTrack("track-1", "Song One") as never],
+      total: 2,
+      offset: 0,
+    });
+
+    await mountView({}, { type: "track" });
+
+    expect(listTracksWithMeta).toHaveBeenCalledWith(
+      expect.objectContaining({
+        genre: "rock",
+        limit: 24,
+        offset: 0,
+        sort_by: "created_at",
+        sort_dir: "desc",
+        include: "artist,album",
+      }),
+    );
+    expect(wrapper.find(".track-list-stub").exists()).toBe(true);
+  });
+
+  it("switches visible tabs, updates the URL query, and reloads", async () => {
     loadItems.mockImplementation((_name: string, params: ListParams) => {
       if (params.type === "album") {
         return Promise.resolve(
           createListResult([createItem("album", "album-1")], 2),
         );
       }
-      if (params.type === "track") {
+      if (params.type === "track" && params.limit === 1) {
         return Promise.resolve(
           createListResult([createItem("track", "track-1")], 2),
         );
       }
       return Promise.resolve(createListResult([], 0));
+    });
+    vi.mocked(listTracksWithMeta).mockResolvedValue({
+      tracks: [createTrack("track-1", "Song One") as never],
+      total: 2,
+      offset: 0,
     });
 
     await mountView();
@@ -155,15 +229,18 @@ describe("TagDetailView", () => {
     await trackTab?.trigger("click");
     await flushPromises();
 
-    expect(loadItems).toHaveBeenLastCalledWith(
-      "rock",
+    expect(listTracksWithMeta).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        type: "track",
+        genre: "rock",
         limit: 24,
         offset: 0,
         sort_by: "created_at",
         sort_dir: "desc",
+        include: "artist,album",
       }),
+    );
+    expect(wrapper.vm?.$router?.currentRoute.value.query.type === "track").toBe(
+      true,
     );
   });
 

@@ -15,6 +15,7 @@ export function listTracks(params?: {
   artist_id?: string;
   album_id?: string;
   genre?: string;
+  hashtag?: string;
   year_from?: number;
   year_to?: number;
   library_id?: string;
@@ -39,6 +40,7 @@ export async function listTracksWithMeta(params?: {
   artist_id?: string;
   album_id?: string;
   genre?: string;
+  hashtag?: string;
   year_from?: number;
   year_to?: number;
   library_id?: string;
