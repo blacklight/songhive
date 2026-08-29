@@ -22,6 +22,11 @@ from ..deps import get_config, get_db
 v1_router = APIRouter(prefix="/instance", tags=["instance"])
 v2_router = APIRouter(prefix="/instance", tags=["instance"])
 
+# NOTE: use "" rather than "/" as the route path so the Mount created by
+# ``app.include_router(..., prefix="/api/v1")`` matches ``/api/v1/instance``
+# without a trailing slash. This lets Songhive's own instance metadata take
+# precedence over the Mastodon-compatible routes registered by pubby.
+
 
 class _Stats(BaseModel):
     user_count: int = 0
@@ -202,7 +207,7 @@ async def _user_count(db: AsyncSession) -> int:
     return result.scalar() or 0
 
 
-@v1_router.get("/", response_model=InstanceV1)
+@v1_router.get("", response_model=InstanceV1)
 async def get_instance_v1(
     request: Request,
     config: SonghiveConfig = Depends(get_config),
@@ -232,7 +237,7 @@ async def get_instance_v1(
     )
 
 
-@v2_router.get("/", response_model=InstanceV2)
+@v2_router.get("", response_model=InstanceV2)
 async def get_instance_v2(
     request: Request,
     config: SonghiveConfig = Depends(get_config),
