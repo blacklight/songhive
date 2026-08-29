@@ -137,6 +137,7 @@ songhive/
 │   ├── audit.py            # Audit log helpers
 │   ├── email.py            # SMTP email (verification, password reset)
 │   ├── federation.py       # Actor provisioning, domain allow/block, inbox dispatch
+│   ├── genres.py           # Genre validation, association and listing
 │   ├── import_.py          # Import pipeline orchestration
 │   ├── metadata.py         # Tag extraction coordination
 │   ├── music.py            # Music library helpers
@@ -318,9 +319,10 @@ Genres are stored in a dedicated `Genre` table and linked to `Track` and
 `Album` through `GenreTrack` and `GenreAlbum` association tables. The free-text
 `Track.genre` and `Album.genre` columns remain the source of truth for embedded
 metadata round-trips, while the normalised tables enable browsing, counting, and
-filtering. Genres will also feed the hashtag system: the genre string will be
-split and mapped to valid hashtag names so genre-derived hashtags appear
-alongside user-created ones.
+filtering. `services/genres.py` validates names, manages associations,
+propagates album genres from the intersection of their tracks' genres, and
+feeds the hashtag system: the genre string is split and mapped to valid hashtag
+names so genre-derived hashtags appear alongside user-created ones.
 
 ---
 

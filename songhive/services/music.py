@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.favorite import Favorite
+from ..models.genre import Genre, GenreAlbum
 from ..models.library import Library
 from ..models.library_track import LibraryTrack
 from ..models.playlist import Playlist, PlaylistTrack
@@ -42,6 +43,8 @@ def _track_selectin_options(include: Optional[Set[str]]) -> List[Any]:
             options.append(selectinload(Track.owner))
         if "hashtags" in include:
             options.append(selectinload(Track.hashtags))
+        if "genres" in include:
+            options.append(selectinload(Track.genres))
     return options
 
 
@@ -68,6 +71,8 @@ def _album_selectin_options(include: Optional[Set[str]]) -> List[Any]:
             )
         if "hashtags" in include:
             options.append(selectinload(Album.hashtags))
+        if "genres" in include:
+            options.append(selectinload(Album.genres))
     return options
 
 
@@ -298,6 +303,7 @@ def _build_albums_stmt(
     artist_id: Optional[str] = None,
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
+    genre: Optional[str] = None,
 ) -> Select[Any]:
     """Build a statement for listing/counting albums."""
     stmt = select(Album)
@@ -309,6 +315,12 @@ def _build_albums_stmt(
         stmt = stmt.where(Album.release_year >= year_from)
     if year_to is not None:
         stmt = stmt.where(Album.release_year <= year_to)
+    if genre:
+        stmt = stmt.where(
+            Album.id.in_(
+                select(GenreAlbum.album_id).join(Genre, GenreAlbum.genre_id == Genre.id).where(Genre.name == genre)
+            )
+        )
     return stmt
 
 
@@ -318,6 +330,7 @@ async def list_albums(
     artist_id: Optional[str] = None,
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
+    genre: Optional[str] = None,
     user: Optional[User] = None,
     limit: int = 20,
     offset: int = 0,
@@ -331,6 +344,7 @@ async def list_albums(
         artist_id=artist_id,
         year_from=year_from,
         year_to=year_to,
+        genre=genre,
     ).options(*_album_selectin_options(include))
     stmt = apply_access_filter(stmt, Album, user, "album")
     field = (
@@ -352,6 +366,7 @@ async def count_albums(
     artist_id: Optional[str] = None,
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
+    genre: Optional[str] = None,
     user: Optional[User] = None,
 ) -> int:
     """Return the total number of albums matching the filters and ACL."""
@@ -360,6 +375,7 @@ async def count_albums(
         artist_id=artist_id,
         year_from=year_from,
         year_to=year_to,
+        genre=genre,
     )
     stmt = apply_access_filter(stmt, Album, user, "album")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))

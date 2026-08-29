@@ -25,6 +25,12 @@ from ..models.library_track import LibraryTrack
 from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..models.upload import Upload
+from .genres import (
+    extract_genres_from_metadata,
+    genres_to_hashtags,
+    propagate_album_genres,
+    set_genres_for_entity,
+)
 from .hashtags import add_hashtags_to_entity, extract_hashtags_from_metadata
 from .metadata import AudioMetadata, extract_metadata
 from .storage import StorageService, audio_hash
@@ -504,7 +510,21 @@ async def import_audio_file(
         content_type=content_type,
     )
 
+    genre_names = extract_genres_from_metadata(metadata)
+    if genre_names:
+        await set_genres_for_entity(
+            session,
+            "track",
+            str(track.id),
+            genre_names,
+        )
+
+    if album:
+        await propagate_album_genres(session, album)
+
     auto_tags = extract_hashtags_from_metadata(metadata)
+    genre_hashtags = genres_to_hashtags(genre_names)
+    auto_tags = list(dict.fromkeys(auto_tags + genre_hashtags))
     if auto_tags:
         await add_hashtags_to_entity(
             session,
