@@ -324,7 +324,7 @@ watch(
           </div>
 
           <div v-if="album.hashtags?.length" class="album-view__hashtags">
-            <HashtagList :hashtags="album.hashtags" />
+            <HashtagList :hashtags="album.hashtags" :genres="album.genres" />
           </div>
 
           <div v-if="album.genres?.length" class="album-view__genres">

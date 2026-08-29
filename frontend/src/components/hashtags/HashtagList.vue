@@ -1,16 +1,19 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
 import AppIcon from "@/components/ui/AppIcon.vue";
 
 export interface Props {
   hashtags: string[];
+  genres?: string[];
   removable?: boolean;
   clickable?: boolean;
   size?: "sm" | "md";
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  genres: () => [],
   removable: false,
   clickable: true,
   size: "md",
@@ -22,6 +25,18 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
+function genreToHashtag(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+const visibleHashtags = computed(() => {
+  const genreHashtags = new Set(props.genres.map(genreToHashtag));
+  return props.hashtags.filter((hashtag) => !genreHashtags.has(hashtag));
+});
 
 function onClick(hashtag: string) {
   if (props.clickable) {
@@ -39,7 +54,7 @@ function onRemove(hashtag: string, event: MouseEvent) {
 <template>
   <ul class="hashtag-list">
     <li
-      v-for="hashtag in hashtags"
+      v-for="hashtag in visibleHashtags"
       :key="hashtag"
       class="hashtag-list__item"
       :class="`hashtag-list__item--${size}`"

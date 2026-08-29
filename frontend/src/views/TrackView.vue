@@ -283,7 +283,7 @@ watch(
           </div>
 
           <div v-if="track.hashtags?.length" class="track-view__hashtags">
-            <HashtagList :hashtags="track.hashtags" />
+            <HashtagList :hashtags="track.hashtags" :genres="track.genres" />
           </div>
 
           <div v-if="track.genres?.length" class="track-view__genres">
