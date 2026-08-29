@@ -603,10 +603,11 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/ui/` | Headless base components (button, input, select, avatar, table, pagination, search, context menu, entity actions) |
 | `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
 | `frontend/src/components/entity/` | Reusable entity grid/list components (e.g. `BulkEditableGrid` for bulk selection and deletion) |
+| `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
 | `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
-| `frontend/src/views/` | Page-level components (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About (fetches `GET /api/v1/instance`), Login, Register, PasswordReset, VerifyEmail, Profile, plus 403/404 and placeholder views) |
-| `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules, WebSocket event bus, stream URL helper |
+| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Storage) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, Profile, plus 403/404 and placeholder views) |
+| `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |
 
