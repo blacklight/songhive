@@ -599,6 +599,13 @@ duplicate `StoredFile` rows.
 Federation keys and actor URLs can be back-filled with
 `songhive admin provision-federation-keys` or `POST /api/v1/admin/provision-federation-keys`.
 
+Admins can also inspect and control the Celery worker pool from the UI. The
+`GET /api/v1/admin/celery/tasks` endpoint lists all tasks currently running on
+workers (including per-task runtime, worker, args and kwargs), while
+`POST /api/v1/admin/celery/terminate` accepts a list of task ids and revokes them
+with `terminate=True` so they are killed on the worker(s) that are running them.
+The admin UI exposes these under `/admin/celery` with bulk selection.
+
 ---
 
 ## Storage Backends
@@ -642,7 +649,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
 | `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
-| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Storage) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, Profile, plus 403/404 and placeholder views) |
+| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, Profile, plus 403/404 and placeholder views) |
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |

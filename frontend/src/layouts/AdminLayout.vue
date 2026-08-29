@@ -21,6 +21,7 @@ const adminNav = [
   { name: "Invites", to: "/admin/invites", icon: "user-plus" },
   { name: "Audit", to: "/admin/audit", icon: "clipboard-list" },
   { name: "Tasks", to: "/admin/tasks", icon: "list-check" },
+  { name: "Celery", to: "/admin/celery", icon: "gears" },
 ];
 </script>
 

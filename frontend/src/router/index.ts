@@ -240,6 +240,11 @@ const routes: RouteRecordRaw[] = [
         name: "adminTasks",
         component: () => import("@/views/admin/TasksView.vue"),
       },
+      {
+        path: "celery",
+        name: "adminCelery",
+        component: () => import("@/views/admin/CeleryView.vue"),
+      },
     ],
   },
   { path: "/403", component: () => import("@/views/ForbiddenView.vue") },

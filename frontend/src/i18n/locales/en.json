@@ -465,6 +465,29 @@
           "triggered": "Federation key provisioning task queued.",
           "triggerError": "Could not trigger federation key provisioning: {message}"
         }
+      },
+      "celery": {
+        "title": "Celery workers",
+        "refresh": "Refresh",
+        "taskId": "Task ID",
+        "task": "Task",
+        "worker": "Worker",
+        "runtime": "Runtime",
+        "runtimeSeconds": "{runtime} s",
+        "details": "Details",
+        "args": "args",
+        "kwargs": "kwargs",
+        "actions": "Actions",
+        "terminate": "Terminate",
+        "empty": "No running Celery tasks.",
+        "selectAll": "Select all tasks",
+        "selectTask": "Select task {task_id}",
+        "terminateSelected": "Terminate selected ({count})",
+        "terminateConfirm": "Are you sure you want to terminate {count} running task(s)?",
+        "terminateTaskConfirm": "Are you sure you want to terminate task {task_id}?",
+        "terminated": "Terminated {count} task(s).",
+        "loadError": "Could not load Celery tasks: {message}",
+        "terminateError": "Could not terminate task(s): {message}"
       }
     }
   },

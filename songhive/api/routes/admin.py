@@ -18,6 +18,7 @@ from ...models.user import User, UserRole
 from ...services import audit, auth, deletion, music
 from ...services import settings as settings_service
 from ...services import stats as stats_service
+from ...services.celery_admin import CeleryAdminError, list_active_celery_tasks, terminate_celery_tasks
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from ...tasks.federation import provision_federation_keys
@@ -1001,3 +1002,82 @@ async def provision_federation_keys_endpoint(
     await db.commit()
 
     return {"task_id": result.id, "status": "queued"}
+
+
+class CeleryTaskInfo(BaseModel):
+    """A currently running Celery task reported by the worker inspect API."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    task_id: str
+    name: str
+    worker: str
+    args: list[Any] = []
+    kwargs: dict[str, Any] = {}
+    runtime: Optional[float] = None
+    hostname: Optional[str] = None
+    acknowledged: Optional[bool] = None
+    delivery_info: Optional[dict[str, Any]] = None
+    time_start: Optional[float] = None
+
+
+class CeleryTerminateRequest(BaseModel):
+    """Request body for terminating running Celery tasks."""
+
+    task_ids: list[str] = Field(..., min_length=1, max_length=100)
+
+
+class CeleryTerminateResponse(BaseModel):
+    """Response returned after a bulk Celery terminate request."""
+
+    terminated: int
+
+
+@router.get(
+    "/celery/tasks",
+    response_model=list[CeleryTaskInfo],
+    dependencies=[Depends(require_admin)],
+)
+async def list_celery_tasks():
+    """List all Celery tasks currently running on workers (admin only)."""
+    try:
+        return await list_active_celery_tasks()
+    except CeleryAdminError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/celery/terminate",
+    response_model=CeleryTerminateResponse,
+    dependencies=[Depends(rate_limit_account), Depends(require_admin)],
+)
+async def terminate_celery_tasks_endpoint(
+    body: CeleryTerminateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Terminate one or more running Celery tasks by id (admin only)."""
+    try:
+        terminated = await terminate_celery_tasks(body.task_ids)
+    except CeleryAdminError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="celery.terminate",
+        target_type="celery",
+        target_id=None,
+        details={"task_ids": body.task_ids, "count": terminated},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return CeleryTerminateResponse(terminated=terminated)

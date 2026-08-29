@@ -23,6 +23,11 @@ export type ProvisionFederationKeysRequest =
   components["schemas"]["ProvisionFederationKeysRequest"];
 export type AdminTaskQueuedResponse =
   components["schemas"]["AdminTaskQueuedResponse"];
+export type CeleryTaskInfo = components["schemas"]["CeleryTaskInfo"];
+export type CeleryTerminateRequest =
+  components["schemas"]["CeleryTerminateRequest"];
+export type CeleryTerminateResponse =
+  components["schemas"]["CeleryTerminateResponse"];
 
 interface StorageBackendStats {
   backend: string;
@@ -232,4 +237,17 @@ export function provisionFederationKeys(
       body,
     },
   );
+}
+
+export function listCeleryTasks(): Promise<CeleryTaskInfo[]> {
+  return apiRequest<CeleryTaskInfo[]>("/admin/celery/tasks");
+}
+
+export function terminateCeleryTasks(
+  body: CeleryTerminateRequest,
+): Promise<CeleryTerminateResponse> {
+  return apiRequest<CeleryTerminateResponse>("/admin/celery/terminate", {
+    method: "POST",
+    body,
+  });
 }

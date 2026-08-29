@@ -23,6 +23,8 @@ import {
   syncTags,
   rehashAudio,
   provisionFederationKeys,
+  listCeleryTasks,
+  terminateCeleryTasks,
   type AdminUserResponse,
   type AdminInviteResponse,
   type AdminInviteCreateRequest,
@@ -329,5 +331,32 @@ describe("admin endpoints", () => {
       },
     );
     expect(result).toEqual({ task_id: "task-2", status: "queued" });
+  });
+
+  it("listCeleryTasks sends GET to /admin/celery/tasks", async () => {
+    const tasks = [
+      {
+        task_id: "task-1",
+        name: "songhive.tasks.storage.cleanup_orphaned_files",
+        worker: "worker1@host",
+        args: [],
+        kwargs: {},
+      },
+    ];
+    apiRequest.mockResolvedValueOnce(tasks);
+    const result = await listCeleryTasks();
+    expect(apiRequest).toHaveBeenCalledWith("/admin/celery/tasks");
+    expect(result).toEqual(tasks);
+  });
+
+  it("terminateCeleryTasks sends POST to /admin/celery/terminate", async () => {
+    const body = { task_ids: ["task-1", "task-2"] };
+    apiRequest.mockResolvedValueOnce({ terminated: 2 });
+    const result = await terminateCeleryTasks(body);
+    expect(apiRequest).toHaveBeenCalledWith("/admin/celery/terminate", {
+      method: "POST",
+      body,
+    });
+    expect(result).toEqual({ terminated: 2 });
   });
 });
