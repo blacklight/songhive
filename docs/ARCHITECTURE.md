@@ -321,11 +321,14 @@ Genres are stored in a dedicated `Genre` table and linked to `Track` and
 `Album` through `GenreTrack` and `GenreAlbum` association tables. The free-text
 `Track.genre` and `Album.genre` columns remain the source of truth for embedded
 metadata round-trips, while the normalised tables enable browsing, counting, and
-filtering. `services/genres.py` validates names, manages associations,
-propagates album genres from the intersection of their tracks' genres, and
-feeds the hashtag system: the genre string is split and mapped to valid hashtag
-names so genre-derived hashtags appear alongside user-created ones. The public
-API exposes global genre listing and deletion in `api/routes/genres.py`, and
+filtering. `GenreTrack.inherited` distinguishes album-inherited values from
+explicit track-level overrides. `services/genres.py` validates names, manages
+associations, propagates album genres down to tracks that have no explicit
+genre of their own, and re-derives the album genre from the intersection of its
+tracks' explicit genres. The hashtag system receives the same genre-derived
+tags: the genre string is split and mapped to valid hashtag names so
+genre-derived hashtags appear alongside user-created ones. The public API
+exposes global genre listing and deletion in `api/routes/genres.py`, and
 per-resource genre management is supported through `POST`/`DELETE` sub-routes on
 tracks and albums as well as the `genre` field on track/album updates. The
 frontend mirrors the hashtag browsing experience: `GenresView` and `GenreView`
@@ -572,9 +575,10 @@ The tag rewrite is performed by the `sync_track_tags` Celery task
    3. No cover
 4. Retrieves the audio file locally and writes the current DB metadata into the
    embedded tags using `mutagen`.
-5. Reconciles the track's `Genre` associations from `track.genre`, creates the
-   corresponding hashtag associations via `genres_to_hashtags`, and propagates
-   unanimous genres to the parent album (if any).
+5. Reconciles the track's `Genre` associations from `track.genre` or from the
+   parent album when the track has no explicit genre, creates the corresponding
+   hashtag associations via `genres_to_hashtags`, and propagates the album's
+   genre from the intersection of its tracks' explicit genres.
 6. Updates `StoredFile.size`. For S3, re-uploads the rewritten file to the same
    key; for local storage, the file is already in place.
 7. Releases the lock.

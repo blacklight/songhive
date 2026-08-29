@@ -17,8 +17,10 @@ from ..music.metadata import AudioMetadataWrite, write_metadata
 from ..services.genres import (
     extract_genres_from_track,
     genres_to_hashtags,
+    get_genres_for_entity,
     propagate_album_genres,
     set_genres_for_entity,
+    set_track_inherited_genres,
 )
 from ..services.hashtags import add_hashtags_to_entity, extract_hashtags_from_track
 from ..services.metadata import _guess_image_mime
@@ -74,6 +76,11 @@ async def _sync_track_tags(track_id: str, config) -> bool:
             if track is None:
                 return True
 
+            is_inherited = False
+            if track.album is not None:
+                album_genre_names = await get_genres_for_entity(session, "album", track.album.id)
+                is_inherited = await set_track_inherited_genres(session, track, album_genre_names)
+
             meta = _build_metadata(track)
 
             auto_tags = extract_hashtags_from_track(track)
@@ -100,16 +107,26 @@ async def _sync_track_tags(track_id: str, config) -> bool:
 
             genre_names = extract_genres_from_track(track)
             if genre_names:
-                await set_genres_for_entity(session, "track", track_id, genre_names)
                 hashtag_names = genres_to_hashtags(genre_names)
-                if hashtag_names:
-                    await add_hashtags_to_entity(
-                        session,
-                        "track",
-                        track_id,
-                        hashtag_names,
-                        user_id=None,
-                    )
+                if is_inherited:
+                    if hashtag_names:
+                        await add_hashtags_to_entity(
+                            session,
+                            "track",
+                            track_id,
+                            hashtag_names,
+                            user_id=None,
+                        )
+                else:
+                    await set_genres_for_entity(session, "track", track_id, genre_names)
+                    if hashtag_names:
+                        await add_hashtags_to_entity(
+                            session,
+                            "track",
+                            track_id,
+                            hashtag_names,
+                            user_id=None,
+                        )
 
             if track.album is not None:
                 await propagate_album_genres(session, track.album)
@@ -155,6 +172,7 @@ async def _load_track_for_sync(session, track_id: str) -> Optional[Track]:
             selectinload(Track.image_file),
             selectinload(Track.audio_file),
             selectinload(Track.album).selectinload(Album.cover_file),
+            selectinload(Track.genre_associations),
         )
         .where(Track.id == track_id)
     )

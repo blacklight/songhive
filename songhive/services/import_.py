@@ -28,8 +28,8 @@ from ..models.upload import Upload
 from .genres import (
     extract_genres_from_metadata,
     genres_to_hashtags,
-    propagate_album_genres,
     set_genres_for_entity,
+    sync_album_genres,
 )
 from .hashtags import add_hashtags_to_entity, extract_hashtags_from_metadata
 from .metadata import AudioMetadata, extract_metadata
@@ -520,7 +520,7 @@ async def import_audio_file(
         )
 
     if album:
-        await propagate_album_genres(session, album)
+        await sync_album_genres(session, album)
 
     auto_tags = extract_hashtags_from_metadata(metadata)
     genre_hashtags = genres_to_hashtags(genre_names)

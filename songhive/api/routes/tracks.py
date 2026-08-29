@@ -30,10 +30,10 @@ from ...services.auth import get_user_by_id
 from ...services.federation import publish_track_activity, unpublish_track_activity
 from ...services.genres import (
     genres_to_hashtags,
-    propagate_album_genres,
     remove_genre_from_entity,
     set_genres_for_entity,
     split_genre_string,
+    sync_album_genres,
     validate_genre_name,
 )
 from ...services.hashtags import (
@@ -424,10 +424,6 @@ async def update_track(
             hashtag_names = genres_to_hashtags(genre_names)
             if hashtag_names:
                 await add_hashtags_to_entity(db, "track", track.id, hashtag_names, user_id=None)
-        if track.album_id:
-            album = await db.get(Album, track.album_id)
-            if album is not None:
-                await propagate_album_genres(db, album)
     if body.track_number is not None:
         track.track_number = body.track_number
     if body.disc_number is not None:
@@ -446,6 +442,11 @@ async def update_track(
             previous_artist_id,
             previous_album_id,
         )
+
+    if track.album_id:
+        album = await db.get(Album, track.album_id)
+        if album is not None:
+            await sync_album_genres(db, album)
 
     details: Dict[str, Any] = {
         "title": track.title,
@@ -834,7 +835,7 @@ async def set_track_genres(
         if track.album_id:
             album = await db.get(Album, track.album_id)
             if album is not None:
-                await propagate_album_genres(db, album)
+                await sync_album_genres(db, album)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -842,6 +843,8 @@ async def set_track_genres(
         ) from exc
 
     track = await music.get_track(db, track_id, include=set(include.values) | {"artist", "genres"})
+    if track is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
     await audit.log_action(
         db,
         actor_id=current_user.id,
@@ -852,7 +855,14 @@ async def set_track_genres(
         ip_address=client_ip(request),
     )
     await db.commit()
-    _enqueue_track_tag_sync(track_id)
+
+    if track.album_id:
+        track_ids = await music.get_track_ids_for_album(db, track.album_id, user=current_user)
+        for tid in track_ids:
+            _enqueue_track_tag_sync(tid)
+    else:
+        _enqueue_track_tag_sync(track_id)
+
     return await _build_track_response(track, current_user, storage, include)
 
 
@@ -890,7 +900,7 @@ async def remove_track_genre(
         if track.album_id:
             album = await db.get(Album, track.album_id)
             if album is not None:
-                await propagate_album_genres(db, album)
+                await sync_album_genres(db, album)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -898,6 +908,8 @@ async def remove_track_genre(
         ) from exc
 
     track = await music.get_track(db, track_id, include=set(include.values) | {"artist", "genres"})
+    if track is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
     await audit.log_action(
         db,
         actor_id=current_user.id,
@@ -908,5 +920,12 @@ async def remove_track_genre(
         ip_address=client_ip(request),
     )
     await db.commit()
-    _enqueue_track_tag_sync(track_id)
+
+    if track.album_id:
+        track_ids = await music.get_track_ids_for_album(db, track.album_id, user=current_user)
+        for tid in track_ids:
+            _enqueue_track_tag_sync(tid)
+    else:
+        _enqueue_track_tag_sync(track_id)
+
     return await _build_track_response(track, current_user, storage, include)

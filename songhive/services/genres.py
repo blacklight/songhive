@@ -7,7 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, List, Optional, Tuple, Type, cast
+from typing import Any, Dict, List, Optional, Tuple, Type, cast
 
 from sqlalchemy import (
     and_,
@@ -21,6 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..models.album import Album
@@ -561,3 +562,112 @@ async def propagate_album_genres(session: AsyncSession, album: Album) -> List[st
     album.genre = "; ".join(genre_names)
     await set_genres_for_entity(session, "album", album.id, genre_names)
     return genre_names
+
+
+def _track_has_explicit_genre(track: Track) -> bool:
+    """Return ``True`` when a track has its own track-level genre override."""
+    if track.genre_associations:
+        return any(not a.inherited for a in track.genre_associations)
+    # No associations yet: a non-empty, parseable ``track.genre`` is treated as
+    # explicit track-level metadata (e.g. from a tag sync or import) rather than
+    # an inherited album value.
+    return bool(track.genre and split_genre_string(track.genre))
+
+
+async def _load_track_genre_associations(session: AsyncSession, track: Track) -> None:
+    """Ensure ``track.genre_associations`` reflects the current database state."""
+    await session.refresh(track, attribute_names=["genre_associations"])
+
+
+async def set_track_inherited_genres(
+    session: AsyncSession,
+    track: Track,
+    album_genre_names: List[str],
+    genre_map: Optional[Dict[str, Genre]] = None,
+) -> bool:
+    """
+    Replace a track's inherited genre associations with ``album_genre_names``.
+
+    If the track has an explicit track-level genre override, the track is left
+    untouched and ``False`` is returned.  Otherwise the track's ``genre`` column
+    and its ``GenreTrack`` rows are updated to mirror the album, with the
+    ``inherited`` flag set to ``True``.
+    """
+    await _load_track_genre_associations(session, track)
+    if _track_has_explicit_genre(track):
+        return False
+
+    await session.execute(
+        delete(GenreTrack).where(
+            GenreTrack.track_id == track.id,
+            GenreTrack.inherited.is_(True),
+        )
+    )
+
+    track.genre = "; ".join(album_genre_names) if album_genre_names else None
+
+    for name in album_genre_names:
+        genre = None
+        if genre_map is not None:
+            genre = genre_map.get(name)
+        if genre is None:
+            genre = await get_or_create_genre(session, name)
+            if genre_map is not None:
+                genre_map[name] = genre
+
+        session.add(
+            GenreTrack(
+                genre_id=genre.id,
+                track_id=track.id,
+                inherited=True,
+            )
+        )
+
+    await session.flush()
+    return True
+
+
+async def propagate_track_genres(session: AsyncSession, album: Album) -> List[str]:
+    """
+    Copy an album's genres to any track in the album without an explicit
+    track-level genre override.
+
+    Tracks that have their own ``GenreTrack`` associations keep their current
+    genres.  For each inheriting track, the ``track.genre`` column and its
+    ``GenreTrack`` rows are replaced with the album's genres.
+
+    Returns the IDs of the tracks that were updated.
+    """
+    album_genre_names = await get_genres_for_entity(session, "album", album.id)
+
+    genre_map: Dict[str, Genre] = {}
+    for name in album_genre_names:
+        genre_map[name] = await get_or_create_genre(session, name)
+
+    result = await session.execute(
+        select(Track).where(Track.album_id == album.id).options(selectinload(Track.genre_associations))
+    )
+    tracks = result.scalars().unique().all()
+
+    updated: List[str] = []
+    for track in tracks:
+        if await set_track_inherited_genres(session, track, album_genre_names, genre_map):
+            updated.append(str(track.id))
+
+    return updated
+
+
+async def sync_album_genres(session: AsyncSession, album: Album) -> List[str]:
+    """
+    Synchronise an album's genre with its tracks in both directions.
+
+    Inherited album genres are pushed to tracks that do not have an explicit
+    override, the album is then re-derived from the intersection of all tracks,
+    and the final album state is pushed back to inheriting tracks.  This
+    converges on the stable state where the album is the intersection of track
+    genres and tracks without explicit genres inherit from the album.
+    """
+    await propagate_track_genres(session, album)
+    album_genres = await propagate_album_genres(session, album)
+    await propagate_track_genres(session, album)
+    return album_genres

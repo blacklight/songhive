@@ -26,6 +26,7 @@ from ...services import acl, audit, deletion, music
 from ...services.federation import unpublish_track_activity
 from ...services.genres import (
     genres_to_hashtags,
+    propagate_track_genres,
     remove_genre_from_entity,
     set_genres_for_entity,
     split_genre_string,
@@ -271,6 +272,7 @@ async def update_album(
             hashtag_names = genres_to_hashtags(genre_names)
             if hashtag_names:
                 await add_hashtags_to_entity(db, "album", album_id, hashtag_names, user_id=None)
+        await propagate_track_genres(db, album)
     if body.visibility is not None:
         album.visibility = body.visibility.value
 
@@ -622,6 +624,8 @@ async def set_album_genres(
         hashtag_names = genres_to_hashtags(normalised)
         if hashtag_names:
             await add_hashtags_to_entity(db, "album", album_id, hashtag_names, user_id=None)
+
+        await propagate_track_genres(db, album)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -677,6 +681,7 @@ async def remove_album_genre(
         album.genre = "; ".join(current) if current else None
 
         await remove_genre_from_entity(db, "album", album_id, name)
+        await propagate_track_genres(db, album)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

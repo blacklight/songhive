@@ -4,7 +4,7 @@ Genre and entity association models.
 
 from typing import TYPE_CHECKING, List
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -48,6 +48,12 @@ class GenreTrack(Base):
     track_id: Mapped[str] = mapped_column(
         ForeignKey("tracks.id", ondelete="CASCADE"),
         index=True,
+    )
+    inherited: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default="false",
     )
 
     genre: Mapped["Genre"] = relationship("Genre", back_populates="tracks", lazy="selectin")
