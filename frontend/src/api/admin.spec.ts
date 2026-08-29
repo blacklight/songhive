@@ -124,6 +124,15 @@ describe("admin endpoints", () => {
     expect(result).toEqual([sampleUser]);
   });
 
+  it("listUsers omits an empty or whitespace-only query", async () => {
+    apiRequest.mockResolvedValueOnce([sampleUser]);
+    const result = await listUsers({ q: "   ", limit: 25, offset: 0 });
+    expect(apiRequest).toHaveBeenCalledWith("/admin/users", {
+      query: { limit: 25, offset: 0 },
+    });
+    expect(result).toEqual([sampleUser]);
+  });
+
   it.each([
     ["promoteUser", promoteUser, "/admin/users/user-1/promote"],
     ["demoteUser", demoteUser, "/admin/users/user-1/demote"],

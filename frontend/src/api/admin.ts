@@ -69,7 +69,15 @@ export function listUsers(params?: {
   limit?: number;
   offset?: number;
 }): Promise<AdminUserResponse[]> {
-  return apiRequest<AdminUserResponse[]>("/admin/users", { query: params });
+  const query: Record<string, string | number | boolean | undefined | null> = {
+    limit: params?.limit,
+    offset: params?.offset,
+  };
+  const q = params?.q?.trim();
+  if (q) {
+    query.q = q;
+  }
+  return apiRequest<AdminUserResponse[]>("/admin/users", { query });
 }
 
 export function promoteUser(userId: string): Promise<AdminUserResponse> {
