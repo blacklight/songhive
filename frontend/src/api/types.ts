@@ -1951,7 +1951,7 @@ export interface paths {
     };
     /**
      * Get File Metadata
-     * @description Get metadata for a stored file.
+     * @description Get metadata for a stored file, including associated tracks.
      */
     get: operations["get_file_metadata_api_v1_files__file_id__get"];
     put?: never;
@@ -2103,18 +2103,15 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/instance/": {
+  "/api/v1/instance": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /**
-     * Get Instance V1
-     * @description Return Mastodon-compatible instance metadata (v1).
-     */
-    get: operations["get_instance_v1_api_v1_instance__get"];
+    /** Mastodon Instance V1 */
+    get: operations["mastodon_instance_v1_api_v1_instance_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2130,11 +2127,8 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /**
-     * Get Instance Peers
-     * @description Return a list of known peer instance domains.
-     */
-    get: operations["get_instance_peers_api_v1_instance_peers_get"];
+    /** Mastodon Instance Peers */
+    get: operations["mastodon_instance_peers_api_v1_instance_peers_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2143,18 +2137,304 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v2/instance/": {
+  "/api/v2/instance": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /**
-     * Get Instance V2
-     * @description Return Mastodon-compatible instance metadata (v2).
-     */
-    get: operations["get_instance_v2_api_v2_instance__get"];
+    /** Mastodon Instance V2 */
+    get: operations["mastodon_instance_v2_api_v2_instance_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/.well-known/webfinger": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Webfinger */
+    get: operations["webfinger__well_known_webfinger_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/.well-known/nodeinfo": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Nodeinfo Discovery */
+    get: operations["nodeinfo_discovery__well_known_nodeinfo_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nodeinfo/2.1": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Nodeinfo */
+    get: operations["nodeinfo_nodeinfo_2_1_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/actor": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Actor */
+    get: operations["actor_ap_actor_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/inbox": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Inbox */
+    post: operations["inbox_ap_inbox_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/outbox": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Outbox */
+    get: operations["outbox_ap_outbox_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/followers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Followers */
+    get: operations["followers_ap_followers_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/following": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Following */
+    get: operations["following_ap_following_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/actor/quote_authorizations/{auth_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Quote Authorization */
+    get: operations["quote_authorization_ap_actor_quote_authorizations__auth_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nodeinfo/2.0.json": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Nodeinfo 20 */
+    get: operations["nodeinfo_20_nodeinfo_2_0_json_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nodeinfo/2.0": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Nodeinfo 20 */
+    get: operations["nodeinfo_20_nodeinfo_2_0_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nodeinfo/2.1.json": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Nodeinfo 21 Json */
+    get: operations["nodeinfo_21_json_nodeinfo_2_1_json_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/accounts/lookup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Mastodon Accounts Lookup */
+    get: operations["mastodon_accounts_lookup_api_v1_accounts_lookup_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/accounts/{account_id}/statuses": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Mastodon Accounts Statuses */
+    get: operations["mastodon_accounts_statuses_api_v1_accounts__account_id__statuses_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/accounts/{account_id}/followers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Mastodon Accounts Followers */
+    get: operations["mastodon_accounts_followers_api_v1_accounts__account_id__followers_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/accounts/{account_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Mastodon Accounts Get */
+    get: operations["mastodon_accounts_get_api_v1_accounts__account_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/statuses/{status_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Mastodon Statuses Get */
+    get: operations["mastodon_statuses_get_api_v1_statuses__status_id__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2612,10 +2892,18 @@ export interface components {
       action: string;
       /** Actor Id */
       actor_id: string | null;
+      /** Actor Name */
+      actor_name?: string | null;
+      /** Actor Username */
+      actor_username?: string | null;
       /** Target Type */
       target_type: string | null;
       /** Target Id */
       target_id: string | null;
+      /** Target Name */
+      target_name?: string | null;
+      /** Target Username */
+      target_username?: string | null;
       /** Details */
       details: {
         [key: string]: unknown;
@@ -3566,10 +3854,7 @@ export interface components {
        * @default []
        */
       hashtags: string[];
-      /**
-       * Favorited
-       * @description Whether the track is a favorite of the current user.
-       */
+      /** Favorited */
       favorited?: boolean | null;
     };
     /**
@@ -8426,7 +8711,7 @@ export interface operations {
       };
     };
   };
-  get_instance_v1_api_v1_instance__get: {
+  mastodon_instance_v1_api_v1_instance_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -8441,12 +8726,12 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["InstanceV1"];
+          "application/json": unknown;
         };
       };
     };
   };
-  get_instance_peers_api_v1_instance_peers_get: {
+  mastodon_instance_peers_api_v1_instance_peers_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -8461,12 +8746,12 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": string[];
+          "application/json": unknown;
         };
       };
     };
   };
-  get_instance_v2_api_v2_instance__get: {
+  mastodon_instance_v2_api_v2_instance_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -8481,7 +8766,448 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["InstanceV2"];
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  webfinger__well_known_webfinger_get: {
+    parameters: {
+      query?: {
+        resource?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  nodeinfo_discovery__well_known_nodeinfo_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  nodeinfo_nodeinfo_2_1_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  actor_ap_actor_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  inbox_ap_inbox_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  outbox_ap_outbox_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  followers_ap_followers_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  following_ap_following_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  quote_authorization_ap_actor_quote_authorizations__auth_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        auth_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  nodeinfo_20_nodeinfo_2_0_json_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  nodeinfo_20_nodeinfo_2_0_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  nodeinfo_21_json_nodeinfo_2_1_json_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  mastodon_accounts_lookup_api_v1_accounts_lookup_get: {
+    parameters: {
+      query?: {
+        acct?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mastodon_accounts_statuses_api_v1_accounts__account_id__statuses_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        max_id?: string | null;
+        since_id?: string | null;
+        only_media?: boolean;
+        exclude_replies?: boolean;
+        exclude_reblogs?: boolean;
+        tagged?: string | null;
+      };
+      header?: never;
+      path: {
+        account_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mastodon_accounts_followers_api_v1_accounts__account_id__followers_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        max_id?: string | null;
+        since_id?: string | null;
+      };
+      header?: never;
+      path: {
+        account_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mastodon_accounts_get_api_v1_accounts__account_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        account_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mastodon_statuses_get_api_v1_statuses__status_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        status_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
