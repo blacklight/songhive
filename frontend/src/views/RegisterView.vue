@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { register } from "@/api/auth";
 import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
@@ -10,15 +10,23 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 
 const { t } = useI18n();
+const route = useRoute();
 const router = useRouter();
 const toast = useToastStore();
+
+function getQueryCode(raw: unknown): string {
+  if (Array.isArray(raw)) return raw[0] ?? "";
+  return typeof raw === "string" ? raw : "";
+}
 
 const username = ref("");
 const email = ref("");
 const password = ref("");
 const confirmPassword = ref("");
 const displayName = ref("");
-const inviteCode = ref("");
+const inviteCode = ref(
+  getQueryCode(route.query.invite_code ?? route.query.code),
+);
 const error = ref<string | null>(null);
 const isLoading = ref(false);
 

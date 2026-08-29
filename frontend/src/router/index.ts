@@ -233,6 +233,11 @@ const router = createRouter({
   routes,
 });
 
+function getQueryCode(raw: unknown): string {
+  if (Array.isArray(raw)) return raw[0] ?? "";
+  return typeof raw === "string" ? raw : "";
+}
+
 // Fail closed: no user can reach /admin/* until the backend exposes role on
 // UserResponse. This is intentional and must be documented.
 router.beforeEach(async (to) => {
@@ -243,7 +248,10 @@ router.beforeEach(async (to) => {
     const instanceStore = useInstanceStore();
     await instanceStore.load();
     if (!instanceStore.registrations) {
-      return authStore.isAuthenticated ? { path: "/" } : { path: "/login" };
+      const code = getQueryCode(to.query.invite_code ?? to.query.code);
+      if (!code || !instanceStore.invitesEnabled) {
+        return authStore.isAuthenticated ? { path: "/" } : { path: "/login" };
+      }
     }
   }
 

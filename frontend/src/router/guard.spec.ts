@@ -109,6 +109,36 @@ describe("router guard", () => {
     expect(router.currentRoute.value.path).toBe("/login");
   });
 
+  it("allows /register with an invite code when invites are enabled", async () => {
+    vi.mocked(instanceApi.getInstance).mockResolvedValue({
+      registrations: false,
+      invites_enabled: true,
+    } as unknown as instanceApi.InstanceInfo);
+
+    await router.push("/register?invite_code=ABC");
+    expect(router.currentRoute.value.path).toBe("/register");
+  });
+
+  it("redirects /register without an invite code when invites are enabled", async () => {
+    vi.mocked(instanceApi.getInstance).mockResolvedValue({
+      registrations: false,
+      invites_enabled: true,
+    } as unknown as instanceApi.InstanceInfo);
+
+    await router.push("/register");
+    expect(router.currentRoute.value.path).toBe("/login");
+  });
+
+  it("redirects /register with an invite code to /login when invites are disabled", async () => {
+    vi.mocked(instanceApi.getInstance).mockResolvedValue({
+      registrations: false,
+      invites_enabled: false,
+    } as unknown as instanceApi.InstanceInfo);
+
+    await router.push("/register?invite_code=ABC");
+    expect(router.currentRoute.value.path).toBe("/login");
+  });
+
   it("redirects /register to / for authenticated users when public registration is closed", async () => {
     const store = useAuthStore();
     store.accessToken = "token";

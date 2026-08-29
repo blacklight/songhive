@@ -90,6 +90,19 @@ describe("RegisterView", () => {
     expect(router.currentRoute.value.path).toBe("/login");
   });
 
+  it("prefills the invite code from the URL query string", async () => {
+    const router = createTestRouter();
+    await router.push("/register?invite_code=pre-filled");
+    await router.isReady();
+
+    const wrapper = mount(RegisterView, {
+      global: { plugins: [router] },
+    });
+
+    const textInputs = wrapper.findAll('input[type="text"]');
+    expect(textInputs[2].element.value).toBe("pre-filled");
+  });
+
   it("shows the email verification notice when the response says unverified", async () => {
     const router = createTestRouter();
     await router.push("/register");
