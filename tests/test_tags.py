@@ -17,6 +17,8 @@ from songhive.models.base import Base
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 from songhive.music.metadata import AudioMetadataWrite, extract_metadata
+from songhive.services.genres import get_genres_for_entity
+from songhive.services.hashtags import get_hashtags_for_entity
 from songhive.tasks.tags import _build_metadata, _prepare_cover_art, _resolve_cover_file, sync_track_tags
 
 
@@ -279,3 +281,73 @@ async def test_prepare_cover_art_clears_when_no_cover_resolves():
     result = await _prepare_cover_art(MagicMock(), track, meta)
     assert result is None
     assert meta.clear_cover_art is True
+
+
+def test_sync_track_tags_propagates_genres_and_hashtags(tmp_path, monkeypatch):
+    """The Celery task normalizes genres, creates hashtags, and propagates them to albums."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'genre_tags.db'}"
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    _patch_tags_task_env(monkeypatch, tmp_path, db_url, media_dir)
+
+    audio_path = _make_silence(tmp_path)
+    storage_path = "tracks/genre.mp3"
+    stored_file_path = media_dir / storage_path
+    stored_file_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(audio_path, stored_file_path)
+
+    async def _setup():
+        async with _LocalSessionFactory(db_url) as session:
+            artist = Artist(name="Genre Artist")
+            session.add(artist)
+            await session.flush()
+
+            album = Album(title="Genre Album", artist_id=artist.id, release_year=2023)
+            session.add(album)
+            await session.flush()
+
+            stored_file = StoredFile(
+                sha256="b" * 64,
+                size=stored_file_path.stat().st_size,
+                storage_path=storage_path,
+                storage_backend="local",
+                content_type="audio/mpeg",
+                owner_id=None,
+                visibility="private",
+            )
+            track = Track(
+                title="Genre Track",
+                artist_id=artist.id,
+                album_id=album.id,
+                audio_file=stored_file,
+                track_number=1,
+                disc_number=1,
+                genre="Hip Hop; Rock",
+                owner_id=None,
+                visibility="private",
+            )
+            session.add_all([stored_file, track])
+            await session.commit()
+            return str(track.id), str(album.id)
+
+    track_id, album_id = asyncio.run(_setup())
+
+    result = sync_track_tags(track_id)
+    assert result is True
+
+    async def _verify():
+        async with _LocalSessionFactory(db_url) as session:
+            from sqlalchemy import select
+
+            track_genres = await get_genres_for_entity(session, "track", track_id)
+            hashtags = await get_hashtags_for_entity(session, "track", track_id)
+            album_genres = await get_genres_for_entity(session, "album", album_id)
+            album_result = await session.execute(select(Album).where(Album.id == album_id))
+            album = album_result.scalar_one()
+            return track_genres, [h.name for h in hashtags], album_genres, album.genre
+
+    track_genres, track_hashtags, album_genres, album_genre = asyncio.run(_verify())
+    assert track_genres == ["hip hop", "rock"]
+    assert track_hashtags == ["hip_hop", "rock"]
+    assert album_genres == ["hip hop", "rock"]
+    assert album_genre == "hip hop; rock"

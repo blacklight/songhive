@@ -14,6 +14,12 @@ from ..models.album import Album
 from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..music.metadata import AudioMetadataWrite, write_metadata
+from ..services.genres import (
+    extract_genres_from_track,
+    genres_to_hashtags,
+    propagate_album_genres,
+    set_genres_for_entity,
+)
 from ..services.hashtags import add_hashtags_to_entity, extract_hashtags_from_track
 from ..services.metadata import _guess_image_mime
 from ..services.storage import StorageService
@@ -91,6 +97,22 @@ async def _sync_track_tags(track_id: str, config) -> bool:
 
             if not await _write_audio_tags(audio_path, meta, track_id):
                 return False
+
+            genre_names = extract_genres_from_track(track)
+            if genre_names:
+                await set_genres_for_entity(session, "track", track_id, genre_names)
+                hashtag_names = genres_to_hashtags(genre_names)
+                if hashtag_names:
+                    await add_hashtags_to_entity(
+                        session,
+                        "track",
+                        track_id,
+                        hashtag_names,
+                        user_id=None,
+                    )
+
+            if track.album is not None:
+                await propagate_album_genres(session, track.album)
 
             return await _finalize_audio_file(session, track, audio_path, storage_service)
 

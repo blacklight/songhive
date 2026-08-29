@@ -564,11 +564,14 @@ The tag rewrite is performed by the `sync_track_tags` Celery task
    1. Track `image_file_id`
    2. Album `cover_file_id`
    3. No cover
-4. Retrieves the audio file locally, writes the current DB metadata into the
-   embedded tags using `mutagen`, and updates `StoredFile.size`.
-5. For S3, re-uploads the rewritten file to the same key; for local storage,
-   the file is already in place.
-6. Releases the lock.
+4. Retrieves the audio file locally and writes the current DB metadata into the
+   embedded tags using `mutagen`.
+5. Reconciles the track's `Genre` associations from `track.genre`, creates the
+   corresponding hashtag associations via `genres_to_hashtags`, and propagates
+   unanimous genres to the parent album (if any).
+6. Updates `StoredFile.size`. For S3, re-uploads the rewritten file to the same
+   key; for local storage, the file is already in place.
+7. Releases the lock.
 
 Tag sync is triggered automatically by metadata-mutating API operations
 (track/album/artist `PATCH`, track/album cover upload and delete) and by
