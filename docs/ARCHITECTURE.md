@@ -464,6 +464,8 @@ discovery are in `api/routes/federation.py`.
   cannot block re-publication.
 - `Delete(Tombstone)` is sent when a track is made non-public or deleted.
 - Following/unfollowing uses standard AP `Follow`/`Undo(Follow)` activities.
+- `track.genre` is split into multiple `Hashtag` tags on the published
+  `Audio` object, with spaces converted to underscores.
 - Per-actor follower isolation is delegated to pubby's `target_actor_id`.
 
 **Instance-level actor:**

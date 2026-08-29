@@ -9,6 +9,7 @@ from sqlalchemy import inspect as sa_inspect
 from ..models._enums import Visibility
 from ..models.artist import Artist
 from ..models.track import Track
+from ..services.genres import extract_genres_from_track, genres_to_hashtags
 from ._common import get_stream_url, get_track_url
 
 
@@ -75,7 +76,9 @@ def track_to_audio_object(
         obj["duration"] = f"PT{minutes}M{seconds}S"
 
     if track.genre:
-        obj["tag"] = [{"type": "Hashtag", "name": f"#{track.genre}"}]
+        genre_names = extract_genres_from_track(track)
+        if genre_names:
+            obj["tag"] = [{"type": "Hashtag", "name": f"#{hashtag}"} for hashtag in genres_to_hashtags(genre_names)]
 
     if stream_url:
         obj["attachment"] = [

@@ -106,11 +106,52 @@ def test_track_to_audio_object():
     assert obj["type"] == "Audio"
     assert obj["name"] == "TestTrack"
     assert obj["duration"] == "PT2M0S"
-    assert obj["tag"][0]["name"] == "#Rock"
+    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock"}]
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
         for link in obj["url"]
     )
+
+
+def test_track_to_audio_object_emits_multiple_genre_hashtags():
+    """Multi-genre tracks emit one ActivityPub Hashtag tag per genre."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        duration=120.0,
+        genre="Rock; Pop",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
+    assert obj["tag"] == [
+        {"type": "Hashtag", "name": "#rock"},
+        {"type": "Hashtag", "name": "#pop"},
+    ]
+
+
+def test_track_to_audio_object_converts_spaces_to_underscores():
+    """Genre names with spaces are emitted as underscore-separated hashtags."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        duration=120.0,
+        genre="Hip Hop",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
+    assert obj["tag"] == [{"type": "Hashtag", "name": "#hip_hop"}]
 
 
 def test_federation_app_setup(tmp_path):
