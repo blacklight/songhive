@@ -528,11 +528,11 @@ All background work is handled by Celery workers. Redis is the broker
 | Task module          | Responsibilities                                          |
 |----------------------|-----------------------------------------------------------|
 | `tasks/import_.py`   | File processing, tag extraction, track/album/artist upsert|
-| `tasks/federation.py`| Activity delivery, inbox processing                       |
+| `tasks/federation.py`| Activity delivery, inbox processing, key provisioning       |
 | `tasks/transcoding.py`| Pre-transcode to common formats, cache result            |
 | `tasks/email.py`     | Verification emails, password-reset emails                |
 | `tasks/musicbrainz.py`| MusicBrainz + Cover Art Archive metadata enrichment      |
-| `tasks/storage.py`   | Orphaned `StoredFile` GC (scheduled, default 03:00 daily) |
+| `tasks/storage.py`   | Orphaned `StoredFile` GC, audio-only hash rehash (scheduled) |
 
 The `cleanup_orphaned_files_schedule` config accepts any 5-field cron
 expression.
@@ -583,12 +583,17 @@ Tag sync is triggered automatically by metadata-mutating API operations
 (track/album/artist `PATCH`, track/album cover upload and delete) and by
 successful MusicBrainz enrichment. Manual bulk triggers are provided by
 `POST /api/v1/admin/sync-tags` and `songhive admin sync-tags` (with optional
-`--track-id`, `--album-id`, `--artist-id`, `--library-id`, or `--all`).
+`--track-id`, `--album-id`, `--artist-id`, `--library-id`, or `--all`); the
+admin web UI exposes the same options under `/admin/tasks`.
 
 To migrate an existing library that was stored before audio-only hashing, run
-`songhive admin rehash-audio` (with `--dry-run` to preview). The command
-re-hashes audio files, moves/renames the backing files to the new hash-based
-paths, and merges duplicate `StoredFile` rows.
+`songhive admin rehash-audio` (with `--dry-run` to preview) or use
+`POST /api/v1/admin/rehash-audio` from the admin UI. The task re-hashes audio
+files, moves/renames the backing files to the new hash-based paths, and merges
+duplicate `StoredFile` rows.
+
+Federation keys and actor URLs can be back-filled with
+`songhive admin provision-federation-keys` or `POST /api/v1/admin/provision-federation-keys`.
 
 ---
 

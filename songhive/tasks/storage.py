@@ -7,6 +7,8 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..services.admin_tasks import rehash_audio as _rehash_audio
+from ..services.storage import StorageService
 from ..storage.base import StorageBackend
 from .celery import celery_app
 
@@ -80,5 +82,33 @@ def cleanup_orphaned_files() -> int:
     async def _run() -> int:
         async with get_session() as session:
             return await _cleanup_orphaned_files(storage, session)
+
+    return asyncio.run(_run())
+
+
+@celery_app.task(name="songhive.tasks.storage.rehash_audio_files")
+def rehash_audio_files(dry_run: bool = False) -> dict[str, int]:
+    """
+    Celery task that migrates audio ``StoredFile`` rows to audio-only hashes.
+
+    Loads the runtime configuration, initializes the database, and runs the
+    async rehash helper inside ``asyncio.run``.
+    """
+    from ..config import load_config
+    from ..models.base import get_session, init_db
+    from ..storage import get_storage
+
+    logger.info("Starting audio rehash task (dry_run=%s)", dry_run)
+
+    config = load_config([])
+    init_db(config.database.url)
+    storage = get_storage(config.storage)
+    storage_service = StorageService(storage, config.storage)
+
+    async def _run() -> dict[str, int]:
+        async with get_session() as session:
+            result = await _rehash_audio(session, storage_service, dry_run=dry_run)
+            await session.commit()
+            return result
 
     return asyncio.run(_run())

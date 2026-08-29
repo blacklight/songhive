@@ -18,6 +18,7 @@ from ..federation.actors import get_federation_storage
 from ..federation.storage import get_or_create_private_key
 from ..models.base import get_session, init_db
 from ..models.user import User
+from ..services.admin_tasks import provision_federation_keys as _provision_federation_keys
 from ..services.federation import ensure_user_actor, extract_domain, is_domain_blocked
 from .celery import celery_app
 
@@ -212,3 +213,29 @@ def deliver_activity(
 
     logger.warning("Delivery to %s returned %s; giving up", inbox_url, response.status_code)
     return None
+
+
+@celery_app.task(name="songhive.tasks.federation.provision_federation_keys")
+def provision_federation_keys(dry_run: bool = False) -> int:
+    """
+    Celery task that back-fills ActivityPub actor URLs and keypairs.
+
+    Loads the runtime configuration, initializes the database, and runs the
+    async provisioning helper inside ``asyncio.run``.
+    """
+    import asyncio
+
+    from ..config import load_config
+
+    logger.info("Starting federation key provisioning (dry_run=%s)", dry_run)
+
+    config = load_config([])
+    init_db(config.database.url)
+
+    async def _run() -> int:
+        async with get_session() as session:
+            count = await _provision_federation_keys(session, config, dry_run=dry_run)
+            await session.commit()
+            return count
+
+    return asyncio.run(_run())

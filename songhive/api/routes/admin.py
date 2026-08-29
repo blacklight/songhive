@@ -20,7 +20,8 @@ from ...services import settings as settings_service
 from ...services import stats as stats_service
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
-from ...tasks.storage import cleanup_orphaned_files
+from ...tasks.federation import provision_federation_keys
+from ...tasks.storage import cleanup_orphaned_files, rehash_audio_files
 from ...tasks.tags import sync_track_tags
 from ...users import invites as invite_service
 from ...users import manager as user_manager
@@ -836,6 +837,7 @@ class SyncTagsRequest(BaseModel):
     artist_id: Optional[str] = None
     library_id: Optional[str] = None
     all: bool = False
+    dry_run: bool = False
 
 
 class SyncTagsResponse(BaseModel):
@@ -872,16 +874,17 @@ async def sync_tags(
 
     enqueued = 0
     broker_error: Optional[Exception] = None
-    try:
-        for track_id in track_ids:
-            try:
-                sync_track_tags.delay(track_id)  # type: ignore
-                enqueued += 1
-            except (KombuOperationalError, RedisConnectionError, OSError) as exc:
-                broker_error = exc
-                break
-    except (KombuOperationalError, RedisConnectionError, OSError) as exc:
-        broker_error = exc
+    if not body.dry_run:
+        try:
+            for track_id in track_ids:
+                try:
+                    sync_track_tags.delay(track_id)  # type: ignore
+                    enqueued += 1
+                except (KombuOperationalError, RedisConnectionError, OSError) as exc:
+                    broker_error = exc
+                    break
+        except (KombuOperationalError, RedisConnectionError, OSError) as exc:
+            broker_error = exc
 
     scope = {
         "track_id": body.track_id,
@@ -896,7 +899,7 @@ async def sync_tags(
         action="tags.sync",
         target_type="storage",
         target_id=None,
-        details={"scope": scope, "enqueued": enqueued},
+        details={"scope": scope, "enqueued": enqueued, "dry_run": body.dry_run},
         ip_address=client_ip(request),
     )
     await db.commit()
@@ -907,4 +910,94 @@ async def sync_tags(
             detail="Celery broker unavailable",
         ) from broker_error
 
-    return SyncTagsResponse(enqueued=enqueued, status="queued")
+    run_status = "dry_run" if body.dry_run else "queued"
+    return SyncTagsResponse(enqueued=enqueued, status=run_status)
+
+
+class RehashAudioRequest(BaseModel):
+    """Request body for triggering an audio rehash task."""
+
+    dry_run: bool = False
+
+
+class AdminTaskQueuedResponse(BaseModel):
+    """Response returned after queueing an admin background task."""
+
+    task_id: Optional[str] = None
+    status: str
+
+
+@router.post(
+    "/rehash-audio",
+    response_model=AdminTaskQueuedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def rehash_audio(
+    body: RehashAudioRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Trigger the audio-only SHA-256 rehash Celery task (admin only)."""
+    try:
+        result = rehash_audio_files.delay(dry_run=body.dry_run)  # type: ignore
+    except (KombuOperationalError, RedisConnectionError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Celery broker unavailable",
+        ) from exc
+
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="storage.rehash_audio",
+        target_type="storage",
+        target_id=None,
+        details={"dry_run": body.dry_run},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return {"task_id": result.id, "status": "queued"}
+
+
+class ProvisionFederationKeysRequest(BaseModel):
+    """Request body for triggering federation key provisioning."""
+
+    dry_run: bool = False
+
+
+@router.post(
+    "/provision-federation-keys",
+    response_model=AdminTaskQueuedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def provision_federation_keys_endpoint(
+    body: ProvisionFederationKeysRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Trigger the federation key provisioning Celery task (admin only)."""
+    try:
+        result = provision_federation_keys.delay(dry_run=body.dry_run)  # type: ignore
+    except (KombuOperationalError, RedisConnectionError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Celery broker unavailable",
+        ) from exc
+
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="federation.provision_keys",
+        target_type="federation",
+        target_id=None,
+        details={"dry_run": body.dry_run},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return {"task_id": result.id, "status": "queued"}

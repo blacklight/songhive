@@ -27,25 +27,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-import aiofiles
-import aiofiles.os
 from kombu.exceptions import OperationalError as KombuOperationalError
-from sqlalchemy import select, update
 
 from ..config import load_config
 from ..migrations import ensure_migrated
 from ..models.base import get_session, init_db
-from ..models.stored_file import StoredFile
-from ..models.track import Track
-from ..models.transcoded_file import TranscodedFile
-from ..models.upload import Upload
 from ..models.user import User, UserRole
-from ..services import music
+from ..services import admin_tasks, music
 from ..services.auth import create_user, get_user_by_username
-from ..services.federation import ensure_user_actor
-from ..services.storage import StorageService, audio_hash
+from ..services.storage import StorageService
 from ..storage import get_storage
-from ..storage.s3 import S3Storage
 from ..tasks.import_ import _AUDIO_EXTENSIONS, scan_directory
 from ..users import manager as user_manager
 from ..users.invites import InviteError, create_invite, list_invites
@@ -114,9 +105,14 @@ def _create_admin_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("list-invites", help="List invite codes")
 
     # provision-federation-keys
-    subparsers.add_parser(
+    provision_parser = subparsers.add_parser(
         "provision-federation-keys",
         help="Provision ActivityPub actor keys for users that are missing them",
+    )
+    provision_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report the number of users that would be provisioned without making changes",
     )
 
     # rehash-audio
@@ -378,65 +374,24 @@ async def _handle_list_invites(*_):
             print(f"{invite.code}  max_uses={invite.max_uses}  uses={invite.uses}  expires_at={expires}")
 
 
-async def _handle_provision_federation_keys(*_):
+async def _handle_provision_federation_keys(args):
     """Back-fill ActivityPub actor URLs and keypairs for existing users."""
-    from sqlalchemy import or_, select
-
     config = load_config([])
     if not config.federation.enabled or not config.federation.instance_domain:
         print("Federation is not enabled or no instance domain is configured; nothing to do.")
         return
 
     domain = config.federation.instance_domain
-    batch_size = 50
-    total = 0
+    dry_run = getattr(args, "dry_run", False)
 
     async with get_session() as session:
-        stmt = (
-            select(User)
-            .where(
-                or_(
-                    User.actor_url.is_(None),
-                    User.private_key_pem.is_(None),
-                    User.public_key_pem.is_(None),
-                )
-            )
-            .order_by(User.created_at)
-        )
-        result = await session.execute(stmt)
-        users = result.scalars().all()
-
-        for user in users:
-            if ensure_user_actor(user, config):
-                total += 1
-                if total % batch_size == 0:
-                    await session.flush()
-
+        total = await admin_tasks.provision_federation_keys(session, config, dry_run=dry_run)
         await session.commit()
 
-    print(f"Provisioned federation keys for {total} user(s) on {domain}")
-
-
-async def _merge_stored_file(session, storage, duplicate: StoredFile, survivor: StoredFile) -> None:
-    """Point all known references to ``survivor`` and remove ``duplicate``."""
-    duplicate_id = str(duplicate.id)
-    survivor_id = str(survivor.id)
-
-    await session.execute(update(Track).where(Track.audio_file_id == duplicate_id).values(audio_file_id=survivor_id))
-    await session.execute(
-        update(Upload).where(Upload.stored_file_id == duplicate_id).values(stored_file_id=survivor_id)
-    )
-    await session.execute(
-        update(TranscodedFile).where(TranscodedFile.stored_file_id == duplicate_id).values(stored_file_id=survivor_id)
-    )
-
-    old_path = duplicate.storage_path
-    await session.delete(duplicate)
-    await session.flush()
-    try:
-        await storage.delete(old_path)
-    except Exception:
-        pass
+    if dry_run:
+        print(f"Would provision federation keys for {total} user(s) on {domain}")
+    else:
+        print(f"Provisioned federation keys for {total} user(s) on {domain}")
 
 
 async def _handle_rehash_audio(args):
@@ -446,81 +401,21 @@ async def _handle_rehash_audio(args):
 
     storage = get_storage(config.storage)
     storage_service = StorageService(storage, config.storage)
-
-    migrated = 0
-    merged = 0
-    skipped = 0
-    failed = 0
+    dry_run = getattr(args, "dry_run", False)
 
     async with get_session() as session:
-        result = await session.execute(select(StoredFile).where(StoredFile.content_type.ilike("audio/%")))
-        rows = list(result.scalars().all())
-
-        for stored_file in rows:
-            local_path = await storage_service.backend.retrieve(stored_file.storage_path)
-            if local_path is None:
-                failed += 1
-                continue
-
-            try:
-                new_hash = await audio_hash(local_path)
-            except RuntimeError:
-                failed += 1
-                continue
-
-            if new_hash == stored_file.sha256:
-                skipped += 1
-                continue
-
-            if args.dry_run:
-                migrated += 1
-                continue
-
-            existing = await session.scalar(select(StoredFile).where(StoredFile.sha256 == new_hash))
-            if existing is not None:
-                await _merge_stored_file(session, storage, stored_file, existing)
-                merged += 1
-            else:
-                prefix = stored_file.storage_path.split("/")[0] if "/" in stored_file.storage_path else "files"
-                new_path = f"{prefix}/{new_hash[:2]}/{new_hash[2:4]}/{new_hash}"
-
-                try:
-                    size = (await asyncio.to_thread(os.stat, local_path)).st_size
-                    with open(local_path, "rb") as f:
-                        await storage_service.backend.store(f, new_path, content_type=stored_file.content_type)
-                except Exception:
-                    failed += 1
-                    continue
-
-                old_path = stored_file.storage_path
-                stored_file.storage_path = new_path
-                stored_file.sha256 = new_hash
-                stored_file.size = size
-
-                try:
-                    await storage_service.backend.delete(old_path)
-                except Exception:
-                    pass
-
-                if isinstance(storage_service.backend, S3Storage):
-                    try:
-                        await aiofiles.os.remove(local_path)
-                    except Exception:
-                        pass
-
-                migrated += 1
-
+        counts = await admin_tasks.rehash_audio(session, storage_service, dry_run=dry_run)
         await session.commit()
 
-    if args.dry_run:
+    if dry_run:
         print(
-            f"Would rehash {migrated} audio file(s), {skipped} already audio-hashed, "
-            f"{failed} failed, {merged} would merge."
+            f"Would rehash {counts['migrated']} audio file(s), {counts['skipped']} already audio-hashed, "
+            f"{counts['failed']} failed, {counts['merged']} would merge."
         )
     else:
         print(
-            f"Rehashed {migrated} audio file(s), merged {merged} duplicate(s), "
-            f"{skipped} already audio-hashed, {failed} failed."
+            f"Rehashed {counts['migrated']} audio file(s), merged {counts['merged']} duplicate(s), "
+            f"{counts['skipped']} already audio-hashed, {counts['failed']} failed."
         )
 
 

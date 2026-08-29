@@ -786,3 +786,76 @@ async def test_admin_sync_tags_endpoint_partial_enqueue_on_broker_failure(
     assert log is not None
     assert log.actor_id == str(admin.id)
     assert log.details["enqueued"] == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_rehash_audio_endpoint(client, db_session, make_user, auth_headers, monkeypatch):
+    """Admins can queue the audio rehash task and the action is audited."""
+    admin = await make_user("admin", role="admin")
+
+    rehash_mock = MagicMock()
+    rehash_mock.delay.return_value = MagicMock(id="rehash-task")
+    monkeypatch.setattr("songhive.api.routes.admin.rehash_audio_files", rehash_mock)
+
+    response = client.post(
+        "/api/v1/admin/rehash-audio",
+        headers=auth_headers(admin),
+        json={"dry_run": False},
+    )
+    assert response.status_code == status.HTTP_202_ACCEPTED
+    data = response.json()
+    assert data["status"] == "queued"
+    assert data["task_id"] == "rehash-task"
+    rehash_mock.delay.assert_called_once_with(dry_run=False)
+
+    result = await db_session.execute(select(AuditLog).where(AuditLog.action == "storage.rehash_audio"))
+    log = result.scalar_one_or_none()
+    assert log is not None
+    assert log.actor_id == str(admin.id)
+    assert log.details["dry_run"] is False
+
+
+@pytest.mark.asyncio
+async def test_admin_rehash_audio_endpoint_broker_unavailable(client, db_session, make_user, auth_headers, monkeypatch):
+    """A broker failure when queuing audio rehash returns 503."""
+    admin = await make_user("admin", role="admin")
+
+    from kombu.exceptions import OperationalError as KombuOperationalError
+
+    rehash_mock = MagicMock()
+    rehash_mock.delay.side_effect = KombuOperationalError("broker down")
+    monkeypatch.setattr("songhive.api.routes.admin.rehash_audio_files", rehash_mock)
+
+    response = client.post(
+        "/api/v1/admin/rehash-audio",
+        headers=auth_headers(admin),
+        json={"dry_run": True},
+    )
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_admin_provision_federation_keys_endpoint(client, db_session, make_user, auth_headers, monkeypatch):
+    """Admins can queue federation key provisioning and the action is audited."""
+    admin = await make_user("admin", role="admin")
+
+    provision_mock = MagicMock()
+    provision_mock.delay.return_value = MagicMock(id="provision-task")
+    monkeypatch.setattr("songhive.api.routes.admin.provision_federation_keys", provision_mock)
+
+    response = client.post(
+        "/api/v1/admin/provision-federation-keys",
+        headers=auth_headers(admin),
+        json={"dry_run": False},
+    )
+    assert response.status_code == status.HTTP_202_ACCEPTED
+    data = response.json()
+    assert data["status"] == "queued"
+    assert data["task_id"] == "provision-task"
+    provision_mock.delay.assert_called_once_with(dry_run=False)
+
+    result = await db_session.execute(select(AuditLog).where(AuditLog.action == "federation.provision_keys"))
+    log = result.scalar_one_or_none()
+    assert log is not None
+    assert log.actor_id == str(admin.id)
+    assert log.details["dry_run"] is False
