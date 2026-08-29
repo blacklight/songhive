@@ -421,12 +421,50 @@
         },
         "allTargetTypes": "All target types"
       },
-      "storage": {
-        "title": "Storage",
-        "trigger": "Trigger cleanup",
-        "triggered": "Storage cleanup started.",
-        "triggerError": "Could not trigger storage cleanup: {message}",
-        "description": "Run an orphaned-file cleanup task. This may take a while and cannot be undone."
+      "tasks": {
+        "title": "Tasks",
+        "storageCleanup": {
+          "title": "Storage cleanup",
+          "description": "Run an orphaned-file cleanup task. This may take a while and cannot be undone.",
+          "trigger": "Trigger cleanup",
+          "triggered": "Storage cleanup started.",
+          "triggerError": "Could not trigger storage cleanup: {message}"
+        },
+        "syncTags": {
+          "title": "Sync tags",
+          "description": "Rewrite embedded tags on one or more tracks to match the database metadata.",
+          "allWarning": "This will enqueue tag rewrites for all tracks and may take a while.",
+          "scopeLabel": "Scope",
+          "scopeAll": "All tracks",
+          "scopeTrack": "Track",
+          "scopeAlbum": "Album",
+          "scopeArtist": "Artist",
+          "scopeLibrary": "Library",
+          "targetIdLabel": "Target ID",
+          "targetIdHint": "Required when a single track, album, artist, or library is selected.",
+          "targetIdRequired": "A target ID is required for the selected scope.",
+          "dryRun": "Dry run",
+          "trigger": "Sync tags",
+          "triggered": "Tag sync queued for {count} track(s).",
+          "dryRunTriggered": "Dry run complete: {count} track(s) would be queued.",
+          "triggerError": "Could not trigger tag sync: {message}"
+        },
+        "rehashAudio": {
+          "title": "Rehash audio",
+          "description": "Migrate audio files to audio-only SHA-256 hashes. This is a long-running task.",
+          "dryRun": "Dry run",
+          "trigger": "Rehash audio",
+          "triggered": "Audio rehash task queued.",
+          "triggerError": "Could not trigger audio rehash: {message}"
+        },
+        "provisionFederationKeys": {
+          "title": "Provision federation keys",
+          "description": "Generate ActivityPub actor URLs and keypairs for users that are missing them.",
+          "dryRun": "Dry run",
+          "trigger": "Provision keys",
+          "triggered": "Federation key provisioning task queued.",
+          "triggerError": "Could not trigger federation key provisioning: {message}"
+        }
       }
     }
   },

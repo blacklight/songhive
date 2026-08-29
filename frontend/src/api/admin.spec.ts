@@ -20,6 +20,9 @@ import {
   deleteInvite,
   listAuditLogs,
   triggerStorageCleanup,
+  syncTags,
+  rehashAudio,
+  provisionFederationKeys,
   type AdminUserResponse,
   type AdminInviteResponse,
   type AdminInviteCreateRequest,
@@ -290,5 +293,41 @@ describe("admin endpoints", () => {
       method: "POST",
     });
     expect(result).toBeNull();
+  });
+
+  it("syncTags sends POST to /admin/sync-tags", async () => {
+    const body = { track_id: "track-1", dry_run: false };
+    apiRequest.mockResolvedValueOnce({ enqueued: 1, status: "queued" });
+    const result = await syncTags(body);
+    expect(apiRequest).toHaveBeenCalledWith("/admin/sync-tags", {
+      method: "POST",
+      body,
+    });
+    expect(result).toEqual({ enqueued: 1, status: "queued" });
+  });
+
+  it("rehashAudio sends POST to /admin/rehash-audio", async () => {
+    const body = { dry_run: true };
+    apiRequest.mockResolvedValueOnce({ task_id: "task-1", status: "queued" });
+    const result = await rehashAudio(body);
+    expect(apiRequest).toHaveBeenCalledWith("/admin/rehash-audio", {
+      method: "POST",
+      body,
+    });
+    expect(result).toEqual({ task_id: "task-1", status: "queued" });
+  });
+
+  it("provisionFederationKeys sends POST to /admin/provision-federation-keys", async () => {
+    const body = { dry_run: false };
+    apiRequest.mockResolvedValueOnce({ task_id: "task-2", status: "queued" });
+    const result = await provisionFederationKeys(body);
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/admin/provision-federation-keys",
+      {
+        method: "POST",
+        body,
+      },
+    );
+    expect(result).toEqual({ task_id: "task-2", status: "queued" });
   });
 });

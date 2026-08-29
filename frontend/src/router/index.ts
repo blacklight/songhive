@@ -236,9 +236,9 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/admin/AuditView.vue"),
       },
       {
-        path: "storage",
-        name: "adminStorage",
-        component: () => import("@/views/admin/StorageView.vue"),
+        path: "tasks",
+        name: "adminTasks",
+        component: () => import("@/views/admin/TasksView.vue"),
       },
     ],
   },

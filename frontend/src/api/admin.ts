@@ -16,6 +16,13 @@ export type BulkUserActionRequest =
   components["schemas"]["BulkUserActionRequest"];
 export type BulkUserActionResponse =
   components["schemas"]["BulkUserActionResponse"];
+export type SyncTagsRequest = components["schemas"]["SyncTagsRequest"];
+export type SyncTagsResponse = components["schemas"]["SyncTagsResponse"];
+export type RehashAudioRequest = components["schemas"]["RehashAudioRequest"];
+export type ProvisionFederationKeysRequest =
+  components["schemas"]["ProvisionFederationKeysRequest"];
+export type AdminTaskQueuedResponse =
+  components["schemas"]["AdminTaskQueuedResponse"];
 
 interface StorageBackendStats {
   backend: string;
@@ -197,4 +204,32 @@ export function listAuditLogs(params?: {
 
 export function triggerStorageCleanup(): Promise<unknown> {
   return apiRequest<unknown>("/admin/storage/cleanup", { method: "POST" });
+}
+
+export function syncTags(body: SyncTagsRequest): Promise<SyncTagsResponse> {
+  return apiRequest<SyncTagsResponse>("/admin/sync-tags", {
+    method: "POST",
+    body,
+  });
+}
+
+export function rehashAudio(
+  body: RehashAudioRequest = { dry_run: false },
+): Promise<AdminTaskQueuedResponse> {
+  return apiRequest<AdminTaskQueuedResponse>("/admin/rehash-audio", {
+    method: "POST",
+    body,
+  });
+}
+
+export function provisionFederationKeys(
+  body: ProvisionFederationKeysRequest = { dry_run: false },
+): Promise<AdminTaskQueuedResponse> {
+  return apiRequest<AdminTaskQueuedResponse>(
+    "/admin/provision-federation-keys",
+    {
+      method: "POST",
+      body,
+    },
+  );
 }

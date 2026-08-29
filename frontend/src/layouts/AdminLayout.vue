@@ -20,7 +20,7 @@ const adminNav = [
   { name: "Reports", to: "/admin/reports", icon: "flag" },
   { name: "Invites", to: "/admin/invites", icon: "user-plus" },
   { name: "Audit", to: "/admin/audit", icon: "clipboard-list" },
-  { name: "Storage", to: "/admin/storage", icon: "database" },
+  { name: "Tasks", to: "/admin/tasks", icon: "list-check" },
 ];
 </script>
 

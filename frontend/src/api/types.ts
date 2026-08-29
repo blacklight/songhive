@@ -2016,6 +2016,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/rehash-audio": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rehash Audio
+     * @description Trigger the audio-only SHA-256 rehash Celery task (admin only).
+     */
+    post: operations["rehash_audio_api_v1_admin_rehash_audio_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/provision-federation-keys": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Provision Federation Keys Endpoint
+     * @description Trigger the federation key provisioning Celery task (admin only).
+     */
+    post: operations["provision_federation_keys_endpoint_api_v1_admin_provision_federation_keys_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/files/upload": {
     parameters: {
       query?: never;
@@ -2428,6 +2468,16 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * AdminTaskQueuedResponse
+     * @description Response returned after queueing an admin background task.
+     */
+    AdminTaskQueuedResponse: {
+      /** Task Id */
+      task_id?: string | null;
+      /** Status */
+      status: string;
     };
     /**
      * AdminUserResponse
@@ -3306,6 +3356,17 @@ export interface components {
       visibility?: components["schemas"]["Visibility"] | null;
     };
     /**
+     * ProvisionFederationKeysRequest
+     * @description Request body for triggering federation key provisioning.
+     */
+    ProvisionFederationKeysRequest: {
+      /**
+       * Dry Run
+       * @default false
+       */
+      dry_run: boolean;
+    };
+    /**
      * PublicUserResponse
      * @description Public user profile response (internal id excluded).
      */
@@ -3398,6 +3459,17 @@ export interface components {
       email_verified: boolean;
       /** Role */
       role: string;
+    };
+    /**
+     * RehashAudioRequest
+     * @description Request body for triggering an audio rehash task.
+     */
+    RehashAudioRequest: {
+      /**
+       * Dry Run
+       * @default false
+       */
+      dry_run: boolean;
     };
     /**
      * RemoveLibraryTracksRequest
@@ -3649,6 +3721,11 @@ export interface components {
        * @default false
        */
       all: boolean;
+      /**
+       * Dry Run
+       * @default false
+       */
+      dry_run: boolean;
     };
     /**
      * SyncTagsResponse
@@ -8453,6 +8530,72 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SyncTagsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  rehash_audio_api_v1_admin_rehash_audio_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RehashAudioRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminTaskQueuedResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  provision_federation_keys_endpoint_api_v1_admin_provision_federation_keys_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ProvisionFederationKeysRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminTaskQueuedResponse"];
         };
       };
       /** @description Validation Error */
