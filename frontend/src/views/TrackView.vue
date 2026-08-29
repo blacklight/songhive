@@ -20,6 +20,7 @@ import { useEntityDelete } from "@/composables/useEntityDelete";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import HashtagList from "@/components/hashtags/HashtagList.vue";
+import GenreList from "@/components/genres/GenreList.vue";
 import { toQueueTrack } from "@/player/enrich";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -174,7 +175,7 @@ async function loadTrack() {
   album.value = null;
 
   try {
-    track.value = await getTrack(trackId.value, { include: "hashtags" });
+    track.value = await getTrack(trackId.value, { include: "hashtags,genres" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -283,6 +284,10 @@ watch(
 
           <div v-if="track.hashtags?.length" class="track-view__hashtags">
             <HashtagList :hashtags="track.hashtags" />
+          </div>
+
+          <div v-if="track.genres?.length" class="track-view__genres">
+            <GenreList :genres="track.genres" />
           </div>
         </div>
 
@@ -403,5 +408,11 @@ watch(
 .track-view__hashtags-label {
   font-size: 0.875rem;
   color: var(--color-text-muted);
+}
+
+.track-view__genres {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 </style>

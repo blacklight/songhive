@@ -33,6 +33,7 @@ import ShareDialog from "@/components/share/ShareDialog.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import HashtagList from "@/components/hashtags/HashtagList.vue";
+import GenreList from "@/components/genres/GenreList.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -216,7 +217,7 @@ async function loadAlbum() {
   loading.value = true;
   error.value = null;
   try {
-    album.value = await getAlbum(albumId.value, { include: "hashtags" });
+    album.value = await getAlbum(albumId.value, { include: "hashtags,genres" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -324,6 +325,10 @@ watch(
 
           <div v-if="album.hashtags?.length" class="album-view__hashtags">
             <HashtagList :hashtags="album.hashtags" />
+          </div>
+
+          <div v-if="album.genres?.length" class="album-view__genres">
+            <GenreList :genres="album.genres" />
           </div>
 
           <p v-if="album.description" class="album-view__description">
@@ -534,6 +539,12 @@ watch(
 .album-view__hashtags-label {
   font-size: 0.875rem;
   color: var(--color-text-muted);
+}
+
+.album-view__genres {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .album-view__section {

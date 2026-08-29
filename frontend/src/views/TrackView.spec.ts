@@ -34,6 +34,7 @@ function createTestRouter() {
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
       { path: "/hashtags/:name", component: { template: "<div/>" } },
+      { path: "/genres/:name", component: { template: "<div/>" } },
     ],
   });
 }
@@ -42,6 +43,7 @@ function createTrack(
   id: string,
   title: string,
   hashtags: string[] = [],
+  genres: string[] = [],
 ): TrackResponse {
   return {
     id,
@@ -56,6 +58,7 @@ function createTrack(
     visibility: "public",
     owner_id: "user-1",
     hashtags,
+    genres,
   };
 }
 
@@ -123,7 +126,7 @@ describe("TrackView", () => {
     await mountAt("/tracks/track-1");
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "hashtags",
+      include: "hashtags,genres",
     });
     expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1");
@@ -200,7 +203,7 @@ describe("TrackView", () => {
     await flushPromises();
 
     expect(tracksApi.getTrack).toHaveBeenLastCalledWith("track-2", {
-      include: "hashtags",
+      include: "hashtags,genres",
     });
     expect(wrapper.text()).toContain("Song Two");
   });

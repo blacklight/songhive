@@ -14,7 +14,9 @@ import {
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
 import { useEntityHashtags } from "@/composables/useEntityHashtags";
+import { useEntityGenres } from "@/composables/useEntityGenres";
 import HashtagInput from "@/components/hashtags/HashtagInput.vue";
+import GenreInput from "@/components/genres/GenreInput.vue";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import type { Visibility } from "@/api/libraries";
@@ -40,7 +42,6 @@ const error = ref<string | null>(null);
 const title = ref("");
 const artistName = ref("");
 const albumTitle = ref("");
-const genre = ref("");
 const trackNumber = ref("");
 const discNumber = ref("");
 const releaseYear = ref("");
@@ -56,6 +57,7 @@ const { canManage } = useCanManage(
 );
 
 const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
+const { genres, resetGenres, syncGenres } = useEntityGenres();
 
 const visibilityOptions = computed(() => [
   { value: "private", label: t("browse.visibility.private") },
@@ -67,7 +69,6 @@ function resetForm() {
   title.value = track.value?.title ?? "";
   artistName.value = track.value?.artist?.name ?? "";
   albumTitle.value = track.value?.album?.title ?? "";
-  genre.value = track.value?.genre ?? "";
   trackNumber.value =
     track.value?.track_number != null ? String(track.value.track_number) : "";
   discNumber.value =
@@ -76,6 +77,7 @@ function resetForm() {
     track.value?.release_year != null ? String(track.value.release_year) : "";
   visibility.value = toVisibility(track.value?.visibility);
   resetHashtags(track.value?.hashtags ?? null);
+  resetGenres(track.value?.genres ?? null);
   error.value = null;
 }
 
@@ -84,7 +86,7 @@ async function loadTrack() {
   error.value = null;
   try {
     track.value = await getTrack(trackId.value, {
-      include: "artist,album,hashtags",
+      include: "artist,album,hashtags,genres",
     });
   } catch (err) {
     error.value =
@@ -118,7 +120,7 @@ async function onSubmit() {
     title: title.value.trim(),
     artist_name: artistName.value.trim(),
     album_title: albumTitle.value.trim() || null,
-    genre: genre.value.trim() || null,
+    genre: genres.value.join("; ") || null,
     track_number: parseNumber(trackNumber.value),
     disc_number: parseNumber(discNumber.value),
     release_year: parseNumber(releaseYear.value),
@@ -128,6 +130,7 @@ async function onSubmit() {
   try {
     await updateTrack(trackId.value, body);
     await syncHashtags("tracks", trackId.value);
+    await syncGenres("tracks", trackId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/tracks/${trackId.value}`);
   } catch (err) {
@@ -170,7 +173,7 @@ async function onDelete() {
 
 async function refreshTrack() {
   try {
-    track.value = await getTrack(trackId.value, { include: "hashtags" });
+    track.value = await getTrack(trackId.value, { include: "hashtags,genres" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -253,7 +256,12 @@ watch(
           :required="true"
         />
         <AppInput v-model="albumTitle" :label="t('browse.edit.album')" />
-        <AppInput v-model="genre" :label="t('browse.detail.genre')" />
+        <GenreInput
+          v-if="canManage"
+          v-model="genres"
+          :placeholder="t('genres.placeholder')"
+          :aria-label="t('genres.ariaLabel')"
+        />
         <div class="track-edit-view__row">
           <AppInput
             v-model="trackNumber"

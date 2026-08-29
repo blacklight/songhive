@@ -327,7 +327,11 @@ feeds the hashtag system: the genre string is split and mapped to valid hashtag
 names so genre-derived hashtags appear alongside user-created ones. The public
 API exposes global genre listing and deletion in `api/routes/genres.py`, and
 per-resource genre management is supported through `POST`/`DELETE` sub-routes on
-tracks and albums as well as the `genre` field on track/album updates.
+tracks and albums as well as the `genre` field on track/album updates. The
+frontend mirrors the hashtag browsing experience: `GenresView` and `GenreView`
+list and filter genres, `GenreInput`/`GenreList` let users edit and display
+genres on tracks and albums, and the sidebar provides a top-level "Genres"
+navigation link.
 
 ---
 

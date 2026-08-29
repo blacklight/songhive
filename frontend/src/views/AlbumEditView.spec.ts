@@ -40,8 +40,11 @@ function createAlbum(
     release_year: 2024,
     cover_url: null,
     description: "A lovely album.",
+    genre: null,
     owner_id: ownerId,
     visibility: "public",
+    hashtags: [],
+    genres: [],
   };
 }
 
@@ -97,7 +100,7 @@ describe("AlbumEditView", () => {
     const router = await mountAt("/albums/album-1/edit");
 
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
-      include: "hashtags",
+      include: "hashtags,genres",
     });
     expect(wrapper.text()).toContain("Edit album");
 
@@ -117,7 +120,7 @@ describe("AlbumEditView", () => {
     const router = await mountAt("/albums/album-1/edit");
 
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
-      include: "hashtags",
+      include: "hashtags,genres",
     });
     expect(router.currentRoute.value.path).toBe("/albums/album-1");
   });
@@ -127,7 +130,7 @@ describe("AlbumEditView", () => {
     const router = await mountAt("/albums/album-1/edit");
 
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
-      include: "hashtags",
+      include: "hashtags,genres",
     });
     expect(wrapper.text()).toContain("Edit album");
     expect(router.currentRoute.value.path).toBe("/albums/album-1/edit");
@@ -171,6 +174,7 @@ describe("AlbumEditView", () => {
       title: "Meadowland Updated",
       release_year: 2025,
       description: "Updated description.",
+      genre: null,
       visibility: "private",
     };
     expect(albumsApi.updateAlbum).toHaveBeenCalledWith("album-1", expectedBody);

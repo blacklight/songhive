@@ -163,6 +163,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/HashtagView.vue"),
       },
       {
+        path: "genres",
+        name: "genres",
+        component: () => import("@/views/GenresView.vue"),
+      },
+      {
+        path: "genres/:name",
+        name: "genre",
+        component: () => import("@/views/GenreView.vue"),
+      },
+      {
         path: "radio",
         name: "radio",
         component: () => import("@/views/RadioView.vue"),

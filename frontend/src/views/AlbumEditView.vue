@@ -14,7 +14,9 @@ import {
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
 import { useEntityHashtags } from "@/composables/useEntityHashtags";
+import { useEntityGenres } from "@/composables/useEntityGenres";
 import HashtagInput from "@/components/hashtags/HashtagInput.vue";
+import GenreInput from "@/components/genres/GenreInput.vue";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import type { Visibility } from "@/api/libraries";
@@ -52,6 +54,7 @@ const { canManage } = useCanManage(
 );
 
 const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
+const { genres, resetGenres, syncGenres } = useEntityGenres();
 
 const visibilityOptions = computed(() => [
   { value: "private", label: t("browse.visibility.private") },
@@ -66,6 +69,7 @@ function resetForm() {
   description.value = album.value?.description ?? "";
   visibility.value = toVisibility(album.value?.visibility);
   resetHashtags(album.value?.hashtags ?? null);
+  resetGenres(album.value?.genres ?? null);
   error.value = null;
 }
 
@@ -73,7 +77,7 @@ async function loadAlbum() {
   loading.value = true;
   error.value = null;
   try {
-    album.value = await getAlbum(albumId.value, { include: "hashtags" });
+    album.value = await getAlbum(albumId.value, { include: "hashtags,genres" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -106,12 +110,14 @@ async function onSubmit() {
     title: title.value.trim(),
     release_year: parseNumber(releaseYear.value),
     description: description.value.trim() || null,
+    genre: genres.value.join("; ") || null,
     visibility: visibility.value,
   };
 
   try {
     await updateAlbum(albumId.value, body);
     await syncHashtags("albums", albumId.value);
+    await syncGenres("albums", albumId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/albums/${albumId.value}`);
   } catch (err) {
@@ -154,7 +160,7 @@ async function onDelete() {
 
 async function refreshAlbum() {
   try {
-    album.value = await getAlbum(albumId.value, { include: "hashtags" });
+    album.value = await getAlbum(albumId.value, { include: "hashtags,genres" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -240,6 +246,12 @@ watch(
           v-model="description"
           as="textarea"
           :label="t('browse.edit.description')"
+        />
+        <GenreInput
+          v-if="canManage"
+          v-model="genres"
+          :placeholder="t('genres.placeholder')"
+          :aria-label="t('genres.ariaLabel')"
         />
         <AppSelect
           v-model="visibility"

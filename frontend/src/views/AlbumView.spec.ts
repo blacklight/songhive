@@ -34,6 +34,7 @@ function createTestRouter() {
       { path: "/albums/:id", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/hashtags/:name", component: { template: "<div/>" } },
+      { path: "/genres/:name", component: { template: "<div/>" } },
     ],
   });
 }
@@ -51,9 +52,11 @@ function createAlbum(
     release_year: 2024,
     cover_url: null,
     description: "A lovely album.",
+    genre: null,
     owner_id: "user-1",
     visibility: "public",
     hashtags,
+    genres: [],
   };
 }
 
@@ -96,6 +99,8 @@ function createTrack(id: string, title: string): TrackResponse {
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
     owner_id: "user-1",
+    hashtags: [],
+    genres: [],
     artist: { id: "artist-1", name: "The Larks", image_url: null },
     album: {
       id: "album-1",
@@ -149,7 +154,7 @@ describe("AlbumView", () => {
     await mountAt("/albums/album-1");
 
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
-      include: "hashtags",
+      include: "hashtags,genres",
     });
     expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
     expect(tracksApi.listTracks).toHaveBeenCalledWith({
@@ -255,7 +260,7 @@ describe("AlbumView", () => {
     await flushPromises();
 
     expect(albumsApi.getAlbum).toHaveBeenLastCalledWith("album-2", {
-      include: "hashtags",
+      include: "hashtags,genres",
     });
     expect(wrapper.text()).toContain("Sunset");
   });
