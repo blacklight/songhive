@@ -9,20 +9,6 @@ import AppLayout from "@/layouts/AppLayout.vue";
 import AuthLayout from "@/layouts/AuthLayout.vue";
 import AdminLayout from "@/layouts/AdminLayout.vue";
 
-function placeholder(
-  path: string,
-  name: string,
-  phase: number,
-  meta?: Record<string, unknown>,
-): RouteRecordRaw {
-  return {
-    path,
-    component: () => import("@/views/PlaceholderView.vue"),
-    props: { name, phase },
-    meta,
-  } as RouteRecordRaw;
-}
-
 const authChildren: RouteRecordRaw[] = [
   {
     path: "login",
@@ -209,15 +195,41 @@ const routes: RouteRecordRaw[] = [
     component: AdminLayout,
     meta: { requiresAuth: true, requiresAdmin: true },
     children: [
-      placeholder("", "adminDashboard", 6),
-      placeholder("users", "adminUsers", 6),
-      placeholder("users/:id", "adminUser", 6),
-      placeholder("users/invite", "adminUserInvite", 6),
-      placeholder("settings", "adminSettings", 6),
-      placeholder("reports", "adminReports", 6),
-      placeholder("invites", "adminInvites", 6),
-      placeholder("audit", "adminAudit", 6),
-      placeholder("storage", "adminStorage", 6),
+      {
+        path: "",
+        name: "adminDashboard",
+        component: () => import("@/views/admin/DashboardView.vue"),
+      },
+      {
+        path: "users",
+        name: "adminUsers",
+        component: () => import("@/views/admin/UsersView.vue"),
+      },
+      {
+        path: "settings",
+        name: "adminSettings",
+        component: () => import("@/views/admin/SettingsView.vue"),
+      },
+      {
+        path: "reports",
+        name: "adminReports",
+        component: () => import("@/views/admin/ReportsView.vue"),
+      },
+      {
+        path: "invites",
+        name: "adminInvites",
+        component: () => import("@/views/admin/InvitesView.vue"),
+      },
+      {
+        path: "audit",
+        name: "adminAudit",
+        component: () => import("@/views/admin/AuditView.vue"),
+      },
+      {
+        path: "storage",
+        name: "adminStorage",
+        component: () => import("@/views/admin/StorageView.vue"),
+      },
     ],
   },
   { path: "/403", component: () => import("@/views/ForbiddenView.vue") },
