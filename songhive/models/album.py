@@ -2,13 +2,14 @@
 Album model.
 """
 
+from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._enums import Visibility
-from .base import Base
+from .base import Base, TZDateTime
 
 if TYPE_CHECKING:
     from .artist import Artist
@@ -28,6 +29,7 @@ class Album(Base):
     cover_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cover_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
+    cover_enriched_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
     owner_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,

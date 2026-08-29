@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from .celery import celery_app
+from .images import enrich_images
 from .tags import sync_track_tags
 
 logger = logging.getLogger(__name__)
@@ -50,5 +51,10 @@ def enrich_track(track_id: str, force: bool = False) -> bool:
             sync_track_tags.delay(track_id)  # type: ignore
         except Exception as exc:
             logger.warning("Could not enqueue tag sync after MusicBrainz enrichment for %s: %s", track_id, exc)
+
+        try:
+            enrich_images.delay(track_id)  # type: ignore
+        except Exception as exc:
+            logger.warning("Could not enqueue image enrichment after MusicBrainz enrichment for %s: %s", track_id, exc)
 
     return result

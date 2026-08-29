@@ -280,6 +280,10 @@ class MusicBrainzConfig(BaseSettings):
         default=True,
         description="Fetch cover art from the Cover Art Archive",
     )
+    fetch_artist_images: bool = Field(
+        default=True,
+        description="Fetch artist images from MusicBrainz URL relations",
+    )
 
 
 class ImportConfig(BaseSettings):

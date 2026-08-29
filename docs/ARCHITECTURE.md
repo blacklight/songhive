@@ -179,7 +179,8 @@ songhive/
 │   ├── federation.py       # Activity delivery + inbox processing tasks
 │   ├── transcoding.py      # Pre-transcoding tasks
 │   ├── email.py            # Email delivery tasks
-│   ├── musicbrainz.py      # MusicBrainz enrichment tasks
+│   ├── musicbrainz.py      # MusicBrainz metadata + Cover Art Archive enrichment
+│   ├── images.py           # Artist image + album cover enrichment
 │   └── storage.py          # Orphaned-file cleanup (scheduled via crontab)
 ├── ws/                     # WebSocket support
 │   └── events.py           # Tornado WebSocket handler (JWT auth, CORS origin check)
@@ -255,7 +256,7 @@ these subsections:
 | `federation`   | enabled, instance_domain, instance_name, private_key_path, allow/block lists |
 | `auth`         | secret_key, token TTLs, rate_limit_enabled, rate_limit_window_seconds, trusted_proxy_hops |
 | `email`        | smtp_host, smtp_port, smtp_user, from_address, tls settings   |
-| `musicbrainz`  | enabled, user_agent, cover_art settings                       |
+| `musicbrainz`  | enabled, user_agent, cover_art, artist_image settings       |
 | `imports`      | auto_enrich, import_visibility                                |
 | `streaming`    | max_bitrate, max_bitrate_by_role, default_bitrate, chunk_size, transcode_cache_enabled |
 
@@ -405,7 +406,9 @@ alembic revision --autogenerate -m "add example column"
    import).
 5. A Celery `import_` task processes metadata, creates/updates `Track`,
    `Album`, `Artist` records, and optionally triggers `enrich_track`.
-6. A separate Celery `transcoding` task pre-transcodes to requested formats
+6. `enrich_track` enqueues `sync_track_tags` and `enrich_images` on success;
+   the latter fetches artist images and any missing album covers.
+7. A separate Celery `transcoding` task pre-transcodes to requested formats
    and stores results as `TranscodedFile` rows pointing back to a `StoredFile`.
 
 **Orphan GC** — the `storage.cleanup_orphaned_files` Celery task runs on the
@@ -535,6 +538,7 @@ All background work is handled by Celery workers. Redis is the broker
 | `tasks/transcoding.py`| Pre-transcode to common formats, cache result            |
 | `tasks/email.py`     | Verification emails, password-reset emails                |
 | `tasks/musicbrainz.py`| MusicBrainz + Cover Art Archive metadata enrichment      |
+| `tasks/images.py`    | Artist image + Cover Art Archive cover enrichment         |
 | `tasks/storage.py`   | Orphaned `StoredFile` GC, audio-only hash rehash (scheduled) |
 
 The `cleanup_orphaned_files_schedule` config accepts any 5-field cron

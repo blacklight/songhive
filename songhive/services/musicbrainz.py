@@ -8,6 +8,7 @@ import io
 import logging
 import re
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast
 
@@ -20,6 +21,7 @@ from sqlalchemy.orm import selectinload
 from ..config.schema import MusicBrainzConfig
 from ..models.album import Album
 from ..models.artist import Artist
+from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..services.storage import StorageService, is_unique_constraint_error
 
@@ -129,6 +131,26 @@ class MusicBrainzService:
             await self._call(
                 musicbrainzngs.get_recording_by_id,
                 recording_id,
+                includes,
+            ),
+        )
+
+    async def fetch_artist(
+        self,
+        artist_id: str,
+        *,
+        include_url_rels: bool = False,
+    ) -> Dict[str, Any]:
+        """Fetch an artist by its MusicBrainz ID."""
+        includes: list[str] = []
+        if include_url_rels:
+            includes.append("url-rels")
+
+        return cast(
+            Dict[str, Any],
+            await self._call(
+                musicbrainzngs.get_artist_by_id,
+                artist_id,
                 includes,
             ),
         )
@@ -269,6 +291,205 @@ class MusicBrainzService:
         self._mark_enriched(track)
         await session.commit()
         return True
+
+    async def enrich_images(
+        self,
+        session,
+        track_id: str,
+        storage_service: Optional[StorageService] = None,
+        force: bool = False,
+    ) -> bool:
+        """
+        Enrich an artist image and album cover for a track.
+
+        Artist images are resolved from MusicBrainz URL relations (e.g.
+        Wikimedia Commons or direct image URLs). Album covers use the Cover Art
+        Archive when a release MusicBrainz ID is known.
+
+        :returns: ``True`` if the artist or album was updated.
+        """
+        if not self.config.enabled or not self.config.fetch_artist_images:
+            return False
+
+        track = await self._load_track_for_images(session, track_id)
+        if track is None:
+            return False
+
+        updated = False
+        artist = track.artist
+        if artist is not None:
+            artist_updated = await self.enrich_artist_image(
+                session,
+                artist,
+                storage_service,
+                owner_id=track.owner_id,
+                visibility=track.visibility,
+                force=force,
+            )
+            updated = updated or artist_updated
+
+        album = track.album
+        if album is not None and storage_service is not None:
+            album_updated = await self._maybe_store_cover_art_for_image_enrichment(
+                session,
+                album,
+                storage_service,
+                force=force,
+            )
+            updated = updated or album_updated
+
+        await session.commit()
+        return updated
+
+    async def _load_track_for_images(
+        self,
+        session,
+        track_id: str,
+    ) -> Optional[Track]:
+        """Fetch the track and its artist and album for image enrichment."""
+        result = await session.execute(
+            select(Track)
+            .options(
+                selectinload(Track.artist),
+                selectinload(Track.album),
+            )
+            .where(Track.id == track_id)
+        )
+        track = cast(Optional[Track], result.scalar_one_or_none())
+        if track is None:
+            logger.warning("Track %s not found for image enrichment", track_id)
+            return None
+        return track
+
+    async def enrich_artist_image_by_id(
+        self,
+        session,
+        artist_id: str,
+        storage_service: Optional[StorageService] = None,
+        force: bool = False,
+    ) -> bool:
+        """Fetch and store an artist image by artist ID."""
+        result = await session.execute(select(Artist).where(Artist.id == artist_id))
+        artist = cast(Optional[Artist], result.scalar_one_or_none())
+        if artist is None:
+            logger.warning("Artist %s not found for image enrichment", artist_id)
+            return False
+
+        return await self.enrich_artist_image(
+            session,
+            artist,
+            storage_service,
+            owner_id=None,
+            visibility=None,
+            force=force,
+        )
+
+    async def enrich_album_cover_by_id(
+        self,
+        session,
+        album_id: str,
+        storage_service: StorageService,
+        force: bool = False,
+    ) -> bool:
+        """Fetch and store an album cover by album ID."""
+        result = await session.execute(select(Album).where(Album.id == album_id))
+        album = cast(Optional[Album], result.scalar_one_or_none())
+        if album is None:
+            logger.warning("Album %s not found for cover enrichment", album_id)
+            return False
+
+        return await self._maybe_store_cover_art_for_image_enrichment(
+            session,
+            album,
+            storage_service,
+            force=force,
+        )
+
+    async def enrich_artist_image(
+        self,
+        session,
+        artist: Artist,
+        storage_service: Optional[StorageService] = None,
+        *,
+        owner_id: Optional[str] = None,
+        visibility: Optional[str] = None,
+        force: bool = False,
+    ) -> bool:
+        """Fetch and store an artist image when missing."""
+        if artist.image_file_id is not None and not force:
+            return False
+        if not force and artist.image_enriched_at is not None:
+            logger.debug("Artist %s already image enriched; skipping", artist.id)
+            return False
+        if not artist.musicbrainz_id:
+            self._mark_image_enriched(artist)
+            return False
+
+        image_url = await self._fetch_artist_image_url(artist.musicbrainz_id)
+        if not image_url:
+            self._mark_image_enriched(artist)
+            return False
+
+        if storage_service is None:
+            artist.image_url = image_url
+            self._mark_image_enriched(artist)
+            return True
+
+        data = await self._download_image(image_url)
+        if data:
+            stored = await self._store_image_file(
+                session,
+                artist,
+                "image_file_id",
+                data,
+                storage_service,
+                owner_id=owner_id,
+                visibility=visibility,
+            )
+            if stored is not None:
+                artist.image_url = None
+                self._mark_image_enriched(artist)
+                return True
+
+        artist.image_url = image_url
+        self._mark_image_enriched(artist)
+        return True
+
+    async def _maybe_store_cover_art_for_image_enrichment(
+        self,
+        session,
+        album: Album,
+        storage_service: StorageService,
+        force: bool = False,
+    ) -> bool:
+        """Store album cover art when missing and a release ID is known."""
+        if album.cover_file_id is not None and not force:
+            return False
+        if not force and album.cover_enriched_at is not None:
+            return False
+        if not album.musicbrainz_id:
+            self._mark_cover_enriched(album)
+            return False
+
+        await self._store_cover_art(
+            session,
+            album,
+            album.musicbrainz_id,
+            storage_service,
+            owner_id=album.owner_id,
+        )
+        self._mark_cover_enriched(album)
+        return album.cover_file_id is not None
+
+    @staticmethod
+    def _mark_image_enriched(artist: Artist) -> None:
+        """Mark an artist as having been processed for images."""
+        artist.image_enriched_at = datetime.datetime.now(datetime.timezone.utc)
+
+    @staticmethod
+    def _mark_cover_enriched(album: Album) -> None:
+        """Mark an album as having been processed for cover art."""
+        album.cover_enriched_at = datetime.datetime.now(datetime.timezone.utc)
 
     async def _load_track_context(
         self,
@@ -568,6 +789,155 @@ class MusicBrainzService:
         raw["mb_recording"] = details.get("recording", recording)
         track.raw_metadata = raw
 
+    async def _fetch_artist_image_url(self, artist_id: str) -> Optional[str]:
+        """Return a candidate image URL for an artist from MusicBrainz URL relations."""
+        try:
+            result = await self.fetch_artist(artist_id, include_url_rels=True)
+        except Exception as exc:
+            logger.debug("Could not fetch artist %s: %s", artist_id, exc)
+            return None
+
+        artist = result.get("artist") if isinstance(result, dict) else None
+        if not isinstance(artist, dict):
+            return None
+
+        relations = (
+            artist.get("url-relation-list")
+            or artist.get("url-relations")
+            or artist.get("relation-list")
+            or artist.get("relations")
+            or []
+        )
+        if not isinstance(relations, list):
+            return None
+
+        for relation in relations:
+            if not isinstance(relation, dict):
+                continue
+            if not _is_image_relation(relation):
+                continue
+            url = relation.get("url", {})
+            if isinstance(url, dict):
+                target = url.get("resource") or url.get("id")
+                if isinstance(target, str) and target.startswith("http"):
+                    resolved = await self._resolve_image_url(target)
+                    if resolved:
+                        return resolved
+            target = relation.get("target")
+            if isinstance(target, str) and target.startswith("http"):
+                resolved = await self._resolve_image_url(target)
+                if resolved:
+                    return resolved
+
+        return None
+
+    async def _resolve_image_url(self, url: str) -> Optional[str]:
+        """Resolve a relation URL to a direct image URL."""
+        parsed = urllib.parse.urlparse(url)
+        if parsed.netloc.endswith("commons.wikimedia.org"):
+            return await self._wikimedia_file_url(url)
+        if _looks_like_image_url(url):
+            return url
+        return None
+
+    async def _wikimedia_file_url(self, url: str) -> Optional[str]:
+        """Resolve a Wikimedia Commons file page to a direct image URL."""
+        parsed = urllib.parse.urlparse(url)
+        path = parsed.path or ""
+        if path.startswith("/wiki/Category:") or path.startswith("/wiki/File:"):
+            title = path.split(":", 1)[1]
+            title = urllib.parse.unquote(title)
+            title = title.replace(" ", "_")
+            api_url = (
+                "https://commons.wikimedia.org/w/api.php"
+                f"?action=query&titles=File:{urllib.parse.quote(title)}"
+                "&prop=imageinfo&iiprop=url|mime&format=json&origin=*"
+            )
+            try:
+                response = await self._client.get(api_url)
+            except Exception as exc:
+                logger.debug("Wikimedia API request failed for %s: %s", url, exc)
+                return None
+
+            if response.status_code != 200:
+                return None
+
+            try:
+                payload = response.json()
+            except Exception:
+                return None
+
+            pages = payload.get("query", {}).get("pages", {})
+            for page in pages.values():
+                if not isinstance(page, dict):
+                    continue
+                for info in page.get("imageinfo", []):
+                    if isinstance(info, dict):
+                        image_url = info.get("url")
+                        if isinstance(image_url, str) and image_url.startswith("http"):
+                            return image_url
+
+        return None
+
+    async def _download_image(self, url: str) -> Optional[bytes]:
+        """Download an image from a URL, following redirects."""
+        for _ in range(_MAX_COVER_ART_REDIRECTS):
+            try:
+                response = await self._client.get(url, follow_redirects=False)
+            except Exception as exc:
+                logger.debug("Image download failed for %s: %s", url, exc)
+                return None
+
+            if 200 <= response.status_code < 300:
+                data = response.content
+                if isinstance(data, bytes) and data and _is_valid_image(data):
+                    return data
+                return None
+
+            if 300 <= response.status_code < 400:
+                location = response.headers.get("location")
+                if not location:
+                    return None
+                url = str(location)
+                continue
+
+            return None
+
+        logger.debug("Too many redirects for image %s", url)
+        return None
+
+    async def _store_image_file(
+        self,
+        session,
+        entity,
+        field_name: str,
+        data: bytes,
+        storage_service: StorageService,
+        owner_id: Optional[str] = None,
+        visibility: Optional[str] = None,
+    ) -> Optional[StoredFile]:
+        """Store an image for an entity and assign its StoredFile."""
+        content_type = _guess_image_mime(data)
+        buffer = io.BytesIO(data)
+
+        stored, _ = await storage_service.store_file(
+            session,
+            buffer,
+            content_type,
+            prefix="images",
+            owner_id=owner_id,
+            visibility=visibility or "private",
+            return_duplicate=True,
+        )
+        if stored is None:
+            return None
+
+        setattr(entity, field_name, str(stored.id))
+        relationship = field_name.replace("_file_id", "_file")
+        if hasattr(entity, relationship):
+            setattr(entity, relationship, stored)
+        return stored
+
     @staticmethod
     def _mark_enriched(track: Track) -> None:
         """Mark a track as having been processed by MusicBrainz."""
@@ -753,3 +1123,39 @@ def _guess_image_mime(data: bytes) -> str:
     if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         return "image/webp"
     return "image/jpeg"
+
+
+_IMAGE_URL_RE = re.compile(r"\.(?:png|jpe?g|gif|webp)(?:\?|#|$)", re.IGNORECASE)
+
+
+def _looks_like_image_url(url: str) -> bool:
+    """Return ``True`` when a URL looks like a direct image link."""
+    return _IMAGE_URL_RE.search(url) is not None
+
+
+def _is_valid_image(data: bytes) -> bool:
+    """Return ``True`` when the bytes start with a known image signature."""
+    if not data:
+        return False
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if data.startswith(b"\xff\xd8"):
+        return True
+    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+        return True
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return True
+    return False
+
+
+def _is_image_relation(relation: Dict[str, Any]) -> bool:
+    """Return ``True`` when a MusicBrainz URL relation may point to an image."""
+    relation_type = relation.get("type") or ""
+    if not isinstance(relation_type, str):
+        return False
+    relation_type = relation_type.lower()
+    if relation_type in {"image", "logo", "wikimedia"}:
+        return True
+    if "image" in relation_type or "photo" in relation_type or "picture" in relation_type:
+        return True
+    return False

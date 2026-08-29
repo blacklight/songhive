@@ -64,6 +64,8 @@ enabled = true
 # rate_limit_per_second = 1.0
 # Fetch cover art from the Cover Art Archive when a matching release is found.
 # fetch_cover_art = true
+# Fetch artist images from MusicBrainz URL relations (e.g. Wikimedia Commons).
+# fetch_artist_images = true
 
 [auth]
 registration_mode = "open"

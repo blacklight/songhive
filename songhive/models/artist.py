@@ -2,12 +2,13 @@
 Artist model.
 """
 
+from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base
+from .base import Base, TZDateTime
 
 if TYPE_CHECKING:
     from .album import Album
@@ -32,6 +33,7 @@ class Artist(Base):
         nullable=True,
         index=True,
     )
+    image_enriched_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
 
     image_file = relationship("StoredFile", foreign_keys=[image_file_id], lazy="selectin")
     cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")
