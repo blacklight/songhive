@@ -71,11 +71,12 @@ class AuditLogResponse(BaseModel):
 )
 async def list_users(
     response: Response,
-    q: Optional[str] = Query(None, min_length=1, max_length=128),
+    q: Optional[str] = Query(None, max_length=128),
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
 ):
     """List all users (admin only), optionally filtering by username or email."""
+    q = q.strip() if q else None
     if q:
         users, total = await user_manager.search_users(db, q, limit=pagination.limit, offset=pagination.offset)
     else:

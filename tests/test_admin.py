@@ -86,6 +86,31 @@ async def test_admin_list_users_paginates(client, db_session, config, make_user,
 
 
 @pytest.mark.asyncio
+async def test_admin_list_users_ignores_empty_query(client, db_session, config, make_user, auth_headers):
+    """An empty or whitespace-only query must not trigger a 422 and should list all users."""
+    admin = await make_user("admin", role="admin")
+    await make_user("alice")
+    headers = auth_headers(admin)
+
+    response = client.get(
+        "/api/v1/admin/users?q=&limit=25&offset=0",
+        headers=headers,
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert len(data) == 2
+    usernames = {u["username"] for u in data}
+    assert usernames == {"admin", "alice"}
+
+    response = client.get(
+        "/api/v1/admin/users?q=%20%20&limit=25&offset=0",
+        headers=headers,
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert len(response.json()) == 2
+
+
+@pytest.mark.asyncio
 async def test_admin_promote_user(client, db_session, config, make_user, auth_headers):
     """Test that an admin can promote a user to admin."""
     admin = await make_user("admin", role="admin")
