@@ -122,6 +122,7 @@ songhive/
 │   ├── library_track.py    # Library ↔ Track join table
 │   ├── playlist.py
 │   ├── favorite.py
+│   ├── genre.py            # Genre and GenreTrack/GenreAlbum associations
 │   ├── history.py          # Listening history entries
 │   ├── radio.py
 │   ├── share_grant.py      # Per-user access grant for a specific item
@@ -310,6 +311,16 @@ libraries, stored files):
 - `private` — visible only to the owner (and users with a `ShareGrant`)
 - `local` — visible to authenticated users on the same instance
 - `public` — visible to everyone including federated instances
+
+### Genres
+
+Genres are stored in a dedicated `Genre` table and linked to `Track` and
+`Album` through `GenreTrack` and `GenreAlbum` association tables. The free-text
+`Track.genre` and `Album.genre` columns remain the source of truth for embedded
+metadata round-trips, while the normalised tables enable browsing, counting, and
+filtering. Genres will also feed the hashtag system: the genre string will be
+split and mapped to valid hashtag names so genre-derived hashtags appear
+alongside user-created ones.
 
 ---
 

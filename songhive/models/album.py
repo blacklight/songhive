@@ -12,6 +12,7 @@ from .base import Base
 
 if TYPE_CHECKING:
     from .artist import Artist
+    from .genre import Genre, GenreAlbum
     from .hashtag import Hashtag, HashtagAlbum
     from .track import Track
 
@@ -23,6 +24,7 @@ class Album(Base):
     artist_id: Mapped[str] = mapped_column(ForeignKey("artists.id"), index=True)
     musicbrainz_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, unique=True, index=True)
     release_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    genre: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     cover_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cover_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
@@ -49,6 +51,18 @@ class Album(Base):
     )
     hashtag_associations: Mapped[List["HashtagAlbum"]] = relationship(
         "HashtagAlbum",
+        back_populates="album",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    genres: Mapped[List["Genre"]] = relationship(
+        "Genre",
+        secondary="genre_albums",
+        viewonly=True,
+        lazy="selectin",
+    )
+    genre_associations: Mapped[List["GenreAlbum"]] = relationship(
+        "GenreAlbum",
         back_populates="album",
         cascade="all, delete-orphan",
         lazy="selectin",

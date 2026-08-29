@@ -10,6 +10,7 @@ from songhive.models._enums import Visibility
 from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.favorite import Favorite
+from songhive.models.genre import Genre, GenreAlbum, GenreTrack
 from songhive.models.history import ListeningHistory
 from songhive.models.library import Library
 from songhive.models.playlist import Playlist
@@ -344,3 +345,78 @@ async def test_track_play_count_defaults_to_zero(db_session, regular_user):
     await db_session.flush()
 
     assert track.play_count == 0
+
+
+def test_genre_model():
+    """Genre stores a normalised name."""
+    genre = Genre(name="rock")
+    assert genre.name == "rock"
+
+
+@pytest.mark.asyncio
+async def test_genre_persistence(db_session):
+    """Genre rows can be persisted and queried."""
+    genre = Genre(name="indie pop")
+    db_session.add(genre)
+    await db_session.flush()
+
+    assert genre.id is not None
+    assert genre.name == "indie pop"
+
+
+@pytest.mark.asyncio
+async def test_genre_track_association(db_session, regular_user):
+    """Genres can be associated with tracks."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    genre = Genre(name="rock")
+    db_session.add(genre)
+    await db_session.flush()
+
+    assoc = GenreTrack(genre_id=genre.id, track_id=track.id)
+    db_session.add(assoc)
+    await db_session.flush()
+
+    assert assoc.id is not None
+    assert assoc.track_id == track.id
+    assert assoc.genre_id == genre.id
+
+
+@pytest.mark.asyncio
+async def test_genre_album_association(db_session, regular_user):
+    """Genres can be associated with albums."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Album",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    genre = Genre(name="jazz")
+    db_session.add(genre)
+    await db_session.flush()
+
+    assoc = GenreAlbum(genre_id=genre.id, album_id=album.id)
+    db_session.add(assoc)
+    await db_session.flush()
+
+    assert assoc.id is not None
+    assert assoc.album_id == album.id
+    assert assoc.genre_id == genre.id

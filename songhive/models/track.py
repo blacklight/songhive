@@ -18,6 +18,7 @@ from .base import Base, TZDateTime
 if TYPE_CHECKING:
     from .album import Album
     from .artist import Artist
+    from .genre import Genre, GenreTrack
     from .hashtag import Hashtag, HashtagTrack
 
 
@@ -74,6 +75,18 @@ class Track(Base):
     )
     hashtag_associations: Mapped[List["HashtagTrack"]] = relationship(
         "HashtagTrack",
+        back_populates="track",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    genres: Mapped[List["Genre"]] = relationship(
+        "Genre",
+        secondary="genre_tracks",
+        viewonly=True,
+        lazy="selectin",
+    )
+    genre_associations: Mapped[List["GenreTrack"]] = relationship(
+        "GenreTrack",
         back_populates="track",
         cascade="all, delete-orphan",
         lazy="selectin",

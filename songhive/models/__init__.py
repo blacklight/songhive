@@ -5,6 +5,7 @@ from .artist import Artist
 from .audit_log import AuditLog
 from .base import Base, get_session, init_db, reset_db
 from .favorite import Favorite
+from .genre import Genre, GenreAlbum, GenreTrack
 from .hashtag import Hashtag, HashtagAlbum, HashtagArtist, HashtagLibrary, HashtagPlaylist, HashtagTrack
 from .history import ListeningHistory
 from .invite import Invite
@@ -31,6 +32,9 @@ __all__ = [
     "AuditLog",
     "Base",
     "Favorite",
+    "Genre",
+    "GenreAlbum",
+    "GenreTrack",
     "get_session",
     "Hashtag",
     "HashtagAlbum",
