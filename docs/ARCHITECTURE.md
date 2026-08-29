@@ -90,6 +90,8 @@ songhive/
 │   │   ├── playlists.py
 │   │   ├── libraries.py
 │   │   ├── favorites.py
+│   │   ├── hashtags.py     # Global hashtag browsing and admin deletion
+│   │   ├── genres.py       # Global genre browsing and admin deletion
 │   │   ├── history.py      # Listening history
 │   │   ├── radios.py       # Dynamic radio generation
 │   │   ├── files.py        # Generic file upload/download (StoredFile)
@@ -322,7 +324,10 @@ metadata round-trips, while the normalised tables enable browsing, counting, and
 filtering. `services/genres.py` validates names, manages associations,
 propagates album genres from the intersection of their tracks' genres, and
 feeds the hashtag system: the genre string is split and mapped to valid hashtag
-names so genre-derived hashtags appear alongside user-created ones.
+names so genre-derived hashtags appear alongside user-created ones. The public
+API exposes global genre listing and deletion in `api/routes/genres.py`, and
+per-resource genre management is supported through `POST`/`DELETE` sub-routes on
+tracks and albums as well as the `genre` field on track/album updates.
 
 ---
 

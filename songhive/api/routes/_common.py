@@ -16,6 +16,12 @@ class HashtagListRequest(BaseModel):
     hashtags: List[str]
 
 
+class GenreListRequest(BaseModel):
+    """Set/replace genres on a resource."""
+
+    genres: List[str]
+
+
 class HasOwnerId(Protocol):
     """Protocol for objects that expose an ``owner_id`` attribute."""
 

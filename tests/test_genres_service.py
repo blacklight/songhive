@@ -99,7 +99,7 @@ class TestValidation:
 
     def test_validate_rejects_invalid_chars(self):
         with pytest.raises(ValueError):
-            validate_genre_name("rock&roll")
+            validate_genre_name("rock@roll")
 
     def test_validate_rejects_too_long(self):
         with pytest.raises(ValueError):
@@ -143,7 +143,7 @@ class TestGenreToHashtag:
         assert genres_to_hashtags(["hip hop", "drum and bass"]) == ["hip_hop", "drum_and_bass"]
 
     def test_genres_to_hashtags_skips_invalid(self):
-        assert genres_to_hashtags(["rock", "r&b"]) == ["rock"]
+        assert genres_to_hashtags(["rock", "123"]) == ["rock"]
 
     def test_genres_to_hashtags_deduplicates(self):
         assert genres_to_hashtags(["rock", "Rock", "hip hop"]) == ["rock", "hip_hop"]

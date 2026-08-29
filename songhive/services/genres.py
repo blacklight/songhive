@@ -513,7 +513,7 @@ def genres_to_hashtags(genre_names: List[str]) -> List[str]:
     hashtags: List[str] = []
     seen: set[str] = set()
     for name in genre_names:
-        tag = re.sub(r"([^a-z0-9_]+)", "_", name)
+        tag = re.sub(r"[^a-z0-9_]+", "_", name.lower())
         try:
             tag = validate_hashtag_name(tag)
         except ValueError:
