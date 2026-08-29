@@ -5,6 +5,7 @@ Tests for the hashtag API endpoints.
 import pytest
 
 from songhive.models._enums import Visibility
+from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.services.hashtags import add_hashtags_to_entity
@@ -30,6 +31,26 @@ async def tagged_track(db_session, regular_user):
     return track
 
 
+@pytest.fixture
+async def tagged_album(db_session, regular_user):
+    """Create a public album with a hashtag attached."""
+    artist = Artist(name="API Album Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="API Album",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    await add_hashtags_to_entity(db_session, "album", album.id, ["rock"], user_id=regular_user.id)
+    return album
+
+
 def test_list_hashtag_items(tagged_track, client):
     """A valid hashtag returns its tagged items."""
     response = client.get("/api/v1/hashtags/rock")
@@ -38,6 +59,29 @@ def test_list_hashtag_items(tagged_track, client):
     assert len(body) == 1
     assert body[0]["type"] == "track"
     assert body[0]["id"] == str(tagged_track.id)
+
+
+def test_list_hashtag_items_by_type(tagged_track, tagged_album, client):
+    """The type query parameter filters hashtag items by entity type."""
+    response = client.get("/api/v1/hashtags/rock?type=track")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["type"] == "track"
+    assert body[0]["id"] == str(tagged_track.id)
+
+    response = client.get("/api/v1/hashtags/rock?type=album")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["type"] == "album"
+    assert body[0]["id"] == str(tagged_album.id)
+
+
+def test_list_hashtag_items_invalid_type(client):
+    """An invalid type query parameter returns a 422 error."""
+    response = client.get("/api/v1/hashtags/rock?type=unknown")
+    assert response.status_code == 422
 
 
 def test_list_hashtag_items_invalid_name_returns_404(client):

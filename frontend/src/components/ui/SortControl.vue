@@ -14,10 +14,12 @@ export interface Props {
   direction: "asc" | "desc";
   options: Option[];
   label?: string;
+  showField?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   label: undefined,
+  showField: true,
 });
 
 const emit = defineEmits<{
@@ -51,6 +53,7 @@ function onToggleDirection() {
 <template>
   <div class="sort-control">
     <AppSelect
+      v-if="props.showField"
       :model-value="props.modelValue"
       :options="props.options"
       :label="props.label ?? t('sort.label')"

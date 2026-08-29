@@ -126,6 +126,33 @@ def test_list_genre_items(genre_track, client):
     assert body[0]["id"] == str(genre_track.id)
 
 
+def test_list_genre_items_by_type(genre_track, genre_album, client):
+    """The type query parameter filters genre items by entity type."""
+    response = client.get("/api/v1/genres/rock?type=track")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["type"] == "track"
+    assert body[0]["id"] == str(genre_track.id)
+
+    response = client.get("/api/v1/genres/jazz?type=album")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["type"] == "album"
+    assert body[0]["id"] == str(genre_album.id)
+
+    response = client.get("/api/v1/genres/rock?type=album")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_genre_items_invalid_type(client):
+    """An invalid type query parameter returns a 422 error."""
+    response = client.get("/api/v1/genres/rock?type=playlist")
+    assert response.status_code == 422
+
+
 def test_list_genre_items_invalid_name_returns_404(client):
     """Malformed genre names in the URL return 404 instead of 500."""
     response = client.get("/api/v1/genres/foo%23bar")

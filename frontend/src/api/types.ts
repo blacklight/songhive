@@ -2056,6 +2056,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/celery/tasks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Celery Tasks
+     * @description List all Celery tasks currently running on workers (admin only).
+     */
+    get: operations["list_celery_tasks_api_v1_admin_celery_tasks_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/celery/terminate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Terminate Celery Tasks Endpoint
+     * @description Terminate one or more running Celery tasks by id (admin only).
+     */
+    post: operations["terminate_celery_tasks_endpoint_api_v1_admin_celery_terminate_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/files/upload": {
     parameters: {
       query?: never;
@@ -2952,6 +2992,58 @@ export interface components {
       failed: {
         [key: string]: unknown;
       }[];
+    };
+    /**
+     * CeleryTaskInfo
+     * @description A currently running Celery task reported by the worker inspect API.
+     */
+    CeleryTaskInfo: {
+      /** Task Id */
+      task_id: string;
+      /** Name */
+      name: string;
+      /** Worker */
+      worker: string;
+      /**
+       * Args
+       * @default []
+       */
+      args: unknown[];
+      /**
+       * Kwargs
+       * @default {}
+       */
+      kwargs: {
+        [key: string]: unknown;
+      };
+      /** Runtime */
+      runtime?: number | null;
+      /** Hostname */
+      hostname?: string | null;
+      /** Acknowledged */
+      acknowledged?: boolean | null;
+      /** Delivery Info */
+      delivery_info?: {
+        [key: string]: unknown;
+      } | null;
+      /** Time Start */
+      time_start?: number | null;
+    };
+    /**
+     * CeleryTerminateRequest
+     * @description Request body for terminating running Celery tasks.
+     */
+    CeleryTerminateRequest: {
+      /** Task Ids */
+      task_ids: string[];
+    };
+    /**
+     * CeleryTerminateResponse
+     * @description Response returned after a bulk Celery terminate request.
+     */
+    CeleryTerminateResponse: {
+      /** Terminated */
+      terminated: number;
     };
     /**
      * ChangePasswordRequest
@@ -7322,6 +7414,8 @@ export interface operations {
   list_hashtag_items_api_v1_hashtags__hashtag__get: {
     parameters: {
       query?: {
+        /** @description Filter by item type */
+        type?: string | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
@@ -7427,6 +7521,8 @@ export interface operations {
   list_genre_items_api_v1_genres__genre__get: {
     parameters: {
       query?: {
+        /** @description Filter by item type */
+        type?: string | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
@@ -8596,6 +8692,59 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminTaskQueuedResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_celery_tasks_api_v1_admin_celery_tasks_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CeleryTaskInfo"][];
+        };
+      };
+    };
+  };
+  terminate_celery_tasks_endpoint_api_v1_admin_celery_terminate_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CeleryTerminateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CeleryTerminateResponse"];
         };
       };
       /** @description Validation Error */

@@ -26,6 +26,7 @@ export interface ListGenreItemsParams {
   offset?: number;
   sort_by?: string;
   sort_dir?: "asc" | "desc";
+  type?: GenreItemType;
 }
 
 export interface ListGenreItemsResult {
@@ -35,6 +36,7 @@ export interface ListGenreItemsResult {
 }
 
 export type GenreEntityType = "tracks" | "albums";
+export type GenreItemType = "track" | "album";
 
 export async function listGenres(
   params?: ListGenresParams,

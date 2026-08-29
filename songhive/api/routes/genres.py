@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models.user import User
 from ...services import audit
 from ...services.genres import (
+    GENRE_ITEM_TYPES,
     GenreSummary,
     delete_genre_globally,
     get_items_for_genre,
@@ -84,6 +85,7 @@ async def list_all_genres(
 async def list_genre_items(
     response: Response,
     genre: str,
+    type: Optional[str] = Query(None, description="Filter by item type"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"type", "created_at"}, "created_at")),
@@ -98,10 +100,17 @@ async def list_genre_items(
             detail="Genre not found",
         ) from None
 
+    if type is not None and type not in GENRE_ITEM_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid item type: {type}",
+        )
+
     items, total = await get_items_for_genre(
         db,
         genre_name=genre,
         user=user,
+        item_type=type,
         limit=pagination.limit,
         offset=pagination.offset,
         sort_by=sort.field,

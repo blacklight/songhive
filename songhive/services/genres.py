@@ -70,6 +70,9 @@ _GENRE_ENTITY_REGISTRY: dict[str, _EntityInfo] = {
     "album": (Album, GenreAlbum, "album_id", "album"),
 }
 
+# Public set of item types returned by the genre listing APIs.
+GENRE_ITEM_TYPES: set[str] = set(_GENRE_ENTITY_REGISTRY.keys())
+
 _GENRE_SPLIT_RE = re.compile(r"[;,|\t\\]")
 
 _GENRE_RE = re.compile(r"^(?=.*[a-z])[a-z0-9&/\-_ ]+$")
@@ -179,6 +182,7 @@ def _accessible_items_cte(
     genre_id: str,
     user: Optional[User],
     target_user_id: Optional[str] = None,
+    item_type: Optional[str] = None,
 ) -> Any:
     """
     Build a CTE of ``(item_type, item_id, created_at)`` rows for a single
@@ -186,6 +190,8 @@ def _accessible_items_cte(
     """
     subqueries: List[Any] = []
     for entity_type, (model, assoc_class, entity_col, acl_type) in _GENRE_ENTITY_REGISTRY.items():
+        if item_type is not None and entity_type != item_type:
+            continue
         if target_user_id is not None and not hasattr(model, "owner_id"):
             continue
 
@@ -453,13 +459,15 @@ async def get_items_for_genre(
     genre_name: str,
     user: Optional[User] = None,
     target_user_id: Optional[str] = None,
+    item_type: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
     sort_by: str = "created_at",
     sort_dir: str = "desc",
 ) -> Tuple[List[GenreItem], int]:
     """
-    Return the visible items for a genre, optionally scoped to an owner.
+    Return the visible items for a genre, optionally scoped to an owner or
+    a single entity type.
 
     Returns ``(items, total_count)``.
     """
@@ -467,7 +475,7 @@ async def get_items_for_genre(
     if genre is None:
         return [], 0
 
-    cte = _accessible_items_cte(genre.id, user, target_user_id)
+    cte = _accessible_items_cte(genre.id, user, target_user_id, item_type)
     if cte is None:
         return [], 0
 

@@ -19,9 +19,12 @@ from songhive.services.genres import (
     get_items_for_genre,
     list_genres,
     propagate_album_genres,
+    propagate_track_genres,
     remove_genre_from_entity,
     set_genres_for_entity,
+    set_track_inherited_genres,
     split_genre_string,
+    sync_album_genres,
     validate_genre_name,
 )
 from songhive.services.hashtags import get_hashtags_for_entity
@@ -297,6 +300,25 @@ class TestListingAndVisibility:
         assert total == 0
         assert items == []
 
+    async def test_get_items_for_genre_by_type(self, db_session, regular_user):
+        artist = await _make_artist(db_session)
+        track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+        album = await _make_album(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+        await set_genres_for_entity(db_session, "track", track.id, ["rock"])
+        await set_genres_for_entity(db_session, "album", album.id, ["rock"])
+
+        track_items, total = await get_items_for_genre(db_session, "rock", item_type="track")
+        assert total == 1
+        assert [(i.type, i.id) for i in track_items] == [("track", str(track.id))]
+
+        album_items, total = await get_items_for_genre(db_session, "rock", item_type="album")
+        assert total == 1
+        assert [(i.type, i.id) for i in album_items] == [("album", str(album.id))]
+
+        unknown_items, total = await get_items_for_genre(db_session, "rock", item_type="artist")
+        assert total == 0
+        assert unknown_items == []
+
 
 class TestDelete:
     """Tests for global genre deletion."""
@@ -388,3 +410,82 @@ class TestAlbumGenrePropagation:
         await set_genres_for_entity(db_session, "track", track.id, ["pop"])
         await propagate_album_genres(db_session, album)
         assert album.genre == "pop"
+
+
+class TestTrackGenreInheritance:
+    """Tests for propagating album genres to tracks."""
+
+    async def test_album_genre_propagates_to_track_without_explicit(self, db_session, regular_user):
+        artist = await _make_artist(db_session)
+        album = await _make_album(db_session, artist, owner=regular_user)
+        track = await _make_track(db_session, artist, owner=regular_user, album=album)
+
+        await set_genres_for_entity(db_session, "album", album.id, ["rock"])
+        updated = await propagate_track_genres(db_session, album)
+
+        assert updated == [str(track.id)]
+        assert track.genre == "rock"
+        assert await get_genres_for_entity(db_session, "track", track.id) == ["rock"]
+
+    async def test_track_with_explicit_genre_does_not_inherit(self, db_session, regular_user):
+        artist = await _make_artist(db_session)
+        album = await _make_album(db_session, artist, owner=regular_user)
+        track = await _make_track(db_session, artist, owner=regular_user, album=album, genre="pop")
+        await set_genres_for_entity(db_session, "track", track.id, ["pop"])
+
+        await set_genres_for_entity(db_session, "album", album.id, ["rock"])
+        updated = await propagate_track_genres(db_session, album)
+
+        assert updated == []
+        assert track.genre == "pop"
+        assert await get_genres_for_entity(db_session, "track", track.id) == ["pop"]
+
+    async def test_album_genre_change_updates_inherited_tracks(self, db_session, regular_user):
+        artist = await _make_artist(db_session)
+        album = await _make_album(db_session, artist, owner=regular_user)
+        track = await _make_track(db_session, artist, owner=regular_user, album=album)
+
+        await set_genres_for_entity(db_session, "album", album.id, ["rock"])
+        await propagate_track_genres(db_session, album)
+        assert track.genre == "rock"
+
+        await set_genres_for_entity(db_session, "album", album.id, ["indie"])
+        await propagate_track_genres(db_session, album)
+
+        assert track.genre == "indie"
+        assert await get_genres_for_entity(db_session, "track", track.id) == ["indie"]
+
+    async def test_sync_album_genres_converges_with_explicit_override(self, db_session, regular_user):
+        artist = await _make_artist(db_session)
+        album = await _make_album(db_session, artist, owner=regular_user)
+        track1 = await _make_track(db_session, artist, owner=regular_user, album=album)
+        track2 = await _make_track(db_session, artist, owner=regular_user, album=album)
+
+        await set_genres_for_entity(db_session, "album", album.id, ["rock"])
+        await sync_album_genres(db_session, album)
+
+        assert album.genre == "rock"
+        assert track1.genre == "rock"
+        assert track2.genre == "rock"
+
+        track1.genre = "pop"
+        await set_genres_for_entity(db_session, "track", track1.id, ["pop"])
+        await sync_album_genres(db_session, album)
+
+        assert album.genre is None
+        assert track1.genre == "pop"
+        assert track2.genre is None
+        assert await get_genres_for_entity(db_session, "track", track1.id) == ["pop"]
+        assert await get_genres_for_entity(db_session, "track", track2.id) == []
+
+    async def test_set_track_inherited_genres_skips_explicit(self, db_session, regular_user):
+        artist = await _make_artist(db_session)
+        album = await _make_album(db_session, artist, owner=regular_user)
+        track = await _make_track(db_session, artist, owner=regular_user, album=album, genre="pop")
+        await set_genres_for_entity(db_session, "track", track.id, ["pop"])
+
+        changed = await set_track_inherited_genres(db_session, track, ["rock"])
+
+        assert changed is False
+        assert track.genre == "pop"
+        assert await get_genres_for_entity(db_session, "track", track.id) == ["pop"]

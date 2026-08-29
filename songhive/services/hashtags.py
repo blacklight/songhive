@@ -81,6 +81,9 @@ _ENTITY_REGISTRY: dict[str, _EntityInfo] = {
     "library": (Library, HashtagLibrary, "library_id", "library"),
 }
 
+# Public set of item types returned by the hashtag listing APIs.
+HASHTAG_ITEM_TYPES: set[str] = set(_ENTITY_REGISTRY.keys())
+
 _HASHTAG_TAG_KEYS = {
     "TAGS",
     "KEYWORDS",
@@ -220,6 +223,7 @@ def _accessible_items_cte(
     hashtag_id: str,
     user: Optional[User],
     target_user_id: Optional[str] = None,
+    item_type: Optional[str] = None,
 ) -> Any:
     """
     Build a CTE of ``(item_type, item_id, created_at)`` rows for a single
@@ -227,6 +231,8 @@ def _accessible_items_cte(
     """
     subqueries: List[Any] = []
     for entity_type, (model, assoc_class, entity_col, acl_type) in _ENTITY_REGISTRY.items():
+        if item_type is not None and entity_type != item_type:
+            continue
         if target_user_id is not None and not hasattr(model, "owner_id"):
             continue
 
@@ -452,13 +458,15 @@ async def get_items_for_hashtag(
     hashtag_name: str,
     user: Optional[User] = None,
     target_user_id: Optional[str] = None,
+    item_type: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
     sort_by: str = "created_at",
     sort_dir: str = "desc",
 ) -> Tuple[List[TaggedItem], int]:
     """
-    Return the visible items for a hashtag, optionally scoped to an owner.
+    Return the visible items for a hashtag, optionally scoped to an owner or
+    a single entity type.
 
     Returns ``(items, total_count)``.
     """
@@ -466,7 +474,7 @@ async def get_items_for_hashtag(
     if hashtag is None:
         return [], 0
 
-    cte = _accessible_items_cte(hashtag.id, user, target_user_id)
+    cte = _accessible_items_cte(hashtag.id, user, target_user_id, item_type)
     if cte is None:
         return [], 0
 

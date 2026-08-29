@@ -26,6 +26,7 @@ export interface ListHashtagItemsParams {
   offset?: number;
   sort_by?: string;
   sort_dir?: "asc" | "desc";
+  type?: TaggedItemType;
 }
 
 export interface ListHashtagItemsResult {
@@ -36,6 +37,8 @@ export interface ListHashtagItemsResult {
 
 export type EntityType =
   "tracks" | "albums" | "artists" | "playlists" | "libraries";
+export type TaggedItemType =
+  "artist" | "album" | "track" | "playlist" | "library";
 
 export async function listHashtags(
   params?: ListHashtagsParams,

@@ -247,6 +247,30 @@ class TestListingAndVisibility:
         assert total == 0
         assert items == []
 
+    async def test_get_items_for_hashtag_by_type(self, db_session, regular_user):
+        artist = await _make_artist(db_session)
+        track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+        album = await _make_album(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+        await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        await add_hashtags_to_entity(db_session, "album", album.id, ["rock"], user_id=regular_user.id)
+        await add_hashtags_to_entity(db_session, "artist", artist.id, ["rock"])
+
+        track_items, total = await get_items_for_hashtag(db_session, "rock", item_type="track")
+        assert total == 1
+        assert [(i.type, i.id) for i in track_items] == [("track", str(track.id))]
+
+        album_items, total = await get_items_for_hashtag(db_session, "rock", item_type="album")
+        assert total == 1
+        assert [(i.type, i.id) for i in album_items] == [("album", str(album.id))]
+
+        artist_items, total = await get_items_for_hashtag(db_session, "rock", item_type="artist")
+        assert total == 1
+        assert [(i.type, i.id) for i in artist_items] == [("artist", str(artist.id))]
+
+        unknown_items, total = await get_items_for_hashtag(db_session, "rock", item_type="library")
+        assert total == 0
+        assert unknown_items == []
+
 
 class TestDelete:
     """Tests for global hashtag deletion."""
