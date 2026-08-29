@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...models.user import User, UserRole
-from ...services import audit, deletion, music
+from ...services import audit, auth, deletion, music
 from ...services import settings as settings_service
 from ...services import stats as stats_service
 from ...services.federation import unpublish_track_activity
@@ -53,8 +53,12 @@ class AuditLogResponse(BaseModel):
     id: str
     action: str
     actor_id: Optional[str]
+    actor_name: Optional[str] = None
+    actor_username: Optional[str] = None
     target_type: Optional[str]
     target_id: Optional[str]
+    target_name: Optional[str] = None
+    target_username: Optional[str] = None
     details: Optional[dict]
     ip_address: Optional[str]
     created_at: datetime
@@ -248,6 +252,7 @@ async def delete_user(
     recursive: bool = Query(False, description="Also delete all content created by the user"),
 ):
     """Delete a user account and all dependent data (admin only)."""
+    target_user = await auth.get_user_by_id(db, user_id)
     await revoke_all_user_refresh_tokens(redis, user_id)
 
     await audit.log_action(
@@ -256,7 +261,11 @@ async def delete_user(
         action="user.delete",
         target_type="user",
         target_id=user_id,
-        details={"recursive": recursive},
+        details={
+            "recursive": recursive,
+            "username": target_user.username if target_user else None,
+            "display_name": target_user.display_name if target_user else None,
+        },
         ip_address=client_ip(request),
     )
 
@@ -352,8 +361,9 @@ async def list_audit_logs(
         limit=limit,
         offset=offset,
     )
+    enriched = await audit.enrich_audit_logs(db, logs)
     Pagination(limit=limit, offset=offset).set_total(response, total)
-    return [AuditLogResponse.model_validate(log) for log in logs]
+    return [AuditLogResponse.model_validate(data) for data in enriched]
 
 
 class AdminInviteResponse(BaseModel):

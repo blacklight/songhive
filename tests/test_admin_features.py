@@ -71,6 +71,10 @@ async def test_admin_list_audit_logs(client, db_session, make_user, auth_headers
     data = response.json()
     assert len(data) == 1
     assert data[0]["action"] == "user.promote"
+    assert data[0]["actor_name"] == admin.username
+    assert data[0]["actor_username"] == admin.username
+    assert data[0]["target_name"] == user.username
+    assert data[0]["target_username"] == user.username
     assert "X-Total-Count" in response.headers
     assert int(response.headers["X-Total-Count"]) >= 1
 
@@ -90,6 +94,54 @@ async def test_admin_audit_filtering(client, db_session, make_user, auth_headers
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert all(log["action"] == "user.activate" for log in data)
+
+
+@pytest.mark.asyncio
+async def test_admin_audit_enriches_actor_and_target_names(db_session, make_user):
+    """Audit log enrichment resolves user, track, and artist names."""
+    admin = await make_user("admin", role="admin")
+    artist = Artist(name="Test Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(title="Test Track", artist_id=artist.id)
+    db_session.add(track)
+    await db_session.flush()
+
+    log = await audit_service.log_action(
+        db_session,
+        actor_id=admin.id,
+        action="track.update",
+        target_type="track",
+        target_id=track.id,
+        details={"title": "Old Track"},
+    )
+    await db_session.commit()
+
+    enriched = await audit_service.enrich_audit_logs(db_session, [log])
+    data = enriched[0]
+
+    assert data["actor_name"] == admin.username
+    assert data["actor_username"] == admin.username
+    assert data["target_name"] == track.title
+    assert data["target_type"] == "track"
+
+
+@pytest.mark.asyncio
+async def test_admin_audit_enriches_target_name_from_details(db_session):
+    """When the target row is gone, target_name falls back to the details dict."""
+    log = await audit_service.log_action(
+        db_session,
+        actor_id=None,
+        action="track.delete",
+        target_type="track",
+        target_id="missing-id",
+        details={"title": "Deleted Track"},
+    )
+    await db_session.commit()
+
+    enriched = await audit_service.enrich_audit_logs(db_session, [log])
+    assert enriched[0]["target_name"] == "Deleted Track"
 
 
 @pytest.mark.asyncio
