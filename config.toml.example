@@ -13,6 +13,8 @@ cors_origins = []
 
 [database]
 url = "postgresql+asyncpg://songhive:songhive@localhost:5432/songhive"
+# Or, for SQLite (only recommended for development purposes or small instances):
+# url = "sqlite+aiosqlite:///./volumes/db/songhive.db"
 pool_size = 5
 max_overflow = 10
 
@@ -68,11 +70,12 @@ enabled = true
 # fetch_artist_images = true
 
 [auth]
+# Supported: "open", "invite-only", "approval-required", "closed"
 registration_mode = "open"
 require_email_verification = false
-# JWT signing secret. Generate a strong random key and never commit it:
+# TODO: JWT signing secret. Generate a strong random key and never commit it:
 # python -c "import secrets; print(secrets.token_urlsafe(64))"
-# secret_key = ""
+secret_key = "####CHANGEME####"
 access_token_expiry_minutes = 15
 refresh_token_expiry_days = 30
 password_reset_token_expiry_minutes = 30
