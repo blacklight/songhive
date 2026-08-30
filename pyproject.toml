@@ -37,6 +37,7 @@ songhive = 'songhive:main'
 include = ["songhive*"]
 
 [tool.setuptools.package-data]
+"songhive" = ["static/**/*"]
 "songhive.migrations" = ["*.mako", "versions/*.py"]
 
 [tool.black]

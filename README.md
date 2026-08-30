@@ -9,6 +9,24 @@
 [![Last Commit](https://img.shields.io/github/last-commit/BlackLight/songhive.svg)](https://git.platypush.tech/songhive/songhive/commits/branch/main)
 [![License](https://img.shields.io/github/license/blacklight/songhive.svg)](https://git.platypush.tech/blacklight/songhive/src/branch/main/LICENSE)
 
+<!-- toc -->
+
+- [Overview](#overview)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quickstart](#quickstart)
+  * [With Docker (recommended)](#with-docker-recommended)
+  * [With pip](#with-pip)
+    + [Latest stable package](#latest-stable-package)
+    + [Development from source](#development-from-source)
+    + [Initialization](#initialization)
+- [Development](#development)
+  * [Frontend](#frontend)
+- [API](#api)
+- [License](#license)
+
+<!-- tocstop -->
+
 A federated and self-hosted music sharing service, built with ActivityPub
 federation support.
 
@@ -93,9 +111,11 @@ one-off `setup` container creates and `chown`s the `./volumes` directories to
 `$PUID:$PGID` before the main services start. If you prefer to prepare the
 volumes yourself, you can also run `PUID=$(id -u) PGID=$(id -g) ./scripts/setup-volumes.sh`.
 
-### With pip (local)
+### With pip
 
 This path is useful for local development or running on an existing Python host.
+A published package is also available on PyPI and ships the built web UI, so the
+frontend does not need to be built manually when installing from PyPI.
 
 Prerequisites:
 
@@ -103,10 +123,20 @@ Prerequisites:
 - PostgreSQL
 - Redis
 - ffmpeg
-- Node.js and npm (optional, for the web UI)
+- Node.js and npm (only required to build the web UI from source)
+
+#### Latest stable package
 
 ```bash
-# Clone the repository
+# Install from PyPI
+pip install songhive
+```
+
+#### Development from source
+
+Or, clone the repository and install in editable mode for development
+
+```bash
 git clone https://git.fabiomanganiello.com/songhive.git
 cd songhive
 
@@ -114,7 +144,6 @@ cd songhive
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install the package
 pip install -e .
 
 # Optional: build the web UI (outputs to songhive/static/)
@@ -123,6 +152,11 @@ npm install
 npm run build
 cd ..
 ```
+
+#### Initialization
+
+These steps are only required for a local installation (not Docker). Adjust the
+paths and credentials as needed.
 
 Create a database and user in PostgreSQL (adjust to match your setup):
 
@@ -189,8 +223,9 @@ songhive admin create-user \
     --admin
 ```
 
-The API is available at http://localhost:8000/api/v1/ and the interactive API
-docs (Swagger) at http://localhost:8000/docs.
+If the web UI has been built, it is available at http://localhost:8000/; the
+interactive API docs (Swagger) are at http://localhost:8000/docs, and the REST
+API is served at `/api/v1/`.
 
 For UI development, run `npm run dev` from the `frontend/` directory instead of
 `npm run build`. If you use the Vite dev server (http://localhost:5173 by

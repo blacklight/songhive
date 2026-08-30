@@ -72,6 +72,7 @@ steps:
   when:
     event:
       - push
+      - tag
     paths:
       include:
         - songhive/**
@@ -157,6 +158,29 @@ steps:
 
   commands:
     - . .drone/build-image.sh
+
+###
+### Build and publish the PyPI package
+###
+
+- name: update-pip-package
+  image: alpine
+  environment:
+    TWINE_USERNAME:
+      from_secret: pypi_user
+    TWINE_PASSWORD:
+      from_secret: pypi_pass
+
+  when:
+    event:
+      - tag
+
+  depends_on:
+    - frontend-build
+    - backend-tests
+
+  commands:
+    - . .drone/update-pip-package.sh
 
 ###
 ### Upload test coverage to Codacy
