@@ -45,7 +45,7 @@ line-length = 120
 target-version = ['py310']
 
 [tool.bumpversion]
-current_version = "0.0.9"
+current_version = "0.0.10"
 commit = true
 tag = true
 
