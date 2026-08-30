@@ -14,12 +14,26 @@
 - [Overview](#overview)
 - [Features](#features)
 - [Architecture](#architecture)
-- [Quickstart](#quickstart)
-  * [With Docker (recommended)](#with-docker-recommended)
-  * [With pip](#with-pip)
+- [Installation](#installation)
+  * [Docker](#docker)
+    + [Latest image](#latest-image)
+    + [From a local checkout](#from-a-local-checkout)
+  * [pip](#pip)
     + [Latest stable package](#latest-stable-package)
-    + [Development from source](#development-from-source)
-    + [Initialization](#initialization)
+    + [From a local checkout](#from-a-local-checkout-1)
+  * [nginx setup](#nginx-setup)
+- [Configuration](#configuration)
+  * [Getting the default configuration](#getting-the-default-configuration)
+  * [Base configuration](#base-configuration)
+  * [From environment variables](#from-environment-variables)
+- [Running the service](#running-the-service)
+  * [Docker installation](#docker-installation)
+  * [pip installation](#pip-installation)
+    + [Celery](#celery)
+  * [Creating the admin user](#creating-the-admin-user)
+    + [Docker installation](#docker-installation-1)
+    + [pip installation](#pip-installation-1)
+- [Testing the installation](#testing-the-installation)
 - [Development](#development)
   * [Frontend](#frontend)
 - [API](#api)
@@ -41,6 +55,7 @@ federating with other instances (including Mastodon) via ActivityPub.
 
 - **Music Library**: Upload and organize artists, albums, and tracks
 - **Streaming**: Audio streaming with on-the-fly transcoding (MP3, OGG, FLAC, AAC, Opus)
+- **Metadata Enrichment**: Fetch metadata from external services
 - **Federation**: ActivityPub support via [pubby](https://github.com/blacklight/pubby) — federate with Mastodon and other AP-compatible services
 - **Playlists & Radios**: Create playlists and dynamic radio stations
 - **Multi-user**: User registration, profiles, and admin management
@@ -57,12 +72,12 @@ federating with other instances (including Mastodon) via ActivityPub.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
 
-## Quickstart
+## Installation
 
 Songhive can be run either as a complete Docker stack or installed locally with
 `pip`.
 
-### With Docker (recommended)
+### Docker
 
 The Docker Compose setup builds the frontend and backend images, starts
 PostgreSQL and Redis, and wires everything together behind an Nginx reverse
@@ -70,10 +85,14 @@ proxy. The `songhive`, `worker`, `postgres` and `redis` services all run as the
 same non-root UID/GID as the host user, so the files in `./volumes` are owned by
 you and are easy to access from the host.
 
-Prerequisites:
+#### Latest image
 
-- Docker and Docker Compose
-- git
+```bash
+# Run the docker-compose bootstrap script
+curl -fsSL https://git.fabiomanganiello.com/songhive/raw/branch/main/docker/bootstrap.sh | sh
+```
+
+#### From a local checkout
 
 ```bash
 # Clone the repository
@@ -86,32 +105,11 @@ cd songhive
 export PUID=$(id -u)
 export PGID=$(id -g)
 
-# Build and start all services
-docker compose up -d --build
-
-# Create the first admin user
-docker compose exec songhive songhive admin create-user \
-    --username admin \
-    --email admin@example.com \
-    --password secret \
-    --admin
+# Build the images
+docker compose build
 ```
 
-Then open:
-
-- Web UI: http://localhost/
-- Swagger UI: http://localhost/swagger-ui/
-- OpenAPI spec: http://localhost/openapi.json
-
-Stop the stack with `docker compose down`.
-
-The Docker entrypoint initializes the database tables and persists a JWT signing
-secret in `volumes/data/secret_key`, so no manual database setup is required. A
-one-off `setup` container creates and `chown`s the `./volumes` directories to
-`$PUID:$PGID` before the main services start. If you prefer to prepare the
-volumes yourself, you can also run `PUID=$(id -u) PGID=$(id -g) ./scripts/setup-volumes.sh`.
-
-### With pip
+### pip
 
 This path is useful for local development or running on an existing Python host.
 A published package is also available on PyPI and ships the built web UI, so the
@@ -121,9 +119,9 @@ Prerequisites:
 
 - Python >= 3.10
 - PostgreSQL
-- Redis
+- Redis/Valkey
 - ffmpeg
-- Node.js and npm (only required to build the web UI from source)
+- Node.js and npm (for the frontend)
 
 #### Latest stable package
 
@@ -132,12 +130,13 @@ Prerequisites:
 pip install songhive
 ```
 
-#### Development from source
+#### From a local checkout
 
 Or, clone the repository and install in editable mode for development
 
 ```bash
-git clone https://git.fabiomanganiello.com/songhive.git
+git clone https://git.fabiomanganiello.com/songhive
+# Or from GitHub: git clone https://github.com/blacklight/songhive
 cd songhive
 
 # Optional: create and activate a virtual environment
@@ -146,32 +145,38 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 pip install -e .
 
-# Optional: build the web UI (outputs to songhive/static/)
+# Build the web UI (outputs to songhive/static/)
 cd frontend
 npm install
 npm run build
 cd ..
 ```
 
-#### Initialization
+### nginx setup
 
-These steps are only required for a local installation (not Docker). Adjust the
-paths and credentials as needed.
+If you are planning to serve Songhive behind a reverse proxy, you can reuse the
+[`nginx.conf`](./docker/nginx.conf) used by the Docker setup.
 
-Create a database and user in PostgreSQL (adjust to match your setup):
+## Configuration
 
-```bash
-sudo -u postgres psql <<'SQL'
-CREATE USER songhive WITH PASSWORD 'songhive';
-CREATE DATABASE songhive OWNER songhive;
-SQL
-```
+### Getting the default configuration
 
-Copy the example configuration file and edit it:
+- If you installed Songhive through the docker-compose bootstrap script, then
+  `config.toml` should be already downloaded under the same folder as
+  `docker-compose.yml`.
+- If you built Songhive from a local checkout, then copy the [example
+  configuration file](./config.toml.example):
 
-```bash
-cp config.toml.example config.toml
-```
+  ```bash
+  cp config.toml.example config.toml
+  ```
+- Otherwise, download the latest `config.toml`:
+
+  ```bash
+  wget https://git.fabiomanganiello.com/songhive/raw/branch/main/config.toml.example
+  ```
+
+### Base configuration
 
 Set at least the following values in `config.toml`:
 
@@ -187,19 +192,53 @@ cors_origins = ["*"]  # Replace with your frontend origin(s) in production
 
 [federation]
 enabled = false  # Set a real instance_domain to enable federation
+# instance_domain = "music.example.com"
 ```
 
-Create the storage directory:
+### From environment variables
+
+All the `config.toml` configuration entries can be overridden via environment
+variables.
+
+For example:
+
+```toml
+[database]
+url = "postgresql+asyncpg://songhive:songhive@localhost:5432/songhive"
+```
+
+becomes:
 
 ```bash
-mkdir -p /path/to/writable/media
+SONGHIVE_DATABASE__URL="postgresql+asyncpg://songhive:songhive@localhost:5432/songhive"
 ```
 
-Initialize the database tables (one-time):
+## Running the service
+
+### Docker installation
 
 ```bash
-songhive admin init-db
+cd /path/to/your/songhive/installation
+docker compose up -d
 ```
+
+Then take down the stack with:
+
+```bash
+docker compose down
+```
+
+### pip installation
+
+```bash
+SONGHIVE_CONFIG="/path/to/your/songhive/installation/config.toml"
+songhive -c "$SONGHIVE_CONFIG"
+```
+
+#### Celery
+
+This is only required in a non-Docker setup. The Docker stack already runs a
+separate container for the Celery workers.
 
 Start the Celery worker in a second terminal:
 
@@ -207,29 +246,37 @@ Start the Celery worker in a second terminal:
 celery -A songhive.tasks worker -B -l info
 ```
 
-Start the Songhive server:
+### Creating the admin user
+
+#### Docker installation
 
 ```bash
-songhive
-```
-
-Create the first admin user in another terminal:
-
-```bash
-songhive admin create-user \
+cd /path/to/your/songhive/installation
+docker compose exec songhive songhive admin create-user \
     --username admin \
     --email admin@example.com \
     --password secret \
     --admin
 ```
 
-If the web UI has been built, it is available at http://localhost:8000/; the
-interactive API docs (Swagger) are at http://localhost:8000/docs, and the REST
-API is served at `/api/v1/`.
+#### pip installation
 
-For UI development, run `npm run dev` from the `frontend/` directory instead of
-`npm run build`. If you use the Vite dev server (http://localhost:5173 by
-default), add it to `server.cors_origins`.
+```bash
+SONGHIVE_CONFIG="/path/to/your/songhive/installation/config.toml"
+songhive -c "$SONGHIVE_CONFIG" admin create-user \
+    --username admin \
+    --email admin@example.com \
+    --password secret \
+    --admin
+```
+
+## Testing the installation
+
+Open:
+
+- **Web UI**: http://localhost:8000/
+- **Swagger UI** (only for the Docker setup): http://localhost:8000/swagger-ui/
+- **OpenAPI spec**: http://localhost:8000/openapi.json
 
 ## Development
 
