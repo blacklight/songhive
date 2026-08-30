@@ -118,7 +118,8 @@ frontend does not need to be built manually when installing from PyPI.
 Prerequisites:
 
 - Python >= 3.10
-- PostgreSQL
+- PostgreSQL (a SQLite database will also work, but it's not recommended for
+  large installations)
 - Redis/Valkey
 - ffmpeg
 - Node.js and npm (for the frontend)
