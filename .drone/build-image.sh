@@ -21,7 +21,7 @@ fi
 IMAGE_NAME="${IMAGE_NAME:-$REGISTRY_ENDPOINT/$DOCKER_USER/songhive}"
 
 # Log in to the container registry
-echo "$DOCKER_PASS" | docker login "$REGISTRY_ENDPOINT" -u "$DOCKER_USER" --password-stdin
+printf '%s' "$DOCKER_PASS" | docker login "$REGISTRY_ENDPOINT" -u "$DOCKER_USER" --password-stdin
 
 # Set up QEMU for multi-platform builds
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
