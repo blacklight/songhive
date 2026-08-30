@@ -39,7 +39,6 @@ docker buildx build \
     -f Dockerfile \
     -t "$IMAGE_NAME:$VERSION" \
     -t "$IMAGE_NAME:latest" \
-    --platform linux/amd64,linux/arm64 \
     --builder "$BUILDER" \
     --cache-from "type=registry,ref=$CACHE_TAG" \
     --cache-to "type=registry,ref=$CACHE_TAG,mode=max" \
