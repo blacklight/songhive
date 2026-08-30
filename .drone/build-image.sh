@@ -20,16 +20,8 @@ fi
 
 IMAGE_NAME="${IMAGE_NAME:-$REGISTRY_ENDPOINT/$DOCKER_USER/songhive}"
 
-# TODO REMOVE (debug) — dump length + bytes so a trailing \n / \r / space is visible.
-# Drone masks the raw secret in logs, but od/wc output won't match the secret string.
-printf '** DEBUG USER len=%s bytes: ' "$(printf '%s' "$DOCKER_USER" | wc -c)"
-printf '%s' "$DOCKER_USER" | od -An -c
-printf '** DEBUG PASS len=%s bytes: ' "$(printf '%s' "$DOCKER_PASS" | wc -c)"
-printf '%s' "$DOCKER_PASS" | od -An -c
-echo "** DEBUG ENDPOINT: [$REGISTRY_ENDPOINT]"
-
 # Log in to the container registry
-printf '%s' "$DOCKER_PASS" | docker login "$REGISTRY_ENDPOINT" -u "$DOCKER_USER" --password-stdin
+echo -n "$DOCKER_PASS" | docker login "$REGISTRY_ENDPOINT" -u "$DOCKER_USER" --password-stdin
 
 # Set up QEMU for multi-platform builds
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
