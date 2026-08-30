@@ -82,7 +82,6 @@ async def dispose_engine() -> None:
     engine afterwards ensures the request-handling loop creates fresh
     connections instead of reusing ones bound to a closed loop.
     """
-    global _engine
     if _engine is not None:
         await _engine.dispose()
 
