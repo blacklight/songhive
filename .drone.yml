@@ -130,7 +130,7 @@ steps:
   commands:
     - export PATH="/opt/ffmpeg:$PATH"
     - pip install -e . -r requirements-dev.txt
-    - python -m pytest -n 4 --cov-report=xml
+    - python -m pytest -n 6 --cov-report=xml
 
   when:
     event:
