@@ -6,7 +6,8 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from decimal import Decimal
+from typing import Any, Optional
 
 from redis.asyncio import Redis
 from sqlalchemy import func, select
@@ -28,28 +29,28 @@ STATS_CACHE_TTL = 60
 
 async def _get_user_stats(session: AsyncSession) -> dict:
     """Return user-related statistics."""
-    total = (await session.execute(select(func.count(User.id)))).scalar() or 0
-    active = (await session.execute(select(func.count(User.id)).where(User.is_active.is_(True)))).scalar() or 0
+    total = int((await session.execute(select(func.count(User.id)))).scalar() or 0)
+    active = int((await session.execute(select(func.count(User.id)).where(User.is_active.is_(True)))).scalar() or 0)
 
     by_role = (await session.execute(select(User.role, func.count(User.id)).group_by(User.role))).mappings().all()
 
     week_ago = datetime.now(timezone.utc) - timedelta(days=7)
-    recent = (await session.execute(select(func.count(User.id)).where(User.created_at >= week_ago))).scalar() or 0
+    recent = int((await session.execute(select(func.count(User.id)).where(User.created_at >= week_ago))).scalar() or 0)
 
     return {
         "total_users": total,
         "active_users": active,
-        "users_by_role": {row["role"]: row["count"] for row in by_role},
+        "users_by_role": {row["role"]: int(row["count"]) for row in by_role},
         "recent_registrations": recent,
     }
 
 
 async def _get_content_stats(session: AsyncSession) -> dict:
     """Return content-related statistics."""
-    total_tracks = (await session.execute(select(func.count(Track.id)))).scalar() or 0
-    total_albums = (await session.execute(select(func.count(Album.id)))).scalar() or 0
-    total_playlists = (await session.execute(select(func.count(Playlist.id)))).scalar() or 0
-    total_libraries = (await session.execute(select(func.count(Library.id)))).scalar() or 0
+    total_tracks = int((await session.execute(select(func.count(Track.id)))).scalar() or 0)
+    total_albums = int((await session.execute(select(func.count(Album.id)))).scalar() or 0)
+    total_playlists = int((await session.execute(select(func.count(Playlist.id)))).scalar() or 0)
+    total_libraries = int((await session.execute(select(func.count(Library.id)))).scalar() or 0)
 
     return {
         "total_tracks": total_tracks,
@@ -61,8 +62,8 @@ async def _get_content_stats(session: AsyncSession) -> dict:
 
 async def _get_storage_stats(session: AsyncSession) -> dict:
     """Return storage-related statistics."""
-    total_files = (await session.execute(select(func.count(StoredFile.id)))).scalar() or 0
-    total_size = (await session.execute(select(func.coalesce(func.sum(StoredFile.size), 0)))).scalar() or 0
+    total_files = int((await session.execute(select(func.count(StoredFile.id)))).scalar() or 0)
+    total_size = int((await session.execute(select(func.coalesce(func.sum(StoredFile.size), 0)))).scalar() or 0)
 
     by_backend = (
         (
@@ -82,7 +83,8 @@ async def _get_storage_stats(session: AsyncSession) -> dict:
         "total_files": total_files,
         "total_size_bytes": total_size,
         "files_by_backend": [
-            {"backend": row["storage_backend"], "count": row["count"], "size": row["size"]} for row in by_backend
+            {"backend": row["storage_backend"], "count": int(row["count"]), "size": int(row["size"])}
+            for row in by_backend
         ],
     }
 
@@ -175,6 +177,15 @@ async def _compute_all_stats(session: AsyncSession, config: SonghiveConfig) -> d
     }
 
 
+def _json_default(value: Any) -> Any:
+    """Serialize Decimal values as plain numbers for Redis caching."""
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return int(value)
+        return float(value)
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+
+
 async def get_all_stats(
     session: AsyncSession,
     config: SonghiveConfig,
@@ -192,6 +203,6 @@ async def get_all_stats(
     stats = await _compute_all_stats(session, config)
 
     if redis is not None:
-        await redis.set(STATS_CACHE_KEY, json.dumps(stats), ex=STATS_CACHE_TTL)
+        await redis.set(STATS_CACHE_KEY, json.dumps(stats, default=_json_default), ex=STATS_CACHE_TTL)
 
     return stats

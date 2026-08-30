@@ -90,6 +90,8 @@ async def test_get_storage_stats(db_session):
     stats = await stats_service._get_storage_stats(db_session)
     assert stats["total_files"] == 2
     assert stats["total_size_bytes"] == 350
+    assert isinstance(stats["total_size_bytes"], int)
+    assert json.dumps(stats)  # ensure the result is JSON-serializable
     by_backend = {b["backend"]: b for b in stats["files_by_backend"]}
     assert by_backend["local"]["count"] == 1
     assert by_backend["local"]["size"] == 100
@@ -223,3 +225,35 @@ async def test_get_all_stats_ignores_bad_cache(db_session, fake_redis, config, m
     result = await stats_service.get_all_stats(db_session, config, fake_redis)
     assert "users" in result
     assert result["federation"]["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_all_stats_serializes_decimal(db_session, fake_redis, config, monkeypatch):
+    """Decimal values in the stats payload must be JSON-serializable for Redis caching."""
+    from decimal import Decimal
+
+    async def _storage_with_decimal(_session):
+        return {
+            "total_files": 1,
+            "total_size_bytes": Decimal(1024),
+            "files_by_backend": [
+                {"backend": "local", "count": Decimal(1), "size": Decimal(1024)},
+            ],
+        }
+
+    async def _no_celery():
+        return {"available": False}
+
+    monkeypatch.setattr(stats_service, "_get_storage_stats", _storage_with_decimal)
+    monkeypatch.setattr(stats_service, "_get_celery_stats", _no_celery)
+
+    result = await stats_service.get_all_stats(db_session, config, fake_redis)
+
+    assert result["storage"]["total_size_bytes"] == 1024
+    assert result["storage"]["files_by_backend"][0]["size"] == 1024
+
+    cached = await fake_redis.get(stats_service.STATS_CACHE_KEY)
+    assert cached is not None
+    parsed = json.loads(cached)
+    assert parsed["storage"]["total_size_bytes"] == 1024
+    assert isinstance(parsed["storage"]["total_size_bytes"], int)
