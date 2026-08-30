@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- Clarify the example configuration's auth secret and SQLite database option. ([`53ff5be`](https://git.platypush.tech/blacklight/songhive/commit/53ff5bee36e0034ebaedcdff50353e7c7df51826))
+
+### Fixed
+
+- `migrations`: Serialize concurrent `ensure_migrated` runs to prevent
+  duplicate-key crashes on fresh Docker Compose deployments. ([`877e1f6`](https://git.platypush.tech/blacklight/songhive/commit/877e1f6d5ccde51fd0d57c256064860d255dc811))
+- `db`: Reset the async engine and session factory after Celery task event loops
+  to prevent asyncpg loop-binding errors during track uploads and other
+  background tasks. ([`ab53219`](https://git.platypush.tech/blacklight/songhive/commit/ab53219f93c4b80b721c4135a2cf0127bc1ec2cb))
+
 ## 0.0.10
 
 ### Changed
