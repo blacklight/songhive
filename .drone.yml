@@ -150,7 +150,7 @@ steps:
     DOCKER_USER:
       from_secret: docker_user
     DOCKER_PASS:
-      from_secret: registry_token
+      from_secret: docker_pass
 
   when:
     event:
