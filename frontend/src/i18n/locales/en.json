@@ -235,7 +235,8 @@
       "sha256Copied": "SHA-256 copied to clipboard.",
       "copyFailed": "Could not copy SHA-256.",
       "empty": "File not found.",
-      "associatedTracks": "Associated tracks"
+      "associatedTracks": "Associated tracks",
+      "preview": "Preview"
     },
     "radio": {
       "title": "Radio",
