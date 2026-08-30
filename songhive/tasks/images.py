@@ -24,7 +24,7 @@ def enrich_images(track_id: str, force: bool = False) -> bool:
     :returns: ``True`` if an image or cover was updated.
     """
     from ..config import load_config
-    from ..models.base import get_session, init_db
+    from ..models.base import dispose_and_reset, get_session, init_db
     from ..services.musicbrainz import MusicBrainzService
     from ..services.storage import StorageService
     from ..storage import get_storage
@@ -39,8 +39,11 @@ def enrich_images(track_id: str, force: bool = False) -> bool:
     mb_service = MusicBrainzService(config.musicbrainz)
 
     async def _run() -> bool:
-        async with get_session() as session:
-            return await mb_service.enrich_images(session, track_id, storage_service, force=force)
+        try:
+            async with get_session() as session:
+                return await mb_service.enrich_images(session, track_id, storage_service, force=force)
+        finally:
+            await dispose_and_reset()
 
     try:
         return asyncio.run(_run())
@@ -63,7 +66,7 @@ def bulk_enrich_images(
     Enqueues image enrichment for the requested scope of artists and albums.
     """
     from ..config import load_config
-    from ..models.base import get_session, init_db
+    from ..models.base import dispose_and_reset, get_session, init_db
     from ..services.admin_tasks import bulk_enrich_images as _bulk_enrich_images
     from ..services.musicbrainz import MusicBrainzService
     from ..services.storage import StorageService
@@ -79,19 +82,22 @@ def bulk_enrich_images(
     mb_service = MusicBrainzService(config.musicbrainz)
 
     async def _run() -> dict[str, int]:
-        async with get_session() as session:
-            result = await _bulk_enrich_images(
-                session,
-                mb_service,
-                storage_service,
-                artist_id=artist_id,
-                album_id=album_id,
-                all_=all_,
-                force=force,
-                dry_run=dry_run,
-            )
-            await session.commit()
-            return result
+        try:
+            async with get_session() as session:
+                result = await _bulk_enrich_images(
+                    session,
+                    mb_service,
+                    storage_service,
+                    artist_id=artist_id,
+                    album_id=album_id,
+                    all_=all_,
+                    force=force,
+                    dry_run=dry_run,
+                )
+                await session.commit()
+                return result
+        finally:
+            await dispose_and_reset()
 
     try:
         return asyncio.run(_run())

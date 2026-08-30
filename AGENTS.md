@@ -97,6 +97,12 @@
   `POST /api/v1/admin/sync-tags`. For large S3 libraries, the migration and
   bulk tag rewrites incur download/upload transfer costs; consider routing
   `sync_track_tags` to a dedicated `tags` Celery queue with limited concurrency.
+- Celery worker tasks run their async work inside ``asyncio.run(...)``. Each
+  ``asyncio.run`` creates and closes a new event loop, and ``asyncpg``
+  connections are bound to the loop that opened them. Every task that uses
+  ``get_session()`` must therefore call ``await dispose_and_reset()`` in the
+  same ``finally`` block that closes the session, so the next task starts with
+  a fresh engine instead of reusing connections tied to a closed loop.
 - When type-checking the Tornado + FastAPI bootstrap in `songhive/app.py`, the
   bridge through `a2wsgi.ASGIMiddleware` and `tornado.wsgi.WSGIContainer` can
   trigger structural mismatches because `FastAPI.__call__` uses Starlette's

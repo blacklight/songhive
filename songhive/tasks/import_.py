@@ -48,7 +48,7 @@ def process_upload(
         raise ValueError("Provide exactly one of stored_file_id or file_path")
 
     from ..config import load_config
-    from ..models.base import get_session, init_db
+    from ..models.base import dispose_and_reset, get_session, init_db
     from ..models.stored_file import StoredFile
     from ..services.import_ import DuplicateTrackError, import_audio_file
     from ..services.storage import StorageService
@@ -62,72 +62,75 @@ def process_upload(
     storage_service = StorageService(storage, config.storage)
 
     async def _run() -> str:
-        async with get_session() as session:
-            file: Optional[BinaryIO] = None
-            actual_filename = filename or "audio.mp3"
+        try:
+            async with get_session() as session:
+                file: Optional[BinaryIO] = None
+                actual_filename = filename or "audio.mp3"
 
-            if stored_file_id:
-                stored_file = await session.get(StoredFile, stored_file_id)
-                if stored_file is None:
-                    raise ValueError(f"StoredFile {stored_file_id} not found")
-                actual_filename = filename or stored_file.original_filename or "audio.mp3"
-                local_path = await storage_service.backend.retrieve(stored_file.storage_path)
-                if local_path is None:
-                    raise ValueError(f"Could not retrieve stored file: {stored_file.storage_path}")
-                file = open(local_path, "rb")
-            else:
-                assert file_path is not None
-                path = Path(file_path)
-                actual_filename = filename or path.name
-                file = open(path, "rb")
+                if stored_file_id:
+                    stored_file = await session.get(StoredFile, stored_file_id)
+                    if stored_file is None:
+                        raise ValueError(f"StoredFile {stored_file_id} not found")
+                    actual_filename = filename or stored_file.original_filename or "audio.mp3"
+                    local_path = await storage_service.backend.retrieve(stored_file.storage_path)
+                    if local_path is None:
+                        raise ValueError(f"Could not retrieve stored file: {stored_file.storage_path}")
+                    file = open(local_path, "rb")
+                else:
+                    assert file_path is not None
+                    path = Path(file_path)
+                    actual_filename = filename or path.name
+                    file = open(path, "rb")
 
-            try:
-                result = await import_audio_file(
-                    session,
-                    storage_service=storage_service,
-                    file=file,
-                    filename=actual_filename,
-                    library_id=library_id,
-                    owner_id=owner_id,
-                    visibility=visibility,
-                    force=force,
-                    enrich=enrich,
-                    source=source,
-                    content_type=content_type,
-                )
-            finally:
-                if file is not None:
-                    file.close()
-
-            if owner_id and result.track.visibility == Visibility.PUBLIC.value:
-                owner = await session.get(User, owner_id)
-                loaded_track = await session.execute(
-                    select(Track).options(selectinload(Track.artist)).where(Track.id == str(result.track.id))
-                )
-                track = loaded_track.scalar_one()
-                track.federation_object_id = str(uuid.uuid4())
-                await session.commit()
-                artist = track.artist
-                if owner is not None and artist is not None:
-                    await asyncio.to_thread(
-                        publish_track_activity,
-                        track,
-                        artist,
-                        owner,
-                        config,
-                        track.federation_object_id,
+                try:
+                    result = await import_audio_file(
+                        session,
+                        storage_service=storage_service,
+                        file=file,
+                        filename=actual_filename,
+                        library_id=library_id,
+                        owner_id=owner_id,
+                        visibility=visibility,
+                        force=force,
+                        enrich=enrich,
+                        source=source,
+                        content_type=content_type,
                     )
+                finally:
+                    if file is not None:
+                        file.close()
 
-            EventWebSocket.broadcast(
-                "import.completed",
-                {
-                    "library_id": library_id,
-                    "track_id": str(result.track.id),
-                    "upload_id": str(result.upload.id),
-                },
-                topic="import",
-            )
-            return str(result.upload.id)
+                if owner_id and result.track.visibility == Visibility.PUBLIC.value:
+                    owner = await session.get(User, owner_id)
+                    loaded_track = await session.execute(
+                        select(Track).options(selectinload(Track.artist)).where(Track.id == str(result.track.id))
+                    )
+                    track = loaded_track.scalar_one()
+                    track.federation_object_id = str(uuid.uuid4())
+                    await session.commit()
+                    artist = track.artist
+                    if owner is not None and artist is not None:
+                        await asyncio.to_thread(
+                            publish_track_activity,
+                            track,
+                            artist,
+                            owner,
+                            config,
+                            track.federation_object_id,
+                        )
+
+                EventWebSocket.broadcast(
+                    "import.completed",
+                    {
+                        "library_id": library_id,
+                        "track_id": str(result.track.id),
+                        "upload_id": str(result.upload.id),
+                    },
+                    topic="import",
+                )
+                return str(result.upload.id)
+        finally:
+            await dispose_and_reset()
 
     try:
         return asyncio.run(_run())

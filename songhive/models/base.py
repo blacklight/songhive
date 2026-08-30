@@ -86,6 +86,18 @@ async def dispose_engine() -> None:
         await _engine.dispose()
 
 
+async def dispose_and_reset() -> None:
+    """Dispose the shared engine and clear the globals.
+
+    Celery worker tasks run each unit of work inside a fresh ``asyncio.run``,
+    so the engine must be disposed (within that same loop) and then cleared so
+    the next task creates a brand-new engine instead of reusing connections
+    bound to a loop that has already closed.
+    """
+    await dispose_engine()
+    reset_db()
+
+
 def _default_engine_kwargs(database_url: str, **kwargs) -> dict:
     """Add SQLite-friendly defaults for the async engine.
 

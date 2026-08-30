@@ -16,7 +16,7 @@ from pubby.handlers._inbox import InboxProcessor
 from ..config import load_config
 from ..federation.actors import get_federation_storage
 from ..federation.storage import get_or_create_private_key
-from ..models.base import get_session, init_db
+from ..models.base import dispose_and_reset, get_session, init_db
 from ..models.user import User
 from ..services.admin_tasks import provision_federation_keys as _provision_federation_keys
 from ..services.federation import ensure_user_actor, extract_domain, is_domain_blocked
@@ -30,13 +30,16 @@ def _load_user_actor(username: str) -> Optional[User]:
     from ..services.auth import get_user_by_username
 
     async def _load():
-        async with get_session() as session:
-            user = await get_user_by_username(session, username)
-            if user is None:
-                return None
-            config = load_config([])
-            ensure_user_actor(user, config)
-            return user
+        try:
+            async with get_session() as session:
+                user = await get_user_by_username(session, username)
+                if user is None:
+                    return None
+                config = load_config([])
+                ensure_user_actor(user, config)
+                return user
+        finally:
+            await dispose_and_reset()
 
     return asyncio.run(_load())
 
@@ -233,9 +236,12 @@ def provision_federation_keys(dry_run: bool = False) -> int:
     init_db(config.database.url)
 
     async def _run() -> int:
-        async with get_session() as session:
-            count = await _provision_federation_keys(session, config, dry_run=dry_run)
-            await session.commit()
-            return count
+        try:
+            async with get_session() as session:
+                count = await _provision_federation_keys(session, config, dry_run=dry_run)
+                await session.commit()
+                return count
+        finally:
+            await dispose_and_reset()
 
     return asyncio.run(_run())

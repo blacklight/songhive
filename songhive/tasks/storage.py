@@ -70,7 +70,7 @@ def cleanup_orphaned_files() -> int:
     async cleanup helper inside ``asyncio.run``.
     """
     from ..config import load_config
-    from ..models.base import get_session, init_db
+    from ..models.base import dispose_and_reset, get_session, init_db
     from ..storage import get_storage
 
     logger.info("Starting orphaned file cleanup task")
@@ -80,8 +80,11 @@ def cleanup_orphaned_files() -> int:
     storage = get_storage(config.storage)
 
     async def _run() -> int:
-        async with get_session() as session:
-            return await _cleanup_orphaned_files(storage, session)
+        try:
+            async with get_session() as session:
+                return await _cleanup_orphaned_files(storage, session)
+        finally:
+            await dispose_and_reset()
 
     return asyncio.run(_run())
 
@@ -95,7 +98,7 @@ def rehash_audio_files(dry_run: bool = False) -> dict[str, int]:
     async rehash helper inside ``asyncio.run``.
     """
     from ..config import load_config
-    from ..models.base import get_session, init_db
+    from ..models.base import dispose_and_reset, get_session, init_db
     from ..storage import get_storage
 
     logger.info("Starting audio rehash task (dry_run=%s)", dry_run)
@@ -106,9 +109,12 @@ def rehash_audio_files(dry_run: bool = False) -> dict[str, int]:
     storage_service = StorageService(storage, config.storage)
 
     async def _run() -> dict[str, int]:
-        async with get_session() as session:
-            result = await _rehash_audio(session, storage_service, dry_run=dry_run)
-            await session.commit()
-            return result
+        try:
+            async with get_session() as session:
+                result = await _rehash_audio(session, storage_service, dry_run=dry_run)
+                await session.commit()
+                return result
+        finally:
+            await dispose_and_reset()
 
     return asyncio.run(_run())

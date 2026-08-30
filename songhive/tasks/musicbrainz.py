@@ -22,7 +22,7 @@ def enrich_track(track_id: str, force: bool = False) -> bool:
     :returns: ``True`` if metadata was updated.
     """
     from ..config import load_config
-    from ..models.base import get_session, init_db
+    from ..models.base import dispose_and_reset, get_session, init_db
     from ..services.musicbrainz import MusicBrainzService
     from ..services.storage import StorageService
     from ..storage import get_storage
@@ -37,8 +37,11 @@ def enrich_track(track_id: str, force: bool = False) -> bool:
     mb_service = MusicBrainzService(config.musicbrainz)
 
     async def _run() -> bool:
-        async with get_session() as session:
-            return await mb_service.enrich_track(session, track_id, storage_service, force=force)
+        try:
+            async with get_session() as session:
+                return await mb_service.enrich_track(session, track_id, storage_service, force=force)
+        finally:
+            await dispose_and_reset()
 
     try:
         result = asyncio.run(_run())

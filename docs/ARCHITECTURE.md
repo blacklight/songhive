@@ -548,6 +548,11 @@ All background work is handled by Celery workers. Redis is the broker
 The `cleanup_orphaned_files_schedule` config accepts any 5-field cron
 expression.
 
+Each task's async work is executed with ``asyncio.run(...)``. Because
+``asyncpg`` connections are bound to the event loop that created them, every
+task disposes the shared async engine and resets the global session factory
+before the loop closes, ensuring the next task gets a fresh pool.
+
 ---
 
 ## Email

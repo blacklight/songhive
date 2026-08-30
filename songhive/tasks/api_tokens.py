@@ -5,7 +5,7 @@ Celery tasks for API token maintenance.
 import logging
 
 from ..config import load_config
-from ..models.base import get_session, init_db
+from ..models.base import dispose_and_reset, get_session, init_db
 from ..services.api_token_tracker import flush_all_api_token_usage
 from ..services.redis import close_redis_client, get_redis_client
 from .celery import celery_app
@@ -34,5 +34,6 @@ def flush_usage_timestamps():
                 logger.info("Flushed %d API token usage timestamps", count)
         finally:
             await close_redis_client()
+            await dispose_and_reset()
 
     asyncio.run(_flush())
