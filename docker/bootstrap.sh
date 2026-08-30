@@ -31,7 +31,7 @@ $CURL -o "$DOCKER_DIR/nginx.conf" "$BASE_URL/$BRANCH/docker/nginx.conf"
 echo "Downloading setup volumes script"
 $CURL -o "$SCRIPTS_DIR/setup-volumes.sh" "$BASE_URL/$BRANCH/scripts/setup-volumes.sh"
 echo "Downloading sample configuration"
-$CURL -o config.toml "$BASE_URL/$BRANCH/config.toml.exampl"
+$CURL -o config.toml "$BASE_URL/$BRANCH/config.toml.example"
 
 chmod +x "$SCRIPTS_DIR/setup-volumes.sh"
 
