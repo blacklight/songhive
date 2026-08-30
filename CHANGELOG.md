@@ -4,11 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `i18n`: Add preview label to en locale. ([`f408805`](https://git.platypush.tech/blacklight/songhive/commit/f4088054d095102da4da4177ed80177f6c0a8db9))
+
+### Changed
+
+- `files-view`: Improved progress bar color contrast. ([`2777fd5`](https://git.platypush.tech/blacklight/songhive/commit/2777fd548d590f22d08d97d4c694e8348ac9a061))
+
 ### Fixed
 
 - `db`: Use `NullPool` for the async engine by default so Tornado and a2wsgi
   request loops each create fresh asyncpg connections, preventing
-  ``Future attached to a different loop`` errors during audio streaming.
+  ``Future attached to a different loop`` errors
+  during audio streaming. ([`1130aa8`](https://git.platypush.tech/blacklight/songhive/commit/1130aa8619b2e53e00909e887a9ee3f25f364979))
 
 ## 0.0.11
 
