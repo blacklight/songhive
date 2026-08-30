@@ -11,6 +11,7 @@ vi.mock("@/api/admin", () => ({
   syncTags: vi.fn(),
   rehashAudio: vi.fn(),
   provisionFederationKeys: vi.fn(),
+  enrichImages: vi.fn(),
 }));
 
 vi.mock("@/composables/useConfirm", () => ({
@@ -83,6 +84,39 @@ describe("TasksView", () => {
     const toastStore = useToastStore();
     expect(toastStore.toasts[0].message).toBe(
       i18n.global.t("pages.admin.tasks.syncTags.triggered", { count: 5 }),
+    );
+  });
+
+  it("triggers image enrichment for all artists and albums", async () => {
+    vi.mocked(adminApi.enrichImages).mockResolvedValue({
+      artists: 3,
+      albums: 2,
+      status: "queued",
+      task_id: "image-task",
+    });
+
+    wrapper = mount(TasksView, { global: { plugins: [i18n] } });
+    await flushPromises();
+
+    const buttons = wrapper.findAll("button");
+    const enrichButton = buttons.find(
+      (b) =>
+        b.text() === i18n.global.t("pages.admin.tasks.enrichImages.trigger"),
+    );
+    await enrichButton?.trigger("click");
+    await flushPromises();
+
+    expect(confirm).toHaveBeenCalled();
+    expect(adminApi.enrichImages).toHaveBeenCalledWith(
+      expect.objectContaining({ all: true, force: false, dry_run: false }),
+    );
+
+    const toastStore = useToastStore();
+    expect(toastStore.toasts[0].message).toBe(
+      i18n.global.t("pages.admin.tasks.enrichImages.triggered", {
+        artists: 3,
+        albums: 2,
+      }),
     );
   });
 

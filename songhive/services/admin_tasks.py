@@ -3,6 +3,7 @@ Shared admin task helpers used by the CLI, API, and Celery workers.
 """
 
 import asyncio
+import logging
 import os
 from typing import Optional, cast
 
@@ -12,6 +13,8 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
+from ..models.album import Album
+from ..models.artist import Artist
 from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..models.transcoded_file import TranscodedFile
@@ -19,6 +22,7 @@ from ..models.upload import Upload
 from ..models.user import User
 from ..storage.s3 import S3Storage
 from .federation import ensure_user_actor
+from .musicbrainz import MusicBrainzService
 from .storage import StorageService, audio_hash
 
 
@@ -183,3 +187,136 @@ async def provision_federation_keys(
                 await session.flush()
 
     return total
+
+
+async def resolve_image_enrichment_targets(
+    session: AsyncSession,
+    *,
+    artist_id: Optional[str] = None,
+    album_id: Optional[str] = None,
+    all_: bool = False,
+    force: bool = False,
+) -> tuple[list[str], list[str]]:
+    """
+    Resolve artist and album IDs that should be processed for image enrichment.
+
+    When ``all_`` is ``True``, all artists with a MusicBrainz ID and all albums
+    with a MusicBrainz ID are returned, optionally limited to those that have
+    not yet been enriched unless ``force`` is ``True``.
+
+    Specific ``artist_id`` and ``album_id`` values are returned as-is when the
+    entity exists and has a MusicBrainz ID.
+    """
+    artist_ids: list[str] = []
+    album_ids: list[str] = []
+
+    if artist_id:
+        result = await session.execute(
+            select(Artist.id).where(Artist.id == artist_id).where(Artist.musicbrainz_id.is_not(None))
+        )
+        row = result.scalar_one_or_none()
+        if row is not None:
+            artist_ids.append(str(row))
+        return artist_ids, album_ids
+
+    if album_id:
+        result = await session.execute(
+            select(Album.id).where(Album.id == album_id).where(Album.musicbrainz_id.is_not(None))
+        )
+        row = result.scalar_one_or_none()
+        if row is not None:
+            album_ids.append(str(row))
+        return artist_ids, album_ids
+
+    if all_:
+        artist_stmt = select(Artist.id).where(Artist.musicbrainz_id.is_not(None))
+        if not force:
+            artist_stmt = artist_stmt.where(Artist.image_enriched_at.is_(None))
+        result = await session.execute(artist_stmt)
+        artist_ids = [str(row) for row in result.scalars().all()]
+
+        album_stmt = select(Album.id).where(Album.musicbrainz_id.is_not(None))
+        if not force:
+            album_stmt = album_stmt.where(Album.cover_enriched_at.is_(None))
+        result = await session.execute(album_stmt)
+        album_ids = [str(row) for row in result.scalars().all()]
+
+    return artist_ids, album_ids
+
+
+async def bulk_enrich_images(
+    session: AsyncSession,
+    mb_service: MusicBrainzService,
+    storage_service: StorageService,
+    *,
+    artist_id: Optional[str] = None,
+    album_id: Optional[str] = None,
+    all_: bool = False,
+    force: bool = False,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """
+    Enrich artist images and album covers for the requested scope.
+
+    :param session: An active async SQLAlchemy session.
+    :param mb_service: A configured MusicBrainz service.
+    :param storage_service: A configured storage service.
+    :param artist_id: Enrich a single artist by ID.
+    :param album_id: Enrich a single album by ID.
+    :param all_: Enrich all artists and albums that have not been processed yet.
+    :param force: Re-process entities that have already been enriched.
+    :param dry_run: When ``True``, report the counts without making changes.
+    :returns: A dictionary with ``artists``, ``albums``, ``updated``, and
+        ``failed`` counts.
+    """
+    artist_ids, album_ids = await resolve_image_enrichment_targets(
+        session,
+        artist_id=artist_id,
+        album_id=album_id,
+        all_=all_,
+        force=force,
+    )
+
+    counts = {
+        "artists": len(artist_ids),
+        "albums": len(album_ids),
+        "updated": 0,
+        "failed": 0,
+    }
+
+    if dry_run:
+        return counts
+
+    for target_id in artist_ids:
+        try:
+            async with session.begin_nested():
+                updated = await mb_service.enrich_artist_image_by_id(
+                    session,
+                    target_id,
+                    storage_service,
+                    force=force,
+                )
+                if updated:
+                    counts["updated"] += 1
+        except Exception:
+            logger = logging.getLogger(__name__)
+            logger.exception("Image enrichment failed for artist %s", target_id)
+            counts["failed"] += 1
+
+    for target_id in album_ids:
+        try:
+            async with session.begin_nested():
+                updated = await mb_service.enrich_album_cover_by_id(
+                    session,
+                    target_id,
+                    storage_service,
+                    force=force,
+                )
+                if updated:
+                    counts["updated"] += 1
+        except Exception:
+            logger = logging.getLogger(__name__)
+            logger.exception("Cover enrichment failed for album %s", target_id)
+            counts["failed"] += 1
+
+    return counts

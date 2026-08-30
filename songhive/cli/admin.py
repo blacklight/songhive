@@ -17,6 +17,8 @@ Usage:
     songhive admin rehash-audio [--dry-run]
     songhive admin sync-tags \
         (--track-id <id> | --album-id <id> | --artist-id <id> | --library-id <id> | --all) [--dry-run]
+    songhive admin enrich-images \
+        (--artist-id <id> | --album-id <id> | --all) [--force] [--dry-run]
 """
 
 import argparse
@@ -141,6 +143,26 @@ def _create_admin_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print the number of tracks that would be queued without enqueuing",
+    )
+
+    # enrich-images
+    enrich_images_parser = subparsers.add_parser(
+        "enrich-images",
+        help="Enqueue image enrichment for one or more artists or albums",
+    )
+    enrich_images_group = enrich_images_parser.add_mutually_exclusive_group(required=True)
+    enrich_images_group.add_argument("--artist-id", help="Enrich a single artist by ID")
+    enrich_images_group.add_argument("--album-id", help="Enrich a single album by ID")
+    enrich_images_group.add_argument("--all", action="store_true", help="Enrich all unenriched artists and albums")
+    enrich_images_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-enrich artists and albums that have already been processed",
+    )
+    enrich_images_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the number of artists and albums that would be enriched without enqueuing",
     )
 
     return parser
@@ -458,6 +480,56 @@ async def _handle_sync_tags(args):
     print(f"Enqueued tag sync for {len(track_ids)} track(s).")
 
 
+async def _handle_enrich_images(args):
+    """Enqueue image enrichment for the requested scope of artists and albums."""
+    from ..tasks.images import bulk_enrich_images
+
+    config = load_config([])
+    init_db(config.database.url)
+
+    if not config.musicbrainz.enabled or not config.musicbrainz.fetch_artist_images:
+        print("MusicBrainz or artist image fetching is disabled; nothing to do.")
+        return
+
+    dry_run = getattr(args, "dry_run", False)
+    force = getattr(args, "force", False)
+
+    async with get_session() as session:
+        artist_ids, album_ids = await admin_tasks.resolve_image_enrichment_targets(
+            session,
+            artist_id=args.artist_id,
+            album_id=args.album_id,
+            all_=args.all,
+            force=force,
+        )
+
+    if not artist_ids and not album_ids:
+        print("No matching artists or albums found.")
+        return
+
+    if dry_run:
+        print(f"Would enrich {len(artist_ids)} artist(s) and {len(album_ids)} album(s).")
+        return
+
+    try:
+        result = bulk_enrich_images.delay(
+            artist_id=args.artist_id,
+            album_id=args.album_id,
+            all_=args.all,
+            force=force,
+            dry_run=False,
+        )  # type: ignore
+    except (KombuOperationalError, OSError):
+        print(f"Found {len(artist_ids)} artist(s) and {len(album_ids)} album(s) to enrich.")
+        print("Celery broker is not available; start the worker to process the queue.", file=sys.stderr)
+        return
+
+    print(
+        f"Queued image enrichment for {len(artist_ids)} artist(s) and "
+        f"{len(album_ids)} album(s). Task id: {result.id}"
+    )
+
+
 def admin_main(argv=None):
     """Entry point for admin CLI commands."""
     parser = _create_admin_parser()
@@ -494,6 +566,7 @@ def admin_main(argv=None):
         "provision-federation-keys": _handle_provision_federation_keys,
         "rehash-audio": _handle_rehash_audio,
         "sync-tags": _handle_sync_tags,
+        "enrich-images": _handle_enrich_images,
     }
 
     handler = handlers.get(args.command)

@@ -333,6 +333,57 @@ def test_is_valid_image():
     assert _is_valid_image(b"") is False
 
 
+@pytest.fixture
+def artist_with_wikidata_relation():
+    """Return a MusicBrainz artist response with a Wikidata relation."""
+    return {
+        "artist": {
+            "id": "artist-mbid-1",
+            "name": "Test Artist",
+            "url-relation-list": [
+                {
+                    "type": "wikidata",
+                    "target": "https://www.wikidata.org/wiki/Q12345",
+                }
+            ],
+        }
+    }
+
+
+@pytest.fixture
+def artist_with_archive_image_relation():
+    """Return a MusicBrainz artist response with an archive.org image relation."""
+    return {
+        "artist": {
+            "id": "artist-mbid-1",
+            "name": "Test Artist",
+            "url-relation-list": [
+                {
+                    "type": "image",
+                    "target": "https://web.archive.org/web/0/https://i.scdn.co/image/test",
+                }
+            ],
+        }
+    }
+
+
+@pytest.fixture
+def artist_with_spotify_image_relation():
+    """Return a MusicBrainz artist response with a Spotify image relation."""
+    return {
+        "artist": {
+            "id": "artist-mbid-1",
+            "name": "Test Artist",
+            "url-relation-list": [
+                {
+                    "type": "image",
+                    "target": "https://i.scdn.co/image/test",
+                }
+            ],
+        }
+    }
+
+
 def test_is_image_relation():
     """_is_image_relation recognizes image-like URL relations."""
     assert _is_image_relation({"type": "image"}) is True
@@ -411,6 +462,221 @@ async def test_enrich_artist_image_by_id(
 
 
 @pytest.mark.asyncio
+async def test_enrich_artist_image_by_id_download_fails(
+    db_session,
+    musicbrainz_config,
+    artist_with_image_relation,
+    local_storage_service,
+    monkeypatch,
+):
+    """A failed artist image download does not mark image_enriched_at."""
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-mbid-1")
+    db_session.add(artist)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    service._client.get = AsyncMock(return_value=Mock(status_code=404, content=b"", headers={}))
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.get_artist_by_id",
+        lambda *_: artist_with_image_relation,
+    )
+
+    result = await service.enrich_artist_image_by_id(
+        db_session,
+        str(artist.id),
+        storage_service=local_storage_service,
+    )
+
+    assert result is False
+    assert artist.image_file_id is None
+    assert artist.image_url is None
+    assert artist.image_enriched_at is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_artist_image_by_id_no_image_relation(
+    db_session,
+    musicbrainz_config,
+    local_storage_service,
+    monkeypatch,
+):
+    """An artist with no image URL relation is not marked as enriched."""
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-mbid-1")
+    db_session.add(artist)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.get_artist_by_id",
+        lambda *_: {"artist": {"id": "artist-mbid-1", "name": "Test Artist"}},
+    )
+
+    result = await service.enrich_artist_image_by_id(
+        db_session,
+        str(artist.id),
+        storage_service=local_storage_service,
+    )
+
+    assert result is False
+    assert artist.image_file_id is None
+    assert artist.image_url is None
+    assert artist.image_enriched_at is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_artist_image_by_id_wikidata(
+    db_session,
+    musicbrainz_config,
+    artist_with_wikidata_relation,
+    local_storage_service,
+    monkeypatch,
+):
+    """Image enrichment falls back to a Wikidata P18 image."""
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-mbid-1")
+    db_session.add(artist)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+
+    wikidata_response = {
+        "entities": {
+            "Q12345": {
+                "claims": {
+                    "P18": [
+                        {
+                            "mainsnak": {
+                                "datavalue": {
+                                    "value": "Test Artist Photo.jpg",
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    }
+
+    wikimedia_api_response = {
+        "query": {
+            "pages": {
+                "1": {
+                    "imageinfo": [
+                        {
+                            "url": "https://upload.wikimedia.org/wikipedia/commons/test.jpg",
+                            "mime": "image/jpeg",
+                        }
+                    ]
+                }
+            }
+        }
+    }
+
+    def _mock_get(url, **_):
+        if "wikidata.org" in str(url):
+            return Mock(status_code=200, json=Mock(return_value=wikidata_response))
+        if "commons.wikimedia.org/w/api.php" in str(url):
+            return Mock(status_code=200, json=Mock(return_value=wikimedia_api_response))
+        return Mock(
+            status_code=200,
+            url="https://upload.wikimedia.org/wikipedia/commons/test.jpg",
+            content=b"\xff\xd8fake",
+            headers={},
+        )
+
+    service._client.get = AsyncMock(side_effect=_mock_get)
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.get_artist_by_id",
+        lambda *_: artist_with_wikidata_relation,
+    )
+
+    result = await service.enrich_artist_image_by_id(
+        db_session,
+        str(artist.id),
+        storage_service=local_storage_service,
+    )
+
+    assert result is True
+    assert artist.image_file_id is not None
+    assert artist.image_enriched_at is not None
+
+
+@pytest.mark.asyncio
+async def test_enrich_artist_image_by_id_archive(
+    db_session,
+    musicbrainz_config,
+    artist_with_archive_image_relation,
+    local_storage_service,
+    monkeypatch,
+):
+    """Image enrichment resolves a web.archive.org image relation."""
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-mbid-1")
+    db_session.add(artist)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    service._client.get = AsyncMock(
+        return_value=Mock(
+            status_code=200,
+            url="https://i.scdn.co/image/test",
+            content=b"\xff\xd8fake",
+            headers={},
+        )
+    )
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.get_artist_by_id",
+        lambda *_: artist_with_archive_image_relation,
+    )
+
+    result = await service.enrich_artist_image_by_id(
+        db_session,
+        str(artist.id),
+        storage_service=local_storage_service,
+    )
+
+    assert result is True
+    assert artist.image_file_id is not None
+    assert artist.image_enriched_at is not None
+
+
+@pytest.mark.asyncio
+async def test_enrich_artist_image_by_id_spotify(
+    db_session,
+    musicbrainz_config,
+    artist_with_spotify_image_relation,
+    local_storage_service,
+    monkeypatch,
+):
+    """Image enrichment resolves a Spotify (i.scdn.co) image relation."""
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-mbid-1")
+    db_session.add(artist)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    service._client.get = AsyncMock(
+        return_value=Mock(
+            status_code=200,
+            url="https://i.scdn.co/image/test",
+            content=b"\xff\xd8fake",
+            headers={},
+        )
+    )
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.get_artist_by_id",
+        lambda *_: artist_with_spotify_image_relation,
+    )
+
+    result = await service.enrich_artist_image_by_id(
+        db_session,
+        str(artist.id),
+        storage_service=local_storage_service,
+    )
+
+    assert result is True
+    assert artist.image_file_id is not None
+    assert artist.image_enriched_at is not None
+
+
+@pytest.mark.asyncio
 async def test_enrich_album_cover_by_id(
     db_session,
     musicbrainz_config,
@@ -447,6 +713,40 @@ async def test_enrich_album_cover_by_id(
     assert result is True
     assert album.cover_file_id is not None
     assert album.cover_enriched_at is not None
+
+
+@pytest.mark.asyncio
+async def test_enrich_album_cover_by_id_download_fails(
+    db_session,
+    musicbrainz_config,
+    local_storage_service,
+    monkeypatch,
+):
+    """A failed cover art download does not mark cover_enriched_at."""
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-mbid-1")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Test Album",
+        artist_id=artist.id,
+        musicbrainz_id="release-1",
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    service._client.get = AsyncMock(return_value=Mock(status_code=404, content=b"", headers={}))
+
+    result = await service.enrich_album_cover_by_id(
+        db_session,
+        str(album.id),
+        storage_service=local_storage_service,
+    )
+
+    assert result is False
+    assert album.cover_file_id is None
+    assert album.cover_enriched_at is None
 
 
 @pytest.mark.asyncio

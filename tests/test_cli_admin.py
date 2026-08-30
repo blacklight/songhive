@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from songhive.cli import admin as cli_admin
 from songhive.config.schema import SonghiveConfig, StorageConfig
+from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.base import Base
 from songhive.models.stored_file import StoredFile
@@ -1170,6 +1171,92 @@ def test_admin_main_sync_tags_all_dry_run(tmp_path, monkeypatch, capsys):
     cli_admin.admin_main(["sync-tags", "--all", "--dry-run"])
     captured = capsys.readouterr()
     assert "Would enqueue tag sync for 1 track(s)." in captured.out
+
+
+def test_admin_main_enrich_images_all_dry_run(tmp_path, monkeypatch, capsys):
+    """``enrich-images --all --dry-run`` counts matching entities without enqueuing."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'images.db'}"
+
+    async def _create_data():
+        engine = create_async_engine(db_url)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            artist = Artist(name="Test Artist", musicbrainz_id="artist-1")
+            session.add(artist)
+            await session.flush()
+            album = Album(title="Test Album", artist_id=artist.id, musicbrainz_id="album-1")
+            session.add(album)
+            await session.commit()
+
+    asyncio.run(_create_data())
+
+    monkeypatch.setattr(
+        cli_admin,
+        "load_config",
+        lambda argv: SonghiveConfig(
+            database={"url": db_url},
+            federation={"enabled": False},
+            musicbrainz={"enabled": True, "fetch_artist_images": True},
+        ),
+    )
+    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
+
+    cli_admin.admin_main(["enrich-images", "--all", "--dry-run"])
+    captured = capsys.readouterr()
+    assert "Would enrich 1 artist(s) and 1 album(s)." in captured.out
+
+
+def test_admin_main_enrich_images_artist_id(tmp_path, monkeypatch, capsys):
+    """``enrich-images --artist-id`` queues the bulk enrichment task."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'images.db'}"
+
+    async def _create_data():
+        engine = create_async_engine(db_url)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            artist = Artist(name="Test Artist", musicbrainz_id="artist-1")
+            session.add(artist)
+            await session.commit()
+            return str(artist.id)
+
+    artist_id = asyncio.run(_create_data())
+
+    monkeypatch.setattr(
+        cli_admin,
+        "load_config",
+        lambda argv: SonghiveConfig(
+            database={"url": db_url},
+            federation={"enabled": False},
+            musicbrainz={"enabled": True, "fetch_artist_images": True},
+        ),
+    )
+    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
+
+    from types import SimpleNamespace
+
+    class _FakeCeleryResult:
+        def __init__(self, task_id: str):
+            self.id = task_id
+
+    task_calls = []
+
+    def _fake_delay(**kwargs):
+        task_calls.append(kwargs)
+        return _FakeCeleryResult("image-task-id")
+
+    monkeypatch.setattr("songhive.tasks.images.bulk_enrich_images", SimpleNamespace(delay=_fake_delay))
+
+    cli_admin.admin_main(["enrich-images", "--artist-id", artist_id])
+    captured = capsys.readouterr()
+    assert "Queued image enrichment for 1 artist(s) and 0 album(s)." in captured.out
+    assert "image-task-id" in captured.out
+    assert task_calls[0]["artist_id"] == artist_id
 
 
 def test_admin_main_rehash_audio_dry_run(tmp_path, monkeypatch, capsys):

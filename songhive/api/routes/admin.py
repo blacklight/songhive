@@ -18,10 +18,12 @@ from ...models.user import User, UserRole
 from ...services import audit, auth, deletion, music
 from ...services import settings as settings_service
 from ...services import stats as stats_service
+from ...services.admin_tasks import resolve_image_enrichment_targets
 from ...services.celery_admin import CeleryAdminError, list_active_celery_tasks, terminate_celery_tasks
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from ...tasks.federation import provision_federation_keys
+from ...tasks.images import bulk_enrich_images
 from ...tasks.storage import cleanup_orphaned_files, rehash_audio_files
 from ...tasks.tags import sync_track_tags
 from ...users import invites as invite_service
@@ -913,6 +915,94 @@ async def sync_tags(
 
     run_status = "dry_run" if body.dry_run else "queued"
     return SyncTagsResponse(enqueued=enqueued, status=run_status)
+
+
+class EnrichImagesRequest(BaseModel):
+    """Request body for bulk image enrichment triggers."""
+
+    artist_id: Optional[str] = None
+    album_id: Optional[str] = None
+    all: bool = False
+    force: bool = False
+    dry_run: bool = False
+
+
+class EnrichImagesResponse(BaseModel):
+    """Response returned after a bulk image enrichment trigger."""
+
+    artists: int
+    albums: int
+    task_id: Optional[str] = None
+    status: str
+
+
+@router.post(
+    "/enrich-images",
+    response_model=EnrichImagesResponse,
+    dependencies=[Depends(rate_limit_account), Depends(require_admin)],
+)
+async def enrich_images(
+    body: EnrichImagesRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Enqueue image enrichment for one or more artists or albums (admin only)."""
+    if not any((body.artist_id, body.album_id, body.all)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one scope is required")
+
+    if not body.dry_run:
+        try:
+            result = bulk_enrich_images.delay(
+                artist_id=body.artist_id,
+                album_id=body.album_id,
+                all_=body.all,
+                force=body.force,
+                dry_run=False,
+            )  # type: ignore
+        except (KombuOperationalError, RedisConnectionError, OSError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Celery broker unavailable",
+            ) from exc
+
+    artist_ids, album_ids = await resolve_image_enrichment_targets(
+        db,
+        artist_id=body.artist_id,
+        album_id=body.album_id,
+        all_=body.all,
+        force=body.force,
+    )
+
+    scope = {
+        "artist_id": body.artist_id,
+        "album_id": body.album_id,
+        "all": body.all,
+        "force": body.force,
+    }
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="images.enrich",
+        target_type="images",
+        target_id=None,
+        details={
+            "scope": scope,
+            "artists": len(artist_ids),
+            "albums": len(album_ids),
+            "dry_run": body.dry_run,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    run_status = "dry_run" if body.dry_run else "queued"
+    return EnrichImagesResponse(
+        artists=len(artist_ids),
+        albums=len(album_ids),
+        task_id=None if body.dry_run else result.id,
+        status=run_status,
+    )
 
 
 class RehashAudioRequest(BaseModel):

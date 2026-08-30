@@ -2016,6 +2016,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/enrich-images": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enrich Images
+     * @description Enqueue image enrichment for one or more artists or albums (admin only).
+     */
+    post: operations["enrich_images_api_v1_admin_enrich_images_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/rehash-audio": {
     parameters: {
       query?: never;
@@ -3078,6 +3098,45 @@ export interface components {
        * @default false
        */
       recursive: boolean;
+    };
+    /**
+     * EnrichImagesRequest
+     * @description Request body for bulk image enrichment triggers.
+     */
+    EnrichImagesRequest: {
+      /** Artist Id */
+      artist_id?: string | null;
+      /** Album Id */
+      album_id?: string | null;
+      /**
+       * All
+       * @default false
+       */
+      all: boolean;
+      /**
+       * Force
+       * @default false
+       */
+      force: boolean;
+      /**
+       * Dry Run
+       * @default false
+       */
+      dry_run: boolean;
+    };
+    /**
+     * EnrichImagesResponse
+     * @description Response returned after a bulk image enrichment trigger.
+     */
+    EnrichImagesResponse: {
+      /** Artists */
+      artists: number;
+      /** Albums */
+      albums: number;
+      /** Task Id */
+      task_id?: string | null;
+      /** Status */
+      status: string;
     };
     /** FavoriteResponse */
     FavoriteResponse: {
@@ -5827,6 +5886,7 @@ export interface operations {
         artist_id?: string | null;
         album_id?: string | null;
         genre?: string | null;
+        hashtag?: string | null;
         year_from?: number | null;
         year_to?: number | null;
         library_id?: string | null;
@@ -8626,6 +8686,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SyncTagsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  enrich_images_api_v1_admin_enrich_images_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EnrichImagesRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EnrichImagesResponse"];
         };
       };
       /** @description Validation Error */

@@ -21,6 +21,9 @@ export type SyncTagsResponse = components["schemas"]["SyncTagsResponse"];
 export type RehashAudioRequest = components["schemas"]["RehashAudioRequest"];
 export type ProvisionFederationKeysRequest =
   components["schemas"]["ProvisionFederationKeysRequest"];
+export type EnrichImagesRequest = components["schemas"]["EnrichImagesRequest"];
+export type EnrichImagesResponse =
+  components["schemas"]["EnrichImagesResponse"];
 export type AdminTaskQueuedResponse =
   components["schemas"]["AdminTaskQueuedResponse"];
 export type CeleryTaskInfo = components["schemas"]["CeleryTaskInfo"];
@@ -247,6 +250,15 @@ export function terminateCeleryTasks(
   body: CeleryTerminateRequest,
 ): Promise<CeleryTerminateResponse> {
   return apiRequest<CeleryTerminateResponse>("/admin/celery/terminate", {
+    method: "POST",
+    body,
+  });
+}
+
+export function enrichImages(
+  body: EnrichImagesRequest,
+): Promise<EnrichImagesResponse> {
+  return apiRequest<EnrichImagesResponse>("/admin/enrich-images", {
     method: "POST",
     body,
   });

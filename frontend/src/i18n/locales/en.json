@@ -464,6 +464,24 @@
           "trigger": "Provision keys",
           "triggered": "Federation key provisioning task queued.",
           "triggerError": "Could not trigger federation key provisioning: {message}"
+        },
+        "enrichImages": {
+          "title": "Enrich images",
+          "description": "Fetch artist images and album covers from MusicBrainz for one or more artists or albums.",
+          "allWarning": "This will enqueue image enrichment for all unenriched artists and albums with MusicBrainz IDs and may take a while.",
+          "scopeLabel": "Scope",
+          "scopeAll": "All artists and albums",
+          "scopeArtist": "Artist",
+          "scopeAlbum": "Album",
+          "targetIdLabel": "Target ID",
+          "targetIdHint": "Required when a single artist or album is selected.",
+          "targetIdRequired": "A target ID is required for the selected scope.",
+          "force": "Force re-enrichment",
+          "dryRun": "Dry run",
+          "trigger": "Enrich images",
+          "triggered": "Image enrichment queued for {artists} artist(s) and {albums} album(s).",
+          "dryRunTriggered": "Dry run complete: {artists} artist(s) and {albums} album(s) would be enriched.",
+          "triggerError": "Could not trigger image enrichment: {message}"
         }
       },
       "celery": {

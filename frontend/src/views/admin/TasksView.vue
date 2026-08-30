@@ -5,11 +5,13 @@ import { useConfirm } from "@/composables/useConfirm";
 import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import {
+  enrichImages,
   provisionFederationKeys,
   rehashAudio,
   syncTags,
   triggerStorageCleanup,
   type SyncTagsRequest,
+  type EnrichImagesRequest,
 } from "@/api/admin";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
@@ -27,6 +29,7 @@ type LoadingTask =
   | "syncTags"
   | "rehashAudio"
   | "provisionFederationKeys"
+  | "enrichImages"
   | null;
 
 const loadingTask = ref<LoadingTask>(null);
@@ -45,6 +48,35 @@ const scopeOptions = computed(() => [
 
 const rehashDryRun = ref(false);
 const provisionDryRun = ref(false);
+
+const enrichImagesScope = ref<"all" | "artist" | "album">("all");
+const enrichImagesTargetId = ref("");
+const enrichImagesForce = ref(false);
+const enrichImagesDryRun = ref(false);
+
+const enrichImagesScopeOptions = computed(() => [
+  { value: "all", label: t("pages.admin.tasks.enrichImages.scopeAll") },
+  { value: "artist", label: t("pages.admin.tasks.enrichImages.scopeArtist") },
+  { value: "album", label: t("pages.admin.tasks.enrichImages.scopeAlbum") },
+]);
+
+function isEnrichImagesScopeValid(): boolean {
+  if (enrichImagesScope.value === "all") return true;
+  return enrichImagesTargetId.value.trim().length > 0;
+}
+
+function buildEnrichImagesBody(): EnrichImagesRequest {
+  const body: EnrichImagesRequest = {
+    all: enrichImagesScope.value === "all",
+    force: enrichImagesForce.value,
+    dry_run: enrichImagesDryRun.value,
+  };
+  if (enrichImagesScope.value !== "all") {
+    (body as Record<string, unknown>)[`${enrichImagesScope.value}_id`] =
+      enrichImagesTargetId.value.trim();
+  }
+  return body;
+}
 
 function isSyncScopeValid(): boolean {
   if (syncScope.value === "all") return true;
@@ -184,6 +216,44 @@ async function onProvisionFederationKeys() {
     showError("pages.admin.tasks.provisionFederationKeys.triggerError", err);
   }
 }
+
+async function onEnrichImages() {
+  if (!isEnrichImagesScopeValid()) {
+    toastStore.push({
+      type: "error",
+      message: t("pages.admin.tasks.enrichImages.targetIdRequired"),
+    });
+    return;
+  }
+
+  if (enrichImagesScope.value === "all" && !enrichImagesDryRun.value) {
+    const ok = await confirm({
+      title: t("common.confirm"),
+      message: t("pages.admin.tasks.enrichImages.allWarning"),
+      danger: true,
+    });
+    if (!ok) return;
+  }
+
+  try {
+    const body = buildEnrichImagesBody();
+    await runWithLoading("enrichImages", async () => {
+      const result = await enrichImages(body);
+      const message = body.dry_run
+        ? t("pages.admin.tasks.enrichImages.dryRunTriggered", {
+            artists: result.artists,
+            albums: result.albums,
+          })
+        : t("pages.admin.tasks.enrichImages.triggered", {
+            artists: result.artists,
+            albums: result.albums,
+          });
+      toastStore.push({ type: "success", message });
+    });
+  } catch (err) {
+    showError("pages.admin.tasks.enrichImages.triggerError", err);
+  }
+}
 </script>
 
 <template>
@@ -295,6 +365,49 @@ async function onProvisionFederationKeys() {
         @click="onProvisionFederationKeys"
       >
         {{ t("pages.admin.tasks.provisionFederationKeys.trigger") }}
+      </AppButton>
+    </section>
+
+    <section class="tasks-view__card">
+      <h2 class="tasks-view__card-title">
+        <AppIcon name="image" spacing="right" />
+        {{ t("pages.admin.tasks.enrichImages.title") }}
+      </h2>
+      <p class="tasks-view__description">
+        {{ t("pages.admin.tasks.enrichImages.description") }}
+      </p>
+      <div class="tasks-view__controls">
+        <AppSelect
+          v-model="enrichImagesScope"
+          :label="t('pages.admin.tasks.enrichImages.scopeLabel')"
+          :options="enrichImagesScopeOptions"
+          :disabled="loadingTask !== null"
+        />
+        <AppInput
+          v-if="enrichImagesScope !== 'all'"
+          v-model="enrichImagesTargetId"
+          :label="t('pages.admin.tasks.enrichImages.targetIdLabel')"
+          :hint="t('pages.admin.tasks.enrichImages.targetIdHint')"
+          :disabled="loadingTask !== null"
+        />
+        <AppCheckbox
+          v-model="enrichImagesForce"
+          :label="t('pages.admin.tasks.enrichImages.force')"
+          :disabled="loadingTask !== null"
+        />
+        <AppCheckbox
+          v-model="enrichImagesDryRun"
+          :label="t('pages.admin.tasks.enrichImages.dryRun')"
+          :disabled="loadingTask !== null"
+        />
+      </div>
+      <AppButton
+        :loading="loadingTask === 'enrichImages'"
+        :disabled="loadingTask !== null"
+        icon="image"
+        @click="onEnrichImages"
+      >
+        {{ t("pages.admin.tasks.enrichImages.trigger") }}
       </AppButton>
     </section>
   </div>

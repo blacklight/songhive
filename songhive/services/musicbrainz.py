@@ -422,12 +422,10 @@ class MusicBrainzService:
             logger.debug("Artist %s already image enriched; skipping", artist.id)
             return False
         if not artist.musicbrainz_id:
-            self._mark_image_enriched(artist)
             return False
 
-        image_url = await self._fetch_artist_image_url(artist.musicbrainz_id)
+        image_url = await self._find_artist_image_url(artist.musicbrainz_id)
         if not image_url:
-            self._mark_image_enriched(artist)
             return False
 
         if storage_service is None:
@@ -436,22 +434,28 @@ class MusicBrainzService:
             return True
 
         data = await self._download_image(image_url)
-        if data:
-            stored = await self._store_image_file(
-                session,
-                artist,
-                "image_file_id",
-                data,
-                storage_service,
-                owner_id=owner_id,
-                visibility=visibility,
+        if not data:
+            logger.debug(
+                "Could not download artist image for %s from %s",
+                artist.id,
+                image_url,
             )
-            if stored is not None:
-                artist.image_url = None
-                self._mark_image_enriched(artist)
-                return True
+            return False
 
-        artist.image_url = image_url
+        stored = await self._store_image_file(
+            session,
+            artist,
+            "image_file_id",
+            data,
+            storage_service,
+            owner_id=owner_id,
+            visibility=visibility,
+        )
+        if stored is None:
+            logger.debug("Could not store artist image for %s", artist.id)
+            return False
+
+        artist.image_url = None
         self._mark_image_enriched(artist)
         return True
 
@@ -468,7 +472,6 @@ class MusicBrainzService:
         if not force and album.cover_enriched_at is not None:
             return False
         if not album.musicbrainz_id:
-            self._mark_cover_enriched(album)
             return False
 
         await self._store_cover_art(
@@ -478,8 +481,10 @@ class MusicBrainzService:
             storage_service,
             owner_id=album.owner_id,
         )
-        self._mark_cover_enriched(album)
-        return album.cover_file_id is not None
+        if album.cover_file_id is not None:
+            self._mark_cover_enriched(album)
+            return True
+        return False
 
     @staticmethod
     def _mark_image_enriched(artist: Artist) -> None:
@@ -789,8 +794,8 @@ class MusicBrainzService:
         raw["mb_recording"] = details.get("recording", recording)
         track.raw_metadata = raw
 
-    async def _fetch_artist_image_url(self, artist_id: str) -> Optional[str]:
-        """Return a candidate image URL for an artist from MusicBrainz URL relations."""
+    async def _find_artist_image_url(self, artist_id: str) -> Optional[str]:
+        """Return a candidate image URL for an artist from any available source."""
         try:
             result = await self.fetch_artist(artist_id, include_url_rels=True)
         except Exception as exc:
@@ -801,6 +806,18 @@ class MusicBrainzService:
         if not isinstance(artist, dict):
             return None
 
+        image_url = await self._resolve_artist_image_relations(artist)
+        if image_url:
+            return image_url
+
+        image_url = await self._resolve_wikidata_image(artist)
+        if image_url:
+            return image_url
+
+        return None
+
+    async def _resolve_artist_image_relations(self, artist: Dict[str, Any]) -> Optional[str]:
+        """Resolve image-like URL relations from an already-fetched artist."""
         relations = (
             artist.get("url-relation-list")
             or artist.get("url-relations")
@@ -831,13 +848,100 @@ class MusicBrainzService:
 
         return None
 
+    async def _resolve_wikidata_image(self, artist: Dict[str, Any]) -> Optional[str]:
+        """Resolve an image from a Wikidata P18 claim linked to the artist."""
+        relations = (
+            artist.get("url-relation-list")
+            or artist.get("url-relations")
+            or artist.get("relation-list")
+            or artist.get("relations")
+            or []
+        )
+        if not isinstance(relations, list):
+            return None
+
+        wikidata_id: Optional[str] = None
+        for relation in relations:
+            if not isinstance(relation, dict):
+                continue
+            relation_type = relation.get("type") or ""
+            if not isinstance(relation_type, str) or "wikidata" not in relation_type.lower():
+                continue
+            target = relation.get("target")
+            if isinstance(target, str) and target.startswith("https://www.wikidata.org/wiki/"):
+                wikidata_id = target.rsplit("/", 1)[-1]
+                if wikidata_id and wikidata_id.startswith("Q"):
+                    break
+            url = relation.get("url", {})
+            if isinstance(url, dict):
+                resource = url.get("resource") or url.get("id")
+                if isinstance(resource, str) and resource.startswith("https://www.wikidata.org/wiki/"):
+                    wikidata_id = resource.rsplit("/", 1)[-1]
+                    if wikidata_id and wikidata_id.startswith("Q"):
+                        break
+
+        if not wikidata_id:
+            return None
+
+        try:
+            response = await self._client.get(
+                f"https://www.wikidata.org/wiki/Special:EntityData/{wikidata_id}.json",
+                follow_redirects=True,
+            )
+        except Exception as exc:
+            logger.debug("Wikidata request failed for %s: %s", wikidata_id, exc)
+            return None
+
+        if response.status_code != 200:
+            return None
+
+        try:
+            payload = response.json()
+        except Exception:
+            return None
+
+        entity = payload.get("entities", {}).get(wikidata_id, {})
+        claims = entity.get("claims", {})
+        p18 = claims.get("P18", [])
+        if not isinstance(p18, list):
+            return None
+
+        for claim in p18:
+            if not isinstance(claim, dict):
+                continue
+            datavalue = claim.get("mainsnak", {}).get("datavalue", {})
+            filename = datavalue.get("value")
+            if not isinstance(filename, str):
+                continue
+            filename = filename.replace(" ", "_")
+            commons_url = f"https://commons.wikimedia.org/wiki/File:{urllib.parse.quote(filename)}"
+            resolved = await self._wikimedia_file_url(commons_url)
+            if resolved:
+                return resolved
+
+        return None
+
     async def _resolve_image_url(self, url: str) -> Optional[str]:
         """Resolve a relation URL to a direct image URL."""
         parsed = urllib.parse.urlparse(url)
+
+        # web.archive.org saved snapshots: extract the archived URL
+        if parsed.netloc.endswith("web.archive.org") and "/web/" in (parsed.path or ""):
+            parts = (parsed.path or "").split("/")
+            if len(parts) >= 4 and parts[1] == "web":
+                archived_url = "/".join(parts[3:])
+                if archived_url.startswith("http"):
+                    return await self._resolve_image_url(archived_url)
+
         if parsed.netloc.endswith("commons.wikimedia.org"):
             return await self._wikimedia_file_url(url)
+
+        if "scdn.co" in parsed.netloc or parsed.netloc.endswith("mzstatic.com"):
+            return url
+
         if _looks_like_image_url(url):
             return url
+
         return None
 
     async def _wikimedia_file_url(self, url: str) -> Optional[str]:

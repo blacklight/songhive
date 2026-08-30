@@ -594,6 +594,19 @@ successful MusicBrainz enrichment. Manual bulk triggers are provided by
 `--track-id`, `--album-id`, `--artist-id`, `--library-id`, or `--all`); the
 admin web UI exposes the same options under `/admin/tasks`.
 
+Image enrichment (artist images + album covers) is normally triggered
+automatically by MusicBrainz metadata enrichment. It can also be run manually
+in bulk via `POST /api/v1/admin/enrich-images` and
+`songhive admin enrich-images` (with `--artist-id`, `--album-id`, or `--all`,
+plus `--force` to re-process already-enriched entities and `--dry-run` to
+preview counts).
+
+Artist images are resolved in this order: (1) MusicBrainz image URL
+relationships, (2) Wikidata `P18` image claims via the artist's Wikidata
+relationship, (3) archived/known image hosts such as `web.archive.org`
+(Spotify CDN) and `i.scdn.co`. If no image can be downloaded, the artist is
+not marked as enriched, so future syncs will continue to retry.
+
 To migrate an existing library that was stored before audio-only hashing, run
 `songhive admin rehash-audio` (with `--dry-run` to preview) or use
 `POST /api/v1/admin/rehash-audio` from the admin UI. The task re-hashes audio

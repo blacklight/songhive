@@ -859,3 +859,108 @@ async def test_admin_provision_federation_keys_endpoint(client, db_session, make
     assert log is not None
     assert log.actor_id == str(admin.id)
     assert log.details["dry_run"] is False
+
+
+@pytest.mark.asyncio
+async def test_admin_enrich_images_endpoint(client, db_session, make_user, auth_headers, monkeypatch):
+    """Admins can queue image enrichment for a single artist and the action is audited."""
+    admin = await make_user("admin", role="admin")
+
+    from songhive.models.artist import Artist
+
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-1")
+    db_session.add(artist)
+    await db_session.commit()
+
+    enrich_mock = MagicMock()
+    enrich_mock.delay.return_value = MagicMock(id="image-task")
+    monkeypatch.setattr("songhive.api.routes.admin.bulk_enrich_images", enrich_mock)
+
+    response = client.post(
+        "/api/v1/admin/enrich-images",
+        headers=auth_headers(admin),
+        json={"artist_id": str(artist.id)},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["artists"] == 1
+    assert data["albums"] == 0
+    assert data["status"] == "queued"
+    assert data["task_id"] == "image-task"
+    enrich_mock.delay.assert_called_once_with(
+        artist_id=str(artist.id), album_id=None, all_=False, force=False, dry_run=False
+    )
+
+    result = await db_session.execute(select(AuditLog).where(AuditLog.action == "images.enrich"))
+    log = result.scalar_one_or_none()
+    assert log is not None
+    assert log.actor_id == str(admin.id)
+    assert log.details["artists"] == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_enrich_images_endpoint_dry_run(client, db_session, make_user, auth_headers):
+    """The enrich-images endpoint supports dry-run and returns counts."""
+    admin = await make_user("admin", role="admin")
+
+    from songhive.models.album import Album
+    from songhive.models.artist import Artist
+
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-1")
+    db_session.add(artist)
+    await db_session.flush()
+    album = Album(title="Test Album", artist_id=artist.id, musicbrainz_id="album-1")
+    db_session.add(album)
+    await db_session.commit()
+
+    response = client.post(
+        "/api/v1/admin/enrich-images",
+        headers=auth_headers(admin),
+        json={"all": True, "dry_run": True},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["artists"] == 1
+    assert data["albums"] == 1
+    assert data["status"] == "dry_run"
+    assert data["task_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_admin_enrich_images_endpoint_requires_scope(client, db_session, make_user, auth_headers):
+    """The enrich-images endpoint requires at least one scope."""
+    admin = await make_user("admin", role="admin")
+
+    response = client.post(
+        "/api/v1/admin/enrich-images",
+        headers=auth_headers(admin),
+        json={},
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_admin_enrich_images_endpoint_broker_unavailable(
+    client, db_session, make_user, auth_headers, monkeypatch
+):
+    """A broker failure when queuing image enrichment returns 503."""
+    admin = await make_user("admin", role="admin")
+
+    from kombu.exceptions import OperationalError as KombuOperationalError
+
+    from songhive.models.artist import Artist
+
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-1")
+    db_session.add(artist)
+    await db_session.commit()
+
+    enrich_mock = MagicMock()
+    enrich_mock.delay.side_effect = KombuOperationalError("broker down")
+    monkeypatch.setattr("songhive.api.routes.admin.bulk_enrich_images", enrich_mock)
+
+    response = client.post(
+        "/api/v1/admin/enrich-images",
+        headers=auth_headers(admin),
+        json={"artist_id": str(artist.id)},
+    )
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
