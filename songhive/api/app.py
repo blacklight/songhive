@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from starlette.types import Receive, Send
 
 from ..config.schema import SonghiveConfig
-from ..models.base import get_session, init_db
+from ..models.base import dispose_engine, get_session, init_db
 from ..services.acl import audit_ownerless_private
 from ..services.redis import close_redis_client, get_redis_client
 from ..services.settings import apply_settings_overrides
@@ -70,11 +70,18 @@ def _sync_settings_overlay(config: SonghiveConfig) -> tuple[SonghiveConfig, bool
     loop = None
     try:
         loop = asyncio.new_event_loop()
-        # ``wait_for`` provides a hard ceiling so a stuck database query cannot
-        # block server startup forever. Avoid ``asyncio.run`` here because it
-        # sets/unsets the current event loop, which can break Tornado's
-        # IOLoop when ``create_app`` is called from an async test context.
-        return loop.run_until_complete(asyncio.wait_for(_run(), timeout=10.0)), True
+        try:
+            # ``wait_for`` provides a hard ceiling so a stuck database query cannot
+            # block server startup forever. Avoid ``asyncio.run`` here because it
+            # sets/unsets the current event loop, which can break Tornado's
+            # IOLoop when ``create_app`` is called from an async test context.
+            return loop.run_until_complete(asyncio.wait_for(_run(), timeout=10.0)), True
+        finally:
+            # The overlay query opens pooled asyncpg connections bound to this
+            # temporary loop. Drop them so the real request loop (a2wsgi or
+            # uvicorn) creates fresh connections on its own loop instead of
+            # reusing ones tied to a loop that is about to close.
+            loop.run_until_complete(dispose_engine())
     except asyncio.TimeoutError:
         logger.warning("Settings overlay timed out; using config file/defaults")
         return config, False

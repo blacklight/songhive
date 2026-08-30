@@ -74,6 +74,19 @@ def reset_db() -> None:
     _session_factory = None
 
 
+async def dispose_engine() -> None:
+    """Dispose the shared engine, dropping all pooled connections.
+
+    asyncpg connections are bound to the event loop that created them. Startup
+    work (e.g. the settings overlay) may run in a temporary loop; disposing the
+    engine afterwards ensures the request-handling loop creates fresh
+    connections instead of reusing ones bound to a closed loop.
+    """
+    global _engine
+    if _engine is not None:
+        await _engine.dispose()
+
+
 def _default_engine_kwargs(database_url: str, **kwargs) -> dict:
     """Add SQLite-friendly defaults for the async engine.
 
