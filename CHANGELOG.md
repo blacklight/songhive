@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `db`: Use `NullPool` for the async engine by default so Tornado and a2wsgi
+  request loops each create fresh asyncpg connections, preventing
+  ``Future attached to a different loop`` errors during audio streaming.
+
 ## 0.0.11
 
 ### Changed

@@ -99,16 +99,19 @@ async def dispose_and_reset() -> None:
 
 
 def _default_engine_kwargs(database_url: str, **kwargs) -> dict:
-    """Add SQLite-friendly defaults for the async engine.
+    """Add loop-safe defaults for the async engine.
 
-    SQLite's default ``StaticPool`` keeps a single connection that can
-    outlive an ``asyncio`` event loop. Tests that create and dispose
-    multiple loops are more reliable with ``NullPool``.
+    asyncpg connections are bound to the event loop that created them, and
+    Songhive runs multiple event loops in the same process (Tornado's main
+    loop, a2wsgi's dedicated ASGI loop, and temporary startup loops). A
+    shared connection pool would hand out loop-bound connections to the
+    wrong loop, causing ``Future attached to a different loop`` errors. Use
+    ``NullPool`` by default so each request creates fresh connections on its
+    own loop; this also covers SQLite, whose default ``StaticPool`` can
+    outlive an ``asyncio`` event loop.
     """
-    if (
-        kwargs.get("poolclass") is None
-        and database_url.startswith("sqlite+aiosqlite")
-        and ":memory:" not in database_url
+    if kwargs.get("poolclass") is None and (
+        database_url.startswith("postgresql+asyncpg://") or database_url.startswith("sqlite+aiosqlite://")
     ):
         kwargs = {"poolclass": NullPool, **kwargs}
 
