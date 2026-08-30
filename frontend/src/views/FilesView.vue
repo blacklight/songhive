@@ -623,7 +623,7 @@ async function onFileChange(event: Event) {
   width: 100%;
   height: 0.75rem;
   border-radius: var(--radius-md);
-  background-color: var(--color-surface-raised);
+  background-color: var(--color-surface-active);
   overflow: hidden;
 }
 
