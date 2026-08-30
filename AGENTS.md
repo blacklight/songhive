@@ -139,6 +139,9 @@ When notable sections are added, changed or removed, remember to update
   current schema from SQLAlchemy and are then stamped at ``head``.
 - Migrations are run automatically when the application starts (inside
   ``create_app``) and before ``songhive``/``celery`` starts in Docker.
+- ``ensure_migrated`` is safe for concurrent callers: it uses a PostgreSQL
+  advisory lock or a SQLite ``fcntl`` file lock so multiple containers (or
+  processes) starting at once do not race to create the baseline schema.
 - Run migrations manually via the admin CLI:
 
   ```bash

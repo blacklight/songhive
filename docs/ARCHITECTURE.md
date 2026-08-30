@@ -350,7 +350,11 @@ production databases are stamped at ``base`` and upgraded normally.
 
 Migrations run automatically when ``create_app`` is called, and the Docker
 entrypoint runs ``songhive admin migrate`` before starting the web server or
-Celery workers.  Admins can also trigger them manually:
+Celery workers.  ``ensure_migrated`` acquires a backend-specific lock for the
+whole operation: a PostgreSQL advisory lock for Postgres, or a ``fcntl`` file
+lock on a companion file for SQLite.  This prevents the web server and worker
+from racing to create the baseline schema on a fresh Docker Compose install.
+Admins can also trigger them manually:
 
 ```bash
 python -m songhive admin migrate
