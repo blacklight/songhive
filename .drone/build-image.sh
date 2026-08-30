@@ -32,11 +32,15 @@ docker buildx rm "$BUILDER" 2>/dev/null || true
 docker buildx create --name="$BUILDER" --driver=docker-container --use
 trap 'docker buildx rm "$BUILDER" 2>/dev/null || true' EXIT
 
-# Build and publish the images
+CACHE_TAG="${IMAGE_NAME}:cache"
+
+# Build and publish the images, exporting BuildKit cache to the registry.
 docker buildx build \
     -f Dockerfile \
     -t "$IMAGE_NAME:$VERSION" \
     -t "$IMAGE_NAME:latest" \
     --platform linux/amd64,linux/arm64 \
     --builder "$BUILDER" \
+    --cache-from "type=registry,ref=$CACHE_TAG" \
+    --cache-to "type=registry,ref=$CACHE_TAG,mode=max" \
     --push .

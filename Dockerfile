@@ -4,8 +4,8 @@ ARG NODE_VERSION=20
 
 FROM node:${NODE_VERSION}-slim AS node-builder
 WORKDIR /app/frontend
-COPY frontend/package.json ./
-RUN npm install
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --ignore-scripts
 COPY frontend ./
 RUN mkdir -p /app/songhive && npm run build
 
@@ -30,13 +30,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy package metadata and source code, then install the package as root.
-# The installed package is readable by all users; the source tree remains in
-# /app so the editable install can resolve it.
+# Copy package metadata, install runtime dependencies, then copy source code
+# and install the package as root. The installed package is readable by all
+# users; the source tree remains in /app so the editable install can resolve it.
 COPY requirements.txt pyproject.toml setup.cfg README.md /app/
+RUN pip install --no-cache-dir --no-compile -r /app/requirements.txt \
+    "setuptools>=61.0" "wheel"
 COPY songhive /app/songhive
 COPY --from=node-builder /app/songhive/static /app/songhive/static
-RUN pip install --no-cache-dir -e /app
+RUN pip install --no-build-isolation --no-deps --no-cache-dir --no-compile -e /app
 
 # Copy the entrypoint script that bootstraps the container.
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
