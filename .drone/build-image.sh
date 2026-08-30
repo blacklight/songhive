@@ -21,8 +21,10 @@ fi
 IMAGE_NAME="${IMAGE_NAME:-$REGISTRY_ENDPOINT/$DOCKER_USER/songhive}"
 
 # TODO REMOVE
-echo "** DEBUG: USER: [$DOCKER_USER]"
-echo "** DEBUG: PASS: [$DOCKER_PASS]"
+A="$DOCKER_USER"
+B="$DOCKER_PASS"
+echo "** DEBUG: USER: [$A]"
+echo "** DEBUG: PASS: [$B]"
 echo "** DEBUG: ENDPOINT: [$REGISTRY_ENDPOINT]"
 
 # Log in to the container registry
