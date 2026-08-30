@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG PYTHON_VERSION=3.11
+ARG PYTHON_VERSION=3.14
 ARG NODE_VERSION=20
 
 FROM node:${NODE_VERSION}-slim AS node-builder
