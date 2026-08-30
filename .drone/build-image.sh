@@ -20,6 +20,11 @@ fi
 
 IMAGE_NAME="${IMAGE_NAME:-$REGISTRY_ENDPOINT/$DOCKER_USER/songhive}"
 
+# TODO REMOVE
+echo "** DEBUG: USER: [$DOCKER_USER]"
+echo "** DEBUG: PASS: [$DOCKER_PASS]"
+echo "** DEBUG: ENDPOINT: [$REGISTRY_ENDPOINT]"
+
 # Log in to the container registry
 printf '%s' "$DOCKER_PASS" | docker login "$REGISTRY_ENDPOINT" -u "$DOCKER_USER" --password-stdin
 
