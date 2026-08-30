@@ -25,10 +25,10 @@ RUN groupadd -g ${GROUP_ID} songhive && \
 
 WORKDIR /home/songhive
 
-# Install runtime system dependencies.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# Install a static ffmpeg binary. It has no external dependencies and works
+# in the Debian-based python-slim image without pulling in the 200+ Debian
+# packages that `apt-get install ffmpeg` would install.
+COPY --from=mwader/static-ffmpeg:9.0.1 /ffmpeg /usr/local/bin/ffmpeg
 
 # Copy package metadata, install runtime dependencies, then copy source code
 # and install the package as root. The installed package is readable by all
