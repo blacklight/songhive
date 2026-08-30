@@ -8,6 +8,11 @@ trigger:
     exclude:
       - pull_request
 
+volumes:
+  - name: docker_sock
+    host:
+      path: /var/run/docker.sock
+
 steps:
 
 ###
@@ -126,6 +131,32 @@ steps:
         - frontend/**
   depends_on:
     - frontend-build
+
+###
+### Build and publish the Docker image
+###
+
+- name: build-image
+  image: docker
+  privileged: true
+  volumes:
+    - name: docker_sock
+      path: /var/run/docker.sock
+
+  environment:
+    REGISTRY_ENDPOINT: quay.io
+    IMAGE_NAME: quay.io/blacklight/songhive
+    DOCKER_USER:
+      from_secret: docker_user
+    DOCKER_PASS:
+      from_secret: registry_token
+
+  when:
+    event:
+      - tag
+
+  commands:
+    - . .drone/build-image.sh
 
 ###
 ### Upload test coverage to Codacy
