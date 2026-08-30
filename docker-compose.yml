@@ -16,12 +16,15 @@ services:
     restart: "no"
 
   songhive:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        USER_ID: ${PUID:-1000}
-        GROUP_ID: ${PGID:-1000}
+    image: quay.io/blacklight/songhive
+    # Or uncomment the following lines if you want to build the image from the
+    # local checkout
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     USER_ID: ${PUID:-1000}
+    #     GROUP_ID: ${PGID:-1000}
     container_name: songhive-app
     user: ${PUID:-1000}:${PGID:-1000}
     environment: &songhive-env
@@ -55,12 +58,15 @@ services:
     restart: unless-stopped
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        USER_ID: ${PUID:-1000}
-        GROUP_ID: ${PGID:-1000}
+    image: quay.io/blacklight/songhive
+    # Or uncomment the following lines if you want to build the image from the
+    # local checkout
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     USER_ID: ${PUID:-1000}
+    #     GROUP_ID: ${PGID:-1000}
     container_name: songhive-worker
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
