@@ -12,6 +12,13 @@ volumes:
   - name: docker_sock
     host:
       path: /var/run/docker.sock
+  - name: ffmpeg_bin
+    temp: {}
+  - name: pip_cache
+    host:
+      # NOTE: Requires /home/drone to exist (or symlinked)
+      # and writeable to the Drone server UID
+      path: /home/drone/.cache/pip/drone
 
 steps:
 
@@ -42,6 +49,9 @@ steps:
 
 - name: backend-lint
   image: python:3.12
+  volumes:
+    - name: pip_cache
+      path: /root/.cache/pip
   commands:
     - pip install flake8 black isort mypy
     - python -m flake8 songhive tests
@@ -79,15 +89,48 @@ steps:
         - frontend/**
 
 ###
+### Prepare a static ffmpeg binary for the test suite
+###
+
+- name: prepare-ffmpeg
+  image: docker
+  privileged: true
+  volumes:
+    - name: docker_sock
+      path: /var/run/docker.sock
+    - name: ffmpeg_bin
+      path: /opt/ffmpeg
+
+  when:
+    event:
+      - push
+    paths:
+      include:
+        - songhive/**
+
+  commands:
+    - docker rm -f ff 2>/dev/null || true
+    - docker create --name ff mwader/static-ffmpeg:9.0.1
+    - docker cp ff:/ffmpeg /opt/ffmpeg/ffmpeg
+    - docker rm ff
+    - chmod +x /opt/ffmpeg/ffmpeg
+
+###
 ### Run tests
 ###
 
 - name: backend-tests
   image: python:3.14
+  volumes:
+    - name: ffmpeg_bin
+      path: /opt/ffmpeg
+    - name: pip_cache
+      path: /root/.cache/pip
+
   commands:
-    - apt-get update && apt-get install -y ffmpeg
+    - export PATH="/opt/ffmpeg:$PATH"
     - pip install -e . -r requirements-dev.txt
-    - python -m pytest --cov=songhive --cov-report=term-missing --cov-report=xml
+    - python -m pytest -n 4 --cov-report=xml
 
   when:
     event:
@@ -98,6 +141,7 @@ steps:
 
   depends_on:
     - frontend-build
+    - prepare-ffmpeg
 
 ###
 ### Frontend Lint
