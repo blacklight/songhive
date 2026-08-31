@@ -43,6 +43,7 @@ from ...users.tokens import (
     rotate_refresh_token,
     validate_refresh_token,
 )
+from .._common import client_ip
 from ..deps import get_config, get_current_user, get_db, get_redis
 from ..middleware.rate_limit import check_rate_limit, rate_limit
 
@@ -250,7 +251,13 @@ async def login(
         )
 
     user.last_login = datetime.now(timezone.utc)
-    token_pair = await issue_token_pair(user, config, redis)
+    token_pair = await issue_token_pair(
+        user,
+        config,
+        redis,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+    )
     return _token_pair_response(token_pair)
 
 
@@ -261,6 +268,7 @@ async def login(
 )
 async def refresh(
     body: RefreshRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
     redis: Redis = Depends(get_redis),
@@ -283,7 +291,13 @@ async def refresh(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token_pair = await rotate_refresh_token(body.refresh_token, config, redis)
+    token_pair = await rotate_refresh_token(
+        body.refresh_token,
+        config,
+        redis,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+    )
     if token_pair is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

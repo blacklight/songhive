@@ -108,6 +108,24 @@ export function passwordResetConfirm(
   });
 }
 
+export interface SessionSummary {
+  id: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string | null;
+  expires_at: string | null;
+  is_current: boolean;
+}
+
+export interface SessionListResponse {
+  items: SessionSummary[];
+  total: number;
+}
+
+export interface RevokeSessionResponse {
+  success: boolean;
+}
+
 export function listApiTokens(): Promise<ApiTokenListResponse> {
   return apiRequest<ApiTokenListResponse>("/auth/api-tokens");
 }
@@ -123,4 +141,29 @@ export function createApiToken(
 
 export function revokeApiToken(id: string): Promise<unknown> {
   return apiRequest<unknown>(`/auth/api-tokens/${id}`, { method: "DELETE" });
+}
+
+export async function sha256Hex(value: string): Promise<string> {
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    return "";
+  }
+  const data = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export function listSessions(
+  currentSessionId?: string,
+): Promise<SessionListResponse> {
+  return apiRequest<SessionListResponse>("/auth/sessions", {
+    query: currentSessionId ? { current_session_id: currentSessionId } : {},
+  });
+}
+
+export function revokeSession(id: string): Promise<RevokeSessionResponse> {
+  return apiRequest<RevokeSessionResponse>(`/auth/sessions/${id}`, {
+    method: "DELETE",
+  });
 }

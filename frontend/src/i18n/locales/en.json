@@ -578,7 +578,18 @@
       "never": "Never"
     },
     "sessions": {
-      "disabled": "Session management is not available yet."
+      "device": "Device",
+      "ipAddress": "IP address",
+      "createdAt": "Created",
+      "expiresAt": "Expires",
+      "current": "Current session",
+      "unknown": "Unknown",
+      "empty": "You have no active sessions.",
+      "revoke": "Revoke",
+      "revokeConfirm": "Are you sure you want to revoke the session on \"{device}\"?",
+      "revokeCurrentConfirm": "Are you sure you want to revoke your current session? You will be logged out.",
+      "revokeSuccess": "Session revoked.",
+      "revokeCurrentSuccess": "Session revoked. Logging out..."
     }
   },
   "browse": {

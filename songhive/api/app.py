@@ -37,6 +37,7 @@ from .routes import (
     playlists,
     radios,
     reports,
+    sessions,
     share,
     share_urls,
     shares,
@@ -197,6 +198,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     # Register API routes
     api_prefix = "/api/v1"
     app.include_router(auth.router, prefix=api_prefix, tags=["auth"])
+    app.include_router(sessions.router, prefix=api_prefix, tags=["sessions"])
     app.include_router(api_tokens.router, prefix=api_prefix, tags=["api-tokens"])
     app.include_router(users.router, prefix=api_prefix, tags=["users"])
     app.include_router(artists.router, prefix=api_prefix, tags=["artists"])

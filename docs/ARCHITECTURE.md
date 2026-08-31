@@ -83,6 +83,7 @@ songhive/
 │   ├── errors.py           # RFC 7807 problem-detail exception handlers
 │   ├── routes/             # Route modules (one file per resource)
 │   │   ├── auth.py         # Login, registration, token refresh, password reset
+│   │   ├── sessions.py     # List and revoke active refresh-token sessions
 │   │   ├── users.py        # User profiles, avatar, links, password change
 │   │   ├── artists.py
 │   │   ├── albums.py
@@ -161,7 +162,7 @@ songhive/
 │   ├── manager.py          # User CRUD, password management
 │   ├── invites.py          # Invite-code creation, validation, consumption
 │   ├── oauth.py            # OAuth2 provider setup (authlib)
-│   └── tokens.py           # JWT access + opaque refresh token issuance/rotation/revocation
+│   └── tokens.py           # JWT access + opaque refresh token issuance/rotation/revocation, session listing
 ├── music/                  # Music domain logic
 │   ├── importer.py         # File importer: save → extract tags → link track
 │   └── metadata.py         # Tag reading (mutagen), field normalization
@@ -375,12 +376,16 @@ alembic revision --autogenerate -m "add example column"
 
 1. **Login** — username/password → bcrypt verify → issue `TokenPair`
    (short-lived JWT access token + long-lived opaque refresh token stored in
-   Redis).
+   Redis). Each refresh token also records IP, user agent, creation time and
+   expiry, forming a user session.
 2. **Refresh** — opaque refresh token → Redis lookup → rotate (revoke old,
    issue new pair).
 3. **Revoke** — single token or all tokens for a user (Redis key deletion).
-4. **OAuth2** — authlib `authorization_code` flow for third-party app access.
-5. **Invite-only registration** — controlled by `RegistrationMode` config
+4. **Session management** — users can list their active refresh-token sessions
+   (including the current one) and revoke any session individually, revoking the
+   current session ends the user's login.
+5. **OAuth2** — authlib `authorization_code` flow for third-party app access.
+6. **Invite-only registration** — controlled by `RegistrationMode` config
    setting; `Invite` codes with optional `max_uses` and `expires_at`.
 
 ### Authorization
@@ -693,7 +698,7 @@ REST API under `/api/v1/`:
 
 ```
 /api/v1/
-├── auth/           # Login, register, token refresh, password reset, verify email
+├── auth/           # Login, register, token refresh, password reset, verify email, sessions
 ├── users/          # User profiles, avatar, links, invite management
 ├── artists/        # Artist CRUD + search
 ├── albums/         # Album CRUD + search

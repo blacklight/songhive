@@ -20,11 +20,14 @@ from ..models.user import User
 __all__ = [
     "TokenPair",
     "RefreshTokenPayload",
+    "UserSession",
     "issue_token_pair",
     "validate_refresh_token",
     "rotate_refresh_token",
     "revoke_refresh_token",
     "revoke_all_user_refresh_tokens",
+    "list_user_sessions",
+    "revoke_session",
 ]
 
 
@@ -44,6 +47,21 @@ class RefreshTokenPayload:
 
     user_id: str
     expires_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+
+
+@dataclass
+class UserSession:
+    """A user-facing view of an active refresh token session."""
+
+    id: str
+    user_id: str
+    created_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
 
 
 def _hash_token(token: str) -> str:
@@ -72,15 +90,27 @@ def _token_ttl(config: SonghiveConfig) -> int:
     return config.auth.refresh_token_expiry_days * 86400
 
 
-def _encode_value(user_id: str, ttl: int) -> str:
+def _encode_value(
+    user_id: str,
+    ttl: int,
+    *,
+    created_at: Optional[datetime] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> str:
     """Encode the refresh token payload as JSON."""
     now = datetime.now(timezone.utc)
+    if created_at is None:
+        created_at = now
     return json.dumps(
         {
             "user_id": user_id,
-            "created_at": now.isoformat(),
+            "created_at": created_at.isoformat(),
             "expires_at": (now + timedelta(seconds=ttl)).isoformat(),
-        }
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+        },
+        default=str,
     )
 
 
@@ -94,18 +124,34 @@ def _decode_value(value: Optional[str | bytes]) -> Optional[RefreshTokenPayload]
         data = json.loads(value)
     except json.JSONDecodeError:
         return None
+
     if not isinstance(data, dict):
         return None
     user_id = data.get("user_id")
     if not user_id:
         return None
+
     expires_at: Optional[datetime] = None
     if data.get("expires_at"):
         try:
             expires_at = datetime.fromisoformat(data["expires_at"])
         except ValueError:
             expires_at = None
-    return RefreshTokenPayload(user_id=user_id, expires_at=expires_at)
+
+    created_at: Optional[datetime] = None
+    if data.get("created_at"):
+        try:
+            created_at = datetime.fromisoformat(data["created_at"])
+        except ValueError:
+            created_at = None
+
+    return RefreshTokenPayload(
+        user_id=user_id,
+        expires_at=expires_at,
+        created_at=created_at,
+        ip_address=data.get("ip_address") or None,
+        user_agent=data.get("user_agent") or None,
+    )
 
 
 def _issue_token_pair_for_user_id(user_id: str, config: SonghiveConfig) -> TokenPair:
@@ -127,7 +173,15 @@ def _issue_token_pair_for_user_id(user_id: str, config: SonghiveConfig) -> Token
     )
 
 
-async def issue_token_pair(user: User, config: SonghiveConfig, redis: Redis) -> TokenPair:
+async def issue_token_pair(
+    user: User,
+    config: SonghiveConfig,
+    redis: Redis,
+    *,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    created_at: Optional[datetime] = None,
+) -> TokenPair:
     """
     Issue a new access token and refresh token for a user.
 
@@ -140,7 +194,13 @@ async def issue_token_pair(user: User, config: SonghiveConfig, redis: Redis) -> 
     key = _refresh_key(token_hash)
     user_set_key = _user_refresh_set_key(user.id)
     ttl = _token_ttl(config)
-    value = _encode_value(user.id, ttl)
+    value = _encode_value(
+        user.id,
+        ttl,
+        created_at=created_at,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
     async with redis.pipeline(transaction=True) as pipe:
         pipe.set(key, value, ex=ttl)
@@ -164,7 +224,14 @@ async def validate_refresh_token(token: str, redis: Redis) -> Optional[RefreshTo
     return _decode_value(value)
 
 
-async def rotate_refresh_token(token: str, config: SonghiveConfig, redis: Redis) -> Optional[TokenPair]:
+async def rotate_refresh_token(
+    token: str,
+    config: SonghiveConfig,
+    redis: Redis,
+    *,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Optional[TokenPair]:
     """
     Validate a refresh token and, if valid, issue a new pair and revoke the old one.
 
@@ -190,7 +257,13 @@ async def rotate_refresh_token(token: str, config: SonghiveConfig, redis: Redis)
         token_pair = _issue_token_pair_for_user_id(payload.user_id, config)
         new_hash = _hash_token(token_pair.refresh_token)
         new_key = _refresh_key(new_hash)
-        new_value = _encode_value(payload.user_id, ttl)
+        new_value = _encode_value(
+            payload.user_id,
+            ttl,
+            created_at=payload.created_at,
+            ip_address=ip_address or payload.ip_address,
+            user_agent=user_agent or payload.user_agent,
+        )
         user_set_key = _user_refresh_set_key(payload.user_id)
 
         pipe.multi()
@@ -251,3 +324,56 @@ async def revoke_all_user_refresh_tokens(redis: Redis, user_id: str) -> int:
     keys.append(set_key)
     deleted: int = await redis.delete(*keys)
     return deleted
+
+
+async def list_user_sessions(redis: Redis, user_id: str) -> list[UserSession]:
+    """Return all active refresh token sessions for a user, newest first."""
+    set_key = _user_refresh_set_key(user_id)
+    token_hashes = await _set_members(redis, set_key)
+    sessions: list[UserSession] = []
+
+    for token_hash in token_hashes:
+        key = _refresh_key(token_hash)
+        value = await redis.get(key)
+        payload = _decode_value(value)
+        if payload is None or payload.user_id != user_id:
+            # Clean up stale or malformed set entries.
+            await cast(Awaitable[int], redis.srem(set_key, token_hash))
+            continue
+
+        sessions.append(
+            UserSession(
+                id=token_hash,
+                user_id=payload.user_id,
+                created_at=payload.created_at,
+                expires_at=payload.expires_at,
+                ip_address=payload.ip_address,
+                user_agent=payload.user_agent,
+            )
+        )
+
+    def _sort_key(session: UserSession) -> float:
+        if session.created_at is not None:
+            return session.created_at.timestamp()
+        return 0.0
+
+    sessions.sort(key=_sort_key, reverse=True)
+    return sessions
+
+
+async def revoke_session(redis: Redis, session_id: str, user_id: str) -> bool:
+    """Revoke a single session by its id (token hash) for a user."""
+    key = _refresh_key(session_id)
+    value = await redis.get(key)
+    payload = _decode_value(value)
+
+    if payload is None or payload.user_id != user_id:
+        return False
+
+    user_set_key = _user_refresh_set_key(user_id)
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.delete(key)
+        pipe.srem(user_set_key, session_id)
+        results = await pipe.execute()
+
+    return bool(results[0])

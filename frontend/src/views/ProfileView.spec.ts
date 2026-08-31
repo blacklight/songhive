@@ -12,6 +12,9 @@ vi.mock("@/api/auth", () => ({
   listApiTokens: vi.fn(),
   createApiToken: vi.fn(),
   revokeApiToken: vi.fn(),
+  listSessions: vi.fn(),
+  revokeSession: vi.fn(),
+  sha256Hex: vi.fn().mockResolvedValue("current-session-hash"),
 }));
 
 vi.mock("@/api/users", () => ({
@@ -35,6 +38,7 @@ describe("ProfileView", () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     vi.mocked(authApi.listApiTokens).mockResolvedValue({ items: [], total: 0 });
+    vi.mocked(authApi.listSessions).mockResolvedValue({ items: [], total: 0 });
     vi.mocked(usersApi.updateMe).mockResolvedValue({
       id: "u1",
       username: "alice",
@@ -92,7 +96,7 @@ describe("ProfileView", () => {
     expect(authApi.listApiTokens).toHaveBeenCalled();
   });
 
-  it("switches to the sessions tab and shows the disabled notice", async () => {
+  it("switches to the sessions tab and lists sessions", async () => {
     const router = createTestRouter();
     await router.push("/profile?tab=sessions");
     await router.isReady();
@@ -103,9 +107,8 @@ describe("ProfileView", () => {
     await flushPromises();
 
     expect(router.currentRoute.value.query.tab).toBe("sessions");
-    expect(wrapper.text()).toContain(
-      i18n.global.t("profile.sessions.disabled"),
-    );
+    expect(authApi.listSessions).toHaveBeenCalledWith("current-session-hash");
+    expect(wrapper.text()).toContain(i18n.global.t("profile.sessions.empty"));
   });
 
   it("switches to the password tab", async () => {
