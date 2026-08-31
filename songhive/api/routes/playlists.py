@@ -16,7 +16,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models._enums import Visibility
@@ -93,6 +93,28 @@ class RemovePlaylistTracksRequest(BaseModel):
     """Request body for removing tracks from a playlist."""
 
     track_ids: List[str]
+
+
+class ReorderPlaylistTracksRequest(BaseModel):
+    """Request body for reordering tracks in a playlist."""
+
+    track_ids: List[str] = Field(min_length=1)
+    position: Optional[int] = None
+
+    @field_validator("position")
+    @classmethod
+    def _position_must_be_positive(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and value <= 0:
+            raise ValueError("position must be a positive integer")
+        return value
+
+
+class ReorderPlaylistTracksResponse(BaseModel):
+    """Response body for a successful playlist track reorder."""
+
+    reordered: bool = True
+    track_ids: List[str]
+    count: int
 
 
 async def _playlist_image_url(playlist: Playlist, storage: StorageService) -> Optional[str]:
@@ -609,6 +631,56 @@ async def remove_tracks_from_playlist(
     await db.commit()
 
     return {"removed": removed_count, "track_ids": removed_ids}
+
+
+@router.post("/{playlist_id}/tracks/reorder", response_model=ReorderPlaylistTracksResponse)
+async def reorder_playlist_tracks_route(
+    playlist_id: str,
+    request: Request,
+    body: ReorderPlaylistTracksRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reorder tracks within a playlist."""
+    playlist = await music.get_playlist(db, playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    try:
+        moved = await music.reorder_playlist_tracks(
+            db,
+            playlist_id,
+            body.track_ids,
+            body.position,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="playlist_track.reorder",
+        target_type="playlist",
+        target_id=playlist_id,
+        details={
+            "track_ids": moved,
+            "position": body.position,
+            "count": len(moved),
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return ReorderPlaylistTracksResponse(reordered=True, track_ids=moved, count=len(moved))
 
 
 @router.delete("/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])

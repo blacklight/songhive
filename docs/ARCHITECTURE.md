@@ -708,7 +708,7 @@ REST API under `/api/v1/`:
 ├── tracks/         # Track CRUD + search
 ├── files/          # Generic file upload/list/download (StoredFile)
 ├── libraries/      # Library management + add/remove tracks/albums/artists
-├── playlists/      # Playlist CRUD + add/remove tracks/albums/artists + list tracks
+├── playlists/      # Playlist CRUD + add/remove/reorder tracks/albums/artists + list tracks
 ├── favorites/      # Favorites/bookmarks
 ├── history/        # Listening history
 ├── radios/         # Dynamic radio generation

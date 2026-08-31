@@ -376,3 +376,299 @@ async def test_remove_tracks_from_playlist_creates_audit_log(client, regular_use
     assert log.target_type == "playlist"
     assert log.details["count"] == 1
     assert log.details["track_ids"] == [str(track.id)]
+
+
+def _ordered_track_ids(response):
+    """Return track IDs from a playlist track listing response."""
+    return [track["id"] for track in response.json()]
+
+
+@pytest.mark.asyncio
+async def test_reorder_tracks_single_move(client, regular_user, db_session, auth_headers):
+    """A single track can be moved to a specific position."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 6)]
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(t.id) for t in tracks]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/reorder",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(tracks[3].id)], "position": 2},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["reordered"] is True
+    assert data["count"] == 1
+    assert data["track_ids"] == [str(tracks[3].id)]
+
+    listing = client.get(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+    )
+    assert listing.status_code == 200
+    expected = [
+        str(tracks[0].id),
+        str(tracks[3].id),
+        str(tracks[1].id),
+        str(tracks[2].id),
+        str(tracks[4].id),
+    ]
+    assert _ordered_track_ids(listing) == expected
+
+
+@pytest.mark.asyncio
+async def test_reorder_tracks_split_move(client, regular_user, db_session, auth_headers):
+    """A multi-track move preserves the block's relative order."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 6)]
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(t.id) for t in tracks]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/reorder",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(tracks[2].id), str(tracks[0].id)], "position": 2},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] == 2
+
+    listing = client.get(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+    )
+    expected = [
+        str(tracks[1].id),
+        str(tracks[0].id),
+        str(tracks[2].id),
+        str(tracks[3].id),
+        str(tracks[4].id),
+    ]
+    assert _ordered_track_ids(listing) == expected
+
+
+@pytest.mark.asyncio
+async def test_reorder_tracks_move_to_end(client, regular_user, db_session, auth_headers):
+    """Omitting position moves the block to the end."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 6)]
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(t.id) for t in tracks]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/reorder",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(tracks[1].id)]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["track_ids"] == [str(tracks[1].id)]
+
+    listing = client.get(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+    )
+    expected = [
+        str(tracks[0].id),
+        str(tracks[2].id),
+        str(tracks[3].id),
+        str(tracks[4].id),
+        str(tracks[1].id),
+    ]
+    assert _ordered_track_ids(listing) == expected
+
+
+@pytest.mark.asyncio
+async def test_reorder_tracks_forbidden(client, regular_user, other_user, db_session, auth_headers):
+    """A non-manager cannot reorder a playlist's tracks."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/reorder",
+        headers=auth_headers(other_user),
+        json={"track_ids": [str(track.id)], "position": 1},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_reorder_tracks_missing_playlist(client, regular_user, auth_headers):
+    """Reordering a missing playlist returns 404."""
+    response = client.post(
+        "/api/v1/playlists/missing/tracks/reorder",
+        headers=auth_headers(regular_user),
+        json={"track_ids": ["track-1"], "position": 1},
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_reorder_tracks_empty_track_ids(client, regular_user, db_session, auth_headers):
+    """An empty track_ids list is rejected."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/reorder",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [], "position": 1},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_reorder_tracks_unknown_track_id(client, regular_user, db_session, auth_headers):
+    """Unknown track IDs are rejected."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/reorder",
+        headers=auth_headers(regular_user),
+        json={"track_ids": ["missing-id"], "position": 1},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_reorder_tracks_non_positive_position(client, regular_user, db_session, auth_headers):
+    """Non-positive positions are rejected."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/reorder",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)], "position": 0},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_reorder_tracks_creates_audit_log(client, regular_user, db_session, auth_headers):
+    """Reordering tracks writes a playlist_track.reorder AuditLog row."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 4)]
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(t.id) for t in tracks]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/reorder",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(tracks[2].id)], "position": 1},
+    )
+    assert response.status_code == 200
+
+    log = await db_session.scalar(
+        select(AuditLog)
+        .where(
+            AuditLog.action == "playlist_track.reorder",
+            AuditLog.actor_id == regular_user.id,
+            AuditLog.target_id == playlist.id,
+        )
+        .order_by(AuditLog.created_at.desc())
+    )
+    assert log is not None
+    assert log.target_type == "playlist"
+    assert log.details["count"] == 1
+    assert log.details["track_ids"] == [str(tracks[2].id)]
+    assert log.details["position"] == 1
+
+
+@pytest.mark.asyncio
+async def test_remove_tracks_from_playlist_renormalizes(client, regular_user, db_session, auth_headers):
+    """Removing a middle track renormalizes the remaining positions."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 6)]
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(t.id) for t in tracks]},
+    )
+    assert add.status_code == 201
+
+    remove = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks/remove",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(tracks[2].id)]},
+    )
+    assert remove.status_code == 200
+
+    listing = client.get(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+    )
+    expected = [
+        str(tracks[0].id),
+        str(tracks[1].id),
+        str(tracks[3].id),
+        str(tracks[4].id),
+    ]
+    assert _ordered_track_ids(listing) == expected

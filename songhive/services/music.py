@@ -1025,8 +1025,82 @@ async def remove_playlist_tracks(
 
     if rows:
         await session.flush()
+        await renormalize_playlist_track_positions(session, playlist_id)
 
     return len(rows), removed_ids
+
+
+async def renormalize_playlist_track_positions(session: AsyncSession, playlist_id: str) -> None:
+    """
+    Reassign contiguous 1-based ``position`` values to a playlist's tracks.
+
+    Existing order is preserved; only rows whose position actually changes are
+    written.
+    """
+    result = await session.execute(
+        select(PlaylistTrack)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+        .order_by(PlaylistTrack.position, PlaylistTrack.id)
+    )
+    rows = list(result.scalars().all())
+
+    changed = False
+    for i, row in enumerate(rows, start=1):
+        if row.position != i:
+            row.position = i
+            changed = True
+
+    if changed:
+        await session.flush()
+
+
+async def reorder_playlist_tracks(
+    session: AsyncSession,
+    playlist_id: str,
+    track_ids: List[str],
+    position: Optional[int] = None,
+) -> List[str]:
+    """
+    Move all occurrences of ``track_ids`` to ``position`` in the playlist.
+
+    The block of tracks is taken from its current locations, preserving its
+    internal order, and inserted at the 1-based rank ``position`` (``None``
+    means the end). Unknown track IDs raise ``ValueError``.
+    """
+    if not track_ids:
+        return []
+
+    seen: Set[str] = set()
+    deduped: List[str] = []
+    for track_id in track_ids:
+        if track_id not in seen:
+            seen.add(track_id)
+            deduped.append(track_id)
+
+    result = await session.execute(
+        select(PlaylistTrack)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+        .order_by(PlaylistTrack.position, PlaylistTrack.id)
+    )
+    rows = list(result.scalars().all())
+    present = {str(row.track_id) for row in rows}
+
+    for track_id in deduped:
+        if track_id not in present:
+            raise ValueError(f"Track {track_id} is not in the playlist")
+
+    move_set = set(deduped)
+    moving = [row for row in rows if str(row.track_id) in move_set]
+    rest = [row for row in rows if str(row.track_id) not in move_set]
+    insertion_index = max(1, min(position, len(rest) + 1)) - 1 if position is not None else len(rest)
+
+    final = rest[:insertion_index] + moving + rest[insertion_index:]
+    for i, row in enumerate(final, start=1):
+        if row.position != i:
+            row.position = i
+
+    await session.flush()
+    return deduped
 
 
 async def list_playlist_tracks(

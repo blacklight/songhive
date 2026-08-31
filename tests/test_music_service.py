@@ -2,6 +2,8 @@
 Tests for the music service list/count/fetch helpers.
 """
 
+from typing import List
+
 import pytest
 
 from songhive.models._enums import Visibility
@@ -9,7 +11,7 @@ from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.library import Library
 from songhive.models.library_track import LibraryTrack
-from songhive.models.playlist import Playlist
+from songhive.models.playlist import Playlist, PlaylistTrack
 from songhive.models.radio import Radio
 from songhive.models.track import Track
 from songhive.models.user import User
@@ -299,3 +301,225 @@ async def test_get_playlist_and_radio(db_session, regular_user):
 
     assert (await music.get_radio(db_session, radio.id)) is not None
     assert (await music.get_radio(db_session, "missing")) is None
+
+
+async def _make_playlist(
+    session,
+    owner: User,
+    visibility: str = Visibility.PUBLIC.value,
+) -> Playlist:
+    """Create and persist a test playlist."""
+    playlist = Playlist(name="Test Playlist", owner_id=owner.id, visibility=visibility)
+    session.add(playlist)
+    await session.flush()
+    return playlist
+
+
+async def _add_playlist_tracks(
+    session,
+    playlist: Playlist,
+    tracks: List[Track],
+) -> None:
+    """Add tracks to a playlist with explicit positions."""
+    for i, track in enumerate(tracks, start=1):
+        session.add(
+            PlaylistTrack(
+                playlist_id=playlist.id,
+                track_id=track.id,
+                position=i,
+            )
+        )
+    await session.flush()
+
+
+async def _playlist_track_ids(
+    session,
+    playlist: Playlist,
+) -> List[str]:
+    """Return track IDs for a playlist ordered by position."""
+    from sqlalchemy import select
+
+    result = await session.execute(
+        select(PlaylistTrack.track_id).where(PlaylistTrack.playlist_id == playlist.id).order_by(PlaylistTrack.position)
+    )
+    return [str(row) for row in result.scalars().all()]
+
+
+async def _playlist_positions(
+    session,
+    playlist: Playlist,
+) -> List[int]:
+    """Return positions for a playlist ordered by position."""
+    from sqlalchemy import select
+
+    result = await session.execute(
+        select(PlaylistTrack.position).where(PlaylistTrack.playlist_id == playlist.id).order_by(PlaylistTrack.position)
+    )
+    return [int(row) for row in result.scalars().all()]
+
+
+@pytest.mark.asyncio
+async def test_remove_playlist_tracks_renormalizes_positions(db_session, regular_user):
+    """Removing a track reassigns contiguous positions to the survivors."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 6)]
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, tracks)
+
+    removed, _ = await music.remove_playlist_tracks(db_session, playlist.id, [tracks[2].id])
+    assert removed == 1
+
+    positions = await _playlist_positions(db_session, playlist)
+    assert positions == [1, 2, 3, 4]
+
+    order = await _playlist_track_ids(db_session, playlist)
+    expected = [tracks[0].id, tracks[1].id, tracks[3].id, tracks[4].id]
+    assert order == expected
+
+
+@pytest.mark.asyncio
+async def test_renormalize_is_idempotent(db_session, regular_user):
+    """Renormalizing an already-contiguous playlist leaves positions unchanged."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 4)]
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, tracks)
+
+    await music.renormalize_playlist_track_positions(db_session, playlist.id)
+    assert await _playlist_positions(db_session, playlist) == [1, 2, 3]
+
+    await music.renormalize_playlist_track_positions(db_session, playlist.id)
+    assert await _playlist_positions(db_session, playlist) == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_reorder_single_move_to_position(db_session, regular_user):
+    """Moving a single track lands it at the requested 1-based rank."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 6)]
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, tracks)
+
+    moved = await music.reorder_playlist_tracks(db_session, playlist.id, [tracks[3].id], 2)
+    assert moved == [tracks[3].id]
+
+    order = await _playlist_track_ids(db_session, playlist)
+    expected = [tracks[0].id, tracks[3].id, tracks[1].id, tracks[2].id, tracks[4].id]
+    assert order == expected
+    assert await _playlist_positions(db_session, playlist) == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.asyncio
+async def test_reorder_split_move_preserves_relative_order(db_session, regular_user):
+    """A multi-track move preserves the moved block's current relative order."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 6)]
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, tracks)
+
+    moved = await music.reorder_playlist_tracks(
+        db_session,
+        playlist.id,
+        [tracks[2].id, tracks[0].id],
+        2,
+    )
+    assert moved == [tracks[2].id, tracks[0].id]
+
+    order = await _playlist_track_ids(db_session, playlist)
+    expected = [tracks[1].id, tracks[0].id, tracks[2].id, tracks[3].id, tracks[4].id]
+    assert order == expected
+    assert await _playlist_positions(db_session, playlist) == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.asyncio
+async def test_reorder_move_to_end(db_session, regular_user):
+    """Omitting position moves the block to the end of the playlist."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 6)]
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, tracks)
+
+    moved = await music.reorder_playlist_tracks(db_session, playlist.id, [tracks[1].id])
+    assert moved == [tracks[1].id]
+
+    order = await _playlist_track_ids(db_session, playlist)
+    expected = [tracks[0].id, tracks[2].id, tracks[3].id, tracks[4].id, tracks[1].id]
+    assert order == expected
+
+
+@pytest.mark.asyncio
+async def test_reorder_unknown_track_id_raises(db_session, regular_user):
+    """Unknown track IDs raise ValueError."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title="Track 1", owner=regular_user)]
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, tracks)
+
+    with pytest.raises(ValueError):
+        await music.reorder_playlist_tracks(db_session, playlist.id, ["missing-id"], 1)
+
+
+@pytest.mark.asyncio
+async def test_reorder_leaves_contiguous_positions(db_session, regular_user):
+    """Reordering always leaves contiguous 1-based positions."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 6)]
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, tracks)
+
+    await music.reorder_playlist_tracks(db_session, playlist.id, [tracks[4].id, tracks[0].id], 1)
+    positions = await _playlist_positions(db_session, playlist)
+    assert positions == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.asyncio
+async def test_reorder_duplicate_track_occurrences(db_session, regular_user):
+    """All occurrences of a duplicated track move together."""
+    artist = await _make_artist(db_session)
+    track_one = await _make_track(db_session, artist, title="Track One", owner=regular_user)
+    track_two = await _make_track(db_session, artist, title="Track Two", owner=regular_user)
+    track_three = await _make_track(db_session, artist, title="Track Three", owner=regular_user)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    for i, track_id in enumerate([track_one.id, track_two.id, track_one.id, track_three.id], start=1):
+        db_session.add(PlaylistTrack(playlist_id=playlist.id, track_id=track_id, position=i))
+    await db_session.flush()
+
+    moved = await music.reorder_playlist_tracks(db_session, playlist.id, [track_one.id], 2)
+    assert moved == [track_one.id]
+
+    order = await _playlist_track_ids(db_session, playlist)
+    expected = [track_two.id, track_one.id, track_one.id, track_three.id]
+    assert order == expected
+    assert await _playlist_positions(db_session, playlist) == [1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_remove_playlist_tracks_renormalizes_first_and_last(db_session, regular_user):
+    """Removing the first and last tracks renormalizes the remaining rows."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 5)]
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, tracks)
+
+    await music.remove_playlist_tracks(db_session, playlist.id, [tracks[0].id])
+    assert await _playlist_positions(db_session, playlist) == [1, 2, 3]
+    assert await _playlist_track_ids(db_session, playlist) == [tracks[1].id, tracks[2].id, tracks[3].id]
+
+    await music.remove_playlist_tracks(db_session, playlist.id, [tracks[3].id])
+    assert await _playlist_positions(db_session, playlist) == [1, 2]
+    assert await _playlist_track_ids(db_session, playlist) == [tracks[1].id, tracks[2].id]
+
+
+@pytest.mark.asyncio
+async def test_reorder_idempotent_when_already_in_place(db_session, regular_user):
+    """Moving a track to its current position is a no-op."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(1, 4)]
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, tracks)
+
+    moved = await music.reorder_playlist_tracks(db_session, playlist.id, [tracks[0].id], 1)
+    assert moved == [tracks[0].id]
+    assert await _playlist_track_ids(db_session, playlist) == [tracks[0].id, tracks[1].id, tracks[2].id]
+    assert await _playlist_positions(db_session, playlist) == [1, 2, 3]
