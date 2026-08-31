@@ -9,9 +9,11 @@ import {
 import {
   getPlaylist,
   listPlaylistTracks,
+  reorderPlaylistTracks,
   deletePlaylist as deletePlaylistApi,
   type PlaylistResponse,
 } from "@/api/playlists";
+import { useToastStore } from "@/stores/toast";
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
@@ -27,6 +29,8 @@ import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
+
+type TrackListInstance = InstanceType<typeof TrackList>;
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import SortControl from "@/components/ui/SortControl.vue";
 
@@ -39,11 +43,15 @@ const playlist = ref<PlaylistResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
+const toastStore = useToastStore();
+
 const {
   items: tracks,
   loading: tracksLoading,
   error: tracksError,
   hasMore: tracksHasMore,
+  offset: trackOffset,
+  total: trackTotal,
   sortBy: trackSortBy,
   sortDir: trackSortDir,
   load: loadTracks,
@@ -105,6 +113,30 @@ const {
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
 const canRemove = computed(() => canManage.value);
+
+const trackListRef = ref<TrackListInstance | null>(null);
+
+function onReorder({
+  trackIds,
+  position,
+}: {
+  trackIds: string[];
+  position?: number;
+}) {
+  if (!playlist.value) return;
+  reorderPlaylistTracks(playlist.value.id, { track_ids: trackIds, position })
+    .then(() => refreshTracks())
+    .catch((err) => {
+      toastStore.push({
+        type: "error",
+        message:
+          getApiErrorMessage(err) || t("browse.reorder.error", { message: "" }),
+      });
+    })
+    .finally(() => {
+      trackListRef.value?.setReordering(false);
+    });
+}
 
 const removableFrom = computed(() => {
   if (!playlist.value) return undefined;
@@ -321,14 +353,21 @@ watch(
         </div>
 
         <TrackList
+          ref="trackListRef"
           :tracks="tracks"
           :loading="tracksLoading"
           :context="playlist.name"
           :removable-from="removableFrom"
           :empty-label="t('browse.playlist.empty')"
           :deletable="true"
+          :reorderable="true"
+          :sort-by="trackSortBy"
+          :offset="trackOffset"
+          :total="trackTotal"
+          :has-more="tracksHasMore"
           @share="onTrackShare"
           @removed="onTracksRemoved"
+          @reorder="onReorder"
         />
 
         <div class="playlist-view__footer">

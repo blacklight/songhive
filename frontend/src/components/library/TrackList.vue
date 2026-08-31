@@ -47,6 +47,11 @@ export interface Props {
   removableFrom?: RemovableFrom;
   deletable?: boolean;
   autoScroll?: boolean;
+  reorderable?: boolean;
+  sortBy?: string;
+  offset?: number;
+  total?: number;
+  hasMore?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -54,6 +59,11 @@ const props = withDefaults(defineProps<Props>(), {
   showArtwork: false,
   autoScroll: true,
   favoriteManaged: false,
+  reorderable: false,
+  sortBy: "position",
+  offset: 0,
+  total: 0,
+  hasMore: false,
 });
 
 const emit = defineEmits<{
@@ -64,6 +74,7 @@ const emit = defineEmits<{
   "toggle-favorite": [track: QueueTrack];
   share: [track: QueueTrack];
   removed: [trackIds: string[]];
+  reorder: [payload: { trackIds: string[]; position?: number }];
 }>();
 
 const { t } = useI18n();
@@ -88,6 +99,10 @@ const confirmMode = ref<"single" | "bulk">("single");
 const confirmTrack = ref<QueueTrack | null>(null);
 const confirmIsDelete = ref(false);
 const isRemoving = ref(false);
+const reorderMode = ref(false);
+const isReordering = ref(false);
+const moveToValue = ref("");
+const moveToError = ref("");
 const listRef = ref<HTMLElement | null>(null);
 const favoritedOverrides = ref<Record<string, boolean>>({});
 
@@ -194,10 +209,17 @@ const canEdit = computed(
   () => props.removableFrom?.canRemove || props.deletable,
 );
 
+const reorderAvailable = computed(
+  () => props.reorderable && props.sortBy === "position" && canEdit.value,
+);
+
 const columns = computed<Column[]>(() => {
   const cols: Column[] = [];
-  if (bulkMode.value && canEdit.value) {
+  if ((bulkMode.value || reorderMode.value) && canEdit.value) {
     cols.push({ key: "selected", label: "", align: "center", width: "2.5rem" });
+  }
+  if (reorderMode.value && canEdit.value) {
+    cols.push({ key: "reorder", label: "", align: "center", width: "3.5rem" });
   }
   cols.push(
     { key: "num", label: "#", align: "right", width: "2rem" },
@@ -224,7 +246,10 @@ const rows = computed<Record<string, unknown>[]>(() =>
   enrichedTracks.value.map((track, index) => ({
     id: track.id,
     index,
-    num: track.track_number ?? index + 1,
+    num:
+      props.sortBy === "position"
+        ? props.offset + index + 1
+        : (track.track_number ?? index + 1),
     title: track.title,
     artist: track.artist_name || "—",
     album: track.album_title || "—",
@@ -265,9 +290,17 @@ function isPlayingCurrent(track: QueueTrack): boolean {
 }
 
 function rowClass(row: Record<string, unknown>): string | undefined {
-  return isCurrentTrack(asTrackRow(row).track)
-    ? "track-list__row--current"
-    : undefined;
+  const classes: string[] = [];
+  if (isCurrentTrack(asTrackRow(row).track)) {
+    classes.push("track-list__row--current");
+  }
+  if (
+    dragState.value.active &&
+    asTrackRow(row).index === dragState.value.dropTargetIndex
+  ) {
+    classes.push("track-list__row--drop-target");
+  }
+  return classes.length > 0 ? classes.join(" ") : undefined;
 }
 
 function play(index: number) {
@@ -329,6 +362,341 @@ function toggleRow(track: QueueTrack) {
     selectedIds.value.add(track.id);
   }
 }
+
+function toggleReorderMode() {
+  reorderMode.value = !reorderMode.value;
+  if (!reorderMode.value) {
+    selectedIds.value.clear();
+    moveToValue.value = "";
+    moveToError.value = "";
+  }
+}
+
+function selectedTrackIds(): string[] {
+  return enrichedTracks.value
+    .filter((track) => selectedIds.value.has(track.id))
+    .map((track) => track.id);
+}
+
+function firstSelectedIndex(): number {
+  return enrichedTracks.value.findIndex((track) =>
+    selectedIds.value.has(track.id),
+  );
+}
+
+function lastSelectedIndex(): number {
+  for (let i = enrichedTracks.value.length - 1; i >= 0; i--) {
+    if (selectedIds.value.has(enrichedTracks.value[i]!.id)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function canMoveUp(): boolean {
+  if (!reorderMode.value || isReordering.value) return false;
+  const first = firstSelectedIndex();
+  if (selectedIds.value.size === 0) return false;
+  return first > 0 || props.offset > 0;
+}
+
+function canMoveDown(): boolean {
+  if (!reorderMode.value || isReordering.value) return false;
+  const last = lastSelectedIndex();
+  if (selectedIds.value.size === 0) return false;
+  return last < enrichedTracks.value.length - 1 || props.hasMore;
+}
+
+function canMoveRowUp(rowIndex: number): boolean {
+  if (!reorderMode.value || isReordering.value) return false;
+  return rowIndex > 0 || props.offset > 0;
+}
+
+function canMoveRowDown(rowIndex: number): boolean {
+  if (!reorderMode.value || isReordering.value) return false;
+  return rowIndex < enrichedTracks.value.length - 1 || props.hasMore;
+}
+
+function emitReorder(trackIds: string[], position?: number) {
+  if (trackIds.length === 0) return;
+  isReordering.value = true;
+  emit("reorder", { trackIds, position });
+}
+
+function moveUp() {
+  const trackIds = selectedTrackIds();
+  if (trackIds.length === 0) return;
+
+  const first = firstSelectedIndex();
+  if (first === 0 && props.offset > 0) {
+    emitReorder(trackIds, 1);
+    return;
+  }
+  if (first > 0) {
+    emitReorder(trackIds, props.offset + first);
+  }
+}
+
+function moveDown() {
+  const trackIds = selectedTrackIds();
+  if (trackIds.length === 0) return;
+
+  const first = firstSelectedIndex();
+  const last = lastSelectedIndex();
+  if (last === enrichedTracks.value.length - 1 && props.hasMore) {
+    emitReorder(trackIds, undefined);
+    return;
+  }
+  if (last < enrichedTracks.value.length - 1) {
+    emitReorder(trackIds, props.offset + first + 2);
+  }
+}
+
+function moveRowUp(rowIndex: number) {
+  if (rowIndex === 0 && props.offset > 0) {
+    emitReorder([enrichedTracks.value[rowIndex]!.id], 1);
+    return;
+  }
+  if (rowIndex > 0) {
+    emitReorder([enrichedTracks.value[rowIndex]!.id], props.offset + rowIndex);
+  }
+}
+
+function moveRowDown(rowIndex: number) {
+  if (rowIndex === enrichedTracks.value.length - 1 && props.hasMore) {
+    emitReorder([enrichedTracks.value[rowIndex]!.id], undefined);
+    return;
+  }
+  if (rowIndex < enrichedTracks.value.length - 1) {
+    emitReorder(
+      [enrichedTracks.value[rowIndex]!.id],
+      props.offset + rowIndex + 2,
+    );
+  }
+}
+
+function moveToPosition() {
+  const value = moveToValue.value.trim();
+  if (value === "") return;
+
+  const n = Number(value);
+  if (Number.isNaN(n)) {
+    moveToError.value = t("browse.reorder.invalidPosition");
+    return;
+  }
+
+  if (n === 0) {
+    moveToError.value = t("browse.reorder.invalidPosition");
+    return;
+  }
+
+  if (n === -1) {
+    emitMoveTo(undefined);
+    return;
+  }
+
+  if (n < 0) {
+    if (props.total > 0) {
+      emitMoveTo(props.total + n + 1);
+    } else {
+      emitMoveTo(undefined);
+    }
+    return;
+  }
+
+  emitMoveTo(n);
+}
+
+function emitMoveTo(position?: number) {
+  const trackIds = selectedTrackIds();
+  if (trackIds.length === 0) return;
+  emitReorder(trackIds, position);
+}
+
+function moveToTop() {
+  const trackIds = selectedTrackIds();
+  if (trackIds.length === 0) return;
+  emitReorder(trackIds, 1);
+}
+
+function moveToBottom() {
+  const trackIds = selectedTrackIds();
+  if (trackIds.length === 0) return;
+  emitReorder(trackIds, undefined);
+}
+
+watch(
+  () => props.tracks,
+  () => {
+    isReordering.value = false;
+    moveToValue.value = "";
+    moveToError.value = "";
+  },
+);
+
+function setReordering(value: boolean) {
+  isReordering.value = value;
+}
+
+defineExpose({ setReordering });
+
+const dragState = ref<{
+  active: boolean;
+  pointerDown: boolean;
+  draggedRow: QueueTrack | null;
+  startY: number;
+  startX: number;
+  longPressTimer: ReturnType<typeof setTimeout> | null;
+  dropTargetIndex: number;
+}>({
+  active: false,
+  pointerDown: false,
+  draggedRow: null,
+  startY: 0,
+  startX: 0,
+  longPressTimer: null,
+  dropTargetIndex: -1,
+});
+
+const DRAG_THRESHOLD = 8;
+const LONG_PRESS_MS = 300;
+
+function resetDrag() {
+  if (dragState.value.longPressTimer) {
+    clearTimeout(dragState.value.longPressTimer);
+  }
+  dragState.value = {
+    active: false,
+    pointerDown: false,
+    draggedRow: null,
+    startY: 0,
+    startX: 0,
+    longPressTimer: null,
+    dropTargetIndex: -1,
+  };
+}
+
+function onHandlePointerDown(event: PointerEvent, track: QueueTrack) {
+  if (!reorderMode.value || isReordering.value) return;
+  if (typeof window === "undefined") return;
+
+  const target = event.currentTarget as HTMLElement | null;
+  if (target && "setPointerCapture" in target) {
+    target.setPointerCapture(event.pointerId);
+  }
+
+  dragState.value = {
+    active: false,
+    pointerDown: true,
+    draggedRow: track,
+    startY: event.clientY,
+    startX: event.clientX,
+    longPressTimer: null,
+    dropTargetIndex: -1,
+  };
+
+  const isTouch = event.pointerType === "touch";
+  if (isTouch) {
+    dragState.value.longPressTimer = setTimeout(() => {
+      if (dragState.value.pointerDown && dragState.value.draggedRow) {
+        dragState.value.active = true;
+      }
+    }, LONG_PRESS_MS);
+  }
+}
+
+function onHandlePointerMove(event: PointerEvent) {
+  if (!dragState.value.pointerDown) return;
+
+  const dx = Math.abs(event.clientX - dragState.value.startX);
+  const dy = Math.abs(event.clientY - dragState.value.startY);
+
+  if (!dragState.value.active && (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD)) {
+    if (dragState.value.longPressTimer) {
+      clearTimeout(dragState.value.longPressTimer);
+      dragState.value.longPressTimer = null;
+    }
+    dragState.value.active = true;
+  }
+
+  if (!dragState.value.active) return;
+
+  const list = listRef.value;
+  if (!list) return;
+
+  const pointerY = event.clientY;
+  const rowElements = Array.from(
+    list.querySelectorAll(".app-table tbody tr, .track-list__compact-item"),
+  ) as HTMLElement[];
+
+  let targetIndex = rowElements.length;
+  for (let i = 0; i < rowElements.length; i++) {
+    const rect = rowElements[i]!.getBoundingClientRect();
+    if (pointerY < rect.top + rect.height / 2) {
+      targetIndex = i;
+      break;
+    }
+  }
+
+  dragState.value.dropTargetIndex = targetIndex;
+}
+
+function onHandlePointerUp() {
+  if (!dragState.value.pointerDown) return;
+
+  if (dragState.value.longPressTimer) {
+    clearTimeout(dragState.value.longPressTimer);
+    dragState.value.longPressTimer = null;
+  }
+
+  if (
+    dragState.value.active &&
+    dragState.value.draggedRow &&
+    dragState.value.dropTargetIndex !== -1
+  ) {
+    const track = dragState.value.draggedRow;
+    const index = dragState.value.dropTargetIndex;
+
+    let trackIds: string[];
+    if (selectedIds.value.has(track.id) && selectedIds.value.size > 0) {
+      trackIds = selectedTrackIds();
+    } else {
+      trackIds = [track.id];
+    }
+
+    const position =
+      index < enrichedTracks.value.length
+        ? props.offset + index + 1
+        : props.offset + index + 1;
+
+    if (trackIds.length > 0) {
+      emitReorder(trackIds, position);
+    }
+  }
+
+  resetDrag();
+}
+
+function onHandlePointerCancel() {
+  resetDrag();
+}
+
+function onKeyDown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    resetDrag();
+  }
+}
+
+onMounted(() => {
+  if (typeof window === "undefined") return;
+  window.addEventListener("keydown", onKeyDown);
+});
+
+onUnmounted(() => {
+  if (typeof window === "undefined") return;
+  window.removeEventListener("keydown", onKeyDown);
+  resetDrag();
+});
 
 function canManageTrack(track: QueueTrack): boolean {
   return canManageItem(authStore, track);
@@ -747,7 +1115,76 @@ async function onMenuSelect(key: string) {
       </AppButton>
 
       <div v-if="canEdit" class="track-list__bulk">
-        <template v-if="bulkMode">
+        <template v-if="reorderMode">
+          <AppButton
+            variant="secondary"
+            size="sm"
+            :disabled="isReordering"
+            @click="toggleReorderMode"
+          >
+            {{ t("browse.reorder.done") }}
+          </AppButton>
+          <AppButton
+            variant="ghost"
+            size="sm"
+            icon="chevron-up"
+            :disabled="!canMoveUp()"
+            @click="moveUp"
+          >
+            {{ t("browse.reorder.moveUp") }}
+          </AppButton>
+          <AppButton
+            variant="ghost"
+            size="sm"
+            icon="chevron-down"
+            :disabled="!canMoveDown()"
+            @click="moveDown"
+          >
+            {{ t("browse.reorder.moveDown") }}
+          </AppButton>
+          <span class="track-list__move-to">
+            <input
+              v-model="moveToValue"
+              type="text"
+              inputmode="numeric"
+              class="track-list__move-to-input"
+              :placeholder="t('browse.reorder.moveToPosition')"
+              :disabled="isReordering"
+              @keyup.enter="moveToPosition"
+            />
+            <AppButton
+              variant="ghost"
+              size="sm"
+              :disabled="isReordering || selectedIds.size === 0"
+              @click="moveToTop"
+            >
+              {{ t("browse.reorder.top") }}
+            </AppButton>
+            <AppButton
+              variant="ghost"
+              size="sm"
+              :disabled="isReordering || selectedIds.size === 0"
+              @click="moveToBottom"
+            >
+              {{ t("browse.reorder.bottom") }}
+            </AppButton>
+          </span>
+          <span v-if="moveToError" class="track-list__move-to-error">{{
+            moveToError
+          }}</span>
+        </template>
+        <template v-else-if="reorderAvailable">
+          <AppButton
+            variant="secondary"
+            size="sm"
+            icon="arrow-up-arrow-down"
+            :disabled="isReordering"
+            @click="toggleReorderMode"
+          >
+            {{ t("browse.reorder.start") }}
+          </AppButton>
+        </template>
+        <template v-if="bulkMode && !reorderMode">
           <AppCheckbox
             v-if="isCompact"
             :model-value="allSelected"
@@ -824,6 +1261,45 @@ async function onMenuSelect(key: string) {
           :aria-label="t('browse.bulkEdit.selectAll')"
           @update:model-value="toggleRow(asTrackRow(row).track)"
         />
+      </template>
+
+      <template #row-reorder="{ row }">
+        <div
+          class="track-list__reorder-cell"
+          :class="{ 'track-list__reorder-cell--dragging': dragState.active }"
+        >
+          <button
+            type="button"
+            class="track-list__handle"
+            :class="{ 'track-list__handle--grabbing': dragState.active }"
+            :aria-label="t('browse.reorder.drag')"
+            :disabled="isReordering"
+            @pointerdown="onHandlePointerDown($event, asTrackRow(row).track)"
+            @pointermove="onHandlePointerMove"
+            @pointerup="onHandlePointerUp"
+            @pointercancel="onHandlePointerCancel"
+          >
+            <AppIcon name="grip-vertical" />
+          </button>
+          <div class="track-list__reorder-buttons">
+            <AppButton
+              variant="ghost"
+              size="sm"
+              icon="chevron-up"
+              :aria-label="t('browse.reorder.moveUp')"
+              :disabled="!canMoveRowUp(asTrackRow(row).index)"
+              @click="moveRowUp(asTrackRow(row).index)"
+            />
+            <AppButton
+              variant="ghost"
+              size="sm"
+              icon="chevron-down"
+              :aria-label="t('browse.reorder.moveDown')"
+              :disabled="!canMoveRowDown(asTrackRow(row).index)"
+              @click="moveRowDown(asTrackRow(row).index)"
+            />
+          </div>
+        </div>
       </template>
 
       <template #row-num="{ row }">
@@ -920,7 +1396,7 @@ async function onMenuSelect(key: string) {
           :aria-label="t('browse.detail.actions')"
           :title="t('browse.detail.actions')"
           icon="ellipsis-vertical"
-          :disabled="bulkMode"
+          :disabled="bulkMode || reorderMode"
           @click="openMenu($event, asTrackRow(row).track)"
         />
       </template>
@@ -955,17 +1431,67 @@ async function onMenuSelect(key: string) {
             'track-list__compact-item--current': isCurrentTrack(
               asTrackRow(row).track,
             ),
+            'track-list__compact-item--drop-target':
+              dragState.active &&
+              asTrackRow(row).index === dragState.dropTargetIndex,
           }"
         >
-          <div v-if="bulkMode && canEdit" class="track-list__compact-select">
+          <div
+            v-if="(bulkMode || reorderMode) && canEdit"
+            class="track-list__compact-select"
+          >
             <AppCheckbox
               :model-value="asTrackRow(row).selected"
               :aria-label="t('browse.bulkEdit.selectAll')"
               @update:model-value="toggleRow(asTrackRow(row).track)"
             />
           </div>
+          <template v-if="reorderMode && canEdit">
+            <div
+              class="track-list__compact-reorder"
+              :class="{
+                'track-list__compact-reorder--dragging': dragState.active,
+              }"
+            >
+              <button
+                type="button"
+                class="track-list__compact-handle"
+                :class="{
+                  'track-list__compact-handle--grabbing': dragState.active,
+                }"
+                :aria-label="t('browse.reorder.drag')"
+                :disabled="isReordering"
+                @pointerdown="
+                  onHandlePointerDown($event, asTrackRow(row).track)
+                "
+                @pointermove="onHandlePointerMove"
+                @pointerup="onHandlePointerUp"
+                @pointercancel="onHandlePointerCancel"
+              >
+                <AppIcon name="grip-vertical" />
+              </button>
+              <div class="track-list__compact-reorder-buttons">
+                <AppButton
+                  variant="ghost"
+                  size="sm"
+                  icon="chevron-up"
+                  :aria-label="t('browse.reorder.moveUp')"
+                  :disabled="!canMoveRowUp(index)"
+                  @click="moveRowUp(index)"
+                />
+                <AppButton
+                  variant="ghost"
+                  size="sm"
+                  icon="chevron-down"
+                  :aria-label="t('browse.reorder.moveDown')"
+                  :disabled="!canMoveRowDown(index)"
+                  @click="moveRowDown(index)"
+                />
+              </div>
+            </div>
+          </template>
           <span
-            v-else-if="isCurrentTrack(asTrackRow(row).track)"
+            v-if="isCurrentTrack(asTrackRow(row).track)"
             class="track-list__compact-number track-list__playing"
             :class="{
               'track-list__playing--active': isPlayingCurrent(
@@ -1028,7 +1554,7 @@ async function onMenuSelect(key: string) {
             :aria-label="t('browse.detail.actions')"
             :title="t('browse.detail.actions')"
             icon="ellipsis-vertical"
-            :disabled="bulkMode"
+            :disabled="bulkMode || reorderMode"
             @click="openMenu($event, asTrackRow(row).track)"
           />
         </li>
@@ -1365,6 +1891,130 @@ a.track-list__compact-artist:hover {
   100% {
     height: 100%;
   }
+}
+
+.track-list__reorder-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+.track-list__reorder-cell--dragging {
+  opacity: 0.6;
+}
+
+.track-list__handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: grab;
+  font-size: 1rem;
+  touch-action: none;
+}
+
+.track-list__handle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.track-list__handle--grabbing,
+.track-list__handle:active {
+  cursor: grabbing;
+}
+
+.track-list__reorder-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.track-list__move-to {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.track-list__move-to-input {
+  width: 5rem;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.track-list__move-to-input:disabled {
+  opacity: 0.5;
+}
+
+.track-list__move-to-error {
+  color: var(--color-danger);
+  font-size: 0.875rem;
+}
+
+.track-list__compact-reorder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  width: 2.5rem;
+}
+
+.track-list__compact-reorder--dragging {
+  opacity: 0.6;
+}
+
+.track-list__compact-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: grab;
+  font-size: 1rem;
+  touch-action: none;
+}
+
+.track-list__compact-handle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.track-list__compact-handle--grabbing,
+.track-list__compact-handle:active {
+  cursor: grabbing;
+}
+
+.track-list__compact-reorder-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.track-list__drop-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--color-accent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.track-list :deep(.app-table tr.track-list__row--drop-target) td {
+  border-top: 2px solid var(--color-accent);
+}
+
+.track-list__compact-item--drop-target {
+  border-top: 2px solid var(--color-accent);
 }
 
 @media (prefers-reduced-motion: reduce) {

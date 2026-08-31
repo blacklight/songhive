@@ -751,6 +751,19 @@
       "bulkSuccess": "Removed {count} tracks from \"{collection}\".",
       "error": "Could not remove tracks: {message}"
     },
+    "reorder": {
+      "start": "Reorder",
+      "done": "Done",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "moveToPosition": "Move to position",
+      "top": "Top",
+      "bottom": "Bottom",
+      "drag": "Drag to reorder",
+      "invalidPosition": "Enter a positive number, -1 for the end, or 0 to cancel.",
+      "loadMoreToMove": "Load more tracks to move a selection further down.",
+      "error": "Could not reorder tracks: {message}"
+    },
     "bulkEdit": {
       "start": "Bulk edit",
       "done": "Done",

@@ -5,11 +5,14 @@ import { setActivePinia, createPinia } from "pinia";
 import * as playlistsApi from "@/api/playlists";
 import type { PlaylistResponse } from "@/api/playlists";
 import type { TrackResponse } from "@/api/tracks";
+import { useAuthStore } from "@/stores/auth";
+import type { UserResponse } from "@/api/users";
 import PlaylistView from "./PlaylistView.vue";
 
 vi.mock("@/api/playlists", () => ({
   getPlaylist: vi.fn(),
   listPlaylistTracks: vi.fn(),
+  reorderPlaylistTracks: vi.fn(),
   deletePlaylist: vi.fn(),
 }));
 
@@ -72,6 +75,12 @@ describe("PlaylistView", () => {
 
   beforeEach(() => {
     setActivePinia(createPinia());
+    const authStore = useAuthStore();
+    authStore.$patch({
+      accessToken: "token",
+      expiresAt: Date.now() + 60000,
+      user: { id: "user-1", username: "user" } as UserResponse,
+    });
     vi.clearAllMocks();
     vi.mocked(playlistsApi.getPlaylist).mockResolvedValue(
       createPlaylist("playlist-1", "Road Trip"),
@@ -163,5 +172,53 @@ describe("PlaylistView", () => {
 
     expect(playlistsApi.getPlaylist).toHaveBeenLastCalledWith("playlist-2");
     expect(wrapper.text()).toContain("Chill");
+  });
+
+  it("reorders tracks and refreshes the list", async () => {
+    vi.mocked(playlistsApi.listPlaylistTracks).mockResolvedValue([
+      createTrack("track-1", "Song One"),
+      createTrack("track-2", "Song Two"),
+    ]);
+    vi.mocked(playlistsApi.reorderPlaylistTracks).mockResolvedValue({
+      reordered: true,
+      track_ids: ["track-2"],
+      count: 1,
+    });
+
+    const router = createTestRouter();
+    await router.push("/playlists/playlist-1");
+    await router.isReady();
+    wrapper = mount(PlaylistView, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const startButton = wrapper
+      .findAll("button")
+      .find(
+        (b) =>
+          b.text() ===
+          (wrapper as ReturnType<typeof mount>).vm.$t("browse.reorder.start"),
+      );
+    await startButton?.trigger("click");
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll('input[type="checkbox"]');
+    await checkboxes[1]?.setValue(true);
+    await flushPromises();
+
+    const moveDownButtons = wrapper.findAll(
+      '[aria-label="' +
+        (wrapper as ReturnType<typeof mount>).vm.$t("browse.reorder.moveDown") +
+        '"]',
+    );
+    await moveDownButtons[0]?.trigger("click");
+    await flushPromises();
+
+    expect(playlistsApi.reorderPlaylistTracks).toHaveBeenCalledWith(
+      "playlist-1",
+      { track_ids: ["track-1"], position: 2 },
+    );
+    expect(playlistsApi.listPlaylistTracks).toHaveBeenCalledTimes(2);
   });
 });

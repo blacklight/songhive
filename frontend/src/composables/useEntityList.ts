@@ -46,6 +46,7 @@ export function useEntityList<T>(
   const limit = ref(defaultLimit);
   const offset = ref(0);
   const hasMore = ref(false);
+  const total = ref(0);
   const lastWasReset = ref(false);
 
   function getInitialSortBy(): string {
@@ -149,6 +150,7 @@ export function useEntityList<T>(
     limit,
     offset,
     hasMore,
+    total,
     sortBy,
     sortDir,
     load,

@@ -92,6 +92,17 @@ export interface RemoveTracksFromPlaylistResponse {
   track_ids: string[];
 }
 
+export interface ReorderPlaylistTracksRequest {
+  track_ids: string[];
+  position?: number | null;
+}
+
+export interface ReorderPlaylistTracksResponse {
+  reordered: boolean;
+  track_ids: string[];
+  count: number;
+}
+
 export function deletePlaylist(id: string, recursive = false): Promise<void> {
   return apiRequest<void>(`/playlists/${id}`, {
     method: "DELETE",
@@ -141,6 +152,19 @@ export function removeTracksFromPlaylist(
 ): Promise<RemoveTracksFromPlaylistResponse> {
   return apiRequest<RemoveTracksFromPlaylistResponse>(
     `/playlists/${id}/tracks/remove`,
+    {
+      method: "POST",
+      body,
+    },
+  );
+}
+
+export function reorderPlaylistTracks(
+  id: string,
+  body: ReorderPlaylistTracksRequest,
+): Promise<ReorderPlaylistTracksResponse> {
+  return apiRequest<ReorderPlaylistTracksResponse>(
+    `/playlists/${id}/tracks/reorder`,
     {
       method: "POST",
       body,

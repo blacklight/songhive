@@ -744,4 +744,206 @@ describe("TrackList", () => {
       block: "nearest",
     });
   });
+
+  describe("reorder", () => {
+    function mountReordering(props: Record<string, unknown> = {}) {
+      const tracks = [
+        makeTrack({ id: "track-1" }),
+        makeTrack({ id: "track-2", title: "Song Two" }),
+        makeTrack({ id: "track-3", title: "Song Three" }),
+      ];
+      return mountTrackList({
+        tracks,
+        context: "Artist",
+        reorderable: true,
+        sortBy: "position",
+        offset: 10,
+        hasMore: true,
+        removableFrom: {
+          type: "playlist",
+          id: "playlist-1",
+          canRemove: true,
+          name: "My Playlist",
+        },
+        ...props,
+      });
+    }
+
+    it("shows the reorder toggle when reorderable, sorted by position, and editable", async () => {
+      ({ wrapper } = mountReordering());
+      await flushPromises();
+
+      const startButton = wrapper
+        .findAll("button")
+        .find((b) => b.text() === i18n.global.t("browse.reorder.start"));
+      expect(startButton).toBeDefined();
+    });
+
+    it("does not show the reorder toggle when sortBy is not position", async () => {
+      ({ wrapper } = mountReordering({ sortBy: "title" }));
+      await flushPromises();
+
+      const startButton = wrapper
+        .findAll("button")
+        .find((b) => b.text() === i18n.global.t("browse.reorder.start"));
+      expect(startButton).toBeUndefined();
+    });
+
+    it("enters reorder mode and shows global rank numbers", async () => {
+      ({ wrapper } = mountReordering());
+      await flushPromises();
+
+      const startButton = wrapper
+        .findAll("button")
+        .find((b) => b.text() === i18n.global.t("browse.reorder.start"));
+      await startButton?.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("11");
+      expect(wrapper.text()).toContain("12");
+      expect(wrapper.text()).toContain("13");
+    });
+
+    it("emits reorder with the next position when move down is clicked", async () => {
+      ({ wrapper } = mountReordering());
+      await flushPromises();
+
+      const startButton = wrapper
+        .findAll("button")
+        .find((b) => b.text() === i18n.global.t("browse.reorder.start"));
+      await startButton?.trigger("click");
+      await flushPromises();
+
+      const moveDownButtons = wrapper.findAll(
+        '[aria-label="' + i18n.global.t("browse.reorder.moveDown") + '"]',
+      );
+      await moveDownButtons[0]?.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.emitted("reorder")?.[0]).toEqual([
+        { trackIds: ["track-1"], position: 12 },
+      ]);
+    });
+
+    it("emits reorder with the previous position when move up is clicked", async () => {
+      ({ wrapper } = mountReordering({ offset: 0 }));
+      await flushPromises();
+
+      const startButton = wrapper
+        .findAll("button")
+        .find((b) => b.text() === i18n.global.t("browse.reorder.start"));
+      await startButton?.trigger("click");
+      await flushPromises();
+
+      const moveUpButtons = wrapper.findAll(
+        '[aria-label="' + i18n.global.t("browse.reorder.moveUp") + '"]',
+      );
+      await moveUpButtons[2]?.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.emitted("reorder")?.[0]).toEqual([
+        { trackIds: ["track-3"], position: 2 },
+      ]);
+    });
+
+    it("emits reorder to move selected tracks to a position", async () => {
+      ({ wrapper } = mountReordering());
+      await flushPromises();
+
+      const startButton = wrapper
+        .findAll("button")
+        .find((b) => b.text() === i18n.global.t("browse.reorder.start"));
+      await startButton?.trigger("click");
+      await flushPromises();
+
+      const checkboxes = wrapper.findAll('input[type="checkbox"]');
+      await checkboxes[2]?.setValue(true);
+      await checkboxes[3]?.setValue(true);
+      await flushPromises();
+
+      const input = wrapper.find(".track-list__move-to-input");
+      await input.setValue("1");
+      await input.trigger("keyup.enter");
+      await flushPromises();
+
+      expect(wrapper.emitted("reorder")?.[0]).toEqual([
+        { trackIds: ["track-2", "track-3"], position: 1 },
+      ]);
+    });
+
+    it("emits reorder with no position when bottom is requested", async () => {
+      ({ wrapper } = mountReordering());
+      await flushPromises();
+
+      const startButton = wrapper
+        .findAll("button")
+        .find((b) => b.text() === i18n.global.t("browse.reorder.start"));
+      await startButton?.trigger("click");
+      await flushPromises();
+
+      const checkboxes = wrapper.findAll('input[type="checkbox"]');
+      await checkboxes[2]?.setValue(true);
+      await flushPromises();
+
+      const bottomButton = wrapper
+        .findAll("button")
+        .find((b) => b.text() === i18n.global.t("browse.reorder.bottom"));
+      await bottomButton?.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.emitted("reorder")?.[0]).toEqual([
+        { trackIds: ["track-2"], position: undefined },
+      ]);
+    });
+
+    it("emits reorder from a drag-and-drop pointer gesture", async () => {
+      ({ wrapper } = mountReordering());
+      await flushPromises();
+
+      const startButton = wrapper
+        .findAll("button")
+        .find((b) => b.text() === i18n.global.t("browse.reorder.start"));
+      await startButton?.trigger("click");
+      await flushPromises();
+
+      const handle = wrapper.find(
+        '[aria-label="' + i18n.global.t("browse.reorder.drag") + '"]',
+      );
+      expect(handle.exists()).toBe(true);
+
+      const rows = wrapper.findAll(".app-table tbody tr");
+      const rowRects = [
+        { top: 0, height: 40 },
+        { top: 40, height: 40 },
+        { top: 80, height: 40 },
+      ];
+      for (let i = 0; i < rows.length; i++) {
+        vi.spyOn(rows[i]!.element, "getBoundingClientRect").mockReturnValue(
+          rowRects[i] as DOMRect,
+        );
+      }
+
+      await handle.trigger("pointerdown", {
+        pointerId: 1,
+        clientX: 0,
+        clientY: 5,
+        pointerType: "mouse",
+      });
+      await handle.trigger("pointermove", {
+        pointerId: 1,
+        clientX: 0,
+        clientY: 90,
+        pointerType: "mouse",
+      });
+      await handle.trigger("pointerup", {
+        pointerId: 1,
+        pointerType: "mouse",
+      });
+      await flushPromises();
+
+      expect(wrapper.emitted("reorder")?.[0]).toEqual([
+        { trackIds: ["track-1"], position: 13 },
+      ]);
+    });
+  });
 });
