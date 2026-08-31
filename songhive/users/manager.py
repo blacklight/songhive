@@ -363,6 +363,7 @@ async def deactivate_user_by_id(
     session: AsyncSession,
     user_id: str,
     redis: Optional[Redis] = None,
+    access_token_ttl: int = 0,
 ) -> User:
     """Deactivate a user account, guarding the last active admin."""
     user = await _get_user_or_raise(session, user_id)
@@ -371,7 +372,7 @@ async def deactivate_user_by_id(
     user.is_active = False
     await session.flush()
     if redis is not None:
-        await revoke_all_user_refresh_tokens(redis, user.id)
+        await revoke_all_user_refresh_tokens(redis, user.id, access_token_ttl)
     return user
 
 
@@ -558,6 +559,7 @@ async def confirm_password_reset(
     redis: Redis,
     token: str,
     new_password: str,
+    access_token_ttl: int = 0,
 ) -> bool:
     """
     Set a new password using a reset token.
@@ -585,5 +587,5 @@ async def confirm_password_reset(
     user.password_reset_token = None
     user.password_reset_expires_at = None
     await session.flush()
-    await revoke_all_user_refresh_tokens(redis, user.id)
+    await revoke_all_user_refresh_tokens(redis, user.id, access_token_ttl)
     return True

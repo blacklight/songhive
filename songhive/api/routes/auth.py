@@ -284,7 +284,8 @@ async def refresh(
 
     user = await get_user_by_id(db, payload.user_id)
     if user is None or not user.is_active:
-        await revoke_refresh_token(body.refresh_token, redis)
+        access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
+        await revoke_refresh_token(body.refresh_token, redis, access_token_ttl)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Account is inactive or deleted",
@@ -315,9 +316,11 @@ async def refresh(
 async def logout(
     body: LogoutRequest,
     redis: Redis = Depends(get_redis),
+    config: SonghiveConfig = Depends(get_config),
 ):
     """Revoke a refresh token."""
-    await revoke_refresh_token(body.refresh_token, redis)
+    access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
+    await revoke_refresh_token(body.refresh_token, redis, access_token_ttl)
     return LogoutResponse()
 
 
@@ -421,9 +424,11 @@ async def password_reset_confirm(
     body: PasswordResetConfirmRequest,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
+    config: SonghiveConfig = Depends(get_config),
 ):
     """Set a new password using a password-reset token."""
-    success = await confirm_password_reset(db, redis, body.token, body.new_password)
+    access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
+    success = await confirm_password_reset(db, redis, body.token, body.new_password, access_token_ttl=access_token_ttl)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

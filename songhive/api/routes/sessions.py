@@ -10,11 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config.schema import SonghiveConfig
 from ...models.user import User
 from ...services import audit
 from ...users.tokens import list_user_sessions, revoke_session
 from .._common import client_ip
-from ..deps import get_current_user, get_db, get_redis
+from ..deps import get_config, get_current_user, get_db, get_redis
 
 router = APIRouter(prefix="/auth/sessions", tags=["Sessions"])
 
@@ -120,9 +121,11 @@ async def delete_session(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
 ):
     """Revoke an active refresh-token session belonging to the authenticated user."""
-    ok = await revoke_session(redis, session_id, user.id)
+    access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
+    ok = await revoke_session(redis, session_id, user.id, access_token_ttl)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 

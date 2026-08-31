@@ -10,9 +10,10 @@ from urllib.parse import urlsplit
 import tornado.ioloop
 import tornado.websocket
 
-from ..api.middleware.auth import decode_access_token
+from ..api.middleware.auth import decode_access_token, get_access_token_jti
 from ..models.base import get_session
 from ..services.auth import get_user_by_id
+from ..users.tokens import is_access_token_revoked
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,13 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
         if user_id is None:
             self.close(4001, "unauthenticated")
             return
+
+        jti = get_access_token_jti(token, config.auth.secret_key)
+        if jti is not None:
+            redis = self.application.settings.get("redis")
+            if redis is not None and await is_access_token_revoked(jti, redis):
+                self.close(4001, "unauthenticated")
+                return
 
         async with get_session() as session:
             user = await get_user_by_id(session, user_id)

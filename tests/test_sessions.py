@@ -140,3 +140,36 @@ async def test_revoke_other_user_session_returns_404(client, db_session, make_us
         headers=auth_headers(alice),
     )
     assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_revoke_session_blocks_access_token(client, config):
+    """Revoking a session immediately blocks the associated access token."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "alice",
+            "email": "alice@example.com",
+            "password": "secret",
+        },
+    )
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "secret"},
+    ).json()
+    access_token = login["access_token"]
+    session_id = _hash_token(login["refresh_token"])
+
+    response = client.delete(
+        f"/api/v1/auth/sessions/{session_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["success"] is True
+
+    # The previously valid access token should now be rejected.
+    me_response = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert me_response.status_code == status.HTTP_401_UNAUTHORIZED

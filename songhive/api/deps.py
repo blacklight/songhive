@@ -17,7 +17,13 @@ from ..services.auth import get_user_by_id
 from ..services.storage import StorageService
 from ..storage import get_storage
 from ..users.api_tokens import validate_api_token
-from .middleware.auth import decode_access_token, decode_token_payload, extract_token
+from ..users.tokens import is_access_token_revoked
+from .middleware.auth import (
+    decode_access_token,
+    decode_token_payload,
+    extract_token,
+    get_access_token_jti,
+)
 
 bearer_scheme = HTTPBearer(
     auto_error=False,
@@ -92,6 +98,11 @@ async def _get_current_user(
     # Fast path: short-lived access JWT (PyJWT enforces exp).
     user_id = decode_access_token(token, config.auth.secret_key)
     if user_id is not None:
+        jti = get_access_token_jti(token, config.auth.secret_key)
+        if jti is not None:
+            access_redis = getattr(request.app.state, "redis", None)
+            if access_redis is not None and await is_access_token_revoked(jti, access_redis):
+                return None
         user = await get_user_by_id(db, user_id)
         return user if user is not None and user.is_active else None
 

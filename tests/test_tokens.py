@@ -13,6 +13,7 @@ from songhive.services.auth import create_user
 from songhive.users.tokens import (
     _hash_token,
     _user_refresh_set_key,
+    is_access_token_revoked,
     issue_token_pair,
     revoke_all_user_refresh_tokens,
     revoke_refresh_token,
@@ -169,6 +170,24 @@ async def test_revoke_refresh_token_returns_false_for_missing_token(fake_redis):
     """Test that revoking a missing token returns False."""
     revoked = await revoke_refresh_token("not-a-real-token", fake_redis)
     assert revoked is False
+
+
+@pytest.mark.asyncio
+async def test_revoke_refresh_token_blocks_access_token(db_session, token_config, fake_redis):
+    """Test that revoking a refresh token also denies its access token JTI."""
+    user = await create_user(db_session, "carol-block", "carol-block@example.com", "secret")
+    await db_session.flush()
+
+    token_pair = await issue_token_pair(user, token_config, fake_redis)
+    payload = await validate_refresh_token(token_pair.refresh_token, fake_redis)
+    assert payload is not None
+    assert payload.access_token_jti is not None
+
+    access_token_ttl = token_config.auth.access_token_expiry_minutes * 60
+    revoked = await revoke_refresh_token(token_pair.refresh_token, fake_redis, access_token_ttl)
+    assert revoked is True
+
+    assert await is_access_token_revoked(payload.access_token_jti, fake_redis) is True
 
 
 @pytest.mark.asyncio

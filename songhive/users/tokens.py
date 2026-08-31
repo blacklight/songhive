@@ -28,6 +28,8 @@ __all__ = [
     "revoke_all_user_refresh_tokens",
     "list_user_sessions",
     "revoke_session",
+    "is_access_token_revoked",
+    "revoke_access_token",
 ]
 
 
@@ -50,6 +52,7 @@ class RefreshTokenPayload:
     created_at: Optional[datetime] = None
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
+    access_token_jti: Optional[str] = None
 
 
 @dataclass
@@ -79,6 +82,35 @@ def _user_refresh_set_key(user_id: str) -> str:
     return f"auth:refresh-user:{user_id}"
 
 
+def _access_token_denylist_key(jti: str) -> str:
+    """Build the Redis key for a revoked access token JTI."""
+    return f"auth:access-deny:{jti}"
+
+
+async def is_access_token_revoked(jti: str, redis: Redis) -> bool:
+    """Return True if the access token JTI is on the deny-list."""
+    value = await redis.get(_access_token_denylist_key(jti))
+    return value is not None
+
+
+async def revoke_access_token(
+    jti: str,
+    ttl: int,
+    redis: Redis,
+) -> None:
+    """Add an access token JTI to the deny-list.
+
+    ``ttl`` is the number of seconds the entry should persist. A value of 0 or
+    less means the key will be set without an explicit TTL (useful when the
+    access token itself does not expire and must be blocked indefinitely).
+    """
+    key = _access_token_denylist_key(jti)
+    if ttl > 0:
+        await redis.setex(key, ttl, "1")
+    else:
+        await redis.set(key, "1")
+
+
 async def _set_members(redis: Redis, key: str) -> set[str]:
     """Return the members of a Redis set as a set of strings."""
     members = await cast(Awaitable[set[str]], redis.smembers(key))
@@ -97,6 +129,7 @@ def _encode_value(
     created_at: Optional[datetime] = None,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
+    access_token_jti: Optional[str] = None,
 ) -> str:
     """Encode the refresh token payload as JSON."""
     now = datetime.now(timezone.utc)
@@ -109,6 +142,7 @@ def _encode_value(
             "expires_at": (now + timedelta(seconds=ttl)).isoformat(),
             "ip_address": ip_address,
             "user_agent": user_agent,
+            "access_token_jti": access_token_jti,
         },
         default=str,
     )
@@ -151,17 +185,25 @@ def _decode_value(value: Optional[str | bytes]) -> Optional[RefreshTokenPayload]
         created_at=created_at,
         ip_address=data.get("ip_address") or None,
         user_agent=data.get("user_agent") or None,
+        access_token_jti=data.get("access_token_jti") or None,
     )
 
 
-def _issue_token_pair_for_user_id(user_id: str, config: SonghiveConfig) -> TokenPair:
+def _issue_token_pair_for_user_id(
+    user_id: str,
+    config: SonghiveConfig,
+    access_token_jti: Optional[str] = None,
+) -> TokenPair:
     """Create a new access/refresh token pair for the given user id."""
     # A value of 0 means the access token does not expire (OAuth2 convention).
     expires_minutes = config.auth.access_token_expiry_minutes or None
+    if access_token_jti is None:
+        access_token_jti = secrets.token_urlsafe(16)
     access_token = create_access_token(
         user_id,
         config.auth.secret_key,
         expires_minutes=expires_minutes,
+        jti=access_token_jti,
     )
     refresh_token = secrets.token_urlsafe(32)
     expires_in = (expires_minutes or 0) * 60
@@ -189,7 +231,8 @@ async def issue_token_pair(
     user's id as the payload and a TTL set by ``config.auth.refresh_token_expiry_days``.
     A hash is also added to the per-user refresh token set for bulk revocation.
     """
-    token_pair = _issue_token_pair_for_user_id(user.id, config)
+    jti = secrets.token_urlsafe(16)
+    token_pair = _issue_token_pair_for_user_id(user.id, config, access_token_jti=jti)
     token_hash = _hash_token(token_pair.refresh_token)
     key = _refresh_key(token_hash)
     user_set_key = _user_refresh_set_key(user.id)
@@ -200,6 +243,7 @@ async def issue_token_pair(
         created_at=created_at,
         ip_address=ip_address,
         user_agent=user_agent,
+        access_token_jti=jti,
     )
 
     async with redis.pipeline(transaction=True) as pipe:
@@ -254,7 +298,8 @@ async def rotate_refresh_token(
             await pipe.reset()
             return None
 
-        token_pair = _issue_token_pair_for_user_id(payload.user_id, config)
+        jti = secrets.token_urlsafe(16)
+        token_pair = _issue_token_pair_for_user_id(payload.user_id, config, access_token_jti=jti)
         new_hash = _hash_token(token_pair.refresh_token)
         new_key = _refresh_key(new_hash)
         new_value = _encode_value(
@@ -263,6 +308,7 @@ async def rotate_refresh_token(
             created_at=payload.created_at,
             ip_address=ip_address or payload.ip_address,
             user_agent=user_agent or payload.user_agent,
+            access_token_jti=jti,
         )
         user_set_key = _user_refresh_set_key(payload.user_id)
 
@@ -280,10 +326,15 @@ async def rotate_refresh_token(
     return token_pair
 
 
-async def revoke_refresh_token(token: str, redis: Redis) -> bool:
+async def revoke_refresh_token(
+    token: str,
+    redis: Redis,
+    access_token_ttl: int = 0,
+) -> bool:
     """
     Revoke a refresh token by deleting it from Redis and removing it from the
-    per-user refresh token index.
+    per-user refresh token index. The associated access token JTI is also
+    added to the deny-list so the current access token stops working.
 
     Returns ``True`` if a token was deleted, ``False`` if it was not present.
     """
@@ -298,6 +349,9 @@ async def revoke_refresh_token(token: str, redis: Redis) -> bool:
         stale_deleted = await redis.delete(key)
         return stale_deleted > 0
 
+    if payload.access_token_jti and access_token_ttl > 0:
+        await revoke_access_token(payload.access_token_jti, access_token_ttl, redis)
+
     user_set_key = _user_refresh_set_key(payload.user_id)
     async with redis.pipeline(transaction=True) as pipe:
         pipe.delete(key)
@@ -308,10 +362,15 @@ async def revoke_refresh_token(token: str, redis: Redis) -> bool:
     return deleted > 0
 
 
-async def revoke_all_user_refresh_tokens(redis: Redis, user_id: str) -> int:
+async def revoke_all_user_refresh_tokens(
+    redis: Redis,
+    user_id: str,
+    access_token_ttl: int = 0,
+) -> int:
     """
     Revoke every refresh token issued for a user by deleting the per-user set
-    and all token keys it indexes.
+    and all token keys it indexes. The access tokens associated with those
+    sessions are also added to the deny-list.
 
     Returns the number of Redis keys deleted.
     """
@@ -319,6 +378,13 @@ async def revoke_all_user_refresh_tokens(redis: Redis, user_id: str) -> int:
     token_hashes = await _set_members(redis, set_key)
     if not token_hashes:
         return 0
+
+    if access_token_ttl > 0:
+        for token_hash in token_hashes:
+            value = await redis.get(_refresh_key(token_hash))
+            payload = _decode_value(value)
+            if payload and payload.access_token_jti:
+                await revoke_access_token(payload.access_token_jti, access_token_ttl, redis)
 
     keys = [_refresh_key(h) for h in token_hashes]
     keys.append(set_key)
@@ -361,7 +427,12 @@ async def list_user_sessions(redis: Redis, user_id: str) -> list[UserSession]:
     return sessions
 
 
-async def revoke_session(redis: Redis, session_id: str, user_id: str) -> bool:
+async def revoke_session(
+    redis: Redis,
+    session_id: str,
+    user_id: str,
+    access_token_ttl: int = 0,
+) -> bool:
     """Revoke a single session by its id (token hash) for a user."""
     key = _refresh_key(session_id)
     value = await redis.get(key)
@@ -369,6 +440,9 @@ async def revoke_session(redis: Redis, session_id: str, user_id: str) -> bool:
 
     if payload is None or payload.user_id != user_id:
         return False
+
+    if payload.access_token_jti and access_token_ttl > 0:
+        await revoke_access_token(payload.access_token_jti, access_token_ttl, redis)
 
     user_set_key = _user_refresh_set_key(user_id)
     async with redis.pipeline(transaction=True) as pipe:

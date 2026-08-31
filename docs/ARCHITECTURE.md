@@ -381,6 +381,9 @@ alembic revision --autogenerate -m "add example column"
 2. **Refresh** — opaque refresh token → Redis lookup → rotate (revoke old,
    issue new pair).
 3. **Revoke** — single token or all tokens for a user (Redis key deletion).
+   Access tokens now carry a `jti` claim, and revocation also adds that JTI to
+   a Redis deny-list. The JWT middleware checks the deny-list so revoked
+   sessions cannot continue using their existing access token until expiry.
 4. **Session management** — users can list their active refresh-token sessions
    (including the current one) and revoke any session individually, revoking the
    current session ends the user's login.

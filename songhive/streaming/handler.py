@@ -13,7 +13,7 @@ from typing import Optional
 import tornado.iostream
 import tornado.web
 
-from ..api.middleware.auth import decode_access_token
+from ..api.middleware.auth import decode_access_token, get_access_token_jti
 from ..config.schema import SonghiveConfig, effective_bitrate
 from ..models.base import get_session
 from ..models.stored_file import StoredFile
@@ -31,6 +31,7 @@ from ..services.streaming import (
 from ..storage import get_storage
 from ..storage.base import StorageBackend
 from ..streaming.transcoder import Transcoder
+from ..users.tokens import is_access_token_revoked
 from ..ws.events import EventWebSocket
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,11 @@ class StreamHandler(tornado.web.RequestHandler):
         """Return the application configuration from Tornado settings."""
         return self.application.settings["config"]
 
+    @property
+    def _redis(self):
+        """Return the shared Redis client from Tornado settings, if available."""
+        return self.application.settings.get("redis")
+
     def _unauthorized(self):
         """Return a 401 Bearer challenge."""
         self.set_status(401)
@@ -94,10 +100,20 @@ class StreamHandler(tornado.web.RequestHandler):
         mimetype = content_type.split(";")[0].strip().lower()
         return self._FORMAT_BY_MIMETYPE.get(mimetype)
 
-    async def _load_user(self, session, token: str, config: SonghiveConfig) -> Optional[User]:
+    async def _load_user(
+        self,
+        session,
+        token: str,
+        config: SonghiveConfig,
+        redis=None,
+    ) -> Optional[User]:
         """Decode a Bearer token and load the corresponding active user."""
         user_id = decode_access_token(token, config.auth.secret_key)
         if user_id is None:
+            return None
+
+        jti = get_access_token_jti(token, config.auth.secret_key)
+        if jti is not None and redis is not None and await is_access_token_revoked(jti, redis):
             return None
 
         user = await get_user_by_id(session, user_id)
@@ -122,7 +138,7 @@ class StreamHandler(tornado.web.RequestHandler):
         if not token:
             return None
 
-        user = await self._load_user(session, token, self._config)
+        user = await self._load_user(session, token, self._config, self._redis)
         if user is None:
             self._unauthorized()
             return None

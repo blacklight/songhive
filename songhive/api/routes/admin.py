@@ -225,7 +225,9 @@ async def deactivate_user(
 ):
     """Deactivate a user account."""
     try:
-        user = await user_manager.deactivate_user_by_id(db, user_id, redis=redis)
+        config = get_config(request)
+        access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
+        user = await user_manager.deactivate_user_by_id(db, user_id, redis=redis, access_token_ttl=access_token_ttl)
     except user_manager.UserManagementError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -258,7 +260,9 @@ async def delete_user(
 ):
     """Delete a user account and all dependent data (admin only)."""
     target_user = await auth.get_user_by_id(db, user_id)
-    await revoke_all_user_refresh_tokens(redis, user_id)
+    config = get_config(request)
+    access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
+    await revoke_all_user_refresh_tokens(redis, user_id, access_token_ttl)
 
     await audit.log_action(
         db,
@@ -280,7 +284,6 @@ async def delete_user(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     if unpublish:
-        config: SonghiveConfig = request.app.state.config
         for info in unpublish:
             if info.artist is not None and info.owner is not None:
                 background_tasks.add_task(
@@ -754,15 +757,18 @@ async def bulk_user_action(
     unpublish: list[deletion.UnpublishInfo] = []
     config: SonghiveConfig = request.app.state.config
 
+    access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
     for user_id in body.user_ids:
         try:
             async with db.begin_nested():
                 if body.action == "deactivate":
-                    await user_manager.deactivate_user_by_id(db, user_id, redis=redis)
+                    await user_manager.deactivate_user_by_id(
+                        db, user_id, redis=redis, access_token_ttl=access_token_ttl
+                    )
                 elif body.action == "activate":
                     await user_manager.activate_user(db, user_id)
                 elif body.action == "delete":
-                    await revoke_all_user_refresh_tokens(redis, user_id)
+                    await revoke_all_user_refresh_tokens(redis, user_id, access_token_ttl)
                     user_unpublish = await user_manager.delete_user(
                         db, user_id, recursive=body.recursive, storage=storage
                     )
@@ -1000,7 +1006,7 @@ async def enrich_images(
     return EnrichImagesResponse(
         artists=len(artist_ids),
         albums=len(album_ids),
-        task_id=None if body.dry_run else result.id,
+        task_id=None if body.dry_run or not result else result.id,
         status=run_status,
     )
 

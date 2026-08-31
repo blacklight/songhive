@@ -185,7 +185,9 @@ async def change_my_password(
     except PasswordChangeError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    await revoke_all_user_refresh_tokens(redis, current_user.id)
+    config = get_config(request)
+    access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
+    await revoke_all_user_refresh_tokens(redis, current_user.id, access_token_ttl)
     await audit.log_action(
         db,
         actor_id=current_user.id,
@@ -244,10 +246,11 @@ async def delete_current_user(
     except user_manager.UserManagementError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    await revoke_all_user_refresh_tokens(redis, current_user.id)
+    config = get_config(request)
+    access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
+    await revoke_all_user_refresh_tokens(redis, str(current_user.id), access_token_ttl)
 
     if unpublish:
-        config: SonghiveConfig = request.app.state.config
         for info in unpublish:
             if info.artist is not None and info.owner is not None:
                 background_tasks.add_task(
