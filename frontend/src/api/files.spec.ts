@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { i18n } from "@/i18n";
 import * as client from "./client";
-import { uploadFile, getFile, type StoredFileResponse } from "./files";
+import {
+  uploadFile,
+  bulkUploadFiles,
+  getFile,
+  type StoredFileResponse,
+  type BulkFileUploadResult,
+} from "./files";
 
 vi.mock("./client", async (importOriginal) => {
   const original = await importOriginal<typeof import("./client")>();
@@ -256,6 +262,134 @@ describe("uploadFile", () => {
     await expect(uploadFile(file)).rejects.toMatchObject({
       status: 0,
       message: i18n.global.t("errors.uploadAborted"),
+    });
+  });
+});
+
+const sampleBulkResult: BulkFileUploadResult = {
+  filename: "avatar.png",
+  stored_file: sampleFile,
+  track_id: undefined,
+  duplicate: false,
+  error: undefined,
+};
+
+describe("bulkUploadFiles", () => {
+  let mockXhr: MockXhr;
+  let originalXHR: typeof XMLHttpRequest;
+
+  beforeEach(() => {
+    client.setTokenProvider(() => "test-token");
+    originalXHR = globalThis.XMLHttpRequest;
+    mockXhr = createMockXHR({
+      responseText: JSON.stringify([sampleBulkResult]),
+    });
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      vi.fn(() => mockXhr),
+    );
+  });
+
+  afterEach(() => {
+    vi.stubGlobal("XMLHttpRequest", originalXHR);
+  });
+
+  it("posts multiple files to the bulk endpoint", async () => {
+    const file1 = new File(["a"], "song1.mp3", { type: "audio/mpeg" });
+    const file2 = new File(["b"], "song2.mp3", { type: "audio/mpeg" });
+    const result = await bulkUploadFiles([file1, file2], "public");
+
+    expect(mockXhr.open).toHaveBeenCalledWith(
+      "POST",
+      "/api/v1/files/upload/bulk?visibility=public",
+    );
+    expect(mockXhr.setRequestHeader).toHaveBeenCalledWith(
+      "Authorization",
+      "Bearer test-token",
+    );
+    expect(mockXhr.send).toHaveBeenCalledTimes(1);
+
+    const [body] = mockXhr.send.mock.calls[0] as [FormData];
+    expect(body).toBeInstanceOf(FormData);
+    expect(body.getAll("files")).toEqual([file1, file2]);
+    expect(result).toEqual([sampleBulkResult]);
+  });
+
+  it("includes visibility and library_id in the bulk URL", async () => {
+    const file = new File(["a"], "song.mp3", { type: "audio/mpeg" });
+    await bulkUploadFiles([file], "private", undefined, "lib1");
+
+    expect(mockXhr.open).toHaveBeenCalledWith(
+      "POST",
+      "/api/v1/files/upload/bulk?visibility=private&library_id=lib1",
+    );
+  });
+
+  it("reports upload progress via the optional callback", async () => {
+    mockXhr = createMockXHR({
+      responseText: JSON.stringify([sampleBulkResult]),
+      progressSteps: [
+        { loaded: 25, total: 100 },
+        { loaded: 75, total: 100 },
+        { loaded: 100, total: 100 },
+      ],
+    });
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      vi.fn(() => mockXhr),
+    );
+
+    const file = new File(["contents"], "avatar.png", { type: "image/png" });
+    const onProgress = vi.fn();
+    await bulkUploadFiles([file], "public", onProgress);
+
+    expect(onProgress).toHaveBeenCalledTimes(3);
+    expect(onProgress).toHaveBeenNthCalledWith(1, 25);
+    expect(onProgress).toHaveBeenNthCalledWith(2, 75);
+    expect(onProgress).toHaveBeenNthCalledWith(3, 100);
+  });
+
+  it("throws ApiError on a non-2xx response", async () => {
+    mockXhr = createMockXHR({
+      status: 429,
+      statusText: "Too Many Requests",
+      responseText: JSON.stringify({ detail: "Rate limit exceeded" }),
+    });
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      vi.fn(() => mockXhr),
+    );
+
+    const file = new File(["contents"], "avatar.png", { type: "image/png" });
+
+    await expect(bulkUploadFiles([file])).rejects.toMatchObject({
+      status: 429,
+      detail: "Rate limit exceeded",
+    });
+  });
+
+  it("rejects with ApiError when not authenticated", async () => {
+    client.setTokenProvider(() => null);
+
+    const file = new File(["contents"], "avatar.png", { type: "image/png" });
+
+    await expect(bulkUploadFiles([file])).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it("rejects with a localized ApiError on XHR error", async () => {
+    mockXhr = createMockXHR({ trigger: "error" });
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      vi.fn(() => mockXhr),
+    );
+
+    const file = new File(["contents"], "avatar.png", { type: "image/png" });
+
+    await expect(bulkUploadFiles([file])).rejects.toMatchObject({
+      status: 0,
+      message: i18n.global.t("errors.uploadFailed"),
     });
   });
 });

@@ -6,6 +6,14 @@ import type { components } from "./types";
 export type StoredFileResponse = components["schemas"]["StoredFileResponse"];
 export type FileUploadResult = StoredFileResponse & { trackId?: string };
 
+export interface BulkFileUploadResult {
+  filename?: string;
+  stored_file?: StoredFileResponse;
+  track_id?: string;
+  duplicate: boolean;
+  error?: string;
+}
+
 export async function uploadFile(
   file: File,
   visibility: "private" | "local" | "public" = "public",
@@ -79,6 +87,73 @@ export async function uploadFile(
 
     const body = new FormData();
     body.append("file", file);
+    xhr.send(body);
+  });
+}
+
+export async function bulkUploadFiles(
+  files: File[],
+  visibility: "private" | "local" | "public" = "public",
+  onProgress?: (percent: number) => void,
+  libraryId?: string,
+): Promise<BulkFileUploadResult[]> {
+  const auth = getAuthHeader();
+  if (!auth) {
+    throw new ApiError("Not authenticated", 401);
+  }
+
+  const url = buildUrl(`${API_PREFIX}/files/upload/bulk`, {
+    visibility,
+    library_id: libraryId,
+  });
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.setRequestHeader("Authorization", auth);
+
+    if (onProgress) {
+      xhr.upload.onprogress = (event: ProgressEvent) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded * 100) / event.total);
+          onProgress(percent);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      const text = xhr.responseText ?? "";
+      let parsed: unknown = null;
+      if (text) {
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = null;
+        }
+      }
+
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const response = {
+          status: xhr.status,
+          statusText: xhr.statusText,
+        } as Response;
+        void ApiError.fromResponse(response, parsed).then(reject);
+        return;
+      }
+
+      resolve(parsed as BulkFileUploadResult[]);
+    };
+
+    xhr.onerror = () => {
+      reject(new ApiError(i18n.global.t("errors.uploadFailed"), 0));
+    };
+
+    xhr.onabort = () => {
+      reject(new ApiError(i18n.global.t("errors.uploadAborted"), 0));
+    };
+
+    const body = new FormData();
+    files.forEach((file) => body.append("files", file));
     xhr.send(body);
   });
 }

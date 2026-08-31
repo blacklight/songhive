@@ -5,6 +5,7 @@ import { RouterLink, useRouter } from "vue-router";
 import {
   listFiles,
   uploadFile,
+  bulkUploadFiles,
   deleteFile,
   type FileUploadResult,
   type StoredFileResponse,
@@ -31,6 +32,7 @@ const toast = useToastStore();
 
 const visibility = ref<Visibility>("public");
 const uploading = ref(false);
+const isBulkUploading = ref(false);
 const uploadError = ref<string | null>(null);
 const uploadFailures = ref<{ name: string; message: string }[]>([]);
 const selectedFiles = ref<File[]>([]);
@@ -72,12 +74,23 @@ const chooseFileLabel = computed(() => {
 
 const overallProgress = computed(() => {
   if (selectedFiles.value.length === 0) return 0;
+  if (isBulkUploading.value) {
+    return currentFileProgress.value;
+  }
   const completed = currentFileIndex.value * 100;
   const current = currentFileProgress.value;
   return Math.round((completed + current) / selectedFiles.value.length);
 });
 
 const progressLabel = computed(() => {
+  if (isBulkUploading.value) {
+    if (currentFileProgress.value > 0) {
+      return t("pages.files.uploadProgress", {
+        percent: currentFileProgress.value,
+      });
+    }
+    return t("pages.files.uploading");
+  }
   if (
     selectedFiles.value.length > 1 &&
     currentFileIndex.value < selectedFiles.value.length
@@ -206,6 +219,7 @@ async function onFileChange(event: Event) {
   uploadError.value = null;
   uploadFailures.value = [];
   uploading.value = true;
+  isBulkUploading.value = files.length > 1;
   currentFileIndex.value = 0;
   currentFileProgress.value = 0;
   selectedFiles.value = files;
@@ -215,10 +229,9 @@ async function onFileChange(event: Event) {
   const libraryId = selectedLibraryId.value || undefined;
 
   try {
-    for (let i = 0; i < files.length; i++) {
-      currentFileIndex.value = i;
-      currentFileProgress.value = 0;
-      const file = files[i];
+    if (files.length === 1) {
+      const file = files[0];
+      currentFileIndex.value = 0;
       try {
         const result = await uploadFile(
           file,
@@ -234,6 +247,37 @@ async function onFileChange(event: Event) {
           name: file.name,
           message: getErrorMessage(err),
         });
+      } finally {
+        currentFileProgress.value = 100;
+      }
+    } else {
+      try {
+        const bulkResults = await bulkUploadFiles(
+          files,
+          visibility.value,
+          (percent) => {
+            currentFileProgress.value = percent;
+          },
+          libraryId,
+        );
+        bulkResults.forEach((item, index) => {
+          if (item.error) {
+            uploadFailures.value.push({
+              name: item.filename ?? files[index].name,
+              message: item.error,
+            });
+          } else if (item.stored_file) {
+            results.push({
+              ...item.stored_file,
+              trackId: item.track_id,
+            });
+          }
+        });
+      } catch (err) {
+        const message = getErrorMessage(err);
+        for (const file of files) {
+          uploadFailures.value.push({ name: file.name, message });
+        }
       } finally {
         currentFileProgress.value = 100;
       }
@@ -293,6 +337,7 @@ async function onFileChange(event: Event) {
     }
   } finally {
     uploading.value = false;
+    isBulkUploading.value = false;
     selectedFiles.value = [];
     currentFileIndex.value = 0;
     currentFileProgress.value = 0;

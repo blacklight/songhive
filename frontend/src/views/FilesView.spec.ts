@@ -3,7 +3,13 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
-import { listFiles, uploadFile, type StoredFileResponse } from "@/api/files";
+import {
+  listFiles,
+  uploadFile,
+  bulkUploadFiles,
+  type StoredFileResponse,
+  type BulkFileUploadResult,
+} from "@/api/files";
 import { listLibraries, type LibraryResponse } from "@/api/libraries";
 import { useToastStore } from "@/stores/toast";
 import FilesView from "./FilesView.vue";
@@ -11,6 +17,7 @@ import FilesView from "./FilesView.vue";
 vi.mock("@/api/files", () => ({
   listFiles: vi.fn(),
   uploadFile: vi.fn(),
+  bulkUploadFiles: vi.fn(),
   deleteFile: vi.fn(),
 }));
 
@@ -73,6 +80,21 @@ function createLibrary(
     description: null,
     visibility: "public",
     can_write: canWrite,
+  };
+}
+
+function createBulkResult(
+  file: StoredFileResponse,
+  filename?: string,
+  trackId?: string,
+  error?: string,
+): BulkFileUploadResult {
+  return {
+    filename,
+    stored_file: error ? undefined : file,
+    track_id: trackId,
+    duplicate: false,
+    error,
   };
 }
 
@@ -314,9 +336,10 @@ describe("FilesView", () => {
   });
 
   it("bulk-uploads multiple files and refreshes the list", async () => {
-    vi.mocked(uploadFile)
-      .mockResolvedValueOnce(createStoredFile("f1"))
-      .mockResolvedValueOnce(createStoredFile("f2"));
+    vi.mocked(bulkUploadFiles).mockResolvedValue([
+      createBulkResult(createStoredFile("f1"), "song1.mp3"),
+      createBulkResult(createStoredFile("f2"), "song2.mp3"),
+    ]);
 
     await mountView();
 
@@ -328,17 +351,10 @@ describe("FilesView", () => {
     fileInput.dispatchEvent(new Event("change"));
     await flushPromises();
 
-    expect(uploadFile).toHaveBeenCalledTimes(2);
-    expect(uploadFile).toHaveBeenNthCalledWith(
-      1,
-      file1,
-      "public",
-      expect.any(Function),
-      undefined,
-    );
-    expect(uploadFile).toHaveBeenNthCalledWith(
-      2,
-      file2,
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(bulkUploadFiles).toHaveBeenCalledTimes(1);
+    expect(bulkUploadFiles).toHaveBeenCalledWith(
+      [file1, file2],
       "public",
       expect.any(Function),
       undefined,
@@ -352,9 +368,15 @@ describe("FilesView", () => {
   });
 
   it("shows per-file errors for a partially failed bulk upload", async () => {
-    vi.mocked(uploadFile)
-      .mockResolvedValueOnce(createStoredFile("f1"))
-      .mockRejectedValueOnce(new Error("network failure"));
+    vi.mocked(bulkUploadFiles).mockResolvedValue([
+      createBulkResult(createStoredFile("f1"), "song1.mp3"),
+      createBulkResult(
+        createStoredFile("f2"),
+        "song2.mp3",
+        undefined,
+        "network failure",
+      ),
+    ]);
 
     await mountView();
 
@@ -366,7 +388,8 @@ describe("FilesView", () => {
     fileInput.dispatchEvent(new Event("change"));
     await flushPromises();
 
-    expect(uploadFile).toHaveBeenCalledTimes(2);
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(bulkUploadFiles).toHaveBeenCalledTimes(1);
     expect(router.push).not.toHaveBeenCalled();
     expect(toast.toasts).toHaveLength(1);
     expect(toast.toasts[0].type).toBe("warning");
