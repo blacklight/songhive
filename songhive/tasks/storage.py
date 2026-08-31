@@ -18,34 +18,43 @@ logger = logging.getLogger(__name__)
 async def _cleanup_orphaned_files(storage: StorageBackend, session: AsyncSession) -> int:
     """
     Delete ``StoredFile`` rows (and their backing files) not referenced by any
-    ``Track``, ``Album``, or ``Upload``.
+    other table.
+
+    A stored file is considered orphaned when no ``Track`` (audio or embedded
+    image), ``Album``, ``Artist``, ``Library``, ``Playlist``, ``Upload``,
+    or ``TranscodedFile`` row points to it.
 
     :param storage: A configured storage backend.
     :param session: An active async SQLAlchemy session.
     :returns: The number of orphaned files removed.
     """
-    from sqlalchemy import delete, select
+    from sqlalchemy import CompoundSelect, delete, select, union
 
     from ..models.album import Album
-    from ..models.artist import Artist  # noqa: F401
-    from ..models.library import Library  # noqa: F401
+    from ..models.artist import Artist
+    from ..models.library import Library
+    from ..models.playlist import Playlist
     from ..models.stored_file import StoredFile
     from ..models.track import Track
+    from ..models.transcoded_file import TranscodedFile
     from ..models.upload import Upload
-    from ..models.user import User  # noqa: F401
 
-    referenced_by_track = select(Track.audio_file_id).where(Track.audio_file_id.is_not(None))
-    referenced_by_album = select(Album.cover_file_id).where(Album.cover_file_id.is_not(None))
-    referenced_by_upload = select(Upload.stored_file_id).where(Upload.stored_file_id.is_not(None))
+    referenced_ids: CompoundSelect = union(
+        select(Track.audio_file_id).where(Track.audio_file_id.is_not(None)),
+        select(Track.image_file_id).where(Track.image_file_id.is_not(None)),
+        select(Album.cover_file_id).where(Album.cover_file_id.is_not(None)),
+        select(Upload.stored_file_id).where(Upload.stored_file_id.is_not(None)),
+        select(Artist.image_file_id).where(Artist.image_file_id.is_not(None)),
+        select(Artist.cover_file_id).where(Artist.cover_file_id.is_not(None)),
+        select(Library.image_file_id).where(Library.image_file_id.is_not(None)),
+        select(Library.cover_file_id).where(Library.cover_file_id.is_not(None)),
+        select(Playlist.image_file_id).where(Playlist.image_file_id.is_not(None)),
+        select(Playlist.cover_file_id).where(Playlist.cover_file_id.is_not(None)),
+        select(TranscodedFile.stored_file_id),
+    )
 
     stmt = (
-        delete(StoredFile)
-        .where(
-            ~StoredFile.id.in_(referenced_by_track),
-            ~StoredFile.id.in_(referenced_by_album),
-            ~StoredFile.id.in_(referenced_by_upload),
-        )
-        .returning(StoredFile.id, StoredFile.storage_path)
+        delete(StoredFile).where(~StoredFile.id.in_(referenced_ids)).returning(StoredFile.id, StoredFile.storage_path)
     )
 
     result = await session.execute(stmt)

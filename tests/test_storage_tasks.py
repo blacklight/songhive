@@ -12,8 +12,10 @@ from songhive.config.schema import SonghiveConfig, StorageConfig
 from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.library import Library
+from songhive.models.playlist import Playlist
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
+from songhive.models.transcoded_file import TranscodedFile
 from songhive.models.upload import Upload
 from songhive.services.storage import StorageService
 from songhive.storage import get_storage
@@ -91,6 +93,82 @@ async def test_cleanup_orphaned_files_removes_only_orphans(db_session, local_sto
 
     assert await local_storage_service.backend.exists(stored_files[3].storage_path) is False
     for stored_file in stored_files[:3]:
+        assert await local_storage_service.backend.exists(stored_file.storage_path) is True
+
+
+@pytest.mark.asyncio
+async def test_cleanup_orphaned_files_preserves_all_references(db_session, local_storage_service, regular_user):
+    """Stored files referenced by Artist, Library, Playlist, Track image or TranscodedFile survive cleanup."""
+    contents = [
+        b"artist-image",
+        b"artist-cover",
+        b"library-cover",
+        b"playlist-image",
+        b"track-image",
+        b"transcoded",
+        b"orphan",
+    ]
+    stored_files = []
+    for i, content in enumerate(contents):
+        file = io.BytesIO(content)
+        stored_file = await local_storage_service.store_file(
+            db_session,
+            file,
+            "image/png" if i != 5 else "audio/mpeg",
+            original_filename=f"file{i}.png",
+        )
+        stored_files.append(stored_file)
+    await db_session.flush()
+
+    artist = Artist(
+        name="Test Artist",
+        image_file_id=stored_files[0].id,
+        cover_file_id=stored_files[1].id,
+    )
+    db_session.add(artist)
+    await db_session.flush()
+
+    library = Library(
+        name="Test Library",
+        owner_id=regular_user.id,
+        cover_file_id=stored_files[2].id,
+    )
+    playlist = Playlist(
+        name="Test Playlist",
+        owner_id=regular_user.id,
+        image_file_id=stored_files[3].id,
+    )
+    track = Track(
+        title="Test Track",
+        artist_id=artist.id,
+        image_file_id=stored_files[4].id,
+    )
+    db_session.add_all([library, playlist, track])
+    await db_session.flush()
+
+    db_session.add(
+        TranscodedFile(
+            track_id=track.id,
+            format="mp3",
+            bitrate="128k",
+            stored_file_id=stored_files[5].id,
+        )
+    )
+    await db_session.flush()
+
+    count = await _cleanup_orphaned_files(local_storage_service.backend, db_session)
+
+    assert count == 1
+
+    for stored_file in stored_files[:-1]:
+        result = await db_session.execute(select(StoredFile).where(StoredFile.id == stored_file.id))
+        assert result.scalar_one_or_none() is stored_file
+
+    result = await db_session.execute(select(StoredFile).where(StoredFile.id == stored_files[-1].id))
+    assert result.scalar_one_or_none() is None
+
+    assert await local_storage_service.backend.exists(stored_files[-1].storage_path) is False
+    for stored_file in stored_files[:-1]:
         assert await local_storage_service.backend.exists(stored_file.storage_path) is True
 
 
