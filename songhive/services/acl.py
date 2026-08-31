@@ -7,7 +7,7 @@ designed to be used by the FastAPI route layer and by federation serializers.
 """
 
 import logging
-from typing import Any, Dict, NamedTuple, Optional, Type
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Type
 
 from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -227,6 +227,38 @@ async def can_access(
     share tokens, and derived file access through visible tracks/albums.
     """
     return await _can_access(session, user, item_type, item_id, share_token=share_token)
+
+
+_ACCESS_BATCH_SIZE = 1000
+
+
+async def filter_accessible_track_ids(
+    session: AsyncSession,
+    user: Optional[User],
+    track_ids: List[str],
+    batch_size: int = _ACCESS_BATCH_SIZE,
+) -> Set[str]:
+    """
+    Return the subset of ``track_ids`` that ``user`` may access.
+
+    The check is pushed into the database using ``apply_access_filter`` and
+    batched to avoid exceeding database parameter limits for very large inputs.
+    """
+    if not track_ids:
+        return set()
+
+    accessible: Set[str] = set()
+    for i in range(0, len(track_ids), batch_size):
+        chunk = track_ids[i : i + batch_size]
+        stmt = apply_access_filter(
+            select(Track.id).where(Track.id.in_(chunk)),
+            Track,
+            user,
+            "track",
+        )
+        result = await session.execute(stmt)
+        accessible.update(str(row) for row in result.scalars().all())
+    return accessible
 
 
 async def can_manage(

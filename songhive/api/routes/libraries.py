@@ -2,7 +2,6 @@
 Library routes.
 """
 
-import asyncio
 import uuid
 from pathlib import Path
 from typing import List, Optional, Set, cast
@@ -541,13 +540,10 @@ async def _resolve_track_ids(
 ) -> List[str]:
     """Resolve ``track_ids`` / ``album_id`` / ``artist_id`` into accessible track IDs."""
     resolved: List[str] = []
-    resolved_promises = []
 
     if body.track_ids:
-        for track_id in body.track_ids:
-            resolved_promises.append(acl.can_access(db, user, "track", track_id))
-        access_results = await asyncio.gather(*resolved_promises)
-        resolved.extend([track_id for track_id, can_access in zip(body.track_ids, access_results) if can_access])
+        accessible = await acl.filter_accessible_track_ids(db, user, body.track_ids)
+        resolved.extend(track_id for track_id in body.track_ids if track_id in accessible)
 
     if body.album_id:
         resolved.extend(await music.get_track_ids_for_album(db, body.album_id, user=user))

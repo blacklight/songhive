@@ -16,7 +16,7 @@ from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.services import sharing
-from songhive.services.acl import can_access, can_manage
+from songhive.services.acl import can_access, can_manage, filter_accessible_track_ids
 
 
 async def _make_artist(session, name: str = "Test Artist") -> Artist:
@@ -390,3 +390,31 @@ async def test_audit_ownerless_private(db_session, regular_user, caplog):
         count = await audit_ownerless_private(db_session)
     assert count == 1
     assert "ownerless" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_filter_accessible_track_ids_honors_visibility(db_session, regular_user, other_user):
+    """filter_accessible_track_ids returns only tracks the user may access."""
+    public_track = await _make_track(db_session, regular_user, visibility=Visibility.PUBLIC.value)
+    local_track = await _make_track(db_session, other_user, visibility=Visibility.LOCAL.value)
+    private_track = await _make_track(db_session, other_user, visibility=Visibility.PRIVATE.value)
+
+    track_ids = [str(t.id) for t in (public_track, local_track, private_track)]
+    accessible = await filter_accessible_track_ids(db_session, regular_user, track_ids)
+    assert accessible == {str(public_track.id), str(local_track.id)}
+
+
+@pytest.mark.asyncio
+async def test_filter_accessible_track_ids_empty_input(db_session, regular_user):
+    """filter_accessible_track_ids returns an empty set for an empty input list."""
+    assert await filter_accessible_track_ids(db_session, regular_user, []) == set()
+
+
+@pytest.mark.asyncio
+async def test_filter_accessible_track_ids_batches_queries(db_session, regular_user):
+    """filter_accessible_track_ids splits large inputs into batched IN queries."""
+    tracks = [await _make_track(db_session, regular_user, visibility=Visibility.PUBLIC.value) for _ in range(3)]
+    track_ids = [str(t.id) for t in tracks]
+
+    accessible = await filter_accessible_track_ids(db_session, regular_user, track_ids, batch_size=2)
+    assert accessible == set(track_ids)
