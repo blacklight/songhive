@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `auth`: Add refresh-token session listing and revocation. ([`b519b11`](https://git.platypush.tech/blacklight/songhive/commit/b519b11a04009721d6fc2ec3d59608af1aebd80f))
+- `auth`: Denylist access JWTs on session revocation. ([`f6f8e18`](https://git.platypush.tech/blacklight/songhive/commit/f6f8e184040e012cb619082fce7466c0905ca5dc))
+
+### Fixed
+
+- `stats`: Cast db aggregates to int for Redis cache. ([`8905919`](https://git.platypush.tech/blacklight/songhive/commit/890591928f73d0177519da67956282c69bd0c369))
+- `docker`: Preserve client port in proxy Host header. ([`1d88ee0`](https://git.platypush.tech/blacklight/songhive/commit/1d88ee08c0eb51b22611265ff8515a3576219ae7))
+- `storage`: Include all stored file references in orphaned cleanup. ([`24425ea`](https://git.platypush.tech/blacklight/songhive/commit/24425eaf7196346d5b63d42445f8c6671195f9ad))
+
 ## 0.0.12
 
 ### Added
