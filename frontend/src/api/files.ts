@@ -14,6 +14,20 @@ export interface BulkFileUploadResult {
   error?: string;
 }
 
+function makeProgressHandler(
+  onProgress: (percent: number) => void,
+  knownSize: number,
+) {
+  return (event: ProgressEvent) => {
+    const total =
+      event.lengthComputable && event.total > 0 ? event.total : knownSize;
+    if (total > 0) {
+      const percent = Math.min(100, Math.round((event.loaded * 100) / total));
+      onProgress(percent);
+    }
+  };
+}
+
 export async function uploadFile(
   file: File,
   visibility: "private" | "local" | "public" = "public",
@@ -36,12 +50,7 @@ export async function uploadFile(
     xhr.setRequestHeader("Authorization", auth);
 
     if (onProgress) {
-      xhr.upload.onprogress = (event: ProgressEvent) => {
-        if (event.lengthComputable) {
-          const percent = Math.round((event.loaded * 100) / event.total);
-          onProgress(percent);
-        }
-      };
+      xhr.upload.onprogress = makeProgressHandler(onProgress, file.size);
     }
 
     xhr.onload = () => {
@@ -107,18 +116,15 @@ export async function bulkUploadFiles(
     library_id: libraryId,
   });
 
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
     xhr.setRequestHeader("Authorization", auth);
 
     if (onProgress) {
-      xhr.upload.onprogress = (event: ProgressEvent) => {
-        if (event.lengthComputable) {
-          const percent = Math.round((event.loaded * 100) / event.total);
-          onProgress(percent);
-        }
-      };
+      xhr.upload.onprogress = makeProgressHandler(onProgress, totalSize);
     }
 
     xhr.onload = () => {

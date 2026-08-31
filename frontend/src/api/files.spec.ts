@@ -40,7 +40,11 @@ function createMockXHR(config: {
   responseText?: string;
   headers?: Record<string, string | null>;
   trigger?: "load" | "error" | "abort";
-  progressSteps?: Array<{ loaded: number; total: number }>;
+  progressSteps?: Array<{
+    loaded: number;
+    total: number;
+    lengthComputable?: boolean;
+  }>;
 }): MockXhr {
   const {
     status = 200,
@@ -77,7 +81,7 @@ function createMockXHR(config: {
         for (const step of progressSteps) {
           if (xhr.upload.onprogress) {
             xhr.upload.onprogress({
-              lengthComputable: true,
+              lengthComputable: step.lengthComputable ?? true,
               ...step,
             } as ProgressEvent);
           }
@@ -153,6 +157,30 @@ describe("uploadFile", () => {
         { loaded: 25, total: 100 },
         { loaded: 75, total: 100 },
         { loaded: 100, total: 100 },
+      ],
+    });
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      vi.fn(() => mockXhr),
+    );
+
+    const file = new File(["contents"], "avatar.png", { type: "image/png" });
+    const onProgress = vi.fn();
+    await uploadFile(file, "public", onProgress);
+
+    expect(onProgress).toHaveBeenCalledTimes(3);
+    expect(onProgress).toHaveBeenNthCalledWith(1, 25);
+    expect(onProgress).toHaveBeenNthCalledWith(2, 75);
+    expect(onProgress).toHaveBeenNthCalledWith(3, 100);
+  });
+
+  it("reports progress using the file size when the browser has no total", async () => {
+    mockXhr = createMockXHR({
+      responseText: JSON.stringify(sampleFile),
+      progressSteps: [
+        { loaded: 2, total: 0, lengthComputable: false },
+        { loaded: 6, total: 0, lengthComputable: false },
+        { loaded: 8, total: 0, lengthComputable: false },
       ],
     });
     vi.stubGlobal(
@@ -346,6 +374,31 @@ describe("bulkUploadFiles", () => {
     expect(onProgress).toHaveBeenCalledTimes(3);
     expect(onProgress).toHaveBeenNthCalledWith(1, 25);
     expect(onProgress).toHaveBeenNthCalledWith(2, 75);
+    expect(onProgress).toHaveBeenNthCalledWith(3, 100);
+  });
+
+  it("reports progress using the combined file sizes when the browser has no total", async () => {
+    mockXhr = createMockXHR({
+      responseText: JSON.stringify([sampleBulkResult]),
+      progressSteps: [
+        { loaded: 1, total: 0, lengthComputable: false },
+        { loaded: 4, total: 0, lengthComputable: false },
+        { loaded: 5, total: 0, lengthComputable: false },
+      ],
+    });
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      vi.fn(() => mockXhr),
+    );
+
+    const file1 = new File(["abcd"], "a.txt", { type: "text/plain" });
+    const file2 = new File(["x"], "b.txt", { type: "text/plain" });
+    const onProgress = vi.fn();
+    await bulkUploadFiles([file1, file2], "public", onProgress);
+
+    expect(onProgress).toHaveBeenCalledTimes(3);
+    expect(onProgress).toHaveBeenNthCalledWith(1, 20);
+    expect(onProgress).toHaveBeenNthCalledWith(2, 80);
     expect(onProgress).toHaveBeenNthCalledWith(3, 100);
   });
 
