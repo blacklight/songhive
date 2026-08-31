@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Add playlist track reorder endpoint ([`b73c52c`](https://git.platypush.tech/blacklight/songhive/commit/b73c52ccb1c4948bcddeb1ffb8ad3b9f4e53b3a2))
+- `frontend`: Add playlist track reordering UI and API support ([`dbfc31f`](https://git.platypush.tech/blacklight/songhive/commit/dbfc31fdcb391e00ff6ec11f9a2df0a53eee16e8))
+- `files`: Add bulk file upload endpoint with size and count limits ([`393db57`](https://git.platypush.tech/blacklight/songhive/commit/393db57d47e702a76ccb350522196735cb29b189))
+- `files`: Wire up bulk upload endpoint in the frontend ([`5ebb1ec`](https://git.platypush.tech/blacklight/songhive/commit/5ebb1ec3c6722325e568566abd224f2979158fcd))
+
+### Changed
+
+- `acl`: Batch track access checks with select-in queries ([`c48cea0`](https://git.platypush.tech/blacklight/songhive/commit/c48cea0b54283765d633afbc4ef66579f27b1a24))
+- Update config example and architecture config keys ([`0852e58`](https://git.platypush.tech/blacklight/songhive/commit/0852e58d063859b5f901d1795e8784da04aeeb3e))
+
+### Fixed
+
+- `files`: Report upload progress when total is missing ([`a1f0452`](https://git.platypush.tech/blacklight/songhive/commit/a1f04526ff8787f2ecfde8ab59404f0d490c658f))
+- `redis`: Use dedicated client for Tornado loop ([`653cdcc`](https://git.platypush.tech/blacklight/songhive/commit/653cdcc1a6fa21d38493d8f43a82684b1971fa77))
+
 ## 0.0.13
 
 ### Added
