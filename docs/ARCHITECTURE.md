@@ -249,16 +249,16 @@ these subsections:
 
 | Section        | Key settings                                                  |
 |----------------|---------------------------------------------------------------|
-| `server`       | host, port, debug, cors_origins, trusted_proxy_hops           |
+| `server`       | host, port, num_workers, debug, cors_origins                  |
 | `database`     | url (asyncpg), pool_size, max_overflow                        |
 | `redis`        | url                                                           |
 | `celery`       | broker_url, result_backend, cleanup_orphaned_files_schedule   |
 | `storage`      | backend (local/s3), local_path, s3_*, cdn_prefix, max_upload_size |
 | `federation`   | enabled, instance_domain, instance_name, private_key_path, allow/block lists |
-| `auth`         | secret_key, token TTLs, rate_limit_enabled, rate_limit_window_seconds, trusted_proxy_hops |
+| `auth`         | registration_mode, secret_key, token TTLs, rate_limit, trusted_proxy_hops |
 | `email`        | smtp_host, smtp_port, smtp_user, from_address, tls settings   |
 | `musicbrainz`  | enabled, user_agent, cover_art, artist_image settings       |
-| `imports`      | auto_enrich, import_visibility                                |
+| `imports`      | scan_roots, bulk_import_sync_threshold                        |
 | `streaming`    | max_bitrate, max_bitrate_by_role, default_bitrate, chunk_size, transcode_cache_enabled |
 
 Runtime-editable overrides (instance settings stored in the `settings` DB

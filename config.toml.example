@@ -1,5 +1,8 @@
 # Songhive Configuration
 # Copy this file to config.toml and adjust values.
+#
+# Any option can also be set via environment variables using the SONGHIVE_
+# prefix and __ as a nested separator, e.g. SONGHIVE_DATABASE__URL.
 
 [server]
 host = "0.0.0.0"
@@ -33,9 +36,10 @@ local_path = "/var/lib/songhive/media"
 # s3_endpoint = "https://s3.amazonaws.com"
 # s3_bucket = "songhive-media"
 # s3_access_key = ""
-# s3_secret_key = ""
+# s3_secret_key = ""  # Prefer SONGHIVE_STORAGE__S3_SECRET_KEY for secrets.
 # s3_region = "us-east-1"
 # cdn_prefix = "https://cdn.example.com"
+# Maximum upload size in bytes; defaults to 500 MiB.
 # max_upload_size = 524288000
 
 [federation]
@@ -69,11 +73,24 @@ enabled = true
 # Fetch artist images from MusicBrainz URL relations (e.g. Wikimedia Commons).
 # fetch_artist_images = true
 
+[imports]
+# Allowed filesystem roots for directory/bulk imports. Sub-paths outside these
+# roots are rejected. A comma-separated string or JSON list is also accepted
+# from environment variables.
+# scan_roots = ["/path/to/music"]
+# Maximum number of files handled synchronously in a bulk upload; larger
+# batches are queued as Celery tasks.
+# bulk_import_sync_threshold = 20
+
 [auth]
 # Supported: "open", "invite-only", "approval-required", "closed"
 registration_mode = "open"
 require_email_verification = false
-# TODO: JWT signing secret. Generate a strong random key and never commit it:
+# Number of trusted reverse-proxy hops for X-Forwarded-For parsing.
+# 0 disables trust in the header.
+# trusted_proxy_hops = 0
+# JWT signing secret. Generate a strong random key of at least 32 bytes and
+# replace this placeholder, e.g.:
 # python -c "import secrets; print(secrets.token_urlsafe(64))"
 secret_key = "####CHANGEME####"
 access_token_expiry_minutes = 15
