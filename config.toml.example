@@ -41,6 +41,10 @@ local_path = "/var/lib/songhive/media"
 # cdn_prefix = "https://cdn.example.com"
 # Maximum upload size in bytes; defaults to 500 MiB.
 # max_upload_size = 524288000
+# Maximum number of files in a single bulk upload request; defaults to 50.
+# max_bulk_upload_files = 50
+# Maximum total size in bytes for a single bulk upload request; defaults to 5 GiB.
+# max_bulk_upload_total_size = 5368709120
 
 [federation]
 enabled = true

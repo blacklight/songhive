@@ -104,6 +104,15 @@ class StorageConfig(BaseSettings):
         default=500 * 1024 * 1024,
         description="Maximum upload size in bytes; defaults to 500 MiB",
     )
+    max_bulk_upload_files: int = Field(
+        default=50,
+        ge=1,
+        description="Maximum number of files allowed in a single bulk upload request",
+    )
+    max_bulk_upload_total_size: Optional[int] = Field(
+        default=5 * 1024 * 1024 * 1024,
+        description="Maximum total size in bytes for a single bulk upload request; defaults to 5 GiB",
+    )
 
 
 class FederationConfig(BaseSettings):

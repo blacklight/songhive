@@ -3,10 +3,22 @@ File storage routes: upload, metadata, and download.
 """
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Literal, Optional, cast
+from typing import BinaryIO, List, Literal, Optional, cast
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
@@ -85,6 +97,122 @@ class StoredFileResponse(BaseModel):
     tracks: Optional[List[TrackSummary]] = None
 
 
+class BulkFileUploadResult(BaseModel):
+    """Per-file result for a bulk file upload."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    filename: Optional[str] = None
+    stored_file: Optional[StoredFileResponse] = None
+    track_id: Optional[str] = None
+    duplicate: bool = False
+    error: Optional[str] = None
+
+
+@dataclass
+class _UploadOutcome:
+    """Internal result of uploading a single file."""
+
+    stored_file: Optional[StoredFile] = None
+    track_id: Optional[str] = None
+    is_duplicate: bool = False
+    error: Optional[str] = None
+
+
+def _discover_upload_size(file: BinaryIO) -> Optional[int]:
+    """Best-effort discovery of the size of an uploaded file stream."""
+    try:
+        current = file.tell()
+        file.seek(0, 2)
+        size = file.tell()
+        file.seek(current)
+        return size
+    except (OSError, AttributeError):
+        return None
+
+
+async def _build_stored_file_response(
+    stored_file: StoredFile,
+    current_user: User,
+    storage: StorageService,
+) -> StoredFileResponse:
+    """Build a ``StoredFileResponse`` for a stored file."""
+    return StoredFileResponse(
+        id=stored_file.id,
+        content_type=stored_file.content_type,
+        size=stored_file.size,
+        sha256=stored_file.sha256,
+        owner_id=redact_owner(cast(HasOwnerId, stored_file), current_user),
+        visibility=stored_file.visibility,
+        original_filename=stored_file.original_filename,
+        url=await storage.get_url(stored_file),
+    )
+
+
+async def _process_single_upload(
+    db: AsyncSession,
+    storage: StorageService,
+    current_user: User,
+    library: Optional[Library],
+    file: UploadFile,
+    visibility: str,
+) -> _UploadOutcome:
+    """Store or import a single uploaded file and return the outcome."""
+    content_type = file.content_type or "application/octet-stream"
+    stored_file: Optional[StoredFile] = None
+    is_duplicate = False
+    track_id: Optional[str] = None
+
+    if content_type.startswith("audio/"):
+        if library is None:
+            library = await _get_or_create_uploads_library(db, current_user)
+        try:
+            result = await import_audio_file(
+                db,
+                storage_service=storage,
+                file=file.file,
+                filename=file.filename or "audio",
+                library_id=str(library.id),
+                owner_id=str(current_user.id),
+                visibility=visibility,
+                source="upload",
+                content_type=content_type,
+            )
+            stored_file = result.stored_file
+            is_duplicate = result.was_duplicate
+            track_id = str(result.track.id)
+        except DuplicateTrackError as exc:
+            track_id = exc.existing_track_id
+            if exc.stored_file_id is not None:
+                stored_file = await db.get(StoredFile, exc.stored_file_id)
+            is_duplicate = exc.was_duplicate
+        except FileSizeLimitExceededError:
+            return _UploadOutcome(error="File too large")
+        except Exception as exc:
+            logger.warning("Could not import audio file as track: %s", exc)
+
+    if stored_file is None:
+        storage._rewind(file.file)
+        try:
+            stored_file, is_duplicate = await storage.store_file(
+                db,
+                file.file,
+                content_type=content_type,
+                original_filename=file.filename,
+                owner_id=current_user.id,
+                visibility=visibility,
+                return_duplicate=True,
+            )
+        except FileSizeLimitExceededError:
+            return _UploadOutcome(error="File too large")
+
+    return _UploadOutcome(
+        stored_file=stored_file,
+        track_id=track_id,
+        is_duplicate=is_duplicate,
+    )
+
+
 @router.post(
     "/upload",
     response_model=StoredFileResponse,
@@ -111,74 +239,129 @@ async def upload_file(
     This avoids creating a second full-file ``StoredFile`` row for the same
     audio upload.
     """
-    content_type = file.content_type or "application/octet-stream"
-    stored_file: Optional[StoredFile] = None
-    is_duplicate = False
-    track_id: Optional[str] = None
-
-    if content_type.startswith("audio/"):
+    library: Optional[Library] = None
+    if library_id is not None:
         library = await _get_target_library(db, current_user, library_id)
-        try:
-            result = await import_audio_file(
-                db,
-                storage_service=storage,
-                file=file.file,
-                filename=file.filename or "audio",
-                library_id=str(library.id),
-                owner_id=str(current_user.id),
-                visibility=visibility.value,
-                source="upload",
-                content_type=content_type,
-            )
-            stored_file = result.stored_file
-            is_duplicate = result.was_duplicate
-            track_id = str(result.track.id)
-        except DuplicateTrackError as exc:
-            track_id = exc.existing_track_id
-            if exc.stored_file_id is not None:
-                stored_file = await db.get(StoredFile, exc.stored_file_id)
-            is_duplicate = exc.was_duplicate
-        except FileSizeLimitExceededError as exc:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large") from exc
-        except Exception as exc:
-            logger.warning("Could not import audio file as track: %s", exc)
 
-    if stored_file is None:
-        storage._rewind(file.file)
-        try:
-            stored_file, is_duplicate = await storage.store_file(
-                db,
-                file.file,
-                content_type=content_type,
-                original_filename=file.filename,
-                owner_id=current_user.id,
-                visibility=visibility.value,
-                return_duplicate=True,
-            )
-        except FileSizeLimitExceededError as exc:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large") from exc
+    outcome = await _process_single_upload(
+        db,
+        storage,
+        current_user,
+        library,
+        file,
+        visibility.value,
+    )
+    if outcome.error == "File too large":
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
+    if outcome.stored_file is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not store file")
 
-    if is_duplicate:
+    if outcome.is_duplicate:
         response.headers["X-Duplicate"] = "true"
 
-    if track_id is not None:
-        response.headers["X-Track-Id"] = track_id
+    if outcome.track_id is not None:
+        response.headers["X-Track-Id"] = outcome.track_id
 
-    db.add(stored_file)
+    db.add(outcome.stored_file)
     await db.commit()
 
-    logger.info("Uploaded file %s (%s bytes)", stored_file.id, stored_file.size)
-    url = await storage.get_url(stored_file)
-    return StoredFileResponse(
-        id=stored_file.id,
-        content_type=stored_file.content_type,
-        size=stored_file.size,
-        sha256=stored_file.sha256,
-        owner_id=redact_owner(cast(HasOwnerId, stored_file), current_user),
-        visibility=stored_file.visibility,
-        original_filename=stored_file.original_filename,
-        url=url,
-    )
+    logger.info("Uploaded file %s (%s bytes)", outcome.stored_file.id, outcome.stored_file.size)
+    return await _build_stored_file_response(outcome.stored_file, current_user, storage)
+
+
+@router.post(
+    "/upload/bulk",
+    response_model=List[BulkFileUploadResult],
+    dependencies=[Depends(rate_limit)],
+)
+async def bulk_upload_files(
+    files: List[UploadFile] = File(...),
+    visibility: Visibility = Query(Visibility.PRIVATE),
+    library_id: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    storage: StorageService = Depends(get_storage_service),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload multiple files in a single request.
+
+    Audio files are imported as tracks; other files are stored as-is. The whole
+    request is subject to the same per-IP rate limit as ``/files/upload``, and to
+    per-request limits on the number of files and total request size.
+    """
+    config = storage.config
+
+    if len(files) > config.max_bulk_upload_files:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Too many files: maximum is {config.max_bulk_upload_files}",
+        )
+
+    if config.max_bulk_upload_total_size is not None:
+        total_size = 0
+        for upload_file in files:
+            size = _discover_upload_size(upload_file.file)
+            if size is not None:
+                total_size += size
+        if total_size > config.max_bulk_upload_total_size:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Total request size exceeds the maximum of {config.max_bulk_upload_total_size} bytes",
+            )
+
+    library: Optional[Library] = None
+    if library_id is not None:
+        library = await _get_target_library(db, current_user, library_id)
+    elif any((f.content_type or "").startswith("audio/") for f in files):
+        library = await _get_or_create_uploads_library(db, current_user)
+
+    results: List[BulkFileUploadResult] = []
+    for upload_file in files:
+        try:
+            outcome = await _process_single_upload(
+                db,
+                storage,
+                current_user,
+                library,
+                upload_file,
+                visibility.value,
+            )
+            if outcome.error == "File too large":
+                result = BulkFileUploadResult(
+                    filename=upload_file.filename,
+                    error="File too large",
+                )
+            elif outcome.stored_file is None:
+                result = BulkFileUploadResult(
+                    filename=upload_file.filename,
+                    error="Could not store file",
+                )
+            else:
+                db.add(outcome.stored_file)
+                result = BulkFileUploadResult(
+                    filename=upload_file.filename,
+                    stored_file=await _build_stored_file_response(
+                        outcome.stored_file,
+                        current_user,
+                        storage,
+                    ),
+                    track_id=outcome.track_id,
+                    duplicate=outcome.is_duplicate,
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("Bulk upload failed for %s: %s", upload_file.filename, exc)
+            result = BulkFileUploadResult(
+                filename=upload_file.filename,
+                error="Could not process file",
+            )
+        finally:
+            await upload_file.close()
+
+        results.append(result)
+
+    await db.commit()
+    return results
 
 
 @router.get(

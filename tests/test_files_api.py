@@ -1089,3 +1089,112 @@ async def test_get_file_metadata_tracks_filtered_by_visibility(
     owner_tracks = owner_metadata.json()["tracks"]
     assert len(owner_tracks) == 2
     assert {t["title"] for t in owner_tracks} == {"Public Track", "Private Track"}
+
+
+def test_bulk_upload_files(files_client, regular_user, auth_headers):
+    """Multiple files can be uploaded in a single bulk request."""
+    headers = auth_headers(regular_user)
+    files = [
+        ("files", ("a.txt", io.BytesIO(b"first"), "text/plain")),
+        ("files", ("b.txt", io.BytesIO(b"second"), "text/plain")),
+    ]
+
+    response = files_client.post(
+        "/api/v1/files/upload/bulk?visibility=public",
+        files=files,
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["filename"] == "a.txt"
+    assert data[0]["stored_file"]["content_type"] == "text/plain"
+    assert data[0]["stored_file"]["size"] == 5
+    assert data[0]["track_id"] is None
+    assert data[0]["duplicate"] is False
+    assert data[1]["filename"] == "b.txt"
+    assert data[1]["stored_file"]["size"] == 6
+
+
+def test_bulk_upload_audio_files(files_client, regular_user, auth_headers, monkeypatch):
+    """Multiple audio files can be bulk uploaded and imported as tracks."""
+
+    def _fake_metadata(file_path):
+        content = file_path.read_bytes()
+        title = content.decode().replace(" ", "_")
+        return AudioMetadata(
+            title=title,
+            artist="Artist",
+            album="Album",
+            mimetype="audio/mpeg",
+        )
+
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", _fake_metadata)
+
+    headers = auth_headers(regular_user)
+    files = [
+        ("files", ("one.mp3", io.BytesIO(b"fake audio one"), "audio/mpeg")),
+        ("files", ("two.mp3", io.BytesIO(b"fake audio two"), "audio/mpeg")),
+    ]
+
+    response = files_client.post(
+        "/api/v1/files/upload/bulk?visibility=public",
+        files=files,
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["track_id"] is not None
+    assert data[1]["track_id"] is not None
+    assert data[0]["track_id"] != data[1]["track_id"]
+
+    libraries = files_client.get("/api/v1/libraries/", headers=headers)
+    assert libraries.status_code == 200
+    assert any(lib["name"] == "Uploads" for lib in libraries.json())
+
+
+def test_bulk_upload_files_count_limit(files_client, regular_user, auth_headers):
+    """A bulk request with too many files is rejected before processing."""
+    files_client.app.state.config.storage.max_bulk_upload_files = 1
+    headers = auth_headers(regular_user)
+    files = [
+        ("files", ("a.txt", io.BytesIO(b"a"), "text/plain")),
+        ("files", ("b.txt", io.BytesIO(b"b"), "text/plain")),
+    ]
+
+    response = files_client.post("/api/v1/files/upload/bulk", files=files, headers=headers)
+
+    assert response.status_code == 422
+    assert "Too many files" in response.json()["detail"]
+
+
+def test_bulk_upload_files_total_size_limit(files_client, regular_user, auth_headers):
+    """A bulk request whose total file size exceeds the cap is rejected."""
+    files_client.app.state.config.storage.max_bulk_upload_total_size = 1
+    headers = auth_headers(regular_user)
+    files = [
+        ("files", ("a.txt", io.BytesIO(b"12"), "text/plain")),
+        ("files", ("b.txt", io.BytesIO(b"34"), "text/plain")),
+    ]
+
+    response = files_client.post("/api/v1/files/upload/bulk", files=files, headers=headers)
+
+    assert response.status_code == 413
+    assert "Total request size" in response.json()["detail"]
+
+
+def test_bulk_upload_files_rate_limit(files_client, regular_user, auth_headers):
+    """The bulk endpoint uses the same per-IP rate limit as the single upload endpoint."""
+    files_client.app.state.config.auth.rate_limit_requests = 1
+    files_client.app.state.config.auth.rate_limit_window_seconds = 60
+    headers = auth_headers(regular_user)
+    files = [("files", ("a.txt", io.BytesIO(b"a"), "text/plain"))]
+
+    first = files_client.post("/api/v1/files/upload/bulk", files=files, headers=headers)
+    assert first.status_code == 200
+
+    second = files_client.post("/api/v1/files/upload/bulk", files=files, headers=headers)
+    assert second.status_code == 429
