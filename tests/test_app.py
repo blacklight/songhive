@@ -14,6 +14,7 @@ import songhive.app as app_module
 from songhive.api.app import create_app
 from songhive.app import _build_tornado_app, _run_tornado, _run_uvicorn, main
 from songhive.config.schema import SonghiveConfig
+from songhive.services.redis import create_redis_client as _real_create_redis_client
 
 
 def test_build_tornado_app_settings(config, fake_redis):
@@ -24,7 +25,25 @@ def test_build_tornado_app_settings(config, fake_redis):
     tornado_app = _build_tornado_app(config, fastapi_app)
 
     assert tornado_app.settings["config"] is config
+    # Without a dedicated tornado_redis, it falls back to the FastAPI client.
     assert tornado_app.settings["redis"] is fake_redis
+
+
+def test_build_tornado_app_dedicated_redis(config, fake_redis):
+    """_build_tornado_app uses the dedicated tornado_redis when provided."""
+    fastapi_app = create_app(config)
+    fastapi_app.state.redis = fake_redis
+
+    dedicated = _real_create_redis_client(config)
+    try:
+        tornado_app = _build_tornado_app(config, fastapi_app, tornado_redis=dedicated)
+
+        assert tornado_app.settings["redis"] is dedicated
+        assert tornado_app.settings["redis"] is not fake_redis
+    finally:
+        import asyncio
+
+        asyncio.get_event_loop().run_until_complete(dedicated.aclose())
 
 
 class _FakeLoop:
@@ -105,9 +124,10 @@ def test_run_tornado(monkeypatch, tmp_path, _minimal_config):
     monkeypatch.setenv("SONGHIVE_WRITE_PORT_TO", str(port_file))
     monkeypatch.setattr("songhive.api.app.create_app", _fake_create_app)
     monkeypatch.setattr("tornado.httpserver.HTTPServer", _FakeHTTPServer)
-    monkeypatch.setattr(app_module, "_build_tornado_app", lambda _, fa: fa)
+    monkeypatch.setattr(app_module, "_build_tornado_app", lambda _, fa, **kw: fa)
     monkeypatch.setattr(app_module, "get_redis_client", lambda _: "redis")
-    monkeypatch.setattr(app_module, "close_redis_client", lambda: None)
+    monkeypatch.setattr(app_module, "create_redis_client", lambda _: "tornado_redis")
+    monkeypatch.setattr(app_module, "close_redis_client", lambda *_: None)
 
     fake_loop = _FakeLoop()
     monkeypatch.setattr(asyncio, "get_event_loop", lambda: fake_loop)
@@ -132,9 +152,10 @@ def test_run_tornado_signal_fallback(monkeypatch, tmp_path, _minimal_config):
 
     monkeypatch.setattr("songhive.api.app.create_app", _fake_create_app)
     monkeypatch.setattr("tornado.httpserver.HTTPServer", _FakeHTTPServer)
-    monkeypatch.setattr(app_module, "_build_tornado_app", lambda _, fa: fa)
+    monkeypatch.setattr(app_module, "_build_tornado_app", lambda _, fa, **kw: fa)
     monkeypatch.setattr(app_module, "get_redis_client", lambda _: "redis")
-    monkeypatch.setattr(app_module, "close_redis_client", lambda: None)
+    monkeypatch.setattr(app_module, "create_redis_client", lambda _: "tornado_redis")
+    monkeypatch.setattr(app_module, "close_redis_client", lambda *_: None)
     monkeypatch.setattr(app_module.signal, "signal", fake_signal_handler)
 
     fake_loop = _FakeLoop(raise_on_signal=True)

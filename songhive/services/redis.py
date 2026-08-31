@@ -26,22 +26,49 @@ def get_redis_client(config: SonghiveConfig) -> Redis:
     process lifetime. Callers that need a different client in tests can patch
     ``redis.asyncio.Redis.from_url`` or monkeypatch
     ``songhive.services.redis._redis_client`` directly.
+
+    .. note::
+        The returned client's connection pool binds to the event loop of the
+        first call site. When Tornado and FastAPI run on different event loops
+        (as they do when bridged via ``a2wsgi``), each side must use its own
+        client. Use :func:`create_redis_client` for a non-shared instance.
     """
     global _redis_client
     if _redis_client is None:
-        _redis_client = Redis.from_url(
-            config.redis.url,
-            decode_responses=True,
-        )
+        _redis_client = create_redis_client(config)
         logger.info("Initialized shared Redis client")
     return _redis_client
 
 
-async def close_redis_client() -> None:
-    """Close the shared async Redis client, if it has been initialized."""
+def create_redis_client(config: SonghiveConfig) -> Redis:
+    """
+    Create a fresh, non-shared async Redis client.
+
+    Unlike :func:`get_redis_client`, this always returns a new instance rather
+    than reusing the process-wide singleton. This is required when a Redis
+    client must bind to a specific event loop that differs from the one the
+    shared client is bound to — for example, the Tornado request handlers run
+    on the main Tornado loop while the shared client is bound to the
+    ``a2wsgi`` loop used by FastAPI.
+    """
+    return Redis.from_url(
+        config.redis.url,
+        decode_responses=True,
+    )
+
+
+async def close_redis_client(client: Optional[Redis] = None) -> None:
+    """
+    Close an async Redis client.
+
+    By default this closes the shared singleton client (and clears the
+    cache). Pass an explicit ``client`` to close a non-shared instance
+    returned by :func:`create_redis_client` without touching the singleton.
+    """
     global _redis_client
-    client = _redis_client
-    _redis_client = None
+    if client is None:
+        client = _redis_client
+        _redis_client = None
     if client is not None:
         try:
             await client.aclose()

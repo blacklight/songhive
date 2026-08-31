@@ -9,7 +9,7 @@ import pytest
 
 from songhive.config.schema import SonghiveConfig
 from songhive.services import redis as redis_module
-from songhive.services.redis import close_redis_client, get_redis_client
+from songhive.services.redis import close_redis_client, create_redis_client, get_redis_client
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +52,45 @@ def test_get_redis_client_returns_singleton(monkeypatch):
 
     assert first is second
     redis_module.Redis.from_url.assert_called_once()
+
+
+def test_create_redis_client_returns_fresh_instance(monkeypatch):
+    """create_redis_client always returns a new, non-shared client."""
+    fake_a = _fake_redis()
+    fake_b = _fake_redis()
+    from_url = MagicMock(side_effect=[fake_a, fake_b])
+    monkeypatch.setattr(redis_module.Redis, "from_url", from_url)
+
+    config = SonghiveConfig(redis={"url": "redis://localhost:6379/5"})
+    dedicated = create_redis_client(config)
+
+    assert dedicated is fake_a
+    from_url.assert_called_once_with(config.redis.url, decode_responses=True)
+    # The singleton is untouched.
+    assert redis_module._redis_client is None
+
+    shared = get_redis_client(config)
+    assert shared is fake_b
+    assert shared is not dedicated
+
+
+@pytest.mark.asyncio
+async def test_close_redis_client_closes_explicit_client(monkeypatch):
+    """close_redis_client(client) closes the given client without touching the singleton."""
+    dedicated = _fake_redis()
+    singleton = _fake_redis()
+    monkeypatch.setattr(redis_module.Redis, "from_url", MagicMock(return_value=singleton))
+
+    config = SonghiveConfig()
+    get_redis_client(config)  # populate the singleton
+    assert redis_module._redis_client is singleton
+
+    await close_redis_client(dedicated)
+
+    dedicated.aclose.assert_awaited_once()
+    # The singleton is left intact.
+    assert redis_module._redis_client is singleton
+    singleton.aclose.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -22,13 +22,23 @@ from typing import Any, Awaitable, Callable, Optional, cast
 from .config import SonghiveConfig, load_config
 from .migrations import ensure_migrated
 from .models.base import init_db
-from .services.redis import close_redis_client, get_redis_client
+from .services.redis import close_redis_client, create_redis_client, get_redis_client
 
 logger = logging.getLogger(__name__)
 
 
-def _build_tornado_app(config: SonghiveConfig, fastapi_app) -> Any:
-    """Build the Tornado application without binding a socket."""
+def _build_tornado_app(config: SonghiveConfig, fastapi_app, tornado_redis=None) -> Any:
+    """Build the Tornado application without binding a socket.
+
+    ``tornado_redis`` is an optional Redis client dedicated to the Tornado
+    event loop. When Tornado and FastAPI run on different event loops (the
+    default when bridged via ``a2wsgi``), the shared Redis client stored on
+    ``fastapi_app.state.redis`` is bound to the ``a2wsgi`` loop and cannot be
+    used from Tornado request handlers. When provided, this client is used for
+    Tornado-side Redis access (e.g. token revocation checks in the streaming
+    handler); otherwise the FastAPI client is used as a fallback (suitable for
+    tests where everything runs on a single loop).
+    """
     from a2wsgi import ASGIMiddleware
     from tornado.web import Application, FallbackHandler
     from tornado.wsgi import WSGIContainer
@@ -48,6 +58,8 @@ def _build_tornado_app(config: SonghiveConfig, fastapi_app) -> Any:
     if a2wsgi_loop is not None:
         fastapi_app.state._a2wsgi_loop = a2wsgi_loop
 
+    redis = tornado_redis if tornado_redis is not None else fastapi_app.state.redis
+
     return Application(
         [
             (r"/ws/events", EventWebSocket),
@@ -57,7 +69,7 @@ def _build_tornado_app(config: SonghiveConfig, fastapi_app) -> Any:
         ],
         debug=config.server.debug,
         config=config,
-        redis=fastapi_app.state.redis,
+        redis=redis,
     )
 
 
@@ -70,7 +82,14 @@ def _run_tornado(config: SonghiveConfig):
     fastapi_app = create_app(config)
     fastapi_app.state.redis = get_redis_client(config)
 
-    tornado_app = _build_tornado_app(config, fastapi_app)
+    # Tornado request handlers (e.g. the streaming handler) run on the main
+    # Tornado event loop, while FastAPI — bridged via a2wsgi — runs on a
+    # separate loop. The shared Redis client binds its connection pool to the
+    # first loop that uses it (the a2wsgi loop), so Tornado needs its own
+    # client to avoid "Future attached to a different loop" errors.
+    tornado_redis = create_redis_client(config)
+
+    tornado_app = _build_tornado_app(config, fastapi_app, tornado_redis=tornado_redis)
 
     server = HTTPServer(tornado_app)
     server.listen(config.server.port, address=config.server.host)
@@ -107,6 +126,9 @@ def _run_tornado(config: SonghiveConfig):
     try:
         loop.run_forever()
     finally:
+        # The Tornado-side Redis client is bound to this loop; close it here.
+        loop.run_until_complete(close_redis_client(tornado_redis))
+
         # a2wsgi may run FastAPI in a dedicated event loop. The shared Redis
         # client is bound to that loop, so close it there to avoid
         # "Future attached to a different loop" on shutdown.
