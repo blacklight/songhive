@@ -41,10 +41,10 @@ from ..deps import (
     require_access,
 )
 from ..middleware.rate_limit import rate_limit_account
-from ..responses import TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
+from ..responses import TrackResponse, TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
 from ._common import HashtagListRequest, HasOwnerId, redact_owner
 from ._images import remove_entity_image, upload_entity_image
-from .tracks import TrackResponse, _build_track_response
+from .tracks import _build_track_response
 
 router = APIRouter(prefix="/playlists")
 

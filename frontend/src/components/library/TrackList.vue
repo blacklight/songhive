@@ -27,6 +27,7 @@ import {
   enrichTrack,
 } from "@/api/tracks";
 import { canManageItem } from "@/composables/useCanManage";
+import ExternalTrackBadge from "@/components/external-libraries/ExternalTrackBadge.vue";
 
 export interface RemovableFrom {
   type: "library" | "playlist";
@@ -1350,6 +1351,11 @@ async function onMenuSelect(key: string) {
             class="track-list__favorite-icon"
             :aria-label="t('common.favorite')"
           />
+          <ExternalTrackBadge
+            :is-external="asTrackRow(row).track.is_external"
+            :provider="asTrackRow(row).track.external_provider_type"
+            :state="asTrackRow(row).track.external_state"
+          />
         </button>
       </template>
 
@@ -1525,6 +1531,11 @@ async function onMenuSelect(key: string) {
                 variant="solid"
                 class="track-list__favorite-icon"
                 :aria-label="t('common.favorite')"
+              />
+              <ExternalTrackBadge
+                :is-external="asTrackRow(row).track.is_external"
+                :provider="asTrackRow(row).track.external_provider_type"
+                :state="asTrackRow(row).track.external_state"
               />
             </button>
             <RouterLink

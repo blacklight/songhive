@@ -5,7 +5,7 @@ File storage routes: upload, metadata, and download.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, List, Literal, Optional, cast
+from typing import BinaryIO, List, Literal, Optional, Union, cast
 
 from fastapi import (
     APIRouter,
@@ -19,25 +19,47 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config.schema import SonghiveConfig
 from ...models._enums import Visibility
 from ...models.library import Library
 from ...models.stored_file import StoredFile
 from ...models.user import User
 from ...services import acl, audit, deletion, music
 from ...services.federation import unpublish_track_activity
-from ...services.import_ import DuplicateTrackError, import_audio_file
+from ...services.import_ import (
+    DuplicateTrackError,
+    ExternalDuplicateError,
+    ExternalDuplicatePermissionError,
+    ExternalDuplicateTokenError,
+    import_audio_file,
+    resolve_external_duplicate,
+)
 from ...services.storage import StorageService, count_files, list_files
 from ...storage import FileSizeLimitExceededError
 from .._common import Pagination, client_ip, get_pagination
-from ..deps import get_current_user, get_current_user_optional, get_db, get_storage_service, require_access
+from .._include import IncludeQuery
+from ..deps import (
+    get_config,
+    get_current_user,
+    get_current_user_optional,
+    get_db,
+    get_redis,
+    get_storage_service,
+    require_access,
+)
 from ..middleware.rate_limit import rate_limit, rate_limit_account
-from ..responses import TrackSummary, build_track_summary
+from ..responses import TrackResponse, TrackSummary, build_track_summary
 from ._common import HasOwnerId, redact_owner
+from .external_libraries import (
+    ExternalDuplicateResolutionRequest,
+    ExternalDuplicateWarning,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/files")
@@ -107,6 +129,8 @@ class BulkFileUploadResult(BaseModel):
     track_id: Optional[str] = None
     duplicate: bool = False
     error: Optional[str] = None
+    status: Optional[str] = None
+    external_duplicate: Optional[ExternalDuplicateWarning] = None
 
 
 @dataclass
@@ -117,6 +141,7 @@ class _UploadOutcome:
     track_id: Optional[str] = None
     is_duplicate: bool = False
     error: Optional[str] = None
+    external_duplicate: Optional[ExternalDuplicateWarning] = None
 
 
 def _discover_upload_size(file: BinaryIO) -> Optional[int]:
@@ -156,6 +181,8 @@ async def _process_single_upload(
     library: Optional[Library],
     file: UploadFile,
     visibility: str,
+    external_duplicate_action: Optional[Literal["keep_local", "discard_upload"]] = None,
+    redis: Optional[Redis] = None,
 ) -> _UploadOutcome:
     """Store or import a single uploaded file and return the outcome."""
     content_type = file.content_type or "application/octet-stream"
@@ -177,10 +204,23 @@ async def _process_single_upload(
                 visibility=visibility,
                 source="upload",
                 content_type=content_type,
+                external_duplicate_action=external_duplicate_action,
+                redis=redis,
             )
             stored_file = result.stored_file
             is_duplicate = result.was_duplicate
-            track_id = str(result.track.id)
+            track_id = str(result.track.id) if result.track else None
+        except ExternalDuplicateError as exc:
+            provider_type = ""
+            if exc.display_infos:
+                provider_type = exc.display_infos[0].get("provider_type", "")
+            warning = ExternalDuplicateWarning(
+                token=exc.token or "",
+                sha256=exc.sha256,
+                provider_type=provider_type,
+                display_info=exc.display_infos,
+            )
+            return _UploadOutcome(external_duplicate=warning)
         except DuplicateTrackError as exc:
             track_id = exc.existing_track_id
             if exc.stored_file_id is not None:
@@ -191,7 +231,7 @@ async def _process_single_upload(
         except Exception as exc:
             logger.warning("Could not import audio file as track: %s", exc)
 
-    if stored_file is None:
+    if stored_file is None and track_id is None:
         storage._rewind(file.file)
         try:
             stored_file, is_duplicate = await storage.store_file(
@@ -215,7 +255,7 @@ async def _process_single_upload(
 
 @router.post(
     "/upload",
-    response_model=StoredFileResponse,
+    response_model=Union[StoredFileResponse, TrackResponse],
     dependencies=[Depends(rate_limit)],
 )
 async def upload_file(
@@ -223,9 +263,11 @@ async def upload_file(
     file: UploadFile,
     visibility: Visibility = Query(Visibility.PRIVATE),
     library_id: Optional[str] = Query(None),
+    external_duplicate_action: Optional[Literal["keep_local", "discard_upload"]] = Query(None),
     current_user: User = Depends(get_current_user),
     storage: StorageService = Depends(get_storage_service),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     """Upload a file and store it in the configured backend.
 
@@ -250,11 +292,34 @@ async def upload_file(
         library,
         file,
         visibility.value,
+        external_duplicate_action=external_duplicate_action,
+        redis=redis,
     )
     if outcome.error == "File too large":
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
-    if outcome.stored_file is None:
+
+    if outcome.external_duplicate is not None:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=outcome.external_duplicate.model_dump(),
+        )
+
+    if outcome.stored_file is None and outcome.track_id is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not store file")
+
+    if outcome.stored_file is None and outcome.track_id is not None:
+        from ..routes.tracks import _build_track_response
+
+        track = await music.get_track(db, outcome.track_id, include={"artist", "album"})
+        if track is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+        await db.commit()
+        return await _build_track_response(
+            track,
+            current_user,
+            storage,
+            IncludeQuery({"artist", "album"}),
+        )
 
     if outcome.is_duplicate:
         response.headers["X-Duplicate"] = "true"
@@ -262,6 +327,7 @@ async def upload_file(
     if outcome.track_id is not None:
         response.headers["X-Track-Id"] = outcome.track_id
 
+    assert outcome.stored_file is not None
     db.add(outcome.stored_file)
     await db.commit()
 
@@ -278,9 +344,11 @@ async def bulk_upload_files(
     files: List[UploadFile] = File(...),
     visibility: Visibility = Query(Visibility.PRIVATE),
     library_id: Optional[str] = Query(None),
+    external_duplicate_action: Optional[Literal["keep_local", "discard_upload"]] = Query(None),
     current_user: User = Depends(get_current_user),
     storage: StorageService = Depends(get_storage_service),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     """Upload multiple files in a single request.
 
@@ -324,11 +392,25 @@ async def bulk_upload_files(
                 library,
                 upload_file,
                 visibility.value,
+                external_duplicate_action=external_duplicate_action,
+                redis=redis,
             )
-            if outcome.error == "File too large":
+            if outcome.external_duplicate is not None:
+                result = BulkFileUploadResult(
+                    filename=upload_file.filename,
+                    status="external_duplicate",
+                    external_duplicate=outcome.external_duplicate,
+                )
+            elif outcome.error == "File too large":
                 result = BulkFileUploadResult(
                     filename=upload_file.filename,
                     error="File too large",
+                )
+            elif outcome.stored_file is None and outcome.track_id is not None:
+                result = BulkFileUploadResult(
+                    filename=upload_file.filename,
+                    track_id=outcome.track_id,
+                    status="discard_upload",
                 )
             elif outcome.stored_file is None:
                 result = BulkFileUploadResult(
@@ -362,6 +444,65 @@ async def bulk_upload_files(
 
     await db.commit()
     return results
+
+
+@router.post(
+    "/upload/resolve-duplicate",
+    response_model=Union[StoredFileResponse, TrackResponse],
+    dependencies=[Depends(rate_limit)],
+)
+async def resolve_upload_duplicate(
+    response: Response,
+    body: ExternalDuplicateResolutionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    redis: Redis = Depends(get_redis),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Resolve a pending external-duplicate warning by token."""
+    try:
+        result = await resolve_external_duplicate(
+            db,
+            body.token,
+            body.action,
+            str(current_user.id),
+            config,
+            storage,
+            redis=redis,
+        )
+    except ExternalDuplicateTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Token not found or expired",
+        ) from None
+    except ExternalDuplicatePermissionError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        ) from None
+
+    await db.commit()
+
+    if result.track is not None:
+        response.headers["X-Track-Id"] = str(result.track.id)
+
+    if result.stored_file is None:
+        from ..routes.tracks import _build_track_response
+
+        track = await music.get_track(db, result.track.id, include={"artist", "album"})
+        if track is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+        return await _build_track_response(
+            track,
+            current_user,
+            storage,
+            IncludeQuery({"artist", "album"}),
+        )
+
+    db.add(result.stored_file)
+    await db.commit()
+    return await _build_stored_file_response(result.stored_file, current_user, storage)
 
 
 @router.get(
@@ -480,6 +621,42 @@ def _sanitize_filename(filename: Optional[str]) -> str:
     return filename or _DOWNLOAD_FALLBACK_FILENAME
 
 
+def _sanitize_content_disposition(
+    disposition: Literal["inline", "attachment"],
+    content_type: Optional[str],
+) -> Literal["inline", "attachment"]:
+    """Force attachment for content types that are not safe to serve inline."""
+    if disposition == "inline" and not _safe_inline_types(content_type or ""):
+        return "attachment"
+    return disposition
+
+
+async def _download_stored_file_response(
+    stored_file: StoredFile,
+    disposition: Literal["inline", "attachment"],
+    storage: StorageService,
+) -> FileResponse:
+    """Resolve a StoredFile and return a FileResponse for its bytes."""
+    try:
+        path = await storage.backend.retrieve(stored_file.storage_path)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found") from e
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    disposition = _sanitize_content_disposition(disposition, stored_file.content_type)
+    filename = _sanitize_filename(stored_file.original_filename)
+    headers = {"X-Content-Type-Options": "nosniff"}
+
+    return FileResponse(
+        path,
+        media_type=stored_file.content_type,
+        filename=filename,
+        content_disposition_type=disposition,
+        headers=headers,
+    )
+
+
 @router.get(
     "/{file_id}/download",
     dependencies=[Depends(require_access("file")), Depends(rate_limit)],
@@ -494,27 +671,7 @@ async def download_file(
     stored_file = await db.get(StoredFile, file_id)
     # ``require_access`` already loads the row and raises 404 when missing.
     assert stored_file is not None
-
-    try:
-        path = await storage.backend.retrieve(stored_file.storage_path)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found") from e
-    if path is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-
-    if disposition == "inline" and not _safe_inline_types(stored_file.content_type):
-        disposition = "attachment"
-
-    filename = _sanitize_filename(stored_file.original_filename)
-    headers = {"X-Content-Type-Options": "nosniff"}
-
-    return FileResponse(
-        path,
-        media_type=stored_file.content_type,
-        filename=filename,
-        content_disposition_type=disposition,
-        headers=headers,
-    )
+    return await _download_stored_file_response(stored_file, disposition, storage)
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])

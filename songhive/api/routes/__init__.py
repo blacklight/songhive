@@ -1,9 +1,11 @@
 from . import (
     admin,
+    admin_external_libraries,
     albums,
     api_tokens,
     artists,
     auth,
+    external_libraries,
     favorites,
     federation,
     files,
@@ -25,10 +27,12 @@ from . import (
 
 __all__ = [
     "admin",
+    "admin_external_libraries",
     "albums",
     "api_tokens",
     "artists",
     "auth",
+    "external_libraries",
     "favorites",
     "federation",
     "files",

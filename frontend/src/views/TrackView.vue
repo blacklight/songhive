@@ -28,6 +28,7 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
+import ExternalTrackBadge from "@/components/external-libraries/ExternalTrackBadge.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -234,6 +235,12 @@ watch(
           <AppPageTitle class="track-view__title" icon="music">{{
             track.title
           }}</AppPageTitle>
+
+          <ExternalTrackBadge
+            :is-external="track.is_external"
+            :provider="track.external_provider_type"
+            :state="track.external_state"
+          />
 
           <div class="track-view__meta">
             <span v-if="artist" class="track-view__meta-item">

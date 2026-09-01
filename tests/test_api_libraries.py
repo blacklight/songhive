@@ -9,6 +9,7 @@ from songhive.models._enums import Visibility
 from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.audit_log import AuditLog
+from songhive.models.external_library import ExternalLibrary
 from songhive.models.library import Library
 from songhive.models.library_track import LibraryTrack
 from songhive.models.track import Track
@@ -340,3 +341,93 @@ async def test_remove_tracks_from_library_creates_audit_log(client, regular_user
     assert log.target_type == "library"
     assert log.details["count"] == 1
     assert log.details["track_ids"] == [str(track.id)]
+
+
+async def _make_external_library(
+    session,
+    owner: User,
+    scope: str = "user",
+    include_in_index: bool = False,
+    visibility: str = Visibility.PUBLIC.value,
+) -> tuple[Library, ExternalLibrary]:
+    """Create a library with an attached ExternalLibrary row."""
+    library = Library(name="External Library", owner_id=owner.id, visibility=visibility)
+    session.add(library)
+    await session.flush()
+    external = ExternalLibrary(
+        library_id=str(library.id),
+        provider_type="fake",
+        scope=scope,
+        include_in_library_index=include_in_index,
+        capabilities={"write_tags": True},
+        created_by_id=owner.id,
+    )
+    session.add(external)
+    await session.flush()
+    return library, external
+
+
+@pytest.mark.asyncio
+async def test_libraries_exclude_user_external_libraries(client, regular_user, db_session, auth_headers):
+    """GET /libraries omits libraries attached to user-scoped external libraries."""
+    library, _ = await _make_external_library(db_session, regular_user, scope="user")
+
+    response = client.get("/api/v1/libraries", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    data = response.json()
+    ids = {item["id"] for item in data}
+    assert str(library.id) not in ids
+
+
+@pytest.mark.asyncio
+async def test_libraries_exclude_admin_external_libraries_not_indexed(
+    client, admin_user, regular_user, db_session, auth_headers
+):
+    """GET /libraries omits admin-scoped external libraries not included in the index."""
+    library, _ = await _make_external_library(db_session, admin_user, scope="admin", include_in_index=False)
+
+    response = client.get("/api/v1/libraries", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    data = response.json()
+    ids = {item["id"] for item in data}
+    assert str(library.id) not in ids
+
+    # Admin also sees it excluded from the default view.
+    response = client.get("/api/v1/libraries", headers=auth_headers(admin_user))
+    assert response.status_code == 200
+    data = response.json()
+    ids = {item["id"] for item in data}
+    assert str(library.id) not in ids
+
+
+@pytest.mark.asyncio
+async def test_libraries_include_admin_external_libraries_in_index(client, admin_user, db_session, auth_headers):
+    """GET /libraries includes admin-scoped external libraries opted into the index."""
+    library, _ = await _make_external_library(db_session, admin_user, scope="admin", include_in_index=True)
+
+    response = client.get("/api/v1/libraries", headers=auth_headers(admin_user))
+    assert response.status_code == 200
+    data = response.json()
+    ids = {item["id"] for item in data}
+    assert str(library.id) in ids
+
+
+@pytest.mark.asyncio
+async def test_libraries_include_external_requires_admin(client, regular_user, auth_headers):
+    """Non-admins cannot request the moderation view with include_external=true."""
+    response = client.get("/api/v1/libraries", params={"include_external": "true"}, headers=auth_headers(regular_user))
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_libraries_include_external_admin_returns_all(client, admin_user, regular_user, db_session, auth_headers):
+    """Admins can request include_external=true to see all external libraries."""
+    user_lib, _ = await _make_external_library(db_session, regular_user, scope="user")
+    admin_lib, _ = await _make_external_library(db_session, admin_user, scope="admin", include_in_index=False)
+
+    response = client.get("/api/v1/libraries", params={"include_external": "true"}, headers=auth_headers(admin_user))
+    assert response.status_code == 200
+    data = response.json()
+    ids = {item["id"] for item in data}
+    assert str(user_lib.id) in ids
+    assert str(admin_lib.id) in ids

@@ -22,10 +22,12 @@ from ..version import __version__
 from .errors import install_error_handlers
 from .routes import (
     admin,
+    admin_external_libraries,
     albums,
     api_tokens,
     artists,
     auth,
+    external_libraries,
     favorites,
     federation,
     files,
@@ -214,6 +216,12 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(reports.router, prefix=api_prefix, tags=["reports"])
     app.include_router(reports.admin_router, prefix=api_prefix, tags=["reports"])
     app.include_router(admin.router, prefix=api_prefix, tags=["admin"])
+    app.include_router(external_libraries.router, prefix=api_prefix, tags=["external-libraries"])
+    app.include_router(
+        admin_external_libraries.admin_router,
+        prefix=api_prefix,
+        tags=["admin-external-libraries"],
+    )
     app.include_router(files.router, prefix=api_prefix, tags=["files"])
     app.include_router(shares.router, prefix=api_prefix, tags=["shares"])
     app.include_router(share_urls.router, prefix=api_prefix, tags=["share-urls"])

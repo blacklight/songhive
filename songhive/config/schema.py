@@ -362,6 +362,70 @@ class StreamingConfig(BaseSettings):
     )
 
 
+class ExternalLibrariesConfig(BaseSettings):
+    """External library configuration."""
+
+    allow_user_created_libraries: bool = Field(
+        default=False,
+        description="Whether non-admin users may create external libraries.",
+    )
+    allowed_user_providers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Provider types non-admin users may configure when "
+            "allow_user_created_libraries=true; empty means all user_configurable providers."
+        ),
+    )
+    denied_user_providers: list[str] = Field(
+        default_factory=list,
+        description="Provider types non-admin users may never configure, regardless of allowed_user_providers.",
+    )
+    allow_admin_library_index_inclusion: bool = Field(
+        default=True,
+        description="Whether admins may opt admin-managed external libraries into the default /libraries view.",
+    )
+    allow_destructive_delete: bool = Field(
+        default=False,
+        description="Global kill-switch for destructive provider-side deletion.",
+    )
+    minimum_sync_interval_seconds: int = Field(
+        default=300,
+        ge=0,
+        description="Minimum number of seconds between consecutive sync runs for a library.",
+    )
+    max_concurrent_syncs: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum number of external library syncs that may run concurrently.",
+    )
+    stream_temp_dir: Optional[Path] = Field(
+        default=None,
+        description="Directory for external stream temp/cache files; system temp when None.",
+    )
+    stream_max_proxy_bytes: Optional[int] = Field(
+        default=256 * 1024 * 1024,
+        description="Max bytes Songhive will proxy through memory before spilling to disk.",
+    )
+    stream_proxy_timeout_seconds: int = Field(
+        default=60,
+        ge=1,
+        description="Timeout in seconds for proxied external stream responses.",
+    )
+
+    @field_validator("allowed_user_providers", "denied_user_providers", mode="before")
+    @classmethod
+    def _parse_providers(cls, value):
+        if isinstance(value, str):
+            return ServerConfig._split_cors_origins(value)
+        if isinstance(value, list):
+            return [
+                item
+                for sub in (ServerConfig._split_cors_origins(v) if isinstance(v, str) else [v] for v in value)
+                for item in sub
+            ]
+        return value
+
+
 def _bitrate_to_bits(value: str) -> int:
     """Parse a bitrate string such as '192k' or '1.5M' into bits per second.
 
@@ -422,3 +486,4 @@ class SonghiveConfig(BaseSettings):
     musicbrainz: MusicBrainzConfig = Field(default_factory=MusicBrainzConfig)
     imports: ImportConfig = Field(default_factory=ImportConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
+    external_libraries: ExternalLibrariesConfig = Field(default_factory=ExternalLibrariesConfig)

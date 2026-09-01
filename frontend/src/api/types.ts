@@ -248,6 +248,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/auth/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Sessions
+     * @description List the authenticated user's active refresh-token sessions.
+     */
+    get: operations["list_sessions_api_v1_auth_sessions_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/sessions/{session_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete Session
+     * @description Revoke an active refresh-token session belonging to the authenticated user.
+     */
+    delete: operations["delete_session_api_v1_auth_sessions__session_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/auth/api-tokens": {
     parameters: {
       query?: never;
@@ -708,6 +748,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/tracks/{track_id}/download": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download Track
+     * @description Download the bytes for a track, local or external.
+     */
+    get: operations["download_track_api_v1_tracks__track_id__download_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/tracks/": {
     parameters: {
       query?: never;
@@ -1038,6 +1098,26 @@ export interface paths {
      * @description Remove existing tracks from a playlist.
      */
     post: operations["remove_tracks_from_playlist_api_v1_playlists__playlist_id__tracks_remove_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/playlists/{playlist_id}/tracks/reorder": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Reorder Playlist Tracks Route
+     * @description Reorder tracks within a playlist.
+     */
+    post: operations["reorder_playlist_tracks_route_api_v1_playlists__playlist_id__tracks_reorder_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2116,6 +2196,370 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/external-libraries/providers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Providers
+     * @description List external-library provider types available to the requester.
+     */
+    get: operations["list_providers_api_v1_external_libraries_providers_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/external-libraries/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List External Libraries
+     * @description List user-scoped external libraries visible to the requester.
+     */
+    get: operations["list_external_libraries_api_v1_external_libraries__get"];
+    put?: never;
+    /**
+     * Create External Library
+     * @description Create a new user-scoped external library.
+     */
+    post: operations["create_external_library_api_v1_external_libraries__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/external-libraries/{external_library_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get External Library
+     * @description Get a single user-scoped external library.
+     */
+    get: operations["get_external_library_api_v1_external_libraries__external_library_id__get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete External Library
+     * @description Delete a user-scoped external library and its dependent rows.
+     */
+    delete: operations["delete_external_library_api_v1_external_libraries__external_library_id__delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update External Library
+     * @description Update a user-scoped external library.
+     */
+    patch: operations["update_external_library_api_v1_external_libraries__external_library_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/external-libraries/{external_library_id}/sync": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sync External Library Route
+     * @description Enqueue a manual sync for an external library.
+     */
+    post: operations["sync_external_library_route_api_v1_external_libraries__external_library_id__sync_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/external-libraries/{external_library_id}/sync-runs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List External Sync Runs
+     * @description List sync runs for an external library.
+     */
+    get: operations["list_external_sync_runs_api_v1_external_libraries__external_library_id__sync_runs_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/external-libraries/{external_library_id}/tracks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List External Tracks
+     * @description List external tracks for an external library.
+     */
+    get: operations["list_external_tracks_api_v1_external_libraries__external_library_id__tracks_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/external-libraries/{external_library_id}/tracks/{external_track_id}/restore": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore External Track
+     * @description Restore a tombstoned external track if the provider item still exists.
+     */
+    post: operations["restore_external_track_api_v1_external_libraries__external_library_id__tracks__external_track_id__restore_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/external-libraries/{external_library_id}/tracks/{external_track_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete External Track
+     * @description Tombstone or destructively delete an external track.
+     */
+    delete: operations["delete_external_track_api_v1_external_libraries__external_library_id__tracks__external_track_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/external-libraries/providers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Admin Providers
+     * @description List all registered external-library provider types for admins.
+     */
+    get: operations["list_admin_providers_api_v1_admin_external_libraries_providers_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/external-libraries/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Admin External Libraries
+     * @description List admin-scoped external libraries, optionally including user-scoped rows.
+     */
+    get: operations["list_admin_external_libraries_api_v1_admin_external_libraries__get"];
+    put?: never;
+    /**
+     * Create Admin External Library
+     * @description Create a new admin-scoped external library.
+     */
+    post: operations["create_admin_external_library_api_v1_admin_external_libraries__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/external-libraries/{external_library_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Admin External Library
+     * @description Get any external library for moderation.
+     */
+    get: operations["get_admin_external_library_api_v1_admin_external_libraries__external_library_id__get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Admin External Library
+     * @description Delete any external library.
+     */
+    delete: operations["delete_admin_external_library_api_v1_admin_external_libraries__external_library_id__delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Admin External Library
+     * @description Update an admin-scoped external library.
+     */
+    patch: operations["update_admin_external_library_api_v1_admin_external_libraries__external_library_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/admin/external-libraries/{external_library_id}/sync": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sync Admin External Library
+     * @description Enqueue a manual sync for any external library.
+     */
+    post: operations["sync_admin_external_library_api_v1_admin_external_libraries__external_library_id__sync_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/external-libraries/{external_library_id}/sync-runs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Admin External Sync Runs
+     * @description List sync runs for any external library.
+     */
+    get: operations["list_admin_external_sync_runs_api_v1_admin_external_libraries__external_library_id__sync_runs_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/external-libraries/{external_library_id}/tracks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Admin External Tracks
+     * @description List external tracks for any external library.
+     */
+    get: operations["list_admin_external_tracks_api_v1_admin_external_libraries__external_library_id__tracks_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/external-libraries/{external_library_id}/tracks/{external_track_id}/restore": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore Admin External Track
+     * @description Restore a tombstoned external track.
+     */
+    post: operations["restore_admin_external_track_api_v1_admin_external_libraries__external_library_id__tracks__external_track_id__restore_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/external-libraries/{external_library_id}/tracks/{external_track_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete Admin External Track
+     * @description Tombstone or destructively delete an external track as an admin.
+     */
+    delete: operations["delete_admin_external_track_api_v1_admin_external_libraries__external_library_id__tracks__external_track_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/external-libraries/{external_library_id}/tracks/bulk-delete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Bulk Delete Admin External Tracks
+     * @description Tombstone or destructively delete multiple external tracks.
+     */
+    post: operations["bulk_delete_admin_external_tracks_api_v1_admin_external_libraries__external_library_id__tracks_bulk_delete_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/files/upload": {
     parameters: {
       query?: never;
@@ -2140,6 +2584,50 @@ export interface paths {
      *     audio upload.
      */
     post: operations["upload_file_api_v1_files_upload_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/files/upload/bulk": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Bulk Upload Files
+     * @description Upload multiple files in a single request.
+     *
+     *     Audio files are imported as tracks; other files are stored as-is. The whole
+     *     request is subject to the same per-IP rate limit as ``/files/upload``, and to
+     *     per-request limits on the number of files and total request size.
+     */
+    post: operations["bulk_upload_files_api_v1_files_upload_bulk_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/files/upload/resolve-duplicate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resolve Upload Duplicate
+     * @description Resolve a pending external-duplicate warning by token.
+     */
+    post: operations["resolve_upload_duplicate_api_v1_files_upload_resolve_duplicate_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2879,6 +3367,11 @@ export interface components {
        */
       created_at: string;
     };
+    /** Body_bulk_upload_files_api_v1_files_upload_bulk_post */
+    Body_bulk_upload_files_api_v1_files_upload_bulk_post: {
+      /** Files */
+      files: string[];
+    };
     /** Body_bulk_upload_tracks_api_v1_libraries__library_id__tracks_bulk_post */
     Body_bulk_upload_tracks_api_v1_libraries__library_id__tracks_bulk_post: {
       /** Files */
@@ -2974,6 +3467,48 @@ export interface components {
     Body_upload_track_image_api_v1_tracks__track_id__image_post: {
       /** File */
       file: string;
+    };
+    /**
+     * BulkExternalTrackDeleteRequest
+     * @description Request body for bulk external-track deletion.
+     */
+    BulkExternalTrackDeleteRequest: {
+      /** External Track Ids */
+      external_track_ids: string[];
+      /**
+       * Delete Source
+       * @default false
+       */
+      delete_source: boolean;
+      /** Confirm */
+      confirm?: string | null;
+      /**
+       * Remove Songhive Track
+       * @default false
+       */
+      remove_songhive_track: boolean;
+    };
+    /**
+     * BulkFileUploadResult
+     * @description Per-file result for a bulk file upload.
+     */
+    BulkFileUploadResult: {
+      /** Filename */
+      filename?: string | null;
+      stored_file?: components["schemas"]["StoredFileResponse"] | null;
+      /** Track Id */
+      track_id?: string | null;
+      /**
+       * Duplicate
+       * @default false
+       */
+      duplicate: boolean;
+      /** Error */
+      error?: string | null;
+      /** Status */
+      status?: string | null;
+      external_duplicate?:
+        components["schemas"]["ExternalDuplicateWarning"] | null;
     };
     /**
      * BulkTrackDeleteRequest
@@ -3137,6 +3672,367 @@ export interface components {
       task_id?: string | null;
       /** Status */
       status: string;
+    };
+    /**
+     * ExternalDuplicateResolutionRequest
+     * @description Resolution choice for an external duplicate warning.
+     */
+    ExternalDuplicateResolutionRequest: {
+      /** Token */
+      token: string;
+      /**
+       * Action
+       * @enum {string}
+       */
+      action: "keep_local" | "discard_upload";
+    };
+    /**
+     * ExternalDuplicateWarning
+     * @description Warning when an uploaded file collides with an external track.
+     */
+    ExternalDuplicateWarning: {
+      /** Token */
+      token: string;
+      /** Sha256 */
+      sha256: string;
+      /** Provider Type */
+      provider_type: string;
+      /**
+       * Display Info
+       * @default []
+       */
+      display_info: {
+        [key: string]: unknown;
+      }[];
+    };
+    /**
+     * ExternalLibraryCapabilitiesResponse
+     * @description Capability summary for an external library.
+     */
+    ExternalLibraryCapabilitiesResponse: {
+      /**
+       * List Items
+       * @default false
+       */
+      list_items: boolean;
+      /**
+       * Read Bytes
+       * @default false
+       */
+      read_bytes: boolean;
+      /**
+       * Stream Url
+       * @default false
+       */
+      stream_url: boolean;
+      /**
+       * Range Read
+       * @default false
+       */
+      range_read: boolean;
+      /**
+       * Download
+       * @default false
+       */
+      download: boolean;
+      /**
+       * Compute Hash
+       * @default false
+       */
+      compute_hash: boolean;
+      /**
+       * Read Tags
+       * @default false
+       */
+      read_tags: boolean;
+      /**
+       * Write Tags
+       * @default false
+       */
+      write_tags: boolean;
+      /**
+       * Delete Source
+       * @default false
+       */
+      delete_source: boolean;
+      /**
+       * Detect Changes
+       * @default false
+       */
+      detect_changes: boolean;
+      /**
+       * Validate Config
+       * @default false
+       */
+      validate_config: boolean;
+      /** Limits */
+      limits?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * ExternalLibraryCreate
+     * @description Request body for creating an external library.
+     */
+    ExternalLibraryCreate: {
+      /** Provider Type */
+      provider_type: string;
+      /** Name */
+      name?: string | null;
+      /** Config */
+      config: {
+        [key: string]: unknown;
+      };
+      /** Library Id */
+      library_id?: string | null;
+      /** Library Name */
+      library_name?: string | null;
+      /** @default private */
+      visibility: components["schemas"]["Visibility"] | null;
+      /**
+       * Enabled
+       * @default true
+       */
+      enabled: boolean;
+      /**
+       * Sync Enabled
+       * @default true
+       */
+      sync_enabled: boolean;
+      /** Sync Interval Seconds */
+      sync_interval_seconds?: number | null;
+      /**
+       * Include In Library Index
+       * @default false
+       */
+      include_in_library_index: boolean;
+    };
+    /**
+     * ExternalLibraryResponse
+     * @description External library response with redacted config.
+     */
+    ExternalLibraryResponse: {
+      /** Id */
+      id: string;
+      /** Library Id */
+      library_id: string;
+      /** Provider Type */
+      provider_type: string;
+      /** Scope */
+      scope: string;
+      /** Name */
+      name?: string | null;
+      /** Config */
+      config: {
+        [key: string]: unknown;
+      };
+      /** Enabled */
+      enabled: boolean;
+      /** Include In Library Index */
+      include_in_library_index: boolean;
+      /** Sync Enabled */
+      sync_enabled: boolean;
+      /** Sync Interval Seconds */
+      sync_interval_seconds?: number | null;
+      /** Last Sync Started At */
+      last_sync_started_at?: string | null;
+      /** Last Sync Completed At */
+      last_sync_completed_at?: string | null;
+      /** Last Sync Status */
+      last_sync_status?: string | null;
+      /** Last Sync Error */
+      last_sync_error?: string | null;
+      capabilities?:
+        components["schemas"]["ExternalLibraryCapabilitiesResponse"] | null;
+      /** Created By Id */
+      created_by_id?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /**
+       * Can Manage
+       * @default false
+       */
+      can_manage: boolean;
+      /**
+       * Can Sync
+       * @default false
+       */
+      can_sync: boolean;
+    };
+    /**
+     * ExternalLibraryUpdate
+     * @description Partial update payload for an external library.
+     */
+    ExternalLibraryUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Config */
+      config?: {
+        [key: string]: unknown;
+      } | null;
+      /** Enabled */
+      enabled?: boolean | null;
+      /** Sync Enabled */
+      sync_enabled?: boolean | null;
+      /** Sync Interval Seconds */
+      sync_interval_seconds?: number | null;
+      /** Include In Library Index */
+      include_in_library_index?: boolean | null;
+    };
+    /**
+     * ExternalProviderResponse
+     * @description Provider type available to the requester.
+     */
+    ExternalProviderResponse: {
+      /** Provider Type */
+      provider_type: string;
+      /** User Configurable */
+      user_configurable: boolean;
+      /** Capabilities Summary */
+      capabilities_summary: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * ExternalSyncRequest
+     * @description Request body for a manual sync.
+     */
+    ExternalSyncRequest: {
+      /**
+       * Include Tombstones
+       * @default false
+       */
+      include_tombstones: boolean;
+    };
+    /**
+     * ExternalSyncRunResponse
+     * @description External sync run response.
+     */
+    ExternalSyncRunResponse: {
+      /** Id */
+      id: string;
+      /** External Library Id */
+      external_library_id: string;
+      /** Triggered By */
+      triggered_by: string;
+      /** Triggered By User Id */
+      triggered_by_user_id?: string | null;
+      /** Status */
+      status: string;
+      /** Started At */
+      started_at?: string | null;
+      /** Completed At */
+      completed_at?: string | null;
+      /**
+       * Items Seen
+       * @default 0
+       */
+      items_seen: number;
+      /**
+       * Tracks Created
+       * @default 0
+       */
+      tracks_created: number;
+      /**
+       * Tracks Updated
+       * @default 0
+       */
+      tracks_updated: number;
+      /**
+       * Tracks Shadowed
+       * @default 0
+       */
+      tracks_shadowed: number;
+      /**
+       * Tracks Tombstoned
+       * @default 0
+       */
+      tracks_tombstoned: number;
+      /**
+       * Tracks Missing
+       * @default 0
+       */
+      tracks_missing: number;
+      /**
+       * Tracks Failed
+       * @default 0
+       */
+      tracks_failed: number;
+      /** Error */
+      error?: string | null;
+      /** Details */
+      details?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * ExternalTrackDeleteRequest
+     * @description Request body for tombstoning or destructively deleting an external track.
+     */
+    ExternalTrackDeleteRequest: {
+      /**
+       * Delete Source
+       * @default false
+       */
+      delete_source: boolean;
+      /** Confirm */
+      confirm?: string | null;
+      /**
+       * Remove Songhive Track
+       * @default false
+       */
+      remove_songhive_track: boolean;
+    };
+    /**
+     * ExternalTrackResponse
+     * @description External track response.
+     */
+    ExternalTrackResponse: {
+      /** Id */
+      id: string;
+      /** External Library Id */
+      external_library_id: string;
+      /** Track Id */
+      track_id?: string | null;
+      /** Provider Key */
+      provider_key: string;
+      /** State */
+      state: string;
+      /** Sha256 */
+      sha256?: string | null;
+      /** Last Seen At */
+      last_seen_at?: string | null;
+      /** Last Synced At */
+      last_synced_at?: string | null;
+      /**
+       * Write Back Pending
+       * @default false
+       */
+      write_back_pending: boolean;
+      /** Write Back Error */
+      write_back_error?: string | null;
+      /** Sync Error */
+      sync_error?: string | null;
+      /** Display Path */
+      display_path?: string | null;
     };
     /** FavoriteResponse */
     FavoriteResponse: {
@@ -3639,6 +4535,31 @@ export interface components {
       track_ids: string[];
     };
     /**
+     * ReorderPlaylistTracksRequest
+     * @description Request body for reordering tracks in a playlist.
+     */
+    ReorderPlaylistTracksRequest: {
+      /** Track Ids */
+      track_ids: string[];
+      /** Position */
+      position?: number | null;
+    };
+    /**
+     * ReorderPlaylistTracksResponse
+     * @description Response body for a successful playlist track reorder.
+     */
+    ReorderPlaylistTracksResponse: {
+      /**
+       * Reordered
+       * @default true
+       */
+      reordered: boolean;
+      /** Track Ids */
+      track_ids: string[];
+      /** Count */
+      count: number;
+    };
+    /**
      * ReportCreateRequest
      * @description Request body for submitting a report.
      */
@@ -3724,12 +4645,97 @@ export interface components {
       success: boolean;
     };
     /**
+     * RevokeSessionResponse
+     * @description Response returned after revoking a session.
+     */
+    RevokeSessionResponse: {
+      /**
+       * Success
+       * @default true
+       */
+      success: boolean;
+    };
+    /**
      * ScanRequest
      * @description Directory scan request.
      */
     ScanRequest: {
       /** Path */
       path: string;
+    };
+    /**
+     * SessionListResponse
+     * @description Paginated list of active sessions.
+     * @example {
+     *       "items": [
+     *         {
+     *           "created_at": "2026-08-31T12:00:00Z",
+     *           "expires_at": "2026-09-30T12:00:00Z",
+     *           "id": "a4b5c6...",
+     *           "ip_address": "192.0.2.1",
+     *           "is_current": true,
+     *           "user_agent": "Mozilla/5.0"
+     *         }
+     *       ],
+     *       "total": 1
+     *     }
+     */
+    SessionListResponse: {
+      /**
+       * Items
+       * @description List of active sessions
+       */
+      items: components["schemas"]["SessionSummary"][];
+      /**
+       * Total
+       * @description Total number of active sessions
+       */
+      total: number;
+    };
+    /**
+     * SessionSummary
+     * @description Metadata for an active refresh-token session.
+     * @example {
+     *       "created_at": "2026-08-31T12:00:00Z",
+     *       "expires_at": "2026-09-30T12:00:00Z",
+     *       "id": "a4b5c6...",
+     *       "ip_address": "192.0.2.1",
+     *       "is_current": false,
+     *       "user_agent": "Mozilla/5.0"
+     *     }
+     */
+    SessionSummary: {
+      /**
+       * Id
+       * @description SHA-256 hash of the refresh token; used as the session id
+       */
+      id: string;
+      /**
+       * Ip Address
+       * @description IP address from which the session was created
+       */
+      ip_address?: string | null;
+      /**
+       * User Agent
+       * @description User-Agent header from which the session was created
+       */
+      user_agent?: string | null;
+      /**
+       * Created At
+       * @description Timestamp when the session was created
+       */
+      created_at?: string | null;
+      /**
+       * Expires At
+       * @description Timestamp when the session expires
+       */
+      expires_at?: string | null;
+      /**
+       * Is Current
+       * @description True if this is the caller's current session
+       * @default false
+       */
+      is_current: boolean;
     };
     /**
      * SettingResponse
@@ -3974,6 +4980,25 @@ export interface components {
       genres: string[];
       /** Favorited */
       favorited?: boolean | null;
+      /**
+       * Is External
+       * @default false
+       */
+      is_external: boolean;
+      /** External Library Id */
+      external_library_id?: string | null;
+      /** External Provider Type */
+      external_provider_type?: string | null;
+      /** External State */
+      external_state?: string | null;
+      /** Can Stream */
+      can_stream?: boolean | null;
+      /** Can Download */
+      can_download?: boolean | null;
+      /** Can Write Tags */
+      can_write_tags?: boolean | null;
+      /** Can Delete Source */
+      can_delete_source?: boolean | null;
     };
     /**
      * TrackSummary
@@ -4785,6 +5810,69 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["OAuth2IntrospectionResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_sessions_api_v1_auth_sessions_get: {
+    parameters: {
+      query?: {
+        /** @description Optional session id of the caller, used to mark the current session. */
+        current_session_id?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_session_api_v1_auth_sessions__session_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RevokeSessionResponse"];
         };
       };
       /** @description Validation Error */
@@ -5878,6 +6966,39 @@ export interface operations {
       };
     };
   };
+  download_track_api_v1_tracks__track_id__download_get: {
+    parameters: {
+      query?: {
+        disposition?: "inline" | "attachment";
+      };
+      header?: never;
+      path: {
+        track_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_tracks_api_v1_tracks__get: {
     parameters: {
       query?: {
@@ -6743,6 +7864,41 @@ export interface operations {
       };
     };
   };
+  reorder_playlist_tracks_route_api_v1_playlists__playlist_id__tracks_reorder_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        playlist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReorderPlaylistTracksRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReorderPlaylistTracksResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   add_playlist_hashtags_api_v1_playlists__playlist_id__hashtags_post: {
     parameters: {
       query?: {
@@ -6819,6 +7975,8 @@ export interface operations {
   list_libraries_api_v1_libraries__get: {
     parameters: {
       query?: {
+        /** @description Include external libraries (admin only) */
+        include_external?: boolean;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
@@ -8851,11 +10009,746 @@ export interface operations {
       };
     };
   };
+  list_providers_api_v1_external_libraries_providers_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalProviderResponse"][];
+        };
+      };
+    };
+  };
+  list_external_libraries_api_v1_external_libraries__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalLibraryResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_external_library_api_v1_external_libraries__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExternalLibraryCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalLibraryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_external_library_api_v1_external_libraries__external_library_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalLibraryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_external_library_api_v1_external_libraries__external_library_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_external_library_api_v1_external_libraries__external_library_id__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExternalLibraryUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalLibraryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  sync_external_library_route_api_v1_external_libraries__external_library_id__sync_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ExternalSyncRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_external_sync_runs_api_v1_external_libraries__external_library_id__sync_runs_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalSyncRunResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_external_tracks_api_v1_external_libraries__external_library_id__tracks_get: {
+    parameters: {
+      query?: {
+        state?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalTrackResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  restore_external_track_api_v1_external_libraries__external_library_id__tracks__external_track_id__restore_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+        external_track_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalTrackResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_external_track_api_v1_external_libraries__external_library_id__tracks__external_track_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+        external_track_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ExternalTrackDeleteRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_admin_providers_api_v1_admin_external_libraries_providers_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalProviderResponse"][];
+        };
+      };
+    };
+  };
+  list_admin_external_libraries_api_v1_admin_external_libraries__get: {
+    parameters: {
+      query?: {
+        include_user?: boolean;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalLibraryResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_admin_external_library_api_v1_admin_external_libraries__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExternalLibraryCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalLibraryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_admin_external_library_api_v1_admin_external_libraries__external_library_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalLibraryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_admin_external_library_api_v1_admin_external_libraries__external_library_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_admin_external_library_api_v1_admin_external_libraries__external_library_id__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExternalLibraryUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalLibraryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  sync_admin_external_library_api_v1_admin_external_libraries__external_library_id__sync_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ExternalSyncRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_admin_external_sync_runs_api_v1_admin_external_libraries__external_library_id__sync_runs_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalSyncRunResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_admin_external_tracks_api_v1_admin_external_libraries__external_library_id__tracks_get: {
+    parameters: {
+      query?: {
+        state?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalTrackResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  restore_admin_external_track_api_v1_admin_external_libraries__external_library_id__tracks__external_track_id__restore_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+        external_track_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalTrackResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_admin_external_track_api_v1_admin_external_libraries__external_library_id__tracks__external_track_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+        external_track_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ExternalTrackDeleteRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  bulk_delete_admin_external_tracks_api_v1_admin_external_libraries__external_library_id__tracks_bulk_delete_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        external_library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BulkExternalTrackDeleteRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   upload_file_api_v1_files_upload_post: {
     parameters: {
       query?: {
         visibility?: components["schemas"]["Visibility"];
         library_id?: string | null;
+        external_duplicate_action?: ("keep_local" | "discard_upload") | null;
       };
       header?: never;
       path?: never;
@@ -8873,7 +10766,81 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["StoredFileResponse"];
+          "application/json":
+            | components["schemas"]["StoredFileResponse"]
+            | components["schemas"]["TrackResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  bulk_upload_files_api_v1_files_upload_bulk_post: {
+    parameters: {
+      query?: {
+        visibility?: components["schemas"]["Visibility"];
+        library_id?: string | null;
+        external_duplicate_action?: ("keep_local" | "discard_upload") | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_bulk_upload_files_api_v1_files_upload_bulk_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BulkFileUploadResult"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  resolve_upload_duplicate_api_v1_files_upload_resolve_duplicate_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExternalDuplicateResolutionRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json":
+            | components["schemas"]["StoredFileResponse"]
+            | components["schemas"]["TrackResponse"];
         };
       };
       /** @description Validation Error */

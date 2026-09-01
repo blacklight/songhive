@@ -36,6 +36,15 @@ from songhive.services.auth import create_user
 
 
 @pytest.fixture(autouse=True)
+def _register_fake_external_adapter():
+    """Register the fake external library adapter for tests that need it."""
+    from songhive.external._fake import FakeExternalAdapter
+    from songhive.external.registry import register_external_adapter
+
+    register_external_adapter("fake", FakeExternalAdapter)
+
+
+@pytest.fixture(autouse=True)
 def _ensure_test_secret_key(monkeypatch):
     """Provide a fallback JWT secret key so tests can build a SonghiveConfig."""
     monkeypatch.setenv("SONGHIVE_AUTH__SECRET_KEY", "a" * 64)

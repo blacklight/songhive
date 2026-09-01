@@ -6,12 +6,14 @@ libraries, and radios.
 import contextlib
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
-from sqlalchemy import Select, and_, false, func, or_, select
+from sqlalchemy import Select, and_, exists, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..models.album import Album
 from ..models.artist import Artist
+from ..models.external_library import ExternalLibrary
+from ..models.external_track import ExternalTrack
 from ..models.favorite import Favorite
 from ..models.genre import Genre, GenreAlbum
 from ..models.hashtag import Hashtag, HashtagTrack
@@ -29,6 +31,7 @@ def _track_selectin_options(include: Optional[Set[str]]) -> List[Any]:
     options: List[Any] = [
         selectinload(Track.audio_file),
         selectinload(Track.image_file),
+        selectinload(Track.external_track).selectinload(ExternalTrack.external_library),
     ]
     if include:
         if "artist" in include:
@@ -523,6 +526,16 @@ def _build_tracks_stmt(
     if query:
         stmt = _apply_tracks_query(session, stmt, query=query, year_from=year_from, year_to=year_to)
 
+    stmt = stmt.where(
+        or_(
+            ~exists().where(ExternalTrack.track_id == Track.id),
+            exists().where(
+                ExternalTrack.track_id == Track.id,
+                ExternalTrack.state == "active",
+            ),
+        )
+    )
+
     return stmt
 
 
@@ -769,10 +782,24 @@ async def list_libraries(
     include: Optional[Set[str]] = None,
     sort_by: str = "name",
     sort_dir: str = "asc",
+    include_external: bool = False,
 ) -> List[Library]:
     """List libraries visible to ``user``."""
     field = getattr(Library, sort_by)
     stmt = select(Library).options(*_library_selectin_options(include))
+    if not include_external:
+        stmt = stmt.where(
+            ~exists().where(
+                ExternalLibrary.library_id == Library.id,
+                or_(
+                    ExternalLibrary.scope == "user",
+                    and_(
+                        ExternalLibrary.scope == "admin",
+                        ExternalLibrary.include_in_library_index == false(),
+                    ),
+                ),
+            )
+        )
     stmt = apply_access_filter(stmt, Library, user, "library")
     stmt = _apply_sort(stmt, field, sort_dir, Library.id)
     stmt = stmt.offset(offset).limit(limit)
@@ -783,9 +810,23 @@ async def list_libraries(
 async def count_libraries(
     session: AsyncSession,
     user: Optional[User] = None,
+    include_external: bool = False,
 ) -> int:
     """Return the total number of libraries visible to ``user``."""
     stmt = select(Library)
+    if not include_external:
+        stmt = stmt.where(
+            ~exists().where(
+                ExternalLibrary.library_id == Library.id,
+                or_(
+                    ExternalLibrary.scope == "user",
+                    and_(
+                        ExternalLibrary.scope == "admin",
+                        ExternalLibrary.include_in_library_index == false(),
+                    ),
+                ),
+            )
+        )
     stmt = apply_access_filter(stmt, Library, user, "library")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0

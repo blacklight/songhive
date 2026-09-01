@@ -76,6 +76,10 @@ def make_celery(
                 "task": "songhive.tasks.api_tokens.flush_usage_timestamps",
                 "schedule": 300.0,  # Every 5 minutes
             },
+            "external-scheduled-sync-scan": {
+                "task": "songhive.tasks.external_libraries.scan_scheduled_syncs",
+                "schedule": crontab(minute="*/5"),
+            },
         },
     )
     app.autodiscover_tasks(["songhive.tasks"])

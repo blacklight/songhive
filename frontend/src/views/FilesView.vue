@@ -9,8 +9,9 @@ import {
   deleteFile,
   type FileUploadResult,
   type StoredFileResponse,
+  type ExternalDuplicateWarning,
 } from "@/api/files";
-import { getApiErrorMessage } from "@/api/client";
+import { ApiError, getApiErrorMessage } from "@/api/client";
 import { buildUrl } from "@/api/config";
 import {
   listLibraries,
@@ -25,6 +26,7 @@ import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
+import ExternalDuplicateModal from "@/components/external-libraries/ExternalDuplicateModal.vue";
 
 const { t } = useI18n();
 const router = useRouter();
@@ -42,6 +44,50 @@ const lastUploadTotal = ref(0);
 const fileInput = ref<HTMLInputElement | null>(null);
 const libraries = ref<LibraryResponse[]>([]);
 const selectedLibraryId = ref("");
+
+const duplicateOpen = ref(false);
+const duplicateWarning = ref<ExternalDuplicateWarning | null>(null);
+let duplicateResolve: ((value: unknown | null) => void) | null = null;
+
+function isTrackResponse(
+  value: unknown,
+): value is { id: string; title: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    typeof (value as { id: unknown }).id === "string" &&
+    "title" in value
+  );
+}
+
+function waitForDuplicate(
+  warning: ExternalDuplicateWarning,
+): Promise<unknown | null> {
+  duplicateWarning.value = warning;
+  duplicateOpen.value = true;
+  return new Promise((resolve) => {
+    duplicateResolve = resolve;
+  });
+}
+
+function onDuplicateResolved(result: unknown) {
+  duplicateOpen.value = false;
+  duplicateWarning.value = null;
+  if (duplicateResolve) {
+    duplicateResolve(result);
+    duplicateResolve = null;
+  }
+}
+
+function onDuplicateClosed() {
+  duplicateOpen.value = false;
+  duplicateWarning.value = null;
+  if (duplicateResolve) {
+    duplicateResolve(null);
+    duplicateResolve = null;
+  }
+}
 
 const visibilityOptions = computed(() => [
   { value: "private", label: t("browse.visibility.private") },
@@ -228,6 +274,19 @@ async function onFileChange(event: Event) {
   const results: FileUploadResult[] = [];
   const libraryId = selectedLibraryId.value || undefined;
 
+  function addResolvedResult(result: unknown, filename: string) {
+    if (isTrackResponse(result)) {
+      results.push({ id: result.id, trackId: result.id } as FileUploadResult);
+    } else if (result && typeof result === "object" && "id" in result) {
+      results.push({ ...(result as StoredFileResponse) } as FileUploadResult);
+    } else {
+      uploadFailures.value.push({
+        name: filename,
+        message: t("pages.files.uploadError", { message: t("errors.unknown") }),
+      });
+    }
+  }
+
   try {
     if (files.length === 1) {
       const file = files[0];
@@ -243,10 +302,32 @@ async function onFileChange(event: Event) {
         );
         results.push(result);
       } catch (err) {
-        uploadFailures.value.push({
-          name: file.name,
-          message: getErrorMessage(err),
-        });
+        if (
+          err instanceof ApiError &&
+          err.status === 409 &&
+          err.body &&
+          typeof err.body === "object" &&
+          "token" in err.body
+        ) {
+          const resolved = await waitForDuplicate(
+            err.body as ExternalDuplicateWarning,
+          );
+          if (resolved) {
+            addResolvedResult(resolved, file.name);
+          } else {
+            uploadFailures.value.push({
+              name: file.name,
+              message: t("pages.files.uploadError", {
+                message: t("errors.unknown"),
+              }),
+            });
+          }
+        } else {
+          uploadFailures.value.push({
+            name: file.name,
+            message: getErrorMessage(err),
+          });
+        }
       } finally {
         currentFileProgress.value = 100;
       }
@@ -260,8 +341,20 @@ async function onFileChange(event: Event) {
           },
           libraryId,
         );
-        bulkResults.forEach((item, index) => {
-          if (item.error) {
+        for (const [index, item] of bulkResults.entries()) {
+          if (item.status === "external_duplicate" && item.external_duplicate) {
+            const resolved = await waitForDuplicate(item.external_duplicate);
+            if (resolved) {
+              addResolvedResult(resolved, item.filename ?? files[index].name);
+            } else {
+              uploadFailures.value.push({
+                name: item.filename ?? files[index].name,
+                message: t("pages.files.uploadError", {
+                  message: t("errors.unknown"),
+                }),
+              });
+            }
+          } else if (item.error) {
             uploadFailures.value.push({
               name: item.filename ?? files[index].name,
               message: item.error,
@@ -272,7 +365,7 @@ async function onFileChange(event: Event) {
               trackId: item.track_id,
             });
           }
-        });
+        }
       } catch (err) {
         const message = getErrorMessage(err);
         for (const file of files) {
@@ -496,6 +589,13 @@ async function onFileChange(event: Event) {
         </div>
       </template>
     </BulkEditableGrid>
+
+    <ExternalDuplicateModal
+      :open="duplicateOpen"
+      :warning="duplicateWarning"
+      @close="onDuplicateClosed"
+      @resolved="onDuplicateResolved"
+    />
   </div>
 </template>
 

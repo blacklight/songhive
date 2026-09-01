@@ -119,6 +119,7 @@ def process_upload(
                             track.federation_object_id,
                         )
 
+                assert result.upload is not None
                 EventWebSocket.broadcast(
                     "import.completed",
                     {

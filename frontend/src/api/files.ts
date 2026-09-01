@@ -5,6 +5,8 @@ import type { components } from "./types";
 
 export type StoredFileResponse = components["schemas"]["StoredFileResponse"];
 export type FileUploadResult = StoredFileResponse & { trackId?: string };
+export type ExternalDuplicateWarning =
+  components["schemas"]["ExternalDuplicateWarning"];
 
 export interface BulkFileUploadResult {
   filename?: string;
@@ -12,6 +14,8 @@ export interface BulkFileUploadResult {
   track_id?: string;
   duplicate: boolean;
   error?: string;
+  status?: string;
+  external_duplicate?: ExternalDuplicateWarning | null;
 }
 
 function makeProgressHandler(

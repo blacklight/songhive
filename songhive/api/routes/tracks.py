@@ -3,8 +3,11 @@ Track routes.
 """
 
 import logging
+import os
 import uuid
-from typing import Any, Dict, List, Optional, Set, cast
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Set, Union, cast
 
 from fastapi import (
     APIRouter,
@@ -18,9 +21,12 @@ from fastapi import (
     UploadFile,
     status,
 )
-from pydantic import BaseModel, ConfigDict
+from fastapi.responses import FileResponse, RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config.schema import SonghiveConfig
+from ...external.errors import ExternalItemNotFound, UnsupportedExternalOperation
 from ...models import Track
 from ...models._enums import Visibility
 from ...models.album import Album
@@ -42,10 +48,17 @@ from ...services.hashtags import (
     validate_hashtag_name,
 )
 from ...services.storage import StorageService
+from ...services.streaming import (
+    collect_external_stream,
+    resolve_external_download_stream,
+    resolve_track_file,
+)
+from ...tasks.external_libraries import write_back_metadata_task
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
 from .._sorting import SortParams, get_sort
 from ..deps import (
+    get_config,
     get_current_user,
     get_current_user_optional,
     get_db,
@@ -54,9 +67,7 @@ from ..deps import (
 )
 from ..middleware.rate_limit import rate_limit_account
 from ..responses import (
-    AlbumSummary,
-    ArtistSummary,
-    UserSummary,
+    TrackResponse,
     _is_loaded,
     _track_image_url,
     _track_release_year,
@@ -64,37 +75,16 @@ from ..responses import (
     build_artist_summary,
     build_user_summary,
 )
+from ..routes.files import (
+    _download_stored_file_response,
+    _sanitize_content_disposition,
+    _sanitize_filename,
+)
 from ._common import GenreListRequest, HashtagListRequest, HasOwnerId, redact_owner
 from ._images import remove_entity_image, upload_entity_image
 
 router = APIRouter(prefix="/tracks")
 logger = logging.getLogger(__name__)
-
-
-class TrackResponse(BaseModel):
-    """Public track response."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    title: str
-    artist_id: str
-    album_id: Optional[str] = None
-    track_number: Optional[int] = None
-    disc_number: Optional[int] = None
-    duration: Optional[float] = None
-    genre: Optional[str] = None
-    audio_url: Optional[str] = None
-    image_url: Optional[str] = None
-    release_year: Optional[int] = None
-    owner_id: Optional[str] = None
-    visibility: str = Visibility.PRIVATE.value
-    artist: Optional[ArtistSummary] = None
-    album: Optional[AlbumSummary] = None
-    owner: Optional[UserSummary] = None
-    hashtags: List[str] = []
-    genres: List[str] = []
-    favorited: Optional[bool] = None
 
 
 class TrackUpdate(BaseModel):
@@ -254,6 +244,33 @@ async def _build_track_response(
 
     favorited = bool(str(track.id) in (favorited_track_ids or []) if user else False)
 
+    is_external = False
+    external_library_id: Optional[str] = None
+    external_provider_type: Optional[str] = None
+    external_state: Optional[str] = None
+    can_stream: Optional[bool] = None
+    can_download: Optional[bool] = None
+    can_write_tags: Optional[bool] = None
+    can_delete_source: Optional[bool] = None
+    audio_url: Optional[str] = None
+
+    external_track = getattr(track, "external_track", None)
+    if external_track is not None and external_track.state == "active":
+        is_external = True
+        external_library_id = str(external_track.external_library_id)
+        external_state = external_track.state
+        external_library = external_track.external_library
+        if external_library is not None:
+            external_provider_type = external_library.provider_type
+            capabilities = external_library.capabilities or {}
+            can_stream = bool(capabilities.get("read_bytes") or capabilities.get("stream_url"))
+            can_download = bool(capabilities.get("download"))
+            can_write_tags = bool(capabilities.get("write_tags"))
+            can_delete_source = bool(capabilities.get("delete_source"))
+        audio_url = f"/api/v1/tracks/{track.id}/download"
+    else:
+        audio_url = await storage.get_url(track.audio_file) if track.audio_file_id else None
+
     return TrackResponse(
         id=str(track.id),
         title=track.title,
@@ -263,7 +280,7 @@ async def _build_track_response(
         disc_number=track.disc_number,
         duration=track.duration,
         genre=track.genre,
-        audio_url=await storage.get_url(track.audio_file) if track.audio_file_id else None,
+        audio_url=audio_url,
         image_url=await _track_image_url(track, storage),
         release_year=_track_release_year(track),
         owner_id=owner_id,
@@ -274,7 +291,81 @@ async def _build_track_response(
         hashtags=_track_hashtags(track),
         genres=_track_genres(track),
         favorited=favorited,
+        is_external=is_external,
+        external_library_id=external_library_id,
+        external_provider_type=external_provider_type,
+        external_state=external_state,
+        can_stream=can_stream,
+        can_download=can_download,
+        can_write_tags=can_write_tags,
+        can_delete_source=can_delete_source,
     )
+
+
+def _cleanup_temp_file(path: Union[str, Path]) -> None:
+    """Remove a temporary file, ignoring errors."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+@router.get(
+    "/{track_id}/download",
+    dependencies=[Depends(require_access("track")), Depends(rate_limit_account)],
+)
+async def download_track(
+    track_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    disposition: Literal["inline", "attachment"] = Query("inline"),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Download the bytes for a track, local or external."""
+    track = await music.get_track(db, track_id, include={"artist"})
+    if track is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    stored_file = await resolve_track_file(db, track_id)
+    if stored_file is not None:
+        return await _download_stored_file_response(stored_file, disposition, storage)
+
+    try:
+        stream = await resolve_external_download_stream(db, track_id)
+    except ExternalItemNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except UnsupportedExternalOperation as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    if stream is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    content_type = stream.content_type or "application/octet-stream"
+
+    if stream.kind == "url" and stream.safe_to_redirect and stream.url:
+        return RedirectResponse(url=stream.url, status_code=status.HTTP_302_FOUND)
+
+    payload = await collect_external_stream(stream, config)
+    filename = _sanitize_filename(track.title)
+    disposition = _sanitize_content_disposition(disposition, content_type)
+    headers = {"X-Content-Type-Options": "nosniff"}
+
+    if isinstance(payload, Path):
+        if stream.temporary or stream.kind != "path":
+            background_tasks.add_task(_cleanup_temp_file, payload)
+        return FileResponse(
+            payload,
+            media_type=content_type,
+            filename=filename,
+            content_disposition_type=disposition,
+            headers=headers,
+        )
+
+    content_disposition = f'{disposition}; filename="{filename}"'
+    headers["Content-Disposition"] = content_disposition
+    return Response(content=payload, media_type=content_type, headers=headers)
 
 
 @router.get("/", response_model=List[TrackResponse])
@@ -476,7 +567,21 @@ async def update_track(
     )
 
     if _should_sync_tags(body):
-        _enqueue_track_tag_sync(track_id)
+        external_track = track.external_track
+        if external_track is not None:
+            external_library = external_track.external_library
+            if external_library is not None:
+                capabilities = external_library.capabilities or {}
+                if capabilities.get("write_tags"):
+                    external_track.write_back_pending = True
+                    track.metadata_updated_at = datetime.now(timezone.utc)
+                    try:
+                        write_back_metadata_task.delay(str(external_track.id))
+                    except Exception as exc:
+                        logger.warning("Could not enqueue write-back for %s: %s", external_track.id, exc)
+        if track.audio_file_id is not None:
+            _enqueue_track_tag_sync(track_id)
+        await db.commit()
 
     track = await music.get_track(db, track_id, include=set(include.values) | {"artist"})
     return await _build_track_response(track, current_user, storage, include)

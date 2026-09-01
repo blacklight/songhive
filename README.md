@@ -62,6 +62,9 @@ federating with other instances (including Mastodon) via ActivityPub.
 - **OAuth2 Provider**: Third-party app authorization
 - **Subsonic API**: Compatibility layer for Subsonic clients
 - **Flexible Storage**: Local filesystem or S3-compatible object storage
+- **External Libraries**: Attach external music storage (e.g. cloud adapters) to
+  Songhive libraries; index, stream, and write metadata back to the provider.
+  See [docs/ARCHITECTURE.md#external-libraries](docs/ARCHITECTURE.md#external-libraries).
 
 ## Architecture
 

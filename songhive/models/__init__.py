@@ -4,6 +4,9 @@ from .api_token import ApiToken
 from .artist import Artist
 from .audit_log import AuditLog
 from .base import Base, get_session, init_db, reset_db
+from .external_library import ExternalLibrary
+from .external_sync_run import ExternalSyncRun
+from .external_track import ExternalTrack
 from .favorite import Favorite
 from .genre import Genre, GenreAlbum, GenreTrack
 from .hashtag import Hashtag, HashtagAlbum, HashtagArtist, HashtagLibrary, HashtagPlaylist, HashtagTrack
@@ -31,6 +34,9 @@ __all__ = [
     "Artist",
     "AuditLog",
     "Base",
+    "ExternalLibrary",
+    "ExternalSyncRun",
+    "ExternalTrack",
     "Favorite",
     "Genre",
     "GenreAlbum",
