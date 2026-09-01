@@ -59,6 +59,7 @@ from .external_libraries import (
     _provider_item_exists,
     _redact_audit_details,
     _sanitize_error,
+    _utcnow,
     _validate_and_encrypt_config,
 )
 
@@ -187,18 +188,18 @@ async def update_admin_external_library(
     if body.sync_enabled is not None:
         external_library.sync_enabled = body.sync_enabled
         changes["sync_enabled"] = body.sync_enabled
-    if body.sync_interval_seconds is not None:
+    if "sync_interval_seconds" in body.model_fields_set:
         external_library.sync_interval_seconds = body.sync_interval_seconds
         changes["sync_interval_seconds"] = body.sync_interval_seconds
 
-    if body.include_in_library_index is not None:
+    if "include_in_library_index" in body.model_fields_set:
         if body.include_in_library_index and not allow_include_in_index:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="include_in_library_index is not allowed",
             )
-        external_library.include_in_library_index = body.include_in_library_index
-        changes["include_in_library_index"] = body.include_in_library_index
+        external_library.include_in_library_index = body.include_in_library_index or False
+        changes["include_in_library_index"] = external_library.include_in_library_index
 
     if body.config is not None:
         encrypted, capabilities = await _validate_and_encrypt_config(
@@ -279,6 +280,7 @@ async def sync_admin_external_library(
     )
     db.add(run)
     await db.flush()
+    run_id = str(run.id)
 
     await audit.log_action(
         db,
@@ -290,21 +292,29 @@ async def sync_admin_external_library(
         ip_address=client_ip(request),
     )
 
+    await db.commit()
+
     try:
         sync_external_library_task.delay(
             external_library_id,
             "manual",
             str(admin.id),
             body.include_tombstones,
+            run_id,
         )
     except Exception as exc:
+        existing_run = await db.get(ExternalSyncRun, run_id)
+        if existing_run is not None:
+            existing_run.status = "failed"
+            existing_run.completed_at = _utcnow()
+            existing_run.error = _sanitize_error(exc)
+            await db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Could not enqueue sync task: {_sanitize_error(exc)}",
         ) from exc
 
-    await db.commit()
-    return {"sync_run_id": str(run.id)}
+    return {"sync_run_id": run_id}
 
 
 @admin_router.get("/{external_library_id}/sync-runs", response_model=List[ExternalSyncRunResponse])

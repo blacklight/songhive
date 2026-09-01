@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  type Mock,
+} from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
@@ -18,7 +26,7 @@ vi.mock("@/api/externalLibraries", () => ({
   listUserExternalTracks: vi.fn(),
   adminListExternalTracks: vi.fn(),
   listUserSyncRuns: vi.fn(),
-  adminListSyncRuns: vi.fn(),
+  adminListExternalSyncRuns: vi.fn(),
 }));
 
 function createTestRouter(path = "/profile/external-libraries/new") {
@@ -122,6 +130,86 @@ describe("ExternalLibraryEditView", () => {
     await saveButton?.click();
     await flushPromises();
 
-    expect(externalLibrariesApi.createUserExternalLibrary).toHaveBeenCalled();
+    expect(externalLibrariesApi.createUserExternalLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider_type: "s3",
+        name: "New Library",
+        include_in_library_index: false,
+      }),
+    );
+  });
+
+  it("submits user updates without include_in_library_index", async () => {
+    vi.mocked(externalLibrariesApi.getUserExternalLibrary).mockResolvedValue({
+      id: "el1",
+      library_id: "lib1",
+      provider_type: "s3",
+      scope: "user",
+      name: "Existing Library",
+      config: { bucket: "music" },
+      enabled: true,
+      include_in_library_index: false,
+      sync_enabled: true,
+      sync_interval_seconds: 3600,
+      can_manage: true,
+      can_sync: true,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    });
+    vi.mocked(externalLibrariesApi.updateUserExternalLibrary).mockResolvedValue(
+      {
+        id: "el1",
+        library_id: "lib1",
+        provider_type: "s3",
+        scope: "user",
+        name: "Updated Library",
+        config: { bucket: "music" },
+        enabled: true,
+        include_in_library_index: false,
+        sync_enabled: true,
+        sync_interval_seconds: null,
+        can_manage: true,
+        can_sync: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    );
+
+    const router = createTestRouter("/profile/external-libraries/el1");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const nameInput = document.body.querySelector(
+      "input[type=text]",
+    ) as HTMLInputElement;
+    nameInput.value = "Updated Library";
+    nameInput.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) =>
+      (b.textContent ?? "").includes(
+        i18n.global.t("pages.externalLibraries.save"),
+      ),
+    );
+    expect(saveButton).toBeDefined();
+    await saveButton?.click();
+    await flushPromises();
+
+    expect(externalLibrariesApi.updateUserExternalLibrary).toHaveBeenCalledWith(
+      "el1",
+      expect.objectContaining({
+        name: "Updated Library",
+      }),
+    );
+    const body = (externalLibrariesApi.updateUserExternalLibrary as Mock).mock
+      .calls[0][1];
+    expect(body).not.toHaveProperty("include_in_library_index");
   });
 });

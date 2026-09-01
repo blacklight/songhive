@@ -327,6 +327,62 @@ async def test_resolve_cross_user_token_rejected(
     assert resolve.status_code == status.HTTP_403_FORBIDDEN
 
 
+async def _create_shadowed_only_external_track(
+    db_session,
+    user,
+    sha256: str = MATCHING_AUDIO_HASH,
+) -> tuple[Library, ExternalLibrary, ExternalTrack]:
+    """Create an external track in shadowed state with no linked Songhive track."""
+    library = Library(
+        name="External Library",
+        owner_id=str(user.id),
+        visibility="private",
+    )
+    db_session.add(library)
+    await db_session.flush()
+
+    external_library = ExternalLibrary(
+        library_id=str(library.id),
+        provider_type="fake",
+        name="Fake Library",
+    )
+    db_session.add(external_library)
+    await db_session.flush()
+
+    external_track = ExternalTrack(
+        external_library_id=str(external_library.id),
+        provider_key="song.mp3",
+        sha256=sha256,
+        state="shadowed",
+        track_id=None,
+    )
+    db_session.add(external_track)
+    await db_session.commit()
+
+    return library, external_library, external_track
+
+
+@pytest.mark.asyncio
+async def test_upload_shadowed_only_does_not_crash(
+    client,
+    regular_user,
+    auth_headers,
+    db_session,
+):
+    """Uploading a file that only matches a shadowed, unlinked external track does not crash."""
+    _, _, _ = await _create_shadowed_only_external_track(db_session, regular_user)
+
+    headers = auth_headers(regular_user)
+    response = client.post(
+        "/api/v1/files/upload?external_duplicate_action=discard_upload",
+        files={"file": ("match.mp3", b"match audio content", "audio/mpeg")},
+        headers=headers,
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert "X-Track-Id" in response.headers
+
+
 @pytest.mark.asyncio
 async def test_bulk_upload_marks_external_duplicate(
     client,

@@ -195,13 +195,14 @@ async def _find_duplicate_by_metadata(
 
 
 async def find_external_duplicate(session: AsyncSession, sha256: str) -> List[ExternalTrack]:
-    """Return active or shadowed ExternalTrack rows matching the audio hash."""
+    """Return active or shadowed ExternalTrack rows with a linked track, matching the audio hash."""
     result = await session.execute(
         select(ExternalTrack)
         .options(selectinload(ExternalTrack.external_library))
         .where(
             ExternalTrack.sha256 == sha256,
             ExternalTrack.state.in_(["active", "shadowed"]),
+            ExternalTrack.track_id.isnot(None),
         )
     )
     return list(result.scalars().all())

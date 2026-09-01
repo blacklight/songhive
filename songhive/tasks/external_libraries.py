@@ -74,6 +74,7 @@ async def _sync_external_library(
     triggered_by: str,
     triggered_by_user_id: Optional[str],
     include_tombstones: bool,
+    sync_run_id: Optional[str] = None,
 ) -> dict:
     """Run a sync inside a managed session and return the result."""
     redis = get_redis_client(load_config([]))
@@ -85,6 +86,7 @@ async def _sync_external_library(
                 triggered_by=triggered_by,
                 triggered_by_user_id=triggered_by_user_id,
                 include_tombstones=include_tombstones,
+                sync_run_id=sync_run_id,
                 redis=redis,
             )
             return {"sync_run_id": run.id, "status": run.status}
@@ -121,6 +123,7 @@ def sync_external_library_task(
     triggered_by: str = "manual",
     triggered_by_user_id: Optional[str] = None,
     include_tombstones: bool = False,
+    sync_run_id: Optional[str] = None,
 ) -> dict:
     """Celery task entry point for syncing a single external library."""
     config = load_config([])
@@ -133,6 +136,7 @@ def sync_external_library_task(
                 triggered_by,
                 triggered_by_user_id,
                 include_tombstones,
+                sync_run_id=sync_run_id,
             )
         )
     except KombuOperationalError:

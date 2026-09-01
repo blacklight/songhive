@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import AppIcon from "@/components/ui/AppIcon.vue";
 
@@ -11,7 +12,7 @@ export interface Props {
 const props = defineProps<Props>();
 const { t } = useI18n();
 
-const provider = props.provider ?? "";
+const provider = computed(() => props.provider ?? "");
 </script>
 
 <template>

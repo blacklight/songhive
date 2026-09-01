@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import type { Visibility } from "@/api/libraries";
@@ -81,7 +81,7 @@ const configText = ref("{}");
 const visibility = ref<Visibility>("private");
 const enabled = ref(true);
 const syncEnabled = ref(true);
-const syncInterval = ref<number | undefined>(undefined);
+const syncInterval = ref<number | null>(null);
 const includeInLibraryIndex = ref(false);
 
 const configError = ref<string | null>(null);
@@ -100,6 +100,8 @@ const syncRunsError = ref<string | null>(null);
 const syncRunsTotal = ref(0);
 const syncRunsPage = ref(1);
 const syncRunsPerPage = 20;
+const activeSyncRunId = ref<string | null>(null);
+let syncPollTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const selectedTrackIds = ref<Set<string>>(new Set());
 
@@ -119,8 +121,10 @@ const visibilityOptions = computed(() => [
 const stateOptions = computed(() => [
   { value: "", label: t("common.all") },
   { value: "active", label: "Active" },
-  { value: "shadow", label: "Shadow" },
-  { value: "tombstone", label: "Tombstone" },
+  { value: "shadowed", label: "Shadowed" },
+  { value: "tombstoned", label: "Tombstoned" },
+  { value: "missing", label: "Missing" },
+  { value: "error", label: "Error" },
 ]);
 
 const trackColumns = computed(() => [
@@ -190,7 +194,10 @@ async function loadProviders() {
 }
 
 async function loadLibrary() {
-  if (isNew.value) return;
+  if (isNew.value) {
+    resetForm();
+    return;
+  }
   loading.value = true;
   error.value = null;
   try {
@@ -218,7 +225,7 @@ function resetForm() {
     visibility.value = "private";
     enabled.value = true;
     syncEnabled.value = true;
-    syncInterval.value = undefined;
+    syncInterval.value = null;
     includeInLibraryIndex.value = false;
     return;
   }
@@ -227,7 +234,7 @@ function resetForm() {
   configText.value = JSON.stringify(source.config ?? {}, null, 2);
   enabled.value = source.enabled;
   syncEnabled.value = source.sync_enabled;
-  syncInterval.value = source.sync_interval_seconds ?? undefined;
+  syncInterval.value = source.sync_interval_seconds ?? null;
   includeInLibraryIndex.value = source.include_in_library_index;
 }
 
@@ -258,7 +265,9 @@ async function onSubmit() {
         enabled: enabled.value,
         sync_enabled: syncEnabled.value,
         sync_interval_seconds: syncInterval.value,
-        include_in_library_index: includeInLibraryIndex.value,
+        include_in_library_index: isAdmin.value
+          ? includeInLibraryIndex.value
+          : false,
       };
       const created = isAdmin.value
         ? await adminCreateExternalLibrary(body)
@@ -275,8 +284,10 @@ async function onSubmit() {
         enabled: enabled.value,
         sync_enabled: syncEnabled.value,
         sync_interval_seconds: syncInterval.value,
-        include_in_library_index: includeInLibraryIndex.value,
       };
+      if (isAdmin.value) {
+        body.include_in_library_index = includeInLibraryIndex.value;
+      }
       const updated = isAdmin.value
         ? await adminUpdateExternalLibrary(libraryId.value, body)
         : await updateUserExternalLibrary(libraryId.value, body);
@@ -333,28 +344,80 @@ async function onDelete() {
   }
 }
 
+function stopSyncPolling() {
+  if (syncPollTimeout !== null) {
+    clearTimeout(syncPollTimeout);
+    syncPollTimeout = null;
+  }
+  activeSyncRunId.value = null;
+}
+
 async function onSync() {
+  stopSyncPolling();
   isSyncing.value = true;
   try {
-    if (isAdmin.value) {
-      await adminSyncExternalLibrary(libraryId.value);
-    } else {
-      await syncUserExternalLibrary(libraryId.value);
-    }
-    toast.push({
-      type: "success",
-      message: t("pages.externalLibraries.syncSuccess"),
-    });
-    if (tab.value === "syncRuns") await loadSyncRuns();
+    const result = isAdmin.value
+      ? await adminSyncExternalLibrary(libraryId.value)
+      : await syncUserExternalLibrary(libraryId.value);
+    activeSyncRunId.value = result.sync_run_id;
+    tab.value = "syncRuns";
+    await loadSyncRuns();
+    void pollSyncRunStatus();
   } catch (err) {
+    isSyncing.value = false;
     error.value = t("pages.externalLibraries.syncError", {
       message:
         getApiErrorMessage(err) ||
         (err instanceof Error ? err.message : t("errors.unknown")),
     });
-  } finally {
-    isSyncing.value = false;
   }
+}
+
+async function pollSyncRunStatus(attempts = 0) {
+  const runId = activeSyncRunId.value;
+  if (runId === null || !libraryId.value) {
+    isSyncing.value = false;
+    return;
+  }
+
+  if (attempts > 0) {
+    await loadSyncRuns();
+  }
+
+  const run = syncRuns.value.find((r) => r.id === runId);
+  if (run && ["success", "partial", "failed"].includes(run.status)) {
+    stopSyncPolling();
+    isSyncing.value = false;
+    await loadLibrary();
+    if (run.status === "success") {
+      toast.push({
+        type: "success",
+        message: t("pages.externalLibraries.syncSuccess"),
+      });
+    } else if (run.status === "partial") {
+      toast.push({
+        type: "warning",
+        message: t("pages.externalLibraries.syncPartial"),
+      });
+    } else {
+      toast.push({
+        type: "error",
+        message: t("pages.externalLibraries.syncFailed"),
+      });
+    }
+    return;
+  }
+
+  if (attempts >= 30) {
+    stopSyncPolling();
+    isSyncing.value = false;
+    error.value = t("pages.externalLibraries.syncTimeout");
+    return;
+  }
+
+  syncPollTimeout = setTimeout(() => {
+    void pollSyncRunStatus(attempts + 1);
+  }, 2000);
 }
 
 async function loadTracks() {
@@ -542,6 +605,10 @@ onMounted(() => {
     void loadLibrary();
   });
 });
+
+onUnmounted(() => {
+  stopSyncPolling();
+});
 </script>
 
 <template>
@@ -634,10 +701,11 @@ onMounted(() => {
             type="number"
             :label="t('pages.externalLibraries.syncInterval')"
             @update:model-value="
-              syncInterval = $event === '' ? undefined : Number($event)
+              syncInterval = $event === '' ? null : Number($event)
             "
           />
           <AppCheckbox
+            v-if="isAdmin"
             v-model="includeInLibraryIndex"
             :label="t('pages.externalLibraries.includeInLibraryIndex')"
           />

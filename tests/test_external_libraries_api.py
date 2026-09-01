@@ -4,8 +4,9 @@ from typing import Any
 
 import pytest
 from fastapi import status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from songhive.external.sync import sync_external_library
 from songhive.models.audit_log import AuditLog
 from songhive.models.external_library import ExternalLibrary
 from songhive.models.external_sync_run import ExternalSyncRun
@@ -281,6 +282,49 @@ async def test_update(client, regular_user, auth_headers, monkeypatch, db_sessio
 
 
 @pytest.mark.asyncio
+async def test_update_clears_sync_interval(client, regular_user, auth_headers, monkeypatch):
+    """PATCH with sync_interval_seconds: null clears the scheduled interval."""
+    data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
+
+    response = client.patch(
+        f"/api/v1/external-libraries/{data['id']}",
+        json={"sync_interval_seconds": 3600},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["sync_interval_seconds"] == 3600
+
+    response = client.patch(
+        f"/api/v1/external-libraries/{data['id']}",
+        json={"sync_interval_seconds": None},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["sync_interval_seconds"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_omitted_sync_interval_is_unchanged(client, regular_user, auth_headers, monkeypatch):
+    """PATCH without sync_interval_seconds leaves the existing value in place."""
+    data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
+
+    response = client.patch(
+        f"/api/v1/external-libraries/{data['id']}",
+        json={"sync_interval_seconds": 3600},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+
+    response = client.patch(
+        f"/api/v1/external-libraries/{data['id']}",
+        json={"name": "Updated"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["sync_interval_seconds"] == 3600
+
+
+@pytest.mark.asyncio
 async def test_update_rejects_provider_type(client, regular_user, auth_headers, monkeypatch):
     """The update schema rejects the immutable provider_type field."""
     data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
@@ -294,14 +338,24 @@ async def test_update_rejects_provider_type(client, regular_user, auth_headers, 
 
 @pytest.mark.asyncio
 async def test_update_rejects_include_in_library_index(client, regular_user, auth_headers, monkeypatch):
-    """The user update route rejects include_in_library_index."""
+    """The user update route rejects include_in_library_index when present."""
     data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
+
+    for value in (True, False, None):
+        response = client.patch(
+            f"/api/v1/external-libraries/{data['id']}",
+            json={"include_in_library_index": value},
+            headers=auth_headers(regular_user),
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    # An update that omits the field is allowed.
     response = client.patch(
         f"/api/v1/external-libraries/{data['id']}",
-        json={"include_in_library_index": True},
+        json={"name": "Updated"},
         headers=auth_headers(regular_user),
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_200_OK
 
 
 @pytest.mark.asyncio
@@ -351,6 +405,39 @@ async def test_sync_creates_run(client, regular_user, auth_headers, monkeypatch,
         select(AuditLog).where(AuditLog.target_id == data["id"], AuditLog.action == "external_library.sync")
     )
     assert result.scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
+async def test_sync_run_is_updated_by_worker(client, regular_user, auth_headers, monkeypatch, db_session, fake_redis):
+    """POST /sync returns a run ID that the worker updates in place."""
+    data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
+    monkeypatch.setattr(
+        "songhive.api.routes.external_libraries.sync_external_library_task.delay",
+        _sync_delay,
+    )
+
+    response = client.post(
+        f"/api/v1/external-libraries/{data['id']}/sync",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_202_ACCEPTED
+    run_id = response.json()["sync_run_id"]
+
+    run = await sync_external_library(
+        db_session,
+        data["id"],
+        triggered_by="manual",
+        triggered_by_user_id=str(regular_user.id),
+        sync_run_id=run_id,
+        redis=fake_redis,
+    )
+    assert str(run.id) == run_id
+    assert run.status == "success"
+
+    runs_count = await db_session.execute(
+        select(func.count(ExternalSyncRun.id)).where(ExternalSyncRun.external_library_id == data["id"])
+    )
+    assert runs_count.scalar() == 1
 
 
 @pytest.mark.asyncio

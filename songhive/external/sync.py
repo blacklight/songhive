@@ -431,12 +431,15 @@ async def sync_external_library(
     triggered_by: str,
     triggered_by_user_id: Optional[str] = None,
     include_tombstones: bool = False,
+    sync_run_id: Optional[str] = None,
     redis: Optional[Redis] = None,
 ) -> ExternalSyncRun:
     """Run a full sync for the given external library and return the run record."""
     lock_key = f"external_sync:{external_library_id}"
     lock_acquired = False
     run: Optional[ExternalSyncRun] = None
+    external_library: Optional[ExternalLibrary] = None
+    run_created = False
 
     if redis is None:
         songhive_config = load_config([])
@@ -463,14 +466,28 @@ async def sync_external_library(
         capabilities = await adapter.validate_config(config)
         external_library.capabilities = dataclasses.asdict(capabilities)
 
-        run = ExternalSyncRun(
-            external_library_id=external_library_id,
-            triggered_by=triggered_by,
-            triggered_by_user_id=triggered_by_user_id,
-            status="running",
-            started_at=_utcnow(),
-        )
-        session.add(run)
+        if sync_run_id is not None:
+            run = await session.get(ExternalSyncRun, sync_run_id)
+            if run is not None and str(run.external_library_id) != external_library_id:
+                logger.warning(
+                    "Sync run %s belongs to a different external library; creating a new run.",
+                    sync_run_id,
+                )
+                run = None
+        if run is None:
+            run = ExternalSyncRun(
+                external_library_id=external_library_id,
+                triggered_by=triggered_by,
+                triggered_by_user_id=triggered_by_user_id,
+            )
+            run_created = True
+        run.status = "running"
+        run.started_at = _utcnow()
+        run.triggered_by = triggered_by
+        run.triggered_by_user_id = triggered_by_user_id
+        run.error = None
+        if run_created:
+            session.add(run)
         external_library.last_sync_started_at = run.started_at
         external_library.last_sync_status = "running"
         await session.flush()
