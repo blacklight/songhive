@@ -76,6 +76,33 @@ def test_list_tracks_filters_by_hashtag(client, sample_tracks, regular_user, aut
     assert int(response.headers["X-Total-Count"]) == 1
 
 
+def test_list_tracks_filters_by_genre(client, sample_tracks, regular_user, auth_headers):
+    """List endpoints can filter tracks by genre, using normalised associations."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    headers = auth_headers(regular_user)
+
+    # Store a raw, mixed-case genre string. The endpoint should still be
+    # findable by the normalised genre name because filtering uses the
+    # GenreTrack association table.
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"genre": "Rock, Pop"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+
+    response = client.get("/api/v1/tracks", params={"genre": "rock"}, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == track.id
+    assert int(response.headers["X-Total-Count"]) == 1
+
+    response = client.get("/api/v1/tracks", params={"genre": "pop"}, headers=headers)
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
 def test_get_public_track_redacts_owner_for_non_owner(client, sample_tracks, other_user, auth_headers):
     """Non-owners see a null owner_id for public tracks."""
     track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)

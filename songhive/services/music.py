@@ -15,7 +15,7 @@ from ..models.artist import Artist
 from ..models.external_library import ExternalLibrary
 from ..models.external_track import ExternalTrack
 from ..models.favorite import Favorite
-from ..models.genre import Genre, GenreAlbum
+from ..models.genre import Genre, GenreAlbum, GenreTrack
 from ..models.hashtag import Hashtag, HashtagTrack
 from ..models.library import Library
 from ..models.library_track import LibraryTrack
@@ -24,6 +24,7 @@ from ..models.radio import Radio
 from ..models.track import Track
 from ..models.user import User
 from .acl import apply_access_filter
+from .genres import InvalidGenreName, validate_genre_name
 
 
 def _track_selectin_options(include: Optional[Set[str]]) -> List[Any]:
@@ -320,11 +321,20 @@ def _build_albums_stmt(
     if year_to is not None:
         stmt = stmt.where(Album.release_year <= year_to)
     if genre:
-        stmt = stmt.where(
-            Album.id.in_(
-                select(GenreAlbum.album_id).join(Genre, GenreAlbum.genre_id == Genre.id).where(Genre.name == genre)
+        try:
+            genre_name = validate_genre_name(genre)
+        except InvalidGenreName:
+            genre_name = None
+        if genre_name is None:
+            stmt = stmt.where(false())
+        else:
+            stmt = stmt.where(
+                Album.id.in_(
+                    select(GenreAlbum.album_id)
+                    .join(Genre, GenreAlbum.genre_id == Genre.id)
+                    .where(Genre.name == genre_name)
+                )
             )
-        )
     return stmt
 
 
@@ -489,7 +499,20 @@ def _build_tracks_stmt(
     if album_id:
         stmt = stmt.where(Track.album_id == album_id)
     if genre:
-        stmt = stmt.where(Track.genre == genre)
+        try:
+            genre_name = validate_genre_name(genre)
+        except InvalidGenreName:
+            genre_name = None
+        if genre_name is None:
+            stmt = stmt.where(false())
+        else:
+            stmt = stmt.where(
+                Track.id.in_(
+                    select(GenreTrack.track_id)
+                    .join(Genre, GenreTrack.genre_id == Genre.id)
+                    .where(Genre.name == genre_name)
+                )
+            )
     if hashtag:
         stmt = (
             stmt.join(HashtagTrack, HashtagTrack.track_id == Track.id)

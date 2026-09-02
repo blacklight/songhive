@@ -16,6 +16,7 @@ from songhive.models.radio import Radio
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.services import music
+from songhive.services.genres import set_genres_for_entity, split_genre_string
 
 
 async def _make_artist(session, name: str = "Test Artist") -> Artist:
@@ -67,6 +68,12 @@ async def _make_track(
     )
     session.add(track)
     await session.flush()
+
+    if genre:
+        genre_names = split_genre_string(genre)
+        if genre_names:
+            await set_genres_for_entity(session, "track", str(track.id), genre_names)
+
     return track
 
 
@@ -225,6 +232,40 @@ async def test_list_and_count_tracks_with_filters(db_session, regular_user):
         user=regular_user,
     )
     assert len(by_query_year) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_tracks_by_genre_uses_associations(db_session, regular_user):
+    """list_tracks filters by the normalised GenreTrack associations, not the
+    raw free-text ``track.genre`` column."""
+    artist = await _make_artist(db_session, "Genre Artist")
+
+    # Track genre is stored as a raw string; the genre association is the
+    # normalised source of truth for filtering.
+    track = await _make_track(
+        db_session,
+        artist,
+        title="Genre Song",
+        genre="Rock, Pop",
+        owner=regular_user,
+        visibility=Visibility.PUBLIC.value,
+    )
+
+    by_lower, _ = await music.list_tracks(db_session, genre="rock", user=regular_user)
+    assert len(by_lower) == 1
+    assert by_lower[0].id == track.id
+
+    by_upper, _ = await music.list_tracks(db_session, genre="Rock", user=regular_user)
+    assert len(by_upper) == 1
+    assert by_upper[0].id == track.id
+
+    by_other, _ = await music.list_tracks(db_session, genre="pop", user=regular_user)
+    assert len(by_other) == 1
+    assert by_other[0].id == track.id
+
+    by_missing, _ = await music.list_tracks(db_session, genre="jazz", user=regular_user)
+    assert by_missing == []
+    assert await music.count_tracks(db_session, genre="rock", user=regular_user) == 1
 
 
 @pytest.mark.asyncio
