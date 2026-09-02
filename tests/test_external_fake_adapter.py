@@ -216,6 +216,28 @@ async def test_rename_source_rejects_target_collision(adapter, config):
         await adapter.rename_source(config, item, "track2.mp3")
 
 
+async def test_rename_source_neutralizes_path_traversal(adapter, config):
+    """Path separators, parent refs, and backslashes in new_name are stripped,
+    and the item stays in the same parent."""
+    config["items"]["albums/track1.flac"] = config["items"].pop("track1.flac")
+    item = ExternalItemRef(provider_key="albums/track1.flac", display_path="albums/track1.flac")
+
+    new_item = await adapter.rename_source(config, item, "../renamed.flac")
+    assert new_item.provider_key == "albums/renamed.flac"
+    assert "albums/renamed.flac" in config["items"]
+    assert "renamed.flac" not in config["items"]
+
+    # Backslashes and absolute paths are treated as separators.
+    new_item2 = await adapter.rename_source(config, new_item, "\\tmp\\renamed2.flac")
+    assert new_item2.provider_key == "albums/renamed2.flac"
+
+    # A bare ".." is rejected.
+    config["items"]["track2.flac"] = {"data": b"data", "metadata": {"title": "Two"}}
+    item2 = ExternalItemRef(provider_key="track2.flac", display_path="track2.flac")
+    with pytest.raises(Exception):
+        await adapter.rename_source(config, item2, "..")
+
+
 def test_sanitize_config():
     adapter = FakeExternalAdapter()
     redacted = adapter.sanitize_config_for_response({"api_key": "secret", "items": {}})

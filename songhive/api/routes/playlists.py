@@ -16,6 +16,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,6 +88,7 @@ class AddPlaylistTracksRequest(BaseModel):
     track_ids: Optional[List[str]] = None
     album_id: Optional[str] = None
     artist_id: Optional[str] = None
+    allow_duplicates: bool = False
 
 
 class RemovePlaylistTracksRequest(BaseModel):
@@ -517,7 +519,16 @@ async def add_tracks_to_playlist(
         )
 
     track_ids = await _resolve_track_ids(db, current_user, body)
-    added_ids = await music.add_playlist_tracks(db, playlist_id, track_ids)
+    try:
+        added_ids = await music.add_playlist_tracks(db, playlist_id, track_ids, allow_duplicates=body.allow_duplicates)
+    except music.DuplicatePlaylistTrackError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "Tracks already in playlist",
+                "track_ids": exc.track_ids,
+            },
+        )
 
     await audit.log_action(
         db,

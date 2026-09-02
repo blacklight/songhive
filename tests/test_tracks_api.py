@@ -1536,3 +1536,71 @@ async def test_update_track_filename_rejected_when_external_rename_unsupported(
 
     await db_session.refresh(external_track)
     assert external_track.provider_key == "song1.mp3"
+
+
+@pytest.mark.asyncio
+async def test_update_track_filename_sanitizes_path_traversal(
+    client, sample_tracks, regular_user, auth_headers, db_session
+):
+    """PATCH with a path-traversal filename only updates the basename and leaves storage_path intact."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+
+    stored = StoredFile(
+        storage_path=f"files/{track.id}/audio.mp3",
+        storage_backend="local",
+        content_type="audio/mpeg",
+        size=1234,
+        sha256=track.id.replace("-", ""),
+        original_filename="old_name.mp3",
+        owner_id=str(regular_user.id),
+    )
+    db_session.add(stored)
+    await db_session.flush()
+    track.audio_file_id = str(stored.id)
+    await db_session.flush()
+
+    old_storage_path = stored.storage_path
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"filename": "/etc/passwd/hacked"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filename"] == "hacked.mp3"
+
+    await db_session.refresh(stored)
+    assert stored.original_filename == "hacked.mp3"
+    assert stored.storage_path == old_storage_path
+    assert stored.sha256 == track.id.replace("-", "")
+
+    # A bare ".." is rejected outright.
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"filename": ".."},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_update_track_filename_external_sanitizes_path_traversal(client, regular_user, auth_headers, db_session):
+    """PATCH with a path-traversal filename renames an external source without changing its parent."""
+    track, external_track, _ = await _make_external_track_for_user(
+        db_session, regular_user, provider_key="music/song1.mp3"
+    )
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"filename": "../hacked"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filename"] == "hacked.mp3"
+
+    result = await db_session.execute(select(ExternalTrack).where(ExternalTrack.id == external_track.id))
+    refreshed = result.scalar_one()
+    assert refreshed.provider_key == "music/hacked.mp3"
+    assert refreshed.raw_metadata.get("display_path") == "music/hacked.mp3"

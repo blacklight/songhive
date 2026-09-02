@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
-import { getApiErrorMessage } from "@/api/client";
+import { ApiError, getApiErrorMessage } from "@/api/client";
 import {
   listLibraries,
   createLibrary,
@@ -20,6 +20,7 @@ import {
   type PlaylistCreate,
 } from "@/api/playlists";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppModal from "@/components/feedback/AppModal.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
@@ -50,6 +51,8 @@ const selectedId = ref<string>("");
 const newName = ref("");
 const isSaving = ref(false);
 const saveError = ref<string | null>(null);
+const showDuplicateWarning = ref(false);
+const allowDuplicates = ref(false);
 
 const isNew = computed(() => selectedId.value === "__new__");
 const canCreate = computed(() => authStore.isAuthenticated);
@@ -62,6 +65,8 @@ function reset() {
   newName.value = "";
   isSaving.value = false;
   saveError.value = null;
+  showDuplicateWarning.value = false;
+  allowDuplicates.value = false;
 }
 
 const title = computed(() => {
@@ -140,19 +145,44 @@ watch(
   { immediate: true },
 );
 
+watch(selectedId, () => {
+  showDuplicateWarning.value = false;
+  allowDuplicates.value = false;
+});
+
 function close() {
   if (!isSaving.value) emit("close");
 }
 
 function buildRequestBody():
-  { track_ids: string[] } | { album_id: string } | { artist_id: string } {
+  | { track_ids: string[]; allow_duplicates?: boolean }
+  | { album_id: string; allow_duplicates?: boolean }
+  | { artist_id: string; allow_duplicates?: boolean } {
   if (props.itemType === "track") {
-    return { track_ids: [props.itemId] };
+    const body: { track_ids: string[]; allow_duplicates?: boolean } = {
+      track_ids: [props.itemId],
+    };
+    if (props.mode === "playlist" && allowDuplicates.value) {
+      body.allow_duplicates = true;
+    }
+    return body;
   }
   if (props.itemType === "album") {
-    return { album_id: props.itemId };
+    const body: { album_id: string; allow_duplicates?: boolean } = {
+      album_id: props.itemId,
+    };
+    if (props.mode === "playlist" && allowDuplicates.value) {
+      body.allow_duplicates = true;
+    }
+    return body;
   }
-  return { artist_id: props.itemId };
+  const body: { artist_id: string; allow_duplicates?: boolean } = {
+    artist_id: props.itemId,
+  };
+  if (props.mode === "playlist" && allowDuplicates.value) {
+    body.allow_duplicates = true;
+  }
+  return body;
 }
 
 async function createCollection(): Promise<string> {
@@ -173,10 +203,19 @@ async function createCollection(): Promise<string> {
   return created.id;
 }
 
+const confirmLabel = computed(() => {
+  return showDuplicateWarning.value
+    ? t("browse.addToCollection.addAnyway")
+    : t("common.save");
+});
+
 async function onConfirm() {
   saveError.value = null;
   if (isNew.value && !newName.value.trim()) {
     saveError.value = t("browse.addToCollection.nameRequired");
+    return;
+  }
+  if (showDuplicateWarning.value && !allowDuplicates.value) {
     return;
   }
   isSaving.value = true;
@@ -209,9 +248,19 @@ async function onConfirm() {
     }
     emit("close");
   } catch (err) {
-    saveError.value =
-      getApiErrorMessage(err) ||
-      (err instanceof Error ? err.message : t("errors.unknown"));
+    if (
+      err instanceof ApiError &&
+      err.status === 409 &&
+      props.mode === "playlist"
+    ) {
+      showDuplicateWarning.value = true;
+    } else {
+      showDuplicateWarning.value = false;
+      allowDuplicates.value = false;
+      saveError.value =
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown"));
+    }
   } finally {
     isSaving.value = false;
   }
@@ -250,6 +299,18 @@ async function onConfirm() {
             :disabled="isSaving"
           />
         </template>
+        <p
+          v-if="showDuplicateWarning"
+          class="add-to-collection__warning"
+          role="alert"
+        >
+          {{ t("browse.addToCollection.duplicateWarning") }}
+        </p>
+        <AppCheckbox
+          v-if="showDuplicateWarning"
+          v-model="allowDuplicates"
+          :label="t('browse.addToCollection.addAnyway')"
+        />
         <p v-if="saveError" class="add-to-collection__error" role="alert">
           {{ saveError }}
         </p>
@@ -269,11 +330,14 @@ async function onConfirm() {
         icon="plus"
         :loading="isSaving"
         :disabled="
-          isSaving || (!isNew && !selectedId) || (isNew && !newName.trim())
+          isSaving ||
+          (!isNew && !selectedId) ||
+          (isNew && !newName.trim()) ||
+          (showDuplicateWarning && !allowDuplicates)
         "
         @click="onConfirm"
       >
-        {{ t("common.save") }}
+        {{ confirmLabel }}
       </AppButton>
     </template>
   </AppModal>
@@ -297,6 +361,11 @@ async function onConfirm() {
 .add-to-collection__error {
   color: var(--color-danger);
   justify-content: flex-start;
+}
+
+.add-to-collection__warning {
+  color: var(--color-warning);
+  margin: 0;
 }
 
 .add-to-collection__empty {

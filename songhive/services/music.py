@@ -27,6 +27,14 @@ from .acl import apply_access_filter
 from .genres import InvalidGenreName, validate_genre_name
 
 
+class DuplicatePlaylistTrackError(ValueError):
+    """Raised when tracks are already present in a playlist and duplicates are disallowed."""
+
+    def __init__(self, track_ids: List[str]):
+        self.track_ids = track_ids
+        super().__init__(f"Duplicate playlist tracks: {track_ids}")
+
+
 def _track_selectin_options(include: Optional[Set[str]]) -> List[Any]:
     """Return selectinload options for Track queries."""
     options: List[Any] = [
@@ -1025,20 +1033,41 @@ async def add_playlist_tracks(
     session: AsyncSession,
     playlist_id: str,
     track_ids: List[str],
+    allow_duplicates: bool = False,
 ) -> List[str]:
     """
     Append ``track_ids`` to ``playlist_id`` at the end of the playlist.
 
     New ``PlaylistTrack`` rows are assigned increasing ``position`` values. The
     returned list contains the IDs that were appended, in input order.
+
+    If ``allow_duplicates`` is ``False`` (the default) and any of ``track_ids``
+    are already in the playlist, a ``DuplicatePlaylistTrackError`` is raised.
     """
     if not track_ids:
         return []
 
+    if not allow_duplicates:
+        result = await session.execute(
+            select(PlaylistTrack.track_id).where(
+                PlaylistTrack.playlist_id == playlist_id,
+                PlaylistTrack.track_id.in_(track_ids),
+            )
+        )
+        existing = {str(row) for row in result.scalars().all()}
+        duplicates: List[str] = []
+        seen: Set[str] = set()
+        for track_id in track_ids:
+            if track_id in existing and track_id not in seen:
+                seen.add(track_id)
+                duplicates.append(track_id)
+        if duplicates:
+            raise DuplicatePlaylistTrackError(duplicates)
+
     result = await session.execute(
         select(func.max(PlaylistTrack.position)).where(PlaylistTrack.playlist_id == playlist_id)
     )
-    max_position = result.scalar() or 0
+    max_position = cast(int, result.scalar() or 0)
 
     added: List[str] = []
     rows: List[PlaylistTrack] = []

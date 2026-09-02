@@ -229,6 +229,93 @@ async def test_add_tracks_to_playlist_creates_audit_log(client, regular_user, db
 
 
 @pytest.mark.asyncio
+async def test_add_duplicate_track_to_playlist_rejected(client, regular_user, db_session, auth_headers):
+    """Adding a track already in the playlist returns 409 with duplicate track IDs."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+
+    assert response.status_code == 409
+    data = response.json()
+    assert data["detail"] == "Tracks already in playlist"
+    assert data["track_ids"] == [str(track.id)]
+
+    result = await db_session.execute(select(PlaylistTrack.track_id).where(PlaylistTrack.playlist_id == playlist.id))
+    stored = list(result.scalars().all())
+    assert stored == [track.id]
+
+
+@pytest.mark.asyncio
+async def test_add_duplicate_track_to_playlist_allowed(client, regular_user, db_session, auth_headers):
+    """Adding a duplicate track succeeds when allow_duplicates is true."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    add = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert add.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)], "allow_duplicates": True},
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["added"] == 1
+    assert data["track_ids"] == [str(track.id)]
+
+    result = await db_session.execute(select(PlaylistTrack.track_id).where(PlaylistTrack.playlist_id == playlist.id))
+    stored = list(result.scalars().all())
+    assert stored == [track.id, track.id]
+
+
+@pytest.mark.asyncio
+async def test_add_album_to_playlist_rejects_existing_duplicates(client, regular_user, db_session, auth_headers):
+    """Adding an album with already-present tracks returns 409 by default."""
+    artist = await _make_artist(db_session)
+    album = await _make_album(db_session, artist, owner=regular_user)
+    track = await _make_track(db_session, artist, album, title="Track One", track_number=1, owner=regular_user)
+    playlist = await _make_playlist(db_session, regular_user)
+
+    first = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"track_ids": [str(track.id)]},
+    )
+    assert first.status_code == 201
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(regular_user),
+        json={"album_id": str(album.id)},
+    )
+
+    assert response.status_code == 409
+    data = response.json()
+    assert data["detail"] == "Tracks already in playlist"
+    assert data["track_ids"] == [str(track.id)]
+
+
+@pytest.mark.asyncio
 async def test_list_playlist_tracks(client, regular_user, db_session, auth_headers):
     """Tracks can be listed for a playlist in order."""
     artist = await _make_artist(db_session)

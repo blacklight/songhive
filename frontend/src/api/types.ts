@@ -2902,6 +2902,8 @@ export interface components {
       album_id?: string | null;
       /** Artist Id */
       artist_id?: string | null;
+      /** Allow Duplicates */
+      allow_duplicates?: boolean | null;
     };
     /**
      * AdminInviteCreateRequest

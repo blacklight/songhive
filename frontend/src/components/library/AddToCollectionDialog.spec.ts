@@ -4,6 +4,7 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
+import { ApiError } from "@/api/client";
 import AddToCollectionDialog from "./AddToCollectionDialog.vue";
 import * as librariesApi from "@/api/libraries";
 import * as playlistsApi from "@/api/playlists";
@@ -293,5 +294,55 @@ describe("AddToCollectionDialog", () => {
 
     expect(wrapper.emitted("close")?.length).toBe(1);
     expect(librariesApi.addTracksToLibrary).not.toHaveBeenCalled();
+  });
+
+  it("shows a duplicate warning for playlists and resubmits with allow_duplicates", async () => {
+    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([samplePlaylist]);
+    vi.mocked(playlistsApi.addTracksToPlaylist)
+      .mockRejectedValueOnce(
+        new ApiError("Tracks already in playlist", 409, {
+          detail: "Tracks already in playlist",
+        }),
+      )
+      .mockResolvedValueOnce({
+        added: 1,
+        track_ids: ["track-1"],
+      });
+
+    mountDialog({ mode: "playlist" });
+    await flushPromises();
+
+    const saveButton = findButton(i18n.global.t("common.save"));
+    saveButton?.click();
+    await flushPromises();
+
+    expect(playlistsApi.addTracksToPlaylist).toHaveBeenCalledWith(
+      "playlist-1",
+      { track_ids: ["track-1"] },
+    );
+    expect(
+      findByText(i18n.global.t("browse.addToCollection.duplicateWarning")),
+    ).not.toBeUndefined();
+
+    const checkbox = document.body.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement | null;
+    expect(checkbox).not.toBeNull();
+    if (checkbox) {
+      checkbox.checked = true;
+      checkbox.dispatchEvent(new Event("change"));
+    }
+    await flushPromises();
+
+    const addAnywayButton = findButton(
+      i18n.global.t("browse.addToCollection.addAnyway"),
+    );
+    addAnywayButton?.click();
+    await flushPromises();
+
+    expect(playlistsApi.addTracksToPlaylist).toHaveBeenCalledWith(
+      "playlist-1",
+      { track_ids: ["track-1"], allow_duplicates: true },
+    );
   });
 });

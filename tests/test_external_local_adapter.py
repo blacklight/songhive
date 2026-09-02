@@ -491,3 +491,33 @@ async def test_rename_source_rejects_target_collision(local_adapter, tmp_root, b
     item = ExternalItemRef(provider_key="track.mp3", display_path="track.mp3")
     with pytest.raises(ExternalPermissionDenied):
         await local_adapter.rename_source(base_config, item, "collision.mp3")
+
+
+@pytest.mark.asyncio
+async def test_rename_source_neutralizes_path_traversal(local_adapter, tmp_root, base_config):
+    """Path separators, parent refs, and backslashes in new_name are stripped,
+    and the file stays in the same parent."""
+    _write_file(tmp_root / "music" / "track.mp3")
+    _write_file(tmp_root / "music" / "track2.mp3")
+    _write_file(tmp_root / "music" / "track3.mp3")
+    base_config["allow_rename_source"] = True
+    await local_adapter.validate_config(base_config)
+
+    cases = [
+        ("music/track.mp3", "../hacked.mp3", "music/hacked.mp3"),
+        ("music/track2.mp3", "foo/bar\\hacked2.mp3", "music/hacked2.mp3"),
+        ("music/track3.mp3", "/tmp/hacked3.mp3", "music/hacked3.mp3"),
+    ]
+
+    for provider_key, new_name, expected_key in cases:
+        item = ExternalItemRef(provider_key=provider_key, display_path=provider_key)
+        new_item = await local_adapter.rename_source(base_config, item, new_name)
+        assert new_item.provider_key == expected_key
+        assert (tmp_root / expected_key.replace("/", os.sep)).exists()
+        assert not (tmp_root / provider_key.replace("/", os.sep)).exists()
+
+    # A bare ".." is rejected rather than normalised.
+    _write_file(tmp_root / "track4.mp3")
+    item4 = ExternalItemRef(provider_key="track4.mp3", display_path="track4.mp3")
+    with pytest.raises(ExternalPermissionDenied):
+        await local_adapter.rename_source(base_config, item4, "..")

@@ -51,6 +51,7 @@ export interface AddTracksToPlaylistRequest {
   track_ids?: string[];
   album_id?: string;
   artist_id?: string;
+  allow_duplicates?: boolean;
 }
 
 export interface AddTracksToPlaylistResponse {

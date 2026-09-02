@@ -564,3 +564,32 @@ async def test_reorder_idempotent_when_already_in_place(db_session, regular_user
     assert moved == [tracks[0].id]
     assert await _playlist_track_ids(db_session, playlist) == [tracks[0].id, tracks[1].id, tracks[2].id]
     assert await _playlist_positions(db_session, playlist) == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_add_playlist_tracks_rejects_duplicates(db_session, regular_user):
+    """Adding a track that already exists in a playlist raises DuplicatePlaylistTrackError."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, title="Track One", owner=regular_user)
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, [track])
+
+    with pytest.raises(music.DuplicatePlaylistTrackError):
+        await music.add_playlist_tracks(db_session, playlist.id, [track.id])
+
+    assert await _playlist_track_ids(db_session, playlist) == [track.id]
+
+
+@pytest.mark.asyncio
+async def test_add_playlist_tracks_allows_duplicates_when_requested(db_session, regular_user):
+    """Adding a track that already exists in a playlist succeeds when allow_duplicates is true."""
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, artist, title="Track One", owner=regular_user)
+    playlist = await _make_playlist(db_session, regular_user)
+    await _add_playlist_tracks(db_session, playlist, [track])
+
+    added = await music.add_playlist_tracks(db_session, playlist.id, [track.id], allow_duplicates=True)
+
+    assert added == [track.id]
+    assert await _playlist_track_ids(db_session, playlist) == [track.id, track.id]
+    assert await _playlist_positions(db_session, playlist) == [1, 2]

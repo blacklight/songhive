@@ -902,7 +902,9 @@
       "empty": "No collections available.",
       "noneAdded": "No tracks were added (they may already be present).",
       "librarySuccess": "Added {count} tracks to library.",
-      "playlistSuccess": "Added {count} tracks to playlist."
+      "playlistSuccess": "Added {count} tracks to playlist.",
+      "duplicateWarning": "One or more tracks are already in this playlist. Add them again anyway?",
+      "addAnyway": "Add anyway"
     },
     "createPlaylist": "Playlist created.",
     "createLibrary": "Library created.",
