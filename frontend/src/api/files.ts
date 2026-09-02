@@ -32,11 +32,25 @@ function makeProgressHandler(
   };
 }
 
+function cleanupSignalHandler(
+  abortSignal: AbortSignal | undefined,
+  handler: (() => void) | null,
+) {
+  if (abortSignal && handler) {
+    try {
+      abortSignal.removeEventListener("abort", handler);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export async function uploadFile(
   file: File,
   visibility: "private" | "local" | "public" = "public",
   onProgress?: (percent: number) => void,
   libraryId?: string,
+  abortSignal?: AbortSignal,
 ): Promise<FileUploadResult> {
   const auth = getAuthHeader();
   if (!auth) {
@@ -49,6 +63,11 @@ export async function uploadFile(
   });
 
   return new Promise((resolve, reject) => {
+    if (abortSignal?.aborted) {
+      reject(new ApiError(i18n.global.t("errors.uploadAborted"), 0));
+      return;
+    }
+
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
     xhr.setRequestHeader("Authorization", auth);
@@ -57,7 +76,15 @@ export async function uploadFile(
       xhr.upload.onprogress = makeProgressHandler(onProgress, file.size);
     }
 
+    let signalHandler: (() => void) | null = null;
+
+    const finish = () => {
+      cleanupSignalHandler(abortSignal, signalHandler);
+      signalHandler = null;
+    };
+
     xhr.onload = () => {
+      finish();
       const text = xhr.responseText ?? "";
       let parsed: unknown = null;
       if (text) {
@@ -91,16 +118,29 @@ export async function uploadFile(
     };
 
     xhr.onerror = () => {
+      finish();
       reject(new ApiError(i18n.global.t("errors.uploadFailed"), 0));
     };
 
     xhr.onabort = () => {
+      finish();
       reject(new ApiError(i18n.global.t("errors.uploadAborted"), 0));
     };
 
     const body = new FormData();
     body.append("file", file);
     xhr.send(body);
+
+    if (abortSignal) {
+      if (abortSignal.aborted) {
+        xhr.abort();
+      } else {
+        signalHandler = () => {
+          xhr.abort();
+        };
+        abortSignal.addEventListener("abort", signalHandler);
+      }
+    }
   });
 }
 
@@ -109,6 +149,7 @@ export async function bulkUploadFiles(
   visibility: "private" | "local" | "public" = "public",
   onProgress?: (percent: number) => void,
   libraryId?: string,
+  abortSignal?: AbortSignal,
 ): Promise<BulkFileUploadResult[]> {
   const auth = getAuthHeader();
   if (!auth) {
@@ -123,6 +164,11 @@ export async function bulkUploadFiles(
   const totalSize = files.reduce((sum, file) => sum + file.size, 0);
 
   return new Promise((resolve, reject) => {
+    if (abortSignal?.aborted) {
+      reject(new ApiError(i18n.global.t("errors.uploadAborted"), 0));
+      return;
+    }
+
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
     xhr.setRequestHeader("Authorization", auth);
@@ -131,7 +177,15 @@ export async function bulkUploadFiles(
       xhr.upload.onprogress = makeProgressHandler(onProgress, totalSize);
     }
 
+    let signalHandler: (() => void) | null = null;
+
+    const finish = () => {
+      cleanupSignalHandler(abortSignal, signalHandler);
+      signalHandler = null;
+    };
+
     xhr.onload = () => {
+      finish();
       const text = xhr.responseText ?? "";
       let parsed: unknown = null;
       if (text) {
@@ -155,16 +209,29 @@ export async function bulkUploadFiles(
     };
 
     xhr.onerror = () => {
+      finish();
       reject(new ApiError(i18n.global.t("errors.uploadFailed"), 0));
     };
 
     xhr.onabort = () => {
+      finish();
       reject(new ApiError(i18n.global.t("errors.uploadAborted"), 0));
     };
 
     const body = new FormData();
     files.forEach((file) => body.append("files", file));
     xhr.send(body);
+
+    if (abortSignal) {
+      if (abortSignal.aborted) {
+        xhr.abort();
+      } else {
+        signalHandler = () => {
+          xhr.abort();
+        };
+        abortSignal.addEventListener("abort", signalHandler);
+      }
+    }
   });
 }
 

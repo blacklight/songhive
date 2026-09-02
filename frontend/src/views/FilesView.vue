@@ -44,6 +44,8 @@ const lastUploadTotal = ref(0);
 const fileInput = ref<HTMLInputElement | null>(null);
 const libraries = ref<LibraryResponse[]>([]);
 const selectedLibraryId = ref("");
+const uploadController = ref<AbortController | null>(null);
+const uploadCancelled = ref(false);
 
 const duplicateOpen = ref(false);
 const duplicateWarning = ref<ExternalDuplicateWarning | null>(null);
@@ -87,6 +89,12 @@ function onDuplicateClosed() {
     duplicateResolve(null);
     duplicateResolve = null;
   }
+}
+
+function cancelUpload() {
+  uploadCancelled.value = true;
+  onDuplicateClosed();
+  uploadController.value?.abort();
 }
 
 const visibilityOptions = computed(() => [
@@ -264,12 +272,17 @@ async function onFileChange(event: Event) {
 
   uploadError.value = null;
   uploadFailures.value = [];
+  uploadCancelled.value = false;
   uploading.value = true;
   isBulkUploading.value = files.length > 1;
   currentFileIndex.value = 0;
   currentFileProgress.value = 0;
   selectedFiles.value = files;
   lastUploadTotal.value = files.length;
+
+  const controller = new AbortController();
+  uploadController.value = controller;
+  const signal = controller.signal;
 
   const results: FileUploadResult[] = [];
   const libraryId = selectedLibraryId.value || undefined;
@@ -299,9 +312,14 @@ async function onFileChange(event: Event) {
             currentFileProgress.value = percent;
           },
           libraryId,
+          signal,
         );
         results.push(result);
       } catch (err) {
+        if (uploadCancelled.value) {
+          uploadError.value = t("pages.files.uploadCancelled");
+          return;
+        }
         if (
           err instanceof ApiError &&
           err.status === 409 &&
@@ -312,6 +330,10 @@ async function onFileChange(event: Event) {
           const resolved = await waitForDuplicate(
             err.body as ExternalDuplicateWarning,
           );
+          if (uploadCancelled.value) {
+            uploadError.value = t("pages.files.uploadCancelled");
+            return;
+          }
           if (resolved) {
             addResolvedResult(resolved, file.name);
           } else {
@@ -340,10 +362,18 @@ async function onFileChange(event: Event) {
             currentFileProgress.value = percent;
           },
           libraryId,
+          signal,
         );
         for (const [index, item] of bulkResults.entries()) {
+          if (uploadCancelled.value) {
+            break;
+          }
           if (item.status === "external_duplicate" && item.external_duplicate) {
             const resolved = await waitForDuplicate(item.external_duplicate);
+            if (uploadCancelled.value) {
+              uploadError.value = t("pages.files.uploadCancelled");
+              return;
+            }
             if (resolved) {
               addResolvedResult(resolved, item.filename ?? files[index].name);
             } else {
@@ -367,6 +397,10 @@ async function onFileChange(event: Event) {
           }
         }
       } catch (err) {
+        if (uploadCancelled.value) {
+          uploadError.value = t("pages.files.uploadCancelled");
+          return;
+        }
         const message = getErrorMessage(err);
         for (const file of files) {
           uploadFailures.value.push({ name: file.name, message });
@@ -374,6 +408,11 @@ async function onFileChange(event: Event) {
       } finally {
         currentFileProgress.value = 100;
       }
+    }
+
+    if (uploadCancelled.value) {
+      uploadError.value = t("pages.files.uploadCancelled");
+      return;
     }
 
     if (uploadFailures.value.length === 0) {
@@ -434,6 +473,8 @@ async function onFileChange(event: Event) {
     selectedFiles.value = [];
     currentFileIndex.value = 0;
     currentFileProgress.value = 0;
+    uploadController.value = null;
+    uploadCancelled.value = false;
     resetInput();
   }
 }
@@ -506,6 +547,19 @@ async function onFileChange(event: Event) {
       <p v-if="uploading" class="files-view__progress-text">
         {{ progressLabel }}
       </p>
+
+      <div v-if="uploading" class="files-view__progress-actions">
+        <AppButton
+          class="files-view__cancel"
+          icon="xmark"
+          variant="danger"
+          size="sm"
+          :title="t('common.cancel')"
+          @click="cancelUpload"
+        >
+          {{ t("common.cancel") }}
+        </AppButton>
+      </div>
 
       <div v-if="uploadError" class="files-view__error" role="alert">
         <span>{{ uploadError }}</span>
@@ -782,5 +836,15 @@ async function onFileChange(event: Event) {
   margin: 0;
   font-size: 0.875rem;
   color: var(--color-text-muted);
+}
+
+.files-view__progress-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+
+.files-view__cancel {
+  flex-shrink: 0;
 }
 </style>

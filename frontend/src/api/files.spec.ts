@@ -32,6 +32,8 @@ interface MockXhr {
   onload: (() => void) | null;
   onerror: (() => void) | null;
   onabort: (() => void) | null;
+  resolve?: () => void;
+  reject?: () => void;
 }
 
 function createMockXHR(config: {
@@ -45,21 +47,53 @@ function createMockXHR(config: {
     total: number;
     lengthComputable?: boolean;
   }>;
+  manual?: boolean;
 }): MockXhr {
   const {
     status = 200,
     statusText = "OK",
     responseText = "",
     trigger = "load",
+    manual = false,
   } = config;
 
   const headers: Record<string, string | null> = config.headers ?? {};
+  let done = false;
+
+  function fireProgress() {
+    const progressSteps = config.progressSteps ?? [{ loaded: 100, total: 100 }];
+    for (const step of progressSteps) {
+      if (xhr.upload.onprogress) {
+        xhr.upload.onprogress({
+          lengthComputable: step.lengthComputable ?? true,
+          ...step,
+        } as ProgressEvent);
+      }
+    }
+  }
+
+  function fire(event: "load" | "error" | "abort") {
+    if (done) return;
+    done = true;
+    if (event === "load") {
+      fireProgress();
+      if (xhr.onload) xhr.onload();
+    } else if (event === "error" && xhr.onerror) {
+      xhr.onerror();
+    } else if (event === "abort" && xhr.onabort) {
+      xhr.onabort();
+    }
+  }
 
   const xhr: MockXhr = {
     open: vi.fn(),
     setRequestHeader: vi.fn(),
-    send: vi.fn(),
-    abort: vi.fn(),
+    send: vi.fn(() => {
+      if (!manual) {
+        queueMicrotask(() => fire(trigger));
+      }
+    }),
+    abort: vi.fn(() => fire("abort")),
     getResponseHeader: vi.fn(
       (name: string) => headers[name.toLowerCase()] ?? null,
     ),
@@ -70,30 +104,9 @@ function createMockXHR(config: {
     onload: null,
     onerror: null,
     onabort: null,
+    resolve: () => fire("load"),
+    reject: () => fire("error"),
   };
-
-  xhr.send = vi.fn(() => {
-    queueMicrotask(() => {
-      if (trigger === "load") {
-        const progressSteps = config.progressSteps ?? [
-          { loaded: 100, total: 100 },
-        ];
-        for (const step of progressSteps) {
-          if (xhr.upload.onprogress) {
-            xhr.upload.onprogress({
-              lengthComputable: step.lengthComputable ?? true,
-              ...step,
-            } as ProgressEvent);
-          }
-        }
-        if (xhr.onload) xhr.onload();
-      } else if (trigger === "error" && xhr.onerror) {
-        xhr.onerror();
-      } else if (trigger === "abort" && xhr.onabort) {
-        xhr.onabort();
-      }
-    });
-  });
 
   return xhr;
 }
@@ -292,6 +305,54 @@ describe("uploadFile", () => {
       message: i18n.global.t("errors.uploadAborted"),
     });
   });
+
+  it("calls xhr.abort and rejects when the signal is aborted", async () => {
+    mockXhr = createMockXHR({ manual: true });
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      vi.fn(() => mockXhr),
+    );
+
+    const file = new File(["contents"], "avatar.png", { type: "image/png" });
+    const controller = new AbortController();
+    const promise = uploadFile(
+      file,
+      "public",
+      undefined,
+      undefined,
+      controller.signal,
+    );
+
+    expect(mockXhr.send).toHaveBeenCalledTimes(1);
+    controller.abort();
+
+    await expect(promise).rejects.toMatchObject({
+      status: 0,
+      message: i18n.global.t("errors.uploadAborted"),
+    });
+    expect(mockXhr.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects immediately when given an already-aborted signal", async () => {
+    mockXhr = createMockXHR({
+      responseText: JSON.stringify(sampleFile),
+    });
+    const stub = vi.fn(() => mockXhr);
+    vi.stubGlobal("XMLHttpRequest", stub);
+
+    const file = new File(["contents"], "avatar.png", { type: "image/png" });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      uploadFile(file, "public", undefined, undefined, controller.signal),
+    ).rejects.toMatchObject({
+      status: 0,
+      message: i18n.global.t("errors.uploadAborted"),
+    });
+    expect(mockXhr.send).not.toHaveBeenCalled();
+    expect(stub).not.toHaveBeenCalled();
+  });
 });
 
 const sampleBulkResult: BulkFileUploadResult = {
@@ -444,6 +505,33 @@ describe("bulkUploadFiles", () => {
       status: 0,
       message: i18n.global.t("errors.uploadFailed"),
     });
+  });
+
+  it("calls xhr.abort and rejects when the signal is aborted", async () => {
+    mockXhr = createMockXHR({ manual: true });
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      vi.fn(() => mockXhr),
+    );
+
+    const file = new File(["contents"], "avatar.png", { type: "image/png" });
+    const controller = new AbortController();
+    const promise = bulkUploadFiles(
+      [file],
+      "public",
+      undefined,
+      undefined,
+      controller.signal,
+    );
+
+    expect(mockXhr.send).toHaveBeenCalledTimes(1);
+    controller.abort();
+
+    await expect(promise).rejects.toMatchObject({
+      status: 0,
+      message: i18n.global.t("errors.uploadAborted"),
+    });
+    expect(mockXhr.abort).toHaveBeenCalledTimes(1);
   });
 });
 

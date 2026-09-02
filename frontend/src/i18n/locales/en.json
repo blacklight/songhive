@@ -225,6 +225,7 @@
       "uploadSuccessPlural": "{count} files uploaded.",
       "uploadPartial": "Uploaded {success} of {total} files.",
       "uploadAllFailed": "Could not upload any files.",
+      "uploadCancelled": "Upload cancelled.",
       "uploadError": "Could not upload file: {message}",
       "fileUploadError": "Could not upload \"{name}\": {message}",
       "detailTitle": "File details",

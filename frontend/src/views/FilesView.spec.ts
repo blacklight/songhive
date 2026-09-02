@@ -193,6 +193,7 @@ describe("FilesView", () => {
       "private",
       expect.any(Function),
       undefined,
+      expect.any(AbortSignal),
     );
     expect(router.push).toHaveBeenCalledWith({
       name: "file",
@@ -235,6 +236,7 @@ describe("FilesView", () => {
       "public",
       expect.any(Function),
       "lib2",
+      expect.any(AbortSignal),
     );
     expect(router.push).toHaveBeenCalledWith({
       name: "track",
@@ -299,6 +301,39 @@ describe("FilesView", () => {
     expect(router.push).not.toHaveBeenCalled();
   });
 
+  it("shows a cancel button and cancels an in-progress upload", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    vi.mocked(uploadFile).mockImplementation(
+      (_file, _visibility, _onProgress, _libraryId, signal) => {
+        capturedSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        });
+      },
+    );
+
+    await mountView();
+
+    const fileInput = wrapper.find('input[type="file"]')
+      .element as HTMLInputElement;
+    const file = new File(["contents"], "song.mp3", { type: "audio/mpeg" });
+    setFiles(fileInput, [file]);
+    fileInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const cancelButton = wrapper.find(".files-view__cancel");
+    expect(cancelButton.exists()).toBe(true);
+
+    await cancelButton.trigger("click");
+    await flushPromises();
+
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(wrapper.find(".files-view__cancel").exists()).toBe(false);
+    expect(wrapper.text()).toContain(
+      i18n.global.t("pages.files.uploadCancelled"),
+    );
+  });
+
   it("navigates to the track when the upload returns a trackId", async () => {
     vi.mocked(uploadFile).mockResolvedValue({
       ...createStoredFile("f1"),
@@ -358,6 +393,7 @@ describe("FilesView", () => {
       "public",
       expect.any(Function),
       undefined,
+      expect.any(AbortSignal),
     );
     expect(router.push).not.toHaveBeenCalled();
     expect(toast.toasts).toHaveLength(1);
