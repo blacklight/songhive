@@ -87,6 +87,7 @@ const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
 const {
   items: tracks,
   loading: tracksLoading,
+  loadingMore: tracksLoadingMore,
   error: tracksError,
   hasMore: tracksHasMore,
   load: loadTracks,
@@ -648,6 +649,7 @@ watch(
         <TrackList
           :tracks="tracks"
           :loading="tracksLoading"
+          :loading-more="tracksLoadingMore"
           :auto-scroll="false"
           :context="library.name"
           :removable-from="removableFrom"
@@ -660,7 +662,7 @@ watch(
           <AppButton
             v-if="tracksHasMore"
             variant="secondary"
-            :loading="tracksLoading"
+            :loading="tracksLoadingMore"
             :disabled="tracksLoading"
             icon="chevron-down"
             @click="loadMoreTracks"

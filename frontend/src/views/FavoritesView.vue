@@ -23,6 +23,7 @@ const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 const {
   items,
   loading,
+  loadingMore,
   error,
   query,
   hasMore,
@@ -180,6 +181,7 @@ onMounted(() => load());
         v-else
         :tracks="items"
         :loading="loading"
+        :loading-more="loadingMore"
         :favorite-label="t('common.unfavorite')"
         :favorite-managed="true"
         :deletable="true"
@@ -192,7 +194,7 @@ onMounted(() => load());
         <AppButton
           icon="chevron-down"
           variant="secondary"
-          :loading="loading"
+          :loading="loadingMore"
           :disabled="loading"
           @click="loadMore"
         >

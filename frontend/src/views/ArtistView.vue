@@ -81,6 +81,7 @@ const {
 const {
   items: tracks,
   loading: tracksLoading,
+  loadingMore: tracksLoadingMore,
   error: tracksError,
   hasMore: tracksHasMore,
   sortBy: trackSortBy,
@@ -399,6 +400,7 @@ watch(
         <TrackList
           :tracks="tracks"
           :loading="tracksLoading"
+          :loading-more="tracksLoadingMore"
           :auto-scroll="false"
           :context="artist.name"
           :deletable="true"
@@ -411,7 +413,7 @@ watch(
             v-if="tracksHasMore"
             icon="chevron-down"
             variant="secondary"
-            :loading="tracksLoading"
+            :loading="tracksLoadingMore"
             :disabled="tracksLoading"
             @click="loadMoreTracks"
           >

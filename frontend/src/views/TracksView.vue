@@ -21,6 +21,8 @@ const player = usePlayerStore();
 const {
   items,
   loading,
+  loadingMore,
+  loadingPrevious,
   error,
   query,
   hasMore,
@@ -138,7 +140,7 @@ watch(
         <AppButton
           icon="chevron-up"
           variant="secondary"
-          :loading="loading"
+          :loading="loadingPrevious"
           :disabled="loading"
           @click="loadPrevious"
         >
@@ -149,6 +151,8 @@ watch(
       <TrackList
         :tracks="items"
         :loading="loading"
+        :loading-more="loadingMore"
+        :loading-previous="loadingPrevious"
         :deletable="authStore.isAuthenticated"
         @share="onTrackShare"
         @removed="onRemoved"
@@ -171,7 +175,7 @@ watch(
         v-if="hasMore"
         icon="chevron-down"
         variant="secondary"
-        :loading="loading"
+        :loading="loadingMore"
         :disabled="loading"
         @click="loadMore"
       >

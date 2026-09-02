@@ -52,6 +52,8 @@ export function useChunkList<T>(
 
   const items: Ref<T[]> = ref([]);
   const loading = ref(false);
+  const loadingMore = ref(false);
+  const loadingPrevious = ref(false);
   const error: Ref<string | null> = ref(null);
   const query = ref("");
   const limit = ref(defaultLimit);
@@ -93,14 +95,23 @@ export function useChunkList<T>(
     await router.replace({ query: newQuery });
   }
 
+  function isBusy() {
+    return loading.value || loadingMore.value || loadingPrevious.value;
+  }
+
   async function doLoad(
     targetOffset: number,
     aroundTrackId?: string,
     mode: "replace" | "prepend" | "append" = "replace",
   ) {
-    if (loading.value) return;
+    if (isBusy()) return;
 
     loading.value = true;
+    if (mode === "append") {
+      loadingMore.value = true;
+    } else if (mode === "prepend") {
+      loadingPrevious.value = true;
+    }
     error.value = null;
 
     try {
@@ -133,10 +144,16 @@ export function useChunkList<T>(
         (err instanceof Error ? err.message : "Unknown error");
     } finally {
       loading.value = false;
+      if (mode === "append") {
+        loadingMore.value = false;
+      } else if (mode === "prepend") {
+        loadingPrevious.value = false;
+      }
     }
   }
 
   async function load(reset = false, aroundTrackId?: string) {
+    if (isBusy()) return;
     lastWasReset.value = reset;
     if (reset) {
       items.value = [];
@@ -148,18 +165,19 @@ export function useChunkList<T>(
   }
 
   function loadMore() {
-    if (loading.value || !hasMore.value) return;
+    if (isBusy() || !hasMore.value) return;
     const targetOffset = startOffset.value + items.value.length;
     return doLoad(targetOffset, undefined, "append");
   }
 
   function loadPrevious() {
-    if (loading.value || !hasPrevious.value) return;
+    if (isBusy() || !hasPrevious.value) return;
     const targetOffset = Math.max(0, startOffset.value - limit.value);
     return doLoad(targetOffset, undefined, "prepend");
   }
 
   function loadAround(aroundTrackId: string) {
+    if (isBusy()) return;
     lastWasReset.value = true;
     items.value = [];
     startOffset.value = 0;
@@ -193,6 +211,8 @@ export function useChunkList<T>(
   return {
     items,
     loading,
+    loadingMore,
+    loadingPrevious,
     error,
     query,
     limit,

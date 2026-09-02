@@ -13,6 +13,7 @@ import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppModal from "@/components/feedback/AppModal.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import ContextMenu from "@/components/ui/ContextMenu.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import { formatTime } from "@/utils/time";
@@ -44,6 +45,8 @@ export interface Props {
   tracks: TrackResponse[];
   context?: string;
   loading?: boolean;
+  loadingMore?: boolean;
+  loadingPrevious?: boolean;
   showArtwork?: boolean;
   enrich?: Map<string, TrackEnrich>;
   favoriteLabel?: string;
@@ -61,6 +64,8 @@ export interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
+  loadingMore: false,
+  loadingPrevious: false,
   showArtwork: false,
   autoScroll: true,
   favoriteManaged: false,
@@ -210,6 +215,10 @@ interface TrackListRow extends Record<string, unknown> {
   track: QueueTrack;
   selected: boolean;
 }
+
+const isFullLoading = computed(
+  () => props.loading && !props.loadingMore && !props.loadingPrevious,
+);
 
 const canEdit = computed(
   () => props.removableFrom?.canRemove || props.deletable,
@@ -1281,270 +1290,85 @@ async function onMenuSelect(key: string) {
       </div>
     </div>
 
-    <AppTable
-      v-if="!isCompact"
-      :columns="columns"
-      :rows="rows"
-      :row-key="rowKey"
-      :row-class="rowClass"
-      :loading="props.loading"
-      :empty-label="
-        props.emptyLabel ??
-        t('browse.list.empty', { entity: t('browse.entities.tracks') })
-      "
-    >
-      <template #column-selected>
-        <AppCheckbox
-          :model-value="allSelected"
-          :indeterminate="someSelected"
-          :aria-label="t('browse.bulkEdit.selectAll')"
-          @update:model-value="toggleAll"
-        />
-      </template>
+    <template v-if="!isCompact">
+      <div
+        v-if="props.loadingPrevious"
+        class="track-list__spinner track-list__spinner--previous"
+      >
+        <AppSpinner size="sm" />
+      </div>
 
-      <template #row-selected="{ row }">
-        <AppCheckbox
-          :model-value="asTrackRow(row).selected"
-          :aria-label="t('browse.bulkEdit.selectAll')"
-          @update:model-value="toggleRow(asTrackRow(row).track)"
-        />
-      </template>
-
-      <template #row-reorder="{ row }">
-        <div
-          class="track-list__reorder-cell"
-          :class="{ 'track-list__reorder-cell--dragging': dragState.active }"
-        >
-          <button
-            type="button"
-            class="track-list__handle"
-            :class="{ 'track-list__handle--grabbing': dragState.active }"
-            :aria-label="t('browse.reorder.drag')"
-            :disabled="isReordering"
-            @pointerdown="onHandlePointerDown($event, asTrackRow(row).track)"
-            @pointermove="onHandlePointerMove"
-            @pointerup="onHandlePointerUp"
-            @pointercancel="onHandlePointerCancel"
-          >
-            <AppIcon name="grip-vertical" />
-          </button>
-          <div class="track-list__reorder-buttons">
-            <AppButton
-              variant="ghost"
-              size="sm"
-              icon="chevron-up"
-              :aria-label="t('browse.reorder.moveUp')"
-              :disabled="!canMoveRowUp(asTrackRow(row).index)"
-              @click="moveRowUp(asTrackRow(row).index)"
-            />
-            <AppButton
-              variant="ghost"
-              size="sm"
-              icon="chevron-down"
-              :aria-label="t('browse.reorder.moveDown')"
-              :disabled="!canMoveRowDown(asTrackRow(row).index)"
-              @click="moveRowDown(asTrackRow(row).index)"
-            />
-          </div>
-        </div>
-      </template>
-
-      <template #row-num="{ row }">
-        <span
-          v-if="isCurrentTrack(asTrackRow(row).track)"
-          class="track-list__playing"
-          :class="{
-            'track-list__playing--active': isPlayingCurrent(
-              asTrackRow(row).track,
-            ),
-          }"
-          :aria-label="t('player.nowPlaying')"
-        >
-          <span
-            v-for="bar in 3"
-            :key="bar"
-            class="track-list__playing-bar"
-            aria-hidden="true"
-          />
-        </span>
-        <span v-else class="track-list__num">
-          {{ asTrackRow(row).num }}
-        </span>
-      </template>
-
-      <template #row-title="{ row }">
-        <button
-          type="button"
-          class="track-list__title-btn"
-          @click="play(asTrackRow(row).index)"
-        >
-          <img
-            v-if="showArtwork && asTrackRow(row).track.artwork_url"
-            :src="asTrackRow(row).track.artwork_url"
-            class="track-list__artwork"
-            alt=""
-          />
-          <span
-            :title="asTrackRow(row).track.title"
-            class="track-list__title-text"
-          >
-            {{ asTrackRow(row).track.title }}
-          </span>
-          <AppIcon
-            v-if="isTrackFavorited(asTrackRow(row).track)"
-            name="heart"
-            variant="solid"
-            class="track-list__favorite-icon"
-            :aria-label="t('common.favorite')"
-          />
-          <ExternalTrackBadge
-            :is-external="asTrackRow(row).track.is_external"
-            :provider="asTrackRow(row).track.external_provider_type"
-            :state="asTrackRow(row).track.external_state"
-          />
-        </button>
-      </template>
-
-      <template #row-artist="{ row }">
-        <RouterLink
-          v-if="asTrackRow(row).track.artist_id"
-          :to="`/artists/${asTrackRow(row).track.artist_id}`"
-          :title="asTrackRow(row).artist"
-          class="track-list__link"
-        >
-          {{ asTrackRow(row).artist }}
-        </RouterLink>
-        <span
-          v-else
-          :title="asTrackRow(row).artist"
-          class="track-list__cell-text"
-        >
-          {{ asTrackRow(row).artist }}
-        </span>
-      </template>
-
-      <template #row-album="{ row }">
-        <RouterLink
-          v-if="asTrackRow(row).track.album_id"
-          :to="`/albums/${asTrackRow(row).track.album_id}`"
-          :title="asTrackRow(row).album"
-          class="track-list__link"
-        >
-          {{ asTrackRow(row).album }}
-        </RouterLink>
-        <span
-          v-else
-          :title="asTrackRow(row).album"
-          class="track-list__cell-text"
-        >
-          {{ asTrackRow(row).album }}
-        </span>
-      </template>
-
-      <template #row-actions="{ row }">
-        <AppButton
-          variant="ghost"
-          size="sm"
-          :aria-label="t('browse.detail.actions')"
-          :title="t('browse.detail.actions')"
-          icon="ellipsis-vertical"
-          :disabled="bulkMode || reorderMode"
-          @click="openMenu($event, asTrackRow(row).track)"
-        />
-      </template>
-    </AppTable>
-    <ul
-      v-else
-      class="track-list__compact"
-      role="list"
-      :aria-busy="props.loading ? 'true' : 'false'"
-    >
-      <template v-if="props.loading">
-        <li
-          v-for="i in 3"
-          :key="`loading-${i}`"
-          class="track-list__compact-item track-list__compact-item--loading"
-        >
-          <SkeletonLoader variant="list-row" />
-        </li>
-      </template>
-      <li v-else-if="rows.length === 0" class="track-list__compact-empty">
-        {{
+      <AppTable
+        :columns="columns"
+        :rows="rows"
+        :row-key="rowKey"
+        :row-class="rowClass"
+        :loading="isFullLoading"
+        :empty-label="
           props.emptyLabel ??
-          t("browse.list.empty", { entity: t("browse.entities.tracks") })
-        }}
-      </li>
-      <template v-else>
-        <li
-          v-for="(row, index) in rows"
-          :key="rowKey(row, index)"
-          class="track-list__compact-item"
-          :class="{
-            'track-list__compact-item--current': isCurrentTrack(
-              asTrackRow(row).track,
-            ),
-            'track-list__compact-item--drop-target':
-              dragState.active &&
-              asTrackRow(row).index === dragState.dropTargetIndex,
-          }"
-        >
+          t('browse.list.empty', { entity: t('browse.entities.tracks') })
+        "
+      >
+        <template #column-selected>
+          <AppCheckbox
+            :model-value="allSelected"
+            :indeterminate="someSelected"
+            :aria-label="t('browse.bulkEdit.selectAll')"
+            @update:model-value="toggleAll"
+          />
+        </template>
+
+        <template #row-selected="{ row }">
+          <AppCheckbox
+            :model-value="asTrackRow(row).selected"
+            :aria-label="t('browse.bulkEdit.selectAll')"
+            @update:model-value="toggleRow(asTrackRow(row).track)"
+          />
+        </template>
+
+        <template #row-reorder="{ row }">
           <div
-            v-if="(bulkMode || reorderMode) && canEdit"
-            class="track-list__compact-select"
+            class="track-list__reorder-cell"
+            :class="{ 'track-list__reorder-cell--dragging': dragState.active }"
           >
-            <AppCheckbox
-              :model-value="asTrackRow(row).selected"
-              :aria-label="t('browse.bulkEdit.selectAll')"
-              @update:model-value="toggleRow(asTrackRow(row).track)"
-            />
-          </div>
-          <template v-if="reorderMode && canEdit">
-            <div
-              class="track-list__compact-reorder"
-              :class="{
-                'track-list__compact-reorder--dragging': dragState.active,
-              }"
+            <button
+              type="button"
+              class="track-list__handle"
+              :class="{ 'track-list__handle--grabbing': dragState.active }"
+              :aria-label="t('browse.reorder.drag')"
+              :disabled="isReordering"
+              @pointerdown="onHandlePointerDown($event, asTrackRow(row).track)"
+              @pointermove="onHandlePointerMove"
+              @pointerup="onHandlePointerUp"
+              @pointercancel="onHandlePointerCancel"
             >
-              <button
-                type="button"
-                class="track-list__compact-handle"
-                :class="{
-                  'track-list__compact-handle--grabbing': dragState.active,
-                }"
-                :aria-label="t('browse.reorder.drag')"
-                :disabled="isReordering"
-                @pointerdown="
-                  onHandlePointerDown($event, asTrackRow(row).track)
-                "
-                @pointermove="onHandlePointerMove"
-                @pointerup="onHandlePointerUp"
-                @pointercancel="onHandlePointerCancel"
-              >
-                <AppIcon name="grip-vertical" />
-              </button>
-              <div class="track-list__compact-reorder-buttons">
-                <AppButton
-                  variant="ghost"
-                  size="sm"
-                  icon="chevron-up"
-                  :aria-label="t('browse.reorder.moveUp')"
-                  :disabled="!canMoveRowUp(index)"
-                  @click="moveRowUp(index)"
-                />
-                <AppButton
-                  variant="ghost"
-                  size="sm"
-                  icon="chevron-down"
-                  :aria-label="t('browse.reorder.moveDown')"
-                  :disabled="!canMoveRowDown(index)"
-                  @click="moveRowDown(index)"
-                />
-              </div>
+              <AppIcon name="grip-vertical" />
+            </button>
+            <div class="track-list__reorder-buttons">
+              <AppButton
+                variant="ghost"
+                size="sm"
+                icon="chevron-up"
+                :aria-label="t('browse.reorder.moveUp')"
+                :disabled="!canMoveRowUp(asTrackRow(row).index)"
+                @click="moveRowUp(asTrackRow(row).index)"
+              />
+              <AppButton
+                variant="ghost"
+                size="sm"
+                icon="chevron-down"
+                :aria-label="t('browse.reorder.moveDown')"
+                :disabled="!canMoveRowDown(asTrackRow(row).index)"
+                @click="moveRowDown(asTrackRow(row).index)"
+              />
             </div>
-          </template>
+          </div>
+        </template>
+
+        <template #row-num="{ row }">
           <span
             v-if="isCurrentTrack(asTrackRow(row).track)"
-            class="track-list__compact-number track-list__playing"
+            class="track-list__playing"
             :class="{
               'track-list__playing--active': isPlayingCurrent(
                 asTrackRow(row).track,
@@ -1559,52 +1383,81 @@ async function onMenuSelect(key: string) {
               aria-hidden="true"
             />
           </span>
-          <span v-else class="track-list__compact-number" aria-hidden="true">
+          <span v-else class="track-list__num">
             {{ asTrackRow(row).num }}
           </span>
+        </template>
 
-          <div class="track-list__compact-main">
-            <button
-              type="button"
-              class="track-list__compact-title"
+        <template #row-title="{ row }">
+          <button
+            type="button"
+            class="track-list__title-btn"
+            @click="play(asTrackRow(row).index)"
+          >
+            <img
+              v-if="showArtwork && asTrackRow(row).track.artwork_url"
+              :src="asTrackRow(row).track.artwork_url"
+              class="track-list__artwork"
+              alt=""
+            />
+            <span
               :title="asTrackRow(row).track.title"
-              @click="play(asTrackRow(row).index)"
+              class="track-list__title-text"
             >
               {{ asTrackRow(row).track.title }}
-              <AppIcon
-                v-if="isTrackFavorited(asTrackRow(row).track)"
-                name="heart"
-                variant="solid"
-                class="track-list__favorite-icon"
-                :aria-label="t('common.favorite')"
-              />
-              <ExternalTrackBadge
-                :is-external="asTrackRow(row).track.is_external"
-                :provider="asTrackRow(row).track.external_provider_type"
-                :state="asTrackRow(row).track.external_state"
-              />
-            </button>
-            <RouterLink
-              v-if="asTrackRow(row).track.artist_id"
-              :to="`/artists/${asTrackRow(row).track.artist_id}`"
-              :title="asTrackRow(row).artist"
-              class="track-list__compact-artist"
-            >
-              {{ asTrackRow(row).artist }}
-            </RouterLink>
-            <span
-              v-else
-              class="track-list__compact-artist"
-              :title="asTrackRow(row).artist"
-            >
-              {{ asTrackRow(row).artist }}
             </span>
-          </div>
+            <AppIcon
+              v-if="isTrackFavorited(asTrackRow(row).track)"
+              name="heart"
+              variant="solid"
+              class="track-list__favorite-icon"
+              :aria-label="t('common.favorite')"
+            />
+            <ExternalTrackBadge
+              :is-external="asTrackRow(row).track.is_external"
+              :provider="asTrackRow(row).track.external_provider_type"
+              :state="asTrackRow(row).track.external_state"
+            />
+          </button>
+        </template>
 
-          <span class="track-list__compact-duration">
-            {{ asTrackRow(row).duration }}
+        <template #row-artist="{ row }">
+          <RouterLink
+            v-if="asTrackRow(row).track.artist_id"
+            :to="`/artists/${asTrackRow(row).track.artist_id}`"
+            :title="asTrackRow(row).artist"
+            class="track-list__link"
+          >
+            {{ asTrackRow(row).artist }}
+          </RouterLink>
+          <span
+            v-else
+            :title="asTrackRow(row).artist"
+            class="track-list__cell-text"
+          >
+            {{ asTrackRow(row).artist }}
           </span>
+        </template>
 
+        <template #row-album="{ row }">
+          <RouterLink
+            v-if="asTrackRow(row).track.album_id"
+            :to="`/albums/${asTrackRow(row).track.album_id}`"
+            :title="asTrackRow(row).album"
+            class="track-list__link"
+          >
+            {{ asTrackRow(row).album }}
+          </RouterLink>
+          <span
+            v-else
+            :title="asTrackRow(row).album"
+            class="track-list__cell-text"
+          >
+            {{ asTrackRow(row).album }}
+          </span>
+        </template>
+
+        <template #row-actions="{ row }">
           <AppButton
             variant="ghost"
             size="sm"
@@ -1614,9 +1467,198 @@ async function onMenuSelect(key: string) {
             :disabled="bulkMode || reorderMode"
             @click="openMenu($event, asTrackRow(row).track)"
           />
+        </template>
+      </AppTable>
+
+      <div
+        v-if="props.loadingMore"
+        class="track-list__spinner track-list__spinner--more"
+      >
+        <AppSpinner size="sm" />
+      </div>
+    </template>
+
+    <template v-else>
+      <ul
+        class="track-list__compact"
+        role="list"
+        :aria-busy="isFullLoading ? 'true' : 'false'"
+      >
+        <li
+          v-if="props.loadingPrevious"
+          class="track-list__compact-item track-list__compact-item--loading"
+        >
+          <AppSpinner size="sm" />
         </li>
-      </template>
-    </ul>
+
+        <template v-if="isFullLoading">
+          <li
+            v-for="i in 3"
+            :key="`loading-${i}`"
+            class="track-list__compact-item track-list__compact-item--loading"
+          >
+            <SkeletonLoader variant="list-row" />
+          </li>
+        </template>
+
+        <li v-else-if="rows.length === 0" class="track-list__compact-empty">
+          {{
+            props.emptyLabel ??
+            t("browse.list.empty", { entity: t("browse.entities.tracks") })
+          }}
+        </li>
+
+        <template v-else>
+          <li
+            v-for="(row, index) in rows"
+            :key="rowKey(row, index)"
+            class="track-list__compact-item"
+            :class="{
+              'track-list__compact-item--current': isCurrentTrack(
+                asTrackRow(row).track,
+              ),
+              'track-list__compact-item--drop-target':
+                dragState.active &&
+                asTrackRow(row).index === dragState.dropTargetIndex,
+            }"
+          >
+            <div
+              v-if="(bulkMode || reorderMode) && canEdit"
+              class="track-list__compact-select"
+            >
+              <AppCheckbox
+                :model-value="asTrackRow(row).selected"
+                :aria-label="t('browse.bulkEdit.selectAll')"
+                @update:model-value="toggleRow(asTrackRow(row).track)"
+              />
+            </div>
+            <template v-if="reorderMode && canEdit">
+              <div
+                class="track-list__compact-reorder"
+                :class="{
+                  'track-list__compact-reorder--dragging': dragState.active,
+                }"
+              >
+                <button
+                  type="button"
+                  class="track-list__compact-handle"
+                  :class="{
+                    'track-list__compact-handle--grabbing': dragState.active,
+                  }"
+                  :aria-label="t('browse.reorder.drag')"
+                  :disabled="isReordering"
+                  @pointerdown="
+                    onHandlePointerDown($event, asTrackRow(row).track)
+                  "
+                  @pointermove="onHandlePointerMove"
+                  @pointerup="onHandlePointerUp"
+                  @pointercancel="onHandlePointerCancel"
+                >
+                  <AppIcon name="grip-vertical" />
+                </button>
+                <div class="track-list__compact-reorder-buttons">
+                  <AppButton
+                    variant="ghost"
+                    size="sm"
+                    icon="chevron-up"
+                    :aria-label="t('browse.reorder.moveUp')"
+                    :disabled="!canMoveRowUp(index)"
+                    @click="moveRowUp(index)"
+                  />
+                  <AppButton
+                    variant="ghost"
+                    size="sm"
+                    icon="chevron-down"
+                    :aria-label="t('browse.reorder.moveDown')"
+                    :disabled="!canMoveRowDown(index)"
+                    @click="moveRowDown(index)"
+                  />
+                </div>
+              </div>
+            </template>
+            <span
+              v-if="isCurrentTrack(asTrackRow(row).track)"
+              class="track-list__compact-number track-list__playing"
+              :class="{
+                'track-list__playing--active': isPlayingCurrent(
+                  asTrackRow(row).track,
+                ),
+              }"
+              :aria-label="t('player.nowPlaying')"
+            >
+              <span
+                v-for="bar in 3"
+                :key="bar"
+                class="track-list__playing-bar"
+                aria-hidden="true"
+              />
+            </span>
+            <span v-else class="track-list__compact-number" aria-hidden="true">
+              {{ asTrackRow(row).num }}
+            </span>
+
+            <div class="track-list__compact-main">
+              <button
+                type="button"
+                class="track-list__compact-title"
+                :title="asTrackRow(row).track.title"
+                @click="play(asTrackRow(row).index)"
+              >
+                {{ asTrackRow(row).track.title }}
+                <AppIcon
+                  v-if="isTrackFavorited(asTrackRow(row).track)"
+                  name="heart"
+                  variant="solid"
+                  class="track-list__favorite-icon"
+                  :aria-label="t('common.favorite')"
+                />
+                <ExternalTrackBadge
+                  :is-external="asTrackRow(row).track.is_external"
+                  :provider="asTrackRow(row).track.external_provider_type"
+                  :state="asTrackRow(row).track.external_state"
+                />
+              </button>
+              <RouterLink
+                v-if="asTrackRow(row).track.artist_id"
+                :to="`/artists/${asTrackRow(row).track.artist_id}`"
+                :title="asTrackRow(row).artist"
+                class="track-list__compact-artist"
+              >
+                {{ asTrackRow(row).artist }}
+              </RouterLink>
+              <span
+                v-else
+                class="track-list__compact-artist"
+                :title="asTrackRow(row).artist"
+              >
+                {{ asTrackRow(row).artist }}
+              </span>
+            </div>
+
+            <span class="track-list__compact-duration">
+              {{ asTrackRow(row).duration }}
+            </span>
+
+            <AppButton
+              variant="ghost"
+              size="sm"
+              :aria-label="t('browse.detail.actions')"
+              :title="t('browse.detail.actions')"
+              icon="ellipsis-vertical"
+              :disabled="bulkMode || reorderMode"
+              @click="openMenu($event, asTrackRow(row).track)"
+            />
+          </li>
+        </template>
+
+        <li
+          v-if="props.loadingMore"
+          class="track-list__compact-item track-list__compact-item--loading"
+        >
+          <AppSpinner size="sm" />
+        </li>
+      </ul>
+    </template>
 
     <ContextMenu
       :open="menuOpen"
@@ -1704,6 +1746,20 @@ async function onMenuSelect(key: string) {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: var(--space-3);
+}
+
+.track-list__spinner {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3) 0;
+}
+
+.track-list__spinner--previous {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.track-list__spinner--more {
+  border-top: 1px solid var(--color-border);
 }
 
 .track-list__bulk {

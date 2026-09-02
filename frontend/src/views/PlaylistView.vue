@@ -48,6 +48,7 @@ const toastStore = useToastStore();
 const {
   items: tracks,
   loading: tracksLoading,
+  loadingMore: tracksLoadingMore,
   error: tracksError,
   hasMore: tracksHasMore,
   offset: trackOffset,
@@ -356,6 +357,7 @@ watch(
           ref="trackListRef"
           :tracks="tracks"
           :loading="tracksLoading"
+          :loading-more="tracksLoadingMore"
           :context="playlist.name"
           :removable-from="removableFrom"
           :empty-label="t('browse.playlist.empty')"
@@ -375,7 +377,7 @@ watch(
             v-if="tracksHasMore"
             icon="chevron-down"
             variant="secondary"
-            :loading="tracksLoading"
+            :loading="tracksLoadingMore"
             :disabled="tracksLoading"
             @click="loadMoreTracks"
           >

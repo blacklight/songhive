@@ -58,6 +58,7 @@ const error = ref<string | null>(null);
 const {
   items: tracks,
   loading: tracksLoading,
+  loadingMore: tracksLoadingMore,
   error: tracksError,
   hasMore: tracksHasMore,
   load: loadTracks,
@@ -366,6 +367,7 @@ watch(
         <TrackList
           :tracks="tracks"
           :loading="tracksLoading"
+          :loading-more="tracksLoadingMore"
           :context="artistName"
           :show-artwork="true"
           :deletable="true"
@@ -378,7 +380,7 @@ watch(
             v-if="tracksHasMore"
             icon="chevron-down"
             variant="secondary"
-            :loading="tracksLoading"
+            :loading="tracksLoadingMore"
             :disabled="tracksLoading"
             @click="loadMoreTracks"
           >

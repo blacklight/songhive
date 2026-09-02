@@ -41,6 +41,7 @@ export function useEntityList<T>(
 
   const items: Ref<T[]> = ref([]);
   const loading = ref(false);
+  const loadingMore = ref(false);
   const error: Ref<string | null> = ref(null);
   const query = ref("");
   const limit = ref(defaultLimit);
@@ -113,10 +114,16 @@ export function useEntityList<T>(
     }
   }
 
-  function loadMore() {
-    if (loading.value) return;
+  async function loadMore() {
+    if (loading.value || loadingMore.value || !hasMore.value) return;
+
+    loadingMore.value = true;
     offset.value += limit.value;
-    return load();
+    try {
+      await load();
+    } finally {
+      loadingMore.value = false;
+    }
   }
 
   const search = useDebounce((q: string) => {
@@ -145,6 +152,7 @@ export function useEntityList<T>(
   return {
     items,
     loading,
+    loadingMore,
     error,
     query,
     limit,
