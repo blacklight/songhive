@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Add external library support with syncing, streaming, upload duplicate
+  handling, and a management UI. ([`a4746e3`](https://git.platypush.tech/blacklight/songhive/commit/a4746e35b907a81eb8cc9986be25b716bb7f7532))
+- `external-libraries`: Add a local filesystem adapter with filesystem-change
+  watchdog, provider templates, and optional source-file deletion for external
+  libraries. ([`efda28f`](https://git.platypush.tech/blacklight/songhive/commit/efda28fe61132f2e2ca789d0089410c126faa302))
+- Add separate loading states for pagination in track lists. ([`1ad5f3f`](https://git.platypush.tech/blacklight/songhive/commit/1ad5f3f1f258abcac86d209d46620f5eade485c6))
+- `files`: Add a cancel upload button for single and bulk in-progress uploads. ([`12dee39`](https://git.platypush.tech/blacklight/songhive/commit/12dee39a59334db1c22b0bcb4d9982636a24ba57))
+- `tracks`: Support renaming a track's source filename in the API and UI, and
+  harden download filename sanitization. ([`95ae8ca`](https://git.platypush.tech/blacklight/songhive/commit/95ae8ca995b5d8c5a5b520028deccbf7c8e7fa7f))
+- Handle duplicate playlist track additions by returning a conflict, allowing an
+  override, and adding a confirmation UI. ([`55e46e6`](https://git.platypush.tech/blacklight/songhive/commit/55e46e6b1a586e95f8ce6aaef8ec099d1526ad31))
+
+### Fixed
+
+- `external-libraries`: Correct sync runs, PATCH null handling, and UI polling. ([`695771b`](https://git.platypush.tech/blacklight/songhive/commit/695771b5e3545c8f61a9a87e40acf1d21c3cdd06))
+- `music`: Filter tracks and albums by normalised genre associations, ensuring
+  all tagged tracks appear in genre listings and API results. ([`57fbaa2`](https://git.platypush.tech/blacklight/songhive/commit/57fbaa29d0f2ca2b9b119045cd5aa2295b7f984f))
+
 ## 0.0.14
 
 ### Added
