@@ -415,12 +415,14 @@ const loginItem = {
   flex: 1;
   padding: var(--space-4);
   min-width: 0;
-  padding-bottom: calc(var(--space-4) + 5rem);
+  padding-bottom: calc(
+    var(--space-4) + 5rem + env(safe-area-inset-bottom, 0px)
+  );
 }
 
 .app-layout__player {
   position: fixed;
-  bottom: 0;
+  bottom: env(safe-area-inset-bottom, 0px);
   left: calc(var(--sidebar-width) + 2.05rem);
   right: 0;
   height: 5rem;
@@ -432,6 +434,7 @@ const loginItem = {
 @media (max-width: 767px) {
   .app-layout__menu-toggle {
     display: inline-flex;
+    top: max(var(--space-3), env(safe-area-inset-top, 0px));
   }
 
   .app-layout__brand {
@@ -443,9 +446,11 @@ const loginItem = {
     top: 0;
     left: 0;
     height: 100%;
+    box-sizing: border-box;
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom, 0px));
     transform: translateX(-100%);
     transition: transform var(--transition-base);
-    z-index: 20;
+    z-index: var(--z-sidebar);
   }
 
   .app-layout__sidebar--open {

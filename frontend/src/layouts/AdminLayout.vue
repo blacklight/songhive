@@ -151,6 +151,7 @@ const adminNav = [
 @media (max-width: 767px) {
   .admin-layout__menu-toggle {
     display: inline-flex;
+    top: max(var(--space-3), env(safe-area-inset-top, 0px));
   }
 
   .admin-layout__sidebar {
@@ -158,9 +159,11 @@ const adminNav = [
     top: 0;
     left: 0;
     height: 100%;
+    box-sizing: border-box;
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom, 0px));
     transform: translateX(-100%);
     transition: transform var(--transition-base);
-    z-index: 20;
+    z-index: var(--z-sidebar);
   }
 
   .admin-layout__sidebar--open {

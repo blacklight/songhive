@@ -48,6 +48,7 @@
 
   /* z-index layers */
   --z-player: 40;
+  --z-sidebar: 45;
   --z-toast: 50;
   --z-modal: 60;
   --z-modal-step: 1;
