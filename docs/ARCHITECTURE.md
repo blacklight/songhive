@@ -840,6 +840,13 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |
 
+The frontend is also a Progressive Web App. `/manifest.webmanifest` is served
+from the backend so the PWA name follows the configured instance name and the
+manifest `theme_color`/`background_color` react to the user's selected
+light/dark theme. `frontend/public/pwa/` contains generated icon variants
+(including `maskable-*` icons for Android adaptive icons), and
+`frontend/public/sw.js` provides a lightweight offline shell cache.
+
 Build output is served as static files by the backend (or a CDN). The FastAPI
 app sets `router.default` to an ASGI handler that serves files directly from
 `songhive/static/` and falls back to `index.html` for unhandled non-API paths,

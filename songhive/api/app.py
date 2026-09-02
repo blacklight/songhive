@@ -37,6 +37,7 @@ from .routes import (
     instance,
     libraries,
     playlists,
+    pwa,
     radios,
     reports,
     sessions,
@@ -228,6 +229,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(share.router, prefix=api_prefix, tags=["share"])
     app.include_router(instance.v1_router, prefix="/api/v1")
     app.include_router(instance.v2_router, prefix="/api/v2")
+    app.include_router(pwa.router)
 
     # Federation routes
     if config.federation.enabled and config.federation.instance_domain:

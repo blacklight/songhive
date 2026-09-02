@@ -1,6 +1,14 @@
 <script setup lang="ts">
+import { onMounted } from "vue";
 import { RouterView } from "vue-router";
 import ConfirmDialog from "@/components/feedback/ConfirmDialog.vue";
+import { usePwa } from "@/composables/usePwa";
+
+const { registerServiceWorker } = usePwa();
+
+onMounted(() => {
+  registerServiceWorker();
+});
 </script>
 
 <template>
