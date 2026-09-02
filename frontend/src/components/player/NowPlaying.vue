@@ -24,7 +24,7 @@ const store = usePlayerStore();
     :aria-label="t('player.nowPlaying')"
   >
     <RouterLink
-      v-if="store.currentTrack?.artwork_url && store.currentTrack?.album_id"
+      v-if="store.currentTrack?.album_id"
       :to="`/albums/${store.currentTrack.album_id}`"
       class="now-playing__artwork now-playing__artwork--link"
       :aria-label="
@@ -35,10 +35,14 @@ const store = usePlayerStore();
       :title="store.currentTrack?.album_title"
     >
       <img
+        v-if="store.currentTrack?.artwork_url"
         :src="store.currentTrack.artwork_url"
         alt=""
         class="now-playing__img"
       />
+      <div v-else class="now-playing__artwork--placeholder">
+        <AppIcon name="music" />
+      </div>
     </RouterLink>
     <img
       v-else-if="store.currentTrack?.artwork_url"
@@ -51,7 +55,20 @@ const store = usePlayerStore();
     </div>
 
     <div class="now-playing__meta">
-      <p class="now-playing__title" :title="store.currentTrack?.title">
+      <RouterLink
+        v-if="store.currentTrack?.id"
+        :to="`/tracks/${store.currentTrack.id}`"
+        class="now-playing__title now-playing__title--link"
+        :title="store.currentTrack?.title"
+        :aria-label="
+          t('player.goToTrack', {
+            title: store.currentTrack?.title || '',
+          }).trim()
+        "
+      >
+        {{ store.currentTrack?.title }}
+      </RouterLink>
+      <p v-else class="now-playing__title" :title="store.currentTrack?.title">
         {{ store.currentTrack?.title }}
       </p>
       <RouterLink
@@ -102,6 +119,7 @@ const store = usePlayerStore();
   display: inline-flex;
   cursor: pointer;
   transition: transform var(--transition-fast);
+  text-decoration: none;
 }
 
 .now-playing__artwork--link:hover {
@@ -114,6 +132,11 @@ const store = usePlayerStore();
   justify-content: center;
   background-color: var(--color-surface-raised);
   color: var(--color-text-muted);
+}
+
+.now-playing__artwork--link .now-playing__artwork--placeholder {
+  width: 100%;
+  height: 100%;
 }
 
 .now-playing__img {
@@ -147,17 +170,21 @@ const store = usePlayerStore();
   color: var(--color-text-muted);
 }
 
+.now-playing__title--link,
 .now-playing__artist--link {
   display: block;
   text-decoration: none;
 }
 
+.now-playing__title--link:hover,
+.now-playing__title--link:focus-visible,
 .now-playing__artist--link:hover,
 .now-playing__artist--link:focus-visible {
   color: var(--color-text);
   text-decoration: underline;
 }
 
+.now-playing__title--link:focus-visible,
 .now-playing__artist--link:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;

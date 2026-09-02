@@ -11,6 +11,7 @@ from typing import BinaryIO, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from ..config import AUDIO_EXTENSIONS
 from ..models._enums import Visibility
 from ..models.track import Track
 from ..models.user import User
@@ -18,8 +19,6 @@ from ..services.federation import publish_track_activity
 from .celery import celery_app
 
 logger = logging.getLogger(__name__)
-
-_AUDIO_EXTENSIONS = {".mp3", ".flac", ".ogg", ".opus", ".m4a", ".wav"}
 
 
 @celery_app.task(name="songhive.tasks.import_.process_upload")
@@ -72,7 +71,7 @@ def process_upload(
                     if stored_file is None:
                         raise ValueError(f"StoredFile {stored_file_id} not found")
                     actual_filename = filename or stored_file.original_filename or "audio.mp3"
-                    local_path = await storage_service.backend.retrieve(stored_file.storage_path)
+                    local_path = await storage_service.backend.retrieve(str(stored_file.storage_path))
                     if local_path is None:
                         raise ValueError(f"Could not retrieve stored file: {stored_file.storage_path}")
                     file = open(local_path, "rb")
@@ -87,7 +86,7 @@ def process_upload(
                         session,
                         storage_service=storage_service,
                         file=file,
-                        filename=actual_filename,
+                        filename=str(actual_filename),
                         library_id=library_id,
                         owner_id=owner_id,
                         visibility=visibility,
@@ -119,6 +118,7 @@ def process_upload(
                             track.federation_object_id,
                         )
 
+                assert result.upload is not None
                 EventWebSocket.broadcast(
                     "import.completed",
                     {
@@ -171,7 +171,7 @@ def scan_directory(
 
     count = 0
     for file_path in resolved.rglob("*"):
-        if file_path.is_file() and file_path.suffix.lower() in _AUDIO_EXTENSIONS:
+        if file_path.is_file() and file_path.suffix.lower() in AUDIO_EXTENSIONS:
             process_upload.delay(  # type: ignore
                 library_id,
                 owner_id,

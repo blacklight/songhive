@@ -22,6 +22,11 @@ const adminNav = [
   { name: "Audit", to: "/admin/audit", icon: "clipboard-list" },
   { name: "Tasks", to: "/admin/tasks", icon: "list-check" },
   { name: "Celery", to: "/admin/celery", icon: "gears" },
+  {
+    name: "External libraries",
+    to: "/admin/external-libraries",
+    icon: "cloud",
+  },
 ];
 </script>
 

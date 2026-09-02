@@ -13,6 +13,7 @@ from sqlalchemy import select
 from songhive.models._enums import Visibility
 from songhive.models.album import Album
 from songhive.models.artist import Artist
+from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 
 
@@ -146,11 +147,27 @@ def test_update_track(client, sample_tracks, regular_user, auth_headers):
     assert data["disc_number"] == 2
 
 
-def test_update_track_enqueues_tag_sync(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+@pytest.mark.asyncio
+async def test_update_track_enqueues_tag_sync(
+    client, sample_tracks, regular_user, db_session, auth_headers, monkeypatch
+):
     """Updating tag-relevant track metadata enqueues a sync for that track."""
     track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
-    headers = auth_headers(regular_user)
 
+    stored = StoredFile(
+        storage_path=f"/tmp/{track.id}.mp3",
+        storage_backend="local",
+        content_type="audio/mpeg",
+        size=1234,
+        sha256=track.id.replace("-", ""),
+        owner_id=regular_user.id,
+    )
+    db_session.add(stored)
+    await db_session.flush()
+    track.audio_file_id = str(stored.id)
+    await db_session.flush()
+
+    headers = auth_headers(regular_user)
     sync_mock = MagicMock()
     monkeypatch.setattr("songhive.api.routes.tracks._enqueue_track_tag_sync", sync_mock)
 

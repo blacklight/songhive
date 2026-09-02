@@ -18,6 +18,9 @@ from sqlalchemy.orm import selectinload
 from ..models._enums import Visibility
 from ..models.album import Album
 from ..models.artist import Artist
+from ..models.external_library import ExternalLibrary
+from ..models.external_sync_run import ExternalSyncRun
+from ..models.external_track import ExternalTrack
 from ..models.favorite import Favorite
 from ..models.history import ListeningHistory
 from ..models.library import Library
@@ -544,6 +547,59 @@ async def delete_library(
     await session.execute(delete(Library).where(Library.id == library.id))
 
     return deletion
+
+
+async def delete_external_library(
+    session: AsyncSession,
+    storage: StorageService,
+    external_library: ExternalLibrary,
+    *,
+    user: Optional[User] = None,
+    is_admin: bool = False,
+) -> DeletionResult:
+    """Delete an external library and all tracks it contributed.
+
+    The linked Songhive tracks are removed first so their dependent rows
+    (playlist entries, library associations) and any empty albums/artists are
+    cleaned up. ``ExternalSyncRun`` and ``ExternalTrack`` rows are then
+    removed explicitly for databases that do not enforce ON DELETE CASCADE
+    (e.g. test SQLite). The underlying ``Library`` is deleted only when it
+    contains no remaining tracks, preserving existing libraries that were
+    attached to the external library.
+    """
+    external_library_id = str(external_library.id)
+    library_id = str(external_library.library_id)
+
+    # Delete all Songhive tracks that were imported through this external
+    # library. This removes playlist entries, library associations, and empty
+    # albums/artists through the existing track deletion helper.
+    track_result = await session.execute(
+        select(ExternalTrack.track_id)
+        .where(ExternalTrack.external_library_id == external_library_id)
+        .where(ExternalTrack.track_id.is_not(None))
+    )
+    track_ids = [str(row[0]) for row in track_result.all()]
+
+    unpublish: List[UnpublishInfo] = []
+    if track_ids:
+        ups, _ = await delete_tracks_bulk(session, storage, track_ids, user=user)
+        unpublish.extend(ups)
+
+    # Explicitly remove external-library rows for databases without FK cascade.
+    await session.execute(delete(ExternalSyncRun).where(ExternalSyncRun.external_library_id == external_library_id))
+    await session.execute(delete(ExternalTrack).where(ExternalTrack.external_library_id == external_library_id))
+    await session.execute(delete(ExternalLibrary).where(ExternalLibrary.id == external_library_id))
+
+    # Only delete the underlying library if it is now empty, so an external
+    # library attached to an existing library does not destroy unrelated tracks.
+    remaining = await session.scalar(
+        select(func.count(LibraryTrack.track_id)).where(LibraryTrack.library_id == library_id)
+    )
+    result = DeletionResult(unpublish=unpublish)
+    if remaining == 0:
+        lib_result = await delete_library(session, storage, library_id, recursive=False, user=user, is_admin=is_admin)
+        result.deleted_library_ids.extend(lib_result.deleted_library_ids)
+    return result
 
 
 async def _delete_empty_album(session: AsyncSession, storage: StorageService, album_id: Optional[str]) -> None:

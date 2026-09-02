@@ -44,6 +44,7 @@ function createTrack(
   title: string,
   hashtags: string[] = [],
   genres: string[] = [],
+  image_url: string | null = null,
 ): TrackResponse {
   return {
     id,
@@ -55,6 +56,7 @@ function createTrack(
     duration: 185,
     genre: "Indie",
     audio_url: "https://example.com/audio.mp3",
+    image_url,
     visibility: "public",
     owner_id: "user-1",
     hashtags,
@@ -73,14 +75,18 @@ function createArtist(id: string, name: string): ArtistResponse {
   };
 }
 
-function createAlbum(id: string, title: string): AlbumResponse {
+function createAlbum(
+  id: string,
+  title: string,
+  cover_url: string | null = null,
+): AlbumResponse {
   return {
     id,
     title,
     artist_id: "artist-1",
     musicbrainz_id: null,
     release_year: 2024,
-    cover_url: null,
+    cover_url,
     description: null,
     owner_id: "user-1",
     visibility: "public",
@@ -206,5 +212,44 @@ describe("TrackView", () => {
       include: "hashtags,genres",
     });
     expect(wrapper.text()).toContain("Song Two");
+  });
+
+  it("renders the track image when one is present", async () => {
+    vi.mocked(tracksApi.getTrack).mockResolvedValue(
+      createTrack(
+        "track-1",
+        "Song One",
+        [],
+        [],
+        "https://example.com/track-image.jpg",
+      ),
+    );
+    await mountAt("/tracks/track-1");
+
+    const img = wrapper.find("img.track-view__cover");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe("https://example.com/track-image.jpg");
+  });
+
+  it("falls back to the album cover when the track has no image", async () => {
+    vi.mocked(albumsApi.getAlbum).mockResolvedValue(
+      createAlbum(
+        "album-1",
+        "Meadowland",
+        "https://example.com/album-cover.jpg",
+      ),
+    );
+    await mountAt("/tracks/track-1");
+
+    const img = wrapper.find("img.track-view__cover");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe("https://example.com/album-cover.jpg");
+  });
+
+  it("renders a placeholder when no cover is available", async () => {
+    await mountAt("/tracks/track-1");
+
+    expect(wrapper.find("img.track-view__cover").exists()).toBe(false);
+    expect(wrapper.find(".track-view__cover").exists()).toBe(true);
   });
 });

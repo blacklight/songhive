@@ -16,6 +16,7 @@ export class ApiError extends Error {
   detail?: string;
   instance?: string;
   errors?: unknown[];
+  body?: unknown;
 
   constructor(
     message: string,
@@ -29,6 +30,7 @@ export class ApiError extends Error {
     this.detail = fields.detail;
     this.instance = fields.instance;
     this.errors = fields.errors;
+    this.body = fields.body;
   }
 
   static async fromResponse(
@@ -51,10 +53,11 @@ export class ApiError extends Error {
         detail,
         instance,
         errors,
+        body,
       });
     }
 
-    return new ApiError(response.statusText, status);
+    return new ApiError(response.statusText, status, { body });
   }
 }
 

@@ -6,6 +6,7 @@ import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import * as authApi from "@/api/auth";
 import * as usersApi from "@/api/users";
+import * as externalLibrariesApi from "@/api/externalLibraries";
 import ProfileView from "./ProfileView.vue";
 
 vi.mock("@/api/auth", () => ({
@@ -21,6 +22,11 @@ vi.mock("@/api/users", () => ({
   getMe: vi.fn(),
   updateMe: vi.fn(),
   changePassword: vi.fn(),
+}));
+
+vi.mock("@/api/externalLibraries", () => ({
+  listUserProviders: vi.fn(),
+  listUserExternalLibraries: vi.fn(),
 }));
 
 function createTestRouter() {
@@ -39,6 +45,19 @@ describe("ProfileView", () => {
     vi.clearAllMocks();
     vi.mocked(authApi.listApiTokens).mockResolvedValue({ items: [], total: 0 });
     vi.mocked(authApi.listSessions).mockResolvedValue({ items: [], total: 0 });
+    vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
+      {
+        provider_type: "fake",
+        user_configurable: true,
+        capabilities_summary: {},
+      },
+    ]);
+    vi.mocked(externalLibrariesApi.listUserExternalLibraries).mockResolvedValue(
+      {
+        libraries: [],
+        total: 0,
+      },
+    );
     vi.mocked(usersApi.updateMe).mockResolvedValue({
       id: "u1",
       username: "alice",
@@ -144,5 +163,22 @@ describe("ProfileView", () => {
     await flushPromises();
 
     expect(router.currentRoute.value.query.tab).toBe("apiTokens");
+  });
+
+  it("switches to the external libraries tab via query", async () => {
+    const router = createTestRouter();
+    await router.push("/profile?tab=externalLibraries");
+    await router.isReady();
+
+    const wrapper = mount(ProfileView, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(router.currentRoute.value.query.tab).toBe("externalLibraries");
+    expect(wrapper.text()).toContain(
+      i18n.global.t("pages.externalLibraries.listTitle"),
+    );
+    expect(externalLibrariesApi.listUserProviders).toHaveBeenCalled();
   });
 });

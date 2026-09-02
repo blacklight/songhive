@@ -48,10 +48,10 @@ from ..deps import (
     require_access,
 )
 from ..middleware.rate_limit import rate_limit_account
-from ..responses import TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
+from ..responses import TrackResponse, TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
 from ._common import HashtagListRequest, HasOwnerId, redact_owner
 from ._images import remove_entity_image, upload_entity_image
-from .tracks import TrackResponse, _build_track_response
+from .tracks import _build_track_response
 
 router = APIRouter(prefix="/libraries")
 
@@ -192,6 +192,7 @@ async def _build_library_response(
 async def list_libraries(
     response: Response,
     user: Optional[User] = Depends(get_current_user_optional),
+    include_external: bool = Query(False, description="Include external libraries (admin only)"),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
     db: AsyncSession = Depends(get_db),
@@ -199,7 +200,13 @@ async def list_libraries(
     include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
 ):
     """List libraries visible to the requester."""
-    total = await music.count_libraries(db, user=user)
+    if include_external and (user is None or not user.is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+    total = await music.count_libraries(db, user=user, include_external=include_external)
     rows = await music.list_libraries(
         db,
         user=user,
@@ -208,6 +215,7 @@ async def list_libraries(
         include=set(include.values),
         sort_by=sort.field,
         sort_dir=sort.direction,
+        include_external=include_external,
     )
     pagination.set_total(response, total)
     return [await _build_library_response(lib, user, storage, include) for lib in rows]
@@ -336,6 +344,7 @@ async def upload_track(
 
     track = await music.get_track(db, result.track.id)
     track_response = await _track_response(storage, track, user)
+    assert result.upload is not None
     return {
         "track": track_response,
         "upload_id": str(result.upload.id),
@@ -383,6 +392,7 @@ async def _import_single_sync_file(
                     config,
                     result.track.federation_object_id,
                 )
+        assert result.upload is not None
         return BulkUploadResult(
             filename=filename,
             status="created",

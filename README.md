@@ -30,6 +30,7 @@
   * [Docker installation](#docker-installation)
   * [pip installation](#pip-installation)
     + [Celery](#celery)
+    + [Local library watchdog](#local-library-watchdog)
   * [Creating the admin user](#creating-the-admin-user)
     + [Docker installation](#docker-installation-1)
     + [pip installation](#pip-installation-1)
@@ -62,6 +63,9 @@ federating with other instances (including Mastodon) via ActivityPub.
 - **OAuth2 Provider**: Third-party app authorization
 - **Subsonic API**: Compatibility layer for Subsonic clients
 - **Flexible Storage**: Local filesystem or S3-compatible object storage
+- **External Libraries**: Attach external music storage (e.g. cloud adapters) to
+  Songhive libraries; index, stream, and write metadata back to the provider.
+  See [docs/ARCHITECTURE.md#external-libraries](docs/ARCHITECTURE.md#external-libraries).
 
 ## Architecture
 
@@ -246,6 +250,20 @@ Start the Celery worker in a second terminal:
 ```bash
 celery -A songhive.tasks worker -B -l info
 ```
+
+#### Local library watchdog
+
+If you are using the built-in `local` external-library provider, start the
+filesystem watcher in another terminal or under a supervisor such as systemd:
+
+```bash
+songhive watch-external-libraries
+```
+
+The Docker stack runs this as a separate `watcher` container. The watcher is kept
+as a standalone process rather than a child of the web server so that a single
+host has exactly one watchdog, even when the web server is scaled to multiple
+workers.
 
 ### Creating the admin user
 

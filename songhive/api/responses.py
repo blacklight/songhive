@@ -4,7 +4,7 @@ These live outside individual route modules so that nested summary objects can
 be reused across the API without creating import cycles.
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import inspect
@@ -81,6 +81,41 @@ class TrackSummary(BaseModel):
     release_year: Optional[int] = None
     owner_id: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+
+
+class TrackResponse(BaseModel):
+    """Public track response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    artist_id: str
+    album_id: Optional[str] = None
+    track_number: Optional[int] = None
+    disc_number: Optional[int] = None
+    duration: Optional[float] = None
+    genre: Optional[str] = None
+    audio_url: Optional[str] = None
+    image_url: Optional[str] = None
+    release_year: Optional[int] = None
+    owner_id: Optional[str] = None
+    visibility: str = Visibility.PRIVATE.value
+    artist: Optional[ArtistSummary] = None
+    album: Optional[AlbumSummary] = None
+    owner: Optional[UserSummary] = None
+    hashtags: List[str] = []
+    genres: List[str] = []
+    favorited: Optional[bool] = None
+    is_external: bool = False
+    external_library_id: Optional[str] = None
+    external_track_id: Optional[str] = None
+    external_provider_type: Optional[str] = None
+    external_state: Optional[str] = None
+    can_stream: Optional[bool] = None
+    can_download: Optional[bool] = None
+    can_write_tags: Optional[bool] = None
+    can_delete_source: Optional[bool] = None
 
 
 async def build_artist_summary(

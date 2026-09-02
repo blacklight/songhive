@@ -8,6 +8,7 @@ import ProfileTab from "./profile/ProfileTab.vue";
 import ChangePasswordTab from "./profile/ChangePasswordTab.vue";
 import ApiTokensTab from "./profile/ApiTokensTab.vue";
 import SessionsTab from "./profile/SessionsTab.vue";
+import ExternalLibrariesView from "@/views/ExternalLibrariesView.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -16,7 +17,13 @@ const tab = computed(() => {
   const raw = route.query.tab;
   const value = Array.isArray(raw) ? raw[0] : raw;
   return typeof value === "string" &&
-    ["profile", "password", "apiTokens", "sessions"].includes(value)
+    [
+      "profile",
+      "password",
+      "apiTokens",
+      "sessions",
+      "externalLibraries",
+    ].includes(value)
     ? value
     : "profile";
 });
@@ -26,6 +33,11 @@ const tabs = [
   { key: "password", label: t("profile.tabs.password"), icon: "lock" },
   { key: "apiTokens", label: t("profile.tabs.apiTokens"), icon: "key" },
   { key: "sessions", label: t("profile.tabs.sessions"), icon: "laptop" },
+  {
+    key: "externalLibraries",
+    label: t("profile.tabs.externalLibraries"),
+    icon: "cloud",
+  },
 ];
 
 const currentComponent = computed(() => {
@@ -36,6 +48,8 @@ const currentComponent = computed(() => {
       return ApiTokensTab;
     case "sessions":
       return SessionsTab;
+    case "externalLibraries":
+      return ExternalLibrariesView;
     default:
       return ProfileTab;
   }

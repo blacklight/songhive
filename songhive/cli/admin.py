@@ -31,7 +31,7 @@ from typing import Iterable
 
 from kombu.exceptions import OperationalError as KombuOperationalError
 
-from ..config import load_config
+from ..config import AUDIO_EXTENSIONS, load_config
 from ..migrations import ensure_migrated
 from ..models.base import get_session, init_db
 from ..models.user import User, UserRole
@@ -39,7 +39,7 @@ from ..services import admin_tasks, music
 from ..services.auth import create_user, get_user_by_username
 from ..services.storage import StorageService
 from ..storage import get_storage
-from ..tasks.import_ import _AUDIO_EXTENSIONS, scan_directory
+from ..tasks.import_ import scan_directory
 from ..users import manager as user_manager
 from ..users.invites import InviteError, create_invite, list_invites
 
@@ -310,7 +310,7 @@ def _validate_import_path(config, path: Path) -> Path:
 def _count_audio_files(path: Path) -> int:
     """Count audio files under the given path."""
     return sum(
-        1 for file_path in path.rglob("*") if file_path.is_file() and file_path.suffix.lower() in _AUDIO_EXTENSIONS
+        1 for file_path in path.rglob("*") if file_path.is_file() and file_path.suffix.lower() in AUDIO_EXTENSIONS
     )
 
 

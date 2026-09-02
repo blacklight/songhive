@@ -101,7 +101,9 @@ songhive/
 │   │   ├── share.py        # Public token resolver (redirects + sets cookie)
 │   │   ├── reports.py      # Content moderation reports + admin review
 │   │   ├── federation.py   # Per-user ActivityPub actors + WebFinger
-│   │   └── admin.py        # Admin endpoints (settings, stats, user management)
+│   │   ├── admin.py        # Admin endpoints (settings, stats, user management)
+│   │   ├── external_libraries.py # User external library CRUD, sync, tracks
+│   │   └── admin_external_libraries.py # Admin external library management
 │   └── middleware/
 │       ├── auth.py         # JWT decode middleware + access-token helpers
 │       └── rate_limit.py   # Redis sliding-window rate limiting (IP / user)
@@ -133,6 +135,9 @@ songhive/
 │   ├── report.py           # Content moderation report
 │   ├── oauth_client.py     # Registered OAuth2 clients
 │   ├── audit_log.py        # Admin/security audit trail
+│   ├── external_library.py # External library adapter instance
+│   ├── external_sync_run.py # External library sync history
+│   ├── external_track.py   # Track discovered through an external provider
 │   └── setting.py          # Runtime-editable instance settings (key/JSON-value)
 ├── services/               # Business logic layer
 │   ├── acl.py              # Three-level visibility + share-grant + share-token ACL
@@ -147,11 +152,19 @@ songhive/
 │   ├── musicbrainz.py      # MusicBrainz + Cover Art Archive enrichment (async httpx)
 │   ├── redis.py            # Redis client lifecycle
 │   ├── reports.py          # Content report CRUD
+│   ├── secrets.py          # Config encryption, decryption, and secret redaction
 │   ├── settings.py         # Instance settings with Redis cache + config overlay
 │   ├── sharing.py          # Share-grant and share-token CRUD
 │   ├── stats.py            # Admin dashboard statistics
 │   ├── storage.py          # StorageService facade (delegates to storage backend)
 │   └── streaming.py        # Track file resolution, transcode cache, history recording
+├── external/               # External library adapter interface and registry
+│   ├── base.py             # BaseExternalLibraryAdapter protocol
+│   ├── _fake.py            # In-memory fake adapter for tests
+│   ├── _local.py           # Local filesystem adapter
+│   ├── watchdog.py         # Filesystem watchdog for local libraries
+│   ├── registry.py         # Provider-type registry
+│   └── types.py            # Adapter dataclasses (ItemRef, TrackMetadata, etc.)
 ├── federation/             # ActivityPub per-user federation
 │   ├── _common.py          # URL builders
 │   ├── actors.py           # Actor document generation, federation storage helpers
@@ -182,6 +195,7 @@ songhive/
 │   ├── email.py            # Email delivery tasks
 │   ├── musicbrainz.py      # MusicBrainz metadata + Cover Art Archive enrichment
 │   ├── images.py           # Artist image + album cover enrichment
+│   ├── external_libraries.py # External library sync task
 │   └── storage.py          # Orphaned-file cleanup (scheduled via crontab)
 ├── ws/                     # WebSocket support
 │   └── events.py           # Tornado WebSocket handler (JWT auth, CORS origin check)
@@ -340,6 +354,135 @@ navigation link.
 
 ---
 
+## External Libraries
+
+Songhive supports attaching external music libraries (e.g., cloud storage
+adapters) to user- or admin-owned Songhive libraries. The feature is built
+around a pluggable adapter model in `songhive/external/`, with a per-provider
+registry (`songhive/external/registry.py`) and a `BaseExternalLibraryAdapter`
+interface.
+
+Adapters live in child plans and are registered at import time. Each adapter
+exposes capabilities (`list_items`, `read_metadata`, `open_stream`, `download`,
+`write_tags`, `delete_source`, `compute_hash`) and a sanitized configuration
+schema. Provider-specific implementations are kept outside the core codebase and
+register through `songhive.external.registry`.
+
+Models:
+
+- `ExternalLibrary` — adapter instance, encrypted provider config, capabilities,
+  and scope (`user` or `admin`).
+- `ExternalTrack` — a track discovered through an external provider, tied to an
+  `ExternalLibrary` and optionally to a Songhive `Track`.
+- `ExternalSyncRun` — a record of each sync attempt, including status,
+  triggered-by, and error details.
+
+API surfaces:
+
+- `api/routes/external_libraries.py` — user-facing CRUD, sync, sync-run listing,
+  and track management under `/api/v1/external-libraries/...`.
+- `api/routes/admin_external_libraries.py` — admin CRUD, sync, and track
+  management under `/api/v1/admin/external-libraries/...`.
+
+User-created external libraries are governed by
+`config.external_libraries.allow_user_created_libraries` and the
+allow/deny provider lists. Admin libraries can be included in the public library
+index when `allow_admin_library_index_inclusion` is enabled.
+
+The built-in `local` provider (`external/_local.py`) lets admins mount
+server-side directories as external libraries. Root paths are restricted to an
+allowlist configured in `external_libraries.local_roots` for safety. Files under
+the root are enumerated recursively, metadata is read from embedded tags, and
+the directory is treated as a local audio source for streaming and download.
+A separate filesystem watchdog process (`external/watchdog.py`) monitors enabled
+local libraries and enqueues incremental or scoped syncs through
+`sync_external_library_task` as files change, with a quiet window to coalesce
+bursts of events. The watchdog is started via `songhive watch-external-libraries`
+and is also available as a `watcher` container in `docker-compose.yml`. If no
+local libraries are configured, the process polls the database every few seconds
+and starts watching automatically once libraries are created, so it does not need
+to be restarted after the stack is already running.
+
+The watcher is intentionally a standalone process rather than a thread inside the
+main web server: filesystem watches can be long-lived, are best as a single
+instance per host, and have a different failure/restart profile than HTTP
+workers. In a non-Docker deployment you should run it as a separate process
+(`songhive watch-external-libraries`) or under a supervisor such as systemd.
+
+#### Local provider settings
+
+A local external library stores the following adapter config in `ExternalLibrary.config`:
+
+| Key                  | Required | Default      | Description                                                                 |
+|----------------------|----------|--------------|-----------------------------------------------------------------------------|
+| `root`               | yes      | —            | Absolute or relative path to the directory to scan.                         |
+| `extensions`         | no       | all audio    | List of file extensions to index, e.g. `[".mp3", ".flac"]`.               |
+| `recursive`          | no       | `true`       | Whether to scan subdirectories.                                             |
+| `follow_symlinks`    | no       | `false`      | If `false`, symlinks are ignored; if `true`, resolved targets must stay within `root`. |
+| `exclude`            | no       | `[]`         | `fnmatch` patterns applied to root-relative paths.                          |
+| `allow_hashing`      | no       | `true`       | Whether to compute a SHA-256 hash for new/updated files.                    |
+| `fast_hash`          | no       | `false`      | If `true`, hash the raw file bytes; otherwise use ffmpeg audio-only hashing. |
+| `allow_write_tags`   | no       | `false`      | Whether Songhive metadata edits may be written back to the source files.    |
+| `allow_delete_source`| no       | `false`      | Whether the `delete_source` operation may remove the backing file.          |
+
+The global `external_libraries.local_roots` allowlist is required: a library's
+`root` must resolve to a path inside one of the configured roots, or validation
+fails.
+
+The web UI renders a per-provider configuration form instead of raw JSON.
+Provider form templates live in
+`frontend/src/config/externalLibraryProviderTemplates.ts`. Each template entry
+lists the JSON property name, i18n label/description keys, field type (string,
+number, boolean, enum, or comma-separated string array), and default value.
+`ExternalLibraryEditView` switches the displayed fields whenever the provider
+`<select>` changes, and falls back to a plain JSON textarea for providers that do
+not have a template yet.
+
+Sync and tasks:
+
+- `tasks/external_libraries.py` defines three Celery tasks:
+  - `sync_external_library_task` runs a manual or scheduled sync, enumerating
+    provider items through `external/sync.py` and upserting `ExternalTrack` rows.
+  - `scan_scheduled_syncs_task` scans for due external libraries and enqueues
+    sync tasks while skipping libraries with an active run.
+  - `write_back_metadata_task` applies local metadata edits to the provider when
+    the adapter supports `write_tags`.
+  - Destructive source deletion requires both `write_tags` and `delete_source`
+    capabilities, the global `allow_destructive_delete` setting, and an explicit
+    `confirm: "DELETE"` from the caller. Tracks may optionally be removed from
+    Songhive at the same time.
+
+Streaming and downloads:
+
+- `services/streaming.resolve_external_stream` loads an external track and opens
+  a provider stream (`path`, `iterator`, or `url`).
+- `streaming/handler.py` falls back from local `StoredFile` playback to external
+  streams, preserving auth, ACL, history, and now-playing broadcasts.
+- `api/routes/tracks.py` provides `GET /api/v1/tracks/{track_id}/download`,
+  proxying external bytes through Songhive and honoring `Content-Disposition`
+  and `disposition=inline|attachment`.
+
+Secrets and audit:
+
+- `services/secrets.py` encrypts/decrypts provider configs at rest and redacts
+  them in API responses and audit logs.
+- All mutating external-library and external-track endpoints log an `AuditLog`
+  row with a sanitized `details` dictionary.
+
+### Duplicate detection
+
+When an uploaded audio file's audio-only SHA-256 hash matches an `ExternalTrack`
+in `active` or `shadowed` state, `services/import_.py` raises an
+`ExternalDuplicateError`. The `POST /api/v1/files/upload` and
+`POST /api/v1/files/upload/bulk` endpoints return a 409 response with an
+`ExternalDuplicateWarning` containing a short-lived Redis token.
+The caller can then resolve the conflict via
+`POST /api/v1/files/upload/resolve-duplicate` with `action=keep_local` (create a
+local Songhive track and keep the uploaded file) or `action=discard_upload`
+(reuse the existing external track and remove the uploaded stored file).
+
+---
+
 ## Database Migrations
 
 Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/).  The
@@ -442,9 +585,12 @@ Deleting a track removes its `Upload`, `LibraryTrack`,
 `ShareToken`, and `Report` rows and deletes the underlying `StoredFile` once it
 is unreferenced. Deleting a stored file removes all tracks that use it as their
 audio source and clears `cover_file_id`/`image_file_id` references on
-albums/artists before removing the backing object. Recursive deletion collects
-unpublish information for public tracks and enqueues `Delete(Tombstone)`
-ActivityPub activities.
+albums/artists before removing the backing object. Deleting an external library
+cascades through its linked `ExternalTrack` rows, removing each Songhive track
+and its dependents (playlist entries, favorites, etc.), cleaning up empty
+albums/artists, and removing the underlying `Library` only when it is empty.
+Recursive deletion collects unpublish information for public tracks and enqueues
+`Delete(Tombstone)` ActivityPub activities.
 
 ---
 

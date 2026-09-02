@@ -2,8 +2,9 @@
 Track model.
 
 ``source`` documents where the track came from. Allowed values are:
-``"upload"`` (user upload), ``"import"`` (bulk/directory import), and
-``"federation"`` ( ActivityPub / federation).
+``"upload"`` (user upload), ``"import"`` (bulk/directory import),
+``"federation"`` (ActivityPub / federation), and ``"external"``
+(external audio bytes).
 """
 
 from datetime import datetime
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._enums import Visibility
 from .base import Base, TZDateTime
+from .external_track import ExternalTrack
 
 if TYPE_CHECKING:
     from .album import Album
@@ -49,6 +51,15 @@ class Track(Base):
     release_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     raw_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
+    metadata_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        TZDateTime(),
+        nullable=True,
+        index=True,
+    )
+    external_metadata_synced_at: Mapped[Optional[datetime]] = mapped_column(
+        TZDateTime(),
+        nullable=True,
+    )
     audio_mime_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     federation_object_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     owner_id: Mapped[Optional[str]] = mapped_column(
@@ -90,4 +101,12 @@ class Track(Base):
         back_populates="track",
         cascade="all, delete-orphan",
         lazy="selectin",
+    )
+    external_track: Mapped[Optional["ExternalTrack"]] = relationship(
+        "ExternalTrack",
+        uselist=False,
+        viewonly=True,
+        lazy="selectin",
+        primaryjoin="Track.id == ExternalTrack.track_id",
+        remote_side=[ExternalTrack.track_id],
     )

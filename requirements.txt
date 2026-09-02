@@ -39,3 +39,7 @@ tomli>=2.0; python_version < "3.11"
 # Utilities
 httpx>=0.24
 email-validator>=2.0
+watchfiles>=0.24
+
+# Secret-at-rest encryption for external library configs
+cryptography>=3.4.8

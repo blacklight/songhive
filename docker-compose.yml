@@ -84,6 +84,35 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  watcher:
+    image: quay.io/blacklight/songhive
+    # Or uncomment the following lines if you want to build the image from the
+    # local checkout
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     USER_ID: ${PUID:-1000}
+    #     GROUP_ID: ${PGID:-1000}
+    container_name: songhive-watcher
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      <<: *songhive-env
+    command: songhive watch-external-libraries
+    volumes:
+      - ./volumes/config:/etc/songhive
+      - ./volumes/data:/data
+      # Bind the same host mount points used for local external libraries so
+      # the watcher sees the same filesystem tree as the app and worker.
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
   nginx:
     image: nginx:stable-alpine
     container_name: songhive-nginx

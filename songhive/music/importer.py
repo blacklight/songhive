@@ -25,7 +25,7 @@ async def import_file(
     storage: StorageBackend,
     storage_backend: str,
     owner_id: Optional[str] = None,
-) -> Upload:
+) -> Optional[Upload]:
     """
     Import an audio file into the library.
 

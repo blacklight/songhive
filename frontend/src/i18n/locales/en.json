@@ -69,7 +69,10 @@
     "favoriteAddError": "Could not add favorite: {message}",
     "favoriteRemoveError": "Could not remove favorite: {message}",
     "share": "Share",
-    "download": "Download"
+    "download": "Download",
+    "yes": "Yes",
+    "no": "No",
+    "all": "All"
   },
   "sort": {
     "label": "Sort by",
@@ -169,6 +172,7 @@
     "about": "About",
     "admin": "Admin",
     "profile": "Profile",
+    "externalLibraries": "External libraries",
     "login": "Log in"
   },
   "errors": {
@@ -508,6 +512,107 @@
         "loadError": "Could not load Celery tasks: {message}",
         "terminateError": "Could not terminate task(s): {message}"
       }
+    },
+    "externalLibraries": {
+      "title": "External libraries",
+      "listTitle": "External libraries",
+      "newTitle": "New external library",
+      "editTitle": "Edit external library",
+      "adminTitle": "External libraries",
+      "provider": "Provider",
+      "providerHint": "Select an external storage provider.",
+      "name": "Name",
+      "providerConfig": "Provider configuration",
+      "config": "Configuration (JSON)",
+      "configHint": "Provider-specific settings as a JSON object.",
+      "configError": "Configuration must be valid JSON.",
+      "visibility": "Visibility",
+      "enabled": "Enabled",
+      "syncEnabled": "Sync enabled",
+      "syncInterval": "Sync interval (seconds)",
+      "includeInLibraryIndex": "Include in library index",
+      "create": "Create",
+      "save": "Save",
+      "sync": "Sync now",
+      "syncing": "Syncing…",
+      "syncSuccess": "Sync completed.",
+      "syncPartial": "Sync completed with warnings.",
+      "syncFailed": "Sync failed.",
+      "syncTimeout": "Sync status could not be confirmed.",
+      "syncError": "Could not start sync: {message}",
+      "tracks": "Tracks",
+      "syncRuns": "Sync runs",
+      "syncRunStatus": "Status",
+      "trackState": "State",
+      "trackProviderKey": "Provider key",
+      "trackDisplayPath": "Path",
+      "lastSeen": "Last seen",
+      "lastSynced": "Last synced",
+      "restore": "Restore",
+      "deleteTrack": "Remove track",
+      "deleteTrackSource": "Also delete source file",
+      "removeSonghiveTrack": "Also remove local track",
+      "bulkDelete": "Delete selected",
+      "selectAll": "Select all",
+      "noProviders": "No external providers are available.",
+      "noLibraries": "No external libraries configured.",
+      "createSuccess": "External library created.",
+      "saveSuccess": "External library saved.",
+      "deleteConfirm": "Delete external library \"{name}\"?",
+      "deleteSuccess": "External library deleted.",
+      "deleteError": "Could not delete: {message}",
+      "saveError": "Could not save: {message}",
+      "loadError": "Could not load: {message}",
+      "duplicateModalTitle": "Upload matches an external track",
+      "duplicateModalMessage": "A file you uploaded matches a track already managed by an external library ({provider}).",
+      "keepLocal": "Keep local track",
+      "discardUpload": "Discard upload",
+      "resolveError": "Could not resolve duplicate: {message}",
+      "external": "External",
+      "trackExternalBadge": "External: {provider}",
+      "trackExternalState": "{state}",
+      "providers": {
+        "local": {
+          "fields": {
+            "root": {
+              "label": "Root path",
+              "description": "Absolute or relative path to the directory to index. Must be within a configured local_roots allowlist."
+            },
+            "follow_symlinks": {
+              "label": "Follow symlinks",
+              "description": "Whether to follow symbolic links while scanning the library."
+            },
+            "recursive": {
+              "label": "Recursive scan",
+              "description": "Index audio files in subdirectories recursively."
+            },
+            "extensions": {
+              "label": "File extensions",
+              "description": "Comma-separated list of audio file extensions to index (e.g. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Exclude patterns",
+              "description": "Comma-separated glob patterns for paths to skip during scanning."
+            },
+            "allow_write_tags": {
+              "label": "Allow metadata write-back",
+              "description": "Allow Songhive to write metadata tags back to the source files. Requires write permission on the root directory."
+            },
+            "allow_delete_source": {
+              "label": "Allow source deletion",
+              "description": "Allow deleting source files from the filesystem. Requires write permission on the root directory."
+            },
+            "allow_hashing": {
+              "label": "Allow audio hashing",
+              "description": "Compute a stable audio hash for tracks to detect duplicates and support transcoding."
+            },
+            "fast_hash": {
+              "label": "Use fast raw hash",
+              "description": "Use raw SHA-256 instead of ffmpeg audio-only hashing. Faster but changes when tags or artwork change."
+            }
+          }
+        }
+      }
     }
   },
   "profile": {
@@ -516,7 +621,8 @@
       "profile": "Profile",
       "password": "Password",
       "apiTokens": "API Tokens",
-      "sessions": "Sessions"
+      "sessions": "Sessions",
+      "externalLibraries": "External libraries"
     },
     "displayName": "Display name",
     "bio": "Bio",
@@ -662,6 +768,8 @@
       "bulkTitle": "Delete {count} {entity}?",
       "bulkConfirm": "Are you sure you want to delete {count} {entity}?",
       "recursive": "Delete associated {contents}",
+      "deleteSource": "Also delete the source audio file",
+      "deleteSourceWarning": "This action is destructive and irreversible. The source audio file will be deleted from the external {provider} library and cannot be recovered.",
       "success": "Deleted \"{name}\".",
       "bulkSuccess": "Deleted {count} {entity}.",
       "error": "Could not delete {entity}: {message}"
@@ -727,6 +835,7 @@
       "enqueue": "Add to queue",
       "goToAlbum": "Go to album",
       "goToArtist": "Go to artist",
+      "goToTrack": "Go to track",
       "addToLibrary": "Add to library",
       "addToPlaylist": "Add to playlist",
       "removeFromLibrary": "Remove from library",
@@ -824,6 +933,7 @@
     "nowPlaying": "Now playing",
     "goToAlbum": "Go to album {title}",
     "goToArtist": "Go to artist {name}",
+    "goToTrack": "Go to track {title}",
     "albumArtwork": "Album artwork"
   }
 }
