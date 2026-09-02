@@ -283,6 +283,23 @@ async def test_download_empty_or_whitespace_filename_uses_fallback(
     assert 'filename="file"' in response_ws.headers["Content-Disposition"]
 
 
+def test_sanitize_filename_corner_cases():
+    """_sanitize_filename removes non-printable chars, path separators, and traversal markers."""
+    from songhive.api.routes.files import _DOWNLOAD_FALLBACK_FILENAME, _sanitize_filename
+
+    assert _sanitize_filename("foo/bar\\baz.mp3") == "baz.mp3"
+    assert _sanitize_filename("/etc/passwd") == "passwd"
+    assert _sanitize_filename("foo\x00bar.mp3") == "foobar.mp3"
+    assert _sanitize_filename("foo\x1b\x7fbar.mp3") == "foobar.mp3"
+    assert _sanitize_filename("foo\tbar.mp3") == "foobar.mp3"
+    assert _sanitize_filename("foo/..") == _DOWNLOAD_FALLBACK_FILENAME
+    assert _sanitize_filename("..") == _DOWNLOAD_FALLBACK_FILENAME
+    assert _sanitize_filename(".") == _DOWNLOAD_FALLBACK_FILENAME
+    assert _sanitize_filename("  baz.mp3  ") == "baz.mp3"
+    assert _sanitize_filename("") == _DOWNLOAD_FALLBACK_FILENAME
+    assert _sanitize_filename(None) == _DOWNLOAD_FALLBACK_FILENAME
+
+
 def test_download_orphaned_record_returns_404(files_client, regular_user, auth_headers):
     """A StoredFile record with a missing backing file returns 404 on download."""
     content = b"orphaned content"

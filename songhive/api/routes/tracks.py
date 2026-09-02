@@ -23,13 +23,18 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
-from ...external.errors import ExternalItemNotFound, UnsupportedExternalOperation
+from ...external.errors import ExternalItemNotFound, ExternalLibraryError, UnsupportedExternalOperation
+from ...external.registry import get_external_adapter
+from ...external.types import ExternalItemRef
 from ...models import Track
 from ...models._enums import Visibility
 from ...models.album import Album
+from ...models.external_track import ExternalTrack
+from ...models.stored_file import StoredFile
 from ...models.user import User
 from ...services import acl, audit, deletion, music
 from ...services.auth import get_user_by_id
@@ -47,6 +52,7 @@ from ...services.hashtags import (
     remove_hashtag_from_entity,
     validate_hashtag_name,
 )
+from ...services.secrets import decrypt_json
 from ...services.storage import StorageService
 from ...services.streaming import (
     collect_external_stream,
@@ -76,6 +82,7 @@ from ..responses import (
     build_user_summary,
 )
 from ..routes.files import (
+    _DOWNLOAD_FALLBACK_FILENAME,
     _download_stored_file_response,
     _sanitize_content_disposition,
     _sanitize_filename,
@@ -98,6 +105,7 @@ class TrackUpdate(BaseModel):
     disc_number: Optional[int] = None
     release_year: Optional[int] = None
     visibility: Optional[Visibility] = None
+    filename: Optional[str] = None
 
 
 class BulkTrackDeleteRequest(BaseModel):
@@ -146,6 +154,159 @@ _TAG_SYNC_FIELDS = {
 def _should_sync_tags(body: TrackUpdate) -> bool:
     """Return True when the update payload contains tag-relevant metadata."""
     return any(field in body.model_dump(exclude_unset=True) for field in _TAG_SYNC_FIELDS)
+
+
+def _ensure_track_filename_extension(new_filename: str, current_filename: Optional[str]) -> str:
+    """
+    Ensure that the original file extension is preserved, in order to prevent future rendering issues.
+
+    If the new name omits the extension, use the old extension.
+    If the new name provides a different extension, append the old extension to it.
+    """
+    if not current_filename:
+        return new_filename
+
+    old_suffix = Path(current_filename).suffix
+    new_suffix = Path(new_filename).suffix
+    if old_suffix == new_suffix:
+        return new_filename
+    return f"{new_filename}{old_suffix}"
+
+
+def _prepare_track_filename(new_filename: str, current_filename: Optional[str]) -> str:
+    """Return a safe filename, keeping the original extension when omitted."""
+    if not (new_filename or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename cannot be empty",
+        )
+    name = _sanitize_filename(new_filename)
+    if name == _DOWNLOAD_FALLBACK_FILENAME and new_filename.strip() != _DOWNLOAD_FALLBACK_FILENAME:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid filename",
+        )
+    return _ensure_track_filename_extension(name, current_filename)
+
+
+async def _rename_track_file(db: AsyncSession, track: Track, new_filename: str) -> str:
+    """Rename the track's media file without rehashing or changing foreign keys."""
+    if track.audio_file is not None:
+        filename = _prepare_track_filename(new_filename, track.audio_file.original_filename)
+        track.audio_file.original_filename = filename
+        return filename
+
+    if track.audio_file_id is not None:
+        stored = await db.get(StoredFile, track.audio_file_id)
+        if stored is not None:
+            filename = _prepare_track_filename(new_filename, str(stored.original_filename))
+            stored.original_filename = filename
+            track.audio_file = stored
+            return filename
+
+    external_track = getattr(track, "external_track", None)
+    if external_track is not None and external_track.state == "active":
+        return await _rename_external_track_file(db, track, cast(ExternalTrack, external_track), new_filename)
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="Track has no media file to rename",
+    )
+
+
+async def _rename_external_track_file(
+    db: AsyncSession,
+    track: Track,
+    external_track: ExternalTrack,
+    new_filename: str,
+) -> str:
+    """Rename the source file for an active external track."""
+    external_library = external_track.external_library
+    if external_library is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Track has no external library",
+        )
+
+    capabilities = external_library.capabilities or {}
+    if not capabilities.get("rename_source"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="External library does not support renaming",
+        )
+
+    filename = _prepare_track_filename(new_filename, external_track.provider_key)
+    adapter_cls = get_external_adapter(external_library.provider_type)
+    adapter = adapter_cls()
+    raw_config = external_library.config
+    config = decrypt_json(raw_config) if isinstance(raw_config, str) else dict(raw_config or {})
+    await adapter.validate_config(config)
+
+    current_display = (
+        external_track.raw_metadata.get("display_path", external_track.provider_key)
+        if isinstance(external_track.raw_metadata, dict)
+        else external_track.provider_key
+    )
+    item = ExternalItemRef(
+        provider_key=external_track.provider_key,
+        display_path=current_display,
+        etag=external_track.provider_etag,
+        mtime=external_track.provider_mtime,
+        size=external_track.provider_size,
+        mime_type=external_track.provider_mime_type,
+        checksum=external_track.provider_checksum,
+        sha256=external_track.sha256,
+    )
+
+    try:
+        new_item = await adapter.rename_source(config, item, filename)
+    except ExternalItemNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except (ExternalLibraryError, UnsupportedExternalOperation) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    if new_item.provider_key != external_track.provider_key:
+        existing = await db.scalar(
+            select(ExternalTrack).where(
+                ExternalTrack.external_library_id == str(external_library.id),
+                ExternalTrack.provider_key == new_item.provider_key,
+                ExternalTrack.id != str(external_track.id),
+            )
+        )
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A track with the same provider key already exists",
+            )
+
+    external_track.provider_key = new_item.provider_key
+    external_track.provider_etag = new_item.etag
+    external_track.provider_mtime = new_item.mtime
+    external_track.provider_size = new_item.size
+    external_track.provider_mime_type = new_item.mime_type
+    external_track.provider_checksum = new_item.checksum
+    if new_item.sha256:
+        external_track.sha256 = new_item.sha256
+
+    display_path = new_item.display_path or new_item.provider_key
+    external_track.raw_metadata = (
+        {**external_track.raw_metadata, "display_path": display_path}
+        if isinstance(external_track.raw_metadata, dict)
+        else {"display_path": display_path}
+    )
+    track.raw_metadata = (
+        {**track.raw_metadata, "display_path": display_path}
+        if isinstance(track.raw_metadata, dict)
+        else {"display_path": display_path}
+    )
+
+    return Path(new_item.provider_key).name
 
 
 def _enqueue_track_tag_sync(track_id: str) -> bool:
@@ -253,7 +414,9 @@ async def _build_track_response(
     can_download: Optional[bool] = None
     can_write_tags: Optional[bool] = None
     can_delete_source: Optional[bool] = None
+    can_rename_source: Optional[bool] = None
     audio_url: Optional[str] = None
+    filename: Optional[str] = None
 
     external_track = getattr(track, "external_track", None)
     if external_track is not None and external_track.state == "active":
@@ -268,10 +431,15 @@ async def _build_track_response(
             can_stream = bool(capabilities.get("read_bytes") or capabilities.get("stream_url"))
             can_download = bool(capabilities.get("download"))
             can_write_tags = bool(capabilities.get("write_tags"))
+            can_rename_source = bool(capabilities.get("rename_source"))
             can_delete_source = bool(capabilities.get("delete_source"))
         audio_url = f"/api/v1/tracks/{track.id}/download"
+        filename = Path(external_track.provider_key).name
     else:
         audio_url = await storage.get_url(track.audio_file) if track.audio_file_id else None
+        if track.audio_file is not None:
+            filename = track.audio_file.original_filename
+        can_rename_source = track.audio_file_id is not None
 
     return TrackResponse(
         id=str(track.id),
@@ -287,6 +455,7 @@ async def _build_track_response(
         release_year=_track_release_year(track),
         owner_id=owner_id,
         visibility=track.visibility,
+        filename=filename,
         artist=artist,
         album=album,
         owner=owner,
@@ -301,6 +470,7 @@ async def _build_track_response(
         can_stream=can_stream,
         can_download=can_download,
         can_write_tags=can_write_tags,
+        can_rename_source=can_rename_source,
         can_delete_source=can_delete_source,
     )
 
@@ -530,6 +700,10 @@ async def update_track(
     if body.visibility is not None:
         track.visibility = body.visibility.value
 
+    new_filename: Optional[str] = None
+    if body.filename is not None:
+        new_filename = await _rename_track_file(db, track, body.filename)
+
     if body.artist_name is not None or body.album_title is not None:
         await db.flush()
         await db.refresh(track, ["artist", "album"])
@@ -554,6 +728,8 @@ async def update_track(
         details["artist_name"] = artist.name if artist is not None else None
     if body.album_title is not None:
         details["album_title"] = album.title if album is not None else None
+    if new_filename is not None:
+        details["filename"] = new_filename
 
     await audit.log_action(
         db,
@@ -587,6 +763,7 @@ async def update_track(
         await db.commit()
 
     track = await music.get_track(db, track_id, include=set(include.values) | {"artist"})
+    assert track  # for mypy
     return await _build_track_response(track, current_user, storage, include)
 
 
@@ -860,6 +1037,7 @@ async def add_track_hashtags(
         ip_address=client_ip(request),
     )
     await db.commit()
+    assert track  # for mypy
     return await _build_track_response(track, current_user, storage, include)
 
 
@@ -903,6 +1081,7 @@ async def remove_track_hashtag(
         ip_address=client_ip(request),
     )
     await db.commit()
+    assert track  # for mypy
     return await _build_track_response(track, current_user, storage, include)
 
 

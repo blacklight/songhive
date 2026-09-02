@@ -87,6 +87,15 @@ export const providerTemplates: Record<string, ProviderTemplate> = {
         default: false,
       },
       {
+        name: "allow_rename_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.local.fields.allow_rename_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.local.fields.allow_rename_source.description",
+        default: false,
+      },
+      {
         name: "allow_delete_source",
         type: "boolean",
         labelI18nKey:

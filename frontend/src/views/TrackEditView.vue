@@ -45,6 +45,7 @@ const albumTitle = ref("");
 const trackNumber = ref("");
 const discNumber = ref("");
 const releaseYear = ref("");
+const filename = ref("");
 const visibility = ref<Visibility>("private");
 const isSaving = ref(false);
 const isDeleting = ref(false);
@@ -54,6 +55,10 @@ const imageError = ref<string | null>(null);
 
 const { canManage } = useCanManage(
   computed(() => track.value?.owner_id ?? null),
+);
+
+const canRenameFile = computed(
+  () => !track.value?.is_external || track.value?.can_rename_source !== false,
 );
 
 const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
@@ -75,6 +80,7 @@ function resetForm() {
     track.value?.disc_number != null ? String(track.value.disc_number) : "";
   releaseYear.value =
     track.value?.release_year != null ? String(track.value.release_year) : "";
+  filename.value = track.value?.filename ?? "";
   visibility.value = toVisibility(track.value?.visibility);
   resetHashtags(track.value?.hashtags ?? null);
   resetGenres(track.value?.genres ?? null);
@@ -126,6 +132,10 @@ async function onSubmit() {
     release_year: parseNumber(releaseYear.value),
     visibility: visibility.value,
   };
+
+  if (canRenameFile.value) {
+    body.filename = filename.value.trim() || track.value?.filename || null;
+  }
 
   try {
     await updateTrack(trackId.value, body);
@@ -278,6 +288,11 @@ watch(
           v-model="releaseYear"
           type="number"
           :label="t('browse.edit.releaseYear')"
+        />
+        <AppInput
+          v-model="filename"
+          :label="t('browse.edit.filename')"
+          :disabled="!canRenameFile"
         />
         <AppSelect
           v-model="visibility"

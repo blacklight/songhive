@@ -364,9 +364,9 @@ interface.
 
 Adapters live in child plans and are registered at import time. Each adapter
 exposes capabilities (`list_items`, `read_metadata`, `open_stream`, `download`,
-`write_tags`, `delete_source`, `compute_hash`) and a sanitized configuration
-schema. Provider-specific implementations are kept outside the core codebase and
-register through `songhive.external.registry`.
+`write_tags`, `rename_source`, `delete_source`, `compute_hash`) and a sanitized
+configuration schema. Provider-specific implementations are kept outside the
+core codebase and register through `songhive.external.registry`.
 
 Models:
 
@@ -423,6 +423,7 @@ A local external library stores the following adapter config in `ExternalLibrary
 | `allow_hashing`      | no       | `true`       | Whether to compute a SHA-256 hash for new/updated files.                    |
 | `fast_hash`          | no       | `false`      | If `true`, hash the raw file bytes; otherwise use ffmpeg audio-only hashing. |
 | `allow_write_tags`   | no       | `false`      | Whether Songhive metadata edits may be written back to the source files.    |
+| `allow_rename_source`| no       | `false`      | Whether the `rename_source` operation may rename the backing file.          |
 | `allow_delete_source`| no       | `false`      | Whether the `delete_source` operation may remove the backing file.          |
 
 The global `external_libraries.local_roots` allowlist is required: a library's
@@ -447,6 +448,8 @@ Sync and tasks:
     sync tasks while skipping libraries with an active run.
   - `write_back_metadata_task` applies local metadata edits to the provider when
     the adapter supports `write_tags`.
+  - `rename_source` lets track owners and admins rename the backing source file
+    from the track edit page when the adapter supports it.
   - Destructive source deletion requires both `write_tags` and `delete_source`
     capabilities, the global `allow_destructive_delete` setting, and an explicit
     `confirm: "DELETE"` from the caller. Tracks may optionally be removed from

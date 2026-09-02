@@ -89,6 +89,7 @@ class ExternalLibraryCapabilities:
     compute_hash: bool = False
     read_tags: bool = False
     write_tags: bool = False
+    rename_source: bool = False
     delete_source: bool = False
     detect_changes: bool = False
     validate_config: bool = False

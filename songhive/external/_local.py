@@ -12,7 +12,7 @@ import logging
 import mimetypes
 import os
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, AsyncIterator, Optional
 
 from ..config.constants import AUDIO_EXTENSIONS
@@ -201,6 +201,7 @@ class LocalExternalAdapter(ExternalLibraryAdapter):
         root = self._resolve_root(config)
 
         write_tags = bool(config.get("allow_write_tags")) and os.access(str(root), os.W_OK)
+        rename_source = bool(config.get("allow_rename_source")) and os.access(str(root), os.W_OK)
         delete_source = bool(config.get("allow_delete_source")) and os.access(str(root), os.W_OK)
 
         self._capabilities = ExternalLibraryCapabilities(
@@ -211,6 +212,7 @@ class LocalExternalAdapter(ExternalLibraryAdapter):
             compute_hash=bool(config.get("allow_hashing", True)),
             read_tags=True,
             write_tags=write_tags,
+            rename_source=rename_source,
             delete_source=delete_source,
             detect_changes=True,
             validate_config=True,
@@ -450,6 +452,99 @@ class LocalExternalAdapter(ExternalLibraryAdapter):
         return ExternalMutationResult(
             provider_key=item.provider_key,
             mtime=new_mtime,
+        )
+
+    async def rename_source(
+        self,
+        config: dict,
+        item: ExternalItemRef,
+        new_name: str,
+    ) -> ExternalItemRef:
+        """Rename the source audio file, preserving its parent directory."""
+        if not self.capabilities().rename_source:
+            raise UnsupportedExternalOperation("rename_source is not enabled for this local library")
+
+        root = self._resolve_root(config)
+
+        # Validate the old path exists and is within the root.
+        await asyncio.to_thread(self._resolve_item_path, config, item)
+
+        old_path = PurePosixPath(item.provider_key)
+        # Normalise both POSIX and Windows-style separators to a basename so a
+        # rename cannot change the item's parent directory or climb out of it.
+        new_basename = PurePosixPath(new_name.replace("\\", "/")).name
+        if not new_basename or new_basename in (".", ".."):
+            raise ExternalPermissionDenied(
+                f"Invalid new name: {new_name!r}",
+                operation="rename_source",
+            )
+
+        new_provider_key = (
+            new_basename if old_path.name == item.provider_key else (old_path.parent / new_basename).as_posix()
+        )
+
+        new_path = PurePosixPath(new_provider_key)
+        if new_path.is_absolute() or ".." in new_path.parts:
+            raise ExternalPermissionDenied(
+                f"Invalid new path: {new_provider_key}",
+                operation="rename_source",
+            )
+
+        old_candidate = root / item.provider_key
+        new_candidate = root / new_provider_key
+
+        def _rename() -> None:
+            # Resolve and verify the target stays inside the root.
+            try:
+                resolved = new_candidate.resolve()
+            except (OSError, ValueError) as exc:
+                raise ExternalItemNotFound(
+                    f"Could not resolve path: {new_provider_key}",
+                    provider_key=new_provider_key,
+                ) from exc
+
+            try:
+                resolved.relative_to(root.resolve())
+            except ValueError as exc:
+                raise ExternalPermissionDenied(
+                    f"Path resolves outside the library root: {new_provider_key}",
+                    operation="rename_source",
+                ) from exc
+
+            if new_candidate.exists():
+                raise ExternalPermissionDenied(
+                    f"Target path already exists: {new_provider_key}",
+                    operation="rename_source",
+                )
+
+            if not old_candidate.exists():
+                raise ExternalItemNotFound(
+                    f"File not found: {item.provider_key}",
+                    provider_key=item.provider_key,
+                )
+
+            os.rename(str(old_candidate), str(resolved))
+
+        await asyncio.to_thread(_rename)
+
+        st = new_candidate.stat()
+        new_mtime = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc)
+        etag = f"{st.st_mtime_ns}:{st.st_size}"
+
+        mime_type = mimetypes.guess_type(new_provider_key)[0]
+        if mime_type is None:
+            suffix = Path(new_provider_key).suffix.lstrip(".").lower()
+            mime_type = f"audio/{suffix}" if suffix else "application/octet-stream"
+
+        return ExternalItemRef(
+            provider_key=new_provider_key,
+            display_path=new_provider_key,
+            etag=etag,
+            mtime=new_mtime,
+            size=st.st_size,
+            mime_type=mime_type,
+            checksum=item.checksum,
+            sha256=item.sha256,
         )
 
     async def delete_source(self, config: dict, item: ExternalItemRef) -> ExternalMutationResult:

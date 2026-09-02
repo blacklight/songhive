@@ -81,6 +81,15 @@ class ExternalLibraryAdapter(ABC):
         """Write metadata/tags back to the provider."""
         raise UnsupportedExternalOperation("write_metadata is not supported by this adapter")
 
+    async def rename_source(
+        self,
+        config: dict,
+        item: ExternalItemRef,
+        new_name: str,
+    ) -> ExternalItemRef:
+        """Rename the source file to ``new_name`` and return the updated reference."""
+        raise UnsupportedExternalOperation("rename_source is not supported by this adapter")
+
     async def delete_source(self, config: dict, item: ExternalItemRef) -> ExternalMutationResult:
         """Delete the item from the provider."""
         raise UnsupportedExternalOperation("delete_source is not supported by this adapter")

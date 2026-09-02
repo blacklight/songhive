@@ -71,6 +71,7 @@ describe("externalLibraryProviderTemplates", () => {
       recursive: false,
       extensions: [".mp3", ".flac"],
       allow_write_tags: true,
+      allow_rename_source: false,
       allow_delete_source: false,
       allow_hashing: true,
       fast_hash: false,

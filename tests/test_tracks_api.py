@@ -2,6 +2,7 @@
 Tests for the track API endpoints.
 """
 
+import hashlib
 import io
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +14,10 @@ from sqlalchemy import select
 from songhive.models._enums import Visibility
 from songhive.models.album import Album
 from songhive.models.artist import Artist
+from songhive.models.external_library import ExternalLibrary
+from songhive.models.external_track import ExternalTrack
+from songhive.models.library import Library
+from songhive.models.library_track import LibraryTrack
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 
@@ -1313,3 +1318,221 @@ async def test_update_track_removes_old_album_when_cleared(
 
     artist_result = await db_session.execute(select(Artist).where(Artist.id == artist_id))
     assert artist_result.scalar_one_or_none() is not None
+
+
+async def _make_external_track_for_user(db_session, user, provider_key="song1.mp3"):
+    """Create a track backed by a fake external library."""
+    artist = Artist(name="External Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    library = Library(name="External Library", owner_id=str(user.id), visibility="private")
+    db_session.add(library)
+    await db_session.flush()
+
+    external_library = ExternalLibrary(
+        library_id=str(library.id),
+        provider_type="fake",
+        config={
+            "items": {
+                provider_key: {
+                    "data": "fake audio data",
+                    "metadata": {"title": "Song", "artist": "Artist"},
+                }
+            }
+        },
+        capabilities={
+            "list_items": True,
+            "read_bytes": True,
+            "read_tags": True,
+            "write_tags": True,
+            "rename_source": True,
+            "download": True,
+        },
+    )
+    db_session.add(external_library)
+    await db_session.flush()
+
+    track = Track(
+        title="External Track",
+        artist_id=artist.id,
+        owner_id=str(user.id),
+        visibility="private",
+        source="external",
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    db_session.add(LibraryTrack(library_id=str(library.id), track_id=str(track.id), added_by_id=str(user.id)))
+
+    sha256_value = hashlib.sha256("fake audio data".encode()).hexdigest()
+    external_track = ExternalTrack(
+        external_library_id=str(external_library.id),
+        track_id=str(track.id),
+        provider_key=provider_key,
+        state="active",
+        sha256=sha256_value,
+        raw_metadata={"display_path": provider_key},
+    )
+    db_session.add(external_track)
+    await db_session.commit()
+    return track, external_track, external_library
+
+
+@pytest.mark.asyncio
+async def test_update_track_filename_renames_stored_file(client, sample_tracks, regular_user, auth_headers, db_session):
+    """PATCH with filename updates original_filename without rehashing or changing FKs."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+
+    stored = StoredFile(
+        storage_path=f"files/{track.id}/audio.mp3",
+        storage_backend="local",
+        content_type="audio/mpeg",
+        size=1234,
+        sha256=track.id.replace("-", ""),
+        original_filename="old_name.mp3",
+        owner_id=str(regular_user.id),
+    )
+    db_session.add(stored)
+    await db_session.flush()
+    track.audio_file_id = str(stored.id)
+    await db_session.flush()
+
+    old_sha256 = stored.sha256
+    old_storage_path = stored.storage_path
+    old_audio_file_id = track.audio_file_id
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"filename": "new_name"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filename"] == "new_name.mp3"
+
+    await db_session.refresh(stored)
+    assert stored.original_filename == "new_name.mp3"
+    assert stored.sha256 == old_sha256
+    assert stored.storage_path == old_storage_path
+    assert track.audio_file_id == old_audio_file_id
+
+
+@pytest.mark.asyncio
+async def test_update_track_filename_as_admin(client, sample_tracks, admin_user, auth_headers, db_session):
+    """Admins can rename a track's media file."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+
+    stored = StoredFile(
+        storage_path=f"files/{track.id}/audio.mp3",
+        storage_backend="local",
+        content_type="audio/mpeg",
+        size=1234,
+        sha256=track.id.replace("-", ""),
+        original_filename="old_name.mp3",
+        owner_id=str(track.owner_id),
+    )
+    db_session.add(stored)
+    await db_session.flush()
+    track.audio_file_id = str(stored.id)
+    await db_session.flush()
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"filename": "admin_name"},
+        headers=auth_headers(admin_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filename"] == "admin_name.mp3"
+
+
+@pytest.mark.asyncio
+async def test_update_track_filename_denied_for_other_user(client, sample_tracks, other_user, auth_headers, db_session):
+    """Non-owners cannot rename a track's media file."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+
+    stored = StoredFile(
+        storage_path=f"files/{track.id}/audio.mp3",
+        storage_backend="local",
+        content_type="audio/mpeg",
+        size=1234,
+        sha256=track.id.replace("-", ""),
+        original_filename="old_name.mp3",
+        owner_id=str(track.owner_id),
+    )
+    db_session.add(stored)
+    await db_session.flush()
+    track.audio_file_id = str(stored.id)
+    await db_session.flush()
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"filename": "hacked"},
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_track_filename_renames_external_source(client, regular_user, auth_headers, db_session):
+    """PATCH with filename renames an external source file when the adapter supports it."""
+    track, external_track, _ = await _make_external_track_for_user(db_session, regular_user, provider_key="song1.mp3")
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"filename": "renamed"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filename"] == "renamed.mp3"
+    assert data["can_rename_source"] is True
+
+    expected_sha256 = hashlib.sha256("fake audio data".encode()).hexdigest()
+    result = await db_session.execute(select(ExternalTrack).where(ExternalTrack.id == external_track.id))
+    refreshed = result.scalar_one()
+    assert refreshed.provider_key == "renamed.mp3"
+    assert refreshed.raw_metadata.get("display_path") == "renamed.mp3"
+    assert refreshed.sha256 == expected_sha256
+    assert str(refreshed.track_id) == str(track.id)
+
+
+@pytest.mark.asyncio
+async def test_update_track_filename_rejected_when_no_media(client, sample_tracks, regular_user, auth_headers):
+    """PATCH with filename fails for a track with no stored or external media."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"filename": "renamed"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_track_filename_rejected_when_external_rename_unsupported(
+    client, regular_user, auth_headers, db_session
+):
+    """PATCH with filename fails when the external adapter does not support renaming."""
+    track, external_track, external_library = await _make_external_track_for_user(
+        db_session, regular_user, provider_key="song1.mp3"
+    )
+    external_library.capabilities = {
+        **(external_library.capabilities or {}),
+        "rename_source": False,
+    }
+    await db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"filename": "renamed"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 422
+    data = response.json()
+    assert "does not support renaming" in data["detail"]
+
+    await db_session.refresh(external_track)
+    assert external_track.provider_key == "song1.mp3"

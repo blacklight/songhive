@@ -451,3 +451,43 @@ async def test_delete_source_disabled_when_root_read_only(local_adapter, tmp_roo
     monkeypatch.setattr("os.access", lambda path, mode: mode != os.W_OK)
     caps = await local_adapter.validate_config(base_config)
     assert caps.delete_source is False
+
+
+@pytest.mark.asyncio
+async def test_rename_source_moves_file_and_preserves_parent(local_adapter, tmp_root, base_config):
+    """rename_source moves the file and keeps its parent directory."""
+    _write_file(tmp_root / "music" / "track.mp3")
+    base_config["allow_rename_source"] = True
+    await local_adapter.validate_config(base_config)
+
+    item = ExternalItemRef(provider_key="music/track.mp3", display_path="music/track.mp3")
+    new_item = await local_adapter.rename_source(base_config, item, "renamed.mp3")
+
+    assert new_item.provider_key == "music/renamed.mp3"
+    assert (tmp_root / "music" / "renamed.mp3").exists()
+    assert not (tmp_root / "music" / "track.mp3").exists()
+    assert new_item.size == (tmp_root / "music" / "renamed.mp3").stat().st_size
+
+
+@pytest.mark.asyncio
+async def test_rename_source_rejects_missing_file(local_adapter, tmp_root, base_config):
+    """rename_source raises ExternalItemNotFound when the source is missing."""
+    base_config["allow_rename_source"] = True
+    await local_adapter.validate_config(base_config)
+
+    item = ExternalItemRef(provider_key="missing.mp3", display_path="missing.mp3")
+    with pytest.raises(ExternalItemNotFound):
+        await local_adapter.rename_source(base_config, item, "renamed.mp3")
+
+
+@pytest.mark.asyncio
+async def test_rename_source_rejects_target_collision(local_adapter, tmp_root, base_config):
+    """rename_source raises when the target path already exists."""
+    _write_file(tmp_root / "track.mp3")
+    _write_file(tmp_root / "collision.mp3")
+    base_config["allow_rename_source"] = True
+    await local_adapter.validate_config(base_config)
+
+    item = ExternalItemRef(provider_key="track.mp3", display_path="track.mp3")
+    with pytest.raises(ExternalPermissionDenied):
+        await local_adapter.rename_source(base_config, item, "collision.mp3")

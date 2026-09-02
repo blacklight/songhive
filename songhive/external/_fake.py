@@ -7,11 +7,16 @@ import os
 import tempfile
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, AsyncIterator, Optional
 
 from .base import ExternalLibraryAdapter
-from .errors import ExternalConfigError, ExternalItemNotFound, ExternalWriteBackError
+from .errors import (
+    ExternalConfigError,
+    ExternalItemNotFound,
+    ExternalPermissionDenied,
+    ExternalWriteBackError,
+)
 from .types import (
     ExternalHealth,
     ExternalItemRef,
@@ -43,6 +48,7 @@ class FakeExternalAdapter(ExternalLibraryAdapter):
             compute_hash=True,
             read_tags=True,
             write_tags=True,
+            rename_source=True,
             delete_source=True,
             detect_changes=True,
             validate_config=True,
@@ -296,6 +302,66 @@ class FakeExternalAdapter(ExternalLibraryAdapter):
             checksum=sha256,
             sha256=sha256,
         )
+
+    async def rename_source(
+        self,
+        config: dict,
+        item: ExternalItemRef,
+        new_name: str,
+    ) -> ExternalItemRef:
+        """Rename an in-memory item, preserving any parent path segments."""
+        items = config.get("items", {})
+        if item.provider_key not in items:
+            raise ExternalItemNotFound(
+                f"Item not found: {item.provider_key}",
+                provider_key=item.provider_key,
+            )
+
+        old_path = PurePosixPath(item.provider_key)
+        # Normalise both POSIX and Windows-style separators to a basename so a
+        # rename cannot change the item's parent directory or climb out of it.
+        new_basename = PurePosixPath(new_name.replace("\\", "/")).name
+        if not new_basename or new_basename in (".", ".."):
+            raise ExternalPermissionDenied(
+                f"Invalid new name: {new_name!r}",
+                operation="rename_source",
+            )
+
+        new_provider_key = (
+            new_basename if old_path.name == item.provider_key else (old_path.parent / new_basename).as_posix()
+        )
+
+        if PurePosixPath(new_provider_key).is_absolute() or ".." in PurePosixPath(new_provider_key).parts:
+            raise ExternalPermissionDenied(
+                f"Invalid new path: {new_provider_key}",
+                operation="rename_source",
+            )
+
+        if new_provider_key != item.provider_key and new_provider_key in items:
+            raise ExternalPermissionDenied(
+                f"Target path already exists: {new_provider_key}",
+                operation="rename_source",
+            )
+
+        # Work on a normalized record so required keys are present.
+        value = self._get_item(config, item.provider_key)
+        items.pop(item.provider_key)
+        if new_provider_key != item.provider_key:
+            items[new_provider_key] = value
+
+        mtime = datetime.now(timezone.utc)
+        value["mtime"] = mtime
+        value["etag"] = str(uuid.uuid4())
+
+        data = value.get("data", b"")
+        if isinstance(data, list):
+            data = bytes(data)
+        sha256 = hashlib.sha256(data).hexdigest()
+        value["sha256"] = sha256
+        value["checksum"] = sha256
+        value["size"] = len(data)
+
+        return self._make_ref(new_provider_key, value)
 
     async def delete_source(self, config: dict, item: ExternalItemRef) -> ExternalMutationResult:
         """Remove the item from the in-memory store."""

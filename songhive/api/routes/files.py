@@ -3,8 +3,9 @@ File storage routes: upload, metadata, and download.
 """
 
 import logging
+import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import BinaryIO, List, Literal, Optional, Union, cast
 
 from fastapi import (
@@ -579,6 +580,10 @@ async def get_file_metadata(
 
 _DOWNLOAD_FALLBACK_FILENAME = "file"
 
+# ASCII control characters (0x00-0x1f, 0x7f) including NUL; these are
+# disallowed in HTTP headers and can break filesystem operations.
+_FILENAME_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
 # Explicit allowlist of MIME types that can be served inline. SVG and broad
 # audio/image/video wildcards are excluded to prevent content-sniffing attacks.
 _SAFE_INLINE_TYPES = {
@@ -612,11 +617,20 @@ def _sanitize_filename(filename: Optional[str]) -> str:
     """
     Strip control characters, path segments, and surrounding whitespace from a
     filename.
+
+    All ASCII control characters (0x00-0x1f, 0x7f) are removed, backslashes are
+    normalised to forward slashes, and the basename is taken using a POSIX path
+    parser so the behaviour is the same on every platform.
     """
     if not filename:
         return _DOWNLOAD_FALLBACK_FILENAME
-    filename = filename.replace("\r", "").replace("\n", "").replace("\\", "/")
-    filename = Path(filename).name
+    # Remove ASCII control chars (including NUL) before any path parsing.
+    filename = _FILENAME_CONTROL_RE.sub("", filename)
+    # Normalise Windows-style separators to POSIX-style before taking basename.
+    filename = filename.replace("\\", "/")
+    filename = PurePosixPath(filename).name
+    if filename in (".", ".."):
+        return _DOWNLOAD_FALLBACK_FILENAME
     filename = filename.strip()
     return filename or _DOWNLOAD_FALLBACK_FILENAME
 

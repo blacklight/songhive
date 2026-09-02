@@ -43,6 +43,7 @@ function createTrack(
     genre: "Rock",
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
+    filename: "Song One.mp3",
     owner_id: ownerId,
     hashtags: [],
     genres: ["rock"],
@@ -195,6 +196,7 @@ describe("TrackEditView", () => {
       disc_number: null,
       release_year: null,
       visibility: "local",
+      filename: "Song One.mp3",
     };
     expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-1", expectedBody);
     expect(router.currentRoute.value.path).toBe("/tracks/track-1");

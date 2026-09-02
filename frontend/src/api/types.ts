@@ -4965,6 +4965,8 @@ export interface components {
        * @default private
        */
       visibility: string;
+      /** Filename */
+      filename?: string | null;
       artist?: components["schemas"]["ArtistSummary"] | null;
       album?: components["schemas"]["AlbumSummary"] | null;
       owner?: components["schemas"]["UserSummary"] | null;
@@ -4999,6 +5001,8 @@ export interface components {
       can_download?: boolean | null;
       /** Can Write Tags */
       can_write_tags?: boolean | null;
+      /** Can Rename Source */
+      can_rename_source?: boolean | null;
       /** Can Delete Source */
       can_delete_source?: boolean | null;
     };
@@ -5057,6 +5061,8 @@ export interface components {
       /** Release Year */
       release_year?: number | null;
       visibility?: components["schemas"]["Visibility"] | null;
+      /** Filename */
+      filename?: string | null;
     };
     /**
      * UserLinkInput

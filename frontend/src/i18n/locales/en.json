@@ -599,6 +599,10 @@
               "label": "Allow metadata write-back",
               "description": "Allow Songhive to write metadata tags back to the source files. Requires write permission on the root directory."
             },
+            "allow_rename_source": {
+              "label": "Allow source renaming",
+              "description": "Allow Songhive to rename source files through track edits. Requires write permission on the root directory."
+            },
             "allow_delete_source": {
               "label": "Allow source deletion",
               "description": "Allow deleting source files from the filesystem. Requires write permission on the root directory."
@@ -756,6 +760,7 @@
       "album": "Album",
       "description": "Description",
       "releaseYear": "Release year",
+      "filename": "Filename",
       "name": "Name",
       "hashtags": "Hashtags",
       "saveSuccess": "Saved.",

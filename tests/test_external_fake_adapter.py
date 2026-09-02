@@ -187,6 +187,35 @@ async def test_healthcheck(adapter, config):
     assert health.ok
 
 
+async def test_rename_source_renames_item_and_preserves_sha256(adapter, config):
+    """rename_source moves the in-memory item and keeps its content hash."""
+    item = ExternalItemRef(provider_key="track1.flac", display_path="track1.flac")
+    new_item = await adapter.rename_source(config, item, "renamed.flac")
+
+    assert new_item.provider_key == "renamed.flac"
+    assert new_item.sha256 == await adapter.compute_sha256(config, new_item)
+    assert "track1.flac" not in config["items"]
+    assert "renamed.flac" in config["items"]
+    assert config["items"]["renamed.flac"]["metadata"]["title"] == "Track One"
+
+
+async def test_rename_source_preserves_parent_path(adapter, config):
+    """rename_source keeps parent directories from the original provider key."""
+    config["items"]["albums/track1.flac"] = config["items"].pop("track1.flac")
+    item = ExternalItemRef(provider_key="albums/track1.flac", display_path="albums/track1.flac")
+    new_item = await adapter.rename_source(config, item, "renamed.flac")
+
+    assert new_item.provider_key == "albums/renamed.flac"
+    assert "albums/renamed.flac" in config["items"]
+
+
+async def test_rename_source_rejects_target_collision(adapter, config):
+    """rename_source fails when the target provider key already exists."""
+    item = ExternalItemRef(provider_key="track1.flac", display_path="track1.flac")
+    with pytest.raises(Exception):
+        await adapter.rename_source(config, item, "track2.mp3")
+
+
 def test_sanitize_config():
     adapter = FakeExternalAdapter()
     redacted = adapter.sanitize_config_for_response({"api_key": "secret", "items": {}})

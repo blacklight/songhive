@@ -101,6 +101,7 @@ class TrackResponse(BaseModel):
     release_year: Optional[int] = None
     owner_id: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+    filename: Optional[str] = None
     artist: Optional[ArtistSummary] = None
     album: Optional[AlbumSummary] = None
     owner: Optional[UserSummary] = None
@@ -115,6 +116,7 @@ class TrackResponse(BaseModel):
     can_stream: Optional[bool] = None
     can_download: Optional[bool] = None
     can_write_tags: Optional[bool] = None
+    can_rename_source: Optional[bool] = None
     can_delete_source: Optional[bool] = None
 
 
