@@ -133,10 +133,11 @@ allow_user_created_libraries = false
 
 # When allow_user_created_libraries is true, restrict non-admin users to these
 # provider types. Empty means all user_configurable providers are allowed.
-# allowed_user_providers = ["s3", "webdav"]
+# Examples: ["local", "s3", "webdav"]
+allowed_user_providers = []
 
 # Provider types non-admin users may never configure, regardless of allow list.
-# denied_user_providers = []
+denied_user_providers = []
 
 # Whether admins may include admin-managed external libraries in the default
 # /libraries view.
@@ -159,3 +160,10 @@ stream_max_proxy_bytes = 268435456
 
 # Timeout in seconds for proxied external stream responses.
 stream_proxy_timeout_seconds = 60
+
+# Filesystem roots a 'local' external library may point at.  Empty means no
+# local libraries are allowed. Restrict to intended mount points, and remember
+# that this is a local-file-read vector. A comma-separated string or JSON list
+# is also accepted from environment variables.
+# Examples: ["/mnt/music", "/media"]
+local_roots = []

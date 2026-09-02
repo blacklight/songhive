@@ -85,6 +85,7 @@ async def test_track_response_includes_external_fields(client, regular_user, db_
     assert data["is_external"] is True
     assert data["external_provider_type"] == "fake"
     assert data["external_state"] == "active"
+    assert data["external_track_id"] is not None
     assert data["can_stream"] is True
     assert data["can_download"] is True
     assert data["can_write_tags"] is True

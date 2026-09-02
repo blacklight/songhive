@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 export interface Props {
   name: string;
+  title?: string;
   variant?: "solid" | "regular" | "light" | "brand";
   spacing?: "left" | "right" | "none";
 }
@@ -10,6 +11,7 @@ export interface Props {
 const props = withDefaults(defineProps<Props>(), {
   variant: "solid",
   spacing: "none",
+  title: "",
 });
 
 const variantClass = computed(() => {
@@ -28,7 +30,9 @@ const variantClass = computed(() => {
         'app-icon--spaced-left': props.spacing === 'left',
       },
     ]"
+    :title="props.title"
     aria-hidden="true"
+    :aria-label="props.title"
   ></i>
 </template>
 

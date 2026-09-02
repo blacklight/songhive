@@ -4987,6 +4987,8 @@ export interface components {
       is_external: boolean;
       /** External Library Id */
       external_library_id?: string | null;
+      /** External Track Id */
+      external_track_id?: string | null;
       /** External Provider Type */
       external_provider_type?: string | null;
       /** External State */

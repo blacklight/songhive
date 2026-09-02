@@ -18,11 +18,13 @@ import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import HashtagList from "@/components/hashtags/HashtagList.vue";
 import GenreList from "@/components/genres/GenreList.vue";
 import { toQueueTrack } from "@/player/enrich";
 import { formatTime } from "@/utils/time";
+import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
@@ -58,6 +60,10 @@ const queueTrack = computed(() => {
     album_title: album.value?.title,
   });
 });
+
+const coverUrl = computed(
+  () => track.value?.image_url || album.value?.cover_url || null,
+);
 
 const { ownerName, visibilityText } = useEntityMeta(track);
 const { isOwner } = useOwnership(computed(() => track.value?.owner_id ?? null));
@@ -231,19 +237,31 @@ watch(
 
     <template v-else-if="track">
       <div class="track-view__header">
+        <img
+          v-if="coverUrl"
+          :src="coverUrl"
+          :alt="track.title"
+          class="track-view__cover"
+        />
+        <AppAvatar
+          v-else
+          :name="track.title"
+          size="lg"
+          class="track-view__cover"
+        />
+
         <div class="track-view__info">
           <AppPageTitle class="track-view__title" icon="music">{{
             track.title
           }}</AppPageTitle>
 
-          <ExternalTrackBadge
-            :is-external="track.is_external"
-            :provider="track.external_provider_type"
-            :state="track.external_state"
-          />
-
           <div class="track-view__meta">
             <span v-if="artist" class="track-view__meta-item">
+              <AppIcon
+                name="microphone"
+                :title="t('browse.entities.artist')"
+                spacing="right"
+              />
               <RouterLink
                 :to="`/artists/${track.artist_id}`"
                 class="track-view__link"
@@ -252,10 +270,19 @@ watch(
               </RouterLink>
             </span>
             <span v-else-if="track.artist_id" class="track-view__meta-item">
-              {{ t("browse.entities.artist") }}
+              <AppIcon
+                name="microphone"
+                :title="t('browse.entities.artist')"
+                spacing="right"
+              />
             </span>
 
             <span v-if="album" class="track-view__meta-item">
+              <AppIcon
+                name="compact-disc"
+                :title="t('browse.entities.album')"
+                spacing="right"
+              />
               <RouterLink
                 :to="`/albums/${track.album_id}`"
                 class="track-view__link"
@@ -265,27 +292,66 @@ watch(
             </span>
 
             <span v-if="track.genre" class="track-view__meta-item">
-              {{ t("browse.detail.genre") }} {{ track.genre }}
+              <AppIcon
+                name="tag"
+                :title="t('browse.detail.genre')"
+                spacing="right"
+              />
+              {{ track.genre }}
             </span>
 
             <span class="track-view__meta-item">
-              {{ t("browse.detail.duration") }} {{ durationText }}
+              <AppIcon
+                name="clock"
+                :title="t('browse.detail.duration')"
+                spacing="right"
+              />
+              {{ durationText }}
             </span>
 
             <span v-if="track.track_number" class="track-view__meta-item">
-              {{ t("browse.detail.trackNumber") }} {{ track.track_number }}
+              <AppIcon
+                name="list-ol"
+                :title="t('browse.detail.trackNumber')"
+                spacing="right"
+              />
+              {{ track.track_number }}
             </span>
 
             <span v-if="track.disc_number" class="track-view__meta-item">
-              {{ t("browse.detail.discNumber") }} {{ track.disc_number }}
+              <AppIcon
+                name="layer-group"
+                :title="t('browse.detail.discNumber')"
+                spacing="right"
+              />
+              {{ track.disc_number }}
             </span>
 
             <span class="track-view__meta-item">
-              {{ t("browse.detail.visibility") }} {{ visibilityText }}
+              <AppIcon
+                name="eye"
+                :title="t('browse.detail.visibility')"
+                spacing="right"
+              />
+              {{ visibilityText }}
             </span>
 
             <span v-if="ownerName" class="track-view__meta-item">
-              {{ t("browse.detail.owner") }} {{ ownerName }}
+              <AppIcon
+                name="user"
+                :title="t('browse.detail.owner')"
+                spacing="right"
+              />
+              {{ ownerName }}
+            </span>
+
+            <span v-if="track.is_external" class="track-view__meta-item">
+              <ExternalTrackBadge
+                :is-external="track.is_external"
+                :provider="track.external_provider_type"
+                :state="track.external_state"
+              />
+              {{ track.external_provider_type }}
             </span>
           </div>
 
@@ -366,8 +432,16 @@ watch(
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: var(--space-5);
   flex-wrap: wrap;
+}
+
+.track-view__cover,
+.track-view__cover.app-avatar--lg {
+  width: 12rem;
+  height: 12rem;
+  border-radius: var(--radius-lg);
+  object-fit: cover;
 }
 
 .track-view__info {
@@ -385,6 +459,7 @@ watch(
 
 .track-view__meta {
   display: flex;
+  flex-direction: column;
   flex-wrap: wrap;
   gap: var(--space-3);
   color: var(--color-text-muted);
@@ -421,5 +496,11 @@ watch(
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+:deep(.external-track-badge) {
+  display: inline-block;
+  margin: 0 var(--space-2) 0 0;
+  padding: 0;
 }
 </style>

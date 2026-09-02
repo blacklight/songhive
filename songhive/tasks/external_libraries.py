@@ -38,6 +38,21 @@ def _sanitize_error(exc: Any) -> str:
     return str(exc)[:512]
 
 
+def _parse_since(value: Optional[datetime | str]) -> Optional[datetime]:
+    """Convert a Celery-safe ISO string (or datetime) into a timezone-aware datetime."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    value = value.strip()
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def _build_external_track_metadata(external_track: ExternalTrack) -> ExternalTrackMetadata:
     """Build a provider-facing metadata object from the current Songhive track."""
     track = external_track.track
@@ -75,6 +90,8 @@ async def _sync_external_library(
     triggered_by_user_id: Optional[str],
     include_tombstones: bool,
     sync_run_id: Optional[str] = None,
+    since: Optional[datetime | str] = None,
+    scope: Optional[str] = None,
 ) -> dict:
     """Run a sync inside a managed session and return the result."""
     redis = get_redis_client(load_config([]))
@@ -87,6 +104,8 @@ async def _sync_external_library(
                 triggered_by_user_id=triggered_by_user_id,
                 include_tombstones=include_tombstones,
                 sync_run_id=sync_run_id,
+                since=_parse_since(since),
+                scope=scope,
                 redis=redis,
             )
             return {"sync_run_id": run.id, "status": run.status}
@@ -124,6 +143,8 @@ def sync_external_library_task(
     triggered_by_user_id: Optional[str] = None,
     include_tombstones: bool = False,
     sync_run_id: Optional[str] = None,
+    since: Optional[str] = None,
+    scope: Optional[str] = None,
 ) -> dict:
     """Celery task entry point for syncing a single external library."""
     config = load_config([])
@@ -137,6 +158,8 @@ def sync_external_library_task(
                 triggered_by_user_id,
                 include_tombstones,
                 sync_run_id=sync_run_id,
+                since=since,
+                scope=scope,
             )
         )
     except KombuOperationalError:

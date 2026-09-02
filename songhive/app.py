@@ -17,7 +17,7 @@ import signal
 import sys
 from collections.abc import Iterable
 from textwrap import dedent
-from typing import Any, Awaitable, Callable, Optional, cast
+from typing import Any, Awaitable, Callable, Collection, Dict, Optional, cast
 
 from .config import SonghiveConfig, load_config
 from .migrations import ensure_migrated
@@ -134,6 +134,7 @@ def _run_tornado(config: SonghiveConfig):
         # "Future attached to a different loop" on shutdown.
         a2wsgi_loop: Optional[asyncio.AbstractEventLoop] = getattr(fastapi_app.state, "_a2wsgi_loop", None)
         if a2wsgi_loop is not None and a2wsgi_loop is not loop:
+            assert a2wsgi_loop  # for mypy
             future = asyncio.run_coroutine_threadsafe(close_redis_client(), a2wsgi_loop)
             try:
                 future.result()
@@ -190,16 +191,34 @@ def _print_cli_banner():
     # fmt: on
 
 
+def _admin_main(args: Collection[str]):
+    from .cli.admin import admin_main
+
+    admin_main(args)
+
+
+def _watch_main(args: Collection[str]):
+    from .cli.watch import watch_main
+
+    watch_main(args)
+
+
+_entry_points: Dict[str, Callable[[Collection[str]], None]] = {
+    "admin": _admin_main,
+    "watch-external-libraries": _watch_main,
+}
+
+
 def main():
     """
     Songhive application entry point.
     """
-    # Check if this is an admin command
-    if len(sys.argv) > 1 and sys.argv[1] == "admin":
-        from .cli.admin import admin_main
-
-        admin_main(sys.argv[2:])
-        return
+    # Check for dedicated CLI commands before starting the web server.
+    if len(sys.argv) > 1:
+        entry_point = _entry_points.get(sys.argv[1])
+        if entry_point:
+            entry_point(sys.argv[2:])
+            return
 
     config = load_config()
 

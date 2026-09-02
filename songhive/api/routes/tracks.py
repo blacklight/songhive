@@ -246,6 +246,7 @@ async def _build_track_response(
 
     is_external = False
     external_library_id: Optional[str] = None
+    external_track_id: Optional[str] = None
     external_provider_type: Optional[str] = None
     external_state: Optional[str] = None
     can_stream: Optional[bool] = None
@@ -258,6 +259,7 @@ async def _build_track_response(
     if external_track is not None and external_track.state == "active":
         is_external = True
         external_library_id = str(external_track.external_library_id)
+        external_track_id = str(external_track.id)
         external_state = external_track.state
         external_library = external_track.external_library
         if external_library is not None:
@@ -293,6 +295,7 @@ async def _build_track_response(
         favorited=favorited,
         is_external=is_external,
         external_library_id=external_library_id,
+        external_track_id=external_track_id,
         external_provider_type=external_provider_type,
         external_state=external_state,
         can_stream=can_stream,

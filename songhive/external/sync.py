@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from redis.asyncio import Redis
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.loader import load_config
@@ -55,6 +55,7 @@ class RunCounters:
         self.tracks_tombstoned: int = 0
         self.tracks_missing: int = 0
         self.tracks_failed: int = 0
+        self.enrich_queue: set[str] = set()
 
 
 def _utcnow() -> datetime:
@@ -73,9 +74,17 @@ def _decrypt_config(raw: Any) -> dict:
     """Decrypt an external-library config when it is stored as a Fernet token."""
     if raw is None:
         return {}
+    if isinstance(raw, dict):
+        return raw
     if isinstance(raw, str):
-        return decrypt_json(raw)
-    return dict(raw)
+        try:
+            return decrypt_json(raw)
+        except Exception as exc:
+            raise ExternalLibraryError(
+                "Failed to decrypt external library config; "
+                "check that auth.secret_key matches the key used to encrypt it"
+            ) from exc
+    return {}
 
 
 def _metadata_fingerprint(metadata: ExternalTrackMetadata) -> str:
@@ -350,7 +359,7 @@ async def _process_item(
     stored_file = result.scalar_one_or_none()
     if stored_file is not None:
         if external_track.state == "active" and external_track.track_id is not None:
-            await _remove_library_track(session, str(external_library.library_id), external_track.track_id)
+            await _remove_library_track(session, str(external_library.library_id), str(external_track.track_id))
             external_track.track_id = None
         external_track.sha256 = sha256
         external_track.provider_etag = item.etag
@@ -382,6 +391,19 @@ async def _process_item(
         sha256,
     )
 
+    track = await _load_existing_track(session, external_track)
+    if (
+        track is not None
+        and track.musicbrainz_enriched_at is None
+        and decision
+        in (
+            MetadataDecision.CREATED,
+            MetadataDecision.UPDATED,
+            MetadataDecision.UNCHANGED,
+        )
+    ):
+        counters.enrich_queue.add(str(track.id))
+
     if (
         decision
         in (
@@ -395,7 +417,7 @@ async def _process_item(
         await _find_or_create_library_track(
             session,
             str(external_library.library_id),
-            external_track.track_id,
+            str(external_track.track_id),
             added_by_id,
         )
 
@@ -424,6 +446,19 @@ async def _process_item(
         counters.tracks_updated += 1
 
 
+def _maybe_enqueue_musicbrainz(config: Any, track_ids: set[str]) -> None:
+    """Queue MusicBrainz enrichment for tracks when enabled."""
+    if not track_ids or not config.musicbrainz.enabled:
+        return
+    from ..tasks.musicbrainz import enrich_track
+
+    for track_id in track_ids:
+        try:
+            enrich_track.delay(track_id)  # type: ignore
+        except Exception:
+            logger.exception("Failed to enqueue MusicBrainz enrichment for %s", track_id)
+
+
 async def sync_external_library(
     session: AsyncSession,
     external_library_id: str,
@@ -432,17 +467,20 @@ async def sync_external_library(
     triggered_by_user_id: Optional[str] = None,
     include_tombstones: bool = False,
     sync_run_id: Optional[str] = None,
+    since: Optional[datetime] = None,
+    scope: Optional[str] = None,
     redis: Optional[Redis] = None,
 ) -> ExternalSyncRun:
-    """Run a full sync for the given external library and return the run record."""
+    """Run a sync for the given external library and return the run record."""
     lock_key = f"external_sync:{external_library_id}"
     lock_acquired = False
     run: Optional[ExternalSyncRun] = None
     external_library: Optional[ExternalLibrary] = None
     run_created = False
+    songhive_config = load_config([])
+    counters = RunCounters()
 
     if redis is None:
-        songhive_config = load_config([])
         redis = get_redis_client(songhive_config)
 
     try:
@@ -467,7 +505,7 @@ async def sync_external_library(
         external_library.capabilities = dataclasses.asdict(capabilities)
 
         if sync_run_id is not None:
-            run = await session.get(ExternalSyncRun, sync_run_id)
+            run = await session.get(ExternalSyncRun, sync_run_id)  # type: ignore
             if run is not None and str(run.external_library_id) != external_library_id:
                 logger.warning(
                     "Sync run %s belongs to a different external library; creating a new run.",
@@ -488,21 +526,22 @@ async def sync_external_library(
         run.error = None
         if run_created:
             session.add(run)
+
+        assert run  # for mypy
         external_library.last_sync_started_at = run.started_at
         external_library.last_sync_status = "running"
         await session.flush()
 
-        counters = RunCounters()
         batch: list[ExternalItemRef] = []
         batch_size = 100
-        since: Optional[datetime] = None
 
-        async for item in adapter.iter_items(config, since=since):
+        async for item in adapter.iter_items(config, since=since, scope=scope):
             batch.append(item)
             if len(batch) >= batch_size:
                 for batch_item in batch:
                     async with session.begin_nested():
                         try:
+                            assert run  # for mypy
                             await _process_item(
                                 session,
                                 external_library,
@@ -522,6 +561,7 @@ async def sync_external_library(
         for batch_item in batch:
             async with session.begin_nested():
                 try:
+                    assert run  # for mypy
                     await _process_item(
                         session,
                         external_library,
@@ -538,13 +578,21 @@ async def sync_external_library(
                     counters.tracks_failed += 1
 
         if capabilities.list_items and since is None:
-            missing_result = await session.execute(
-                select(ExternalTrack).where(
-                    ExternalTrack.external_library_id == external_library_id,
-                    ExternalTrack.state == "active",
-                    ExternalTrack.last_seen_at < run.started_at,
-                )
-            )
+            where_clause = [
+                ExternalTrack.external_library_id == external_library_id,
+                ExternalTrack.state == "active",
+                ExternalTrack.last_seen_at < run.started_at,
+            ]
+            if scope is not None:
+                scope_clean = scope.rstrip("/")
+                if scope_clean:
+                    where_clause.append(
+                        or_(
+                            ExternalTrack.provider_key == scope_clean,
+                            ExternalTrack.provider_key.startswith(f"{scope_clean}/", autoescape=True),
+                        )
+                    )
+            missing_result = await session.execute(select(ExternalTrack).where(*where_clause))
             for missing_track in missing_result.scalars().all():
                 missing_track.state = "missing"
                 missing_track.sync_error = None
@@ -571,6 +619,8 @@ async def sync_external_library(
         external_library.last_sync_error = run.error
 
         await session.commit()
+        _maybe_enqueue_musicbrainz(songhive_config, counters.enrich_queue)
+        assert run  # for mypy
         return run
     except Exception as exc:
         if run is not None:
@@ -583,6 +633,7 @@ async def sync_external_library(
                     external_library.last_sync_error = run.error
                 await session.flush()
                 await session.commit()
+                _maybe_enqueue_musicbrainz(songhive_config, counters.enrich_queue)
             except Exception:
                 logger.exception("Failed to persist failed sync run for %s", external_library_id)
         if isinstance(exc, ExternalLibraryError):

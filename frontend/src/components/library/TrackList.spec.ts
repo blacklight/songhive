@@ -8,6 +8,7 @@ import { useAuthStore } from "@/stores/auth";
 import type { UserResponse } from "@/api/users";
 import type { TrackResponse } from "@/player/types";
 import { toQueueTrack } from "@/player/enrich";
+import * as externalLibrariesApi from "@/api/externalLibraries";
 import * as favoritesApi from "@/api/favorites";
 import * as librariesApi from "@/api/libraries";
 import * as tracksApi from "@/api/tracks";
@@ -38,6 +39,11 @@ vi.mock("@/api/favorites", () => ({
   removeFavorite: vi.fn(),
 }));
 
+vi.mock("@/api/externalLibraries", () => ({
+  deleteUserExternalTrack: vi.fn().mockResolvedValue(undefined),
+  adminDeleteExternalTrack: vi.fn().mockResolvedValue(undefined),
+}));
+
 const actionsLabel = i18n.global.t("browse.detail.actions");
 
 function createTestRouter() {
@@ -47,6 +53,7 @@ function createTestRouter() {
       { path: "/", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
+      { path: "/tracks/:id", component: { template: "<div/>" } },
       {
         path: "/tracks/:id/edit",
         name: "trackEdit",
@@ -308,6 +315,19 @@ describe("TrackList", () => {
 
     await clickMenuItem(i18n.global.t("browse.contextMenu.goToAlbum"));
     expect(router.currentRoute.value.path).toBe("/albums/album-1");
+  });
+
+  it("navigates to the track from the context menu", async () => {
+    const router = createTestRouter();
+    const tracks = [makeTrack()];
+    ({ wrapper } = mountTrackList({ tracks, context: "Artist" }, router));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    await clickMenuItem(i18n.global.t("browse.contextMenu.goToTrack"));
+    expect(router.currentRoute.value.path).toBe("/tracks/track-1");
   });
 
   it("navigates to the track edit view from the context menu when the user can manage the track", async () => {
@@ -945,5 +965,66 @@ describe("TrackList", () => {
         { trackIds: ["track-1"], position: 13 },
       ]);
     });
+  });
+
+  it("deletes the source audio file for an external track when requested", async () => {
+    const tracks = [
+      makeTrack({
+        id: "track-1",
+        title: "External Song",
+        owner_id: "user-1",
+        is_external: true,
+        can_write_tags: true,
+        can_delete_source: true,
+        external_library_id: "extlib-1",
+        external_track_id: "exttrack-1",
+        external_provider_type: "fake",
+      }),
+    ];
+
+    ({ wrapper } = mountTrackList({
+      tracks,
+      context: "Artist",
+      deletable: true,
+    }));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    await clickMenuItem(i18n.global.t("browse.contextMenu.deleteTrack"));
+    await flushPromises();
+
+    const checkbox = document.body.querySelector(
+      ".track-list__delete-source input[type='checkbox']",
+    ) as HTMLInputElement | null;
+    expect(checkbox).not.toBeNull();
+
+    checkbox!.checked = true;
+    checkbox!.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const warning = i18n.global.t("browse.delete.deleteSourceWarning", {
+      provider: "fake",
+    });
+    expect(document.body.textContent).toContain(warning);
+
+    const confirmButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.delete"));
+    confirmButton?.click();
+    await flushPromises();
+
+    expect(externalLibrariesApi.deleteUserExternalTrack).toHaveBeenCalledWith(
+      "extlib-1",
+      "exttrack-1",
+      {
+        delete_source: true,
+        remove_songhive_track: true,
+        confirm: "DELETE",
+      },
+    );
+    expect(tracksApi.deleteTrack).not.toHaveBeenCalled();
+    expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1"]]);
   });
 });

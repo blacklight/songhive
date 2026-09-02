@@ -6,6 +6,7 @@ from typing import Any, List, Optional, cast
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Body,
     Depends,
     HTTPException,
@@ -19,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ...config.schema import SonghiveConfig
-from ...external.errors import ExternalItemNotFound
 from ...external.registry import (
     get_external_adapter,
     is_user_configurable,
@@ -29,6 +29,7 @@ from ...external.sync import _find_or_create_library_track
 from ...models import ExternalLibrary, ExternalSyncRun, ExternalTrack
 from ...models.user import User
 from ...services import audit, deletion
+from ...services.federation import unpublish_track_activity
 from ...services.secrets import redact_config
 from ...services.storage import StorageService
 from ...tasks.external_libraries import sync_external_library_task
@@ -49,7 +50,9 @@ from .external_libraries import (
     _build_external_track_response,
     _create_external_library,
     _decrypt_external_config,
+    _delete_source_item,
     _delete_track_source,
+    _ensure_can_delete_source,
     _item_ref_from_track,
     _load_external_library,
     _load_external_track,
@@ -58,6 +61,7 @@ from .external_libraries import (
     _provider_capabilities_summary,
     _provider_item_exists,
     _redact_audit_details,
+    _remove_or_tombstone_external_track,
     _sanitize_error,
     _utcnow,
     _validate_and_encrypt_config,
@@ -233,10 +237,12 @@ async def update_admin_external_library(
 async def delete_admin_external_library(
     external_library_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
 ):
-    """Delete any external library."""
+    """Delete any external library and its linked tracks, albums, and artists."""
     external_library = await _load_external_library(db, external_library_id)
     if external_library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -250,8 +256,25 @@ async def delete_admin_external_library(
         details={"provider_type": external_library.provider_type, "scope": external_library.scope},
         ip_address=client_ip(request),
     )
-    await db.delete(external_library)
+
+    try:
+        result = await deletion.delete_external_library(db, storage, external_library, user=admin, is_admin=True)
+    except deletion.DeletionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
+
     await db.commit()
+
+    for info in result.unpublish:
+        if info.owner is not None and info.artist is not None:
+            background_tasks.add_task(
+                unpublish_track_activity,
+                info.track,
+                info.artist,
+                info.owner,
+                request.app.state.config,
+                info.federation_object_id,
+            )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -584,54 +607,26 @@ async def bulk_delete_admin_external_tracks(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Confirm must be 'DELETE'",
             )
-        if not config.external_libraries.allow_destructive_delete:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Destructive source deletion is disabled",
-            )
-        capabilities = external_library.capabilities or {}
-        if not capabilities.get("delete_source"):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Adapter does not support source deletion",
-            )
 
-        decrypted = _decrypt_external_config(external_library.config)
-        try:
-            adapter_cls = get_external_adapter(external_library.provider_type)
-        except KeyError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown provider") from exc
-
-        adapter = adapter_cls()
-        await adapter.validate_config(decrypted)
+        adapter, decrypted = await _ensure_can_delete_source(external_library, config)
 
         for track_id in body.external_track_ids:
             external_track = tracks[track_id]
 
-            if external_track.state != "missing":
-                item = _item_ref_from_track(external_track)
-                try:
-                    await adapter.delete_source(decrypted, item)
-                except ExternalItemNotFound:
-                    pass
-                except Exception as exc:
-                    external_track.sync_error = _sanitize_error(exc)
-                    await db.commit()
-                    raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail=f"{track_id}: {_sanitize_error(exc)}",
-                    ) from exc
-
-            if body.remove_songhive_track and external_track.track_id:
-                try:
-                    await deletion.delete_track(db, storage, external_track.track_id, delete_audio_file=False)
-                except deletion.DeletionError as exc:
-                    if exc.status_code != status.HTTP_404_NOT_FOUND:
-                        raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
-                await db.delete(external_track)
-            else:
-                external_track.state = "missing"
-                external_track.last_seen_at = datetime.now(timezone.utc)
+            try:
+                await _delete_source_item(adapter, decrypted, external_track)
+                await _remove_or_tombstone_external_track(db, storage, external_track, body.remove_songhive_track)
+            except HTTPException:
+                raise
+            except deletion.DeletionError as exc:
+                raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
+            except Exception as exc:
+                external_track.sync_error = _sanitize_error(exc)
+                await db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"{track_id}: {_sanitize_error(exc)}",
+                ) from exc
 
             affected_track_ids.append(track_id)
 

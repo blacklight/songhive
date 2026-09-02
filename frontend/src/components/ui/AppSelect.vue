@@ -10,6 +10,7 @@ export interface Props {
   modelValue: string;
   options: Option[];
   label?: string;
+  hint?: string;
   error?: string;
   disabled?: boolean;
 }
@@ -48,6 +49,7 @@ function onChange(event: Event) {
         {{ option.label }}
       </option>
     </select>
+    <p v-if="props.hint" class="app-select__hint">{{ props.hint }}</p>
     <p v-if="props.error" class="app-select__error" role="alert">
       {{ props.error }}
     </p>
@@ -79,6 +81,12 @@ function onChange(event: Event) {
 .app-select__field:focus {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
+}
+
+.app-select__hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
 }
 
 .app-select__error {

@@ -39,3 +39,23 @@ def test_external_libraries_denied_providers_from_json_string(monkeypatch):
     monkeypatch.setenv("SONGHIVE_EXTERNAL_LIBRARIES__DENIED_USER_PROVIDERS", '["ftp", "sftp"]')
     config = SonghiveConfig()
     assert config.external_libraries.denied_user_providers == ["ftp", "sftp"]
+
+
+def test_external_libraries_local_roots_default():
+    """local_roots is empty by default."""
+    config = SonghiveConfig()
+    assert config.external_libraries.local_roots == []
+
+
+def test_external_libraries_local_roots_from_comma_string(monkeypatch):
+    """local_roots can be parsed from a comma-separated env var."""
+    monkeypatch.setenv("SONGHIVE_EXTERNAL_LIBRARIES__LOCAL_ROOTS", "/a, /b")
+    config = SonghiveConfig()
+    assert config.external_libraries.local_roots == ["/a", "/b"]
+
+
+def test_external_libraries_local_roots_from_json_string(monkeypatch):
+    """local_roots can be parsed from a JSON list env var."""
+    monkeypatch.setenv("SONGHIVE_EXTERNAL_LIBRARIES__LOCAL_ROOTS", '["/a","/b"]')
+    config = SonghiveConfig()
+    assert config.external_libraries.local_roots == ["/a", "/b"]

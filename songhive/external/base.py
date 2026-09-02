@@ -38,6 +38,7 @@ class ExternalLibraryAdapter(ABC):
         self,
         config: dict,
         since: Optional[datetime] = None,
+        scope: Optional[str] = None,
     ) -> AsyncIterator[ExternalItemRef]:
         """Asynchronously iterate provider items."""
         if False:

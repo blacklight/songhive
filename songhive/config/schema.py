@@ -411,8 +411,16 @@ class ExternalLibrariesConfig(BaseSettings):
         ge=1,
         description="Timeout in seconds for proxied external stream responses.",
     )
+    local_roots: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Filesystem roots a 'local' external library may point at; "
+            "empty denies all. A comma-separated string or JSON list is also "
+            "accepted from environment variables."
+        ),
+    )
 
-    @field_validator("allowed_user_providers", "denied_user_providers", mode="before")
+    @field_validator("allowed_user_providers", "denied_user_providers", "local_roots", mode="before")
     @classmethod
     def _parse_providers(cls, value):
         if isinstance(value, str):
@@ -434,7 +442,7 @@ def _bitrate_to_bits(value: str) -> int:
     value = (value or "").strip().lower()
     if not value:
         return 0
-    match = re.match(r"^(\d+(?:\.\d+)?)\s*(k|m|g)?$", value)
+    match = re.match(r"^(\d+(?:\.\d+)?)\s*([kmg])?$", value)
     if not match:
         return 0
     number = float(match.group(1))

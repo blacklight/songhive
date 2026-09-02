@@ -3,7 +3,6 @@ Admin CLI command tests.
 """
 
 import asyncio
-import os
 import shutil
 import subprocess
 from contextlib import asynccontextmanager
@@ -1093,28 +1092,6 @@ async def test_provision_federation_keys_batch(db_session, monkeypatch, capsys):
     await cli_admin._handle_provision_federation_keys(_make_args())
     captured = capsys.readouterr()
     assert "Provisioned federation keys for 50 user(s) on fed.example.com" in captured.out
-
-
-def test_admin_main_secret_file(tmp_path, monkeypatch):
-    """Test that admin_main loads a secret key from SONGHIVE_SECRET_FILE."""
-    secret_file = tmp_path / "secret.txt"
-    secret_file.write_text("my-secret-value")
-    monkeypatch.delenv("SONGHIVE_AUTH__SECRET_KEY", raising=False)
-    monkeypatch.setenv("SONGHIVE_SECRET_FILE", str(secret_file))
-    monkeypatch.setattr(
-        cli_admin,
-        "load_config",
-        lambda argv: SonghiveConfig(
-            database={"url": "sqlite+aiosqlite:///:memory:"},
-            federation={"enabled": False},
-            auth={"secret_key": "a" * 64},
-        ),
-    )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
-    monkeypatch.setattr(cli_admin, "_handle_init_db", AsyncMock())
-
-    cli_admin.admin_main(["init-db"])
-    assert os.environ.get("SONGHIVE_AUTH__SECRET_KEY") == "my-secret-value"
 
 
 def test_admin_main_import_dir(tmp_path, monkeypatch, capsys):

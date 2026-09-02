@@ -99,10 +99,13 @@ class FakeExternalAdapter(ExternalLibraryAdapter):
         self,
         config: dict,
         since: Optional[datetime] = None,
+        scope: Optional[str] = None,
     ) -> AsyncIterator[ExternalItemRef]:
         """Yield an ``ExternalItemRef`` for every in-memory item."""
         items = config.get("items", {})
         for provider_key in items:
+            if scope and not (provider_key == scope or provider_key.startswith(f"{scope.rstrip('/')}/")):
+                continue
             record = self._get_item(config, provider_key)
             mtime = record["mtime"]
             if since is not None and mtime is not None and mtime <= since:

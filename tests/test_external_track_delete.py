@@ -8,10 +8,14 @@ from sqlalchemy import select
 
 from songhive.external._fake import FakeExternalAdapter
 from songhive.external.errors import ExternalItemNotFound, ExternalPermissionDenied
+from songhive.models.album import Album
+from songhive.models.artist import Artist
 from songhive.models.audit_log import AuditLog
 from songhive.models.external_library import ExternalLibrary
 from songhive.models.external_track import ExternalTrack
+from songhive.models.library import Library
 from songhive.models.library_track import LibraryTrack
+from songhive.models.playlist import Playlist, PlaylistTrack
 from songhive.models.track import Track
 from songhive.models.user import User
 
@@ -242,6 +246,28 @@ async def test_destructive_delete_unsupported_adapter(client, regular_user, auth
     external_track = await _make_track_for_external(db_session, external_library, regular_user)
 
     external_library.capabilities = {"delete_source": False}
+    await db_session.commit()
+
+    response = client.request(
+        "DELETE",
+        f"/api/v1/external-libraries/{data['id']}/tracks/{external_track.id}",
+        json={"delete_source": True, "confirm": "DELETE"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@pytest.mark.asyncio
+async def test_destructive_delete_rejects_read_only_library(
+    client, regular_user, auth_headers, monkeypatch, db_session
+):
+    """Destructive DELETE on a non-writeable adapter returns 422."""
+    data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
+    client.app.state.config.external_libraries.allow_destructive_delete = True
+    external_library = await db_session.get(ExternalLibrary, data["id"])
+    external_track = await _make_track_for_external(db_session, external_library, regular_user)
+
+    external_library.capabilities = {"delete_source": True, "write_tags": False}
     await db_session.commit()
 
     response = client.request(
@@ -592,3 +618,157 @@ async def test_audit_details_never_contain_raw_config(client, regular_user, auth
         assert "super-secret" not in str(log.details)
         assert "hunter2" not in str(log.details)
         assert "abc123" not in str(log.details)
+
+
+async def _make_track_with_album_and_playlist(
+    db_session,
+    external_library: ExternalLibrary,
+    user: User,
+) -> tuple[ExternalTrack, Track, Album, Artist, Playlist]:
+    """Create a track with an album and a playlist entry for cascade tests."""
+    artist = Artist(name="Cascade Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Cascade Album",
+        artist_id=str(artist.id),
+        owner_id=str(user.id),
+        visibility="private",
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    track = Track(
+        title="Cascade Track",
+        artist_id=str(artist.id),
+        album_id=str(album.id),
+        owner_id=str(user.id),
+        visibility="private",
+        source="external",
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    library_track = LibraryTrack(
+        library_id=external_library.library_id,
+        track_id=str(track.id),
+        added_by_id=str(user.id),
+    )
+    db_session.add(library_track)
+
+    external_track = ExternalTrack(
+        external_library_id=str(external_library.id),
+        track_id=str(track.id),
+        provider_key="cascade.mp3",
+        state="active",
+        sha256="abc123",
+        raw_metadata={"display_path": "cascade.mp3"},
+    )
+    db_session.add(external_track)
+
+    playlist = Playlist(
+        name="Cascade Playlist",
+        owner_id=str(user.id),
+        visibility="private",
+    )
+    db_session.add(playlist)
+    await db_session.flush()
+
+    playlist_track = PlaylistTrack(
+        playlist_id=str(playlist.id),
+        track_id=str(track.id),
+        position=0,
+    )
+    db_session.add(playlist_track)
+    await db_session.commit()
+
+    return external_track, track, album, artist, playlist
+
+
+@pytest.mark.asyncio
+async def test_user_delete_external_library_cascades(
+    client,
+    regular_user,
+    auth_headers,
+    monkeypatch,
+    db_session,
+):
+    """Deleting a user external library removes its tracks, album, artist, and playlist entries."""
+    data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
+    external_library = await db_session.get(ExternalLibrary, data["id"])
+    external_track, track, album, artist, playlist = await _make_track_with_album_and_playlist(
+        db_session, external_library, regular_user
+    )
+
+    track_id = str(track.id)
+    album_id = str(album.id)
+    artist_id = str(artist.id)
+    playlist_id = str(playlist.id)
+    library_id = str(external_library.library_id)
+
+    response = client.delete(
+        f"/api/v1/external-libraries/{data['id']}",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+
+    await db_session.rollback()
+    assert await db_session.get(ExternalLibrary, data["id"]) is None
+    assert await db_session.get(Library, library_id) is None
+    assert await db_session.get(Track, track_id) is None
+    assert await db_session.get(Album, album_id) is None
+    assert await db_session.get(Artist, artist_id) is None
+    assert await db_session.get(Playlist, playlist_id) is not None
+    result = await db_session.execute(select(PlaylistTrack).where(PlaylistTrack.track_id == track_id))
+    assert result.scalar_one_or_none() is None
+    result = await db_session.execute(select(LibraryTrack).where(LibraryTrack.track_id == track_id))
+    assert result.scalar_one_or_none() is None
+    result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == data["id"], AuditLog.action == "external_library.delete")
+    )
+    assert result.scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_external_library_cascades(
+    client,
+    admin_user,
+    auth_headers,
+    monkeypatch,
+    db_session,
+):
+    """Deleting an admin external library removes its tracks, album, artist, and playlist entries."""
+    data = await _create_admin_external_library(client, admin_user, auth_headers, monkeypatch)
+    external_library = await db_session.get(ExternalLibrary, data["id"])
+    external_track, track, album, artist, playlist = await _make_track_with_album_and_playlist(
+        db_session, external_library, admin_user
+    )
+
+    track_id = str(track.id)
+    album_id = str(album.id)
+    artist_id = str(artist.id)
+    playlist_id = str(playlist.id)
+    library_id = str(external_library.library_id)
+
+    response = client.delete(
+        f"/api/v1/admin/external-libraries/{data['id']}",
+        headers=auth_headers(admin_user),
+    )
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+
+    await db_session.rollback()
+    assert await db_session.get(ExternalLibrary, data["id"]) is None
+    assert await db_session.get(Library, library_id) is None
+    assert await db_session.get(Track, track_id) is None
+    assert await db_session.get(Album, album_id) is None
+    assert await db_session.get(Artist, artist_id) is None
+    assert await db_session.get(Playlist, playlist_id) is not None
+    result = await db_session.execute(select(PlaylistTrack).where(PlaylistTrack.track_id == track_id))
+    assert result.scalar_one_or_none() is None
+    result = await db_session.execute(select(LibraryTrack).where(LibraryTrack.track_id == track_id))
+    assert result.scalar_one_or_none() is None
+    result = await db_session.execute(
+        select(AuditLog).where(AuditLog.target_id == data["id"], AuditLog.action == "external_library.admin_delete")
+    )
+    assert result.scalar_one_or_none() is not None

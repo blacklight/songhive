@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-let checkboxCounter = 0;
-
 export interface Props {
   modelValue: boolean;
   label?: string;
+  hint?: string;
   disabled?: boolean;
   indeterminate?: boolean;
   id?: string;
@@ -19,8 +18,9 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{ "update:modelValue": [value: boolean] }>();
 
-const fallbackId = `app-checkbox-${++checkboxCounter}`;
-const inputId = computed(() => props.id || fallbackId);
+const inputId = computed(
+  () => props.id || `app-checkbox-${Math.random().toString(36).slice(2)}`,
+);
 
 function onChange(event: Event) {
   const target = event.target as HTMLInputElement;
@@ -30,23 +30,32 @@ function onChange(event: Event) {
 
 <template>
   <div class="app-checkbox">
-    <input
-      :id="inputId"
-      type="checkbox"
-      class="app-checkbox__input"
-      :checked="props.modelValue"
-      :disabled="props.disabled"
-      :indeterminate.prop="props.indeterminate"
-      @change="onChange"
-    />
-    <label v-if="props.label" :for="inputId" class="app-checkbox__label">
-      {{ props.label }}
-    </label>
+    <div class="app-checkbox__row">
+      <input
+        :id="inputId"
+        type="checkbox"
+        class="app-checkbox__input"
+        :checked="props.modelValue"
+        :disabled="props.disabled"
+        :indeterminate.prop="props.indeterminate"
+        @change="onChange"
+      />
+      <label v-if="props.label" :for="inputId" class="app-checkbox__label">
+        {{ props.label }}
+      </label>
+    </div>
+    <p v-if="props.hint" class="app-checkbox__hint">{{ props.hint }}</p>
   </div>
 </template>
 
 <style scoped>
 .app-checkbox {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.app-checkbox__row {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -68,5 +77,11 @@ function onChange(event: Event) {
   color: var(--color-text);
   font-size: 0.875rem;
   cursor: pointer;
+}
+
+.app-checkbox__hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
 }
 </style>

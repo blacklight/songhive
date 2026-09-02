@@ -26,6 +26,10 @@ import {
   downloadTrack,
   enrichTrack,
 } from "@/api/tracks";
+import {
+  deleteUserExternalTrack,
+  adminDeleteExternalTrack,
+} from "@/api/externalLibraries";
 import { canManageItem } from "@/composables/useCanManage";
 import ExternalTrackBadge from "@/components/external-libraries/ExternalTrackBadge.vue";
 
@@ -99,6 +103,7 @@ const confirmOpen = ref(false);
 const confirmMode = ref<"single" | "bulk">("single");
 const confirmTrack = ref<QueueTrack | null>(null);
 const confirmIsDelete = ref(false);
+const deleteSource = ref(false);
 const isRemoving = ref(false);
 const reorderMode = ref(false);
 const isReordering = ref(false);
@@ -721,6 +726,7 @@ function openBulkDelete() {
   confirmTrack.value = null;
   confirmMode.value = "bulk";
   confirmIsDelete.value = true;
+  deleteSource.value = false;
   confirmOpen.value = true;
 }
 
@@ -728,6 +734,7 @@ function openSingleDelete(track: QueueTrack) {
   confirmTrack.value = track;
   confirmMode.value = "single";
   confirmIsDelete.value = true;
+  deleteSource.value = false;
   confirmOpen.value = true;
 }
 
@@ -735,6 +742,7 @@ function closeConfirm() {
   confirmOpen.value = false;
   confirmTrack.value = null;
   confirmIsDelete.value = false;
+  deleteSource.value = false;
 }
 
 const confirmTitle = computed(() => {
@@ -766,6 +774,15 @@ const confirmTitle = computed(() => {
   });
 });
 
+const showDeleteSource = computed(() => {
+  if (!confirmIsDelete.value || confirmMode.value !== "single") return false;
+  const track = confirmTrack.value;
+  if (!track || !track.is_external) return false;
+  if (!canManageTrack(track)) return false;
+  if (!track.can_write_tags || !track.can_delete_source) return false;
+  return !!track.external_track_id && !!track.external_library_id;
+});
+
 async function onConfirm() {
   const trackIds =
     confirmMode.value === "single" && confirmTrack.value
@@ -780,7 +797,27 @@ async function onConfirm() {
       let deleted = 0;
       let ids: string[] = [];
       if (confirmMode.value === "single" && confirmTrack.value) {
-        await deleteTrack(confirmTrack.value.id);
+        if (
+          deleteSource.value &&
+          confirmTrack.value.is_external &&
+          confirmTrack.value.external_library_id &&
+          confirmTrack.value.external_track_id
+        ) {
+          const deleteFn = authStore.isAdmin
+            ? adminDeleteExternalTrack
+            : deleteUserExternalTrack;
+          await deleteFn(
+            confirmTrack.value.external_library_id,
+            confirmTrack.value.external_track_id,
+            {
+              delete_source: true,
+              remove_songhive_track: true,
+              confirm: "DELETE",
+            },
+          );
+        } else {
+          await deleteTrack(confirmTrack.value.id);
+        }
         ids = [confirmTrack.value.id];
         deleted = 1;
       } else {
@@ -962,6 +999,12 @@ const menuItems = computed(() => {
     });
   }
 
+  items.push({
+    key: "go-to-track",
+    label: t("browse.contextMenu.goToTrack"),
+    icon: "music",
+  });
+
   if (track.album_id) {
     items.push({
       key: "go-to-album",
@@ -1003,6 +1046,9 @@ async function onMenuSelect(key: string) {
     case "enqueue":
       player.enqueue(track);
       emit("enqueue", track);
+      break;
+    case "go-to-track":
+      await router.push(`/tracks/${track.id}`);
       break;
     case "download":
       try {
@@ -1602,6 +1648,23 @@ async function onMenuSelect(key: string) {
         {{ confirmTitle }}
       </p>
 
+      <AppCheckbox
+        v-if="showDeleteSource"
+        v-model="deleteSource"
+        class="track-list__delete-source"
+        :label="t('browse.delete.deleteSource')"
+      />
+      <p
+        v-if="showDeleteSource && deleteSource && confirmTrack"
+        class="track-list__delete-source-warning"
+      >
+        {{
+          t("browse.delete.deleteSourceWarning", {
+            provider: confirmTrack.external_provider_type ?? "",
+          })
+        }}
+      </p>
+
       <template #actions>
         <AppButton
           variant="secondary"
@@ -1716,6 +1779,16 @@ async function onMenuSelect(key: string) {
 .track-list__confirm-text {
   margin: 0;
   color: var(--color-text);
+}
+
+.track-list__delete-source {
+  margin-top: var(--space-3);
+}
+
+.track-list__delete-source-warning {
+  margin: var(--space-2) 0 0;
+  color: var(--color-danger);
+  font-weight: 700;
 }
 
 .track-list :deep(.app-table) {

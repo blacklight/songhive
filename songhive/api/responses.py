@@ -109,6 +109,7 @@ class TrackResponse(BaseModel):
     favorited: Optional[bool] = None
     is_external: bool = False
     external_library_id: Optional[str] = None
+    external_track_id: Optional[str] = None
     external_provider_type: Optional[str] = None
     external_state: Optional[str] = None
     can_stream: Optional[bool] = None

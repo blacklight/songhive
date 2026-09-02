@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
+import { formatDateTime } from "@/i18n";
 import type { Visibility } from "@/api/libraries";
 import {
   listUserProviders,
@@ -43,12 +44,21 @@ import AppTabs from "@/components/ui/AppTabs.vue";
 import AppTable from "@/components/ui/AppTable.vue";
 import AppPagination from "@/components/ui/AppPagination.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import AppSpinner from "@/components/feedback/AppSpinner.vue";
+import { useMediaQuery } from "@/composables/useMediaQuery";
+import {
+  buildProviderConfigFromTemplate,
+  getFieldInitialValue,
+  getProviderTemplate,
+  type ProviderFieldTemplate,
+} from "@/config/externalLibraryProviderTemplates";
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const confirm = useConfirmStore();
 const toast = useToastStore();
+const isWide = useMediaQuery("(min-width: 1280px)", true);
 
 const isAdmin = computed(() => route.path.startsWith("/admin"));
 const libraryId = computed(() => {
@@ -83,6 +93,14 @@ const enabled = ref(true);
 const syncEnabled = ref(true);
 const syncInterval = ref<number | null>(null);
 const includeInLibraryIndex = ref(false);
+
+const providerConfig = reactive<Record<string, unknown>>({});
+const providerTemplate = computed(() =>
+  getProviderTemplate(providerType.value),
+);
+const hasProviderTemplate = computed(
+  () => providerTemplate.value.fields.length > 0,
+);
 
 const configError = ref<string | null>(null);
 
@@ -127,36 +145,47 @@ const stateOptions = computed(() => [
   { value: "error", label: "Error" },
 ]);
 
-const trackColumns = computed(() => [
-  { key: "selected", label: "", align: "center" as const, width: "2.5rem" },
-  { key: "provider_key", label: t("pages.externalLibraries.trackProviderKey") },
-  {
-    key: "state",
-    label: t("pages.externalLibraries.trackState"),
-    align: "center" as const,
-  },
-  { key: "display_path", label: t("pages.externalLibraries.trackDisplayPath") },
-  { key: "last_seen_at", label: t("pages.externalLibraries.lastSeen") },
-  {
-    key: "actions",
-    label: t("browse.detail.actions"),
-    align: "center" as const,
-  },
-]);
+function getFieldOptions(field: ProviderFieldTemplate) {
+  return (field.options ?? []).map((option) => ({
+    value: option.value,
+    label: t(option.labelI18nKey),
+  }));
+}
 
-const trackRows = computed<Record<string, unknown>[]>(() =>
-  tracks.value.map((track) => ({
-    id: track.id,
-    trackId: track.id,
-    selected: selectedTrackIds.value.has(track.id),
-    provider_key: track.provider_key,
-    state: track.state,
-    display_path: track.display_path || "—",
-    last_seen_at: track.last_seen_at
-      ? new Date(track.last_seen_at).toLocaleString()
-      : "—",
-  })),
-);
+function getFieldInputValue(field: ProviderFieldTemplate): string | number {
+  const value = providerConfig[field.name];
+  if (field.type === "number") {
+    if (typeof value === "number") return value;
+    if (value === undefined || value === null || value === "") return "";
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? "" : parsed;
+  }
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function setFieldInputValue(
+  field: ProviderFieldTemplate,
+  value: string | number,
+) {
+  providerConfig[field.name] = value;
+}
+
+function getFieldCheckboxValue(field: ProviderFieldTemplate): boolean {
+  return Boolean(providerConfig[field.name]);
+}
+
+function setFieldCheckboxValue(field: ProviderFieldTemplate, value: boolean) {
+  providerConfig[field.name] = value;
+}
+
+function getFieldSelectValue(field: ProviderFieldTemplate): string {
+  const value = providerConfig[field.name];
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function setFieldSelectValue(field: ProviderFieldTemplate, value: string) {
+  providerConfig[field.name] = value;
+}
 
 const syncRunColumns = computed(() => [
   { key: "status", label: t("pages.externalLibraries.syncRunStatus") },
@@ -182,6 +211,20 @@ const syncRunRows = computed<Record<string, unknown>[]>(() =>
       : "—",
   })),
 );
+
+const syncRunCardKeys = [
+  "items_seen",
+  "tracks_created",
+  "tracks_updated",
+  "tracks_tombstoned",
+  "tracks_shadowed",
+];
+
+function syncRunLabel(key: string): string {
+  return (
+    syncRunColumns.value.find((column) => column.key === key)?.label ?? key
+  );
+}
 
 async function loadProviders() {
   try {
@@ -216,29 +259,65 @@ async function loadLibrary() {
   }
 }
 
+function resetProviderConfig(source?: Record<string, unknown>) {
+  const template = providerTemplate.value;
+  if (template.fields.length === 0) {
+    configText.value = JSON.stringify(source ?? {}, null, 2);
+    return;
+  }
+
+  for (const key of Object.keys(providerConfig)) {
+    delete providerConfig[key];
+  }
+
+  for (const field of template.fields) {
+    providerConfig[field.name] = getFieldInitialValue(field, source);
+  }
+}
+
 function resetForm() {
   const source = library.value;
   if (!source) {
     providerType.value = providers.value[0]?.provider_type ?? "";
     name.value = "";
-    configText.value = "{}";
     visibility.value = "private";
     enabled.value = true;
     syncEnabled.value = true;
     syncInterval.value = null;
     includeInLibraryIndex.value = false;
+    resetProviderConfig();
     return;
   }
   providerType.value = source.provider_type;
   name.value = source.name ?? "";
-  configText.value = JSON.stringify(source.config ?? {}, null, 2);
   enabled.value = source.enabled;
   syncEnabled.value = source.sync_enabled;
   syncInterval.value = source.sync_interval_seconds ?? null;
   includeInLibraryIndex.value = source.include_in_library_index;
+  resetProviderConfig(source.config);
+}
+
+function onProviderTypeChanged(newType: string) {
+  providerType.value = newType;
+  resetProviderConfig();
 }
 
 function validateConfig(): Record<string, unknown> | null {
+  if (hasProviderTemplate.value) {
+    try {
+      return buildProviderConfigFromTemplate(
+        providerTemplate.value,
+        providerConfig,
+      );
+    } catch (err) {
+      configError.value =
+        err instanceof Error
+          ? err.message
+          : t("pages.externalLibraries.configError");
+      return null;
+    }
+  }
+
   try {
     return JSON.parse(configText.value) as Record<string, unknown>;
   } catch {
@@ -381,7 +460,7 @@ async function pollSyncRunStatus(attempts = 0) {
   }
 
   if (attempts > 0) {
-    await loadSyncRuns();
+    await loadSyncRuns(true);
   }
 
   const run = syncRuns.value.find((r) => r.id === runId);
@@ -450,9 +529,9 @@ async function loadTracks() {
   }
 }
 
-async function loadSyncRuns() {
+async function loadSyncRuns(silent = false) {
   if (isNew.value) return;
-  syncRunsLoading.value = true;
+  if (!silent) syncRunsLoading.value = true;
   syncRunsError.value = null;
   try {
     const offset = (syncRunsPage.value - 1) * syncRunsPerPage;
@@ -474,7 +553,7 @@ async function loadSyncRuns() {
         (err instanceof Error ? err.message : t("errors.unknown")),
     });
   } finally {
-    syncRunsLoading.value = false;
+    if (!silent) syncRunsLoading.value = false;
   }
 }
 
@@ -670,13 +749,70 @@ onUnmounted(() => {
           @submit.prevent="onSubmit"
         >
           <AppSelect
-            v-model="providerType"
+            :model-value="providerType"
             :label="t('pages.externalLibraries.provider')"
             :options="providerOptions"
             :disabled="!isNew"
+            @update:model-value="onProviderTypeChanged"
           />
           <AppInput v-model="name" :label="t('pages.externalLibraries.name')" />
+
+          <template v-if="hasProviderTemplate">
+            <p class="external-library-edit-view__provider-config-title">
+              {{ t("pages.externalLibraries.providerConfig") }}
+            </p>
+            <div
+              v-for="field in providerTemplate.fields"
+              :key="field.name"
+              class="external-library-edit-view__provider-field"
+            >
+              <AppInput
+                v-if="
+                  field.type === 'string' ||
+                  field.type === 'number' ||
+                  field.type === 'string-array'
+                "
+                :model-value="getFieldInputValue(field)"
+                :type="field.type === 'number' ? 'number' : 'text'"
+                :as="field.type === 'string-array' ? 'textarea' : 'input'"
+                :rows="field.type === 'string-array' ? 2 : undefined"
+                :label="t(field.labelI18nKey)"
+                :hint="
+                  field.descriptionI18nKey
+                    ? t(field.descriptionI18nKey)
+                    : undefined
+                "
+                :required="field.required"
+                @update:model-value="setFieldInputValue(field, $event)"
+              />
+              <AppCheckbox
+                v-else-if="field.type === 'boolean'"
+                :model-value="getFieldCheckboxValue(field)"
+                :label="t(field.labelI18nKey)"
+                :hint="
+                  field.descriptionI18nKey
+                    ? t(field.descriptionI18nKey)
+                    : undefined
+                "
+                @update:model-value="setFieldCheckboxValue(field, $event)"
+              />
+              <AppSelect
+                v-else-if="field.type === 'enum'"
+                :model-value="getFieldSelectValue(field)"
+                :label="t(field.labelI18nKey)"
+                :hint="
+                  field.descriptionI18nKey
+                    ? t(field.descriptionI18nKey)
+                    : undefined
+                "
+                :options="getFieldOptions(field)"
+                @update:model-value="setFieldSelectValue(field, $event)"
+              />
+            </div>
+          </template>
+
           <AppInput
+            v-else
             v-model="configText"
             as="textarea"
             :label="t('pages.externalLibraries.config')"
@@ -733,6 +869,18 @@ onUnmounted(() => {
         <div class="external-library-edit-view__section">
           <div class="external-library-edit-view__section-controls">
             <AppSelect v-model="trackState" :options="stateOptions" />
+            <AppCheckbox
+              v-if="tracks.length"
+              :model-value="
+                selectedTrackIds.size === tracks.length && tracks.length > 0
+              "
+              :indeterminate="
+                selectedTrackIds.size > 0 &&
+                selectedTrackIds.size < tracks.length
+              "
+              :label="t('pages.externalLibraries.selectAll')"
+              @update:model-value="toggleSelectAll"
+            />
             <AppButton
               v-if="selectedTrackIds.size"
               variant="danger"
@@ -754,58 +902,82 @@ onUnmounted(() => {
             </AppButton>
           </div>
 
-          <AppTable
-            :columns="trackColumns"
-            :rows="trackRows"
-            :row-key="(row) => String(row.id)"
-            :loading="tracksLoading"
-            :empty-label="
-              t('browse.list.empty', {
-                entity: t('pages.externalLibraries.tracks'),
-              })
-            "
+          <div
+            v-if="tracksLoading && tracks.length === 0"
+            class="external-library-edit-view__loading"
           >
-            <template #column-selected>
-              <AppCheckbox
-                :model-value="
-                  selectedTrackIds.size === tracks.length && tracks.length > 0
-                "
-                :aria-label="t('pages.externalLibraries.selectAll')"
-                @update:model-value="toggleSelectAll"
-              />
-            </template>
+            <AppSpinner />
+          </div>
 
-            <template #row-selected="{ row }">
-              <AppCheckbox
-                :model-value="Boolean(row.selected)"
-                :aria-label="t('pages.externalLibraries.selectAll')"
-                @update:model-value="toggleTrack(String(row.trackId))"
-              />
-            </template>
+          <template v-else-if="tracks.length > 0">
+            <ul class="external-library-edit-view__track-cards" role="list">
+              <li
+                v-for="track in tracks"
+                :key="track.id"
+                class="external-library-edit-view__track-card"
+              >
+                <div class="external-library-edit-view__track-card-header">
+                  <AppCheckbox
+                    :model-value="selectedTrackIds.has(track.id)"
+                    :aria-label="t('pages.externalLibraries.selectAll')"
+                    @update:model-value="toggleTrack(track.id)"
+                  />
+                  <span class="external-library-edit-view__track-card-key">
+                    {{ track.provider_key }}
+                  </span>
+                  <span class="external-library-edit-view__track-card-state">
+                    {{ track.state }}
+                  </span>
+                </div>
 
-            <template #row-state="{ value }">
-              <span class="external-library-edit-view__state">{{ value }}</span>
-            </template>
+                <dl class="external-library-edit-view__track-card-body">
+                  <div>
+                    <dt>
+                      {{ t("pages.externalLibraries.trackDisplayPath") }}
+                    </dt>
+                    <dd>{{ track.display_path || "—" }}</dd>
+                  </div>
+                  <div>
+                    <dt>{{ t("pages.externalLibraries.lastSeen") }}</dt>
+                    <dd>
+                      <time
+                        v-if="track.last_seen_at"
+                        :datetime="track.last_seen_at"
+                      >
+                        {{ formatDateTime(track.last_seen_at) }}
+                      </time>
+                      <template v-else>—</template>
+                    </dd>
+                  </div>
+                </dl>
 
-            <template #row-actions="{ row }">
-              <div class="external-library-edit-view__row-actions">
-                <AppButton
-                  variant="ghost"
-                  size="sm"
-                  icon="rotate-right"
-                  :aria-label="t('pages.externalLibraries.restore')"
-                  @click="onRestoreTrack(String(row.trackId))"
-                />
-                <AppButton
-                  variant="ghost"
-                  size="sm"
-                  icon="trash"
-                  :aria-label="t('pages.externalLibraries.deleteTrack')"
-                  @click="onDeleteTrack(String(row.trackId))"
-                />
-              </div>
-            </template>
-          </AppTable>
+                <div class="external-library-edit-view__track-card-footer">
+                  <AppButton
+                    variant="ghost"
+                    size="sm"
+                    icon="rotate-right"
+                    :aria-label="t('pages.externalLibraries.restore')"
+                    @click="onRestoreTrack(track.id)"
+                  />
+                  <AppButton
+                    variant="ghost"
+                    size="sm"
+                    icon="trash"
+                    :aria-label="t('pages.externalLibraries.deleteTrack')"
+                    @click="onDeleteTrack(track.id)"
+                  />
+                </div>
+              </li>
+            </ul>
+          </template>
+
+          <div v-else class="external-library-edit-view__empty" role="status">
+            {{
+              t("browse.list.empty", {
+                entity: t("pages.externalLibraries.tracks"),
+              })
+            }}
+          </div>
 
           <AppPagination
             v-if="tracksTotal > tracksPerPage"
@@ -829,17 +1001,65 @@ onUnmounted(() => {
             </AppButton>
           </div>
 
-          <AppTable
-            :columns="syncRunColumns"
-            :rows="syncRunRows"
-            :row-key="(row) => String(row.id)"
-            :loading="syncRunsLoading"
-            :empty-label="
-              t('browse.list.empty', {
-                entity: t('pages.externalLibraries.syncRuns'),
+          <div
+            v-if="syncRunsLoading && syncRunRows.length === 0"
+            class="external-library-edit-view__loading"
+          >
+            <AppSpinner />
+          </div>
+
+          <template v-else-if="syncRunRows.length > 0">
+            <AppTable
+              v-if="isWide"
+              :columns="syncRunColumns"
+              :rows="syncRunRows"
+              :row-key="(row) => String(row.id)"
+              :loading="syncRunsLoading && syncRunRows.length === 0"
+              :empty-label="
+                t('browse.list.empty', {
+                  entity: t('pages.externalLibraries.syncRuns'),
+                })
+              "
+            />
+
+            <ul
+              v-else
+              class="external-library-edit-view__sync-runs-cards"
+              role="list"
+            >
+              <li
+                v-for="run in syncRunRows"
+                :key="String(run.id)"
+                class="external-library-edit-view__sync-run-card"
+              >
+                <div class="external-library-edit-view__sync-run-card-header">
+                  <span
+                    class="external-library-edit-view__sync-run-card-status"
+                  >
+                    {{ run.status }}
+                  </span>
+                  <span class="external-library-edit-view__sync-run-card-time">
+                    {{ run.started_at }}
+                  </span>
+                </div>
+
+                <dl class="external-library-edit-view__sync-run-card-body">
+                  <div v-for="key in syncRunCardKeys" :key="key">
+                    <dt>{{ syncRunLabel(key) }}</dt>
+                    <dd>{{ run[key] }}</dd>
+                  </div>
+                </dl>
+              </li>
+            </ul>
+          </template>
+
+          <div v-else class="external-library-edit-view__empty" role="status">
+            {{
+              t("browse.list.empty", {
+                entity: t("pages.externalLibraries.syncRuns"),
               })
-            "
-          />
+            }}
+          </div>
 
           <AppPagination
             v-if="syncRunsTotal > syncRunsPerPage"
@@ -916,12 +1136,166 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.external-library-edit-view__row-actions {
-  display: flex;
-  gap: var(--space-1);
+.external-library-edit-view__provider-config-title {
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
 }
 
-.external-library-edit-view__state {
+.external-library-edit-view__provider-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.external-library-edit-view__loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6);
+}
+
+.external-library-edit-view__empty {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.external-library-edit-view__sync-runs-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.external-library-edit-view__sync-run-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.external-library-edit-view__sync-run-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.external-library-edit-view__sync-run-card-status {
+  font-weight: 600;
   text-transform: capitalize;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.external-library-edit-view__sync-run-card-time {
+  flex: 0 0 auto;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.external-library-edit-view__sync-run-card-body {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.external-library-edit-view__sync-run-card-body div {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.external-library-edit-view__sync-run-card-body dt {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.external-library-edit-view__sync-run-card-body dd {
+  margin: 0;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.external-library-edit-view__track-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.external-library-edit-view__track-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.external-library-edit-view__track-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.external-library-edit-view__track-card-key {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.external-library-edit-view__track-card-state {
+  flex: 0 0 auto;
+  font-size: 0.875rem;
+  text-transform: capitalize;
+  color: var(--color-text-muted);
+}
+
+.external-library-edit-view__track-card-body {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.external-library-edit-view__track-card-body div {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.external-library-edit-view__track-card-body dt {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.external-library-edit-view__track-card-body dd {
+  margin: 0;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.external-library-edit-view__track-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
 }
 </style>

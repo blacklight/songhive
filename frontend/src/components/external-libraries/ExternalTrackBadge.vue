@@ -1,33 +1,53 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useI18n } from "vue-i18n";
 import AppIcon from "@/components/ui/AppIcon.vue";
 
 export interface Props {
   provider?: string | null;
-  state?: string | null;
   isExternal?: boolean;
 }
 
 const props = defineProps<Props>();
-const { t } = useI18n();
 
-const provider = computed(() => props.provider ?? "");
+interface IconDescriptor {
+  name: string;
+  variant?: "solid" | "brand";
+  label: string;
+}
+
+const providerIconMap: Record<string, IconDescriptor> = {
+  local: { name: "hard-drive", label: "Local storage" },
+  s3: { name: "aws", variant: "brand", label: "Amazon S3" },
+};
+
+function formatLabel(provider: string): string {
+  return provider ? provider[0].toUpperCase() + provider.slice(1) : "External";
+}
+
+const badge = computed<IconDescriptor | null>(() => {
+  const provider = props.provider?.toLowerCase() ?? "";
+  if (provider && providerIconMap[provider]) {
+    return providerIconMap[provider];
+  }
+  if (props.isExternal || provider) {
+    return {
+      name: "cloud",
+      label: provider ? formatLabel(provider) : "External",
+    };
+  }
+  return null;
+});
 </script>
 
 <template>
-  <span v-if="isExternal || provider" class="external-track-badge">
-    <AppIcon name="cloud" />
-    <span class="external-track-badge__text">
-      {{
-        t("pages.externalLibraries.trackExternalBadge", {
-          provider: provider || t("pages.externalLibraries.external"),
-        })
-      }}
-    </span>
-    <span v-if="state" class="external-track-badge__state">
-      {{ t("pages.externalLibraries.trackExternalState", { state }) }}
-    </span>
+  <span
+    v-if="badge"
+    class="external-track-badge"
+    :title="badge.label"
+    :aria-label="badge.label"
+    role="img"
+  >
+    <AppIcon :name="badge.name" :variant="badge.variant" />
   </span>
 </template>
 
@@ -35,16 +55,10 @@ const provider = computed(() => props.provider ?? "");
 .external-track-badge {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: 0.125rem var(--space-2);
-  border-radius: var(--radius-md);
-  background-color: var(--color-surface-raised);
+  justify-content: center;
+  margin-left: calc(0.5 * var(--space-1));
+  padding: calc(1.5 * var(--space-1));
   color: var(--color-text-muted);
   font-size: 0.75rem;
-  font-weight: 500;
-}
-
-.external-track-badge__state {
-  text-transform: capitalize;
 }
 </style>

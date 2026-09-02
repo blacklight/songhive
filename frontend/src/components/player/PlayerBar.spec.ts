@@ -6,7 +6,11 @@ import { usePlayerStore } from "@/stores/player";
 import PlayerBar from "./PlayerBar.vue";
 import type { QueueTrack } from "@/player/types";
 
-function makeTrack(id: string, title = `Track ${id}`): QueueTrack {
+function makeTrack(
+  id: string,
+  title = `Track ${id}`,
+  overrides: Partial<QueueTrack> = {},
+): QueueTrack {
   return {
     id,
     title,
@@ -17,6 +21,7 @@ function makeTrack(id: string, title = `Track ${id}`): QueueTrack {
     duration: 180,
     artwork_url: `https://example.com/${id}.jpg`,
     visibility: "public",
+    ...overrides,
   };
 }
 
@@ -41,6 +46,11 @@ function createTestRouter() {
       {
         path: "/artists/:id",
         name: "artist",
+        component: { template: "<div/>" },
+      },
+      {
+        path: "/tracks/:id",
+        name: "track",
         component: { template: "<div/>" },
       },
     ],
@@ -106,6 +116,49 @@ describe("PlayerBar", () => {
         .find('a.now-playing__artist--link[href="/artists/artist-a"]')
         .exists(),
     ).toBe(true);
+    expect(
+      full.find('a.now-playing__title--link[href="/tracks/a"]').exists(),
+    ).toBe(true);
+  });
+
+  it("renders the album link even when artwork is missing", async () => {
+    const { wrapper, store } = await mountPlayerBar();
+    const track = makeTrack("a", "Track a", { artwork_url: undefined });
+    store.playAll([track], 0);
+    await flushPromises();
+
+    const full = wrapper.find(".player-bar__full");
+    expect(
+      full
+        .find('a.now-playing__artwork--link[href="/albums/album-a"]')
+        .exists(),
+    ).toBe(true);
+    expect(full.find(".now-playing__artwork .now-playing__img").exists()).toBe(
+      false,
+    );
+    expect(
+      full
+        .find(".now-playing__artwork--link .now-playing__artwork--placeholder")
+        .exists(),
+    ).toBe(true);
+  });
+
+  it("does not render an album link when the track has no album", async () => {
+    const { wrapper, store } = await mountPlayerBar();
+    const track = makeTrack("a", "Track a", {
+      album_id: undefined,
+      album_title: undefined,
+    });
+    store.playAll([track], 0);
+    await flushPromises();
+
+    const full = wrapper.find(".player-bar__full");
+    expect(
+      full
+        .find('a.now-playing__artwork--link[href="/albums/album-a"]')
+        .exists(),
+    ).toBe(false);
+    expect(full.find("img.now-playing__img").exists()).toBe(true);
   });
 
   it("Play/Pause button toggles playback state", async () => {
@@ -224,5 +277,8 @@ describe("PlayerBar", () => {
       'a.now-playing__artist--link[href="/artists/artist-a"]',
     );
     expect(artistLink.exists()).toBe(true);
+
+    const trackLink = mini.find('a.now-playing__title--link[href="/tracks/a"]');
+    expect(trackLink.exists()).toBe(true);
   });
 });
