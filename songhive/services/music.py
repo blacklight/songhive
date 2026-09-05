@@ -934,6 +934,34 @@ async def get_track_ids_for_album(
     return [str(row) for row in result.scalars().all()]
 
 
+async def propagate_album_visibility(
+    session: AsyncSession,
+    album: Album,
+    user: User,
+) -> List[Tuple[Track, str]]:
+    """Copy ``album.visibility`` onto the album's tracks that ``user`` manages.
+
+    Non-admin users only affect tracks they own; admins propagate to every
+    track in the album, mirroring the ownership semantics of
+    ``deletion.delete_album``.  Returns ``(track, previous_visibility)`` pairs
+    for the tracks whose visibility actually changed so callers can run
+    post-change side effects such as federation publish/unpublish.
+    """
+    stmt = select(Track).where(
+        Track.album_id == album.id,
+        Track.visibility != album.visibility,
+    )
+    if not user.is_admin:
+        stmt = stmt.where(Track.owner_id == user.id)
+    result = await session.execute(stmt)
+    changed = [(track, track.visibility) for track in result.scalars().all()]
+    for track, _ in changed:
+        track.visibility = album.visibility
+    if changed:
+        await session.flush()
+    return changed
+
+
 async def get_track_ids_for_artist(
     session: AsyncSession,
     artist_id: str,

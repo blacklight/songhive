@@ -2,7 +2,7 @@
 Album routes.
 """
 
-from typing import List, Optional, cast
+from typing import List, Optional, Tuple, cast
 
 from fastapi import (
     APIRouter,
@@ -60,7 +60,7 @@ from ..responses import (
 )
 from ._common import GenreListRequest, HashtagListRequest, HasOwnerId, redact_owner
 from ._images import remove_entity_image, upload_entity_image
-from .tracks import _enqueue_track_enrichment, _enqueue_track_tag_sync
+from .tracks import _enqueue_track_enrichment, _enqueue_track_tag_sync, _handle_visibility_changes
 
 router = APIRouter(prefix="/albums")
 
@@ -242,6 +242,7 @@ async def update_album(
     album_id: str,
     body: AlbumUpdate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
@@ -273,8 +274,10 @@ async def update_album(
             if hashtag_names:
                 await add_hashtags_to_entity(db, "album", album_id, hashtag_names, user_id=None)
         await propagate_track_genres(db, album)
+    visibility_track_changes: List[Tuple[Track, str]] = []
     if body.visibility is not None:
         album.visibility = body.visibility.value
+        visibility_track_changes = await music.propagate_album_visibility(db, album, current_user)
 
     await audit.log_action(
         db,
@@ -287,10 +290,20 @@ async def update_album(
             "release_year": album.release_year,
             "genre": album.genre,
             "visibility": album.visibility,
+            "visibility_tracks_updated": len(visibility_track_changes),
         },
         ip_address=client_ip(request),
     )
     await db.commit()
+
+    for track, previous_visibility in visibility_track_changes:
+        await _handle_visibility_changes(
+            track,
+            previous_visibility=previous_visibility,
+            request=request,
+            background_tasks=background_tasks,
+            db=db,
+        )
 
     if any(field in body.model_dump(exclude_unset=True) for field in ("title", "release_year", "genre")):
         track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user)

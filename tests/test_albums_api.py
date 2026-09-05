@@ -204,6 +204,181 @@ def test_update_album_visibility(client, sample_albums, regular_user, auth_heade
     assert response.json()["visibility"] == "public"
 
 
+async def _add_album_tracks(db_session, album, owner, *visibilities):
+    """Create tracks in ``album`` owned by ``owner`` with the given visibilities."""
+    tracks = [
+        Track(
+            title=f"Track {i}",
+            artist_id=album.artist_id,
+            album_id=album.id,
+            owner_id=str(owner.id),
+            visibility=visibility.value,
+        )
+        for i, visibility in enumerate(visibilities)
+    ]
+    db_session.add_all(tracks)
+    await db_session.commit()
+    return tracks
+
+
+@pytest.mark.asyncio
+async def test_update_album_visibility_propagates_to_tracks(
+    client, db_session, sample_albums, regular_user, auth_headers
+):
+    """Making an album private also hides the tracks it contains."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+    tracks = await _add_album_tracks(
+        db_session, album, regular_user, Visibility.PUBLIC, Visibility.PUBLIC, Visibility.LOCAL
+    )
+
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"visibility": "private"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    assert response.json()["visibility"] == "private"
+
+    for track in tracks:
+        await db_session.refresh(track)
+        assert track.visibility == Visibility.PRIVATE.value
+
+
+@pytest.mark.asyncio
+async def test_update_album_visibility_propagates_when_made_public(
+    client, db_session, sample_albums, regular_user, auth_headers
+):
+    """Making an album public also publishes its tracks."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    tracks = await _add_album_tracks(db_session, album, regular_user, Visibility.PRIVATE)
+
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"visibility": "public"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    for track in tracks:
+        await db_session.refresh(track)
+        assert track.visibility == Visibility.PUBLIC.value
+
+
+@pytest.mark.asyncio
+async def test_update_album_visibility_leaves_other_users_tracks(
+    client, db_session, sample_albums, regular_user, other_user, auth_headers
+):
+    """Propagation only touches tracks owned by the requesting user."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+    own_track, foreign_track = await _add_album_tracks(
+        db_session, album, regular_user, Visibility.PUBLIC
+    ) + await _add_album_tracks(db_session, album, other_user, Visibility.PUBLIC)
+
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"visibility": "private"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    await db_session.refresh(own_track)
+    await db_session.refresh(foreign_track)
+    assert own_track.visibility == Visibility.PRIVATE.value
+    assert foreign_track.visibility == Visibility.PUBLIC.value
+
+
+@pytest.mark.asyncio
+async def test_admin_update_album_visibility_propagates_to_all_tracks(
+    client, db_session, sample_albums, regular_user, other_user, admin_user, auth_headers
+):
+    """Admins propagate visibility to every track in the album."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+    own_track, foreign_track = await _add_album_tracks(
+        db_session, album, regular_user, Visibility.PUBLIC
+    ) + await _add_album_tracks(db_session, album, other_user, Visibility.PUBLIC)
+
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"visibility": "private"},
+        headers=auth_headers(admin_user),
+    )
+    assert response.status_code == 200
+
+    await db_session.refresh(own_track)
+    await db_session.refresh(foreign_track)
+    assert own_track.visibility == Visibility.PRIVATE.value
+    assert foreign_track.visibility == Visibility.PRIVATE.value
+
+
+@pytest.mark.asyncio
+async def test_album_visibility_propagation_enqueues_track_unpublish(
+    client, db_session, sample_albums, regular_user, auth_headers, monkeypatch
+):
+    """Tracks that lose public visibility through the album are unpublished."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+    (track,) = await _add_album_tracks(db_session, album, regular_user, Visibility.PUBLIC)
+    unpublish_mock = MagicMock(return_value=0)
+    monkeypatch.setattr("songhive.api.routes.tracks.unpublish_track_activity", unpublish_mock)
+
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"visibility": "private"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    unpublish_mock.assert_called_once()
+    call_track, call_artist, call_owner, call_config, _ = unpublish_mock.call_args[0]
+    assert str(call_track.id) == str(track.id)
+    assert str(call_artist.id) == str(album.artist_id)
+    assert str(call_owner.id) == str(regular_user.id)
+    assert call_config is client.app.state.config
+
+
+@pytest.mark.asyncio
+async def test_album_visibility_propagation_enqueues_track_publish(
+    client, db_session, sample_albums, regular_user, auth_headers, monkeypatch
+):
+    """Tracks that become public through the album are published."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    (track,) = await _add_album_tracks(db_session, album, regular_user, Visibility.PRIVATE)
+    publish_mock = MagicMock(return_value=0)
+    monkeypatch.setattr("songhive.api.routes.tracks.publish_track_activity", publish_mock)
+
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"visibility": "public"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    publish_mock.assert_called_once()
+    call_track = publish_mock.call_args[0][0]
+    assert str(call_track.id) == str(track.id)
+
+
+@pytest.mark.asyncio
+async def test_update_album_without_visibility_change_does_not_publish(
+    client, db_session, sample_albums, regular_user, auth_headers, monkeypatch
+):
+    """An album update that keeps the same visibility does not touch tracks."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    await _add_album_tracks(db_session, album, regular_user, Visibility.PRIVATE)
+    publish_mock = MagicMock(return_value=0)
+    unpublish_mock = MagicMock(return_value=0)
+    monkeypatch.setattr("songhive.api.routes.tracks.publish_track_activity", publish_mock)
+    monkeypatch.setattr("songhive.api.routes.tracks.unpublish_track_activity", unpublish_mock)
+
+    response = client.patch(
+        f"/api/v1/albums/{album.id}",
+        json={"visibility": "private", "title": "Renamed"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    assert publish_mock.call_count == 0
+    assert unpublish_mock.call_count == 0
+
+
 def test_delete_missing_album_returns_404(client, auth_headers, regular_user):
     """Deleting a missing album returns 404."""
     response = client.delete(
