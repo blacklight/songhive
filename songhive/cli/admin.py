@@ -44,17 +44,15 @@ from ..users import manager as user_manager
 from ..users.invites import InviteError, create_invite, list_invites
 
 
-def _create_admin_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="songhive admin")
-    subparsers = parser.add_subparsers(dest="command")
-
-    # init-db
+def _add_init_db_command(subparsers: argparse._SubParsersAction) -> None:
     subparsers.add_parser("init-db", help="Create database tables if they do not exist")
 
-    # migrate
+
+def _add_migrate_command(subparsers: argparse._SubParsersAction) -> None:
     subparsers.add_parser("migrate", help="Run Alembic database migrations")
 
-    # create-user
+
+def _add_create_user_command(subparsers: argparse._SubParsersAction) -> None:
     create_user_parser = subparsers.add_parser("create-user", help="Create a new user")
     create_user_parser.add_argument("--username", required=True)
     create_user_parser.add_argument("--email", required=True)
@@ -68,34 +66,41 @@ def _create_admin_parser() -> argparse.ArgumentParser:
         help="Role for the new user (default: user)",
     )
 
-    # promote-user
+
+def _add_promote_user_command(subparsers: argparse._SubParsersAction) -> None:
     promote_parser = subparsers.add_parser("promote-user", help="Promote a user to admin")
     promote_parser.add_argument("--username", required=True)
 
-    # demote-user
+
+def _add_demote_user_command(subparsers: argparse._SubParsersAction) -> None:
     demote_parser = subparsers.add_parser("demote-user", help="Demote a user to the user role")
     demote_parser.add_argument("--username", required=True)
 
-    # approve-user
+
+def _add_approve_user_command(subparsers: argparse._SubParsersAction) -> None:
     approve_parser = subparsers.add_parser("approve-user", help="Approve a user by activating their account")
     approve_parser.add_argument("--username", required=True)
 
-    # disable-user
+
+def _add_disable_user_command(subparsers: argparse._SubParsersAction) -> None:
     disable_parser = subparsers.add_parser("disable-user", help="Deactivate a user account")
     disable_parser.add_argument("--username", required=True)
 
-    # reset-password
+
+def _add_reset_password_command(subparsers: argparse._SubParsersAction) -> None:
     reset_parser = subparsers.add_parser("reset-password", help="Reset a user's password")
     reset_parser.add_argument("--username", required=True)
     reset_parser.add_argument("--password", required=True)
 
-    # import-dir
+
+def _add_import_dir_command(subparsers: argparse._SubParsersAction) -> None:
     import_parser = subparsers.add_parser("import-dir", help="Import audio files from a directory")
     import_parser.add_argument("--path", required=True, help="Path to the directory to import")
     import_parser.add_argument("--library-id", required=True, help="Library UUID to import into")
     import_parser.add_argument("--owner", default=None, help="Username to set as the owner")
 
-    # create-invite
+
+def _add_create_invite_command(subparsers: argparse._SubParsersAction) -> None:
     create_invite_parser = subparsers.add_parser("create-invite", help="Create an invite code")
     create_invite_parser.add_argument("--created-by", required=True, help="Username of the admin creating the invite")
     create_invite_parser.add_argument("--max-uses", type=int, default=None, help="Maximum number of uses")
@@ -103,10 +108,12 @@ def _create_admin_parser() -> argparse.ArgumentParser:
         "--expires-at", default=None, help="ISO 8601 expiration datetime (e.g. 2026-01-01T00:00:00Z)"
     )
 
-    # list-invites
+
+def _add_list_invites_command(subparsers: argparse._SubParsersAction) -> None:
     subparsers.add_parser("list-invites", help="List invite codes")
 
-    # provision-federation-keys
+
+def _add_provision_federation_keys_command(subparsers: argparse._SubParsersAction) -> None:
     provision_parser = subparsers.add_parser(
         "provision-federation-keys",
         help="Provision ActivityPub actor keys for users that are missing them",
@@ -117,7 +124,8 @@ def _create_admin_parser() -> argparse.ArgumentParser:
         help="Report the number of users that would be provisioned without making changes",
     )
 
-    # rehash-audio
+
+def _add_rehash_audio_command(subparsers: argparse._SubParsersAction) -> None:
     rehash_parser = subparsers.add_parser(
         "rehash-audio",
         help="Migrate audio StoredFile rows to audio-only SHA-256 hashes",
@@ -128,7 +136,8 @@ def _create_admin_parser() -> argparse.ArgumentParser:
         help="Report files that would migrate without making changes",
     )
 
-    # sync-tags
+
+def _add_sync_tags_command(subparsers: argparse._SubParsersAction) -> None:
     sync_tags_parser = subparsers.add_parser(
         "sync-tags",
         help="Enqueue tag sync for one or more tracks",
@@ -145,7 +154,8 @@ def _create_admin_parser() -> argparse.ArgumentParser:
         help="Print the number of tracks that would be queued without enqueuing",
     )
 
-    # enrich-images
+
+def _add_enrich_image_parser(subparsers: argparse._SubParsersAction) -> None:
     enrich_images_parser = subparsers.add_parser(
         "enrich-images",
         help="Enqueue image enrichment for one or more artists or albums",
@@ -165,6 +175,26 @@ def _create_admin_parser() -> argparse.ArgumentParser:
         help="Print the number of artists and albums that would be enriched without enqueuing",
     )
 
+
+def _create_admin_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="songhive admin")
+    subparsers = parser.add_subparsers(dest="command")
+
+    _add_init_db_command(subparsers)
+    _add_migrate_command(subparsers)
+    _add_create_user_command(subparsers)
+    _add_promote_user_command(subparsers)
+    _add_demote_user_command(subparsers)
+    _add_approve_user_command(subparsers)
+    _add_disable_user_command(subparsers)
+    _add_reset_password_command(subparsers)
+    _add_import_dir_command(subparsers)
+    _add_create_invite_command(subparsers)
+    _add_list_invites_command(subparsers)
+    _add_provision_federation_keys_command(subparsers)
+    _add_rehash_audio_command(subparsers)
+    _add_sync_tags_command(subparsers)
+    _add_enrich_image_parser(subparsers)
     return parser
 
 
@@ -512,7 +542,7 @@ async def _handle_enrich_images(args):
         return
 
     try:
-        result = bulk_enrich_images.delay(
+        result = bulk_enrich_images.delay(  # type: ignore
             artist_id=args.artist_id,
             album_id=args.album_id,
             all_=args.all,
