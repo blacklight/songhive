@@ -15,7 +15,9 @@ import AppModal from "@/components/feedback/AppModal.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import ContextMenu from "@/components/ui/ContextMenu.vue";
-import EntityActions from "@/components/ui/EntityActions.vue";
+import EntityActions, {
+  type ActionItem,
+} from "@/components/ui/EntityActions.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import BulkTrackEditModal from "@/components/library/BulkTrackEditModal.vue";
 import { formatTime } from "@/utils/time";
@@ -736,7 +738,7 @@ function canManageTrack(track: QueueTrack): boolean {
 }
 
 const bulkActions = computed(() => {
-  const actions = [
+  const actions: ActionItem[] = [
     {
       key: "edit-metadata",
       label: t("browse.bulkEdit.editMetadata"),
