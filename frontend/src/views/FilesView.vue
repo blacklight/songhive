@@ -262,6 +262,214 @@ function onSelectClick() {
   fileInput.value?.click();
 }
 
+function getAddResolvedResult(results: FileUploadResult[]) {
+  return function addResolvedResult(result: unknown, filename: string) {
+    if (isTrackResponse(result)) {
+      results.push({ id: result.id, trackId: result.id } as FileUploadResult);
+    } else if (result && typeof result === "object" && "id" in result) {
+      results.push({ ...(result as StoredFileResponse) } as FileUploadResult);
+    } else {
+      uploadFailures.value.push({
+        name: filename,
+        message: t("pages.files.uploadError", { message: t("errors.unknown") }),
+      });
+    }
+  };
+}
+
+async function handleFileUploadError(
+  err: unknown,
+  file: File,
+  addResolvedResult: (result: unknown, filename: string) => void,
+) {
+  if (uploadCancelled.value) {
+    uploadError.value = t("pages.files.uploadCancelled");
+    return;
+  }
+  if (
+    err instanceof ApiError &&
+    err.status === 409 &&
+    err.body &&
+    typeof err.body === "object" &&
+    "token" in err.body
+  ) {
+    const resolved = await waitForDuplicate(
+      err.body as ExternalDuplicateWarning,
+    );
+    if (uploadCancelled.value) {
+      uploadError.value = t("pages.files.uploadCancelled");
+      return;
+    }
+    if (resolved) {
+      addResolvedResult(resolved, file.name);
+    } else {
+      uploadFailures.value.push({
+        name: file.name,
+        message: t("pages.files.uploadError", {
+          message: t("errors.unknown"),
+        }),
+      });
+    }
+  } else {
+    uploadFailures.value.push({
+      name: file.name,
+      message: getErrorMessage(err),
+    });
+  }
+}
+
+async function handleSingleFileUpload(
+  file: File,
+  libraryId: string | undefined,
+  addResolvedResult: (result: unknown, filename: string) => void,
+  results: FileUploadResult[],
+  signal: AbortSignal,
+) {
+  currentFileIndex.value = 0;
+  try {
+    const result = await uploadFile(
+      file,
+      visibility.value,
+      (percent) => {
+        currentFileProgress.value = percent;
+      },
+      libraryId,
+      signal,
+    );
+    results.push(result);
+  } catch (err) {
+    handleFileUploadError(err, file, addResolvedResult);
+  } finally {
+    currentFileProgress.value = 100;
+  }
+}
+
+async function handleMultipleFilesUpload(
+  files: File[],
+  libraryId: string | undefined,
+  addResolvedResult: (result: unknown, filename: string) => void,
+  results: FileUploadResult[],
+  signal: AbortSignal,
+) {
+  try {
+    const bulkResults = await bulkUploadFiles(
+      files,
+      visibility.value,
+      (percent) => {
+        currentFileProgress.value = percent;
+      },
+      libraryId,
+      signal,
+    );
+    for (const [index, item] of bulkResults.entries()) {
+      if (uploadCancelled.value) {
+        break;
+      }
+      if (item.status === "external_duplicate" && item.external_duplicate) {
+        const resolved = await waitForDuplicate(item.external_duplicate);
+        if (uploadCancelled.value) {
+          uploadError.value = t("pages.files.uploadCancelled");
+          return;
+        }
+        if (resolved) {
+          addResolvedResult(resolved, item.filename ?? files[index].name);
+        } else {
+          uploadFailures.value.push({
+            name: item.filename ?? files[index].name,
+            message: t("pages.files.uploadError", {
+              message: t("errors.unknown"),
+            }),
+          });
+        }
+      } else if (item.error) {
+        uploadFailures.value.push({
+          name: item.filename ?? files[index].name,
+          message: item.error,
+        });
+      } else if (item.stored_file) {
+        results.push({
+          ...item.stored_file,
+          trackId: item.track_id,
+        });
+      }
+    }
+  } catch (err) {
+    if (uploadCancelled.value) {
+      uploadError.value = t("pages.files.uploadCancelled");
+      return;
+    }
+    const message = getErrorMessage(err);
+    for (const file of files) {
+      uploadFailures.value.push({ name: file.name, message });
+    }
+  } finally {
+    currentFileProgress.value = 100;
+  }
+}
+
+async function handleFileUploadResults(
+  files: File[],
+  results: FileUploadResult[],
+) {
+  if (uploadCancelled.value) {
+    uploadError.value = t("pages.files.uploadCancelled");
+    return;
+  }
+
+  if (uploadFailures.value.length === 0) {
+    toast.push({
+      type: "success",
+      message:
+        results.length === 1
+          ? t("pages.files.uploadSuccess")
+          : t("pages.files.uploadSuccessPlural", { count: results.length }),
+    });
+  } else if (results.length === 0) {
+    toast.push({
+      type: "error",
+      message:
+        files.length === 1
+          ? t("pages.files.uploadError", {
+              message: uploadFailures.value[0].message,
+            })
+          : t("pages.files.uploadAllFailed", { count: files.length }),
+    });
+  } else {
+    toast.push({
+      type: "warning",
+      message: t("pages.files.uploadPartial", {
+        success: results.length,
+        total: files.length,
+      }),
+    });
+  }
+
+  if (uploadFailures.value.length === 0 && results.length === 1) {
+    if (results[0].trackId) {
+      await router.push({
+        name: "track",
+        params: { id: results[0].trackId },
+      });
+    } else {
+      await router.push({ name: "file", params: { id: results[0].id } });
+    }
+  } else {
+    await refresh();
+  }
+
+  if (uploadFailures.value.length > 0) {
+    uploadError.value =
+      files.length === 1
+        ? t("pages.files.uploadError", {
+            message: uploadFailures.value[0].message,
+          })
+        : t("pages.files.uploadPartial", {
+            success: results.length,
+            total: files.length,
+          });
+  }
+}
+
 async function onFileChange(event: Event) {
   const target = event.target as HTMLInputElement;
   const files = target.files ? Array.from(target.files) : [];
@@ -286,187 +494,28 @@ async function onFileChange(event: Event) {
 
   const results: FileUploadResult[] = [];
   const libraryId = selectedLibraryId.value || undefined;
-
-  function addResolvedResult(result: unknown, filename: string) {
-    if (isTrackResponse(result)) {
-      results.push({ id: result.id, trackId: result.id } as FileUploadResult);
-    } else if (result && typeof result === "object" && "id" in result) {
-      results.push({ ...(result as StoredFileResponse) } as FileUploadResult);
-    } else {
-      uploadFailures.value.push({
-        name: filename,
-        message: t("pages.files.uploadError", { message: t("errors.unknown") }),
-      });
-    }
-  }
+  const addResolvedResult = getAddResolvedResult(results);
 
   try {
     if (files.length === 1) {
-      const file = files[0];
-      currentFileIndex.value = 0;
-      try {
-        const result = await uploadFile(
-          file,
-          visibility.value,
-          (percent) => {
-            currentFileProgress.value = percent;
-          },
-          libraryId,
-          signal,
-        );
-        results.push(result);
-      } catch (err) {
-        if (uploadCancelled.value) {
-          uploadError.value = t("pages.files.uploadCancelled");
-          return;
-        }
-        if (
-          err instanceof ApiError &&
-          err.status === 409 &&
-          err.body &&
-          typeof err.body === "object" &&
-          "token" in err.body
-        ) {
-          const resolved = await waitForDuplicate(
-            err.body as ExternalDuplicateWarning,
-          );
-          if (uploadCancelled.value) {
-            uploadError.value = t("pages.files.uploadCancelled");
-            return;
-          }
-          if (resolved) {
-            addResolvedResult(resolved, file.name);
-          } else {
-            uploadFailures.value.push({
-              name: file.name,
-              message: t("pages.files.uploadError", {
-                message: t("errors.unknown"),
-              }),
-            });
-          }
-        } else {
-          uploadFailures.value.push({
-            name: file.name,
-            message: getErrorMessage(err),
-          });
-        }
-      } finally {
-        currentFileProgress.value = 100;
-      }
+      handleSingleFileUpload(
+        files[0],
+        libraryId,
+        addResolvedResult,
+        results,
+        signal,
+      );
     } else {
-      try {
-        const bulkResults = await bulkUploadFiles(
-          files,
-          visibility.value,
-          (percent) => {
-            currentFileProgress.value = percent;
-          },
-          libraryId,
-          signal,
-        );
-        for (const [index, item] of bulkResults.entries()) {
-          if (uploadCancelled.value) {
-            break;
-          }
-          if (item.status === "external_duplicate" && item.external_duplicate) {
-            const resolved = await waitForDuplicate(item.external_duplicate);
-            if (uploadCancelled.value) {
-              uploadError.value = t("pages.files.uploadCancelled");
-              return;
-            }
-            if (resolved) {
-              addResolvedResult(resolved, item.filename ?? files[index].name);
-            } else {
-              uploadFailures.value.push({
-                name: item.filename ?? files[index].name,
-                message: t("pages.files.uploadError", {
-                  message: t("errors.unknown"),
-                }),
-              });
-            }
-          } else if (item.error) {
-            uploadFailures.value.push({
-              name: item.filename ?? files[index].name,
-              message: item.error,
-            });
-          } else if (item.stored_file) {
-            results.push({
-              ...item.stored_file,
-              trackId: item.track_id,
-            });
-          }
-        }
-      } catch (err) {
-        if (uploadCancelled.value) {
-          uploadError.value = t("pages.files.uploadCancelled");
-          return;
-        }
-        const message = getErrorMessage(err);
-        for (const file of files) {
-          uploadFailures.value.push({ name: file.name, message });
-        }
-      } finally {
-        currentFileProgress.value = 100;
-      }
+      handleMultipleFilesUpload(
+        files,
+        libraryId,
+        addResolvedResult,
+        results,
+        signal,
+      );
     }
 
-    if (uploadCancelled.value) {
-      uploadError.value = t("pages.files.uploadCancelled");
-      return;
-    }
-
-    if (uploadFailures.value.length === 0) {
-      toast.push({
-        type: "success",
-        message:
-          results.length === 1
-            ? t("pages.files.uploadSuccess")
-            : t("pages.files.uploadSuccessPlural", { count: results.length }),
-      });
-    } else if (results.length === 0) {
-      toast.push({
-        type: "error",
-        message:
-          files.length === 1
-            ? t("pages.files.uploadError", {
-                message: uploadFailures.value[0].message,
-              })
-            : t("pages.files.uploadAllFailed", { count: files.length }),
-      });
-    } else {
-      toast.push({
-        type: "warning",
-        message: t("pages.files.uploadPartial", {
-          success: results.length,
-          total: files.length,
-        }),
-      });
-    }
-
-    if (uploadFailures.value.length === 0 && results.length === 1) {
-      if (results[0].trackId) {
-        await router.push({
-          name: "track",
-          params: { id: results[0].trackId },
-        });
-      } else {
-        await router.push({ name: "file", params: { id: results[0].id } });
-      }
-    } else {
-      await refresh();
-    }
-
-    if (uploadFailures.value.length > 0) {
-      uploadError.value =
-        files.length === 1
-          ? t("pages.files.uploadError", {
-              message: uploadFailures.value[0].message,
-            })
-          : t("pages.files.uploadPartial", {
-              success: results.length,
-              total: files.length,
-            });
-    }
+    handleFileUploadResults(files, results);
   } finally {
     uploading.value = false;
     isBulkUploading.value = false;
