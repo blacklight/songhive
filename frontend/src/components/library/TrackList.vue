@@ -15,6 +15,7 @@ import AppModal from "@/components/feedback/AppModal.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import ContextMenu from "@/components/ui/ContextMenu.vue";
+import EntityActions from "@/components/ui/EntityActions.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import BulkTrackEditModal from "@/components/library/BulkTrackEditModal.vue";
 import { formatTime } from "@/utils/time";
@@ -103,6 +104,9 @@ const dialogTrack = ref<QueueTrack | null>(null);
 
 const addDialogOpen = ref(false);
 const addDialogMode = ref<"library" | "playlist">("library");
+const bulkAddOpen = ref(false);
+const bulkAddMode = ref<"library" | "playlist">("library");
+const bulkAddIds = ref<string[]>([]);
 
 const selectedIds = ref<Set<string>>(new Set());
 const bulkMode = ref(false);
@@ -178,6 +182,16 @@ function openAddDialog(mode: "library" | "playlist") {
 function closeAddDialog() {
   addDialogOpen.value = false;
   dialogTrack.value = null;
+}
+
+function openBulkAddDialog(mode: "library" | "playlist") {
+  bulkAddMode.value = mode;
+  bulkAddIds.value = Array.from(selectedIds.value);
+  bulkAddOpen.value = true;
+}
+
+function closeBulkAddDialog() {
+  bulkAddOpen.value = false;
 }
 
 const enrichedTracks = computed<QueueTrack[]>(() => {
@@ -721,6 +735,84 @@ function canManageTrack(track: QueueTrack): boolean {
   return canManageItem(authStore, track);
 }
 
+const bulkActions = computed(() => {
+  const actions = [
+    {
+      key: "edit-metadata",
+      label: t("browse.bulkEdit.editMetadata"),
+      icon: "pen-to-square",
+      variant: "secondary" as const,
+      disabled: selectedIds.value.size === 0 || isRemoving.value,
+    },
+    {
+      key: "add-to-library",
+      label: t("browse.bulkEdit.addToLibrary"),
+      icon: "folder-plus",
+      variant: "secondary" as const,
+      visible: authStore.isAuthenticated,
+      disabled: selectedIds.value.size === 0 || isRemoving.value,
+    },
+    {
+      key: "add-to-playlist",
+      label: t("browse.bulkEdit.addToPlaylist"),
+      icon: "list",
+      variant: "secondary" as const,
+      visible: authStore.isAuthenticated,
+      disabled: selectedIds.value.size === 0 || isRemoving.value,
+    },
+  ];
+
+  if (props.removableFrom?.canRemove) {
+    const action = {
+      key: "remove",
+      label: t("browse.bulkEdit.removeSelected"),
+      icon: "minus",
+      variant: "danger" as const,
+      visible: props.removableFrom?.canRemove,
+      disabled: selectedIds.value.size === 0 || isRemoving.value,
+    };
+
+    if (props.removableFrom.type === "library") {
+      action.label = t("browse.bulkEdit.removeSelectedFromLibrary");
+    } else if (props.removableFrom.type === "playlist") {
+      action.label = t("browse.bulkEdit.removeSelectedFromPlaylist");
+    }
+
+    actions.push(action);
+  }
+
+  actions.push({
+    key: "delete",
+    label: t("browse.bulkEdit.deleteSelected"),
+    icon: "trash",
+    variant: "danger" as const,
+    visible: props.deletable,
+    disabled: selectedIds.value.size === 0 || isRemoving.value,
+  });
+
+  return actions;
+});
+
+function onBulkAction(key: string) {
+  if (selectedIds.value.size === 0 || isRemoving.value) return;
+  switch (key) {
+    case "edit-metadata":
+      openBulkEdit();
+      break;
+    case "add-to-library":
+      openBulkAddDialog("library");
+      break;
+    case "add-to-playlist":
+      openBulkAddDialog("playlist");
+      break;
+    case "delete":
+      openBulkDelete();
+      break;
+    case "remove":
+      openBulkRemove();
+      break;
+  }
+}
 function openBulkEdit() {
   bulkEditIds.value = Array.from(selectedIds.value);
   bulkEditOpen.value = true;
@@ -1188,6 +1280,33 @@ async function onMenuSelect(key: string) {
       </AppButton>
 
       <div v-if="canEdit" class="track-list__bulk">
+        <template v-if="bulkMode && !reorderMode">
+          <AppCheckbox
+            v-if="isCompact"
+            :model-value="allSelected"
+            :indeterminate="someSelected"
+            :label="t('browse.bulkEdit.selectAll')"
+            @update:model-value="toggleAll"
+          />
+          <AppButton
+            variant="secondary"
+            size="sm"
+            icon="xmark"
+            :disabled="isRemoving"
+            @click="toggleBulkMode"
+          >
+            {{ t("browse.bulkEdit.done") }}
+          </AppButton>
+        </template>
+        <AppButton
+          v-else
+          variant="secondary"
+          size="sm"
+          icon="pen-to-square"
+          @click="toggleBulkMode"
+        >
+          {{ t("browse.bulkEdit.start") }}
+        </AppButton>
         <template v-if="reorderMode">
           <AppButton
             variant="secondary"
@@ -1250,69 +1369,14 @@ async function onMenuSelect(key: string) {
           <AppButton
             variant="secondary"
             size="sm"
-            icon="arrow-up-arrow-down"
+            icon="rotate"
             :disabled="isReordering"
             @click="toggleReorderMode"
           >
             {{ t("browse.reorder.start") }}
           </AppButton>
         </template>
-        <template v-if="bulkMode && !reorderMode">
-          <AppCheckbox
-            v-if="isCompact"
-            :model-value="allSelected"
-            :indeterminate="someSelected"
-            :label="t('browse.bulkEdit.selectAll')"
-            @update:model-value="toggleAll"
-          />
-          <AppButton
-            variant="secondary"
-            size="sm"
-            icon="pen-to-square"
-            :disabled="selectedIds.size === 0 || isRemoving"
-            @click="openBulkEdit"
-          >
-            {{ t("browse.bulkEdit.editMetadata") }}
-          </AppButton>
-          <AppButton
-            v-if="props.deletable"
-            variant="danger"
-            size="sm"
-            icon="trash"
-            :disabled="selectedIds.size === 0 || isRemoving"
-            @click="openBulkDelete"
-          >
-            {{ t("browse.bulkEdit.deleteSelected") }}
-          </AppButton>
-          <AppButton
-            v-if="props.removableFrom?.canRemove"
-            variant="danger"
-            size="sm"
-            icon="minus"
-            :disabled="selectedIds.size === 0 || isRemoving"
-            @click="openBulkRemove"
-          >
-            {{ t("browse.bulkEdit.removeSelected") }}
-          </AppButton>
-          <AppButton
-            variant="secondary"
-            size="sm"
-            icon="xmark"
-            :disabled="isRemoving"
-            @click="toggleBulkMode"
-          >
-            {{ t("browse.bulkEdit.done") }}
-          </AppButton>
-        </template>
-        <AppButton
-          v-else
-          variant="secondary"
-          size="sm"
-          icon="pen-to-square"
-          @click="toggleBulkMode"
-        >
-          {{ t("browse.bulkEdit.start") }}
-        </AppButton>
+        <EntityActions :actions="bulkActions" @select="onBulkAction" />
       </div>
     </div>
 
@@ -1711,6 +1775,15 @@ async function onMenuSelect(key: string) {
       :item-id="dialogTrack.id"
       :item-name="dialogTrack.title"
       @close="closeAddDialog"
+    />
+
+    <AddToCollectionDialog
+      v-if="canEdit && bulkAddIds.length > 0"
+      :open="bulkAddOpen"
+      :mode="bulkAddMode"
+      item-type="track"
+      :item-ids="bulkAddIds"
+      @close="closeBulkAddDialog"
     />
 
     <AppModal

@@ -143,6 +143,36 @@ describe("AddToCollectionDialog", () => {
     });
   });
 
+  it("calls addTracksToPlaylist with all provided item ids", async () => {
+    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([samplePlaylist]);
+    vi.mocked(playlistsApi.addTracksToPlaylist).mockResolvedValue({
+      added: 2,
+      track_ids: ["t1", "t2"],
+    });
+
+    mountDialog({
+      mode: "playlist",
+      itemType: "track",
+      itemIds: ["t1", "t2"],
+    });
+    await flushPromises();
+
+    expect(
+      findByText(
+        i18n.global.t("browse.addToCollection.trackCount", { count: 2 }),
+      ),
+    ).not.toBeUndefined();
+
+    const saveButton = findButton(i18n.global.t("common.save"));
+    saveButton?.click();
+    await flushPromises();
+
+    expect(playlistsApi.addTracksToPlaylist).toHaveBeenCalledWith(
+      "playlist-1",
+      { track_ids: ["t1", "t2"] },
+    );
+  });
+
   it("calls addTracksToLibrary with album_id for an album", async () => {
     vi.mocked(librariesApi.listLibraries).mockResolvedValue([sampleLibrary]);
     vi.mocked(librariesApi.addTracksToLibrary).mockResolvedValue({

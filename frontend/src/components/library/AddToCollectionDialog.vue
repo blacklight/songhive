@@ -33,7 +33,8 @@ export interface Props {
   open: boolean;
   mode: CollectionMode;
   itemType: AddableItemType;
-  itemId: string;
+  itemId?: string;
+  itemIds?: string[];
   itemName?: string;
 }
 
@@ -69,12 +70,21 @@ function reset() {
   allowDuplicates.value = false;
 }
 
+const itemLabel = computed(() => {
+  if (props.itemIds && props.itemIds.length > 0) {
+    return t("browse.addToCollection.trackCount", {
+      count: props.itemIds.length,
+    });
+  }
+  return props.itemName || t("browse.entities.item");
+});
+
 const title = computed(() => {
   const key =
     props.mode === "library"
       ? "browse.addToCollection.libraryTitle"
       : "browse.addToCollection.playlistTitle";
-  return t(key, { name: props.itemName || t("browse.entities.item") });
+  return t(key, { name: itemLabel.value });
 });
 
 function userCanAddToLibrary(lib: LibraryResponse) {
@@ -160,7 +170,12 @@ function buildRequestBody():
   | { artist_id: string; allow_duplicates?: boolean } {
   if (props.itemType === "track") {
     const body: { track_ids: string[]; allow_duplicates?: boolean } = {
-      track_ids: [props.itemId],
+      track_ids:
+        props.itemIds && props.itemIds.length > 0
+          ? props.itemIds
+          : props.itemId
+            ? [props.itemId]
+            : [],
     };
     if (props.mode === "playlist" && allowDuplicates.value) {
       body.allow_duplicates = true;
@@ -169,7 +184,7 @@ function buildRequestBody():
   }
   if (props.itemType === "album") {
     const body: { album_id: string; allow_duplicates?: boolean } = {
-      album_id: props.itemId,
+      album_id: props.itemId ?? "",
     };
     if (props.mode === "playlist" && allowDuplicates.value) {
       body.allow_duplicates = true;
@@ -177,7 +192,7 @@ function buildRequestBody():
     return body;
   }
   const body: { artist_id: string; allow_duplicates?: boolean } = {
-    artist_id: props.itemId,
+    artist_id: props.itemId ?? "",
   };
   if (props.mode === "playlist" && allowDuplicates.value) {
     body.allow_duplicates = true;
@@ -237,11 +252,11 @@ async function onConfirm() {
         message:
           props.mode === "library"
             ? t("browse.addToCollection.librarySuccess", {
-                name: props.itemName || t("browse.entities.item"),
+                name: itemLabel.value,
                 count: response.added,
               })
             : t("browse.addToCollection.playlistSuccess", {
-                name: props.itemName || t("browse.entities.item"),
+                name: itemLabel.value,
                 count: response.added,
               }),
       });

@@ -11,6 +11,7 @@ import { toQueueTrack } from "@/player/enrich";
 import * as externalLibrariesApi from "@/api/externalLibraries";
 import * as favoritesApi from "@/api/favorites";
 import * as librariesApi from "@/api/libraries";
+import * as playlistsApi from "@/api/playlists";
 import * as tracksApi from "@/api/tracks";
 import TrackList from "./TrackList.vue";
 
@@ -569,7 +570,9 @@ describe("TrackList", () => {
     const removeSelected = wrapper
       .findAll("button")
       .find(
-        (b) => b.text() === i18n.global.t("browse.bulkEdit.removeSelected"),
+        (b) =>
+          b.text() ===
+          i18n.global.t("browse.bulkEdit.removeSelectedFromLibrary"),
       );
     expect(removeSelected).toBeDefined();
     await removeSelected?.trigger("click");
@@ -704,6 +707,118 @@ describe("TrackList", () => {
       artist_name: "New Artist",
     });
     expect(wrapper.emitted("updated")?.[0]).toEqual([["track-1", "track-2"]]);
+  });
+
+  it("adds all selected tracks to a playlist via bulk edit mode", async () => {
+    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([
+      {
+        id: "playlist-1",
+        name: "My Playlist",
+        owner_id: "user-1",
+        visibility: "private",
+      },
+    ]);
+    vi.mocked(playlistsApi.addTracksToPlaylist).mockResolvedValue({
+      added: 2,
+      track_ids: ["track-1", "track-2"],
+    });
+
+    const trackFixtures = [
+      makeTrack(),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+    ];
+    ({ wrapper } = mountTrackList({
+      tracks: trackFixtures,
+      context: "Artist",
+      deletable: true,
+    }));
+    await flushPromises();
+
+    const bulkButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.bulkEdit.start"));
+    await bulkButton?.trigger("click");
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll('input[type="checkbox"]');
+    await checkboxes[0]?.setValue(true);
+    await flushPromises();
+
+    const addButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.bulkEdit.addToPlaylist"));
+    expect(addButton).toBeDefined();
+    await addButton?.trigger("click");
+    await flushPromises();
+
+    expect(playlistsApi.listPlaylists).toHaveBeenCalledWith({ limit: 100 });
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.save"));
+    expect(saveButton).toBeDefined();
+    saveButton?.click();
+    await flushPromises();
+
+    expect(playlistsApi.addTracksToPlaylist).toHaveBeenCalledWith(
+      "playlist-1",
+      { track_ids: ["track-1", "track-2"] },
+    );
+  });
+
+  it("adds all selected tracks to a library via bulk edit mode", async () => {
+    vi.mocked(librariesApi.listLibraries).mockResolvedValue([
+      {
+        id: "lib-1",
+        name: "My Library",
+        owner_id: "user-1",
+        can_write: true,
+        visibility: "private",
+      },
+    ]);
+    vi.mocked(librariesApi.addTracksToLibrary).mockResolvedValue({
+      added: 2,
+      track_ids: ["track-1", "track-2"],
+    });
+
+    const trackFixtures = [
+      makeTrack(),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+    ];
+    ({ wrapper } = mountTrackList({
+      tracks: trackFixtures,
+      context: "Artist",
+      deletable: true,
+    }));
+    await flushPromises();
+
+    const bulkButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.bulkEdit.start"));
+    await bulkButton?.trigger("click");
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll('input[type="checkbox"]');
+    await checkboxes[0]?.setValue(true);
+    await flushPromises();
+
+    const addButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.bulkEdit.addToLibrary"));
+    expect(addButton).toBeDefined();
+    await addButton?.trigger("click");
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.save"));
+    expect(saveButton).toBeDefined();
+    saveButton?.click();
+    await flushPromises();
+
+    expect(librariesApi.addTracksToLibrary).toHaveBeenCalledWith("lib-1", {
+      track_ids: ["track-1", "track-2"],
+    });
   });
 
   it("highlights the currently playing track in the table", async () => {
