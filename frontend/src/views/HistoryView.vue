@@ -6,6 +6,7 @@ import { getTrack } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { usePlayerStore } from "@/stores/player";
 import { useToastStore } from "@/stores/toast";
+import { useMediaQuery } from "@/composables/useMediaQuery";
 import { toQueueTrack } from "@/player/enrich";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -20,6 +21,7 @@ type HistoryEntry = HistoryPage["items"][number];
 const { t } = useI18n();
 const player = usePlayerStore();
 const toast = useToastStore();
+const isWide = useMediaQuery("(min-width: 1280px)", true);
 
 const items = ref<HistoryEntry[]>([]);
 const loading = ref(false);
@@ -209,26 +211,73 @@ onMounted(() => load());
       <SkeletonLoader variant="page" />
     </div>
 
-    <AppTable
-      v-else
-      :columns="columns"
-      :rows="rows"
-      :row-key="rowKey"
-      :loading="loading"
-      :empty-label="emptyLabel"
-    >
-      <template #row-actions="{ row }">
-        <AppButton
-          size="sm"
-          icon="rotate-right"
-          :aria-label="t('pages.history.playAgain')"
-          :title="t('pages.history.playAgain')"
-          @click="onPlayAgain(asRow(row).entry)"
+    <template v-else-if="filteredItems.length > 0">
+      <AppTable
+        v-if="isWide"
+        :columns="columns"
+        :rows="rows"
+        :row-key="rowKey"
+        :loading="loading"
+        :empty-label="emptyLabel"
+      >
+        <template #row-actions="{ row }">
+          <AppButton
+            size="sm"
+            icon="rotate-right"
+            :aria-label="t('pages.history.playAgain')"
+            :title="t('pages.history.playAgain')"
+            @click="onPlayAgain(asRow(row).entry)"
+          >
+            {{ t("pages.history.playAgain") }}
+          </AppButton>
+        </template>
+      </AppTable>
+
+      <ul v-else class="history-view__cards" role="list">
+        <li
+          v-for="entry in filteredItems"
+          :key="entry.id"
+          class="history-view__card"
         >
-          {{ t("pages.history.playAgain") }}
-        </AppButton>
-      </template>
-    </AppTable>
+          <div class="history-view__card-header">
+            <span class="history-view__card-title">
+              {{ entry.title ?? t("pages.history.untitled") }}
+            </span>
+          </div>
+
+          <dl class="history-view__card-body">
+            <div>
+              <dt>{{ t("browse.entities.artist") }}</dt>
+              <dd>{{ entry.artist ?? "—" }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("pages.history.playedAt") }}</dt>
+              <dd>
+                <time :datetime="entry.created_at">
+                  {{ formatDateTime(entry.created_at) }}
+                </time>
+              </dd>
+            </div>
+          </dl>
+
+          <div class="history-view__card-footer">
+            <AppButton
+              size="sm"
+              icon="rotate-right"
+              :aria-label="t('pages.history.playAgain')"
+              :title="t('pages.history.playAgain')"
+              @click="onPlayAgain(entry)"
+            >
+              {{ t("pages.history.playAgain") }}
+            </AppButton>
+          </div>
+        </li>
+      </ul>
+    </template>
+
+    <div v-else class="history-view__empty" role="status">
+      {{ emptyLabel }}
+    </div>
 
     <div v-if="!error" class="history-view__pagination">
       <AppButton
@@ -293,9 +342,77 @@ onMounted(() => load());
   min-height: 16rem;
 }
 
+.history-view__empty {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
 .history-view__pagination {
   display: flex;
   justify-content: center;
   gap: var(--space-3);
+}
+
+.history-view__cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history-view__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.history-view__card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.history-view__card-title {
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.history-view__card-body {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.history-view__card-body div {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.history-view__card-body dt {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.history-view__card-body dd {
+  margin: 0;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.history-view__card-footer {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

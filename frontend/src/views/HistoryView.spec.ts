@@ -508,4 +508,77 @@ describe("HistoryView", () => {
       i18n.global.t("pages.history.playAllPartial", { count: 1, total: 2 }),
     );
   });
+
+  it("renders listening history as cards on narrow viewports", async () => {
+    vi.mocked(historyApi.listHistory).mockResolvedValue({
+      items: [
+        createHistoryEntry(
+          "h1",
+          "track-1",
+          "Song One",
+          "The Larks",
+          "2024-01-15T10:30:00Z",
+        ),
+      ],
+      page: 1,
+      pageSize: 20,
+    });
+
+    wrapper = mount(HistoryView);
+    await flushPromises();
+
+    expect(wrapper.find("table").exists()).toBe(false);
+
+    const cards = wrapper.findAll(".history-view__card");
+    expect(cards.length).toBe(1);
+    expect(cards[0].text()).toContain("Song One");
+    expect(cards[0].text()).toContain("The Larks");
+    expect(cards[0].text()).toContain(i18n.global.t("pages.history.playAgain"));
+  });
+
+  it("renders listening history as a table on wide viewports", async () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: vi.fn((query: string) => ({
+        matches: query === "(min-width: 1280px)",
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+
+    try {
+      vi.mocked(historyApi.listHistory).mockResolvedValue({
+        items: [
+          createHistoryEntry(
+            "h1",
+            "track-1",
+            "Song One",
+            "The Larks",
+            "2024-01-15T10:30:00Z",
+          ),
+        ],
+        page: 1,
+        pageSize: 20,
+      });
+
+      wrapper = mount(HistoryView);
+      await flushPromises();
+
+      expect(wrapper.find(".history-view__card").exists()).toBe(false);
+      expect(wrapper.find("table").exists()).toBe(true);
+      expect(wrapper.text()).toContain("Song One");
+      expect(wrapper.text()).toContain("The Larks");
+    } finally {
+      Object.defineProperty(window, "matchMedia", {
+        writable: true,
+        value: originalMatchMedia,
+      });
+    }
+  });
 });
