@@ -3,6 +3,7 @@ Configuration loading tests.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -346,3 +347,86 @@ def test_effective_bitrate():
     assert effective_bitrate(config.streaming, "admin", "256k") == "256k"
     assert effective_bitrate(config.streaming, "admin", "500k") == "320k"
     assert effective_bitrate(config.streaming, "unknown", "96k") == "96k"
+
+
+def test_load_config_from_songhive_config_env_var(monkeypatch, tmp_path):
+    """SONGHIVE_CONFIG points to the config file to load."""
+    toml_file = tmp_path / "env-config.toml"
+    toml_file.write_text("\n".join(["[server]", 'host = "env.config.host"']))
+    monkeypatch.setenv("SONGHIVE_CONFIG", str(toml_file))
+    config = load_config([])
+    assert config.server.host == "env.config.host"
+
+
+def test_cli_config_overrides_songhive_config_env_var(monkeypatch, tmp_path):
+    """--config takes precedence over SONGHIVE_CONFIG."""
+    env_toml = tmp_path / "env-config.toml"
+    env_toml.write_text("\n".join(["[server]", 'host = "env.host"']))
+    cli_toml = tmp_path / "cli-config.toml"
+    cli_toml.write_text("\n".join(["[server]", 'host = "cli.host"']))
+    monkeypatch.setenv("SONGHIVE_CONFIG", str(env_toml))
+    config = load_config(["--config", str(cli_toml)])
+    assert config.server.host == "cli.host"
+
+
+def test_load_config_from_xdg_config_home(monkeypatch, tmp_path):
+    """Config is discovered from $XDG_CONFIG_HOME/songhive/config.toml."""
+    xdg_dir = tmp_path / "xdg-config"
+    xdg_dir.mkdir()
+    toml_file = xdg_dir / "songhive" / "config.toml"
+    toml_file.parent.mkdir(parents=True)
+    toml_file.write_text("\n".join(["[server]", 'host = "xdg.host"']))
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.delenv("SONGHIVE_CONFIG", raising=False)
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.chdir(home_dir)
+
+    config = load_config([])
+    assert config.server.host == "xdg.host"
+
+
+def test_load_config_from_home_dot_config(monkeypatch, tmp_path):
+    """Config is discovered from ~/.config/songhive/config.toml."""
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    toml_file = home_dir / ".config" / "songhive" / "config.toml"
+    toml_file.parent.mkdir(parents=True)
+    toml_file.write_text("\n".join(["[server]", 'host = "home.config.host"']))
+
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("SONGHIVE_CONFIG", raising=False)
+    monkeypatch.chdir(home_dir)
+
+    config = load_config([])
+    assert config.server.host == "home.config.host"
+
+
+def test_load_config_search_paths_include_xdg_and_etc(monkeypatch, tmp_path):
+    """The default search list includes the XDG, ~/.config, and /etc fallbacks."""
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("SONGHIVE_CONFIG", raising=False)
+    monkeypatch.chdir(home_dir)
+
+    from songhive.config.loader import _config_search_paths
+
+    paths = _config_search_paths()
+    assert Path("./config.toml") in paths
+    assert home_dir / ".config" / "songhive" / "config.toml" in paths
+    assert Path("/etc/songhive/config.toml") in paths
+    assert paths.index(Path("./config.toml")) < paths.index(home_dir / ".config" / "songhive" / "config.toml")
+    assert paths.index(home_dir / ".config" / "songhive" / "config.toml") < paths.index(
+        Path("/etc/songhive/config.toml")
+    )
+
+
+def test_load_config_missing_explicit_file_raises():
+    """An explicit --config path that does not exist raises an error."""
+    with pytest.raises(FileNotFoundError):
+        load_config(["--config", "/nonexistent/songhive/config.toml"])

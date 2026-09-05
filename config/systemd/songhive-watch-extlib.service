@@ -1,0 +1,19 @@
+[Unit]
+Description=Songhive external library watchdog
+PartOf=songhive.service
+After=network.target
+
+[Service]
+Type=simple
+User=@@USER@@
+Group=@@GROUP@@
+WorkingDirectory=@@DATA_DIR@@
+Environment="SONGHIVE_CONFIG=@@CONFIG_DIR@@/config.toml"
+Environment="PATH=@@VENV_DIR@@/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=@@VENV_DIR@@/bin/songhive watch-external-libraries
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=@@WANTED_BY@@

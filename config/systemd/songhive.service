@@ -1,0 +1,13 @@
+[Unit]
+Description=Songhive federated music sharing service
+Wants=songhive-server.service songhive-celery.service songhive-watch-extlib.service
+After=network.target
+ConditionPathExists=@@CONFIG_DIR@@/config.toml
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+
+[Install]
+WantedBy=@@WANTED_BY@@

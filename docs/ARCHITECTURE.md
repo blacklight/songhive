@@ -255,7 +255,9 @@ Configuration is loaded with the following priority (highest first):
 
 1. Environment variables (prefixed `SONGHIVE_`, nested with `__`)
 2. CLI arguments
-3. `config.toml` (searched at `./config.toml` then `~/.config/songhive/config.toml`)
+3. `config.toml` (searched at the path given by `--config` or `SONGHIVE_CONFIG`,
+   then `./config.toml`, then `$XDG_CONFIG_HOME/songhive/config.toml` or
+   `~/.config/songhive/config.toml`, and finally `/etc/songhive/config.toml`)
 4. Field defaults
 
 The root schema is `SonghiveConfig` (a Pydantic `BaseSettings`), composed of
@@ -910,3 +912,21 @@ application and performs content negotiation for `/@<user>` and
 requests fall through to the Vue SPA.
 
 Persistent data is stored under `volumes/`.
+
+### systemd
+
+For non-Docker deployments, `config/systemd/` contains unit files for running
+Songhive as a systemd service. The `install.sh` script automates the setup:
+
+- Creates a Python virtual environment
+- Installs Songhive from the local checkout
+- Copies `config.toml.example` to the system (`/etc/songhive`) or user
+  (`~/.config/songhive`) config directory
+- Creates data, cache, and log directories
+- Installs the systemd units and sets the correct `ExecStart` paths
+
+The master `songhive.service` unit starts three dependent units:
+
+- `songhive-server.service` — main web server (`songhive`)
+- `songhive-celery.service` — Celery worker and scheduler
+- `songhive-watch-extlib.service` — external-library watchdog

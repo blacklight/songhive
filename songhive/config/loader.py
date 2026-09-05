@@ -11,11 +11,34 @@ from pydantic_settings import TomlConfigSettingsSource
 
 from .schema import SonghiveConfig
 
-_CONFIG_SEARCH_PATHS = [
-    Path("./config.toml"),
-    Path(os.path.expanduser("~/.config/songhive/config.toml")),
-    Path("/etc/songhive/config.toml"),
-]
+
+def _xdg_config_home() -> Path:
+    """Return the XDG config home, falling back to ~/.config."""
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(os.path.expanduser(xdg_config_home))
+    return Path.home() / ".config"
+
+
+def _config_search_paths() -> list[Path]:
+    """Return the default config file search paths in priority order."""
+    paths = [
+        Path("./config.toml"),
+        _xdg_config_home() / "songhive" / "config.toml",
+        Path("/etc/songhive/config.toml"),
+    ]
+
+    seen = set()
+    unique: list[Path] = []
+    for path in paths:
+        # Use the path as-is for relative paths; resolve absolute ones to avoid
+        # duplicates when XDG_CONFIG_HOME points at ~/.config.
+        key = path.resolve() if path.is_absolute() else path
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
 
 
 def _find_config_file(explicit_path: Optional[str] = None) -> Optional[Path]:
@@ -24,9 +47,9 @@ def _find_config_file(explicit_path: Optional[str] = None) -> Optional[Path]:
         p = Path(explicit_path)
         if p.exists():
             return p
-        return None
+        raise FileNotFoundError(f"Config file not found: {p}")
 
-    for path in _CONFIG_SEARCH_PATHS:
+    for path in _config_search_paths():
         if path.exists():
             return path
     return None
@@ -42,8 +65,8 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "-c",
         "--config",
         type=str,
-        default=None,
-        help="Path to config.toml file",
+        default=os.environ.get("SONGHIVE_CONFIG"),
+        help="Path to config.toml file (also read from SONGHIVE_CONFIG env var)",
     )
     parser.add_argument(
         "--host",
@@ -139,6 +162,10 @@ def load_config(argv: Optional[list] = None) -> SonghiveConfig:
     2. CLI arguments
     3. TOML config file
     4. Defaults (from schema)
+
+    The TOML file is discovered from ``--config``/``SONGHIVE_CONFIG``,
+    ``./config.toml``, ``$XDG_CONFIG_HOME/songhive/config.toml``
+    (or ``~/.config/songhive/config.toml``), or ``/etc/songhive/config.toml``.
 
     :param argv: Optional list of CLI arguments (defaults to sys.argv[1:]).
     :returns: A fully resolved SonghiveConfig instance.

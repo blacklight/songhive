@@ -31,6 +31,7 @@
   * [pip installation](#pip-installation)
     + [Celery](#celery)
     + [Local library watchdog](#local-library-watchdog)
+  * [systemd service](#systemd-service)
   * [Creating the admin user](#creating-the-admin-user)
     + [Docker installation](#docker-installation-1)
     + [pip installation](#pip-installation-1)
@@ -181,6 +182,11 @@ If you are planning to serve Songhive behind a reverse proxy, you can reuse the
   wget https://git.fabiomanganiello.com/songhive/raw/branch/main/config.toml.example
   ```
 
+The application looks for `config.toml` in this order: the path given with
+`--config` or the `SONGHIVE_CONFIG` environment variable, then `./config.toml`,
+then `$XDG_CONFIG_HOME/songhive/config.toml` (or `~/.config/songhive/config.toml`),
+and finally `/etc/songhive/config.toml`.
+
 ### Base configuration
 
 Set at least the following values in `config.toml`:
@@ -264,6 +270,54 @@ The Docker stack runs this as a separate `watcher` container. The watcher is kep
 as a standalone process rather than a child of the web server so that a single
 host has exactly one watchdog, even when the web server is scaled to multiple
 workers.
+
+### systemd service
+
+Songhive ships with systemd unit files under [`config/systemd/`](./config/systemd/)
+and an [`install.sh`](./install.sh) script that sets up a virtual environment,
+copies the example config, installs the units, and creates the required
+directories.
+
+The master `songhive.service` unit pulls in three units:
+
+- `songhive-server.service` — the main web server
+- `songhive-celery.service` — the Celery worker and scheduler
+- `songhive-watch-extlib.service` — the external-library watchdog
+
+Run the installer as **root** for a system-wide service:
+
+```bash
+sudo ./install.sh
+```
+
+This creates `/opt/songhive` (the virtual environment), `/etc/songhive`,
+`/var/lib/songhive`, `/var/cache/songhive`, and `/var/log/songhive`, installs
+the units to `/etc/systemd/system/`, and reminds you to copy
+`/etc/songhive/config.toml.example` to `/etc/songhive/config.toml` and edit it.
+Then start and enable the service:
+
+```bash
+sudo systemctl start songhive.service
+sudo systemctl enable songhive.service
+```
+
+Run the installer as a **normal user** for a user service:
+
+```bash
+./install.sh
+```
+
+This creates a virtual environment under `~/.local/share/virtualenvs/songhive`,
+copies the example config to `~/.config/songhive/`, creates
+`~/.local/share/songhive`, `~/.cache/songhive`, and `~/.local/state/songhive`,
+and installs the units to `~/.config/systemd/user/`. Copy
+`~/.config/songhive/config.toml.example` to
+`~/.config/songhive/config.toml`, edit it, then start the user service:
+
+```bash
+systemctl --user start songhive.service
+systemctl --user enable songhive.service
+```
 
 ### Creating the admin user
 
