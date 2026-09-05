@@ -369,6 +369,7 @@ watch(
           :has-more="tracksHasMore"
           @share="onTrackShare"
           @removed="onTracksRemoved"
+          @updated="onTracksRemoved"
           @reorder="onReorder"
         />
 

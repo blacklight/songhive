@@ -886,6 +886,14 @@
       "deselectAll": "Deselect all",
       "removeSelected": "Remove selected",
       "deleteSelected": "Delete selected",
+      "editMetadata": "Edit metadata",
+      "editMetadataTitle": "Edit metadata for {count} tracks",
+      "editHint": "Only the fields you change are applied to every selected track. Fields left untouched keep their current values.",
+      "keepUnchanged": "Keep unchanged",
+      "nothingToUpdate": "No changes to apply.",
+      "saveSuccess": "Updated metadata for {count} tracks.",
+      "savePartial": "Updated {updated} of {total} tracks.",
+      "saveError": "Could not update {count} tracks: {message}",
       "empty": "No tracks selected."
     },
     "addToCollection": {

@@ -111,7 +111,7 @@ export const useAuthStore = defineStore("auth", () => {
       if (err instanceof ApiError) {
         throw err;
       }
-      throw new Error("Login failed");
+      throw new Error("Login failed", { cause: err });
     }
   }
 

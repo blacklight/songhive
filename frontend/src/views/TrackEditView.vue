@@ -15,18 +15,14 @@ import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
 import { useEntityHashtags } from "@/composables/useEntityHashtags";
 import { useEntityGenres } from "@/composables/useEntityGenres";
-import HashtagInput from "@/components/hashtags/HashtagInput.vue";
-import GenreInput from "@/components/genres/GenreInput.vue";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
-import type { Visibility } from "@/api/libraries";
 import { parseNumber, toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
-import AppInput from "@/components/ui/AppInput.vue";
-import AppSelect from "@/components/ui/AppSelect.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ImageUploadField from "@/components/ui/ImageUploadField.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import TrackMetadataForm from "@/components/library/TrackMetadataForm.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -46,7 +42,7 @@ const trackNumber = ref("");
 const discNumber = ref("");
 const releaseYear = ref("");
 const filename = ref("");
-const visibility = ref<Visibility>("private");
+const visibility = ref("private");
 const isSaving = ref(false);
 const isDeleting = ref(false);
 const isUploadingImage = ref(false);
@@ -63,12 +59,6 @@ const canRenameFile = computed(
 
 const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
 const { genres, resetGenres, syncGenres } = useEntityGenres();
-
-const visibilityOptions = computed(() => [
-  { value: "private", label: t("browse.visibility.private") },
-  { value: "local", label: t("browse.visibility.local") },
-  { value: "public", label: t("browse.visibility.public") },
-]);
 
 function resetForm() {
   title.value = track.value?.title ?? "";
@@ -130,7 +120,7 @@ async function onSubmit() {
     track_number: parseNumber(trackNumber.value),
     disc_number: parseNumber(discNumber.value),
     release_year: parseNumber(releaseYear.value),
-    visibility: visibility.value,
+    visibility: toVisibility(visibility.value),
   };
 
   if (canRenameFile.value) {
@@ -254,74 +244,33 @@ watch(
         {{ t("browse.edit.editTrack") }}
       </AppPageTitle>
 
-      <form class="track-edit-view__form" @submit.prevent="onSubmit">
-        <AppInput
-          v-model="title"
-          :label="t('browse.edit.title')"
-          :required="true"
-        />
-        <AppInput
-          v-model="artistName"
-          :label="t('browse.edit.artist')"
-          :required="true"
-        />
-        <AppInput v-model="albumTitle" :label="t('browse.edit.album')" />
-        <GenreInput
-          v-if="canManage"
-          v-model="genres"
-          :placeholder="t('genres.placeholder')"
-          :aria-label="t('genres.ariaLabel')"
-        />
-        <div class="track-edit-view__row">
-          <AppInput
-            v-model="trackNumber"
-            type="number"
-            :label="t('browse.detail.trackNumber')"
-          />
-          <AppInput
-            v-model="discNumber"
-            type="number"
-            :label="t('browse.detail.discNumber')"
-          />
-        </div>
-        <AppInput
-          v-model="releaseYear"
-          type="number"
-          :label="t('browse.edit.releaseYear')"
-        />
-        <AppInput
-          v-model="filename"
-          :label="t('browse.edit.filename')"
-          :disabled="!canRenameFile"
-        />
-        <AppSelect
-          v-model="visibility"
-          :label="t('browse.detail.visibility')"
-          :options="visibilityOptions"
-        />
-
-        <HashtagInput
-          v-if="canManage"
-          v-model="hashtags"
-          :placeholder="t('hashtags.placeholder')"
-          :aria-label="t('hashtags.label')"
-        />
-
-        <div class="track-edit-view__actions">
-          <AppButton type="submit" :loading="isSaving" icon="floppy-disk">
-            {{ t("common.save") }}
-          </AppButton>
-          <AppButton
-            type="button"
-            variant="danger"
-            :loading="isDeleting"
-            icon="trash-can"
-            @click="onDelete"
-          >
-            {{ t("common.delete") }}
-          </AppButton>
-        </div>
-      </form>
+      <TrackMetadataForm
+        v-model:title="title"
+        v-model:artist-name="artistName"
+        v-model:album-title="albumTitle"
+        v-model:genres="genres"
+        v-model:track-number="trackNumber"
+        v-model:disc-number="discNumber"
+        v-model:release-year="releaseYear"
+        v-model:filename="filename"
+        v-model:visibility="visibility"
+        v-model:hashtags="hashtags"
+        :can-rename-file="canRenameFile"
+        @submit="onSubmit"
+      >
+        <AppButton type="submit" :loading="isSaving" icon="floppy-disk">
+          {{ t("common.save") }}
+        </AppButton>
+        <AppButton
+          type="button"
+          variant="danger"
+          :loading="isDeleting"
+          icon="trash-can"
+          @click="onDelete"
+        >
+          {{ t("common.delete") }}
+        </AppButton>
+      </TrackMetadataForm>
 
       <section
         class="track-edit-view__section"
@@ -379,25 +328,6 @@ watch(
 .track-edit-view__title {
   margin: 0;
   font-size: 1.75rem;
-}
-
-.track-edit-view__form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.track-edit-view__row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
-}
-
-.track-edit-view__actions {
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
-  flex-wrap: wrap;
 }
 
 .track-edit-view__section {

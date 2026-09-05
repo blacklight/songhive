@@ -331,6 +331,7 @@ watch(
           :deletable="true"
           @share="onTrackShare"
           @removed="onTracksRemoved"
+          @updated="onTracksRemoved"
         />
 
         <div class="library-detail-view__footer">

@@ -188,6 +188,7 @@ onMounted(() => load());
         @toggle-favorite="onToggleFavorite"
         @share="onTrackShare"
         @removed="onTracksRemoved"
+        @updated="onTracksRemoved"
       />
 
       <div v-if="!error && hasMore" class="favorites-view__footer">

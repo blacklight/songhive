@@ -156,6 +156,7 @@ watch(
         :deletable="authStore.isAuthenticated"
         @share="onTrackShare"
         @removed="onRemoved"
+        @updated="onRemoved"
       />
     </template>
 

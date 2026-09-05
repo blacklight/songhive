@@ -369,6 +369,7 @@ onMounted(() => loadVisibleTypes());
       :deletable="authStore.isAdmin"
       :auto-scroll="true"
       @removed="load"
+      @updated="load"
     />
 
     <template v-else>

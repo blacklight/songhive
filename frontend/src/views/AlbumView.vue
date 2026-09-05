@@ -373,6 +373,7 @@ watch(
           :deletable="true"
           @share="onTrackShare"
           @removed="onTracksRemoved"
+          @updated="onTracksRemoved"
         />
 
         <div class="album-view__footer">

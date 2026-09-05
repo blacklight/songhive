@@ -29,9 +29,19 @@ vi.mock("@/api/playlists", () => ({
 }));
 
 vi.mock("@/api/tracks", () => ({
+  getTrack: vi.fn(),
+  updateTrack: vi.fn(),
   deleteTrack: vi.fn(),
   deleteTracks: vi.fn().mockResolvedValue({ deleted: 0, track_ids: [] }),
   downloadTrack: vi.fn().mockResolvedValue(undefined),
+  enrichTrack: vi
+    .fn()
+    .mockResolvedValue({ track_id: "track-1", enqueued: true }),
+}));
+
+vi.mock("@/api/hashtags", () => ({
+  addHashtags: vi.fn().mockResolvedValue(undefined),
+  removeHashtag: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/api/favorites", () => ({
@@ -632,6 +642,70 @@ describe("TrackList", () => {
     expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1", "track-2"]]);
   });
 
+  it("opens the bulk metadata editor and emits updated after saving", async () => {
+    const trackFixtures = [
+      makeTrack(),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+    ];
+    for (const track of trackFixtures) {
+      vi.mocked(tracksApi.getTrack).mockResolvedValueOnce(track);
+    }
+    vi.mocked(tracksApi.updateTrack).mockResolvedValue(trackFixtures[0]);
+
+    ({ wrapper } = mountTrackList({
+      tracks: trackFixtures,
+      context: "Artist",
+      deletable: true,
+    }));
+    await flushPromises();
+
+    const bulkButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.bulkEdit.start"));
+    await bulkButton?.trigger("click");
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll('input[type="checkbox"]');
+    await checkboxes[0]?.setValue(true);
+    await flushPromises();
+
+    const editButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.bulkEdit.editMetadata"));
+    expect(editButton).toBeDefined();
+    await editButton?.trigger("click");
+    await flushPromises();
+
+    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
+      include: "artist,album,hashtags,genres",
+    });
+    expect(tracksApi.getTrack).toHaveBeenCalledWith("track-2", {
+      include: "artist,album,hashtags,genres",
+    });
+
+    const artistInput = document.body.querySelectorAll(
+      'input[type="text"], input[type="number"]',
+    )[1] as HTMLInputElement;
+    artistInput.value = "New Artist";
+    artistInput.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.save"));
+    await saveButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.updateTrack).toHaveBeenCalledTimes(2);
+    expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-1", {
+      artist_name: "New Artist",
+    });
+    expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-2", {
+      artist_name: "New Artist",
+    });
+    expect(wrapper.emitted("updated")?.[0]).toEqual([["track-1", "track-2"]]);
+  });
+
   it("highlights the currently playing track in the table", async () => {
     const tracks = [
       makeTrack(),
@@ -943,22 +1017,35 @@ describe("TrackList", () => {
         );
       }
 
-      await handle.trigger("pointerdown", {
-        pointerId: 1,
-        clientX: 0,
-        clientY: 5,
-        pointerType: "mouse",
-      });
-      await handle.trigger("pointermove", {
-        pointerId: 1,
-        clientX: 0,
-        clientY: 90,
-        pointerType: "mouse",
-      });
-      await handle.trigger("pointerup", {
-        pointerId: 1,
-        pointerType: "mouse",
-      });
+      handle.element.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          pointerId: 1,
+          clientX: 0,
+          clientY: 5,
+          pointerType: "mouse",
+          bubbles: true,
+        }),
+      );
+      await flushPromises();
+
+      handle.element.dispatchEvent(
+        new PointerEvent("pointermove", {
+          pointerId: 1,
+          clientX: 0,
+          clientY: 90,
+          pointerType: "mouse",
+          bubbles: true,
+        }),
+      );
+      await flushPromises();
+
+      handle.element.dispatchEvent(
+        new PointerEvent("pointerup", {
+          pointerId: 1,
+          pointerType: "mouse",
+          bubbles: true,
+        }),
+      );
       await flushPromises();
 
       expect(wrapper.emitted("reorder")?.[0]).toEqual([

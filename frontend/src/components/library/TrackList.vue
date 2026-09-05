@@ -16,6 +16,7 @@ import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import ContextMenu from "@/components/ui/ContextMenu.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
+import BulkTrackEditModal from "@/components/library/BulkTrackEditModal.vue";
 import { formatTime } from "@/utils/time";
 import { getApiErrorMessage } from "@/api/client";
 import { removeTracksFromLibrary } from "@/api/libraries";
@@ -84,6 +85,7 @@ const emit = defineEmits<{
   "toggle-favorite": [track: QueueTrack];
   share: [track: QueueTrack];
   removed: [trackIds: string[]];
+  updated: [trackIds: string[]];
   reorder: [payload: { trackIds: string[]; position?: number }];
 }>();
 
@@ -104,6 +106,8 @@ const addDialogMode = ref<"library" | "playlist">("library");
 
 const selectedIds = ref<Set<string>>(new Set());
 const bulkMode = ref(false);
+const bulkEditOpen = ref(false);
+const bulkEditIds = ref<string[]>([]);
 const confirmOpen = ref(false);
 const confirmMode = ref<"single" | "bulk">("single");
 const confirmTrack = ref<QueueTrack | null>(null);
@@ -717,6 +721,19 @@ function canManageTrack(track: QueueTrack): boolean {
   return canManageItem(authStore, track);
 }
 
+function openBulkEdit() {
+  bulkEditIds.value = Array.from(selectedIds.value);
+  bulkEditOpen.value = true;
+}
+
+function closeBulkEdit() {
+  bulkEditOpen.value = false;
+}
+
+function onBulkEditSaved() {
+  emit("updated", [...bulkEditIds.value]);
+}
+
 function openBulkRemove() {
   confirmTrack.value = null;
   confirmMode.value = "bulk";
@@ -1249,6 +1266,15 @@ async function onMenuSelect(key: string) {
             @update:model-value="toggleAll"
           />
           <AppButton
+            variant="secondary"
+            size="sm"
+            icon="pen-to-square"
+            :disabled="selectedIds.size === 0 || isRemoving"
+            @click="openBulkEdit"
+          >
+            {{ t("browse.bulkEdit.editMetadata") }}
+          </AppButton>
+          <AppButton
             v-if="props.deletable"
             variant="danger"
             size="sm"
@@ -1667,6 +1693,14 @@ async function onMenuSelect(key: string) {
       :y="menuY"
       @select="onMenuSelect"
       @close="closeMenu"
+    />
+
+    <BulkTrackEditModal
+      v-if="canEdit"
+      :open="bulkEditOpen"
+      :track-ids="bulkEditIds"
+      @close="closeBulkEdit"
+      @saved="onBulkEditSaved"
     />
 
     <AddToCollectionDialog
