@@ -36,6 +36,12 @@ interface MockXhr {
   reject?: () => void;
 }
 
+function mockXhrConstructor(xhr: MockXhr): typeof XMLHttpRequest {
+  return vi.fn(function () {
+    return xhr;
+  }) as unknown as typeof XMLHttpRequest;
+}
+
 function createMockXHR(config: {
   status?: number;
   statusText?: string;
@@ -132,10 +138,7 @@ describe("uploadFile", () => {
     mockXhr = createMockXHR({
       responseText: JSON.stringify(sampleFile),
     });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
   });
 
   afterEach(() => {
@@ -172,10 +175,7 @@ describe("uploadFile", () => {
         { loaded: 100, total: 100 },
       ],
     });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
     const onProgress = vi.fn();
@@ -196,10 +196,7 @@ describe("uploadFile", () => {
         { loaded: 8, total: 0, lengthComputable: false },
       ],
     });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
     const onProgress = vi.fn();
@@ -237,10 +234,7 @@ describe("uploadFile", () => {
       statusText: "Bad Request",
       responseText: JSON.stringify({ detail: "Upload failed" }),
     });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
 
@@ -265,10 +259,7 @@ describe("uploadFile", () => {
       responseText: JSON.stringify(sampleFile),
       headers: { "x-track-id": "t1" },
     });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
     const result = await uploadFile(file);
@@ -278,10 +269,7 @@ describe("uploadFile", () => {
 
   it("rejects with a localized ApiError on XHR error", async () => {
     mockXhr = createMockXHR({ trigger: "error" });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
 
@@ -293,10 +281,7 @@ describe("uploadFile", () => {
 
   it("rejects with a localized ApiError on XHR abort", async () => {
     mockXhr = createMockXHR({ trigger: "abort" });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
 
@@ -308,10 +293,7 @@ describe("uploadFile", () => {
 
   it("calls xhr.abort and rejects when the signal is aborted", async () => {
     mockXhr = createMockXHR({ manual: true });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
     const controller = new AbortController();
@@ -337,7 +319,7 @@ describe("uploadFile", () => {
     mockXhr = createMockXHR({
       responseText: JSON.stringify(sampleFile),
     });
-    const stub = vi.fn(() => mockXhr);
+    const stub = mockXhrConstructor(mockXhr);
     vi.stubGlobal("XMLHttpRequest", stub);
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
@@ -373,10 +355,7 @@ describe("bulkUploadFiles", () => {
     mockXhr = createMockXHR({
       responseText: JSON.stringify([sampleBulkResult]),
     });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
   });
 
   afterEach(() => {
@@ -423,10 +402,7 @@ describe("bulkUploadFiles", () => {
         { loaded: 100, total: 100 },
       ],
     });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
     const onProgress = vi.fn();
@@ -447,10 +423,7 @@ describe("bulkUploadFiles", () => {
         { loaded: 5, total: 0, lengthComputable: false },
       ],
     });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file1 = new File(["abcd"], "a.txt", { type: "text/plain" });
     const file2 = new File(["x"], "b.txt", { type: "text/plain" });
@@ -469,10 +442,7 @@ describe("bulkUploadFiles", () => {
       statusText: "Too Many Requests",
       responseText: JSON.stringify({ detail: "Rate limit exceeded" }),
     });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
 
@@ -494,10 +464,7 @@ describe("bulkUploadFiles", () => {
 
   it("rejects with a localized ApiError on XHR error", async () => {
     mockXhr = createMockXHR({ trigger: "error" });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
 
@@ -509,10 +476,7 @@ describe("bulkUploadFiles", () => {
 
   it("calls xhr.abort and rejects when the signal is aborted", async () => {
     mockXhr = createMockXHR({ manual: true });
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      vi.fn(() => mockXhr),
-    );
+    vi.stubGlobal("XMLHttpRequest", mockXhrConstructor(mockXhr));
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
     const controller = new AbortController();
