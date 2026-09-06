@@ -168,7 +168,7 @@ songhive/
 ├── federation/             # ActivityPub per-user federation
 │   ├── _common.py          # URL builders
 │   ├── actors.py           # Actor document generation, federation storage helpers
-│   ├── activities.py       # Activity creation (Create, Delete, Follow, etc.)
+│   ├── activities.py       # Activity creation (Create, Update, Delete, etc.)
 │   ├── serializers.py      # Track → ActivityPub Audio object mapping
 │   └── storage.py          # pubby storage adapter (SQLAlchemy-backed)
 ├── users/                  # User management
@@ -639,6 +639,9 @@ discovery are in `api/routes/federation.py`.
   on every transition to public) so a previous `Tombstone` at the same URL
   cannot block re-publication.
 - `Delete(Tombstone)` is sent when a track is made non-public or deleted.
+- Profile changes (display name, bio, avatar, links) refresh the cached actor
+  document via `sync_user_actor` and are pushed to follower inboxes as
+  `Update(Person)` activities.
 - Following/unfollowing uses standard AP `Follow`/`Undo(Follow)` activities.
 - `track.genre` is split into multiple `Hashtag` tags on the published
   `Audio` object, with spaces converted to underscores.

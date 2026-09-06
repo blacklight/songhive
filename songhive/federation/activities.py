@@ -92,3 +92,24 @@ def create_delete_activity(
             "type": "Tombstone",
         },
     }
+
+
+def create_update_actor_activity(actor_url: str, actor_document: dict) -> dict:
+    """
+    Create an Update activity wrapping the actor's ``Person`` document.
+
+    Delivered to follower inboxes so remote instances refresh their cached
+    copy of the actor profile (display name, bio, avatar and profile links).
+    """
+    now = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": f"{actor_url}/activities/{uuid.uuid4()}",
+        "type": "Update",
+        "actor": actor_url,
+        "published": now,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [f"{actor_url}/followers"],
+        "object": actor_document,
+    }

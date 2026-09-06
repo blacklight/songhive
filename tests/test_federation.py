@@ -10,7 +10,7 @@ import pytest
 from celery.exceptions import Retry
 
 from songhive.config.schema import SonghiveConfig
-from songhive.federation.activities import create_audio_activity
+from songhive.federation.activities import create_audio_activity, create_update_actor_activity
 from songhive.federation.actors import (
     get_actor_url,
     get_federation_storage,
@@ -25,6 +25,7 @@ from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
+from songhive.services.federation import publish_actor_update
 from songhive.tasks.federation import _load_user_actor, deliver_activity, process_incoming
 
 
@@ -210,8 +211,16 @@ def test_user_to_actor_document_includes_avatar_and_links():
     assert doc["url"] == "https://music.example.com/users/alice"
     assert doc["icon"] == {"type": "Image", "url": "https://example.com/avatar.png"}
     assert doc["attachment"] == [
-        {"type": "PropertyValue", "name": "Website", "value": "https://example.com"},
-        {"type": "PropertyValue", "name": "Mastodon", "value": "https://mastodon.example.com/@alice"},
+        {
+            "type": "PropertyValue",
+            "name": "Website",
+            "value": '<a href="https://example.com">https://example.com</a>',
+        },
+        {
+            "type": "PropertyValue",
+            "name": "Mastodon",
+            "value": '<a href="https://mastodon.example.com/@alice">https://mastodon.example.com/@alice</a>',
+        },
     ]
 
 
@@ -271,7 +280,180 @@ async def test_sync_user_actor_caches_document(db_session, config):
     assert cached["summary"] == "Hello fediverse"
     assert cached["icon"] == {"type": "Image", "url": "https://example.com/avatar.png"}
     assert cached["attachment"] == [
-        {"type": "PropertyValue", "name": "Website", "value": "https://example.com"},
+        {
+            "type": "PropertyValue",
+            "name": "Website",
+            "value": '<a href="https://example.com">https://example.com</a>',
+        },
+    ]
+
+
+def test_create_update_actor_activity():
+    """An Update activity wraps the full actor document."""
+    actor_url = "https://music.example.com/users/alice"
+    doc = {"id": actor_url, "type": "Person", "name": "Alice"}
+
+    activity = create_update_actor_activity(actor_url, doc)
+
+    assert activity["type"] == "Update"
+    assert activity["actor"] == actor_url
+    assert activity["id"].startswith(f"{actor_url}/activities/")
+    assert activity["to"] == ["https://www.w3.org/ns/activitystreams#Public"]
+    assert activity["cc"] == [f"{actor_url}/followers"]
+    assert activity["object"] is doc
+    assert "published" in activity
+
+
+def _make_federated_user(username: str = "alice", **kwargs) -> User:
+    """Build a user with actor credentials already provisioned."""
+    return User(
+        username=username,
+        email=f"{username}@example.com",
+        password_hash="x",
+        actor_url=f"https://music.example.com/users/{username}",
+        private_key_pem="private",
+        public_key_pem="public",
+        **kwargs,
+    )
+
+
+def test_publish_actor_update_noops_when_federation_disabled(monkeypatch):
+    """publish_actor_update does nothing when federation is disabled."""
+    user = _make_federated_user()
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    result = publish_actor_update(user, _fed_config(enabled=False))
+
+    assert result == 0
+    deliver_mock.delay.assert_not_called()
+
+
+def test_publish_actor_update_noops_without_actor_credentials(monkeypatch):
+    """publish_actor_update does nothing when the user has no actor keys."""
+    user = User(username="alice", email="alice@example.com", password_hash="x")
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    result = publish_actor_update(user, _fed_config())
+
+    assert result == 0
+    deliver_mock.delay.assert_not_called()
+
+
+def test_publish_actor_update_enqueues_update_to_followers(monkeypatch):
+    """publish_actor_update sends one Update activity per follower inbox."""
+    user = _make_federated_user(display_name="Alice")
+    inboxes = ["https://a.example/inbox", "https://b.example/inbox"]
+    monkeypatch.setattr(
+        "songhive.services.federation.get_follower_inboxes",
+        lambda *a, **k: inboxes,
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    result = publish_actor_update(user, _fed_config())
+
+    assert result == 2
+    assert deliver_mock.delay.call_count == 2
+    calls = [call.args for call in deliver_mock.delay.call_args_list]
+    assert calls[0][1] == "https://a.example/inbox"
+    assert calls[1][1] == "https://b.example/inbox"
+    activity, _, key_id, pem = calls[0]
+    assert activity["type"] == "Update"
+    assert activity["actor"] == user.actor_url
+    assert activity["object"]["id"] == user.actor_url
+    assert activity["object"]["name"] == "Alice"
+    assert key_id == f"{user.actor_url}#main-key"
+    assert pem == "private"
+
+
+@pytest.mark.asyncio
+async def test_sync_user_actor_delivers_update_to_followers(db_session, config, monkeypatch):
+    """sync_user_actor fans an Update activity out to follower inboxes."""
+    user = User(
+        username="alice",
+        email="alice@example.com",
+        password_hash="x",
+        display_name="Alice",
+        links=[],
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    fed_config = SonghiveConfig(
+        database={"url": config.database.url},
+        federation={"enabled": True, "instance_domain": "music.example.com"},
+        auth={"secret_key": config.auth.secret_key},
+    )
+
+    inboxes = ["https://a.example/inbox"]
+    monkeypatch.setattr(
+        "songhive.services.federation.get_follower_inboxes",
+        lambda *a, **k: inboxes,
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    result = await sync_user_actor(user, fed_config)
+
+    assert result is True
+    deliver_mock.delay.assert_called_once()
+    activity, inbox, key_id, pem = deliver_mock.delay.call_args.args
+    assert inbox == "https://a.example/inbox"
+    assert activity["type"] == "Update"
+    assert activity["actor"] == user.actor_url
+    assert activity["object"]["id"] == user.actor_url
+    assert activity["object"]["name"] == "Alice"
+    assert key_id == f"{user.actor_url}#main-key"
+    assert pem == user.private_key_pem
+
+
+@pytest.mark.asyncio
+async def test_sync_user_actor_fans_out_updated_links(db_session, config, monkeypatch):
+    """A links-only profile update is propagated to follower inboxes."""
+    from songhive.users.manager import update_profile
+
+    user = User(
+        username="alice",
+        email="alice@example.com",
+        password_hash="x",
+        links=[UserLink(name="Old", url="https://old.example")],
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    # Same sequence as PATCH /users/me: update, commit, then sync the actor.
+    await update_profile(
+        db_session,
+        user,
+        {"links": [UserLink(name="New", url="https://new.example")]},
+    )
+    await db_session.commit()
+
+    fed_config = SonghiveConfig(
+        database={"url": config.database.url},
+        federation={"enabled": True, "instance_domain": "music.example.com"},
+        auth={"secret_key": config.auth.secret_key},
+    )
+    monkeypatch.setattr(
+        "songhive.services.federation.get_follower_inboxes",
+        lambda *a, **k: ["https://a.example/inbox"],
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    assert await sync_user_actor(user, fed_config) is True
+
+    deliver_mock.delay.assert_called_once()
+    activity = deliver_mock.delay.call_args.args[0]
+    assert activity["type"] == "Update"
+    assert activity["object"]["attachment"] == [
+        {
+            "type": "PropertyValue",
+            "name": "New",
+            "value": '<a href="https://new.example">https://new.example</a>',
+        }
     ]
 
 

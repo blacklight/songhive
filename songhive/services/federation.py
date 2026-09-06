@@ -224,3 +224,52 @@ def unpublish_track_activity(
         deliver_activity.delay(activity, inbox, actor_key_id, user.private_key_pem)  # type: ignore
 
     return len(inboxes)
+
+
+def publish_actor_update(
+    user: User,
+    config: SonghiveConfig,
+    actor_document: Optional[dict] = None,
+) -> int:
+    """
+    Publish an ``Update`` activity for the user's actor to follower inboxes.
+
+    This pushes profile changes (display name, bio, avatar, links) to remote
+    instances so they can refresh their cached copy of the actor document
+    instead of waiting for a re-fetch.
+
+    Returns the number of remote inboxes enqueued. The function no-ops when
+    federation is disabled or the user has no actor credentials.
+
+    ``actor_document`` may be supplied to reuse an already-serialized actor
+    document; otherwise it is rebuilt from the current user record.
+    """
+    if (
+        not config.federation.enabled
+        or not config.federation.instance_domain
+        or not user
+        or not user.actor_url
+        or not user.private_key_pem
+    ):
+        logger.debug("Skipping ActivityPub actor update")
+        return 0
+
+    from ..federation.activities import create_update_actor_activity
+    from ..tasks.federation import deliver_activity
+
+    document = actor_document
+    if document is None:
+        from ..federation.actors import user_to_actor_document
+
+        document = user_to_actor_document(user, config.federation.instance_domain)
+
+    activity = create_update_actor_activity(user.actor_url, document)
+    inboxes = get_follower_inboxes(user.actor_url, config.database.url)
+    actor_key_id = f"{user.actor_url}#main-key"
+    for inbox in inboxes:
+        try:
+            deliver_activity.delay(activity, inbox, actor_key_id, user.private_key_pem)  # type: ignore
+        except Exception as e:
+            logger.warning("Cannot send update activity to inbox %s: %s: %s", inbox, type(e), e)
+
+    return len(inboxes)

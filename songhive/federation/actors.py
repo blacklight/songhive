@@ -4,7 +4,8 @@ Actor management for federation.
 Each Songhive user has a corresponding ActivityPub actor.  When a user updates
 their local profile the matching actor document is refreshed in the pubby actor
 storage so remote instances can see the latest display name, bio, avatar and
-profile links.
+profile links, and an ``Update`` activity carrying the new document is
+delivered to follower inboxes.
 """
 
 import asyncio
@@ -16,7 +17,7 @@ from pubby.storage.adapters.db import DbActivityPubStorage
 
 from ..config.schema import SonghiveConfig
 from ..models.user import User
-from ..services.federation import ensure_user_actor
+from ..services.federation import ensure_user_actor, publish_actor_update
 from ._common import get_actor_url, get_inbox_url, get_outbox_url
 from .storage import create_activitypub_storage
 
@@ -38,7 +39,9 @@ def _build_attachment(user: User) -> Optional[list[dict[str, Any]]]:
         {
             "type": "PropertyValue",
             "name": link.name,
-            "value": link.url,
+            # Mastodon and friends render ``value`` as HTML; a bare URL would
+            # show up as plain text instead of a clickable link.
+            "value": f'<a href="{link.url}">{link.url}</a>',
         }
         for link in links
     ]
@@ -95,10 +98,13 @@ async def sync_user_actor(user: User, config: SonghiveConfig) -> bool:
     """
     Refresh the cached ActivityPub actor document for a user.
 
+    The refreshed document is also delivered to follower inboxes as an
+    ``Update`` activity so remote instances pick up profile changes.
+
     Returns ``True`` when the actor document was refreshed, ``False`` when
     federation is disabled or the sync could not be performed.  Failures are
     logged rather than raised so that profile updates are not blocked by
-    federation storage problems.
+    federation storage or delivery problems.
     """
     if not config.federation.enabled or not config.federation.instance_domain:
         return False
@@ -129,5 +135,21 @@ async def sync_user_actor(user: User, config: SonghiveConfig) -> bool:
         # subclasses (KeyboardInterrupt, SystemExit) are not caught.
         logger.exception("Failed to cache actor document for %s", user.username)
         return False
+
+    try:
+        delivered = await asyncio.to_thread(publish_actor_update, user, config, actor_doc)
+    except Exception:
+        # Broad catch is intentional: follower fan-out is a non-critical
+        # federation operation and must not block profile updates.
+        # BaseException subclasses (KeyboardInterrupt, SystemExit) are not
+        # caught.
+        logger.exception("Failed to enqueue actor update for %s", user.username)
+    else:
+        if delivered:
+            logger.info(
+                "Enqueued actor update for %s to %d inbox(es)",
+                user.username,
+                delivered,
+            )
 
     return True

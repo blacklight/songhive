@@ -3,6 +3,7 @@ User model and lifecycle management tests.
 """
 
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
@@ -956,10 +957,17 @@ async def test_patch_me_endpoint_rejects_invalid_link(client, db_session, config
 
 
 @pytest.mark.asyncio
-async def test_patch_me_endpoint_syncs_federation_actor(client, db_session, config):
+async def test_patch_me_endpoint_syncs_federation_actor(client, db_session, config, monkeypatch):
     """Test that PATCH /me refreshes the user's ActivityPub actor document."""
     client.app.state.config.federation.enabled = True
     client.app.state.config.federation.instance_domain = "music.example.com"
+
+    monkeypatch.setattr(
+        "songhive.services.federation.get_follower_inboxes",
+        lambda *a, **k: ["https://remote.example/inbox"],
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
 
     user = await create_user(db_session, "alice", "alice@example.com", "secret")
     await db_session.commit()
@@ -990,9 +998,27 @@ async def test_patch_me_endpoint_syncs_federation_actor(client, db_session, conf
     assert cached["summary"] == "Hello fediverse"
     assert cached["icon"] == {"type": "Image", "url": "https://example.com/avatar.png"}
     assert cached["attachment"] == [
-        {"type": "PropertyValue", "name": "Website", "value": "https://example.com"},
-        {"type": "PropertyValue", "name": "Mastodon", "value": "https://mastodon.example.com/@alice"},
+        {
+            "type": "PropertyValue",
+            "name": "Website",
+            "value": '<a href="https://example.com">https://example.com</a>',
+        },
+        {
+            "type": "PropertyValue",
+            "name": "Mastodon",
+            "value": '<a href="https://mastodon.example.com/@alice">https://mastodon.example.com/@alice</a>',
+        },
     ]
+
+    # The refreshed actor document is fanned out to follower inboxes as an
+    # Update activity.
+    deliver_mock.delay.assert_called_once()
+    activity, inbox, key_id, _ = deliver_mock.delay.call_args.args
+    assert inbox == "https://remote.example/inbox"
+    assert activity["type"] == "Update"
+    assert activity["object"]["id"] == actor_url
+    assert activity["object"]["attachment"] == cached["attachment"]
+    assert key_id == f"{actor_url}#main-key"
 
 
 def test_change_password_endpoint_unauthenticated(client):
