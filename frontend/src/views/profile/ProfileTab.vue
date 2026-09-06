@@ -190,22 +190,10 @@ async function onDeleteAccount() {
 async function onSubmit() {
   error.value = null;
 
-  const patch: UserProfileUpdate = {};
-
-  if (displayName.value.trim()) {
-    patch.display_name = displayName.value.trim();
-  }
-
-  if (bio.value.trim()) {
-    patch.bio = bio.value.trim();
-  }
-
-  if (avatarUrl.value.trim()) {
-    if (!isHttpUrl(avatarUrl.value.trim())) {
-      error.value = t("profile.saveError", { message: t("profile.avatarUrl") });
-      return;
-    }
-    patch.avatar_url = avatarUrl.value.trim();
+  const trimmedAvatar = avatarUrl.value.trim();
+  if (trimmedAvatar && !isHttpUrl(trimmedAvatar)) {
+    error.value = t("profile.saveError", { message: t("profile.avatarUrl") });
+    return;
   }
 
   const validLinks = links.value.filter((l) => l.name.trim() && l.url.trim());
@@ -213,12 +201,16 @@ async function onSubmit() {
     error.value = t("profile.saveError", { message: t("profile.linkUrl") });
     return;
   }
-  if (validLinks.length > 0) {
-    patch.links = validLinks.map((l) => ({
+
+  const patch: UserProfileUpdate = {
+    display_name: displayName.value.trim() || null,
+    bio: bio.value.trim() || null,
+    avatar_url: trimmedAvatar || null,
+    links: validLinks.map((l) => ({
       name: l.name.trim(),
       url: l.url.trim(),
-    }));
-  }
+    })),
+  };
 
   isLoading.value = true;
   try {

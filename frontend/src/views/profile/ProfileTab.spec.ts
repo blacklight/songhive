@@ -79,7 +79,7 @@ describe("ProfileTab", () => {
     ).toBe("Hello");
   });
 
-  it("omits blank optional fields and sends the expected payload", async () => {
+  it("sends the expected payload", async () => {
     const router = createTestRouter();
     await router.push("/profile");
     await router.isReady();
@@ -103,6 +103,59 @@ describe("ProfileTab", () => {
       display_name: "Alice U.",
       bio: "New bio",
       avatar_url: "https://example.com/avatar.png",
+      links: [{ name: "Home", url: "https://example.com" }],
+    });
+  });
+
+  it("sends an empty links array when all links are removed", async () => {
+    const router = createTestRouter();
+    await router.push("/profile");
+    await router.isReady();
+
+    const wrapper = mount(ProfileTab, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const removeButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("profile.removeLink"));
+    expect(removeButton).toBeDefined();
+    await removeButton!.trigger("click");
+    await flushPromises();
+
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(usersApi.updateMe).toHaveBeenCalledWith({
+      display_name: "Alice",
+      bio: "Hello",
+      avatar_url: null,
+      links: [],
+    });
+  });
+
+  it("sends null for cleared text fields so they are reset server-side", async () => {
+    const router = createTestRouter();
+    await router.push("/profile");
+    await router.isReady();
+
+    const wrapper = mount(ProfileTab, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const textInputs = wrapper.findAll('input[type="text"]');
+    await textInputs[0].setValue("");
+    await wrapper.find("textarea").setValue("");
+
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(usersApi.updateMe).toHaveBeenCalledWith({
+      display_name: null,
+      bio: null,
+      avatar_url: null,
       links: [{ name: "Home", url: "https://example.com" }],
     });
   });
