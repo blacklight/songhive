@@ -204,7 +204,7 @@ def deliver_activity(
 
     if 200 <= response.status_code < 400:
         logger.info("Delivered activity to %s (status %s)", inbox_url, response.status_code)
-        return response
+        return {"status_code": response.status_code}
 
     if response.status_code >= 500 or response.status_code == 429:
         logger.warning("Delivery to %s returned %s; retrying", inbox_url, response.status_code)

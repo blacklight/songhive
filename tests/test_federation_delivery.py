@@ -71,8 +71,7 @@ def test_deliver_activity_sends_signed_post(monkeypatch):
         ):
             result = deliver_activity.run(activity, inbox_url, actor_key_id, private_key_pem)
 
-    assert result is mock_post.return_value
-    assert result.status_code == 202
+    assert result == {"status_code": 202}
     mock_post.assert_called_once_with(
         inbox_url,
         data=body,

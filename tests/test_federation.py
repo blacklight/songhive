@@ -645,7 +645,7 @@ def test_deliver_activity_blocked_domain(monkeypatch):
 
 
 def test_deliver_activity_success(monkeypatch):
-    """deliver_activity posts signed requests and returns the response."""
+    """deliver_activity posts signed requests and returns a serializable result."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
     monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={"Signature": "sig"}))
@@ -661,7 +661,7 @@ def test_deliver_activity_success(monkeypatch):
         "https://music.example.com/actor#main-key",
         "pem",
     )
-    assert result is response
+    assert result == {"status_code": 200}
 
 
 def test_deliver_activity_request_exception_retries(monkeypatch):
