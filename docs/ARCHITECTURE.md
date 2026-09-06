@@ -642,6 +642,11 @@ discovery are in `api/routes/federation.py`.
 - Profile changes (display name, bio, avatar, links) refresh the cached actor
   document via `sync_user_actor` and are pushed to follower inboxes as
   `Update(Person)` activities.
+- Profile links are emitted as `PropertyValue` attachments whose `value` is an
+  HTML anchor (`<a href="..." rel="me">`) so remote servers render them as
+  clickable fields. The URL is only linkified when it is a well-formed
+  http(s) URL with a host and no HTML-breaking characters; malformed values
+  are emitted as escaped plain text instead.
 - Following/unfollowing uses standard AP `Follow`/`Undo(Follow)` activities.
 - `track.genre` is split into multiple `Hashtag` tags on the published
   `Audio` object, with spaces converted to underscores.

@@ -9,9 +9,11 @@ delivered to follower inboxes.
 """
 
 import asyncio
+import html
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from pubby.storage.adapters.db import DbActivityPubStorage
 
@@ -30,6 +32,39 @@ logger = logging.getLogger(__name__)
 _federation_storage_cache: dict[str, DbActivityPubStorage] = {}
 
 
+def _is_linkable_url(url: str) -> bool:
+    """
+    Return True when ``url`` is a well-formed http(s) URL safe to link.
+
+    The API only requires an http(s) prefix when links are saved, so values
+    containing whitespace or quote characters - or URLs stored before that
+    validation existed - can still reach the actor document.  Those must not
+    become anchors: remote servers render ``PropertyValue.value`` as HTML.
+    """
+    if not url or any(c.isspace() or c in "\"'<>" for c in url):
+        return False
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    return parsed.scheme in ("http", "https") and bool(parsed.hostname)
+
+
+def _render_link_value(url: str) -> str:
+    """
+    Render a profile link URL as an HTML anchor, or escaped plain text.
+
+    Mastodon and friends render ``PropertyValue.value`` as (sanitized) HTML;
+    a bare URL would show up as plain text instead of a clickable link.
+    ``rel="me"`` marks the anchor as an identity link so remote servers can
+    verify it.  Invalid URLs are emitted as escaped text so they stay inert.
+    """
+    escaped = html.escape(url, quote=True)
+    if not _is_linkable_url(url):
+        return escaped
+    return f'<a href="{escaped}" rel="me">{escaped}</a>'
+
+
 def _build_attachment(user: User) -> Optional[list[dict[str, Any]]]:
     """Build an ActivityPub attachment list from the user's profile links."""
     links = getattr(user, "links", None) or []
@@ -39,9 +74,7 @@ def _build_attachment(user: User) -> Optional[list[dict[str, Any]]]:
         {
             "type": "PropertyValue",
             "name": link.name,
-            # Mastodon and friends render ``value`` as HTML; a bare URL would
-            # show up as plain text instead of a clickable link.
-            "value": f'<a href="{link.url}">{link.url}</a>',
+            "value": _render_link_value(link.url),
         }
         for link in links
     ]

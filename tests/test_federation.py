@@ -12,6 +12,7 @@ from celery.exceptions import Retry
 from songhive.config.schema import SonghiveConfig
 from songhive.federation.activities import create_audio_activity, create_update_actor_activity
 from songhive.federation.actors import (
+    _render_link_value,
     get_actor_url,
     get_federation_storage,
     get_inbox_url,
@@ -214,14 +215,52 @@ def test_user_to_actor_document_includes_avatar_and_links():
         {
             "type": "PropertyValue",
             "name": "Website",
-            "value": '<a href="https://example.com">https://example.com</a>',
+            "value": '<a href="https://example.com" rel="me">https://example.com</a>',
         },
         {
             "type": "PropertyValue",
             "name": "Mastodon",
-            "value": '<a href="https://mastodon.example.com/@alice">https://mastodon.example.com/@alice</a>',
+            "value": '<a href="https://mastodon.example.com/@alice" rel="me">https://mastodon.example.com/@alice</a>',
         },
     ]
+
+
+def test_user_to_actor_document_escapes_invalid_link_values():
+    """Malformed-but-prefixed URLs are emitted as escaped text, not anchors."""
+    user = User(
+        username="alice",
+        email="alice@example.com",
+        password_hash="x",
+        links=[
+            UserLink(name="Query", url="https://example.com/?a=1&b=2"),
+            UserLink(name="No host", url="https://"),
+            UserLink(name="Space", url="https://exa mple.com"),
+            UserLink(name="Quote", url='https://example.com/" onmouseover="alert(1)'),
+        ],
+    )
+    doc = user_to_actor_document(user, "music.example.com")
+    assert doc["attachment"] == [
+        {
+            "type": "PropertyValue",
+            "name": "Query",
+            "value": '<a href="https://example.com/?a=1&amp;b=2" rel="me">https://example.com/?a=1&amp;b=2</a>',
+        },
+        {"type": "PropertyValue", "name": "No host", "value": "https://"},
+        {"type": "PropertyValue", "name": "Space", "value": "https://exa mple.com"},
+        {
+            "type": "PropertyValue",
+            "name": "Quote",
+            "value": "https://example.com/&quot; onmouseover=&quot;alert(1)",
+        },
+    ]
+
+
+def test_render_link_value_rejects_non_http_schemes():
+    """Non-http(s) values are never linkified, even if they reach the model."""
+    assert _render_link_value("javascript:alert(1)") == "javascript:alert(1)"
+    assert _render_link_value("ftp://example.com") == "ftp://example.com"
+    assert _render_link_value("just some text") == "just some text"
+    assert _render_link_value("") == ""
 
 
 def test_user_to_actor_document_omits_optional_fields():
@@ -283,7 +322,7 @@ async def test_sync_user_actor_caches_document(db_session, config):
         {
             "type": "PropertyValue",
             "name": "Website",
-            "value": '<a href="https://example.com">https://example.com</a>',
+            "value": '<a href="https://example.com" rel="me">https://example.com</a>',
         },
     ]
 
@@ -452,7 +491,7 @@ async def test_sync_user_actor_fans_out_updated_links(db_session, config, monkey
         {
             "type": "PropertyValue",
             "name": "New",
-            "value": '<a href="https://new.example">https://new.example</a>',
+            "value": '<a href="https://new.example" rel="me">https://new.example</a>',
         }
     ]
 
