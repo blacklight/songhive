@@ -1001,12 +1001,12 @@ async def test_patch_me_endpoint_syncs_federation_actor(client, db_session, conf
         {
             "type": "PropertyValue",
             "name": "Website",
-            "value": '<a href="https://example.com" rel="me">https://example.com</a>',
+            "value": '<a href="https://example.com" rel="me">example.com</a>',
         },
         {
             "type": "PropertyValue",
             "name": "Mastodon",
-            "value": '<a href="https://mastodon.example.com/@alice" rel="me">https://mastodon.example.com/@alice</a>',
+            "value": '<a href="https://mastodon.example.com/@alice" rel="me">mastodon.example.com/@alice</a>',
         },
     ]
 

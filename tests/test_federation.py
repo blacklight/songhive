@@ -12,6 +12,7 @@ from celery.exceptions import Retry
 from songhive.config.schema import SonghiveConfig
 from songhive.federation.activities import create_audio_activity, create_update_actor_activity
 from songhive.federation.actors import (
+    _render_bio_html,
     _render_link_value,
     get_actor_url,
     get_federation_storage,
@@ -215,12 +216,12 @@ def test_user_to_actor_document_includes_avatar_and_links():
         {
             "type": "PropertyValue",
             "name": "Website",
-            "value": '<a href="https://example.com" rel="me">https://example.com</a>',
+            "value": '<a href="https://example.com" rel="me">example.com</a>',
         },
         {
             "type": "PropertyValue",
             "name": "Mastodon",
-            "value": '<a href="https://mastodon.example.com/@alice" rel="me">https://mastodon.example.com/@alice</a>',
+            "value": '<a href="https://mastodon.example.com/@alice" rel="me">mastodon.example.com/@alice</a>',
         },
     ]
 
@@ -243,7 +244,7 @@ def test_user_to_actor_document_escapes_invalid_link_values():
         {
             "type": "PropertyValue",
             "name": "Query",
-            "value": '<a href="https://example.com/?a=1&amp;b=2" rel="me">https://example.com/?a=1&amp;b=2</a>',
+            "value": '<a href="https://example.com/?a=1&amp;b=2" rel="me">example.com/?a=1&amp;b=2</a>',
         },
         {"type": "PropertyValue", "name": "No host", "value": "https://"},
         {"type": "PropertyValue", "name": "Space", "value": "https://exa mple.com"},
@@ -261,6 +262,53 @@ def test_render_link_value_rejects_non_http_schemes():
     assert _render_link_value("ftp://example.com") == "ftp://example.com"
     assert _render_link_value("just some text") == "just some text"
     assert _render_link_value("") == ""
+
+
+def test_render_bio_html_linkifies_urls():
+    """http(s) URLs in the bio become anchors with scheme-less link text."""
+    bio = "Find me at https://blog.example.com or http://old.example.net/page."
+    assert _render_bio_html(bio) == (
+        'Find me at <a href="https://blog.example.com">blog.example.com</a> '
+        'or <a href="http://old.example.net/page">old.example.net/page</a>.'
+    )
+
+
+def test_render_bio_html_escapes_non_url_text():
+    """Bio text is HTML-escaped; angle brackets cannot inject markup."""
+    bio = '<b>not bold</b> see https://a.example/?q="x"'
+    assert _render_bio_html(bio) == (
+        "&lt;b&gt;not bold&lt;/b&gt; see " '<a href="https://a.example/?q=">a.example/?q=</a>&quot;x&quot;'
+    )
+
+
+def test_render_bio_html_strips_wrapping_punctuation():
+    """Sentence punctuation around a URL stays outside the anchor."""
+    assert _render_bio_html("(see https://example.com/path)") == (
+        '(see <a href="https://example.com/path">example.com/path</a>)'
+    )
+    # Balanced brackets inside the URL are kept.
+    assert _render_bio_html("https://example.com/a_(b)") == (
+        '<a href="https://example.com/a_(b)">example.com/a_(b)</a>'
+    )
+
+
+def test_render_bio_html_leaves_invalid_urls_as_text():
+    """URL-looking text without a host is emitted as escaped text."""
+    assert _render_bio_html("visit https:// now") == "visit https:// now"
+    assert _render_bio_html("plain text") == "plain text"
+    assert _render_bio_html("") == ""
+
+
+def test_user_to_actor_document_linkifies_bio():
+    """The actor summary contains linkified, escaped bio HTML."""
+    user = User(
+        username="alice",
+        email="alice@example.com",
+        password_hash="x",
+        bio="Music: https://band.example.com/alice",
+    )
+    doc = user_to_actor_document(user, "music.example.com")
+    assert doc["summary"] == ('Music: <a href="https://band.example.com/alice">band.example.com/alice</a>')
 
 
 def test_user_to_actor_document_omits_optional_fields():
@@ -322,7 +370,7 @@ async def test_sync_user_actor_caches_document(db_session, config):
         {
             "type": "PropertyValue",
             "name": "Website",
-            "value": '<a href="https://example.com" rel="me">https://example.com</a>',
+            "value": '<a href="https://example.com" rel="me">example.com</a>',
         },
     ]
 
@@ -491,7 +539,7 @@ async def test_sync_user_actor_fans_out_updated_links(db_session, config, monkey
         {
             "type": "PropertyValue",
             "name": "New",
-            "value": '<a href="https://new.example" rel="me">https://new.example</a>',
+            "value": '<a href="https://new.example" rel="me">new.example</a>',
         }
     ]
 
