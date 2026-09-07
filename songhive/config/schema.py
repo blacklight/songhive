@@ -30,6 +30,10 @@ def _app_short_version() -> str:
     return ".".join(__version__.split("+", maxsplit=1)[0].split(".")[:2])
 
 
+def get_default_user_agent() -> str:
+    return f"Songhive/{_app_short_version()} (https://git.fabiomanganiello.com/songhive)"
+
+
 class DatabaseConfig(BaseSettings):
     """Database configuration."""
 
@@ -278,7 +282,7 @@ class MusicBrainzConfig(BaseSettings):
 
     enabled: bool = Field(default=True, description="Enable MusicBrainz enrichment")
     user_agent: str = Field(
-        default=f"Songhive/{_app_short_version()} ( https://git.fabiomanganiello.com/songhive )",
+        default=get_default_user_agent(),
         description="User-Agent sent to MusicBrainz",
     )
     rate_limit_per_second: float = Field(

@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `federation`: Add activity interactions — `POST
+  /api/v1/activities/{id}/like` records an idempotent `like` activity that
+  inherits the target's visibility, stores an ActivityPub `Like` payload
+  (`federation/activities.create_like_activity`), and fans out to the liked
+  activity author's inbox (`services/federation.resolve_actor_inbox` reads
+  the `federation_actor_cache` before a signed actor-document fetch, then
+  `tasks.federation.deliver_activity` performs signed delivery).
+  `services/activities.can_view_activity` centralizes who may see an
+  activity (entity ACL + per-activity visibility).
 - `federation`: Add a mention pipeline (`services/mentions.py`) that
   extracts `@user`/`@user@domain` handles from activity content, resolves
   local handles against the users table and remote handles via WebFinger
@@ -15,15 +24,18 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- `federation`: Delegate federation primitives to pubby 0.3.0 — domain
+- `federation`: Delegate federation primitives to pubby 0.3.1 — domain
   normalization and allow/block matching (`pubby.moderation`), async→sync
   database URL conversion (`pubby.storage.adapters.db.to_sync_url`), actor
   key provisioning (`pubby.crypto.ensure_private_key_file`), content and
   duration rendering (`pubby.content.set_object_content`,
   `pubby.content.format_duration`), follower inbox collection
-  (`pubby.collect_inboxes`), and one-shot signed delivery
-  (`pubby.deliver_activity`). Songhive keeps Celery orchestration, the
-  retry policy, per-user actor documents, and `federation_*` table naming.
+  (`pubby.collect_inboxes`), one-shot signed delivery
+  (`pubby.deliver_activity`), `Like` payload building
+  (`pubby.build_like_activity`), and remote actor inbox resolution
+  (`pubby.resolve_actor_inbox`). Songhive keeps Celery orchestration, the
+  retry policy, per-user actor documents, `federation_*` table naming, and
+  the `Visibility`-to-audience adapter in `federation.activities`.
 - `federation`: The instance-level `/ap` inbox and pubby's outbound fan-out
   now enforce the configured `allowed_instances`/`blocked_instances` lists.
 - `federation`: Federated `Audio` durations are now emitted as proper

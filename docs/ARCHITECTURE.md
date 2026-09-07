@@ -85,6 +85,7 @@ songhive/
 │   │   ├── auth.py         # Login, registration, token refresh, password reset
 │   │   ├── sessions.py     # List and revoke active refresh-token sessions
 │   │   ├── users.py        # User profiles, avatar, links, password change
+│   │   ├── activities.py   # Activity interactions (like, …)
 │   │   ├── artists.py
 │   │   ├── albums.py
 │   │   ├── tracks.py
@@ -142,7 +143,7 @@ songhive/
 │   └── setting.py          # Runtime-editable instance settings (key/JSON-value)
 ├── services/               # Business logic layer
 │   ├── acl.py              # Three-level visibility + share-grant + share-token ACL
-│   ├── activities.py       # Activity domain service (entity resolution, creation)
+│   ├── activities.py       # Activity domain service (entity resolution, creation, interactions)
 │   ├── auth.py             # User lookup, password hashing, session helpers
 │   ├── audit.py            # Audit log helpers
 │   ├── deletion.py         # Cascade deletion + activity retraction fan-out
@@ -389,6 +390,27 @@ visibility column, currently `Artist`, act as public containers), checks
 user has no provisioned federation identity; `source_id` embeds the same
 UUID as `local_object_id` (`{actor}/objects/{uuid}`) so section-9 object
 routes can resolve it.
+
+`can_view_activity` decides who may see an activity: the containing entity
+must pass `acl.can_access`, and the activity's own `visibility` applies on
+top (`public` follows the entity check; `local`/`followers` require an
+authenticated user; `mentioned` requires the owner, an admin, or a mentioned
+user; `private` is owner/admin-only; retracted activities are never
+viewable). Interactions are layered on top of `create_local_activity`:
+`like_activity` records an idempotent `like` (400 on a duplicate, 404 on a
+retracted target) that inherits the target's visibility and stores a
+`federation/activities.create_like_activity` `Like` payload whose `to`/`cc`
+come from `activity_audience`. Interactions skip the `can_manage` gate
+(`require_manage=False`) — view access on the target is enough — while
+content-producing activity types still require manage rights. The
+`POST /api/v1/activities/{id}/like` endpoint performs the 404/403/400
+checks, provisions the liker's actor keys (`ensure_user_actor`), commits,
+then calls `services/federation.publish_like_activity` in a thread: for
+remote targets it resolves the author's inbox via `resolve_actor_inbox`
+(the `federation_actor_cache` table first, then a signed actor-document
+fetch, preferring `sharedInbox`) and enqueues the real
+`tasks.federation.deliver_activity` Celery task — which applies the
+federation gate, the blocked-domain gate, and exponential-backoff retries.
 
 `VisibilityRules` centralizes the containment policy: `can_contain` and
 `enforce_activity_visibility` (used by `create_local_activity`) validate an

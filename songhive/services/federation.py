@@ -11,18 +11,24 @@ import logging
 from typing import Optional
 
 from pubby import collect_inboxes
-from pubby.crypto import export_private_key_pem, export_public_key_pem, generate_rsa_keypair
-from pubby.moderation import (
-    extract_domain as _pubby_extract_domain,
-    is_domain_blocked as _pubby_is_domain_blocked,
-    normalize_domain as _pubby_normalize_domain,
+from pubby import resolve_actor_inbox as _pubby_resolve_actor_inbox
+from pubby.crypto import (
+    export_private_key_pem,
+    export_public_key_pem,
+    generate_rsa_keypair,
 )
+from pubby.moderation import extract_domain as _pubby_extract_domain
+from pubby.moderation import is_domain_blocked as _pubby_is_domain_blocked
+from pubby.moderation import normalize_domain as _pubby_normalize_domain
 
-from ..config.schema import SonghiveConfig
-from ..federation._common import get_actor_url
+from ..config import SonghiveConfig, get_default_user_agent
+from ..federation import get_actor_url
 from ..federation.storage import create_activitypub_storage
-from ..models._enums import Visibility
-from ..models.user import User
+from ..models import (
+    Activity,
+    User,
+    Visibility,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +109,91 @@ def get_follower_inboxes(actor_url: str, database_url: str) -> list[str]:
     """
     storage = create_activitypub_storage(database_url)
     return collect_inboxes(storage.get_followers(actor_id=actor_url))
+
+
+def resolve_actor_inbox(
+    actor_url: str,
+    config: SonghiveConfig,
+    *,
+    key_id: Optional[str] = None,
+    private_key_pem: Optional[str] = None,
+    timeout: float = 10.0,
+) -> Optional[str]:
+    """
+    Resolve a remote actor's inbox URL.
+
+    Consults the ``federation_actor_cache`` table first (via pubby's
+    storage); on a miss the actor document is fetched over HTTP(S) — signed
+    when a key is available — and cached.  Returns ``None`` for non-HTTP(S)
+    actor ids, blocked or non-allowed domains, and resolution failures.
+
+    This is a thin Songhive adapter around ``pubby.resolve_actor_inbox``:
+    it creates the storage backend from Songhive config and passes the
+    configured allow/block lists and ``User-Agent``.
+
+    This is a synchronous, ``requests``-based call: async callers should
+    invoke it through ``asyncio.to_thread``.
+    """
+    if not actor_url.startswith(("http://", "https://")):
+        return None
+    storage = create_activitypub_storage(config.database.url)
+    return _pubby_resolve_actor_inbox(
+        actor_url,
+        storage,
+        private_key=private_key_pem,
+        key_id=key_id,
+        allowed_instances=config.federation.allowed_instances,
+        blocked_instances=config.federation.blocked_instances,
+        user_agent=get_default_user_agent(),
+        timeout=timeout,
+    )
+
+
+def publish_like_activity(
+    user: User,
+    target: Activity,
+    like: Activity,
+    config: SonghiveConfig,
+    *,
+    timeout: float = 10.0,
+) -> int:
+    """
+    Deliver a ``Like`` activity to the liked activity author's inbox.
+
+    Returns the number of enqueued deliveries (``0`` or ``1``).  The function
+    no-ops when federation is disabled, the user has no actor credentials,
+    the like does not federate (``private``/``local`` visibility), the liked
+    activity is local (its author is a local user — there is no remote inbox
+    to notify), the stored payload is missing, or the remote author's inbox
+    cannot be resolved.
+    """
+    if not config.federation.enabled or not config.federation.instance_domain:
+        return 0
+    if not user.actor_url or not user.private_key_pem:
+        return 0
+    if target.source_type == "local" or not like.payload:
+        return 0
+    try:
+        if not Visibility.federates(Visibility(like.visibility)):
+            return 0
+    except ValueError:
+        return 0
+
+    actor_key_id = f"{user.actor_url}#main-key"
+    inbox = resolve_actor_inbox(
+        target.source_actor,
+        config,
+        key_id=actor_key_id,
+        private_key_pem=user.private_key_pem,
+        timeout=timeout,
+    )
+    if not inbox:
+        return 0
+
+    from ..tasks.federation import deliver_activity
+
+    deliver_activity.delay(like.payload, inbox, actor_key_id, user.private_key_pem)  # type: ignore
+    return 1
 
 
 def publish_track_activity(

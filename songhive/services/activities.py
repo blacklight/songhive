@@ -24,14 +24,16 @@ from ..models.library import Library
 from ..models.playlist import Playlist
 from ..models.track import Track
 from ..models.user import User
-from .acl import can_manage
+from .acl import can_access, can_manage
 
 __all__ = [
     "ACTIVITY_ENTITY_TYPES",
     "ACTIVITY_TYPES",
     "ActivityCreateParams",
     "VisibilityRules",
+    "can_view_activity",
     "create_local_activity",
+    "like_activity",
     "resolve_entity",
 ]
 
@@ -103,6 +105,63 @@ def _local_actor_url(author: User) -> str:
     if author.actor_url:
         return author.actor_url
     return f"urn:songhive:user:{author.username}"
+
+
+async def can_view_activity(
+    session: AsyncSession,
+    user: Optional[User],
+    activity: Activity,
+) -> bool:
+    """
+    Return whether ``user`` may view ``activity``.
+
+    The containing entity must be accessible (``acl.can_access``) and the
+    activity's own visibility applies on top: ``public`` follows the entity
+    check; ``local`` and ``followers`` require an authenticated user (the
+    instance has no local follow graph, so followers-visible content is
+    treated like local content for viewing); ``mentioned`` additionally
+    requires the activity owner, an admin, or a user named in the activity's
+    mentions; ``private`` is limited to the owner and admins.  Retracted
+    (soft-deleted) activities are never viewable.
+    """
+    if activity.deleted_at is not None:
+        return False
+
+    try:
+        visibility = Visibility(activity.visibility)
+    except ValueError:
+        return False
+
+    if not await can_access(session, user, activity.entity_type, activity.entity_id):
+        return False
+
+    if visibility == Visibility.PUBLIC:
+        return True
+
+    if user is None:
+        return False
+
+    if user.is_admin or (activity.owner_user_id is not None and str(activity.owner_user_id) == str(user.id)):
+        return True
+
+    # TODO: Once support for remote users is added, Visibility.LOCAL access should imply user.is_local.
+    # TODO: Once proper storage for the followers graph is implemented ,that should be checked against
+    #  Visibility.FOLLOWERS access
+    if visibility in (Visibility.LOCAL, Visibility.FOLLOWERS):
+        return True
+
+    if visibility == Visibility.MENTIONED:
+        result = await session.execute(
+            select(ActivityMention.id)
+            .where(
+                ActivityMention.activity_id == activity.id,
+                ActivityMention.user_id == user.id,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    return False
 
 
 async def _fan_out_visibility_update(
@@ -237,6 +296,7 @@ async def create_local_activity(
     in_reply_to_activity_id: Optional[str] = None,
     mentions: Optional[List[dict]] = None,
     payload: Optional[dict] = None,
+    require_manage: bool = True,
 ) -> Activity:
     """Create a local activity attached to an entity.
 
@@ -248,6 +308,11 @@ async def create_local_activity(
     ``mentions`` is a list of pre-resolved mention dicts (``handle``,
     optional ``actor_url`` and ``user_id``); mention extraction, resolution,
     and content rendering are layered on top of this service separately.
+
+    ``require_manage`` gates creation on ``acl.can_manage`` and should stay
+    enabled for content-producing activity types; interaction types (likes,
+    replies) pass ``require_manage=False`` after performing their own
+    view-level access check on the target activity and entity.
     """
     if activity_type not in ACTIVITY_TYPES:
         raise HTTPException(422, detail=f"Invalid activity_type: {activity_type}")
@@ -263,7 +328,7 @@ async def create_local_activity(
 
     VisibilityRules.enforce_activity_visibility(activity_visibility, _entity_visibility(entity))
 
-    if not await can_manage(session, author, entity_type, entity_id):
+    if require_manage and not await can_manage(session, author, entity_type, entity_id):
         raise HTTPException(403, detail="Not authorized to create activity for this entity")
 
     source_actor = _local_actor_url(author)
@@ -301,3 +366,72 @@ async def create_local_activity(
 
     await session.flush()
     return activity
+
+
+async def like_activity(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    author: User,
+) -> Activity:
+    """Record ``author``'s like of ``activity``.
+
+    The like inherits the target activity's visibility and is attached to the
+    same entity.  Raises ``HTTPException`` 404 when the target activity has
+    been retracted and 400 when the author already liked it (a retracted like
+    does not block a new one).  The stored ``payload`` is the ActivityPub
+    ``Like`` activity, addressed — for ``mentioned`` visibility — to the
+    target's author and mentioned actors.  Flushes without committing; the
+    caller owns the transaction.
+    """
+    if activity.deleted_at is not None:
+        raise HTTPException(404, detail="Activity not found")
+
+    source_actor = _local_actor_url(author)
+    existing = await session.execute(
+        select(Activity.id)
+        .where(
+            Activity.entity_type == activity.entity_type,
+            Activity.entity_id == activity.entity_id,
+            Activity.activity_type == "like",
+            Activity.source_actor == source_actor,
+            Activity.in_reply_to_activity_id == activity.id,
+            Activity.deleted_at.is_(None),
+        )
+        .limit(1)
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(400, detail="Already liked")
+
+    like = await create_local_activity(
+        session,
+        entity_type=activity.entity_type,
+        entity_id=activity.entity_id,
+        activity_type="like",
+        author=author,
+        visibility=activity.visibility,
+        in_reply_to_activity_id=str(activity.id),
+        require_manage=False,
+    )
+
+    from ..federation.activities import create_like_activity
+
+    mention_rows = await session.execute(
+        select(ActivityMention.actor_url).where(
+            ActivityMention.activity_id == activity.id,
+            ActivityMention.actor_url.is_not(None),
+        )
+    )
+    addressed = {url for url in mention_rows.scalars().all() if url}
+    addressed.add(activity.source_actor)
+    addressed.discard(source_actor)
+
+    like.payload = create_like_activity(
+        source_actor,
+        activity.source_id,
+        activity.visibility,
+        mention_actor_urls=sorted(addressed),
+        activity_id=like.source_id,
+    )
+    await session.flush()
+    return like

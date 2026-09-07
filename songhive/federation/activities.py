@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Iterable, List, Optional, Tuple
 
+from pubby import build_like_activity
 from pubby.content import format_duration
 
 from ..models._enums import Visibility
@@ -120,6 +121,44 @@ def create_visibility_update_activity(
             "cc": cc,
         },
     }
+
+
+def create_like_activity(
+    actor_url: str,
+    object_id: str,
+    visibility: "Visibility | str",
+    mention_actor_urls: Iterable[str] = (),
+    activity_id: Optional[str] = None,
+    published: Optional[datetime] = None,
+) -> dict:
+    """
+    Create a ``Like`` activity targeting ``object_id``.
+
+    The ``to``/``cc`` audience is derived from ``visibility`` via
+    :func:`activity_audience`; ``mention_actor_urls`` should carry the liked
+    object's author (and any other directly addressed actors) so
+    ``mentioned``-visibility likes are addressed to them. ``activity_id`` may
+    be supplied to reuse the stored activity's ``source_id`` as the
+    ActivityPub ``id``, making the object dereferenceable via the federation
+    object route.
+
+    This is a thin Songhive adapter around ``pubby.build_like_activity``:
+    it keeps the ``Visibility``-to-audience mapping local and delegates the
+    generic payload construction to Pubby.
+    """
+    to, cc = activity_audience(visibility, actor_url, mention_actor_urls)
+    if published is None:
+        published = datetime.now(timezone.utc)
+
+    return build_like_activity(
+        actor_id=actor_url,
+        object_id=object_id,
+        to=to,
+        cc=cc,
+        activity_id=activity_id,
+        published=published,
+        context="https://www.w3.org/ns/activitystreams",
+    )
 
 
 def create_tombstone_delete_activity(actor_url: str, object_id: str) -> dict:
