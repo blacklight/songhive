@@ -150,6 +150,7 @@ songhive/
 │   ├── federation.py       # Actor provisioning, domain allow/block, inbox dispatch
 │   ├── genres.py           # Genre validation, association and listing
 │   ├── import_.py          # Import pipeline orchestration
+│   ├── mentions.py         # @handle extraction, local/WebFinger resolution, safe HTML rendering
 │   ├── metadata.py         # Tag extraction coordination
 │   ├── music.py            # Music library helpers
 │   ├── musicbrainz.py      # MusicBrainz + Cover Art Archive enrichment (async httpx)
@@ -358,6 +359,19 @@ exceed its parent entity's visibility (`Visibility.can_contain`).
 
 `ActivityMention` rows capture `@handle` mentions embedded in content, with
 optional `actor_url` / `user_id` resolution and a `notified_at` marker.
+`services/mentions.py` implements the mention pipeline: `MENTION_REGEX`
+extracts `@user` and `@user@domain` handles, `resolve_mentions` resolves bare
+handles against the local `users` table (case-insensitive, active users only)
+and remote handles through `pubby.resolve_actor_url` (run in a thread, with
+Pubby's `https://{domain}/@{username}` fallback on lookup failure). Remote
+resolution is gated on `federation.enabled`, requires a dotted domain, and
+drops handles on blocked or non-allowed instances via
+`services/federation.is_domain_blocked`; `@user@domain` handles naming the
+local instance resolve locally instead. `render_mentions` builds safe HTML —
+resolved handles become anchors via `pubby.render_link_anchor`, surrounding
+text is escaped and linkified by `pubby.render_post_html` — and
+`process_mentions` is the single entry point returning resolved mentions,
+rendered HTML, hashtags, and ActivityPub `Mention`/`Hashtag` tags.
 `ActivityTarget` rows track per-inbox outbound delivery state (`pending`,
 `sent`, `failed`, `skipped`) with `attempts` / `last_error` /
 `last_attempt_at` bookkeeping. Tracks already published to the fediverse

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `federation`: Add a mention pipeline (`services/mentions.py`) that
+  extracts `@user`/`@user@domain` handles from activity content, resolves
+  local handles against the users table and remote handles via WebFinger
+  (`pubby.resolve_actor_url`) with instance allow/block gating, and renders
+  safe HTML plus ActivityPub `Mention`/`Hashtag` tags
+  (`pubby.render_link_anchor`, `pubby.render_post_html`).
+
 ### Changed
 
 - `federation`: Delegate federation primitives to pubby 0.3.0 — domain

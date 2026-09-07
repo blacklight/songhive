@@ -45,7 +45,7 @@ ACTIVITY_TARGET_STATES = ("pending", "sent", "failed", "skipped")
 _ENTITY_TYPE_CHECK = f"entity_type IN ({', '.join(repr(t) for t in ACTIVITY_ENTITY_TYPES)})"
 _ACTIVITY_TYPE_CHECK = f"activity_type IN ({', '.join(repr(t) for t in ACTIVITY_TYPES)})"
 _TARGET_STATE_CHECK = f"state IN ({', '.join(repr(s) for s in ACTIVITY_TARGET_STATES)})"
-_MENTION_HANDLE_RE = re.compile(r"^@?[a-zA-Z0-9_]+(@[a-zA-Z0-9.\-]+)?$")
+_MENTION_HANDLE_RE = re.compile(r"^@?[a-zA-Z0-9_.\-]+(@[a-zA-Z0-9.\-]+)?$")
 
 
 class Activity(Base):
