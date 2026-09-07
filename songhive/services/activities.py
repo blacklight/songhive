@@ -9,13 +9,16 @@ transaction boundary.
 """
 
 import uuid
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type, Set
 
 from fastapi import HTTPException
+from pubby.content import set_object_content
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
+from ..config.schema import SonghiveConfig
 from ..models._enums import Visibility
 from ..models.activity import ACTIVITY_ENTITY_TYPES, ACTIVITY_TYPES, Activity, ActivityMention
 from ..models.album import Album
@@ -25,6 +28,7 @@ from ..models.playlist import Playlist
 from ..models.track import Track
 from ..models.user import User
 from .acl import can_access, can_manage
+from .mentions import hashtag_url_factory, process_mentions
 
 __all__ = [
     "ACTIVITY_ENTITY_TYPES",
@@ -35,6 +39,7 @@ __all__ = [
     "create_local_activity",
     "like_activity",
     "resolve_entity",
+    "update_activity",
 ]
 
 _ENTITY_MODELS: Dict[str, Type[Any]] = {
@@ -368,6 +373,61 @@ async def create_local_activity(
     return activity
 
 
+async def update_activity(
+    session: AsyncSession,
+    activity: Activity,
+    *,
+    content_source: str,
+    config: SonghiveConfig,
+) -> Activity:
+    """Update an activity's content, re-running the mention pipeline.
+
+    ``content_source`` is the new raw text: ``process_mentions`` re-resolves
+    its ``@handle`` mentions and re-renders safe HTML, which replaces the
+    stored ``content``/``content_source``/``content_type`` columns and the
+    activity's ``activity_mentions`` rows.  When the stored ``payload``
+    embeds a dict ``object`` (e.g. a ``Create`` activity's object), its
+    ``content`` and ``tag`` are rebuilt too: ``pubby.set_object_content``
+    merges hashtag tags while preserving pre-existing tags, the
+    mention-aware pipeline rendering wins for ``content``, and the
+    pipeline's ``Mention`` tags are merged in.
+
+    Raises ``HTTPException`` 404 when the activity has been retracted.
+    Flushes without committing; the caller owns the transaction.
+    """
+    if activity.deleted_at is not None:
+        raise HTTPException(404, detail="Activity not found")
+
+    processed = await process_mentions(session, content_source, config)
+
+    activity.content = processed.html or None
+    activity.content_source = content_source
+    activity.content_type = "text/markdown" if content_source else "text/plain"
+
+    await session.execute(delete(ActivityMention).where(ActivityMention.activity_id == activity.id))
+    for mention in processed.mentions:
+        session.add(ActivityMention(activity_id=activity.id, **mention.as_dict()))
+    session.expire(activity, ["mentions"])
+
+    payload = activity.payload
+    if isinstance(payload, dict) and isinstance(payload.get("object"), dict):
+        obj = payload["object"]
+        domain = (config.federation.instance_domain or "").strip()
+        set_object_content(obj, content_source, hashtag_url_factory(domain))
+        if processed.html:
+            obj["content"] = processed.html
+        else:
+            obj.pop("content", None)
+        if processed.tags:
+            tags = obj.setdefault("tag", [])
+            seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
+            tags.extend(tag for tag in processed.tags if str(tag.get("name", "")).lower() not in seen)
+        flag_modified(activity, "payload")
+
+    await session.flush()
+    return activity
+
+
 async def like_activity(
     session: AsyncSession,
     *,
@@ -422,7 +482,7 @@ async def like_activity(
             ActivityMention.actor_url.is_not(None),
         )
     )
-    addressed = {url for url in mention_rows.scalars().all() if url}
+    addressed: Set[str] = {url for url in mention_rows.scalars().all() if url}
     addressed.add(activity.source_actor)
     addressed.discard(source_actor)
 

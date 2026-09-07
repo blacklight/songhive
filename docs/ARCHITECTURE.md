@@ -426,6 +426,21 @@ carrying the new `to`/`cc` audience built by
 soft-deleted local activities never fan out, and deliveries are signed with
 the activity owner's key through `deletion.enqueue_activity_delivery`.
 
+`PATCH /api/v1/activities/{id}` handles author edits behind an
+`acl.can_manage` check on the containing entity (owner or admin — the same
+gate `create_local_activity` applies to content-producing types). A
+`content` edit goes through `services.activities.update_activity`, which
+re-runs the `process_mentions` pipeline on the new `content_source`:
+`content` is re-rendered as mention-aware safe HTML, the
+`activity_mentions` rows are replaced with the newly resolved set, and —
+when the stored `payload` embeds a dict `object` — the object's `content`
+and `tag` are rebuilt (`pubby.set_object_content` merges hashtags while
+preserving pre-existing tags, then the pipeline's `Mention` tags and HTML
+are layered on). A `visibility` edit goes through
+`cascade_visibility_update` so already-delivered inboxes receive an
+`Update` or a `Delete(Tombstone)`. Content-only edits do not fan out an
+`Update` yet — per-inbox delivery targeting is future work.
+
 Deletion is handled by `services/deletion.py`'s `cascade_delete_entity`,
 which is invoked from every entity delete path (track, album, artist,
 playlist, library). Local activities are soft-deleted (`deleted_at` set)

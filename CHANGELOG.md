@@ -15,6 +15,15 @@ All notable changes to this project will be documented in this file.
   `tasks.federation.deliver_activity` performs signed delivery).
   `services/activities.can_view_activity` centralizes who may see an
   activity (entity ACL + per-activity visibility).
+- `federation`: Add `PATCH /api/v1/activities/{id}` for activity edits.
+  Content changes re-run the mention pipeline in
+  `services/activities.update_activity` — `@handle`s are re-resolved, the
+  rendered `content` and `activity_mentions` rows are replaced, and an
+  embedded payload object's `content`/`tag` are rebuilt via
+  `pubby.set_object_content` plus the pipeline's `Mention` tags. Visibility
+  changes flow through `VisibilityRules.cascade_visibility_update` so
+  inboxes that already received the activity get an `Update` or a
+  `Delete(Tombstone)`.
 - `federation`: Add a mention pipeline (`services/mentions.py`) that
   extracts `@user`/`@user@domain` handles from activity content, resolves
   local handles against the users table and remote handles via WebFinger

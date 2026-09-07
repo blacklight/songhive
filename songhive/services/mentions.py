@@ -36,6 +36,7 @@ __all__ = [
     "ProcessedMentions",
     "ResolvedMention",
     "extract_mentions",
+    "hashtag_url_factory",
     "process_mentions",
     "render_mentions",
     "resolve_mention",
@@ -242,7 +243,7 @@ async def resolve_mentions(
     return mentions
 
 
-def _hashtag_url_factory(domain: str) -> Callable[[str], str]:
+def hashtag_url_factory(domain: str) -> Callable[[str], str]:
     """Return a ``hashtag_url`` callback for ``pubby.content`` renderers."""
     if domain:
         return partial(get_hashtag_url, domain)
@@ -265,7 +266,7 @@ def render_mentions(
     ``domain`` is the instance domain used to build hashtag links.
     """
     by_handle = {mention.handle.lower(): mention for mention in mentions}
-    hashtag_url = _hashtag_url_factory(domain)
+    hashtag_url = hashtag_url_factory(domain)
     parts: List[str] = []
     hashtags: List[str] = []
     seen: set[str] = set()
@@ -314,7 +315,7 @@ async def process_mentions(
     rendered = render_mentions(text, mentions, domain=domain)
 
     tags = [tag for mention in mentions if (tag := mention.to_tag()) is not None]
-    tags.extend(build_hashtag_tags(rendered.hashtags, _hashtag_url_factory(domain)))
+    tags.extend(build_hashtag_tags(rendered.hashtags, hashtag_url_factory(domain)))
 
     return ProcessedMentions(
         mentions=mentions,
