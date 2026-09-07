@@ -142,8 +142,10 @@ songhive/
 │   └── setting.py          # Runtime-editable instance settings (key/JSON-value)
 ├── services/               # Business logic layer
 │   ├── acl.py              # Three-level visibility + share-grant + share-token ACL
+│   ├── activities.py       # Activity domain service (entity resolution, creation)
 │   ├── auth.py             # User lookup, password hashing, session helpers
 │   ├── audit.py            # Audit log helpers
+│   ├── deletion.py         # Cascade deletion + activity retraction fan-out
 │   ├── email.py            # SMTP email (verification, password reset)
 │   ├── federation.py       # Actor provisioning, domain allow/block, inbox dispatch
 │   ├── genres.py           # Genre validation, association and listing
@@ -361,6 +363,29 @@ optional `actor_url` / `user_id` resolution and a `notified_at` marker.
 `last_attempt_at` bookkeeping. Tracks already published to the fediverse
 (`federation_object_id` set) are backfilled as `create` activities by
 migration `4adb5fbea9d6`.
+
+`services/activities.py` is the domain entry point: `resolve_entity` maps an
+`(entity_type, entity_id)` pair to its model row, and
+`create_local_activity` validates the entity (404), enforces
+`Visibility.can_contain` against the entity (422 — entities without a
+visibility column, currently `Artist`, act as public containers), checks
+`acl.can_manage` (403), then persists the activity plus any pre-resolved
+`ActivityMention` rows. Local source identity reuses the author's
+`actor_url`, falling back to a `urn:songhive:user:{username}` URN when the
+user has no provisioned federation identity; `source_id` embeds the same
+UUID as `local_object_id` (`{actor}/objects/{uuid}`) so section-9 object
+routes can resolve it.
+
+Deletion is handled by `services/deletion.py`'s `cascade_delete_entity`,
+which is invoked from every entity delete path (track, album, artist,
+playlist, library). Local activities are soft-deleted (`deleted_at` set)
+and a `Delete(Tombstone)` is enqueued through `deliver_activity` for every
+inbox recorded as `sent` in `activity_targets`, signed with the activity
+owner's private key; remote activities are hard-deleted without fan-out.
+`get_activity_unpublish_info` returns the `ActivityUnpublishInfo`
+(activity id, `source_id`, `actor_url`, sent inboxes) used for that
+delivery, and `federation/activities.py` builds the tombstone payload via
+`create_tombstone_delete_activity`.
 
 ### Genres
 

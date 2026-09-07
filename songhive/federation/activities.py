@@ -65,21 +65,14 @@ def create_audio_activity(
     }
 
 
-def create_delete_activity(
-    actor_url: str, track: Track, domain: str, ap_object_id: Optional[str] = None
-) -> Optional[dict]:
+def create_tombstone_delete_activity(actor_url: str, object_id: str) -> dict:
     """
-    Create a Delete activity for a previously published track.
+    Create a ``Delete`` activity whose object is a ``Tombstone`` for
+    ``object_id``.
 
-    The object is a ``Tombstone`` pointing to the same ActivityPub object id
-    that was used in the original ``Create(Audio)`` activity. This lets remote
-    instances remove the cached object without blocking future re-publication
-    with a different object id.
+    This lets remote instances remove the cached object without blocking
+    future re-publication with a different object id.
     """
-    if not track:
-        return None
-
-    object_id = ap_object_id or track.federation_object_id or get_track_url(track=track, domain=domain)
     now = datetime.now(timezone.utc).isoformat()
 
     return {
@@ -95,6 +88,22 @@ def create_delete_activity(
             "type": "Tombstone",
         },
     }
+
+
+def create_delete_activity(
+    actor_url: str, track: Track, domain: str, ap_object_id: Optional[str] = None
+) -> Optional[dict]:
+    """
+    Create a Delete activity for a previously published track.
+
+    The object is a ``Tombstone`` pointing to the same ActivityPub object id
+    that was used in the original ``Create(Audio)`` activity.
+    """
+    if not track:
+        return None
+
+    object_id = ap_object_id or track.federation_object_id or get_track_url(track=track, domain=domain)
+    return create_tombstone_delete_activity(actor_url, object_id)
 
 
 def create_update_actor_activity(actor_url: str, actor_document: dict) -> dict:
