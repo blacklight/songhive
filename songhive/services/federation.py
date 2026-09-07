@@ -132,6 +132,7 @@ def publish_track_activity(
     user: User,
     config: SonghiveConfig,
     ap_object_id: Optional[str] = None,
+    status: Optional[str] = None,
 ) -> int:
     """
     Publish a ``Create(Audio)`` activity to the user's follower inboxes.
@@ -143,6 +144,10 @@ def publish_track_activity(
     ``ap_object_id`` is the ActivityPub object id that will appear on the
     ``Audio`` object. Callers should persist it on ``track.federation_object_id``
     so that a later ``Delete(Tombstone)`` can reference the same id.
+
+    ``status`` is an optional one-off post text that overrides the track's
+    stored ``description`` as the object's ``content``. It is never persisted
+    on the track.
     """
     if not config.federation.enabled or not config.federation.instance_domain:
         return 0
@@ -165,6 +170,7 @@ def publish_track_activity(
         track=track,
         artist=artist,
         domain=config.federation.instance_domain,
+        description=status,
         ap_object_id=object_id,
     )
     if not activity:

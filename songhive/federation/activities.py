@@ -10,7 +10,7 @@ from ..models._enums import Visibility
 from ..models.artist import Artist
 from ..models.track import Track
 from ._common import get_stream_url, get_track_url
-from .serializers import track_to_audio_object
+from .serializers import set_audio_description, track_to_audio_object
 
 
 def create_audio_activity(
@@ -27,7 +27,10 @@ def create_audio_activity(
     Create a Create(Audio) activity for publishing a track.
 
     Non-public tracks produce no activity. The audio stream URL points to the
-    public download endpoint for the track's audio file.
+    public download endpoint for the track's audio file, and is also included
+    as a ``Document`` attachment. The object's ``content`` is rendered from
+    the track's ``description`` (escaped HTML with linkified URLs and
+    hashtags); ``description`` overrides it when provided.
     """
     if track.visibility != Visibility.PUBLIC.value:
         return None
@@ -45,7 +48,7 @@ def create_audio_activity(
         return None
 
     if description:
-        audio_object["content"] = description
+        set_audio_description(audio_object, description, domain)
 
     if duration is not None:
         minutes = int(duration // 60)

@@ -28,6 +28,7 @@ const releaseYear = defineModel<string>("releaseYear", { required: true });
 const filename = defineModel<string>("filename", { required: true });
 const visibility = defineModel<string>("visibility", { required: true });
 const hashtags = defineModel<string[]>("hashtags", { required: true });
+const description = defineModel<string>("description", { default: "" });
 
 const emit = defineEmits<{ submit: [] }>();
 
@@ -97,6 +98,13 @@ const visibilityOptions = computed(() => {
       v-model="filename"
       :label="t('browse.edit.filename')"
       :disabled="props.disabled || !props.canRenameFile"
+    />
+    <AppInput
+      v-if="!props.bulk"
+      v-model="description"
+      as="textarea"
+      :label="t('browse.edit.description')"
+      :disabled="props.disabled"
     />
     <AppSelect
       v-model="visibility"

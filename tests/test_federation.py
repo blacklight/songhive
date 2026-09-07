@@ -4,16 +4,17 @@ Federation module tests.
 
 import asyncio
 from contextlib import asynccontextmanager
+from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from celery.exceptions import Retry
+from pubby.content import render_bio_html, render_post_html, render_verified_link
 
 from songhive.config.schema import SonghiveConfig
+from songhive.federation._common import get_hashtag_url
 from songhive.federation.activities import create_audio_activity, create_update_actor_activity
 from songhive.federation.actors import (
-    _render_bio_html,
-    _render_link_value,
     get_actor_url,
     get_federation_storage,
     get_inbox_url,
@@ -27,7 +28,7 @@ from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
-from songhive.services.federation import publish_actor_update
+from songhive.services.federation import publish_actor_update, publish_track_activity
 from songhive.tasks.federation import _load_user_actor, deliver_activity, process_incoming
 
 
@@ -109,7 +110,7 @@ def test_track_to_audio_object():
     assert obj["type"] == "Audio"
     assert obj["name"] == "TestTrack"
     assert obj["duration"] == "PT2M0S"
-    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock"}]
+    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"}]
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
         for link in obj["url"]
@@ -133,8 +134,8 @@ def test_track_to_audio_object_emits_multiple_genre_hashtags():
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
     assert obj["tag"] == [
-        {"type": "Hashtag", "name": "#rock"},
-        {"type": "Hashtag", "name": "#pop"},
+        {"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"},
+        {"type": "Hashtag", "name": "#pop", "href": "https://music.example.com/hashtags/pop"},
     ]
 
 
@@ -154,7 +155,162 @@ def test_track_to_audio_object_converts_spaces_to_underscores():
 
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
-    assert obj["tag"] == [{"type": "Hashtag", "name": "#hip_hop"}]
+    assert obj["tag"] == [{"type": "Hashtag", "name": "#hip_hop", "href": "https://music.example.com/hashtags/hip_hop"}]
+
+
+def test_render_post_html_linkifies_urls_and_hashtags():
+    """Post text renders URLs as anchors and hashtags as tag links."""
+    rendered = render_post_html(
+        "New track #LoFi out now: https://band.example.com/song #chill",
+        partial(get_hashtag_url, "music.example.com"),
+    )
+    assert rendered.html == (
+        'New track <a href="https://music.example.com/hashtags/lofi" rel="tag">#LoFi</a> '
+        'out now: <a href="https://band.example.com/song">band.example.com/song</a> '
+        '<a href="https://music.example.com/hashtags/chill" rel="tag">#chill</a>'
+    )
+    assert rendered.hashtags == ["lofi", "chill"]
+
+
+def test_render_post_html_escapes_text():
+    """Description text is HTML-escaped; markup cannot be injected."""
+    rendered = render_post_html('<b>bold</b> #tag "quotes"', partial(get_hashtag_url, "music.example.com"))
+    assert rendered.html == (
+        '&lt;b&gt;bold&lt;/b&gt; <a href="https://music.example.com/hashtags/tag" rel="tag">#tag</a> '
+        "&quot;quotes&quot;"
+    )
+    assert rendered.hashtags == ["tag"]
+
+
+def test_render_post_html_skips_invalid_tokens():
+    """Numeric-only hashtags and hostless URLs stay as escaped text."""
+    rendered = render_post_html("code #123 and https:// here a#b", partial(get_hashtag_url, "music.example.com"))
+    assert rendered.html == "code #123 and https:// here a#b"
+    assert rendered.hashtags == []
+
+
+def test_render_post_html_dedupes_hashtags():
+    """Repeated hashtags produce a single tag entry."""
+    rendered = render_post_html("#rock #Rock #ROCK", partial(get_hashtag_url, "music.example.com"))
+    assert rendered.hashtags == ["rock"]
+    assert rendered.html.count('href="https://music.example.com/hashtags/rock"') == 3
+
+
+def test_track_to_audio_object_renders_description():
+    """A public track's description becomes linkified ``content``."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        duration=120.0,
+        genre="Rock",
+        description="My new #LoFi song: https://band.example.com/song",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
+    assert obj["content"] == (
+        'My new <a href="https://music.example.com/hashtags/lofi" rel="tag">#LoFi</a> '
+        'song: <a href="https://band.example.com/song">band.example.com/song</a>'
+    )
+    # Genre hashtag and description hashtag are merged, deduplicated by name.
+    assert obj["tag"] == [
+        {"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"},
+        {"type": "Hashtag", "name": "#lofi", "href": "https://music.example.com/hashtags/lofi"},
+    ]
+
+
+def test_track_to_audio_object_description_dedupes_genre():
+    """A description hashtag matching a genre does not duplicate the tag."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        genre="Rock",
+        description="loud #rock anthem",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
+    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"}]
+    assert "#rock" in obj["content"]
+
+
+def test_track_to_audio_object_escapes_description():
+    """Markup in a description is escaped in the Audio object content."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        description="<script>alert(1)</script>",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
+    assert obj["content"] == "&lt;script&gt;alert(1)&lt;/script&gt;"
+
+
+def test_track_to_audio_object_media_attachment():
+    """The public download URL is attached as a Document on the Audio object."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        audio_mime_type="audio/flac",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
+    assert obj["attachment"] == [
+        {
+            "type": "Document",
+            "mediaType": "audio/flac",
+            "url": "https://music.example.com/api/v1/files/file-1/download",
+            "name": "TestTrack",
+        }
+    ]
+
+
+def test_create_audio_activity_renders_track_description():
+    """Create(Audio) content comes from the track description."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        description="Fresh #beats at https://band.example.com",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-123"
+
+    activity = create_audio_activity(
+        actor_url="https://music.example.com/users/alice",
+        track=track,
+        artist=artist,
+        domain="music.example.com",
+    )
+    assert activity is not None
+    assert activity["object"]["content"] == (
+        'Fresh <a href="https://music.example.com/hashtags/beats" rel="tag">#beats</a> '
+        'at <a href="https://band.example.com">band.example.com</a>'
+    )
 
 
 def test_federation_app_setup(tmp_path):
@@ -256,18 +412,18 @@ def test_user_to_actor_document_escapes_invalid_link_values():
     ]
 
 
-def test_render_link_value_rejects_non_http_schemes():
+def test_render_verified_link_rejects_non_http_schemes():
     """Non-http(s) values are never linkified, even if they reach the model."""
-    assert _render_link_value("javascript:alert(1)") == "javascript:alert(1)"
-    assert _render_link_value("ftp://example.com") == "ftp://example.com"
-    assert _render_link_value("just some text") == "just some text"
-    assert _render_link_value("") == ""
+    assert render_verified_link("javascript:alert(1)") == "javascript:alert(1)"
+    assert render_verified_link("ftp://example.com") == "ftp://example.com"
+    assert render_verified_link("just some text") == "just some text"
+    assert render_verified_link("") == ""
 
 
 def test_render_bio_html_linkifies_urls():
     """http(s) URLs in the bio become anchors with scheme-less link text."""
     bio = "Find me at https://blog.example.com or http://old.example.net/page."
-    assert _render_bio_html(bio) == (
+    assert render_bio_html(bio) == (
         'Find me at <a href="https://blog.example.com">blog.example.com</a> '
         'or <a href="http://old.example.net/page">old.example.net/page</a>.'
     )
@@ -276,27 +432,25 @@ def test_render_bio_html_linkifies_urls():
 def test_render_bio_html_escapes_non_url_text():
     """Bio text is HTML-escaped; angle brackets cannot inject markup."""
     bio = '<b>not bold</b> see https://a.example/?q="x"'
-    assert _render_bio_html(bio) == (
+    assert render_bio_html(bio) == (
         "&lt;b&gt;not bold&lt;/b&gt; see " '<a href="https://a.example/?q=">a.example/?q=</a>&quot;x&quot;'
     )
 
 
 def test_render_bio_html_strips_wrapping_punctuation():
     """Sentence punctuation around a URL stays outside the anchor."""
-    assert _render_bio_html("(see https://example.com/path)") == (
+    assert render_bio_html("(see https://example.com/path)") == (
         '(see <a href="https://example.com/path">example.com/path</a>)'
     )
     # Balanced brackets inside the URL are kept.
-    assert _render_bio_html("https://example.com/a_(b)") == (
-        '<a href="https://example.com/a_(b)">example.com/a_(b)</a>'
-    )
+    assert render_bio_html("https://example.com/a_(b)") == ('<a href="https://example.com/a_(b)">example.com/a_(b)</a>')
 
 
 def test_render_bio_html_leaves_invalid_urls_as_text():
     """URL-looking text without a host is emitted as escaped text."""
-    assert _render_bio_html("visit https:// now") == "visit https:// now"
-    assert _render_bio_html("plain text") == "plain text"
-    assert _render_bio_html("") == ""
+    assert render_bio_html("visit https:// now") == "visit https:// now"
+    assert render_bio_html("plain text") == "plain text"
+    assert render_bio_html("") == ""
 
 
 def test_user_to_actor_document_linkifies_bio():
@@ -453,6 +607,78 @@ def test_publish_actor_update_enqueues_update_to_followers(monkeypatch):
     assert activity["object"]["name"] == "Alice"
     assert key_id == f"{user.actor_url}#main-key"
     assert pem == "private"
+
+
+def test_publish_track_activity_uses_status_as_content(monkeypatch):
+    """publish_track_activity forwards a one-off status as the object content."""
+    user = _make_federated_user()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        description="stored description",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+    track.federation_object_id = "obj-1"
+
+    inboxes = ["https://a.example/inbox"]
+    monkeypatch.setattr(
+        "songhive.services.federation.get_follower_inboxes",
+        lambda *a, **k: inboxes,
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    result = publish_track_activity(
+        track,
+        artist,
+        user,
+        _fed_config(),
+        status="Fresh post about #beats",
+    )
+
+    assert result == 1
+    deliver_mock.delay.assert_called_once()
+    activity = deliver_mock.delay.call_args[0][0]
+    assert activity["type"] == "Create"
+    assert activity["object"]["id"] == f"{user.actor_url}/objects/obj-1"
+    assert activity["object"]["content"].startswith("Fresh post about")
+    assert "stored description" not in activity["object"]["content"]
+    assert {"type": "Hashtag", "name": "#beats", "href": "https://music.example.com/hashtags/beats"} in activity[
+        "object"
+    ]["tag"]
+
+
+def test_publish_track_activity_without_status_uses_track_description(monkeypatch):
+    """publish_track_activity falls back to the stored description content."""
+    user = _make_federated_user()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        description="stored description",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+    track.federation_object_id = "obj-1"
+
+    monkeypatch.setattr(
+        "songhive.services.federation.get_follower_inboxes",
+        lambda *a, **k: ["https://a.example/inbox"],
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    result = publish_track_activity(track, artist, user, _fed_config())
+
+    assert result == 1
+    activity = deliver_mock.delay.call_args[0][0]
+    assert activity["object"]["content"] == "stored description"
 
 
 @pytest.mark.asyncio

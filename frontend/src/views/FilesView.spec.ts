@@ -194,6 +194,7 @@ describe("FilesView", () => {
       expect.any(Function),
       undefined,
       expect.any(AbortSignal),
+      undefined,
     );
     expect(router.push).toHaveBeenCalledWith({
       name: "file",
@@ -203,6 +204,34 @@ describe("FilesView", () => {
     expect(toast.toasts[0].type).toBe("success");
     expect(toast.toasts[0].message).toBe(
       i18n.global.t("pages.files.uploadSuccess"),
+    );
+  });
+
+  it("uploads a file with the provided description", async () => {
+    vi.mocked(uploadFile).mockResolvedValue(createStoredFile("f1"));
+
+    await mountView();
+
+    const textarea = wrapper.find("textarea").element as HTMLTextAreaElement;
+    expect(textarea).toBeDefined();
+    textarea.value = "My new #demo track";
+    textarea.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const fileInput = wrapper.find('input[type="file"]')
+      .element as HTMLInputElement;
+    const file = new File(["contents"], "song.mp3", { type: "audio/mpeg" });
+    setFiles(fileInput, [file]);
+    fileInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(uploadFile).toHaveBeenCalledWith(
+      file,
+      "public",
+      expect.any(Function),
+      undefined,
+      expect.any(AbortSignal),
+      "My new #demo track",
     );
   });
 
@@ -237,6 +266,7 @@ describe("FilesView", () => {
       expect.any(Function),
       "lib2",
       expect.any(AbortSignal),
+      undefined,
     );
     expect(router.push).toHaveBeenCalledWith({
       name: "track",
@@ -394,6 +424,7 @@ describe("FilesView", () => {
       expect.any(Function),
       undefined,
       expect.any(AbortSignal),
+      undefined,
     );
     expect(router.push).not.toHaveBeenCalled();
     expect(toast.toasts).toHaveLength(1);

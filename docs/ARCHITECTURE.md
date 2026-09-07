@@ -619,7 +619,11 @@ Recursive deletion collects unpublish information for public tracks and enqueues
 
 Federation is powered by [pubby](https://github.com/blacklight/pubby) mounted
 on the FastAPI app via its FastAPI adapter. Per-user actor routes and WebFinger
-discovery are in `api/routes/federation.py`.
+discovery are in `api/routes/federation.py`. Outbound plaintext→HTML rendering
+(escaping, URL linkification, `rel="tag"`/`rel="me"` anchors, `Hashtag` and
+`PropertyValue` tag/attachment builders) is delegated to `pubby.content`; the
+instance's `/hashtags/{name}` route convention is injected via
+`federation/_common.py`'s `get_hashtag_url`.
 
 **Actor model:**
 
@@ -635,9 +639,27 @@ discovery are in `api/routes/federation.py`.
 **Activity lifecycle:**
 
 - Uploaded tracks are published as `Audio` objects via `Create` activity.
+  This happens on every track-creation path: the `/api/v1/files/upload`
+  endpoints (single, bulk, and external-duplicate resolution), the
+  `/{library_id}/tracks` upload endpoints, and the background `process_upload`
+  Celery task.
+- The published `Audio` object carries the track's `description` (a free-text
+  field settable at upload time or via `PATCH /tracks/{id}`) as its
+  `content`: the text is HTML-escaped, http(s) URLs become anchors with
+  scheme-less link text, and `#hashtags` become `rel="tag"` links to this
+  instance's `/hashtags/{name}` pages. Hashtags found in the description are
+  also appended to the object's `tag` list, and the media download URL is
+  attached as a `Document` with the audio MIME type.
 - Each public lifecycle gets a fresh `Track.federation_object_id` (generated
   on every transition to public) so a previous `Tombstone` at the same URL
   cannot block re-publication.
+- `POST /api/v1/tracks/{id}/publish` lets the track's owner re-publish a
+  public track to the fediverse at any time (the "Fediverse" tab of the
+  share dialog). It accepts an optional `status` — a one-off post text used
+  as the `Create(Audio)` object's `content` instead of the stored
+  `description`; the status is never persisted on the track. Each manual
+  publication mints a fresh `federation_object_id` so every post is a
+  distinct remote object.
 - `Delete(Tombstone)` is sent when a track is made non-public or deleted.
 - Profile changes (display name, bio, avatar, links) refresh the cached actor
   document via `sync_user_actor` and are pushed to follower inboxes as
@@ -654,7 +676,8 @@ discovery are in `api/routes/federation.py`.
   validation is left as escaped text.
 - Following/unfollowing uses standard AP `Follow`/`Undo(Follow)` activities.
 - `track.genre` is split into multiple `Hashtag` tags on the published
-  `Audio` object, with spaces converted to underscores.
+  `Audio` object, with spaces converted to underscores. Hashtag tags include
+  an `href` pointing at the instance's `/hashtags/{name}` page.
 - Per-actor follower isolation is delegated to pubby's `target_actor_id`.
 
 **Instance-level actor:**

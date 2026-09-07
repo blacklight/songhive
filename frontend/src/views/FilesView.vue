@@ -23,6 +23,7 @@ import { useToastStore } from "@/stores/toast";
 import { formatBytes, toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
+import AppInput from "@/components/ui/AppInput.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
@@ -33,6 +34,7 @@ const router = useRouter();
 const toast = useToastStore();
 
 const visibility = ref<Visibility>("public");
+const description = ref("");
 const uploading = ref(false);
 const isBulkUploading = ref(false);
 const uploadError = ref<string | null>(null);
@@ -335,6 +337,7 @@ async function handleSingleFileUpload(
       },
       libraryId,
       signal,
+      description.value.trim() || undefined,
     );
     results.push(result);
   } catch (err) {
@@ -360,6 +363,7 @@ async function handleMultipleFilesUpload(
       },
       libraryId,
       signal,
+      description.value.trim() || undefined,
     );
     for (const [index, item] of bulkResults.entries()) {
       if (uploadCancelled.value) {
@@ -498,7 +502,7 @@ async function onFileChange(event: Event) {
 
   try {
     if (files.length === 1) {
-      handleSingleFileUpload(
+      await handleSingleFileUpload(
         files[0],
         libraryId,
         addResolvedResult,
@@ -506,7 +510,7 @@ async function onFileChange(event: Event) {
         signal,
       );
     } else {
-      handleMultipleFilesUpload(
+      await handleMultipleFilesUpload(
         files,
         libraryId,
         addResolvedResult,
@@ -515,7 +519,7 @@ async function onFileChange(event: Event) {
       );
     }
 
-    handleFileUploadResults(files, results);
+    await handleFileUploadResults(files, results);
   } finally {
     uploading.value = false;
     isBulkUploading.value = false;
@@ -577,6 +581,13 @@ async function onFileChange(event: Event) {
           @change="onFileChange"
         />
       </div>
+
+      <AppInput
+        v-model="description"
+        as="textarea"
+        :label="t('browse.edit.description')"
+        :disabled="uploading"
+      />
 
       <div
         v-if="uploading"

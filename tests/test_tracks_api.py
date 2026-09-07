@@ -383,6 +383,79 @@ def test_update_private_to_local_does_not_enqueue_publish(
     assert mock.call_count == 0
 
 
+def test_update_track_description(client, sample_tracks, regular_user, auth_headers):
+    """PATCH sets and returns a track description."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"description": "A description with #tag and https://example.com"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["description"] == "A description with #tag and https://example.com"
+
+    detail = client.get(f"/api/v1/tracks/{track.id}", headers=headers)
+    assert detail.json()["description"] == "A description with #tag and https://example.com"
+
+
+def test_update_track_clear_description(client, sample_tracks, regular_user, auth_headers):
+    """Sending ``description: null`` or an empty string clears the field."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    set_response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"description": "temporary"},
+        headers=headers,
+    )
+    assert set_response.json()["description"] == "temporary"
+
+    clear_response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"description": None},
+        headers=headers,
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.json()["description"] is None
+
+    set_response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"description": "temporary"},
+        headers=headers,
+    )
+    assert set_response.json()["description"] == "temporary"
+
+    clear_response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"description": "   "},
+        headers=headers,
+    )
+    assert clear_response.json()["description"] is None
+
+
+def test_update_track_omitted_description_keeps_value(client, sample_tracks, regular_user, auth_headers):
+    """A PATCH that omits ``description`` leaves the stored value untouched."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"description": "keep me"},
+        headers=headers,
+    )
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"title": "Renamed"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["title"] == "Renamed"
+    assert response.json()["description"] == "keep me"
+
+
 def _patch_unpublish(monkeypatch):
     """Replace the route-level ``unpublish_track_activity`` with a recording mock."""
     mock = MagicMock(return_value=0)
@@ -502,6 +575,206 @@ def test_public_private_public_uses_fresh_object_id(client, sample_tracks, regul
     assert second_object_id != first_object_id
     uuid.UUID(first_object_id)
     uuid.UUID(second_object_id)
+
+
+def _enable_federation(client):
+    """Enable federation on the test app's config."""
+    federation = client.app.state.config.federation
+    federation.enabled = True
+    federation.instance_domain = "music.example.com"
+
+
+def test_publish_track_enqueues_activity_with_status(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """POST /tracks/{id}/publish enqueues a Create(Audio) carrying the status text."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={"status": "Now playing #demo"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["track_id"] == str(track.id)
+    assert data["enqueued"] is True
+    uuid.UUID(track.federation_object_id)
+    assert data["object_id"] == f"{regular_user.actor_url}/objects/{track.federation_object_id}"
+
+    mock.assert_called_once()
+    call_track, call_artist, call_owner, call_config, call_object_id = mock.call_args[0]
+    assert str(call_track.id) == str(track.id)
+    assert str(call_artist.id) == str(track.artist_id)
+    assert str(call_owner.id) == str(regular_user.id)
+    assert call_config is client.app.state.config
+    assert call_object_id == track.federation_object_id
+    assert mock.call_args.kwargs["status"] == "Now playing #demo"
+
+
+def test_publish_track_without_status(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """Publishing without a status falls back to the track description content."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    mock.assert_called_once()
+    assert mock.call_args.kwargs["status"] is None
+
+    # A request without a body is accepted too.
+    mock.reset_mock()
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    mock.assert_called_once()
+    assert mock.call_args.kwargs["status"] is None
+
+
+def test_publish_track_mints_fresh_object_id(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """Every manual publication mints a new ActivityPub object id."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+    headers = auth_headers(regular_user)
+
+    first = client.post(f"/api/v1/tracks/{track.id}/publish", json={}, headers=headers)
+    second = client.post(f"/api/v1/tracks/{track.id}/publish", json={}, headers=headers)
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    assert mock.call_count == 2
+    first_id = mock.call_args_list[0][0][4]
+    second_id = mock.call_args_list[1][0][4]
+    assert first_id != second_id
+    assert second.json()["object_id"].endswith(f"/objects/{second_id}")
+
+
+def test_publish_track_private_rejected(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """Private tracks cannot be published to ActivityPub."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 422
+    mock.assert_not_called()
+
+
+def test_publish_track_local_rejected(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """Local tracks cannot be published to ActivityPub."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.LOCAL.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 422
+    mock.assert_not_called()
+
+
+def test_publish_track_denied_for_other_user(client, sample_tracks, other_user, auth_headers, monkeypatch):
+    """Non-owners cannot publish another user's track."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={},
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == 403
+    mock.assert_not_called()
+
+
+def test_publish_track_denied_for_admin_non_owner(client, sample_tracks, admin_user, auth_headers, monkeypatch):
+    """Admins cannot publish someone else's track under the owner's actor."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={},
+        headers=auth_headers(admin_user),
+    )
+    assert response.status_code == 403
+    mock.assert_not_called()
+
+
+def test_publish_track_missing_returns_404(client, regular_user, auth_headers):
+    """Publishing a missing track returns 404."""
+    _enable_federation(client)
+    response = client.post(
+        "/api/v1/tracks/00000000-0000-0000-0000-000000000000/publish",
+        json={},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 404
+
+
+def test_publish_track_federation_disabled(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """Publishing returns 503 when federation is not enabled."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 503
+    mock.assert_not_called()
+
+
+def test_publish_track_requires_authentication(client, sample_tracks):
+    """Publishing without credentials is rejected."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    response = client.post(f"/api/v1/tracks/{track.id}/publish", json={})
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_publish_track_logs_audit_entry(
+    client, sample_tracks, regular_user, auth_headers, db_session, monkeypatch
+):
+    """Manual publication is recorded in the audit log."""
+    from songhive.models.audit_log import AuditLog
+
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={"status": "Hello fediverse"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    entry = await db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "track.publish",
+            AuditLog.target_id == str(track.id),
+        )
+    )
+    assert entry is not None
+    assert entry.details["status"] == "Hello fediverse"
 
 
 def _patch_track_enrich(monkeypatch):

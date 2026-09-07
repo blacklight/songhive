@@ -9,13 +9,11 @@ delivered to follower inboxes.
 """
 
 import asyncio
-import html
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any, Optional
-from urllib.parse import urlparse
 
+from pubby.content import property_value_attachment, render_bio_html
 from pubby.storage.adapters.db import DbActivityPubStorage
 
 from ..config.schema import SonghiveConfig
@@ -33,121 +31,12 @@ logger = logging.getLogger(__name__)
 _federation_storage_cache: dict[str, DbActivityPubStorage] = {}
 
 
-# Matches http(s) URLs in free text.  It stops before whitespace and
-# HTML-breaking characters so matches can never break out of the escaped
-# text around them.
-_BIO_URL_RE = re.compile(r"https?://[^\s<>\"']+")
-
-# Closing brackets that often wrap a URL in prose; stripped only when they
-# are unmatched inside the URL itself.
-_URL_BRACKET_PAIRS = {")": "(", "]": "[", "}": "{"}
-
-
-def _is_linkable_url(url: str) -> bool:
-    """
-    Return True when ``url`` is a well-formed http(s) URL safe to link.
-
-    The API only requires an http(s) prefix when links are saved, so values
-    containing whitespace or quote characters - or URLs stored before that
-    validation existed - can still reach the actor document.  Those must not
-    become anchors: remote servers render ``PropertyValue.value`` as HTML.
-    """
-    if not url or any(c.isspace() or c in "\"'<>" for c in url):
-        return False
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False
-    return parsed.scheme in ("http", "https") and bool(parsed.hostname)
-
-
-def _display_url(url: str) -> str:
-    """Return ``url`` without its http(s) scheme, for use as link text."""
-    display = url.split("://", 1)[-1]
-    if display.endswith("/") and display.count("/") == 1:
-        display = display[:-1]
-    return display
-
-
-def _render_link_anchor(url: str, rel: Optional[str] = None) -> str:
-    """Render a validated URL as an HTML anchor with scheme-less link text."""
-    href = html.escape(url, quote=True)
-    label = html.escape(_display_url(url))
-    rel_attr = f' rel="{rel}"' if rel else ""
-    return f'<a href="{href}"{rel_attr}>{label}</a>'
-
-
-def _render_link_value(url: str) -> str:
-    """
-    Render a profile link URL as an HTML anchor, or escaped plain text.
-
-    Mastodon and friends render ``PropertyValue.value`` as (sanitized) HTML;
-    a bare URL would show up as plain text instead of a clickable link.
-    ``rel="me"`` marks the anchor as an identity link so remote servers can
-    verify it.  Invalid URLs are emitted as escaped text so they stay inert.
-    """
-    if not _is_linkable_url(url):
-        return html.escape(url, quote=True)
-    return _render_link_anchor(url, rel="me")
-
-
-def _split_trailing_punctuation(url: str) -> tuple[str, str]:
-    """
-    Split sentence punctuation off the end of a URL matched in prose.
-
-    ``Visit https://example.com.`` should link ``https://example.com`` and
-    keep the final period as text.  Closing brackets are stripped only when
-    unmatched inside the URL, so ``https://example.com/a_(b)`` keeps its
-    balanced parentheses.
-    """
-    trailing = ""
-    while url:
-        last = url[-1]
-        if last in ".,;:!?'\"" or (
-            last in _URL_BRACKET_PAIRS and url.count(last) > url.count(_URL_BRACKET_PAIRS[last])
-        ):
-            trailing = last + trailing
-            url = url[:-1]
-        else:
-            break
-    return url, trailing
-
-
-def _render_bio_html(bio: str) -> str:
-    """
-    Render profile bio text for the actor ``summary`` field.
-
-    The text is HTML-escaped and the http(s) URLs it contains are turned
-    into anchors so remote servers render them as clickable links.  Matches
-    that fail ``_is_linkable_url`` are left as escaped text.
-    """
-    parts: list[str] = []
-    pos = 0
-    for match in _BIO_URL_RE.finditer(bio):
-        url, trailing = _split_trailing_punctuation(match.group(0))
-        if not _is_linkable_url(url):
-            continue
-        parts.append(html.escape(bio[pos : match.start()]))
-        parts.append(_render_link_anchor(url))
-        parts.append(html.escape(trailing))
-        pos = match.end()
-    parts.append(html.escape(bio[pos:]))
-    return "".join(parts)
-
-
 def _build_attachment(user: User) -> Optional[list[dict[str, Any]]]:
     """Build an ActivityPub attachment list from the user's profile links."""
     links = getattr(user, "links", None) or []
     if not links:
         return None
-    return [
-        {
-            "type": "PropertyValue",
-            "name": link.name,
-            "value": _render_link_value(link.url),
-        }
-        for link in links
-    ]
+    return [property_value_attachment(link.name, link.url) for link in links]
 
 
 def user_to_actor_document(user: User, domain: str) -> dict:
@@ -168,7 +57,7 @@ def user_to_actor_document(user: User, domain: str) -> dict:
         "type": "Person",
         "preferredUsername": user.username,
         "name": user.display_name or user.username,
-        "summary": _render_bio_html(user.bio or ""),
+        "summary": render_bio_html(user.bio or ""),
         "inbox": get_inbox_url(domain, user.username),
         "outbox": get_outbox_url(domain, user.username),
         "followers": f"{actor_url}/followers",

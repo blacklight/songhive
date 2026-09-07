@@ -880,6 +880,32 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/tracks/{track_id}/publish": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Publish Track
+     * @description Publish a public track to the owner's ActivityPub followers.
+     *
+     *     Sends a fresh ``Create(Audio)`` activity for the track. The optional
+     *     ``status`` is a one-off post text used as the object's ``content`` instead
+     *     of the track's stored ``description``; it is never persisted. A new
+     *     ``federation_object_id`` is minted on every call so each publication is a
+     *     distinct remote object unaffected by earlier ``Tombstone`` deletions.
+     */
+    post: operations["publish_track_api_v1_tracks__track_id__publish_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/tracks/{track_id}/hashtags": {
     parameters: {
       query?: never;
@@ -2256,7 +2282,7 @@ export interface paths {
     post?: never;
     /**
      * Delete External Library
-     * @description Delete a user-scoped external library and its dependent rows.
+     * @description Delete a user-scoped external library and its linked tracks, albums, and artists.
      */
     delete: operations["delete_external_library_api_v1_external_libraries__external_library_id__delete"];
     options?: never;
@@ -2428,7 +2454,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Admin External Library
-     * @description Delete any external library.
+     * @description Delete any external library and its linked tracks, albums, and artists.
      */
     delete: operations["delete_admin_external_library_api_v1_admin_external_libraries__external_library_id__delete"];
     options?: never;
@@ -2581,7 +2607,8 @@ export interface paths {
      *     Audio files are imported directly through ``import_audio_file`` so the
      *     audio-only content hash is used for both the stored file and the track.
      *     This avoids creating a second full-file ``StoredFile`` row for the same
-     *     audio upload.
+     *     audio upload. ``description`` is stored on the created track, and a newly
+     *     created public track is published to the owner's ActivityPub followers.
      */
     post: operations["upload_file_api_v1_files_upload_post"];
     delete?: never;
@@ -2875,6 +2902,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/manifest.webmanifest": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Pwa Manifest
+     * @description Return the web app manifest for this Songhive instance.
+     */
+    get: operations["pwa_manifest_manifest_webmanifest_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/manifest.json": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Pwa Manifest Json
+     * @description Return the same manifest as JSON for clients that prefer .json.
+     */
+    get: operations["pwa_manifest_json_manifest_json_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2902,8 +2969,11 @@ export interface components {
       album_id?: string | null;
       /** Artist Id */
       artist_id?: string | null;
-      /** Allow Duplicates */
-      allow_duplicates?: boolean | null;
+      /**
+       * Allow Duplicates
+       * @default false
+       */
+      allow_duplicates: boolean;
     };
     /**
      * AdminInviteCreateRequest
@@ -3373,6 +3443,8 @@ export interface components {
     Body_bulk_upload_files_api_v1_files_upload_bulk_post: {
       /** Files */
       files: string[];
+      /** Description */
+      description?: string | null;
     };
     /** Body_bulk_upload_tracks_api_v1_libraries__library_id__tracks_bulk_post */
     Body_bulk_upload_tracks_api_v1_libraries__library_id__tracks_bulk_post: {
@@ -3439,6 +3511,8 @@ export interface components {
     Body_upload_file_api_v1_files_upload_post: {
       /** File */
       file: string;
+      /** Description */
+      description?: string | null;
     };
     /** Body_upload_library_cover_api_v1_libraries__library_id__cover_post */
     Body_upload_library_cover_api_v1_libraries__library_id__cover_post: {
@@ -3464,6 +3538,8 @@ export interface components {
     Body_upload_track_api_v1_libraries__library_id__tracks_post: {
       /** File */
       file: string;
+      /** Description */
+      description?: string | null;
     };
     /** Body_upload_track_image_api_v1_tracks__track_id__image_post */
     Body_upload_track_image_api_v1_tracks__track_id__image_post: {
@@ -4934,6 +5010,26 @@ export interface components {
       enqueued: boolean;
     };
     /**
+     * TrackPublishRequest
+     * @description Request body for manually publishing a track to ActivityPub.
+     */
+    TrackPublishRequest: {
+      /** Status */
+      status?: string | null;
+    };
+    /**
+     * TrackPublishResponse
+     * @description Result of a manual ActivityPub publication request.
+     */
+    TrackPublishResponse: {
+      /** Track Id */
+      track_id: string;
+      /** Enqueued */
+      enqueued: boolean;
+      /** Object Id */
+      object_id: string;
+    };
+    /**
      * TrackResponse
      * @description Public track response.
      */
@@ -4954,6 +5050,8 @@ export interface components {
       duration?: number | null;
       /** Genre */
       genre?: string | null;
+      /** Description */
+      description?: string | null;
       /** Audio Url */
       audio_url?: string | null;
       /** Image Url */
@@ -5065,6 +5163,8 @@ export interface components {
       visibility?: components["schemas"]["Visibility"] | null;
       /** Filename */
       filename?: string | null;
+      /** Description */
+      description?: string | null;
     };
     /**
      * UserLinkInput
@@ -7284,6 +7384,41 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TrackEnrichResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  publish_track_api_v1_tracks__track_id__publish_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        track_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["TrackPublishRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TrackPublishResponse"];
         };
       };
       /** @description Validation Error */
@@ -11272,6 +11407,70 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["InstanceV2"];
+        };
+      };
+    };
+  };
+  pwa_manifest_manifest_webmanifest_get: {
+    parameters: {
+      query?: {
+        theme?: string;
+        accent?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  pwa_manifest_json_manifest_json_get: {
+    parameters: {
+      query?: {
+        theme?: string;
+        accent?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

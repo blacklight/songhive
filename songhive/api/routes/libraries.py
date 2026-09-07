@@ -11,6 +11,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Request,
@@ -290,6 +291,7 @@ async def upload_track(
     force: bool = Query(False),
     visibility: Visibility = Query(Visibility.PRIVATE),
     enrich: bool = Query(True),
+    description: Optional[str] = Form(None),
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
@@ -316,6 +318,7 @@ async def upload_track(
             force=force,
             enrich=enrich,
             content_type=file.content_type,
+            description=description,
         )
         await db.commit()
         if result.track.visibility == Visibility.PUBLIC.value and user is not None:

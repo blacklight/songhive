@@ -96,6 +96,7 @@ class TrackResponse(BaseModel):
     disc_number: Optional[int] = None
     duration: Optional[float] = None
     genre: Optional[str] = None
+    description: Optional[str] = None
     audio_url: Optional[str] = None
     image_url: Optional[str] = None
     release_year: Optional[int] = None

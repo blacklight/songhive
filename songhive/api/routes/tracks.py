@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Union, cast
 from fastapi import (
     APIRouter,
     BackgroundTasks,
+    Body,
     Depends,
     File,
     HTTPException,
@@ -38,7 +39,7 @@ from ...models.stored_file import StoredFile
 from ...models.user import User
 from ...services import acl, audit, deletion, music
 from ...services.auth import get_user_by_id
-from ...services.federation import publish_track_activity, unpublish_track_activity
+from ...services.federation import ensure_user_actor, publish_track_activity, unpublish_track_activity
 from ...services.genres import (
     genres_to_hashtags,
     remove_genre_from_entity,
@@ -106,6 +107,7 @@ class TrackUpdate(BaseModel):
     release_year: Optional[int] = None
     visibility: Optional[Visibility] = None
     filename: Optional[str] = None
+    description: Optional[str] = None
 
 
 class BulkTrackDeleteRequest(BaseModel):
@@ -126,6 +128,20 @@ class TrackEnrichResponse(BaseModel):
 
     track_id: str
     enqueued: bool
+
+
+class TrackPublishRequest(BaseModel):
+    """Request body for manually publishing a track to ActivityPub."""
+
+    status: Optional[str] = None
+
+
+class TrackPublishResponse(BaseModel):
+    """Result of a manual ActivityPub publication request."""
+
+    track_id: str
+    enqueued: bool
+    object_id: str
 
 
 def _enqueue_track_enrichment(track_id: str, force: bool = True) -> bool:
@@ -450,6 +466,7 @@ async def _build_track_response(
         disc_number=track.disc_number,
         duration=track.duration,
         genre=track.genre,
+        description=track.description,
         audio_url=audio_url,
         image_url=await _track_image_url(track, storage),
         release_year=_track_release_year(track),
@@ -697,6 +714,10 @@ async def update_track(
         track.disc_number = body.disc_number
     if body.release_year is not None:
         track.release_year = body.release_year
+    # ``description`` uses explicit-field semantics so that ``null`` or an
+    # empty string clears the stored value.
+    if "description" in body.model_fields_set:
+        track.description = (body.description or "").strip() or None
     if body.visibility is not None:
         track.visibility = body.visibility.value
 
@@ -730,6 +751,8 @@ async def update_track(
         details["album_title"] = album.title if album is not None else None
     if new_filename is not None:
         details["filename"] = new_filename
+    if "description" in body.model_fields_set:
+        details["description"] = track.description
 
     await audit.log_action(
         db,
@@ -989,6 +1012,80 @@ async def enrich_track_route(
     await db.commit()
 
     return TrackEnrichResponse(track_id=track_id, enqueued=True)
+
+
+@router.post(
+    "/{track_id}/publish",
+    response_model=TrackPublishResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def publish_track(
+    track_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body: TrackPublishRequest = Body(default_factory=TrackPublishRequest),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Publish a public track to the owner's ActivityPub followers.
+
+    Sends a fresh ``Create(Audio)`` activity for the track. The optional
+    ``status`` is a one-off post text used as the object's ``content`` instead
+    of the track's stored ``description``; it is never persisted. A new
+    ``federation_object_id`` is minted on every call so each publication is a
+    distinct remote object unaffected by earlier ``Tombstone`` deletions.
+    """
+    if not config.federation.enabled or not config.federation.instance_domain:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Federation is not enabled",
+        )
+
+    track = await music.get_track(db, track_id, include={"artist"})
+    if track is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if track.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the track owner can publish it",
+        )
+
+    if track.visibility != Visibility.PUBLIC.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only public tracks can be published",
+        )
+
+    status_text = (body.status or "").strip() or None
+
+    ensure_user_actor(current_user, config)
+    track.federation_object_id = str(uuid.uuid4())
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="track.publish",
+        target_type="track",
+        target_id=track_id,
+        details={"title": track.title, "status": status_text},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    object_id = f"{current_user.actor_url}/objects/{track.federation_object_id}"
+    background_tasks.add_task(
+        publish_track_activity,
+        track,
+        track.artist,
+        current_user,
+        config,
+        track.federation_object_id,
+        status=status_text,
+    )
+
+    return TrackPublishResponse(track_id=track_id, enqueued=True, object_id=object_id)
 
 
 @router.post("/{track_id}/hashtags", response_model=TrackResponse)

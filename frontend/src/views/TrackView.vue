@@ -362,6 +362,10 @@ watch(
           <div v-if="track.genres?.length" class="track-view__genres">
             <GenreList :genres="track.genres" />
           </div>
+
+          <p v-if="track.description" class="track-view__description">
+            {{ track.description }}
+          </p>
         </div>
 
         <EntityActions
@@ -496,6 +500,12 @@ watch(
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.track-view__description {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--color-text-muted);
 }
 
 :deep(.external-track-badge) {

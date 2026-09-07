@@ -5,7 +5,7 @@ Tests for the file storage API endpoints.
 import hashlib
 import io
 import logging
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -567,6 +567,127 @@ def test_upload_audio_file_imports_as_track(files_client, regular_user, auth_hea
     assert libraries_response.status_code == 200
     library_names = {lib["name"] for lib in libraries_response.json()}
     assert "Uploads" in library_names
+
+
+def test_upload_audio_with_description_stores_it(files_client, regular_user, auth_headers, monkeypatch):
+    """A ``description`` form field is stored on the created track."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Described Song",
+            artist="Described Artist",
+            mimetype="audio/mpeg",
+        ),
+    )
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        data={"description": "My new #demo track"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    track_id = response.headers["X-Track-Id"]
+    track_response = files_client.get(f"/api/v1/tracks/{track_id}", headers=headers)
+    assert track_response.status_code == 200
+    assert track_response.json()["description"] == "My new #demo track"
+
+
+def test_public_audio_upload_publishes_track(files_client, regular_user, auth_headers, monkeypatch):
+    """A public audio upload enqueues a Create(Audio) publication."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Uploaded Song",
+            artist="Uploaded Artist",
+            mimetype="audio/mpeg",
+        ),
+    )
+    publish_mock = MagicMock()
+    monkeypatch.setattr("songhive.api.routes.files.publish_track_activity", publish_mock)
+
+    headers = auth_headers(regular_user)
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        data={"description": "public post text"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    track_id = response.headers["X-Track-Id"]
+
+    publish_mock.assert_called_once()
+    call_track, call_artist, call_owner, call_config, call_object_id = publish_mock.call_args[0]
+    assert str(call_track.id) == track_id
+    assert call_track.description == "public post text"
+    assert str(call_artist.id) == str(call_track.artist_id)
+    assert str(call_owner.id) == str(regular_user.id)
+    assert call_config is files_client.app.state.config
+    assert call_object_id == call_track.federation_object_id
+    assert call_object_id
+
+
+def test_private_audio_upload_does_not_publish(files_client, regular_user, auth_headers, monkeypatch):
+    """A private audio upload does not enqueue federation publication."""
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Private Song",
+            artist="Private Artist",
+            mimetype="audio/mpeg",
+        ),
+    )
+    publish_mock = MagicMock()
+    monkeypatch.setattr("songhive.api.routes.files.publish_track_activity", publish_mock)
+
+    headers = auth_headers(regular_user)
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=private",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert "X-Track-Id" in response.headers
+    publish_mock.assert_not_called()
+
+
+def test_bulk_public_audio_uploads_publish_tracks(files_client, regular_user, auth_headers, monkeypatch):
+    """A public bulk upload enqueues a publication for each created track."""
+    counter = {"n": 0}
+
+    def _metadata(_):
+        counter["n"] += 1
+        return AudioMetadata(
+            title=f"Bulk Song {counter['n']}",
+            artist="Bulk Artist",
+            mimetype="audio/mpeg",
+        )
+
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", _metadata)
+    publish_mock = MagicMock()
+    monkeypatch.setattr("songhive.api.routes.files.publish_track_activity", publish_mock)
+
+    headers = auth_headers(regular_user)
+    files = [
+        ("files", ("one.mp3", io.BytesIO(b"bulk audio one"), "audio/mpeg")),
+        ("files", ("two.mp3", io.BytesIO(b"bulk audio two"), "audio/mpeg")),
+    ]
+
+    response = files_client.post(
+        "/api/v1/files/upload/bulk?visibility=public",
+        files=files,
+        data={"description": "bulk description"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert all(item["track_id"] for item in data)
+    assert publish_mock.call_count == len(data)
+    published_ids = {str(call.args[0].id) for call in publish_mock.call_args_list}
+    assert published_ids == {item["track_id"] for item in data}
+    assert all(call.args[0].description == "bulk description" for call in publish_mock.call_args_list)
 
 
 async def test_upload_audio_file_creates_single_stored_file(

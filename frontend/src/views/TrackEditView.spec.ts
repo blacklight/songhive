@@ -197,9 +197,69 @@ describe("TrackEditView", () => {
       release_year: null,
       visibility: "local",
       filename: "Song One.mp3",
+      description: null,
     };
     expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-1", expectedBody);
     expect(router.currentRoute.value.path).toBe("/tracks/track-1");
+  });
+
+  it("loads and submits the track description", async () => {
+    setAuthenticated("user-1");
+    vi.mocked(tracksApi.getTrack).mockResolvedValue({
+      ...createTrack("track-1", "Song One"),
+      description: "Existing description",
+    });
+    await mountAt("/tracks/track-1/edit");
+
+    const textarea = document.body.querySelector(
+      "textarea",
+    ) as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+    expect(textarea.value).toBe("Existing description");
+
+    textarea.value = "A new #vibe https://example.com";
+    textarea.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.save"));
+    await saveButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.updateTrack).toHaveBeenCalledWith(
+      "track-1",
+      expect.objectContaining({
+        description: "A new #vibe https://example.com",
+      }),
+    );
+  });
+
+  it("sends null to clear an existing description", async () => {
+    setAuthenticated("user-1");
+    vi.mocked(tracksApi.getTrack).mockResolvedValue({
+      ...createTrack("track-1", "Song One"),
+      description: "Existing description",
+    });
+    await mountAt("/tracks/track-1/edit");
+
+    const textarea = document.body.querySelector(
+      "textarea",
+    ) as HTMLTextAreaElement;
+    textarea.value = "";
+    textarea.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.save"));
+    await saveButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.updateTrack).toHaveBeenCalledWith(
+      "track-1",
+      expect.objectContaining({ description: null }),
+    );
   });
 
   it("deletes the track after confirmation and navigates to the list", async () => {

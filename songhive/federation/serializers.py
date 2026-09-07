@@ -2,15 +2,39 @@
 Serializers: convert internal models to ActivityPub objects.
 """
 
+from functools import partial
 from typing import Optional
 
+from pubby.content import build_hashtag_tags, render_post_html
 from sqlalchemy import inspect as sa_inspect
 
 from ..models._enums import Visibility
 from ..models.artist import Artist
 from ..models.track import Track
 from ..services.genres import extract_genres_from_track, genres_to_hashtags
-from ._common import get_stream_url, get_track_url
+from ._common import get_hashtag_url, get_stream_url, get_track_url
+
+
+def set_audio_description(obj: dict, description: Optional[str], domain: str) -> None:
+    """
+    Render a track description into the object's ``content`` field.
+
+    The description is HTML-escaped, with http(s) URLs and ``#hashtags``
+    linkified so remote servers render them as usable links.  Hashtags found
+    in the text are also appended to the object's ``tag`` list.
+    """
+    if not description or not description.strip():
+        return
+    hashtag_url = partial(get_hashtag_url, domain)
+    rendered = render_post_html(description, hashtag_url)
+    if rendered.html:
+        obj["content"] = rendered.html
+    if not rendered.hashtags:
+        return
+    tags = obj.setdefault("tag", [])
+    seen = {tag.get("name") for tag in tags}
+    new_names = [name for name in rendered.hashtags if f"#{name}" not in seen]
+    tags.extend(build_hashtag_tags(new_names, hashtag_url))
 
 
 def track_to_audio_object(
@@ -78,7 +102,10 @@ def track_to_audio_object(
     if track.genre:
         genre_names = extract_genres_from_track(track)
         if genre_names:
-            obj["tag"] = [{"type": "Hashtag", "name": f"#{hashtag}"} for hashtag in genres_to_hashtags(genre_names)]
+            genre_tags = list(dict.fromkeys(genres_to_hashtags(genre_names)))
+            obj["tag"] = build_hashtag_tags(genre_tags, partial(get_hashtag_url, domain))
+
+    set_audio_description(obj, getattr(track, "description", None), domain)
 
     if stream_url:
         obj["attachment"] = [

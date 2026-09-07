@@ -10,7 +10,7 @@ Track model.
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import JSON, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._enums import Visibility
@@ -42,6 +42,7 @@ class Track(Base):
     musicbrainz_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     musicbrainz_enriched_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
     genre: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     audio_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
     image_file_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("stored_files.id"),

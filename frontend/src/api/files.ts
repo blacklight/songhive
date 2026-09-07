@@ -51,6 +51,7 @@ export async function uploadFile(
   onProgress?: (percent: number) => void,
   libraryId?: string,
   abortSignal?: AbortSignal,
+  description?: string,
 ): Promise<FileUploadResult> {
   const auth = getAuthHeader();
   if (!auth) {
@@ -129,6 +130,9 @@ export async function uploadFile(
 
     const body = new FormData();
     body.append("file", file);
+    if (description) {
+      body.append("description", description);
+    }
     xhr.send(body);
 
     if (abortSignal) {
@@ -150,6 +154,7 @@ export async function bulkUploadFiles(
   onProgress?: (percent: number) => void,
   libraryId?: string,
   abortSignal?: AbortSignal,
+  description?: string,
 ): Promise<BulkFileUploadResult[]> {
   const auth = getAuthHeader();
   if (!auth) {
@@ -220,6 +225,9 @@ export async function bulkUploadFiles(
 
     const body = new FormData();
     files.forEach((file) => body.append("files", file));
+    if (description) {
+      body.append("description", description);
+    }
     xhr.send(body);
 
     if (abortSignal) {

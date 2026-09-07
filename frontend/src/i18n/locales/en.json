@@ -834,7 +834,15 @@
       "openInApp": "Log in to open in the app",
       "publicUrl": "Public URL",
       "publicUrlHint": "Anyone can view this public page.",
-      "preview": "Preview"
+      "preview": "Preview",
+      "fediverse": "Fediverse",
+      "fediverseHint": "Publish this track as an ActivityPub post to your followers.",
+      "fediverseStatus": "Post text",
+      "fediverseStatusHint": "Optional. Used as the post content instead of the track description — URLs and #hashtags become links. It is not stored on the track.",
+      "fediversePublish": "Publish",
+      "fediversePublished": "Track published to the fediverse.",
+      "fediversePublishError": "Could not publish: {message}",
+      "fediverseNotPublic": "Only public tracks can be published to the fediverse. Change the track's visibility to public first."
     },
     "contextMenu": {
       "playNext": "Play next",

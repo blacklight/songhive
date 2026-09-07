@@ -7,6 +7,7 @@ import { formatDateTime } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
 import * as sharesApi from "@/api/shares";
+import * as tracksApi from "@/api/tracks";
 import ConfirmDialog from "@/components/feedback/ConfirmDialog.vue";
 import ShareDialog from "./ShareDialog.vue";
 
@@ -17,6 +18,10 @@ vi.mock("@/api/shares", () => ({
   listShareUrls: vi.fn(),
   createShareUrl: vi.fn(),
   deleteShareUrl: vi.fn(),
+}));
+
+vi.mock("@/api/tracks", () => ({
+  publishTrack: vi.fn(),
 }));
 
 function createGrant(
@@ -409,6 +414,168 @@ describe("ShareDialog", () => {
     expect(writeText).toHaveBeenCalledWith(
       "http://localhost:3000/albums/album-1",
     );
+  });
+
+  it("publishes a track to the fediverse with a status", async () => {
+    vi.mocked(tracksApi.publishTrack).mockResolvedValue({
+      track_id: "track-1",
+      enqueued: true,
+      object_id: "https://music.example.com/users/alice/objects/obj-1",
+    });
+
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      title: "My Song",
+      ownerId: "user-1",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    expect(fediverseTab).toBeDefined();
+    await fediverseTab?.click();
+    await flushPromises();
+
+    const textarea = document.body.querySelector(
+      "textarea",
+    ) as HTMLTextAreaElement;
+    expect(textarea).toBeDefined();
+    textarea.value = "Now playing #demo";
+    textarea.dispatchEvent(new Event("input"));
+
+    const publishButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("browse.share.fediversePublish"),
+    );
+    expect(publishButton).toBeDefined();
+    await publishButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.publishTrack).toHaveBeenCalledWith("track-1", {
+      status: "Now playing #demo",
+    });
+    expect(textarea.value).toBe("");
+  });
+
+  it("publishes a track without a status", async () => {
+    vi.mocked(tracksApi.publishTrack).mockResolvedValue({
+      track_id: "track-1",
+      enqueued: true,
+      object_id: "https://music.example.com/users/alice/objects/obj-1",
+    });
+
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-1",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    await fediverseTab?.click();
+    await flushPromises();
+
+    const publishButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("browse.share.fediversePublish"),
+    );
+    await publishButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.publishTrack).toHaveBeenCalledWith("track-1", {
+      status: null,
+    });
+  });
+
+  it("surfaces a fediverse publish error inline", async () => {
+    vi.mocked(tracksApi.publishTrack).mockRejectedValue(
+      new Error("publish failed"),
+    );
+
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-1",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    await fediverseTab?.click();
+    await flushPromises();
+
+    const publishButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("browse.share.fediversePublish"),
+    );
+    await publishButton?.click();
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("publish failed");
+  });
+
+  it("hides the fediverse tab for non-track items", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({ ownerId: "user-1", visibility: "public" });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    expect(fediverseTab).toBeUndefined();
+  });
+
+  it("hides the fediverse tab from non-owners", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-2",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    expect(fediverseTab).toBeUndefined();
+  });
+
+  it("shows a not-public hint instead of the publish form for private tracks", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-1",
+      visibility: "private",
+    });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    expect(fediverseTab).toBeDefined();
+    await fediverseTab?.click();
+    await flushPromises();
+
+    expect(document.body.textContent).toContain(
+      i18n.global.t("browse.share.fediverseNotPublic"),
+    );
+    expect(document.body.querySelector("textarea")).toBeNull();
   });
 
   it("shows all three tabs for the owner of a public item", async () => {

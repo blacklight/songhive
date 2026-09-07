@@ -101,6 +101,30 @@ export function enrichTrack(id: string): Promise<TrackEnrichResponse> {
   });
 }
 
+export interface TrackPublishRequest {
+  /**
+   * One-off post text used as the ActivityPub activity content. It is not
+   * stored on the track's ``description`` metadata field.
+   */
+  status?: string | null;
+}
+
+export interface TrackPublishResponse {
+  track_id: string;
+  enqueued: boolean;
+  object_id: string;
+}
+
+export function publishTrack(
+  id: string,
+  body: TrackPublishRequest = {},
+): Promise<TrackPublishResponse> {
+  return apiRequest<TrackPublishResponse>(`/tracks/${id}/publish`, {
+    method: "POST",
+    body,
+  });
+}
+
 export function deleteTrack(id: string): Promise<void> {
   return apiRequest<void>(`/tracks/${id}`, { method: "DELETE" });
 }

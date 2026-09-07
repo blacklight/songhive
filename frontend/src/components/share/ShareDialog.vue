@@ -12,6 +12,7 @@ import {
   type ShareGrantResponse,
   type ShareTokenResponse,
 } from "@/api/shares";
+import { publishTrack } from "@/api/tracks";
 import { getApiErrorMessage, ApiError } from "@/api/client";
 import { useOwnership } from "@/composables/useOwnership";
 import { useConfirmStore } from "@/stores/confirm";
@@ -40,7 +41,7 @@ const confirm = useConfirmStore();
 const toast = useToastStore();
 const { isOwner } = useOwnership(computed(() => props.ownerId ?? null));
 
-type TabKey = "grants" | "urls" | "public";
+type TabKey = "grants" | "urls" | "fediverse" | "public";
 
 const activeTab = ref<TabKey>("grants");
 
@@ -65,6 +66,13 @@ const availableTabs = computed(() => {
       label: t("browse.share.shareUrls"),
       icon: "link",
     });
+    if (props.itemType === "track") {
+      tabs.push({
+        key: "fediverse",
+        label: t("browse.share.fediverse"),
+        icon: "paper-plane",
+      });
+    }
   }
   if (publicUrl.value) {
     tabs.push({
@@ -99,6 +107,10 @@ const userId = ref("");
 const expiresAt = ref("");
 const isCreatingGrant = ref(false);
 const isCreatingUrl = ref(false);
+
+const statusText = ref("");
+const isPublishing = ref(false);
+const publishError = ref<string | null>(null);
 
 const newUrl = ref<string | null>(null);
 const newToken = ref<string | null>(null);
@@ -294,6 +306,27 @@ async function revokeUrl(tokenId: string) {
   }
 }
 
+async function publish() {
+  isPublishing.value = true;
+  publishError.value = null;
+  try {
+    await publishTrack(props.itemId, {
+      status: statusText.value.trim() || null,
+    });
+    statusText.value = "";
+    toast.push({
+      type: "success",
+      message: t("browse.share.fediversePublished"),
+    });
+  } catch (err) {
+    publishError.value = t("browse.share.fediversePublishError", {
+      message: getErrorMessage(err),
+    });
+  } finally {
+    isPublishing.value = false;
+  }
+}
+
 async function copyToClipboard(text: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -329,6 +362,8 @@ watch(
       newToken.value = null;
       grantsError.value = null;
       urlsError.value = null;
+      statusText.value = "";
+      publishError.value = null;
     }
   },
 );
@@ -468,6 +503,38 @@ watch(
       </AppTable>
     </div>
 
+    <div v-else-if="activeTab === 'fediverse'" class="share-dialog__panel">
+      <p class="share-dialog__hint">{{ t("browse.share.fediverseHint") }}</p>
+
+      <template v-if="isPublic">
+        <div class="share-dialog__form">
+          <AppInput
+            v-model="statusText"
+            as="textarea"
+            :label="t('browse.share.fediverseStatus')"
+            :hint="t('browse.share.fediverseStatusHint')"
+            :disabled="isPublishing"
+          />
+          <AppButton
+            size="sm"
+            icon="paper-plane"
+            :loading="isPublishing"
+            @click="publish"
+          >
+            {{ t("browse.share.fediversePublish") }}
+          </AppButton>
+        </div>
+
+        <div v-if="publishError" class="share-dialog__error" role="alert">
+          {{ publishError }}
+        </div>
+      </template>
+
+      <p v-else class="share-dialog__hint">
+        {{ t("browse.share.fediverseNotPublic") }}
+      </p>
+    </div>
+
     <div v-else-if="activeTab === 'public'" class="share-dialog__panel">
       <div v-if="publicUrl" class="share-dialog__new-url">
         <AppInput
@@ -510,6 +577,12 @@ watch(
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background-color: var(--color-surface-secondary);
+}
+
+.share-dialog__hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
 }
 
 .share-dialog__error {
