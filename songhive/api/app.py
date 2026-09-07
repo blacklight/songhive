@@ -206,6 +206,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(api_tokens.router, prefix=api_prefix, tags=["api-tokens"])
     app.include_router(users.router, prefix=api_prefix, tags=["users"])
     app.include_router(activities.router, prefix=api_prefix, tags=["activities"])
+    app.include_router(activities.entity_router, prefix=api_prefix, tags=["activities"])
     app.include_router(artists.router, prefix=api_prefix, tags=["artists"])
     app.include_router(albums.router, prefix=api_prefix, tags=["albums"])
     app.include_router(tracks.router, prefix=api_prefix, tags=["tracks"])

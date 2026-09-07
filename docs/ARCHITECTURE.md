@@ -465,6 +465,23 @@ are layered on). A `visibility` edit goes through
 out an `Update` — `resolve_audience`/`fan_out_activity` provide the
 inbox targeting, but no `Update` payload is built for content edits yet.
 
+`GET /api/v1/{entity_type}/{entity_id}/activities` (a second router in
+`api/routes/activities.py`, mounted at `api_prefix`) is the public read
+endpoint. It validates `entity_type` against `ACTIVITY_ENTITY_TYPES`
+(400), resolves the entity (404), and gates on `acl.can_access` (403) —
+anonymous requesters may read publicly accessible entities, matching the
+other read endpoints; share tokens are not honored, consistent with the
+like/edit routes. `services.activities.list_activities` then applies the
+same per-activity visibility rules as `can_view_activity` in SQL
+(`_activity_visibility_filter`) so pagination cannot leak or under-fill
+pages, supports `activity_type`/`source_type` filters, and
+keyset-paginates on `(published_at, id)` newest-first with an opaque
+base64url cursor (`limit` 1–100, default 20; malformed cursors return
+400). Responses are serialized through
+`ActivityResponse`/`ActivityListResponse`: the raw `payload`,
+`retracted`, and `deleted_at` stay internal while resolved mentions are
+included.
+
 Deletion is handled by `services/deletion.py`'s `cascade_delete_entity`,
 which is invoked from every entity delete path (track, album, artist,
 playlist, library). Local activities are soft-deleted (`deleted_at` set)

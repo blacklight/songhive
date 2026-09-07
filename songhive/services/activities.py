@@ -9,14 +9,15 @@ transaction boundary.
 """
 
 import asyncio
+import base64
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Set, Type
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type
 
 from fastapi import HTTPException
 from pubby.content import set_object_content
 from pydantic import BaseModel, field_validator
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, exists, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -49,6 +50,7 @@ __all__ = [
     "fan_out_activity",
     "fan_out_like_activity",
     "like_activity",
+    "list_activities",
     "resolve_audience",
     "resolve_entity",
     "update_activity",
@@ -179,6 +181,111 @@ async def can_view_activity(
         return result.scalar_one_or_none() is not None
 
     return False
+
+
+def _activity_visibility_filter(user: Optional[User]):
+    """
+    Return a WHERE clause applying per-activity visibility for list queries.
+
+    Mirrors ``can_view_activity`` minus the entity-access check — the caller
+    authorizes the containing entity once for the whole page: ``public``
+    activities are visible to everyone, ``local`` and ``followers`` to
+    authenticated users, ``mentioned`` to the users they name, and every
+    visibility to the activity's owner and to admins.
+    """
+    if user is not None and user.is_admin:
+        return true()
+
+    conditions = [Activity.visibility == Visibility.PUBLIC.value]
+    if user is not None:
+        conditions.append(Activity.owner_user_id == user.id)
+        conditions.append(Activity.visibility.in_([Visibility.LOCAL.value, Visibility.FOLLOWERS.value]))
+        conditions.append(
+            and_(
+                Activity.visibility == Visibility.MENTIONED.value,
+                exists().where(
+                    ActivityMention.activity_id == Activity.id,
+                    ActivityMention.user_id == user.id,
+                ),
+            )
+        )
+    return or_(*conditions)
+
+
+def _encode_activity_cursor(activity: Activity) -> str:
+    """Encode a keyset pagination cursor from the activity's sort position."""
+    raw = f"{activity.published_at.isoformat()}|{activity.id}"
+    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii")
+
+
+def _decode_activity_cursor(cursor: str) -> Tuple[datetime, str]:
+    """Decode a keyset cursor into ``(published_at, activity_id)``.
+
+    Raises ``HTTPException`` 400 for malformed cursors.
+    """
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        ts_raw, sep, activity_id = raw.rpartition("|")
+        if not sep or not activity_id:
+            raise ValueError("malformed cursor")
+        published_at = datetime.fromisoformat(ts_raw)
+    except ValueError as e:
+        raise HTTPException(400, detail="Invalid cursor") from e
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    return published_at, activity_id
+
+
+async def list_activities(
+    session: AsyncSession,
+    *,
+    entity_type: str,
+    entity_id: str,
+    user: Optional[User] = None,
+    activity_type: Optional[str] = None,
+    source_type: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 20,
+) -> Tuple[List[Activity], Optional[str]]:
+    """List the activities attached to an entity, newest first.
+
+    Applies the same per-activity visibility rules as ``can_view_activity``
+    in SQL so pagination stays correct; the caller is responsible for
+    checking that ``user`` may access the containing entity. Results are
+    keyset-paginated on ``(published_at, id)`` — pass the returned cursor to
+    fetch the next page. ``activity_type`` and ``source_type`` filter on
+    exact matches. Raises ``HTTPException`` 400 for a malformed ``cursor``.
+    """
+    stmt = (
+        select(Activity)
+        .where(
+            Activity.entity_type == entity_type,
+            Activity.entity_id == str(entity_id),
+            Activity.deleted_at.is_(None),
+            _activity_visibility_filter(user),
+        )
+        .order_by(Activity.published_at.desc(), Activity.id.desc())
+    )
+    if activity_type is not None:
+        stmt = stmt.where(Activity.activity_type == activity_type)
+    if source_type is not None:
+        stmt = stmt.where(Activity.source_type == source_type)
+    if cursor:
+        published_at, activity_id = _decode_activity_cursor(cursor)
+        stmt = stmt.where(
+            or_(
+                Activity.published_at < published_at,
+                and_(Activity.published_at == published_at, Activity.id < activity_id),
+            )
+        )
+
+    result = await session.execute(stmt.limit(limit + 1))
+    activities = list(result.scalars().all())
+    next_cursor = None
+    if len(activities) > limit:
+        activities = activities[:limit]
+        next_cursor = _encode_activity_cursor(activities[-1])
+    return activities, next_cursor
 
 
 async def _fan_out_visibility_update(

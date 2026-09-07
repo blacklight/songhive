@@ -41,6 +41,15 @@ All notable changes to this project will be documented in this file.
   (`pubby.resolve_actor_url`) with instance allow/block gating, and renders
   safe HTML plus ActivityPub `Mention`/`Hashtag` tags
   (`pubby.render_link_anchor`, `pubby.render_post_html`).
+- `federation`: Add the public activity read endpoint `GET
+  /api/v1/{entity_type}/{entity_id}/activities` backed by
+  `services/activities.list_activities`. Anonymous requesters may read
+  `public` activities on publicly accessible entities; authenticated users
+  additionally see `local`/`followers` activities, their own activities, and
+  `mentioned` activities that name them, with per-activity visibility
+  enforced in SQL so keyset pagination on `(published_at, id)` stays
+  correct. Supports `activity_type`/`source_type` filters, an opaque
+  base64url `cursor`, and `limit` (1–100, default 20).
 
 ### Changed
 
