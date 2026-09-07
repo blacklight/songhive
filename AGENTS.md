@@ -83,6 +83,9 @@
 - Tests use `pytest-asyncio` for async tests and `TestClient` for API tests.
 - Frontend is a Vue.js 3 + TypeScript SPA in `frontend/`; builds to
   `songhive/static/`.
+- The frontend toolchain (vite 8, vitest 5, jsdom 30 via undici 8) requires
+  Node 24+; undici 8 calls `worker_threads.markAsUncloneable`, which does not
+  exist on Node 20. CI and the Dockerfile `NODE_VERSION` both pin Node 24.
 - Celery tasks are organized by domain: `tasks/import_.py`,
   `tasks/federation.py`, `tasks/tags.py`, `tasks/transcoding.py`.
 - Audio file storage uses audio-only SHA-256 hashing (via ffmpeg `streamhash`)

@@ -270,7 +270,11 @@ describe("ArtistView", () => {
 
     const headerActions = wrapper.find(".artist-view__header-actions");
     expect(headerActions.exists()).toBe(true);
-    expect(headerActions.text()).toContain(i18n.global.t("common.edit"));
+    expect(
+      headerActions
+        .findAll("button")
+        .some((b) => b.text() === i18n.global.t("common.edit")),
+    ).toBe(true);
   });
 
   it("hides the edit action for non-admin users", async () => {
@@ -279,6 +283,10 @@ describe("ArtistView", () => {
 
     const headerActions = wrapper.find(".artist-view__header-actions");
     expect(headerActions.exists()).toBe(true);
-    expect(headerActions.text()).not.toContain(i18n.global.t("common.edit"));
+    expect(
+      headerActions
+        .findAll("button")
+        .some((b) => b.text() === i18n.global.t("common.edit")),
+    ).toBe(false);
   });
 });
