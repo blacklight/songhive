@@ -57,9 +57,7 @@ def _uuid_sql_expression() -> str:
 def _backfill_track_activities() -> None:
     """Insert a ``create`` activity for every track already published to the fediverse."""
     id_expr = _uuid_sql_expression()
-    op.execute(
-        sa.text(
-            f"""
+    op.execute(sa.text(f"""
             INSERT INTO activities (
                 id, entity_type, entity_id, activity_type, source_type,
                 source_actor, source_id, local_object_id, owner_user_id,
@@ -83,9 +81,7 @@ def _backfill_track_activities() -> None:
             JOIN users u ON t.owner_id = u.id
             WHERE t.federation_object_id IS NOT NULL
               AND u.actor_url IS NOT NULL
-            """
-        )
-    )
+            """))
 
 
 def upgrade() -> None:
