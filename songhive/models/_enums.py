@@ -29,3 +29,14 @@ class Visibility(str, Enum):
     def can_contain(cls, child: "Visibility", parent: "Visibility") -> bool:
         """Return whether an entity with ``parent`` visibility can contain a ``child`` activity."""
         return cls.rank(child) <= cls.rank(parent)
+
+    @classmethod
+    def federates(cls, visibility: "Visibility") -> bool:
+        """
+        Return whether ``visibility`` is delivered to remote instances.
+
+        ``private`` and ``local`` content never leaves the instance, while
+        ``mentioned``, ``followers``, and ``public`` content is federated to
+        the addressed audience.
+        """
+        return visibility in (cls.MENTIONED, cls.FOLLOWERS, cls.PUBLIC)

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Type
 
 from fastapi import HTTPException
 from pydantic import BaseModel, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models._enums import Visibility
@@ -29,6 +30,7 @@ __all__ = [
     "ACTIVITY_ENTITY_TYPES",
     "ACTIVITY_TYPES",
     "ActivityCreateParams",
+    "VisibilityRules",
     "create_local_activity",
     "resolve_entity",
 ]
@@ -103,6 +105,125 @@ def _local_actor_url(author: User) -> str:
     return f"urn:songhive:user:{author.username}"
 
 
+async def _fan_out_visibility_update(
+    session: AsyncSession,
+    activity: Activity,
+    new_visibility: Visibility,
+) -> None:
+    """
+    Deliver the visibility change to the inboxes an activity already reached.
+
+    Inboxes recorded as ``sent`` in ``activity_targets`` receive an ``Update``
+    carrying the new audience when the new visibility still federates, or a
+    ``Delete(Tombstone)`` when it no longer does (``private``/``local``) so
+    remote instances drop their cached copy.
+    """
+    from ..federation.activities import (
+        create_tombstone_delete_activity,
+        create_visibility_update_activity,
+    )
+    from .deletion import enqueue_activity_delivery, get_activity_unpublish_info
+
+    info = await get_activity_unpublish_info(session, activity)
+    if not info.inboxes:
+        return
+
+    owner = await session.get(User, activity.owner_user_id) if activity.owner_user_id else None
+    if Visibility.federates(new_visibility):
+        mention_rows = await session.execute(
+            select(ActivityMention.actor_url).where(
+                ActivityMention.activity_id == activity.id,
+                ActivityMention.actor_url.is_not(None),
+            )
+        )
+        payload = create_visibility_update_activity(
+            info.actor_url,
+            info.source_id,
+            new_visibility,
+            mention_actor_urls=[url for url in mention_rows.scalars().all() if url],
+        )
+    else:
+        payload = create_tombstone_delete_activity(info.actor_url, info.source_id)
+
+    enqueue_activity_delivery(info, owner, payload)
+
+
+class VisibilityRules:
+    """Activity visibility enforcement and federation cascade helpers."""
+
+    @staticmethod
+    def can_contain(
+        activity_visibility: "Visibility | str",
+        entity_visibility: "Visibility | str",
+    ) -> bool:
+        """
+        Return whether an entity with ``entity_visibility`` may contain an
+        activity with ``activity_visibility``.
+        """
+        return Visibility.can_contain(
+            Visibility(activity_visibility),
+            Visibility(entity_visibility),
+        )
+
+    @staticmethod
+    def enforce_activity_visibility(
+        activity_visibility: "Visibility | str",
+        entity_visibility: "Visibility | str",
+    ) -> None:
+        """
+        Raise ``HTTPException`` 422 when ``activity_visibility`` is invalid
+        or exceeds ``entity_visibility``.
+        """
+        try:
+            child = Visibility(activity_visibility)
+            parent = Visibility(entity_visibility)
+        except ValueError as e:
+            raise HTTPException(422, detail=str(e)) from e
+
+        if not Visibility.can_contain(child, parent):
+            raise HTTPException(
+                422,
+                detail=f"Activity visibility '{child.value}' exceeds entity visibility '{parent.value}'",
+            )
+
+    @staticmethod
+    async def cascade_visibility_update(
+        session: AsyncSession,
+        activity: Activity,
+        new_visibility: "Visibility | str",
+    ) -> None:
+        """
+        Update an activity's visibility and cascade the change to remote
+        instances that already received it.
+
+        A no-op when the visibility is unchanged. The containing entity is
+        re-validated so the new visibility cannot exceed it (404 when the
+        entity no longer exists, 422 on violation). Only local activities fan
+        out — remote instances own the visibility of remote activities.
+        ``updated_at`` is maintained by the ORM ``onupdate`` hook. Flushes
+        without committing; the caller owns the transaction.
+        """
+        try:
+            new_value = Visibility(new_visibility)
+        except ValueError as e:
+            raise HTTPException(422, detail=str(e)) from e
+
+        if activity.visibility == new_value.value:
+            return
+
+        entity = await resolve_entity(session, activity.entity_type, activity.entity_id)
+        if entity is None:
+            raise HTTPException(404, detail="Entity not found")
+
+        VisibilityRules.enforce_activity_visibility(new_value, _entity_visibility(entity))
+
+        if activity.source_type == "local" and activity.deleted_at is None:
+            await _fan_out_visibility_update(session, activity, new_value)
+
+        activity.visibility = new_value.value
+        await session.flush()
+
+
 async def create_local_activity(
     session: AsyncSession,
     *,
@@ -140,8 +261,7 @@ async def create_local_activity(
     except ValueError:
         raise HTTPException(422, detail=f"Invalid visibility: {visibility}")
 
-    if not Visibility.can_contain(activity_visibility, _entity_visibility(entity)):
-        raise HTTPException(422, detail="Activity visibility exceeds entity visibility")
+    VisibilityRules.enforce_activity_visibility(activity_visibility, _entity_visibility(entity))
 
     if not await can_manage(session, author, entity_type, entity_id):
         raise HTTPException(403, detail="Not authorized to create activity for this entity")

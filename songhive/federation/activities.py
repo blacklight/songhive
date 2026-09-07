@@ -4,13 +4,15 @@ Activity creation and processing for federation.
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Iterable, List, Optional, Tuple
 
 from ..models._enums import Visibility
 from ..models.artist import Artist
 from ..models.track import Track
 from ._common import get_stream_url, get_track_url
 from .serializers import set_audio_description, track_to_audio_object
+
+AS_PUBLIC = "https://www.w3.org/ns/activitystreams#Public"
 
 
 def create_audio_activity(
@@ -60,8 +62,63 @@ def create_audio_activity(
         "type": "Create",
         "actor": actor_url,
         "object": audio_object,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "to": [AS_PUBLIC],
         "cc": [f"{actor_url}/followers"],
+    }
+
+
+def activity_audience(
+    visibility: "Visibility | str",
+    actor_url: str,
+    mention_actor_urls: Iterable[str] = (),
+) -> Tuple[List[str], List[str]]:
+    """
+    Map an activity visibility to ActivityPub ``(to, cc)`` addressing.
+
+    ``public`` addresses the ActivityStreams public collection with the
+    actor's followers in ``cc``; ``followers`` addresses the followers
+    collection only; ``mentioned`` addresses the mentioned actors only.
+    ``private`` and ``local`` are not federated and produce an empty audience.
+    """
+    value = Visibility(visibility)
+    if value == Visibility.PUBLIC:
+        return [AS_PUBLIC], [f"{actor_url}/followers"]
+    if value == Visibility.FOLLOWERS:
+        return [f"{actor_url}/followers"], []
+    if value == Visibility.MENTIONED:
+        return sorted(set(mention_actor_urls)), []
+    return [], []
+
+
+def create_visibility_update_activity(
+    actor_url: str,
+    object_id: str,
+    visibility: "Visibility | str",
+    mention_actor_urls: Iterable[str] = (),
+) -> dict:
+    """
+    Create an ``Update`` activity announcing a new audience for ``object_id``.
+
+    The embedded object is a partial representation carrying only the fields
+    that changed: the ``to``/``cc`` audience derived from ``visibility``.
+    """
+    to, cc = activity_audience(visibility, actor_url, mention_actor_urls)
+    now = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": f"{actor_url}/activities/{uuid.uuid4()}",
+        "type": "Update",
+        "actor": actor_url,
+        "published": now,
+        "to": to,
+        "cc": cc,
+        "object": {
+            "id": object_id,
+            "attributedTo": actor_url,
+            "to": to,
+            "cc": cc,
+        },
     }
 
 
@@ -81,7 +138,7 @@ def create_tombstone_delete_activity(actor_url: str, object_id: str) -> dict:
         "type": "Delete",
         "actor": actor_url,
         "published": now,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "to": [AS_PUBLIC],
         "cc": [f"{actor_url}/followers"],
         "object": {
             "id": object_id,
@@ -121,7 +178,7 @@ def create_update_actor_activity(actor_url: str, actor_document: dict) -> dict:
         "type": "Update",
         "actor": actor_url,
         "published": now,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "to": [AS_PUBLIC],
         "cc": [f"{actor_url}/followers"],
         "object": actor_document,
     }

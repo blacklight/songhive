@@ -693,27 +693,38 @@ async def get_activity_unpublish_info(session: AsyncSession, activity: Activity)
     )
 
 
-def _enqueue_activity_delete(info: ActivityUnpublishInfo, owner: Optional[User]) -> None:
-    """Enqueue a ``Delete(Tombstone)`` delivery for each inbox an activity reached."""
+def enqueue_activity_delivery(info: ActivityUnpublishInfo, owner: Optional[User], payload: dict) -> None:
+    """
+    Enqueue a signed delivery of ``payload`` to every inbox an activity reached.
+
+    Delivery is skipped when the activity never reached any inbox or the owner
+    has no signing key.
+    """
     if not info.inboxes or owner is None or not owner.private_key_pem:
         return
 
-    from ..federation.activities import create_tombstone_delete_activity
     from ..tasks.federation import deliver_activity
 
-    payload = create_tombstone_delete_activity(info.actor_url, info.source_id)
     actor_key_id = f"{info.actor_url}#main-key"
     for inbox in info.inboxes:
         try:
             deliver_activity.delay(payload, inbox, actor_key_id, owner.private_key_pem)  # type: ignore
         except Exception as e:
             logger.warning(
-                "Cannot enqueue activity delete for %s to inbox %s: %s: %s",
+                "Cannot enqueue activity delivery for %s to inbox %s: %s: %s",
                 info.activity_id,
                 inbox,
                 type(e),
                 e,
             )
+
+
+def _enqueue_activity_delete(info: ActivityUnpublishInfo, owner: Optional[User]) -> None:
+    """Enqueue a ``Delete(Tombstone)`` delivery for each inbox an activity reached."""
+    from ..federation.activities import create_tombstone_delete_activity
+
+    payload = create_tombstone_delete_activity(info.actor_url, info.source_id)
+    enqueue_activity_delivery(info, owner, payload)
 
 
 async def cascade_delete_entity(

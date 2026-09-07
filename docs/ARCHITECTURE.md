@@ -376,6 +376,20 @@ user has no provisioned federation identity; `source_id` embeds the same
 UUID as `local_object_id` (`{actor}/objects/{uuid}`) so section-9 object
 routes can resolve it.
 
+`VisibilityRules` centralizes the containment policy: `can_contain` and
+`enforce_activity_visibility` (used by `create_local_activity`) validate an
+activity's visibility against its entity's, while
+`cascade_visibility_update` changes a local activity's visibility and fans
+the change out to the inboxes recorded as `sent` in `activity_targets`.
+When the new visibility still federates (`Visibility.federates`:
+`mentioned`, `followers`, `public`) those inboxes receive an `Update`
+carrying the new `to`/`cc` audience built by
+`federation.activities.create_visibility_update_activity` on top of
+`activity_audience`; when it does not (`private`, `local`) a
+`Delete(Tombstone)` retracts the object instead. Remote activities and
+soft-deleted local activities never fan out, and deliveries are signed with
+the activity owner's key through `deletion.enqueue_activity_delivery`.
+
 Deletion is handled by `services/deletion.py`'s `cascade_delete_entity`,
 which is invoked from every entity delete path (track, album, artist,
 playlist, library). Local activities are soft-deleted (`deleted_at` set)
