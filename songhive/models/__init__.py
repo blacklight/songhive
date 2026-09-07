@@ -1,4 +1,5 @@
 from ._enums import Visibility
+from .activity import Activity, ActivityMention, ActivityTarget
 from .album import Album
 from .api_token import ApiToken
 from .artist import Artist
@@ -29,6 +30,9 @@ from .user import User
 from .user_link import UserLink
 
 __all__ = [
+    "Activity",
+    "ActivityMention",
+    "ActivityTarget",
     "Album",
     "ApiToken",
     "Artist",

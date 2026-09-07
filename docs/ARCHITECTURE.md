@@ -113,7 +113,8 @@ songhive/
 │   └── versions/           # Revision scripts
 ├── models/                 # SQLAlchemy mapped models + shared enums
 │   ├── base.py             # DeclarativeBase, UUID PK, timestamps, async session factory
-│   ├── _enums.py           # Visibility enum (private / local / public)
+│   ├── _enums.py           # Visibility enum (private / mentioned / local / followers / public)
+│   ├── activity.py         # Activity, ActivityMention, ActivityTarget (federation interaction layer)
 │   ├── user.py             # User (roles: user / moderator / admin; federation fields)
 │   ├── user_link.py        # Profile links (validated URL list)
 │   ├── invite.py           # Invite codes (max_uses, expiry)
@@ -326,12 +327,40 @@ can be changed via the admin API without a restart.
 └─────────────┘
 ```
 
-**Visibility levels** (`Visibility` enum, applies to tracks, albums, artists,
+**Visibility levels** (`Visibility` enum) are ordered from most to least
+restrictive: `private < mentioned < local < followers < public`
+(`Visibility.rank`, `Visibility.can_contain`). Entity visibility currently
+uses `private`, `local`, and `public` (applies to tracks, albums, artists,
 libraries, stored files):
 
 - `private` — visible only to the owner (and users with a `ShareGrant`)
 - `local` — visible to authenticated users on the same instance
 - `public` — visible to everyone including federated instances
+
+The `mentioned` and `followers` levels exist for the activities layer
+(`Activity.visibility`) and are not yet meaningful for entity ACLs.
+
+### Activities
+
+`Activity` records federation-relevant events (`create`, `announce`, `like`,
+`reply`, `quote`, `mention`, `update`, `delete`, `webmention`) attached to an
+entity through `(entity_type, entity_id)` — where `entity_type` is one of
+`track`, `album`, `artist`, `playlist`, `library`. Each row tracks its origin
+via `source_type` (`local` or a remote source), `source_actor`, and
+`source_id` (unique per source), with `local_object_id` as an optional
+canonical local identifier. Activities support threading through
+`in_reply_to_activity_id`, arbitrary JSON `payload`s, Markdown source vs
+rendered content (`content_source` / `content` / `content_type`), and soft
+deletion (`deleted_at`, `retracted`). An activity's `visibility` must not
+exceed its parent entity's visibility (`Visibility.can_contain`).
+
+`ActivityMention` rows capture `@handle` mentions embedded in content, with
+optional `actor_url` / `user_id` resolution and a `notified_at` marker.
+`ActivityTarget` rows track per-inbox outbound delivery state (`pending`,
+`sent`, `failed`, `skipped`) with `attempts` / `last_error` /
+`last_attempt_at` bookkeeping. Tracks already published to the fediverse
+(`federation_object_id` set) are backfilled as `create` activities by
+migration `4adb5fbea9d6`.
 
 ### Genres
 
