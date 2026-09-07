@@ -2,7 +2,6 @@
 Activity interaction routes.
 """
 
-import asyncio
 import logging
 from typing import Optional
 
@@ -15,7 +14,6 @@ from ...models.activity import Activity
 from ...models.user import User
 from ...services import acl
 from ...services import activities as activity_service
-from ...services import federation as federation_service
 from ...services.federation import ensure_user_actor
 from ..deps import get_config, get_current_user, get_db
 
@@ -87,7 +85,10 @@ async def like_activity(
 
     if config.federation.enabled and current_user.private_key_pem:
         try:
-            await asyncio.to_thread(federation_service.publish_like_activity, current_user, activity, like, config)
+            await activity_service.fan_out_like_activity(
+                db, like=like, target=activity, author=current_user, config=config
+            )
+            await db.commit()
         except Exception as e:
             # Fan-out is best-effort: a broker or resolution failure must not
             # fail the like itself.

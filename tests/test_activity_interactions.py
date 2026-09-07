@@ -4,7 +4,7 @@ rules, ``Like`` payload building, remote inbox resolution, and fan-out.
 """
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import requests
@@ -16,6 +16,7 @@ from songhive.models.activity import Activity, ActivityMention
 from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.models.user import User
+from songhive.services import activities as activity_service
 from songhive.services import federation as federation_service
 from songhive.services.activities import can_view_activity, like_activity
 
@@ -435,102 +436,6 @@ def test_resolve_actor_inbox_fetch_failure(config, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# publish_like_activity
-# ---------------------------------------------------------------------------
-
-
-def _remote_target() -> Activity:
-    """A remote activity whose author lives on a remote instance."""
-    return _make_activity(
-        "track",
-        "track-1",
-        source_type="remote",
-        source_actor="https://remote.example/users/bob",
-        source_id="https://remote.example/users/bob/objects/9",
-    )
-
-
-async def test_publish_like_activity_disabled(config, regular_user):
-    """Federation-disabled configs produce no deliveries."""
-    target = _remote_target()
-    like = _make_activity("track", "track-1", activity_type="like", payload={"type": "Like"})
-    assert federation_service.publish_like_activity(regular_user, target, like, config) == 0
-
-
-async def test_publish_like_activity_local_target(config, regular_user, monkeypatch):
-    """Likes on local activities are not delivered to remote inboxes."""
-    config = _fed_config(config)
-    regular_user.actor_url = "https://local.example/users/regular"
-    regular_user.private_key_pem = "key"
-    deliver = MagicMock()
-    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
-
-    target = _make_activity("track", "track-1")
-    like = _make_activity("track", "track-1", activity_type="like", payload={"type": "Like"})
-
-    assert federation_service.publish_like_activity(regular_user, target, like, config) == 0
-    deliver.delay.assert_not_called()
-
-
-async def test_publish_like_activity_delivers_to_author_inbox(config, regular_user, monkeypatch):
-    """A like on a remote activity is enqueued to the author's inbox."""
-    config = _fed_config(config)
-    regular_user.actor_url = "https://local.example/users/regular"
-    regular_user.private_key_pem = "key"
-    monkeypatch.setattr(
-        "songhive.services.federation.resolve_actor_inbox",
-        MagicMock(return_value="https://remote.example/inbox"),
-    )
-    deliver = MagicMock()
-    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
-
-    target = _remote_target()
-    payload = {"type": "Like", "object": target.source_id}
-    like = _make_activity("track", "track-1", activity_type="like", payload=payload)
-
-    assert federation_service.publish_like_activity(regular_user, target, like, config) == 1
-    deliver.delay.assert_called_once_with(
-        payload,
-        "https://remote.example/inbox",
-        "https://local.example/users/regular#main-key",
-        "key",
-    )
-
-
-async def test_publish_like_activity_unresolvable_inbox(config, regular_user, monkeypatch):
-    """An unresolvable author inbox produces no delivery."""
-    config = _fed_config(config)
-    regular_user.actor_url = "https://local.example/users/regular"
-    regular_user.private_key_pem = "key"
-    monkeypatch.setattr("songhive.services.federation.resolve_actor_inbox", MagicMock(return_value=None))
-    deliver = MagicMock()
-    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
-
-    like = _make_activity("track", "track-1", activity_type="like", payload={"type": "Like"})
-    assert federation_service.publish_like_activity(regular_user, _remote_target(), like, config) == 0
-    deliver.delay.assert_not_called()
-
-
-async def test_publish_like_activity_skips_non_federated_visibility(config, regular_user, monkeypatch):
-    """Likes with private/local visibility never leave the instance."""
-    config = _fed_config(config)
-    regular_user.actor_url = "https://local.example/users/regular"
-    regular_user.private_key_pem = "key"
-    resolve = MagicMock()
-    monkeypatch.setattr("songhive.services.federation.resolve_actor_inbox", resolve)
-
-    like = _make_activity(
-        "track",
-        "track-1",
-        activity_type="like",
-        visibility=Visibility.LOCAL.value,
-        payload={"type": "Like"},
-    )
-    assert federation_service.publish_like_activity(regular_user, _remote_target(), like, config) == 0
-    resolve.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
 # POST /api/v1/activities/{activity_id}/like
 # ---------------------------------------------------------------------------
 
@@ -589,11 +494,11 @@ async def test_like_endpoint_creates_and_is_idempotent(client, db_session, regul
 
 @pytest.mark.asyncio
 async def test_like_endpoint_fans_out_when_federated(client, db_session, regular_user, auth_headers, monkeypatch):
-    """With federation enabled the like is published to the author's inbox."""
+    """With federation enabled the like is fanned out to its audience."""
     client.app.state.config.federation.enabled = True
     client.app.state.config.federation.instance_domain = "local.example"
-    publish = MagicMock(return_value=1)
-    monkeypatch.setattr(federation_service, "publish_like_activity", publish)
+    fan_out = AsyncMock(return_value=0)
+    monkeypatch.setattr(activity_service, "fan_out_like_activity", fan_out)
 
     track = await _make_track(db_session, regular_user)
     activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
@@ -603,12 +508,12 @@ async def test_like_endpoint_fans_out_when_federated(client, db_session, regular
     resp = client.post(f"/api/v1/activities/{activity.id}/like", headers=auth_headers(regular_user))
 
     assert resp.status_code == 201
-    publish.assert_called_once()
-    user, target, like, config = publish.call_args.args
-    assert target.id == activity.id
-    assert like.activity_type == "like"
-    assert user.actor_url == "https://local.example/users/regular"
-    assert user.private_key_pem
+    fan_out.assert_awaited_once()
+    kwargs = fan_out.call_args.kwargs
+    assert kwargs["target"].id == activity.id
+    assert kwargs["like"].activity_type == "like"
+    assert kwargs["author"].actor_url == "https://local.example/users/regular"
+    assert kwargs["author"].private_key_pem
 
 
 @pytest.mark.asyncio

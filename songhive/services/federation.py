@@ -25,7 +25,6 @@ from ..config import SonghiveConfig, get_default_user_agent
 from ..federation import get_actor_url
 from ..federation.storage import create_activitypub_storage
 from ..models import (
-    Activity,
     User,
     Visibility,
 )
@@ -147,53 +146,6 @@ def resolve_actor_inbox(
         user_agent=get_default_user_agent(),
         timeout=timeout,
     )
-
-
-def publish_like_activity(
-    user: User,
-    target: Activity,
-    like: Activity,
-    config: SonghiveConfig,
-    *,
-    timeout: float = 10.0,
-) -> int:
-    """
-    Deliver a ``Like`` activity to the liked activity author's inbox.
-
-    Returns the number of enqueued deliveries (``0`` or ``1``).  The function
-    no-ops when federation is disabled, the user has no actor credentials,
-    the like does not federate (``private``/``local`` visibility), the liked
-    activity is local (its author is a local user — there is no remote inbox
-    to notify), the stored payload is missing, or the remote author's inbox
-    cannot be resolved.
-    """
-    if not config.federation.enabled or not config.federation.instance_domain:
-        return 0
-    if not user.actor_url or not user.private_key_pem:
-        return 0
-    if target.source_type == "local" or not like.payload:
-        return 0
-    try:
-        if not Visibility.federates(Visibility(like.visibility)):
-            return 0
-    except ValueError:
-        return 0
-
-    actor_key_id = f"{user.actor_url}#main-key"
-    inbox = resolve_actor_inbox(
-        target.source_actor,
-        config,
-        key_id=actor_key_id,
-        private_key_pem=user.private_key_pem,
-        timeout=timeout,
-    )
-    if not inbox:
-        return 0
-
-    from ..tasks.federation import deliver_activity
-
-    deliver_activity.delay(like.payload, inbox, actor_key_id, user.private_key_pem)  # type: ignore
-    return 1
 
 
 def publish_track_activity(

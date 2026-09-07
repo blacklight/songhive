@@ -405,12 +405,35 @@ come from `activity_audience`. Interactions skip the `can_manage` gate
 content-producing activity types still require manage rights. The
 `POST /api/v1/activities/{id}/like` endpoint performs the 404/403/400
 checks, provisions the liker's actor keys (`ensure_user_actor`), commits,
-then calls `services/federation.publish_like_activity` in a thread: for
-remote targets it resolves the author's inbox via `resolve_actor_inbox`
-(the `federation_actor_cache` table first, then a signed actor-document
-fetch, preferring `sharedInbox`) and enqueues the real
-`tasks.federation.deliver_activity` Celery task — which applies the
-federation gate, the blocked-domain gate, and exponential-backoff retries.
+then calls `services/activities.fan_out_like_activity`: for remote targets
+it resolves the liked author's inbox via
+`services/federation.resolve_actor_inbox` (the `federation_actor_cache`
+table first, then a signed actor-document fetch, preferring `sharedInbox`)
+and hands it to `fan_out_activity` alongside the like's own audience.
+
+`resolve_audience` maps an activity's visibility to the set of remote
+**inbox URLs** it should reach: `public` and `followers` activities go to
+the author's follower inboxes (`services/federation.get_follower_inboxes`
+reads Pubby's `federation_followers` storage via `pubby.collect_inboxes`,
+preferring `shared_inbox` and deduplicating) plus every remote mentioned
+actor, while `mentioned` activities reach only the mentioned actors.
+Mentions that resolved to a local user (`user_id` set) or an actor URL on
+the local instance domain have no remote inbox and are excluded, as are
+non-HTTP(S) actor URLs; `private` and `local` never federate. Mentioned
+inboxes are resolved concurrently through `resolve_actor_inbox`, signed
+with the owner's key.
+
+`fan_out_activity` is the delivery step: it unions the resolved audience
+with caller-supplied `extra_inboxes`, drops inboxes already booked, and
+creates an `ActivityTarget` row per remaining inbox before enqueueing
+`tasks.federation.deliver_activity` (which applies the federation gate, the
+blocked-domain gate, and exponential-backoff retries). Targets are marked
+`sent` once the task accepts the job, `failed` with `last_error` when
+enqueueing raises, and `skipped` — without an attempt — for blocked or
+non-allowed inbox domains; `pending` remains the default for rows staged
+without a dispatch attempt. Fan-out no-ops for remote or retracted
+activities, missing payloads, non-federating visibilities, disabled
+federation, and owners without a signing key.
 
 `VisibilityRules` centralizes the containment policy: `can_contain` and
 `enforce_activity_visibility` (used by `create_local_activity`) validate an
@@ -438,8 +461,9 @@ and `tag` are rebuilt (`pubby.set_object_content` merges hashtags while
 preserving pre-existing tags, then the pipeline's `Mention` tags and HTML
 are layered on). A `visibility` edit goes through
 `cascade_visibility_update` so already-delivered inboxes receive an
-`Update` or a `Delete(Tombstone)`. Content-only edits do not fan out an
-`Update` yet — per-inbox delivery targeting is future work.
+`Update` or a `Delete(Tombstone)`. Content-only edits still do not fan
+out an `Update` — `resolve_audience`/`fan_out_activity` provide the
+inbox targeting, but no `Update` payload is built for content edits yet.
 
 Deletion is handled by `services/deletion.py`'s `cascade_delete_entity`,
 which is invoked from every entity delete path (track, album, artist,

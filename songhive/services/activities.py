@@ -8,8 +8,10 @@ codebase convention of flushing (not committing) so callers control the
 transaction boundary.
 """
 
+import asyncio
 import uuid
-from typing import Any, Dict, List, Optional, Type, Set
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional, Set, Type
 
 from fastapi import HTTPException
 from pubby.content import set_object_content
@@ -20,13 +22,20 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from ..config.schema import SonghiveConfig
 from ..models._enums import Visibility
-from ..models.activity import ACTIVITY_ENTITY_TYPES, ACTIVITY_TYPES, Activity, ActivityMention
+from ..models.activity import (
+    ACTIVITY_ENTITY_TYPES,
+    ACTIVITY_TYPES,
+    Activity,
+    ActivityMention,
+    ActivityTarget,
+)
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
 from ..models.playlist import Playlist
 from ..models.track import Track
 from ..models.user import User
+from . import federation as federation_service
 from .acl import can_access, can_manage
 from .mentions import hashtag_url_factory, process_mentions
 
@@ -37,7 +46,10 @@ __all__ = [
     "VisibilityRules",
     "can_view_activity",
     "create_local_activity",
+    "fan_out_activity",
+    "fan_out_like_activity",
     "like_activity",
+    "resolve_audience",
     "resolve_entity",
     "update_activity",
 ]
@@ -200,11 +212,12 @@ async def _fan_out_visibility_update(
                 ActivityMention.actor_url.is_not(None),
             )
         )
+        mention_actor_urls: List[str] = [url for url in mention_rows.scalars().all() if url]  # type: ignore
         payload = create_visibility_update_activity(
             info.actor_url,
             info.source_id,
             new_visibility,
-            mention_actor_urls=[url for url in mention_rows.scalars().all() if url],
+            mention_actor_urls=mention_actor_urls,
         )
     else:
         payload = create_tombstone_delete_activity(info.actor_url, info.source_id)
@@ -482,7 +495,7 @@ async def like_activity(
             ActivityMention.actor_url.is_not(None),
         )
     )
-    addressed: Set[str] = {url for url in mention_rows.scalars().all() if url}
+    addressed: Set[str] = {url for url in mention_rows.scalars().all() if url}  # type: ignore
     addressed.add(activity.source_actor)
     addressed.discard(source_actor)
 
@@ -495,3 +508,230 @@ async def like_activity(
     )
     await session.flush()
     return like
+
+
+async def _remote_mention_actor_urls(
+    session: AsyncSession,
+    activity: Activity,
+    config: SonghiveConfig,
+) -> List[str]:
+    """
+    Return the remote actor URLs mentioned by ``activity``.
+
+    Mentions that resolved to a local user (``user_id`` set) or carry an
+    actor URL on this instance's domain are excluded — there is no remote
+    inbox to deliver to — as are non-HTTP(S) actor URLs.
+    """
+    rows = await session.execute(
+        select(ActivityMention.actor_url).where(
+            ActivityMention.activity_id == activity.id,
+            ActivityMention.actor_url.is_not(None),
+            ActivityMention.user_id.is_(None),
+        )
+    )
+    instance_domain = federation_service.normalize_instance_domain(config.federation.instance_domain or "")
+
+    urls: List[str] = []
+    seen: Set[str] = set()
+    for url in rows.scalars().all():
+        if not url or not url.startswith(("http://", "https://")) or url in seen:
+            continue
+        if instance_domain and federation_service.extract_domain(url) == instance_domain:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return urls
+
+
+async def resolve_audience(
+    session: AsyncSession,
+    activity: Activity,
+    config: SonghiveConfig,
+    *,
+    signer: Optional[User] = None,
+) -> Set[str]:
+    """
+    Resolve the remote inbox URLs an activity should be delivered to.
+
+    The audience is derived from the activity's visibility:
+
+    - ``public`` and ``followers`` reach the author's follower inboxes (from
+      Pubby's follower storage via ``get_follower_inboxes``, which prefers
+      each follower's ``shared_inbox``) plus every remote mentioned actor.
+    - ``mentioned`` reaches only the remote mentioned actors.
+    - ``private`` and ``local`` never federate and produce an empty audience.
+
+    Mentioned actors' inboxes are resolved through
+    ``services.federation.resolve_actor_inbox`` (``federation_actor_cache``
+    first, then a remote actor-document fetch). ``signer`` — normally the
+    activity owner — supplies the key used to sign those fetches. Blocking
+    storage and HTTP calls run in threads; the function returns ``set()``
+    when federation is disabled or the visibility is invalid.
+    """
+    if not config.federation.enabled:
+        return set()
+    try:
+        visibility = Visibility(activity.visibility)
+    except ValueError:
+        return set()
+    if not Visibility.federates(visibility):
+        return set()
+
+    inboxes: Set[str] = set()
+    if visibility in (Visibility.PUBLIC, Visibility.FOLLOWERS) and activity.source_actor.startswith(
+        ("http://", "https://")
+    ):
+        inboxes.update(
+            await asyncio.to_thread(
+                federation_service.get_follower_inboxes,
+                activity.source_actor,
+                config.database.url,
+            )
+        )
+
+    actor_urls = await _remote_mention_actor_urls(session, activity, config)
+    if actor_urls:
+        key_id = f"{signer.actor_url}#main-key" if signer and signer.actor_url else None
+        private_key_pem = signer.private_key_pem if signer else None
+        resolved = await asyncio.gather(
+            *(
+                asyncio.to_thread(
+                    federation_service.resolve_actor_inbox,
+                    actor_url,
+                    config,
+                    key_id=key_id,
+                    private_key_pem=private_key_pem,
+                )
+                for actor_url in actor_urls
+            )
+        )
+        inboxes.update(inbox for inbox in resolved if inbox)
+
+    return inboxes
+
+
+async def fan_out_activity(
+    session: AsyncSession,
+    activity: Activity,
+    config: SonghiveConfig,
+    *,
+    owner: Optional[User] = None,
+    extra_inboxes: Iterable[str] = (),
+) -> int:
+    """
+    Deliver ``activity.payload`` to its audience, recording delivery targets.
+
+    The inbox set is ``resolve_audience`` union ``extra_inboxes`` (for
+    activity-type-specific recipients such as a liked object's author), minus
+    inboxes already recorded in ``activity_targets``. Each new inbox gets an
+    ``ActivityTarget`` row: ``sent`` when the Celery delivery is enqueued,
+    ``failed`` (with ``last_error``) when enqueueing raises, and ``skipped``
+    for blocked or non-allowed instances. ``pending`` remains the default
+    state for rows staged without a dispatch attempt.
+
+    Returns the number of newly enqueued deliveries. The function no-ops —
+    recording nothing — for remote or retracted activities, missing payloads,
+    non-federating visibilities, disabled federation, and owners without a
+    signing key. Flushes without committing; the caller owns the
+    transaction.
+    """
+    if (
+        activity.source_type != "local"
+        or activity.deleted_at is not None
+        or not activity.payload
+        or not config.federation.enabled
+        or not config.federation.instance_domain
+    ):
+        return 0
+    try:
+        federates = Visibility.federates(Visibility(activity.visibility))
+    except ValueError:
+        return 0
+    if not federates:
+        return 0
+
+    if owner is None and activity.owner_user_id:
+        owner = await session.get(User, activity.owner_user_id)
+    if owner is None or not owner.private_key_pem:
+        return 0
+
+    inboxes = {inbox for inbox in extra_inboxes if inbox}
+    inboxes.update(await resolve_audience(session, activity, config, signer=owner))
+    recorded = await session.execute(select(ActivityTarget.inbox_url).where(ActivityTarget.activity_id == activity.id))
+    inboxes.difference_update(recorded.scalars().all())
+    if not inboxes:
+        return 0
+
+    from ..tasks.federation import deliver_activity
+
+    actor_key_id = f"{owner.actor_url or activity.source_actor}#main-key"
+    now = datetime.now(timezone.utc)
+    sent = 0
+    for inbox in sorted(inboxes):
+        target = ActivityTarget(activity_id=activity.id, inbox_url=inbox)
+        session.add(target)
+        if federation_service.is_domain_blocked(federation_service.extract_domain(inbox), config):
+            target.state = "skipped"
+            target.last_error = "blocked or non-allowed instance"
+            continue
+        target.attempts = 1
+        target.last_attempt_at = now
+        try:
+            deliver_activity.delay(activity.payload, inbox, actor_key_id, owner.private_key_pem)  # type: ignore
+        except Exception as e:
+            target.state = "failed"
+            target.last_error = f"{type(e).__name__}: {e}"
+        else:
+            target.state = "sent"
+            sent += 1
+
+    await session.flush()
+    return sent
+
+
+async def fan_out_like_activity(
+    session: AsyncSession,
+    *,
+    like: Activity,
+    target: Activity,
+    author: User,
+    config: SonghiveConfig,
+    timeout: float = 10.0,
+) -> int:
+    """Fan ``like`` out to the liked activity's author and its own audience.
+
+    Liking a remote activity additionally targets the remote author's inbox —
+    resolved via ``services.federation.resolve_actor_inbox`` — on top of the
+    like's own visibility audience. The resolution is skipped (and the like
+    may still fan out to its own audience when it has one) when the target is
+    local, federation is disabled, or the author has no signing key.
+    Flushes without committing; the caller owns the transaction.
+    """
+    if not like.payload:
+        return 0
+    try:
+        if not Visibility.federates(Visibility(like.visibility)):
+            return 0
+    except ValueError:
+        return 0
+
+    extra_inboxes: Set[str] = set()
+    if (
+        config.federation.enabled
+        and config.federation.instance_domain
+        and target.source_type == "remote"
+        and author.actor_url
+        and author.private_key_pem
+    ):
+        inbox = await asyncio.to_thread(
+            federation_service.resolve_actor_inbox,
+            target.source_actor,
+            config,
+            key_id=f"{author.actor_url}#main-key",
+            private_key_pem=author.private_key_pem,
+            timeout=timeout,
+        )
+        if inbox:
+            extra_inboxes.add(inbox)
+
+    return await fan_out_activity(session, like, config, owner=author, extra_inboxes=extra_inboxes)

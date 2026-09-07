@@ -9,12 +9,23 @@ All notable changes to this project will be documented in this file.
 - `federation`: Add activity interactions — `POST
   /api/v1/activities/{id}/like` records an idempotent `like` activity that
   inherits the target's visibility, stores an ActivityPub `Like` payload
-  (`federation/activities.create_like_activity`), and fans out to the liked
-  activity author's inbox (`services/federation.resolve_actor_inbox` reads
-  the `federation_actor_cache` before a signed actor-document fetch, then
-  `tasks.federation.deliver_activity` performs signed delivery).
+  (`federation/activities.create_like_activity`), and fans out through
+  `services/activities.fan_out_like_activity`.
   `services/activities.can_view_activity` centralizes who may see an
   activity (entity ACL + per-activity visibility).
+- `federation`: Add visibility-driven fan-out with per-inbox bookkeeping
+  (`services/activities.resolve_audience` and `fan_out_activity`).
+  `public`/`followers` activities reach the author's follower inboxes
+  (`services/federation.get_follower_inboxes`, backed by
+  `pubby.collect_inboxes`) plus remote mentioned actors
+  (`services/federation.resolve_actor_inbox` reads the
+  `federation_actor_cache` before a signed actor-document fetch);
+  `mentioned` activities reach mentioned actors only, and
+  `private`/`local` never federate. Each resolved inbox is recorded as an
+  `ActivityTarget` row (`sent`/`failed`/`skipped`, with `attempts`,
+  `last_error`, and `last_attempt_at`) and delivered via
+  `tasks.federation.deliver_activity`; likes on remote activities also
+  reach the liked author's inbox.
 - `federation`: Add `PATCH /api/v1/activities/{id}` for activity edits.
   Content changes re-run the mention pipeline in
   `services/activities.update_activity` — `@handle`s are re-resolved, the
