@@ -71,7 +71,7 @@ steps:
 ###
 
 - name: frontend-build
-  image: node:20
+  image: node:24
   commands:
     # Skip lifecycle scripts: esbuild's postinstall rewrites and then
     # immediately spawns its binary, which fails with ETXTBSY on the
@@ -158,7 +158,7 @@ steps:
 ###
 
 - name: frontend-lint
-  image: node:20
+  image: node:24
   commands:
     - cd frontend && npm run lint && ./node_modules/.bin/prettier --check src
   when:
@@ -175,7 +175,7 @@ steps:
 ###
 
 - name: frontend-tests
-  image: node:20
+  image: node:24
   commands:
     - cd frontend && npm run test
   when:

@@ -268,13 +268,25 @@ describe("ArtistView", () => {
     setAdmin("admin-1");
     await mountAt("/artists/artist-1");
 
-    expect(wrapper.text()).toContain(i18n.global.t("common.edit"));
+    const headerActions = wrapper.find(".artist-view__header-actions");
+    expect(headerActions.exists()).toBe(true);
+    expect(
+      headerActions
+        .findAll("button")
+        .some((b) => b.text() === i18n.global.t("common.edit")),
+    ).toBe(true);
   });
 
   it("hides the edit action for non-admin users", async () => {
     setAuthenticated("user-1");
     await mountAt("/artists/artist-1");
 
-    expect(wrapper.text()).not.toContain(i18n.global.t("common.edit"));
+    const headerActions = wrapper.find(".artist-view__header-actions");
+    expect(headerActions.exists()).toBe(true);
+    expect(
+      headerActions
+        .findAll("button")
+        .some((b) => b.text() === i18n.global.t("common.edit")),
+    ).toBe(false);
   });
 });

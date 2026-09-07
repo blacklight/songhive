@@ -269,6 +269,12 @@ describe("AlbumView", () => {
     setAdmin("admin-1");
     await mountAt("/albums/album-1");
 
-    expect(wrapper.text()).toContain(i18n.global.t("common.edit"));
+    const headerActions = wrapper.find(".album-view__header-actions");
+    expect(headerActions.exists()).toBe(true);
+    expect(
+      headerActions
+        .findAll("button")
+        .some((b) => b.text() === i18n.global.t("common.edit")),
+    ).toBe(true);
   });
 });
