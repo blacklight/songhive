@@ -150,6 +150,33 @@ async def update_activity(
     return {"status": "ok"}
 
 
+@router.delete("/{activity_id}")
+async def delete_activity(
+    activity_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retract an activity.
+
+    Local activities are soft-deleted and a ``Delete(Tombstone)`` is fanned
+    out to every inbox the activity previously reached; remote activities
+    are simply removed locally.
+    """
+    activity = await db.get(Activity, activity_id)
+    if activity is None or activity.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+
+    if not await acl.can_manage(db, current_user, activity.entity_type, activity.entity_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete this activity",
+        )
+
+    await activity_service.retract_activity(db, activity)
+    await db.commit()
+    return {"status": "ok"}
+
+
 @router.post("/{activity_id}/like", status_code=status.HTTP_201_CREATED)
 async def like_activity(
     activity_id: str,

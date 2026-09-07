@@ -35,8 +35,8 @@ from ...models.library import Library
 from ...models.stored_file import StoredFile
 from ...models.track import Track
 from ...models.user import User
-from ...services import acl, audit, deletion, music
-from ...services.federation import publish_track_activity, unpublish_track_activity
+from ...services import acl, activities, audit, deletion, music
+from ...services.federation import unpublish_track_activity
 from ...services.import_ import (
     DuplicateTrackError,
     ExternalDuplicateError,
@@ -270,13 +270,13 @@ async def _process_single_upload(
 
 async def _publish_new_track(
     db: AsyncSession,
-    background_tasks: BackgroundTasks,
     track: Optional[Track],
     owner: User,
     config: SonghiveConfig,
 ) -> None:
     """
-    Enqueue a ``Create(Audio)`` activity for a freshly created public track.
+    Record and deliver a ``Create(Audio)`` activity for a freshly created
+    public track.
 
     A fresh ``federation_object_id`` is assigned when missing so the published
     object is addressable at ``{actor_url}/objects/{id}``; callers must commit
@@ -287,15 +287,12 @@ async def _publish_new_track(
     if not track.federation_object_id:
         track.federation_object_id = str(uuid.uuid4())
     artist = await db.get(Artist, track.artist_id) if track.artist_id else None
-    if artist is None:
-        return
-    background_tasks.add_task(
-        publish_track_activity,
-        track,
-        artist,
-        owner,
-        config,
-        track.federation_object_id,
+    await activities.record_track_publication(
+        db,
+        track=track,
+        artist=artist,
+        owner=owner,
+        config=config,
     )
 
 
@@ -380,7 +377,7 @@ async def upload_file(
 
     assert outcome.stored_file is not None
     db.add(outcome.stored_file)
-    await _publish_new_track(db, background_tasks, outcome.track, current_user, config)
+    await _publish_new_track(db, outcome.track, current_user, config)
     await db.commit()
 
     logger.info("Uploaded file %s (%s bytes)", outcome.stored_file.id, outcome.stored_file.size)
@@ -502,7 +499,7 @@ async def bulk_upload_files(
         results.append(result)
 
     for track in created_tracks:
-        await _publish_new_track(db, background_tasks, track, current_user, request.app.state.config)
+        await _publish_new_track(db, track, current_user, request.app.state.config)
 
     await db.commit()
     return results
@@ -548,7 +545,7 @@ async def resolve_upload_duplicate(
     # ``stored_file`` is only set when a new track was actually imported
     # (``keep_local``); the discard path returns a pre-existing track.
     new_track = result.track if result.stored_file is not None else None
-    await _publish_new_track(db, background_tasks, new_track, current_user, config)
+    await _publish_new_track(db, new_track, current_user, config)
 
     await db.commit()
 

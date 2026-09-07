@@ -5,12 +5,14 @@ the ``list_activities`` service, visibility filtering, and cursor pagination.
 
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from songhive.models import Visibility
-from songhive.models.activity import Activity, ActivityMention
+from songhive.models.activity import Activity, ActivityMention, ActivityTarget
 from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.models.user import User
@@ -380,3 +382,108 @@ async def test_list_activities_invalid_cursor(db_session, regular_user):
             cursor="!!!",
         )
     assert excinfo.value.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/v1/activities/{id}
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_delete_activity_retracts_and_fans_out(client, db_session, regular_user, auth_headers, monkeypatch):
+    """Deleting a local activity retracts it and fans out Delete(Tombstone) to sent inboxes."""
+    track = await _make_track(db_session, regular_user)
+    regular_user.private_key_pem = "private"
+    regular_user.actor_url = "https://local.example/users/regular"
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=regular_user.id,
+        source_actor=regular_user.actor_url,
+        source_id=f"{regular_user.actor_url}/objects/pub-1",
+    )
+    db_session.add(activity)
+    await db_session.flush()
+    db_session.add(ActivityTarget(activity_id=str(activity.id), inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(ActivityTarget(activity_id=str(activity.id), inbox_url="https://b.example/inbox", state="failed"))
+    await db_session.flush()
+
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    resp = client.delete(f"/api/v1/activities/{activity.id}", headers=auth_headers(regular_user))
+
+    assert resp.status_code == 200
+    await db_session.refresh(activity)
+    assert activity.deleted_at is not None
+
+    # Only the successfully delivered inbox gets the retraction.
+    deliver_mock.delay.assert_called_once()
+    payload, inbox_url = deliver_mock.delay.call_args[0][0], deliver_mock.delay.call_args[0][1]
+    assert inbox_url == "https://a.example/inbox"
+    assert payload["type"] == "Delete"
+    assert payload["object"]["id"] == activity.source_id
+
+    # The retracted activity no longer appears in the feed.
+    resp = client.get(f"/api/v1/track/{track.id}/activities", headers=auth_headers(regular_user))
+    assert resp.json()["activities"] == []
+
+
+@pytest.mark.asyncio
+async def test_delete_activity_not_found(client, db_session, regular_user, auth_headers):
+    """Missing or already-retracted activities return 404."""
+    resp = client.delete(
+        "/api/v1/activities/00000000-0000-0000-0000-000000000000",
+        headers=auth_headers(regular_user),
+    )
+    assert resp.status_code == 404
+
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    activity.deleted_at = datetime.now(timezone.utc)
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.delete(f"/api/v1/activities/{activity.id}", headers=auth_headers(regular_user))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_activity_forbidden_for_non_manager(client, db_session, regular_user, other_user, auth_headers):
+    """Only the entity's owner or an admin may retract an activity."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.delete(f"/api/v1/activities/{activity.id}", headers=auth_headers(regular_user))
+
+    assert resp.status_code == 403
+    await db_session.refresh(activity)
+    assert activity.deleted_at is None
+
+
+@pytest.mark.asyncio
+async def test_delete_remote_activity_removes_local_copy(client, db_session, regular_user, auth_headers, monkeypatch):
+    """Remote activities are hard-deleted without any remote fan-out."""
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=regular_user.id,
+        source_type="remote",
+        source_actor="https://remote.example/users/bob",
+        source_id="https://remote.example/activities/1",
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    resp = client.delete(f"/api/v1/activities/{activity.id}", headers=auth_headers(regular_user))
+
+    assert resp.status_code == 200
+    deliver_mock.delay.assert_not_called()
+    remaining = await db_session.scalar(select(Activity).where(Activity.id == activity.id))
+    assert remaining is None

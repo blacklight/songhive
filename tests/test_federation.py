@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from celery.exceptions import Retry
 from pubby.content import render_bio_html, render_post_html, render_verified_link
+from sqlalchemy import select
 
 from songhive.config.schema import SonghiveConfig
 from songhive.federation._common import get_hashtag_url
@@ -23,12 +24,14 @@ from songhive.federation.actors import (
 )
 from songhive.federation.serializers import track_to_audio_object
 from songhive.models import Visibility
+from songhive.models.activity import ActivityTarget
 from songhive.models.album import Album  # noqa: F401
 from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
-from songhive.services.federation import publish_actor_update, publish_track_activity
+from songhive.services.activities import record_track_publication
+from songhive.services.federation import publish_actor_update
 from songhive.tasks.federation import _load_user_actor, deliver_activity, process_incoming
 
 
@@ -84,6 +87,7 @@ def test_create_audio_activity():
     assert activity["object"]["type"] == "Audio"
     assert activity["object"]["name"] == "My Song"
     assert activity["object"]["content"] == "A great track"
+    assert activity["object"]["summary"] == "A great track"
     assert "PT3M15S" in activity["object"]["duration"]
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
@@ -110,6 +114,11 @@ def test_track_to_audio_object():
     assert obj["type"] == "Audio"
     assert obj["name"] == "TestTrack"
     assert obj["duration"] == "PT2M"
+    # ``mimeType`` mirrors ``mediaType`` so Mastodon's ``url_to_href`` selects
+    # the ``text/html`` track page for display instead of the audio download.
+    assert all(link["mimeType"] == link["mediaType"] for link in obj["url"])
+    html_link = next(link for link in obj["url"] if link["mimeType"] == "text/html")
+    assert html_link["href"] == "https://music.example.com/tracks/track-1"
     assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"}]
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
@@ -311,6 +320,27 @@ def test_create_audio_activity_renders_track_description():
         'Fresh <a href="https://music.example.com/hashtags/beats" rel="tag">#beats</a> '
         'at <a href="https://band.example.com">band.example.com</a>'
     )
+    # Mirrored to ``summary`` so Mastodon-style "converted" Audio objects
+    # render the description instead of dropping ``content``.
+    assert activity["object"]["summary"] == activity["object"]["content"]
+
+
+def test_track_to_audio_object_without_description_has_no_content_or_summary():
+    """Audio objects without a description carry neither content nor summary."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
+    assert "content" not in obj
+    assert "summary" not in obj
 
 
 def test_federation_app_setup(tmp_path):
@@ -654,9 +684,12 @@ def test_publish_actor_update_enqueues_update_to_followers(monkeypatch):
     assert pem == "private"
 
 
-def test_publish_track_activity_uses_status_as_content(monkeypatch):
-    """publish_track_activity forwards a one-off status as the object content."""
+@pytest.mark.asyncio
+async def test_record_track_publication_uses_status_as_content(db_session, monkeypatch):
+    """record_track_publication stores the one-off status as the object content."""
     user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
     artist = Artist(name="TestArtist")
     artist.id = "artist-1"
     track = Track(
@@ -677,29 +710,55 @@ def test_publish_track_activity_uses_status_as_content(monkeypatch):
     deliver_mock = MagicMock()
     monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
 
-    result = publish_track_activity(
-        track,
-        artist,
-        user,
-        _fed_config(),
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
         status="Fresh post about #beats",
     )
 
-    assert result == 1
-    deliver_mock.delay.assert_called_once()
-    activity = deliver_mock.delay.call_args[0][0]
-    assert activity["type"] == "Create"
-    assert activity["object"]["id"] == f"{user.actor_url}/objects/obj-1"
-    assert activity["object"]["content"].startswith("Fresh post about")
-    assert "stored description" not in activity["object"]["content"]
-    assert {"type": "Hashtag", "name": "#beats", "href": "https://music.example.com/hashtags/beats"} in activity[
+    assert activity is not None
+    assert activity.activity_type == "create"
+    assert activity.source_type == "local"
+    assert activity.entity_type == "track"
+    assert activity.entity_id == "track-1"
+    assert activity.visibility == "public"
+    assert activity.source_id == f"{user.actor_url}/objects/obj-1"
+    assert activity.local_object_id == "obj-1"
+    assert activity.content_source == "Fresh post about #beats"
+    assert activity.content is not None and activity.content.startswith("Fresh post about")
+
+    payload = activity.payload
+    assert payload["type"] == "Create"
+    assert payload["object"]["id"] == f"{user.actor_url}/objects/obj-1"
+    assert payload["object"]["content"].startswith("Fresh post about")
+    assert payload["object"]["summary"] == payload["object"]["content"]
+    assert "stored description" not in payload["object"]["content"]
+    assert {"type": "Hashtag", "name": "#beats", "href": "https://music.example.com/hashtags/beats"} in payload[
         "object"
     ]["tag"]
 
+    deliver_mock.delay.assert_called_once()
+    assert deliver_mock.delay.call_args[0][0] is payload
+    assert deliver_mock.delay.call_args[0][1] == "https://a.example/inbox"
 
-def test_publish_track_activity_without_status_uses_track_description(monkeypatch):
-    """publish_track_activity falls back to the stored description content."""
+    # The delivered inbox is tracked so a later retraction can reach it.
+    targets = [
+        t
+        for t in (await db_session.execute(select(ActivityTarget))).scalars().all()
+        if t.activity_id == str(activity.id)
+    ]
+    assert [(t.inbox_url, t.state) for t in targets] == [("https://a.example/inbox", "sent")]
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_without_status_uses_track_description(db_session, monkeypatch):
+    """record_track_publication falls back to the stored description content."""
     user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
     artist = Artist(name="TestArtist")
     artist.id = "artist-1"
     track = Track(
@@ -719,11 +778,44 @@ def test_publish_track_activity_without_status_uses_track_description(monkeypatc
     deliver_mock = MagicMock()
     monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
 
-    result = publish_track_activity(track, artist, user, _fed_config())
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+    )
 
-    assert result == 1
-    activity = deliver_mock.delay.call_args[0][0]
-    assert activity["object"]["content"] == "stored description"
+    assert activity is not None
+    assert activity.payload["object"]["content"] == "stored description"
+    deliver_mock.delay.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_noops_when_not_public(db_session):
+    """Non-public tracks record no activity and enqueue no deliveries."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        visibility=Visibility.PRIVATE.value,
+    )
+    track.id = "track-1"
+    track.federation_object_id = "obj-1"
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+    )
+    assert activity is None
 
 
 @pytest.mark.asyncio

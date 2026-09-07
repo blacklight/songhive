@@ -4,7 +4,7 @@ Tests for the album API endpoints.
 
 import io
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -342,8 +342,8 @@ async def test_album_visibility_propagation_enqueues_track_publish(
     """Tracks that become public through the album are published."""
     album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
     (track,) = await _add_album_tracks(db_session, album, regular_user, Visibility.PRIVATE)
-    publish_mock = MagicMock(return_value=0)
-    monkeypatch.setattr("songhive.api.routes.tracks.publish_track_activity", publish_mock)
+    publish_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", publish_mock)
 
     response = client.patch(
         f"/api/v1/albums/{album.id}",
@@ -353,7 +353,7 @@ async def test_album_visibility_propagation_enqueues_track_publish(
     assert response.status_code == 200
 
     publish_mock.assert_called_once()
-    call_track = publish_mock.call_args[0][0]
+    call_track = publish_mock.call_args.kwargs["track"]
     assert str(call_track.id) == str(track.id)
 
 
@@ -364,9 +364,9 @@ async def test_update_album_without_visibility_change_does_not_publish(
     """An album update that keeps the same visibility does not touch tracks."""
     album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
     await _add_album_tracks(db_session, album, regular_user, Visibility.PRIVATE)
-    publish_mock = MagicMock(return_value=0)
+    publish_mock = AsyncMock(return_value=None)
     unpublish_mock = MagicMock(return_value=0)
-    monkeypatch.setattr("songhive.api.routes.tracks.publish_track_activity", publish_mock)
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", publish_mock)
     monkeypatch.setattr("songhive.api.routes.tracks.unpublish_track_activity", unpublish_mock)
 
     response = client.patch(

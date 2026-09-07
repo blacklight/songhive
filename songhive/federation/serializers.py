@@ -22,8 +22,31 @@ def set_audio_description(obj: dict, description: Optional[str], domain: str) ->
     The description is HTML-escaped, with http(s) URLs and ``#hashtags``
     linkified so remote servers render them as usable links.  Hashtags found
     in the text are also appended to the object's ``tag`` list.
+
+    The rendered text is also mirrored into ``summary``: Mastodon-family
+    servers treat ``Audio`` as a "converted" object type and render
+    ``name``/``summary``/``url`` instead of ``content``, so without the
+    mirror the post text is silently dropped there.
     """
     set_object_content(obj, description or "", partial(get_hashtag_url, domain))
+    mirror_content_to_summary(obj)
+
+
+def mirror_content_to_summary(obj: dict) -> None:
+    """
+    Mirror ``content`` into ``summary`` on ``Audio`` objects (or clear it).
+
+    Mastodon-style "converted" object types (``Audio``, ``Video``, ``Image``,
+    ``Article``, ``Page``, ``Event``) ignore ``content`` and render
+    ``name`` + ``summary`` + ``url`` as the post body.  Mirroring keeps the
+    post text visible there while remaining a no-op for other object types.
+    """
+    if obj.get("type") != "Audio":
+        return
+    if obj.get("content"):
+        obj["summary"] = obj["content"]
+    else:
+        obj.pop("summary", None)
 
 
 def track_to_audio_object(
@@ -71,9 +94,23 @@ def track_to_audio_object(
         "type": "Audio",
         "id": object_id,
         "name": track.title,
+        # ``mimeType`` mirrors ``mediaType``: Mastodon's url_to_href reads the
+        # non-standard ``mimeType`` key and falls back to "text/html" per link,
+        # so without it the audio download URL would be picked for display
+        # instead of the track page.
         "url": [
-            {"type": "Link", "href": stream_url, "mediaType": media_type},
-            {"type": "Link", "href": track_url, "mediaType": "text/html"},
+            {
+                "type": "Link",
+                "href": stream_url,
+                "mediaType": media_type,
+                "mimeType": media_type,
+            },
+            {
+                "type": "Link",
+                "href": track_url,
+                "mediaType": "text/html",
+                "mimeType": "text/html",
+            },
         ],
     }
 

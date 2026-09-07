@@ -488,6 +488,24 @@ playlist, library). Local activities are soft-deleted (`deleted_at` set)
 and a `Delete(Tombstone)` is enqueued through `deliver_activity` for every
 inbox recorded as `sent` in `activity_targets`, signed with the activity
 owner's private key; remote activities are hard-deleted without fan-out.
+Single-activity retraction follows the same rules through
+`services/activities.retract_activity`, exposed as `DELETE
+/api/v1/activities/{id}` behind `acl.can_manage` on the containing entity.
+
+Track fediverse publications are recorded as activities too: every publish
+path — the manual `POST /api/v1/tracks/{id}/publish`, uploads and imports
+of public tracks (including the `process_upload` Celery task and bulk
+library uploads), and entity visibility transitions to `public` — calls
+`services/activities.record_track_publication`. It builds the
+`Create(Audio)` payload for the freshly minted `federation_object_id`,
+stores it on a `create` activity whose `source_id` matches the published
+object URL (`{actor_url}/objects/{federation_object_id}`), keeps the
+one-off `status` post text in `content_source`, and delivers through
+`fan_out_activity` so each reached inbox is booked in `activity_targets`
+and later retraction reaches exactly those inboxes. When a public track
+goes private, `retract_track_publications` soft-deletes the live
+publication rows for the retracted object alongside the track-level
+`unpublish_track_activity` `Delete(Tombstone)`.
 `get_activity_unpublish_info` returns the `ActivityUnpublishInfo`
 (activity id, `source_id`, `actor_url`, sent inboxes) used for that
 delivery, and `federation/activities.py` builds the `Delete(Tombstone)`
@@ -845,7 +863,15 @@ the HTTP routes.
   scheme-less link text, and `#hashtags` become `rel="tag"` links to this
   instance's `/hashtags/{name}` pages. Hashtags found in the description are
   also appended to the object's `tag` list, and the media download URL is
-  attached as a `Document` with the audio MIME type.
+  attached as a `Document` with the audio MIME type. The rendered text is
+  additionally mirrored into `summary` (`mirror_content_to_summary`):
+  Mastodon-family servers treat `Audio` as a "converted" object type and
+  render `name`/`summary`/`url` rather than `content`, so the post text
+  would otherwise be dropped there. The `url` links also mirror `mediaType`
+  into `mimeType` — Mastodon's link selection reads the non-standard
+  `mimeType` key and defaults untyped links to `text/html`, so without it
+  the raw audio download URL would be chosen for display instead of the
+  track page.
 - Each public lifecycle gets a fresh `Track.federation_object_id` (generated
   on every transition to public) so a previous `Tombstone` at the same URL
   cannot block re-publication.

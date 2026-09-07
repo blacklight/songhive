@@ -10,6 +10,7 @@ transaction boundary.
 
 import asyncio
 import base64
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type
@@ -39,6 +40,8 @@ from ..models.user import User
 from . import federation as federation_service
 from .acl import can_access, can_manage
 from .mentions import hashtag_url_factory, process_mentions
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "ACTIVITY_ENTITY_TYPES",
@@ -538,6 +541,9 @@ async def update_activity(
             obj["content"] = processed.html
         else:
             obj.pop("content", None)
+        from ..federation.serializers import mirror_content_to_summary
+
+        mirror_content_to_summary(obj)
         if processed.tags:
             tags = obj.setdefault("tag", [])
             seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
@@ -842,3 +848,149 @@ async def fan_out_like_activity(
             extra_inboxes.add(inbox)
 
     return await fan_out_activity(session, like, config, owner=author, extra_inboxes=extra_inboxes)
+
+
+async def record_track_publication(
+    session: AsyncSession,
+    *,
+    track: Track,
+    artist: Optional[Artist],
+    owner: Optional[User],
+    config: SonghiveConfig,
+    status: Optional[str] = None,
+) -> Optional[Activity]:
+    """Record and fan out a ``create`` activity for a fediverse track share.
+
+    Builds the ``Create(Audio)`` payload for the track's current
+    ``federation_object_id`` (the caller must mint it first, and commit the
+    session so remote fetches of ``{actor_url}/objects/{id}`` can resolve),
+    stores it as a local ``create`` activity attached to the track — making
+    the publication visible in the entity's activity feed — and delivers it
+    through :func:`fan_out_activity`, which records one ``ActivityTarget``
+    per inbox so the publication can later be retracted with a
+    ``Delete(Tombstone)``.
+
+    ``status`` is an optional one-off post text used as the object's
+    ``content`` instead of the track's stored ``description``; it is never
+    persisted on the track itself.
+
+    Returns ``None`` — recording nothing — when federation is disabled, the
+    track is not public, the artist is missing, the owner has no actor
+    credentials, or no ``federation_object_id`` is set. Flushes without
+    committing; the caller owns the transaction.
+    """
+    from ..federation.activities import create_audio_activity
+
+    if not config.federation.enabled or not config.federation.instance_domain:
+        return None
+    if not track or track.visibility != Visibility.PUBLIC.value:
+        return None
+    if not artist or not owner or not owner.actor_url or not owner.private_key_pem:
+        return None
+    if not track.federation_object_id:
+        return None
+
+    object_id = f"{owner.actor_url}/objects/{track.federation_object_id}"
+    payload = create_audio_activity(
+        actor_url=owner.actor_url,
+        track=track,
+        artist=artist,
+        domain=config.federation.instance_domain,
+        description=status,
+        ap_object_id=object_id,
+    )
+    if not payload:
+        return None
+
+    obj = payload.get("object")
+    activity = Activity(
+        entity_type="track",
+        entity_id=str(track.id),
+        activity_type="create",
+        source_type="local",
+        source_actor=owner.actor_url,
+        source_id=object_id,
+        local_object_id=str(track.federation_object_id),
+        owner_user_id=owner.id,
+        visibility=Visibility.PUBLIC.value,
+        content=obj.get("content") if isinstance(obj, dict) else None,
+        content_source=status,
+        content_type="text/markdown" if status else "text/plain",
+        payload=payload,
+    )
+    session.add(activity)
+    await session.flush()
+    try:
+        await fan_out_activity(session, activity, config, owner=owner)
+    except Exception as e:
+        # Fan-out is best-effort: a broker or resolution failure must not
+        # fail the publication itself — the activity row still records it.
+        logger.exception("Failed to fan out publication for track %s: %s: %s", track.id, type(e), e)
+    return activity
+
+
+async def retract_track_publications(
+    session: AsyncSession,
+    track: Track,
+    *,
+    object_id: Optional[str] = None,
+) -> int:
+    """Soft-delete a track's live publication activities.
+
+    Used when the track leaves the fediverse (e.g. a public → non-public
+    visibility transition) so stale ``create`` rows stop appearing in the
+    feed and stop serving their stored payload from the object-dereference
+    route. ``object_id`` narrows the retraction to the rows published with a
+    specific ``federation_object_id``. No remote fan-out happens here — the
+    caller is responsible for the track-level ``Delete(Tombstone)``.
+    Returns the number of retracted rows. Flushes without committing; the
+    caller owns the transaction.
+    """
+    stmt = select(Activity).where(
+        Activity.entity_type == "track",
+        Activity.entity_id == str(track.id),
+        Activity.activity_type == "create",
+        Activity.source_type == "local",
+        Activity.deleted_at.is_(None),
+    )
+    if object_id:
+        stmt = stmt.where(Activity.local_object_id == str(object_id))
+
+    rows = (await session.execute(stmt)).scalars().all()
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        row.deleted_at = now
+    if rows:
+        await session.flush()
+    return len(rows)
+
+
+async def retract_activity(session: AsyncSession, activity: Activity) -> None:
+    """Retract a single activity.
+
+    Local activities are soft-deleted (``deleted_at``) and a
+    ``Delete(Tombstone)`` is enqueued for every inbox the activity was
+    previously delivered to (``sent`` targets only), mirroring
+    :func:`deletion.cascade_delete_entity` for a single row. Remote
+    activities are hard-deleted without fan-out — the remote instance owns
+    retraction. Already-retracted activities are a no-op. Flushes without
+    committing; the caller owns the transaction.
+    """
+    from ..federation.activities import create_tombstone_delete_activity
+    from .deletion import enqueue_activity_delivery, get_activity_unpublish_info
+
+    if activity.deleted_at is not None:
+        return
+
+    if activity.source_type != "local":
+        await session.delete(activity)
+        await session.flush()
+        return
+
+    info = await get_activity_unpublish_info(session, activity)
+    activity.deleted_at = datetime.now(timezone.utc)
+    if info.inboxes:
+        owner = await session.get(User, activity.owner_user_id) if activity.owner_user_id else None
+        payload = create_tombstone_delete_activity(info.actor_url, info.source_id)
+        enqueue_activity_delivery(info, owner, payload)
+    await session.flush()

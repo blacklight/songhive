@@ -5,7 +5,7 @@ Tests for the file storage API endpoints.
 import hashlib
 import io
 import logging
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -605,8 +605,8 @@ def test_public_audio_upload_publishes_track(files_client, regular_user, auth_he
             mimetype="audio/mpeg",
         ),
     )
-    publish_mock = MagicMock()
-    monkeypatch.setattr("songhive.api.routes.files.publish_track_activity", publish_mock)
+    publish_mock = AsyncMock()
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", publish_mock)
 
     headers = auth_headers(regular_user)
     response = files_client.post(
@@ -619,14 +619,14 @@ def test_public_audio_upload_publishes_track(files_client, regular_user, auth_he
     track_id = response.headers["X-Track-Id"]
 
     publish_mock.assert_called_once()
-    call_track, call_artist, call_owner, call_config, call_object_id = publish_mock.call_args[0]
+    call = publish_mock.call_args.kwargs
+    call_track = call["track"]
     assert str(call_track.id) == track_id
     assert call_track.description == "public post text"
-    assert str(call_artist.id) == str(call_track.artist_id)
-    assert str(call_owner.id) == str(regular_user.id)
-    assert call_config is files_client.app.state.config
-    assert call_object_id == call_track.federation_object_id
-    assert call_object_id
+    assert str(call["artist"].id) == str(call_track.artist_id)
+    assert str(call["owner"].id) == str(regular_user.id)
+    assert call["config"] is files_client.app.state.config
+    assert call_track.federation_object_id
 
 
 def test_private_audio_upload_does_not_publish(files_client, regular_user, auth_headers, monkeypatch):
@@ -639,8 +639,8 @@ def test_private_audio_upload_does_not_publish(files_client, regular_user, auth_
             mimetype="audio/mpeg",
         ),
     )
-    publish_mock = MagicMock()
-    monkeypatch.setattr("songhive.api.routes.files.publish_track_activity", publish_mock)
+    publish_mock = AsyncMock()
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", publish_mock)
 
     headers = auth_headers(regular_user)
     response = files_client.post(
@@ -666,8 +666,8 @@ def test_bulk_public_audio_uploads_publish_tracks(files_client, regular_user, au
         )
 
     monkeypatch.setattr("songhive.services.import_.extract_metadata", _metadata)
-    publish_mock = MagicMock()
-    monkeypatch.setattr("songhive.api.routes.files.publish_track_activity", publish_mock)
+    publish_mock = AsyncMock()
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", publish_mock)
 
     headers = auth_headers(regular_user)
     files = [
@@ -685,9 +685,9 @@ def test_bulk_public_audio_uploads_publish_tracks(files_client, regular_user, au
     data = response.json()
     assert all(item["track_id"] for item in data)
     assert publish_mock.call_count == len(data)
-    published_ids = {str(call.args[0].id) for call in publish_mock.call_args_list}
+    published_ids = {str(call.kwargs["track"].id) for call in publish_mock.call_args_list}
     assert published_ids == {item["track_id"] for item in data}
-    assert all(call.args[0].description == "bulk description" for call in publish_mock.call_args_list)
+    assert all(call.kwargs["track"].description == "bulk description" for call in publish_mock.call_args_list)
 
 
 async def test_upload_audio_file_creates_single_stored_file(

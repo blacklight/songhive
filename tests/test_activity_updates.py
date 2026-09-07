@@ -150,6 +150,36 @@ async def test_update_activity_rebuilds_payload_object(db_session, regular_user,
 
 
 @pytest.mark.asyncio
+async def test_update_activity_mirrors_summary_on_audio_payload(db_session, regular_user, config):
+    """An embedded ``Audio`` payload object mirrors ``content`` into ``summary``."""
+    config.federation.instance_domain = "local.example"
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "object": {
+                "id": "https://local.example/users/alice/objects/1",
+                "type": "Audio",
+                "content": "old",
+                "summary": "old",
+            },
+        },
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    await update_activity(db_session, activity, content_source="new post", config=config)
+    await db_session.flush()
+
+    obj = activity.payload["object"]
+    assert obj["summary"] == obj["content"]
+    assert "new post" in obj["summary"]
+
+
+@pytest.mark.asyncio
 async def test_update_activity_leaves_string_object_payload(db_session, regular_user, config):
     """Payloads whose ``object`` is a bare id (e.g. ``Like``) are untouched."""
     track = await _make_track(db_session, regular_user)

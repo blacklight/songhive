@@ -24,10 +24,7 @@ from pubby.moderation import normalize_domain as _pubby_normalize_domain
 from ..config import SonghiveConfig, get_default_user_agent
 from ..federation import get_actor_url
 from ..federation.storage import create_activitypub_storage
-from ..models import (
-    User,
-    Visibility,
-)
+from ..models import User
 
 logger = logging.getLogger(__name__)
 
@@ -146,64 +143,6 @@ def resolve_actor_inbox(
         user_agent=get_default_user_agent(),
         timeout=timeout,
     )
-
-
-def publish_track_activity(
-    track,
-    artist,
-    user: User,
-    config: SonghiveConfig,
-    ap_object_id: Optional[str] = None,
-    status: Optional[str] = None,
-) -> int:
-    """
-    Publish a ``Create(Audio)`` activity to the user's follower inboxes.
-
-    Returns the number of remote inboxes enqueued. The function no-ops when
-    federation is disabled, the track is not public, the user has no actor
-    credentials, or the audio object cannot be serialized.
-
-    ``ap_object_id`` is the ActivityPub object id that will appear on the
-    ``Audio`` object. Callers should persist it on ``track.federation_object_id``
-    so that a later ``Delete(Tombstone)`` can reference the same id.
-
-    ``status`` is an optional one-off post text that overrides the track's
-    stored ``description`` as the object's ``content``. It is never persisted
-    on the track.
-    """
-    if not config.federation.enabled or not config.federation.instance_domain:
-        return 0
-    if not track or track.visibility != Visibility.PUBLIC.value:
-        return 0
-    if not user or not user.actor_url or not user.private_key_pem:
-        return 0
-    if not artist:
-        return 0
-
-    from ..federation.activities import create_audio_activity
-    from ..tasks.federation import deliver_activity
-
-    object_id = ap_object_id or track.federation_object_id
-    if object_id and not object_id.startswith(("http://", "https://")):
-        object_id = f"{user.actor_url}/objects/{object_id}"
-
-    activity = create_audio_activity(
-        actor_url=user.actor_url,
-        track=track,
-        artist=artist,
-        domain=config.federation.instance_domain,
-        description=status,
-        ap_object_id=object_id,
-    )
-    if not activity:
-        return 0
-
-    inboxes = get_follower_inboxes(user.actor_url, config.database.url)
-    actor_key_id = f"{user.actor_url}#main-key"
-    for inbox in inboxes:
-        deliver_activity.delay(activity, inbox, actor_key_id, user.private_key_pem)  # type: ignore
-
-    return len(inboxes)
 
 
 def unpublish_track_activity(

@@ -6,7 +6,7 @@ import hashlib
 import io
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -307,9 +307,21 @@ def test_delete_missing_track_returns_404(client, auth_headers, regular_user):
 
 
 def _patch_publish(monkeypatch):
-    """Replace the route-level ``publish_track_activity`` with a recording mock."""
-    mock = MagicMock(return_value=0)
-    monkeypatch.setattr("songhive.api.routes.tracks.publish_track_activity", mock)
+    """Replace ``record_track_publication`` with a recording async mock.
+
+    ``mock.published_object_ids`` snapshots ``track.federation_object_id`` at
+    call time so tests can compare object ids across re-publications (the
+    track object is mutated between calls).
+    """
+    published_object_ids = []
+    mock = AsyncMock()
+
+    async def _record(*args, **kwargs):
+        published_object_ids.append(kwargs["track"].federation_object_id)
+
+    mock.side_effect = _record
+    mock.published_object_ids = published_object_ids
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", mock)
     return mock
 
 
@@ -328,11 +340,12 @@ def test_update_track_to_public_enqueues_publish(client, sample_tracks, regular_
     assert response.json()["visibility"] == "public"
 
     mock.assert_called_once()
-    call_track, call_artist, call_owner, call_config, call_object_id = mock.call_args[0]
-    assert str(call_track.id) == str(track.id)
-    assert str(call_artist.id) == str(track.artist_id)
-    assert str(call_owner.id) == str(regular_user.id)
-    assert call_config is client.app.state.config
+    call = mock.call_args.kwargs
+    assert str(call["track"].id) == str(track.id)
+    assert str(call["artist"].id) == str(track.artist_id)
+    assert str(call["owner"].id) == str(regular_user.id)
+    assert call["config"] is client.app.state.config
+    call_object_id = mock.published_object_ids[0]
     assert call_object_id
     uuid.UUID(call_object_id)  # validates the generated publication id
 
@@ -553,9 +566,8 @@ def test_admin_delete_public_track_enqueues_unpublish(client, sample_tracks, adm
 def test_public_private_public_uses_fresh_object_id(client, sample_tracks, regular_user, auth_headers, monkeypatch):
     """A track re-published after an unpublish gets a brand-new ActivityPub object id."""
     track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
-    publish_mock = MagicMock(return_value=0)
+    publish_mock = _patch_publish(monkeypatch)
     unpublish_mock = MagicMock(return_value=0)
-    monkeypatch.setattr("songhive.api.routes.tracks.publish_track_activity", publish_mock)
     monkeypatch.setattr("songhive.api.routes.tracks.unpublish_track_activity", unpublish_mock)
     headers = auth_headers(regular_user)
 
@@ -566,9 +578,9 @@ def test_public_private_public_uses_fresh_object_id(client, sample_tracks, regul
     assert publish_mock.call_count == 2
     assert unpublish_mock.call_count == 1
 
-    first_object_id = publish_mock.call_args_list[0][0][4]
+    first_object_id = publish_mock.published_object_ids[0]
     unpublish_object_id = unpublish_mock.call_args[0][4]
-    second_object_id = publish_mock.call_args_list[1][0][4]
+    second_object_id = publish_mock.published_object_ids[1]
 
     assert first_object_id == unpublish_object_id
     assert second_object_id
@@ -603,12 +615,12 @@ def test_publish_track_enqueues_activity_with_status(client, sample_tracks, regu
     assert data["object_id"] == f"{regular_user.actor_url}/objects/{track.federation_object_id}"
 
     mock.assert_called_once()
-    call_track, call_artist, call_owner, call_config, call_object_id = mock.call_args[0]
-    assert str(call_track.id) == str(track.id)
-    assert str(call_artist.id) == str(track.artist_id)
-    assert str(call_owner.id) == str(regular_user.id)
-    assert call_config is client.app.state.config
-    assert call_object_id == track.federation_object_id
+    call = mock.call_args.kwargs
+    assert str(call["track"].id) == str(track.id)
+    assert str(call["artist"].id) == str(track.artist_id)
+    assert str(call["owner"].id) == str(regular_user.id)
+    assert call["config"] is client.app.state.config
+    assert mock.published_object_ids[0] == track.federation_object_id
     assert mock.call_args.kwargs["status"] == "Now playing #demo"
 
 
@@ -651,8 +663,8 @@ def test_publish_track_mints_fresh_object_id(client, sample_tracks, regular_user
     assert second.status_code == 200
 
     assert mock.call_count == 2
-    first_id = mock.call_args_list[0][0][4]
-    second_id = mock.call_args_list[1][0][4]
+    first_id = mock.published_object_ids[0]
+    second_id = mock.published_object_ids[1]
     assert first_id != second_id
     assert second.json()["object_id"].endswith(f"/objects/{second_id}")
 

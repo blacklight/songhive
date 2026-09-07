@@ -37,9 +37,9 @@ from ...models.album import Album
 from ...models.external_track import ExternalTrack
 from ...models.stored_file import StoredFile
 from ...models.user import User
-from ...services import acl, audit, deletion, music
+from ...services import acl, activities, audit, deletion, music
 from ...services.auth import get_user_by_id
-from ...services.federation import ensure_user_actor, publish_track_activity, unpublish_track_activity
+from ...services.federation import ensure_user_actor, unpublish_track_activity
 from ...services.genres import (
     genres_to_hashtags,
     remove_genre_from_entity,
@@ -356,14 +356,14 @@ async def _handle_visibility_changes(
             if not track.federation_object_id:
                 track.federation_object_id = str(uuid.uuid4())
                 await db.commit()
-            background_tasks.add_task(
-                publish_track_activity,
-                track,
-                artist,
-                owner,
-                request.app.state.config,
-                track.federation_object_id,
+            await activities.record_track_publication(
+                db,
+                track=track,
+                artist=artist,
+                owner=owner,
+                config=request.app.state.config,
             )
+            await db.commit()
 
     if (
         previous_visibility == Visibility.PUBLIC.value
@@ -383,6 +383,7 @@ async def _handle_visibility_changes(
                 object_id,
             )
             track.federation_object_id = None
+            await activities.retract_track_publications(db, track, object_id=object_id)
             await db.commit()
 
 
@@ -1022,19 +1023,22 @@ async def enrich_track_route(
 async def publish_track(
     track_id: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     body: TrackPublishRequest = Body(default_factory=TrackPublishRequest),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
 ):
-    """Publish a public track to the owner's ActivityPub followers.
+    """
+    Publish a public track to the owner's ActivityPub followers.
 
-    Sends a fresh ``Create(Audio)`` activity for the track. The optional
-    ``status`` is a one-off post text used as the object's ``content`` instead
-    of the track's stored ``description``; it is never persisted. A new
-    ``federation_object_id`` is minted on every call so each publication is a
-    distinct remote object unaffected by earlier ``Tombstone`` deletions.
+    Records a ``create`` activity carrying a fresh ``Create(Audio)`` payload
+    for the track — making the share visible in the track's activity feed and
+    retractable via ``DELETE /api/v1/activities/{id}`` — and delivers it to
+    the owner's follower inboxes. The optional ``status`` is a one-off post
+    text used as the object's ``content`` instead of the track's stored
+    ``description``; it is never persisted. A new ``federation_object_id`` is
+    minted on every call so each publication is a distinct remote object
+    unaffected by earlier ``Tombstone`` deletions.
     """
     if not config.federation.enabled or not config.federation.instance_domain:
         raise HTTPException(
@@ -1072,19 +1076,17 @@ async def publish_track(
         details={"title": track.title, "status": status_text},
         ip_address=client_ip(request),
     )
+    await activities.record_track_publication(
+        db,
+        track=track,
+        artist=track.artist,
+        owner=current_user,
+        config=config,
+        status=status_text,
+    )
     await db.commit()
 
     object_id = f"{current_user.actor_url}/objects/{track.federation_object_id}"
-    background_tasks.add_task(
-        publish_track_activity,
-        track,
-        track.artist,
-        current_user,
-        config,
-        track.federation_object_id,
-        status=status_text,
-    )
-
     return TrackPublishResponse(track_id=track_id, enqueued=True, object_id=object_id)
 
 
