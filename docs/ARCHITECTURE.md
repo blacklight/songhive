@@ -490,8 +490,25 @@ inbox recorded as `sent` in `activity_targets`, signed with the activity
 owner's private key; remote activities are hard-deleted without fan-out.
 `get_activity_unpublish_info` returns the `ActivityUnpublishInfo`
 (activity id, `source_id`, `actor_url`, sent inboxes) used for that
-delivery, and `federation/activities.py` builds the tombstone payload via
-`create_tombstone_delete_activity`.
+delivery, and `federation/activities.py` builds the `Delete(Tombstone)`
+payload via `create_tombstone_delete_activity` — a thin adapter around
+`pubby.build_delete_activity` (0.3.2) that keeps a plain string `@context`.
+
+`GET /users/{username}/objects/{object_id}` in `api/routes/federation.py`
+is the dereference endpoint for federated objects. Public tracks still
+resolve through `Track.federation_object_id` to their `Audio` object; when
+no track matches, an `Activity` is resolved by `local_object_id` or
+`source_id`, scoped to the requested user (`owner_user_id`), so an object
+is only served under its owner's namespace. Soft-deleted activities answer
+with a `Tombstone` object (`federation/activities.build_tombstone_object`)
+whose shape mirrors the object embedded in `Delete(Tombstone)` deliveries.
+Live activities are only served when their visibility federates
+(`Visibility.federates`: `mentioned`, `followers`, `public`) —
+`private`/`local` objects were never distributed and answer 404.
+`federation/activities.build_activity_object` produces the document: the
+stored `payload` verbatim for payload-bearing activities (e.g. `Like`), or
+a synthesized `Note` carrying the rendered `content`, the
+`activity_audience`-derived `to`/`cc`, `Mention` tags, and `inReplyTo`.
 
 ### Genres
 

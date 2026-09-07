@@ -8,15 +8,17 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ...config.schema import SonghiveConfig
 from ...federation._common import get_actor_url, get_stream_url
+from ...federation.activities import build_activity_object, build_tombstone_object
 from ...federation.actors import get_federation_storage, user_to_actor_document
 from ...federation.serializers import track_to_audio_object
 from ...models._enums import Visibility
+from ...models.activity import Activity
 from ...models.track import Track
 from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor, extract_domain, is_domain_allowed
@@ -102,7 +104,18 @@ async def get_object(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Return a public track's ActivityPub Audio object."""
+    """
+    Return the ActivityPub document for a federated object.
+
+    Public tracks resolve through ``Track.federation_object_id`` to their
+    ``Audio`` object; activities resolve through ``Activity.local_object_id``
+    or ``Activity.source_id`` and are served as their stored payload (or a
+    synthesized ``Note`` when no payload was recorded). Soft-deleted
+    activities are served as ``Tombstone`` objects matching the shape
+    embedded in ``Delete(Tombstone)`` deliveries. Live activities are only
+    served for visibilities that federate — ``private`` and ``local``
+    objects never left the instance and answer 404.
+    """
     config = _federation_config(request)
     user = await _get_active_user(db, username)
     ensure_user_actor(user, config)
@@ -116,24 +129,51 @@ async def get_object(
         )
     )
     track = result.scalar_one_or_none()
-    if track is None or track.artist is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if track is not None:
+        if track.artist is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
-    actor_url = user.actor_url
-    object_url = f"{actor_url}/objects/{object_id}"
-    stream_url = get_stream_url(track, config.federation.instance_domain)
-    audio_object = track_to_audio_object(
-        track,
-        track.artist,
-        config.federation.instance_domain,
-        stream_url,
-        actor_url=actor_url,
-        ap_object_id=object_url,
+        actor_url = user.actor_url
+        object_url = f"{actor_url}/objects/{object_id}"
+        stream_url = get_stream_url(track, config.federation.instance_domain)
+        audio_object = track_to_audio_object(
+            track,
+            track.artist,
+            config.federation.instance_domain,
+            stream_url,
+            actor_url=actor_url,
+            ap_object_id=object_url,
+        )
+        if audio_object is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+        return JSONResponse(content=audio_object, media_type=ACTIVITY_JSON)
+
+    activity_result = await db.execute(
+        select(Activity).where(
+            or_(
+                Activity.local_object_id == object_id,
+                Activity.source_id == object_id,
+            ),
+            Activity.owner_user_id == str(user.id),
+        )
     )
-    if audio_object is None:
+    activity = activity_result.scalar_one_or_none()
+    if activity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
-    return JSONResponse(content=audio_object, media_type=ACTIVITY_JSON)
+    if activity.deleted_at is not None:
+        tombstone = {"@context": AP_CONTEXT, **build_tombstone_object(activity.source_id)}
+        return JSONResponse(content=tombstone, media_type=ACTIVITY_JSON)
+
+    try:
+        federates = Visibility.federates(Visibility(activity.visibility))
+    except ValueError:
+        federates = False
+    if not federates:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    return JSONResponse(content=build_activity_object(activity), media_type=ACTIVITY_JSON)
 
 
 @router.post("/users/{username}/inbox")
@@ -154,7 +194,7 @@ async def post_inbox(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON") from e
 
-    actor_ref = activity.get("actor", "") if isinstance(activity, dict) else ""
+    actor_ref: Any = activity.get("actor", "") if isinstance(activity, dict) else ""
     if isinstance(actor_ref, list) and actor_ref:
         actor_ref = actor_ref[0]
     if isinstance(actor_ref, dict):

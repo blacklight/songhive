@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `federation`: Extend `GET /users/{username}/objects/{object_id}` to
+  dereference activities in addition to tracks. Activities resolve by
+  `local_object_id`/`source_id` under their owner's namespace;
+  soft-deleted activities are served as `Tombstone` objects (the shared
+  `federation/activities.build_tombstone_object` shape, mirroring the
+  object embedded in `Delete` deliveries), live
+  payload-bearing activities return their stored AP document, and
+  payload-less content activities are served as a `Note` synthesized by
+  `federation/activities.build_activity_object`. Only federating
+  visibilities (`mentioned`/`followers`/`public`) are served.
 - `federation`: Add activity interactions — `POST
   /api/v1/activities/{id}/like` records an idempotent `like` activity that
   inherits the target's visibility, stores an ActivityPub `Like` payload
@@ -53,18 +63,19 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- `federation`: Delegate federation primitives to pubby 0.3.1 — domain
+- `federation`: Delegate federation primitives to pubby 0.3.2 — domain
   normalization and allow/block matching (`pubby.moderation`), async→sync
   database URL conversion (`pubby.storage.adapters.db.to_sync_url`), actor
   key provisioning (`pubby.crypto.ensure_private_key_file`), content and
   duration rendering (`pubby.content.set_object_content`,
   `pubby.content.format_duration`), follower inbox collection
   (`pubby.collect_inboxes`), one-shot signed delivery
-  (`pubby.deliver_activity`), `Like` payload building
-  (`pubby.build_like_activity`), and remote actor inbox resolution
-  (`pubby.resolve_actor_inbox`). Songhive keeps Celery orchestration, the
-  retry policy, per-user actor documents, `federation_*` table naming, and
-  the `Visibility`-to-audience adapter in `federation.activities`.
+  (`pubby.deliver_activity`), `Like` and `Delete(Tombstone)` payload
+  building (`pubby.build_like_activity`, `pubby.build_delete_activity`),
+  and remote actor inbox resolution (`pubby.resolve_actor_inbox`).
+  Songhive keeps Celery orchestration, the retry policy, per-user actor
+  documents, `federation_*` table naming, and the
+  `Visibility`-to-audience adapter in `federation.activities`.
 - `federation`: The instance-level `/ap` inbox and pubby's outbound fan-out
   now enforce the configured `allowed_instances`/`blocked_instances` lists.
 - `federation`: Federated `Audio` durations are now emitted as proper

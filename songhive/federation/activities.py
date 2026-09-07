@@ -6,10 +6,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Iterable, List, Optional, Tuple
 
-from pubby import build_like_activity
+from pubby import build_delete_activity, build_like_activity
 from pubby.content import format_duration
 
-from ..models._enums import Visibility
+from ..models import Visibility
+from ..models.activity import Activity
 from ..models.artist import Artist
 from ..models.track import Track
 from ._common import get_stream_url, get_track_url
@@ -161,6 +162,18 @@ def create_like_activity(
     )
 
 
+def build_tombstone_object(object_id: str) -> dict:
+    """
+    Return the ``Tombstone`` object marking ``object_id`` as deleted.
+
+    The shape mirrors the object embedded in the ``Delete`` activities built
+    by :func:`create_tombstone_delete_activity` (via
+    ``pubby.build_delete_activity``), so the document served by the object
+    route matches what remote instances were told to retract.
+    """
+    return {"id": object_id, "type": "Tombstone"}
+
+
 def create_tombstone_delete_activity(actor_url: str, object_id: str) -> dict:
     """
     Create a ``Delete`` activity whose object is a ``Tombstone`` for
@@ -168,22 +181,65 @@ def create_tombstone_delete_activity(actor_url: str, object_id: str) -> dict:
 
     This lets remote instances remove the cached object without blocking
     future re-publication with a different object id.
-    """
-    now = datetime.now(timezone.utc).isoformat()
 
-    return {
+    Thin Songhive adapter around ``pubby.build_delete_activity`` (0.3.2):
+    generic ``Delete(Tombstone)`` construction is delegated to Pubby while a
+    plain string ``@context`` is kept to match the other payloads built here.
+    """
+    return build_delete_activity(
+        actor_id=actor_url,
+        object_id=object_id,
+        context="https://www.w3.org/ns/activitystreams",
+    )
+
+
+def build_activity_object(activity: Activity) -> dict:
+    """
+    Build the dereferenceable ActivityPub document for a stored activity.
+
+    Payload-bearing activities (e.g. a ``Like`` built by
+    :func:`create_like_activity`) already carry their complete AP document in
+    ``activity.payload`` — it is returned as-is. Otherwise, a ``Note`` object
+    is synthesized from the activity's rendered content, the audience derived
+    from its visibility via :func:`activity_audience`, and its ``Mention``
+    tags, so the activity's ``source_id`` stays dereferenceable for remote
+    instances.
+
+    ``activity.mentions`` and ``activity.in_reply_to_activity`` are read
+    directly — both are ``selectin`` relationships and are expected to be
+    loaded by the caller's query.
+    """
+    if isinstance(activity.payload, dict):
+        return activity.payload
+
+    mention_actor_urls: List[str] = [m.actor_url for m in activity.mentions if m.actor_url]  # type: ignore
+    to, cc = activity_audience(activity.visibility, activity.source_actor, mention_actor_urls)
+
+    obj: dict = {
         "@context": "https://www.w3.org/ns/activitystreams",
-        "id": f"{actor_url}/activities/{uuid.uuid4()}",
-        "type": "Delete",
-        "actor": actor_url,
-        "published": now,
-        "to": [AS_PUBLIC],
-        "cc": [f"{actor_url}/followers"],
-        "object": {
-            "id": object_id,
-            "type": "Tombstone",
-        },
+        "id": activity.source_id,
+        "type": "Note",
+        "attributedTo": activity.source_actor,
+        "to": to,
+        "cc": cc,
     }
+
+    if activity.published_at is not None:
+        obj["published"] = activity.published_at.isoformat()
+    if activity.content:
+        obj["content"] = activity.content
+    if activity.in_reply_to_activity is not None:
+        obj["inReplyTo"] = activity.in_reply_to_activity.source_id
+
+    tags = [
+        {"type": "Mention", "href": mention.actor_url, "name": mention.handle}
+        for mention in activity.mentions
+        if mention.actor_url
+    ]
+    if tags:
+        obj["tag"] = tags
+
+    return obj
 
 
 def create_delete_activity(
