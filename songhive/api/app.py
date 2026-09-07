@@ -269,6 +269,8 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
             storage=storage,
             actor_config=actor_config,
             private_key_path=str(private_key_path),
+            allowed_instances=config.federation.allowed_instances,
+            blocked_instances=config.federation.blocked_instances,
         )
         bind_activitypub(app, handler, prefix="/ap")
         bind_mastodon_api(

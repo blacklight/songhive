@@ -687,11 +687,30 @@ Recursive deletion collects unpublish information for public tracks and enqueues
 
 Federation is powered by [pubby](https://github.com/blacklight/pubby) mounted
 on the FastAPI app via its FastAPI adapter. Per-user actor routes and WebFinger
-discovery are in `api/routes/federation.py`. Outbound plaintext→HTML rendering
-(escaping, URL linkification, `rel="tag"`/`rel="me"` anchors, `Hashtag` and
-`PropertyValue` tag/attachment builders) is delegated to `pubby.content`; the
-instance's `/hashtags/{name}` route convention is injected via
-`federation/_common.py`'s `get_hashtag_url`.
+discovery are in `api/routes/federation.py`. The general-purpose primitives are
+delegated to pubby:
+
+- Outbound plaintext→HTML rendering (escaping, URL linkification,
+  `rel="tag"`/`rel="me"` anchors, `Hashtag` and `PropertyValue`
+  tag/attachment builders) and `Audio` object content/duration formatting
+  (`set_object_content`, `format_duration`) come from `pubby.content`; the
+  instance's `/hashtags/{name}` route convention is injected via
+  `federation/_common.py`'s `get_hashtag_url`.
+- Instance allow/block matching (`normalize_domain`, `extract_domain`,
+  `is_domain_blocked`) comes from `pubby.moderation`; `services/federation.py`
+  keeps thin wrappers that inject `config.federation.allowed_instances` /
+  `blocked_instances`.
+- Async→sync database URL conversion for pubby's synchronous SQLAlchemy
+  storage is `pubby.storage.adapters.db.to_sync_url` (applied by
+  `init_db_storage` inside `create_activitypub_storage`).
+- Actor private-key provisioning is `pubby.crypto.ensure_private_key_file`.
+- Follower inbox collection is `pubby.collect_inboxes`; one-shot signed
+  delivery is `pubby.deliver_activity` (the Celery task keeps the retry
+  policy).
+
+Songhive keeps orchestration: Celery tasks and their retry policy, per-user
+actor documents built from the `User` model, `federation_*` table naming, and
+the HTTP routes.
 
 **Actor model:**
 
@@ -754,8 +773,18 @@ instance's `/hashtags/{name}` route convention is injected via
   actor via pubby's `ActorConfig` and mounts both ActivityPub and Mastodon API
   compatibility endpoints.
 
-**Domain allow/block lists** are checked in `services/federation.py`
-(`is_domain_allowed`) before processing incoming activities.
+**Domain allow/block lists** (`federation.allowed_instances` /
+`federation.blocked_instances`) are enforced at several seams:
+
+- `POST /users/{username}/inbox` in `api/routes/federation.py` rejects with
+  403 before queueing (`is_domain_allowed`).
+- `tasks/federation.py`'s `process_incoming` passes the lists to pubby's
+  `InboxProcessor`, which drops the activity before signature verification.
+- The instance-level `/ap/inbox` and pubby's outbound fan-out get the same
+  filtering via `allowed_instances`/`blocked_instances` on
+  `ActivityPubHandler` (`_setup_federation` in `api/app.py`).
+- `tasks/federation.py`'s `deliver_activity` drops outbound deliveries to
+  blocked domains before signing.
 
 ---
 

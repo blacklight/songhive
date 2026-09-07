@@ -43,7 +43,7 @@ def test_process_incoming_noops_when_federation_disabled(tmp_path, caplog):
 
 
 def test_process_incoming_skips_blocked_domain(tmp_path):
-    """The task drops activities from blocked or non-allowed domains."""
+    """The task forwards allow/block lists to InboxProcessor, which drops the activity."""
     config = _make_config(
         tmp_path,
         allowed_instances=["allowed.example"],
@@ -55,11 +55,14 @@ def test_process_incoming_skips_blocked_domain(tmp_path):
         patch("songhive.tasks.federation.load_config", return_value=config),
         patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
     ):
+        mock_processor.return_value.process.return_value = None
         result = process_incoming(activity)
 
     assert result is None
-    assert not mock_processor.called
-    assert not mock_storage.called
+    assert mock_storage.called
+    call_kwargs = mock_processor.call_args.kwargs
+    assert call_kwargs["allowed_instances"] == ["allowed.example"]
+    assert call_kwargs["blocked_instances"] == []
 
 
 def test_process_incoming_instance_actor(tmp_path):

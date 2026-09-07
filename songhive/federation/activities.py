@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Iterable, List, Optional, Tuple
 
+from pubby.content import format_duration
+
 from ..models._enums import Visibility
 from ..models.artist import Artist
 from ..models.track import Track
@@ -53,9 +55,7 @@ def create_audio_activity(
         set_audio_description(audio_object, description, domain)
 
     if duration is not None:
-        minutes = int(duration // 60)
-        seconds = int(duration % 60)
-        audio_object["duration"] = f"PT{minutes}M{seconds}S"
+        audio_object["duration"] = format_duration(duration)
 
     return {
         "@context": "https://www.w3.org/ns/activitystreams",

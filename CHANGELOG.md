@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- `federation`: Delegate federation primitives to pubby 0.3.0 — domain
+  normalization and allow/block matching (`pubby.moderation`), async→sync
+  database URL conversion (`pubby.storage.adapters.db.to_sync_url`), actor
+  key provisioning (`pubby.crypto.ensure_private_key_file`), content and
+  duration rendering (`pubby.content.set_object_content`,
+  `pubby.content.format_duration`), follower inbox collection
+  (`pubby.collect_inboxes`), and one-shot signed delivery
+  (`pubby.deliver_activity`). Songhive keeps Celery orchestration, the
+  retry policy, per-user actor documents, and `federation_*` table naming.
+- `federation`: The instance-level `/ap` inbox and pubby's outbound fan-out
+  now enforce the configured `allowed_instances`/`blocked_instances` lists.
+- `federation`: Federated `Audio` durations are now emitted as proper
+  ISO-8601 strings with hour support (e.g. `PT1H2M3S` for tracks ≥ 1 hour,
+  `PT2M` instead of `PT2M0S`).
+- `federation`: Outbound deliveries now send a `User-Agent: pubby/<version>`
+  header and also sign `Content-Length`; `Accept` is no longer sent.
+
 ## 0.0.15
 
 ### Added

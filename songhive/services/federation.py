@@ -9,9 +9,14 @@ thread when inside an async context.
 
 import logging
 from typing import Optional
-from urllib.parse import urlparse
 
+from pubby import collect_inboxes
 from pubby.crypto import export_private_key_pem, export_public_key_pem, generate_rsa_keypair
+from pubby.moderation import (
+    extract_domain as _pubby_extract_domain,
+    is_domain_blocked as _pubby_is_domain_blocked,
+    normalize_domain as _pubby_normalize_domain,
+)
 
 from ..config.schema import SonghiveConfig
 from ..federation._common import get_actor_url
@@ -26,24 +31,15 @@ def normalize_instance_domain(domain: str) -> str:
     """
     Normalize a domain for allow/block comparisons.
 
-    Strips URL schemes and paths, then lower-cases the hostname.
+    Strips URL schemes, paths, ports and credentials, then lower-cases the
+    hostname. Delegates to ``pubby.moderation``.
     """
-    if not domain:
-        return ""
-    value = domain.strip().lower()
-    if value.startswith(("http://", "https://")):
-        parsed = urlparse(value)
-        host = parsed.hostname or ""
-    else:
-        host = value.split("/")[0]
-    return host.strip()
+    return _pubby_normalize_domain(domain)
 
 
 def extract_domain(url_or_actor: str) -> str:
     """Extract a normalized domain from an actor URL or other HTTP(S) value."""
-    if not url_or_actor:
-        return ""
-    return normalize_instance_domain(url_or_actor)
+    return _pubby_extract_domain(url_or_actor)
 
 
 def is_domain_blocked(domain: str, config: SonghiveConfig) -> bool:
@@ -53,19 +49,15 @@ def is_domain_blocked(domain: str, config: SonghiveConfig) -> bool:
     - Empty allow-list means allow all (except explicit blocks).
     - Blocked domains take precedence over allowed domains.
     - Comparisons are case-insensitive and ignore URL schemes/paths.
+
+    Delegates to ``pubby.moderation.is_domain_blocked`` with the configured
+    allow/block lists.
     """
-    normalized = normalize_instance_domain(domain)
-    if not normalized:
-        return False
-
-    allowed = {normalize_instance_domain(d) for d in config.federation.allowed_instances}
-    blocked = {normalize_instance_domain(d) for d in config.federation.blocked_instances}
-
-    if normalized in blocked:
-        return True
-    if allowed and normalized not in allowed:
-        return True
-    return False
+    return _pubby_is_domain_blocked(
+        domain,
+        allowed=config.federation.allowed_instances,
+        blocked=config.federation.blocked_instances,
+    )
 
 
 def is_domain_allowed(domain: str, config: SonghiveConfig) -> bool:
@@ -110,20 +102,7 @@ def get_follower_inboxes(actor_url: str, database_url: str) -> list[str]:
     Reads pubby's follower storage, prefers shared inboxes, and deduplicates.
     """
     storage = create_activitypub_storage(database_url)
-    followers = storage.get_followers(actor_id=actor_url)
-
-    seen: set[str] = set()
-    inboxes: list[str] = []
-    for follower in followers:
-        inbox = follower.shared_inbox or follower.inbox
-        if not inbox:
-            continue
-        if inbox in seen:
-            continue
-        seen.add(inbox)
-        inboxes.append(inbox)
-
-    return inboxes
+    return collect_inboxes(storage.get_followers(actor_id=actor_url))
 
 
 def publish_track_activity(

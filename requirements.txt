@@ -32,7 +32,7 @@ mutagen>=1.47
 musicbrainzngs>=0.7.1
 
 # Federation
-pubby>=0.2.23
+pubby>=0.3.0
 
 # Config
 tomli>=2.0; python_version < "3.11"

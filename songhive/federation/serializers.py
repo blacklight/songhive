@@ -5,7 +5,7 @@ Serializers: convert internal models to ActivityPub objects.
 from functools import partial
 from typing import Optional
 
-from pubby.content import build_hashtag_tags, render_post_html
+from pubby.content import build_hashtag_tags, format_duration, set_object_content
 from sqlalchemy import inspect as sa_inspect
 
 from ..models._enums import Visibility
@@ -23,18 +23,7 @@ def set_audio_description(obj: dict, description: Optional[str], domain: str) ->
     linkified so remote servers render them as usable links.  Hashtags found
     in the text are also appended to the object's ``tag`` list.
     """
-    if not description or not description.strip():
-        return
-    hashtag_url = partial(get_hashtag_url, domain)
-    rendered = render_post_html(description, hashtag_url)
-    if rendered.html:
-        obj["content"] = rendered.html
-    if not rendered.hashtags:
-        return
-    tags = obj.setdefault("tag", [])
-    seen = {tag.get("name") for tag in tags}
-    new_names = [name for name in rendered.hashtags if f"#{name}" not in seen]
-    tags.extend(build_hashtag_tags(new_names, hashtag_url))
+    set_object_content(obj, description or "", partial(get_hashtag_url, domain))
 
 
 def track_to_audio_object(
@@ -95,9 +84,7 @@ def track_to_audio_object(
         obj["attributedTo"] = artist_url
 
     if track.duration:
-        minutes = int(track.duration // 60)
-        seconds = int(track.duration % 60)
-        obj["duration"] = f"PT{minutes}M{seconds}S"
+        obj["duration"] = format_duration(track.duration)
 
     if track.genre:
         genre_names = extract_genres_from_track(track)

@@ -109,7 +109,7 @@ def test_track_to_audio_object():
     assert obj is not None
     assert obj["type"] == "Audio"
     assert obj["name"] == "TestTrack"
-    assert obj["duration"] == "PT2M0S"
+    assert obj["duration"] == "PT2M"
     assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"}]
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
@@ -349,6 +349,51 @@ def test_federation_app_setup(tmp_path):
         # A second create_app call should reuse the existing persisted key.
         assert key_path.exists()
         assert key_path.stat().st_size > 0
+
+
+def test_federation_app_inbox_drops_blocked_domain(tmp_path):
+    """The instance /ap/inbox silently drops activities from blocked domains."""
+    from fastapi.testclient import TestClient
+
+    from songhive.api.app import create_app
+    from songhive.config.schema import SonghiveConfig
+
+    config = SonghiveConfig(
+        database={"url": f"sqlite+aiosqlite:///{tmp_path / 'songhive.db'}"},
+        federation={
+            "enabled": True,
+            "instance_domain": "music.example.com",
+            "instance_name": "Songhive",
+            "private_key_path": tmp_path / "actor.pem",
+            "blocked_instances": ["evil.example"],
+        },
+    )
+
+    app = create_app(config)
+
+    with TestClient(app) as client:
+        # Blocked actors are dropped before signature verification.
+        blocked = client.post(
+            "/ap/inbox",
+            json={
+                "type": "Follow",
+                "actor": "https://evil.example/users/bob",
+                "object": "https://music.example.com/ap/actor",
+            },
+        )
+        assert blocked.status_code == 202
+
+        # Non-blocked actors reach signature verification and are rejected
+        # for the missing Signature header instead.
+        allowed = client.post(
+            "/ap/inbox",
+            json={
+                "type": "Follow",
+                "actor": "https://friend.example/users/carol",
+                "object": "https://music.example.com/ap/actor",
+            },
+        )
+        assert allowed.status_code == 401
 
 
 def test_user_to_actor_document_includes_avatar_and_links():
@@ -815,10 +860,10 @@ def _patch_process_incoming(monkeypatch, config=None):
     """Apply common monkeypatches for process_incoming tests."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: config or _fed_config())
     monkeypatch.setattr(
-        "songhive.federation.storage.get_or_create_private_key",
+        "songhive.tasks.federation.get_or_create_private_key",
         lambda *a, **k: MagicMock(read_text=lambda *a, **k: "pem"),
     )
-    monkeypatch.setattr("songhive.federation.actors.get_federation_storage", lambda *a, **k: MagicMock())
+    monkeypatch.setattr("songhive.tasks.federation.get_federation_storage", lambda *a, **k: MagicMock())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda *a, **k: "private_key")
     monkeypatch.setattr("songhive.tasks.federation.init_db", lambda *a, **k: None)
 
@@ -919,13 +964,11 @@ def test_deliver_activity_blocked_domain(monkeypatch):
 
 
 def test_deliver_activity_success(monkeypatch):
-    """deliver_activity posts signed requests and returns a serializable result."""
+    """deliver_activity delegates the signed POST to pubby and returns the status."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
-    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={"Signature": "sig"}))
-
-    response = MagicMock(status_code=200)
-    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(return_value=response))
+    pubby_deliver = MagicMock(return_value=200)
+    monkeypatch.setattr("songhive.tasks.federation.pubby_deliver_activity", pubby_deliver)
 
     self = _deliver_self()
     result = deliver_activity.run.__func__(
@@ -936,6 +979,13 @@ def test_deliver_activity_success(monkeypatch):
         "pem",
     )
     assert result == {"status_code": 200}
+    pubby_deliver.assert_called_once_with(
+        {"type": "Create"},
+        "https://example.com/inbox",
+        key_id="https://music.example.com/actor#main-key",
+        private_key="private_key",
+        timeout=15.0,
+    )
 
 
 def test_deliver_activity_request_exception_retries(monkeypatch):
@@ -944,10 +994,10 @@ def test_deliver_activity_request_exception_retries(monkeypatch):
 
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
-    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={}))
-
-    exc = RequestException("network down")
-    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(side_effect=exc))
+    monkeypatch.setattr(
+        "songhive.tasks.federation.pubby_deliver_activity",
+        MagicMock(side_effect=RequestException("network down")),
+    )
 
     self = _deliver_self(retries=1)
     with pytest.raises(Retry):
@@ -960,10 +1010,7 @@ def test_deliver_activity_5xx_retries(monkeypatch):
     """deliver_activity retries on 5xx responses."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
-    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={}))
-
-    response = MagicMock(status_code=503)
-    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(return_value=response))
+    monkeypatch.setattr("songhive.tasks.federation.pubby_deliver_activity", MagicMock(return_value=503))
 
     self = _deliver_self(retries=0)
     with pytest.raises(Retry):
@@ -976,10 +1023,7 @@ def test_deliver_activity_4xx_gives_up(monkeypatch):
     """deliver_activity gives up on non-retryable 4xx responses."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
-    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={}))
-
-    response = MagicMock(status_code=400)
-    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(return_value=response))
+    monkeypatch.setattr("songhive.tasks.federation.pubby_deliver_activity", MagicMock(return_value=400))
 
     self = _deliver_self()
     assert deliver_activity.run.__func__(self, {"type": "Create"}, "https://example.com/inbox", "key", "pem") is None
