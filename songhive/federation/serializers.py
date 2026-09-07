@@ -2,10 +2,17 @@
 Serializers: convert internal models to ActivityPub objects.
 """
 
+import html
 from functools import partial
 from typing import Optional
 
-from pubby.content import build_hashtag_tags, format_duration, set_object_content
+from pubby.content import (
+    build_hashtag_tags,
+    format_duration,
+    is_linkable_url,
+    render_link_anchor,
+    set_object_content,
+)
 from sqlalchemy import inspect as sa_inspect
 
 from ..models._enums import Visibility
@@ -90,10 +97,19 @@ def track_to_audio_object(
 
     media_type = track.audio_mime_type or audio_file_content_type or "audio/mpeg"
 
+    # Mastodon-family servers render ``Audio`` (a "converted" object type)
+    # as ``<h2>{name}</h2>`` + ``summary`` + the object ``url``,
+    # interpolating ``name`` into the markup unescaped: emitting an anchor
+    # turns the post header into an "{artist} - {title}" link to the track
+    # page.  The label and href are escaped; ``name`` falls back to escaped
+    # plain text if the URL is not linkable.
+    title_label = f"{artist.name} - {track.title}"
+    name = render_link_anchor(track_url, label=title_label) if is_linkable_url(track_url) else html.escape(title_label)
+
     obj = {
         "type": "Audio",
         "id": object_id,
-        "name": track.title,
+        "name": name,
         # ``mimeType`` mirrors ``mediaType``: Mastodon's url_to_href reads the
         # non-standard ``mimeType`` key and falls back to "text/html" per link,
         # so without it the audio download URL would be picked for display

@@ -85,7 +85,9 @@ def test_create_audio_activity():
     assert activity is not None
     assert activity["type"] == "Create"
     assert activity["object"]["type"] == "Audio"
-    assert activity["object"]["name"] == "My Song"
+    # ``name`` carries an "{artist} - {title}" anchor to the track page so
+    # Mastodon-family servers render the post header as a link.
+    assert activity["object"]["name"] == '<a href="https://music.example.com/tracks/track-123">TestArtist - My Song</a>'
     assert activity["object"]["content"] == "A great track"
     assert activity["object"]["summary"] == "A great track"
     assert "PT3M15S" in activity["object"]["duration"]
@@ -112,7 +114,7 @@ def test_track_to_audio_object():
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
     assert obj["type"] == "Audio"
-    assert obj["name"] == "TestTrack"
+    assert obj["name"] == '<a href="https://music.example.com/tracks/track-1">TestArtist - TestTrack</a>'
     assert obj["duration"] == "PT2M"
     # ``mimeType`` mirrors ``mediaType`` so Mastodon's ``url_to_href`` selects
     # the ``text/html`` track page for display instead of the audio download.

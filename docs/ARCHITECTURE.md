@@ -867,7 +867,12 @@ the HTTP routes.
   additionally mirrored into `summary` (`mirror_content_to_summary`):
   Mastodon-family servers treat `Audio` as a "converted" object type and
   render `name`/`summary`/`url` rather than `content`, so the post text
-  would otherwise be dropped there. The `url` links also mirror `mediaType`
+  would otherwise be dropped there. The object's `name` is emitted as an
+  anchor — `<a href="{track_url}">{artist} - {title}</a>` — because those
+  servers interpolate `name` unescaped into the post's `<h2>` header,
+  turning the header into a link to the track page (it falls back to
+  escaped plain text if the track URL is not linkable). The `url` links
+  also mirror `mediaType`
   into `mimeType` — Mastodon's link selection reads the non-standard
   `mimeType` key and defaults untyped links to `text/html`, so without it
   the raw audio download URL would be chosen for display instead of the
