@@ -16,7 +16,9 @@ from ...models.activity import Activity
 from ...models.user import User
 from ...services import acl
 from ...services import activities as activity_service
+from ...services import audit
 from ...services.federation import ensure_user_actor
+from .._common import client_ip
 from ..deps import get_config, get_current_user, get_current_user_optional, get_db
 
 logger = logging.getLogger(__name__)
@@ -135,7 +137,7 @@ def _build_activity_response(activity: Activity, profile: Optional[activity_serv
     return response
 
 
-@router.patch("/{activity_id}")
+@router.patch("/{activity_id}", response_model=ActivityResponse)
 async def update_activity(
     activity_id: str,
     body: ActivityUpdate,
@@ -162,6 +164,7 @@ async def update_activity(
         )
 
     config = get_config(request)
+    old_visibility = activity.visibility
     if body.content is not None:
         await activity_service.update_activity(db, activity, content_source=body.content, config=config)
     if body.visibility is not None:
@@ -178,13 +181,32 @@ async def update_activity(
             # fail the edit itself.
             logger.exception("Failed to fan out update for activity %s: %s: %s", activity_id, type(e), e)
 
+    details: dict = {"entity_type": activity.entity_type, "entity_id": activity.entity_id}
+    if body.visibility is not None:
+        details["visibility"] = {"old": old_visibility, "new": activity.visibility}
+    if body.content is not None:
+        details["content_changed"] = True
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="activity.update",
+        target_type="activity",
+        target_id=str(activity.id),
+        details=details,
+        ip_address=client_ip(request),
+    )
+
+    await db.refresh(activity, ["mentions"])
+    profile_map = await activity_service.resolve_source_actor_profiles(db, [activity], config)
     await db.commit()
-    return {"status": "ok"}
+    return _build_activity_response(activity, profile_map.get(str(activity.id), activity_service.ActorProfile()))
 
 
 @router.delete("/{activity_id}")
 async def delete_activity(
     activity_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -205,6 +227,19 @@ async def delete_activity(
         )
 
     await activity_service.retract_activity(db, activity)
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="activity.delete",
+        target_type="activity",
+        target_id=str(activity.id),
+        details={
+            "entity_type": activity.entity_type,
+            "entity_id": activity.entity_id,
+            "visibility": activity.visibility,
+        },
+        ip_address=client_ip(request),
+    )
     await db.commit()
     return {"status": "ok"}
 
@@ -230,6 +265,19 @@ async def like_activity(
     config = get_config(request)
     ensure_user_actor(current_user, config)
     like = await activity_service.like_activity(db, activity=activity, author=current_user)
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="activity.like",
+        target_type="activity",
+        target_id=str(activity.id),
+        details={
+            "entity_type": activity.entity_type,
+            "entity_id": activity.entity_id,
+            "visibility": activity.visibility,
+        },
+        ip_address=client_ip(request),
+    )
     await db.commit()
 
     if config.federation.enabled and current_user.private_key_pem:

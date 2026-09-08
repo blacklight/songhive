@@ -134,15 +134,9 @@ export const useActivitiesStore = defineStore("activities", () => {
     activityId: string,
     body: ActivityUpdate,
   ): Promise<void> {
-    await updateActivityApi(activityId, body);
+    const updated = await updateActivityApi(activityId, body);
     const index = items.value.findIndex((a) => a.id === activityId);
     if (index === -1) return;
-    const updated = { ...items.value[index] };
-    if (body.content !== undefined && body.content !== null) {
-      updated.content = body.content;
-      updated.content_source = body.content;
-    }
-    if (body.visibility) updated.visibility = body.visibility;
     items.value.splice(index, 1, updated);
   }
 

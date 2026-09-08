@@ -542,7 +542,13 @@ class VisibilityRules:
         if isinstance(payload, dict):
             from ..federation.activities import activity_audience
 
-            mention_actor_urls = [m.actor_url for m in activity.mentions if m.actor_url]
+            mention_rows = await session.execute(
+                select(ActivityMention.actor_url).where(
+                    ActivityMention.activity_id == activity.id,
+                    ActivityMention.actor_url.is_not(None),
+                )
+            )
+            mention_actor_urls: List[str] = [url for url in mention_rows.scalars().all() if url]
             to, cc = activity_audience(new_value, activity.source_actor, mention_actor_urls)
             payload["to"] = to
             payload["cc"] = cc
@@ -700,6 +706,7 @@ async def update_activity(
         flag_modified(activity, "payload")
 
     await session.flush()
+    await session.refresh(activity, ["mentions"])
     return activity
 
 
@@ -1322,16 +1329,23 @@ async def sync_track_publications(
             set_audio_description(rebuilt, activity.content_source, domain)
         # Re-apply the activity's current audience (visibility may have
         # changed since publication) and re-attach its Mention tags.
-        mention_actor_urls = [m.actor_url for m in activity.mentions if m.actor_url]
+        mention_rows = await session.execute(
+            select(ActivityMention).where(
+                ActivityMention.activity_id == activity.id,
+                ActivityMention.actor_url.is_not(None),
+            )
+        )
+        mentions = list(mention_rows.scalars().all())
+        mention_actor_urls = [m.actor_url for m in mentions if m.actor_url]
         to, cc = activity_audience(activity.visibility, activity.source_actor, mention_actor_urls)
         rebuilt["to"] = to
         rebuilt["cc"] = cc
         payload["to"] = to
         payload["cc"] = cc
-        if activity.mentions:
+        if mentions:
             tags = rebuilt.setdefault("tag", [])
             seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
-            for mention in activity.mentions:
+            for mention in mentions:
                 if mention.actor_url and mention.handle.lower() not in seen:
                     tags.append({"type": "Mention", "href": mention.actor_url, "name": mention.handle})
                     seen.add(mention.handle.lower())

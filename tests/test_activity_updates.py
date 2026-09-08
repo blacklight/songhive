@@ -306,7 +306,11 @@ async def test_update_endpoint_content(client, db_session, regular_user, other_u
     )
 
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    body = resp.json()
+    assert body["id"] == str(activity.id)
+    assert body["content_source"] == "hi @other"
+    assert 'href="https://local.example/users/other"' in body["content"]
+    assert body["mentions"][0]["handle"] == "@other"
     assert activity.content_source == "hi @other"
     assert 'href="https://local.example/users/other"' in activity.content
     mentions = await _mention_rows(db_session, activity.id)
@@ -328,6 +332,9 @@ async def test_update_endpoint_visibility(client, db_session, regular_user, auth
     )
 
     assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == str(activity.id)
+    assert body["visibility"] == Visibility.LOCAL.value
     assert activity.visibility == Visibility.LOCAL.value
 
 
@@ -366,6 +373,9 @@ async def test_update_endpoint_admin(client, db_session, admin_user, other_user,
         headers=auth_headers(admin_user),
     )
     assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == str(activity.id)
+    assert body["content_source"] == "moderated"
     assert activity.content_source == "moderated"
 
 
@@ -384,6 +394,63 @@ async def test_update_endpoint_retracted(client, db_session, regular_user, auth_
         headers=auth_headers(regular_user),
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_endpoint_content_and_visibility(
+    client, db_session, regular_user, other_user, auth_headers, monkeypatch
+):
+    """PATCH with both content and visibility on a payload-bearing activity
+    persists both changes and does not crash on the mention relationship."""
+    config = client.app.state.config
+    config.federation.enabled = True
+    config.federation.instance_domain = "local.example"
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        source_actor=regular_user.actor_url,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "object": {
+                "id": "https://local.example/users/regular/objects/1",
+                "type": "Audio",
+                "name": "Test Track",
+            },
+        },
+    )
+    activity.mentions.append(
+        ActivityMention(
+            handle="@other",
+            user_id=other_user.id,
+            actor_url="https://local.example/users/other",
+        )
+    )
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    await db_session.flush()
+
+    _patch_resolution(monkeypatch)
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    resp = client.patch(
+        f"/api/v1/activities/{activity.id}",
+        json={"content": "hi @other", "visibility": "local"},
+        headers=auth_headers(regular_user),
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == str(activity.id)
+    assert body["visibility"] == Visibility.LOCAL.value
+    assert body["content_source"] == "hi @other"
+    assert 'href="https://local.example/users/other"' in body["content"]
+    assert activity.visibility == Visibility.LOCAL.value
+    assert 'href="https://local.example/users/other"' in activity.content
+    assert deliver.delay.called
 
 
 # ---------------------------------------------------------------------------

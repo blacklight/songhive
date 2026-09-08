@@ -101,7 +101,12 @@ describe("useActivitiesStore", () => {
   });
 
   it("update patches the activity and updates the cached item", async () => {
-    updateActivity.mockResolvedValue({ status: "ok" });
+    updateActivity.mockResolvedValue({
+      ...createActivity("a1"),
+      content: "edited",
+      content_source: "edited",
+      visibility: "followers",
+    });
     listEntityActivities.mockResolvedValueOnce({
       activities: [createActivity("a1")],
       next_cursor: null,

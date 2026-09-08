@@ -77,8 +77,8 @@ export function listEntityActivities(
 export function updateActivity(
   activityId: string,
   body: ActivityUpdate,
-): Promise<{ status: string }> {
-  return apiRequest<{ status: string }>(`/activities/${activityId}`, {
+): Promise<ActivityResponse> {
+  return apiRequest<ActivityResponse>(`/activities/${activityId}`, {
     method: "PATCH",
     body,
   });
