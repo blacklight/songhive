@@ -304,4 +304,16 @@ async function remove() {
   display: flex;
   gap: var(--space-2);
 }
+
+:deep(.activity-card__content a) {
+  color: var(--color-text-link);
+}
+
+:deep(.activity-card__content a:visited) {
+  color: var(--color-text-link);
+}
+
+a:hover {
+  color: var(--color-text-hover);
+}
 </style>

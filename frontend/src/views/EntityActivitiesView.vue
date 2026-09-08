@@ -52,7 +52,7 @@ const entityLabel = computed(() =>
 .entity-activities-view__back {
   display: inline-flex;
   align-items: center;
-  color: var(--color-accent-contrast);
+  color: var(--color-text-secondary);
   text-decoration: none;
 }
 

@@ -14,6 +14,7 @@
   --color-text-secondary: #374151;
   --color-text-muted: #6b7280;
   --color-text-hover: #1f2937;
+  --color-text-link: #a89038;
   --color-text-menu: #f9fafb;
   --color-surface-media-backfill: #081227;
   --color-border: #d1d5db;
@@ -79,6 +80,7 @@
   --color-text-secondary: #d1d5db;
   --color-text-muted: #9ca3af;
   --color-text-hover: #f3f4f6;
+  --color-text-link: #bfbf53;
   --color-text-menu: #f9fafb;
   --color-border: #4b5563;
   --color-accent: var(--accent);

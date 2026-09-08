@@ -396,7 +396,7 @@ const loginItem = {
 }
 
 .app-layout__user:hover {
-  background-color: var(--color-surface-hover);
+  background-color: var(--color-accent);
 }
 
 .app-layout__user-name {

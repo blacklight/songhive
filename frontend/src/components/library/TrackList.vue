@@ -2052,10 +2052,6 @@ async function onMenuSelect(key: string) {
   font: inherit;
 }
 
-.track-list__compact-title:hover {
-  color: var(--color-accent-contrast);
-}
-
 .track-list__compact-artist {
   color: var(--color-text-muted);
   font-size: 0.875rem;
@@ -2095,8 +2091,19 @@ a.track-list__compact-artist:hover {
   background-color: var(--color-surface-raised);
 }
 
-.track-list__compact-item--current:hover {
-  background-color: var(--color-surface-raised);
+.track-list__compact-item--current:hover,
+:deep(.track-list__row--current:hover) {
+  background-color: var(--color-surface-hover) !important;
+}
+
+.track-list__compact-item--current *,
+:deep(.track-list__row--current *) {
+  color: var(--color-accent-contrast) !important;
+}
+
+.track-list__compact-item--current:hover *,
+:deep(.track-list__row--current:hover *) {
+  color: var(--color-text-hover) !important;
 }
 
 .track-list

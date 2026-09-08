@@ -490,7 +490,7 @@ watch(
 }
 
 .track-view__link {
-  color: var(--color-accent-contrast);
+  color: var(--color-text-link);
   text-decoration: none;
 }
 

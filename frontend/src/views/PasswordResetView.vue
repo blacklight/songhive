@@ -127,6 +127,6 @@ async function onSubmit() {
 .password-reset-view__back {
   font-size: 0.875rem;
   text-align: center;
-  color: var(--color-accent-contrast);
+  color: var(--color-text-secondary);
 }
 </style>

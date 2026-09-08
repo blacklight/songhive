@@ -96,6 +96,6 @@ onMounted(async () => {
 }
 
 .verify-email-view__link {
-  color: var(--color-accent-contrast);
+  color: var(--color-text-link);
 }
 </style>
