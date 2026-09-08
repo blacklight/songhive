@@ -113,13 +113,13 @@ describe("ActivityCard", () => {
     expect(content.text()).toContain("hi");
   });
 
-  it("shows like and edit actions for the authenticated owner", () => {
+  it("shows like edit and copy URL actions for the authenticated owner", () => {
     setAuthenticated("user-1");
     const wrapper = mount(ActivityCard, {
       props: { activity: createActivity() },
     });
     const buttons = wrapper.findAll(".activity-card__actions button");
-    expect(buttons.length).toBe(3);
+    expect(buttons.length).toBe(4);
   });
 
   it("hides actions for anonymous users", () => {
@@ -135,7 +135,7 @@ describe("ActivityCard", () => {
       props: { activity: createActivity() },
     });
     const buttons = wrapper.findAll(".activity-card__actions button");
-    expect(buttons.length).toBe(1);
+    expect(buttons.length).toBe(2);
     expect(buttons[0].text()).toContain("Like");
   });
 
@@ -163,7 +163,7 @@ describe("ActivityCard", () => {
     });
     const deleteButton = wrapper
       .findAll(".activity-card__actions button")
-      .at(-1)!;
+      .at(-2)!;
     await deleteButton.trigger("click");
     expect(confirmStore.state?.open).toBe(true);
     confirmStore.confirm();

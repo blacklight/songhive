@@ -152,6 +152,18 @@ async function remove() {
     });
   }
 }
+
+async function copyUrl() {
+  try {
+    await navigator.clipboard.writeText(props.activity.source_id);
+    toast.push({ type: "success", message: t("activities.copyUrl.done") });
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: getApiErrorMessage(err) || t("activities.copyUrl.error"),
+    });
+  }
+}
 </script>
 
 <template>
@@ -225,6 +237,14 @@ async function remove() {
         :title="t('common.delete')"
         :aria-label="t('common.delete')"
         @click="remove"
+      />
+      <AppButton
+        variant="ghost"
+        size="sm"
+        icon="clipboard"
+        :title="t('browse.share.copyUrl')"
+        :aria-label="t('browse.share.copyUrl')"
+        @click="copyUrl"
       />
     </footer>
 
