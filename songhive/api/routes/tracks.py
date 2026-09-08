@@ -134,6 +134,7 @@ class TrackPublishRequest(BaseModel):
     """Request body for manually publishing a track to ActivityPub."""
 
     status: Optional[str] = None
+    visibility: Optional[Visibility] = None
 
 
 class TrackPublishResponse(BaseModel):
@@ -1052,11 +1053,15 @@ async def publish_track(
     Records a ``create`` activity carrying a fresh ``Create(Audio)`` payload
     for the track — making the share visible in the track's activity feed and
     retractable via ``DELETE /api/v1/activities/{id}`` — and delivers it to
-    the owner's follower inboxes. The optional ``status`` is a one-off post
-    text used as the object's ``content`` instead of the track's stored
-    ``description``; it is never persisted. A new ``federation_object_id`` is
-    minted on every call so each publication is a distinct remote object
-    unaffected by earlier ``Tombstone`` deletions.
+    the inboxes its audience resolves to. The optional ``status`` is a
+    one-off post text used as the object's ``content`` instead of the track's
+    stored ``description``; it is never persisted. ``visibility`` selects the
+    post's audience (``public`` by default): ``public`` and ``followers``
+    reach the owner's follower inboxes plus remote mentioned actors,
+    ``mentioned`` reaches only the mentioned actors, and
+    ``private``/``local`` record the activity without federating it. A new
+    ``federation_object_id`` is minted on every call so each publication is a
+    distinct remote object unaffected by earlier ``Tombstone`` deletions.
     """
     if not config.federation.enabled or not config.federation.instance_domain:
         raise HTTPException(
@@ -1081,6 +1086,7 @@ async def publish_track(
         )
 
     status_text = (body.status or "").strip() or None
+    publish_visibility = body.visibility or Visibility.PUBLIC
 
     ensure_user_actor(current_user, config)
     track.federation_object_id = str(uuid.uuid4())
@@ -1091,7 +1097,11 @@ async def publish_track(
         action="track.publish",
         target_type="track",
         target_id=track_id,
-        details={"title": track.title, "status": status_text},
+        details={
+            "title": track.title,
+            "status": status_text,
+            "visibility": publish_visibility.value,
+        },
         ip_address=client_ip(request),
     )
     await activities.record_track_publication(
@@ -1101,6 +1111,7 @@ async def publish_track(
         owner=current_user,
         config=config,
         status=status_text,
+        visibility=publish_visibility,
     )
     await db.commit()
 

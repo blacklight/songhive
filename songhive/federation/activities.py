@@ -28,6 +28,8 @@ def create_audio_activity(
     description: Optional[str] = None,
     duration: Optional[float] = None,
     ap_object_id: Optional[str] = None,
+    visibility: "Visibility | str" = Visibility.PUBLIC,
+    mention_actor_urls: Iterable[str] = (),
 ) -> Optional[dict]:
     """
     Create a Create(Audio) activity for publishing a track.
@@ -37,6 +39,12 @@ def create_audio_activity(
     as a ``Document`` attachment. The object's ``content`` is rendered from
     the track's ``description`` (escaped HTML with linkified URLs and
     hashtags); ``description`` overrides it when provided.
+
+    ``visibility`` selects the post's audience: the ``to``/``cc`` addressing
+    derived by :func:`activity_audience` is applied to both the ``Create``
+    envelope and the embedded ``Audio`` object (remote servers read the
+    object's audience to scope it), so a ``followers`` or ``mentioned``
+    publication does not look public when dereferenced or re-delivered.
     """
     if track.visibility != Visibility.PUBLIC.value:
         return None
@@ -59,13 +67,17 @@ def create_audio_activity(
     if duration is not None:
         audio_object["duration"] = format_duration(duration)
 
+    to, cc = activity_audience(visibility, actor_url, mention_actor_urls)
+    audio_object["to"] = to
+    audio_object["cc"] = cc
+
     return {
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Create",
         "actor": actor_url,
         "object": audio_object,
-        "to": [AS_PUBLIC],
-        "cc": [f"{actor_url}/followers"],
+        "to": to,
+        "cc": cc,
     }
 
 

@@ -57,6 +57,7 @@ class ActivityResponse(BaseModel):
     local_object_id: Optional[str] = None
     owner_user_id: Optional[str] = None
     source_actor_avatar_url: Optional[str] = None
+    source_actor_display_name: Optional[str] = None
     visibility: Visibility
     in_reply_to_activity_id: Optional[str] = None
     content: Optional[str] = None
@@ -85,7 +86,8 @@ async def list_entity_activities(
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
 ):
-    """List the activities attached to an entity, newest first.
+    """
+    List the activities attached to an entity, newest first.
 
     Anonymous requesters see only ``public`` activities on publicly
     accessible entities; authenticated users additionally see ``local`` and
@@ -116,17 +118,20 @@ async def list_entity_activities(
         cursor=cursor,
         limit=limit,
     )
-    avatar_map = await activity_service.resolve_source_actor_avatars(db, activities, config)
+    profile_map = await activity_service.resolve_source_actor_profiles(db, activities, config)
     return ActivityListResponse(
-        activities=[_build_activity_response(a, avatar_map.get(str(a.id))) for a in activities],
+        activities=[
+            _build_activity_response(a, profile_map.get(str(a.id), activity_service.ActorProfile())) for a in activities
+        ],
         next_cursor=next_cursor,
     )
 
 
-def _build_activity_response(activity: Activity, avatar_url: Optional[str]) -> ActivityResponse:
-    """Build an ``ActivityResponse`` with the resolved source actor avatar."""
+def _build_activity_response(activity: Activity, profile: Optional[activity_service.ActorProfile]) -> ActivityResponse:
+    """Build an ``ActivityResponse`` with the resolved source actor profile."""
     response = ActivityResponse.model_validate(activity)
-    response.source_actor_avatar_url = avatar_url
+    response.source_actor_avatar_url = profile.avatar_url if profile else None
+    response.source_actor_display_name = profile.display_name if profile else None
     return response
 
 

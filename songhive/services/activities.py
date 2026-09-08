@@ -13,7 +13,7 @@ import base64
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type
 
 from fastapi import HTTPException
 from pubby.content import set_object_content
@@ -58,7 +58,7 @@ __all__ = [
     "list_activities",
     "resolve_audience",
     "resolve_entity",
-    "resolve_source_actor_avatars",
+    "resolve_source_actor_profiles",
     "sync_track_publications",
     "update_activity",
 ]
@@ -313,32 +313,56 @@ def _actor_doc_avatar_url(actor_doc: Optional[dict]) -> Optional[str]:
     return None
 
 
-async def resolve_source_actor_avatars(
+def _actor_doc_display_name(actor_doc: Optional[dict]) -> Optional[str]:
+    """Extract a display name from a cached ActivityPub actor document."""
+    if not actor_doc:
+        return None
+    name = actor_doc.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return None
+
+
+class ActorProfile(NamedTuple):
+    """Resolved avatar and display name for an activity's source actor."""
+
+    avatar_url: Optional[str] = None
+    display_name: Optional[str] = None
+
+
+async def resolve_source_actor_profiles(
     session: AsyncSession,
     activities: List[Activity],
     config: SonghiveConfig,
-) -> Dict[str, Optional[str]]:
-    """Map each activity id to its source actor's avatar URL.
+) -> Dict[str, ActorProfile]:
+    """Map each activity id to its source actor's profile.
 
-    Local activities resolve to the owner's ``avatar_url``. Remote activities
-    are looked up in the federation actor cache, which avoids network calls
-    and only returns a URL when the instance has previously fetched the actor.
-    Activities whose actor cannot be resolved fall back to ``None``.
+    Local activities resolve to the owner's ``display_name`` and ``avatar_url``,
+    falling back to the username when no display name is set. Remote activities
+    are looked up in the federation actor cache, which avoids network calls.
+    Activities whose actor cannot be resolved fall back to an empty profile.
     """
     if not activities:
         return {}
 
-    result: Dict[str, Optional[str]] = {str(a.id): None for a in activities}
+    result: Dict[str, ActorProfile] = {str(a.id): ActorProfile() for a in activities}
 
     local_activities = [a for a in activities if a.source_type == "local"]
     if local_activities:
         owner_ids = {a.owner_user_id for a in local_activities if a.owner_user_id}
         if owner_ids:
-            rows = await session.execute(select(User.id, User.avatar_url).where(User.id.in_(owner_ids)))
-            avatar_by_user = {str(row[0]): row[1] for row in rows}
+            rows = await session.execute(
+                select(User.id, User.username, User.display_name, User.avatar_url).where(User.id.in_(owner_ids))
+            )
+            by_user = {str(row[0]): (row[1], row[2], row[3]) for row in rows}
             for activity in local_activities:
                 if activity.owner_user_id:
-                    result[str(activity.id)] = avatar_by_user.get(str(activity.owner_user_id))
+                    username, display_name, avatar_url = by_user.get(str(activity.owner_user_id), (None, None, None))
+                    if username:
+                        result[str(activity.id)] = ActorProfile(
+                            avatar_url=avatar_url,
+                            display_name=display_name or username,
+                        )
 
         # Some local activities may use a ``urn:songhive:user:<username>``
         # actor without an ``owner_user_id``. Resolve those by username.
@@ -348,12 +372,19 @@ async def resolve_source_actor_avatars(
             if not a.owner_user_id and a.source_actor.startswith("urn:songhive:user:")
         ]
         if usernames:
-            rows = await session.execute(select(User.username, User.avatar_url).where(User.username.in_(usernames)))
-            avatar_by_username = {row[0]: row[1] for row in rows}
+            rows = await session.execute(
+                select(User.username, User.display_name, User.avatar_url).where(User.username.in_(usernames))
+            )
+            by_username = {row[0]: (row[1], row[2]) for row in rows}
             for activity in local_activities:
                 if not activity.owner_user_id and activity.source_actor.startswith("urn:songhive:user:"):
                     username = activity.source_actor[len("urn:songhive:user:") :]
-                    result[str(activity.id)] = avatar_by_username.get(username)
+                    display_name, avatar_url = by_username.get(username, (None, None))
+                    if username:
+                        result[str(activity.id)] = ActorProfile(
+                            avatar_url=avatar_url,
+                            display_name=display_name or username,
+                        )
 
     if not config.federation.enabled or not config.federation.instance_domain:
         return result
@@ -367,17 +398,20 @@ async def resolve_source_actor_avatars(
         try:
             storage = await asyncio.to_thread(create_activitypub_storage, config.database.url)
 
-            async def _get_remote_avatar(actor_url: str) -> Optional[str]:
+            async def _get_remote_profile(actor_url: str) -> ActorProfile:
                 doc = await asyncio.to_thread(storage.get_cached_actor, actor_url)
-                return _actor_doc_avatar_url(doc)
+                return ActorProfile(
+                    avatar_url=_actor_doc_avatar_url(doc),
+                    display_name=_actor_doc_display_name(doc),
+                )
 
             unique_actors = list(set(remote_actors.values()))
-            resolved = await asyncio.gather(*[_get_remote_avatar(url) for url in unique_actors])
-            avatar_by_actor = dict(zip(unique_actors, resolved))
+            resolved = await asyncio.gather(*[_get_remote_profile(url) for url in unique_actors])
+            profile_by_actor = dict(zip(unique_actors, resolved))
             for activity_id, actor_url in remote_actors.items():
-                result[activity_id] = avatar_by_actor.get(actor_url)
+                result[activity_id] = profile_by_actor.get(actor_url, ActorProfile())
         except Exception:
-            logger.exception("Failed to resolve remote actor avatars")
+            logger.exception("Failed to resolve remote actor profiles")
 
     return result
 
@@ -499,6 +533,25 @@ class VisibilityRules:
             await _fan_out_visibility_update(session, activity, new_value)
 
         activity.visibility = new_value.value
+
+        # Keep the stored payload's addressing in sync so re-deliveries of
+        # the original activity (e.g. ``fan_out_activity`` sending the
+        # ``Create`` to inboxes first reached by a later edit) carry the
+        # current audience rather than the one recorded at creation.
+        payload = activity.payload
+        if isinstance(payload, dict):
+            from ..federation.activities import activity_audience
+
+            mention_actor_urls = [m.actor_url for m in activity.mentions if m.actor_url]
+            to, cc = activity_audience(new_value, activity.source_actor, mention_actor_urls)
+            payload["to"] = to
+            payload["cc"] = cc
+            obj = payload.get("object")
+            if isinstance(obj, dict):
+                obj["to"] = to
+                obj["cc"] = cc
+            flag_modified(activity, "payload")
+
         await session.flush()
 
 
@@ -1032,6 +1085,7 @@ async def record_track_publication(
     owner: Optional[User],
     config: SonghiveConfig,
     status: Optional[str] = None,
+    visibility: "Visibility | str" = Visibility.PUBLIC,
 ) -> Optional[Activity]:
     """Record and fan out a ``create`` activity for a fediverse track share.
 
@@ -1046,14 +1100,28 @@ async def record_track_publication(
 
     ``status`` is an optional one-off post text used as the object's
     ``content`` instead of the track's stored ``description``; it is never
-    persisted on the track itself.
+    persisted on the track itself. When given, its ``@handle`` mentions are
+    resolved through the ``process_mentions`` pipeline: mention-aware HTML
+    replaces the rendered content, ``Mention`` tags are merged into the
+    object's ``tag`` list, and ``activity_mentions`` rows are persisted so
+    ``resolve_audience`` can reach remote mentioned actors.
+
+    ``visibility`` selects the post's audience (``public`` by default):
+    ``public`` and ``followers`` reach the owner's follower inboxes plus
+    remote mentioned actors, ``mentioned`` reaches only the mentioned actors
+    (a ``status`` carrying ``@handle``s is required for it to deliver
+    anywhere), and ``private``/``local`` record the activity without
+    federating it. The ``to``/``cc`` addressing derived from the visibility
+    is applied to both the ``Create`` envelope and the embedded object.
 
     Returns ``None`` — recording nothing — when federation is disabled, the
     track is not public, the artist is missing, the owner has no actor
-    credentials, or no ``federation_object_id`` is set. Flushes without
-    committing; the caller owns the transaction.
+    credentials, or no ``federation_object_id`` is set. Raises
+    ``HTTPException`` 422 for an invalid ``visibility`` value. Flushes
+    without committing; the caller owns the transaction.
     """
     from ..federation.activities import create_audio_activity
+    from ..federation.serializers import mirror_content_to_summary
 
     if not config.federation.enabled or not config.federation.instance_domain:
         return None
@@ -1064,6 +1132,15 @@ async def record_track_publication(
     if not track.federation_object_id:
         return None
 
+    try:
+        activity_visibility = Visibility(visibility)
+    except ValueError:
+        raise HTTPException(422, detail=f"Invalid visibility: {visibility}")
+    VisibilityRules.enforce_activity_visibility(activity_visibility, _entity_visibility(track))
+
+    processed = await process_mentions(session, status, config) if status else None
+    mention_actor_urls = [m.actor_url for m in processed.mentions if m.actor_url] if processed else []
+
     object_id = f"{owner.actor_url}/objects/{track.federation_object_id}"
     payload = create_audio_activity(
         actor_url=owner.actor_url,
@@ -1072,11 +1149,22 @@ async def record_track_publication(
         domain=config.federation.instance_domain,
         description=status,
         ap_object_id=object_id,
+        visibility=activity_visibility,
+        mention_actor_urls=mention_actor_urls,
     )
     if not payload:
         return None
 
     obj = payload.get("object")
+    if processed is not None and isinstance(obj, dict):
+        if processed.html:
+            obj["content"] = processed.html
+            mirror_content_to_summary(obj)
+        if processed.tags:
+            tags = obj.setdefault("tag", [])
+            seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
+            tags.extend(tag for tag in processed.tags if str(tag.get("name", "")).lower() not in seen)
+
     activity = Activity(
         entity_type="track",
         entity_id=str(track.id),
@@ -1086,7 +1174,7 @@ async def record_track_publication(
         source_id=object_id,
         local_object_id=str(track.federation_object_id),
         owner_user_id=owner.id,
-        visibility=Visibility.PUBLIC.value,
+        visibility=activity_visibility.value,
         content=obj.get("content") if isinstance(obj, dict) else None,
         content_source=status,
         content_type="text/markdown" if status else "text/plain",
@@ -1094,6 +1182,11 @@ async def record_track_publication(
     )
     session.add(activity)
     await session.flush()
+
+    if processed is not None:
+        for mention in processed.mentions:
+            session.add(ActivityMention(activity_id=activity.id, **mention.as_dict()))
+        await session.flush()
     try:
         await fan_out_activity(session, activity, config, owner=owner)
     except Exception as e:
@@ -1157,6 +1250,11 @@ async def sync_track_publications(
     ``content_source``), that text is re-applied as the object's content so
     a metadata edit does not clobber the intentional post body. The
     activity's ``content`` column is refreshed to match the rebuilt object.
+    The rebuilt object and the stored ``Create`` envelope also get their
+    ``to``/``cc`` re-derived from the activity's current visibility and
+    mention rows (via ``activity_audience``), and the resolved ``Mention``
+    tags are re-attached, so ``followers``/``mentioned`` publications keep
+    their addressing across metadata edits.
 
     Each re-synced activity then goes through
     :func:`fan_out_activity_update`, which delivers an ``Update`` to the
@@ -1167,6 +1265,7 @@ async def sync_track_publications(
     or no live local ``create`` activities exist. Flushes without
     committing; the caller owns the transaction.
     """
+    from ..federation.activities import activity_audience
     from ..federation.serializers import set_audio_description, track_to_audio_object
 
     if not config.federation.enabled or not config.federation.instance_domain:
@@ -1221,6 +1320,21 @@ async def sync_track_publications(
         # no status was given.
         if activity.content_source:
             set_audio_description(rebuilt, activity.content_source, domain)
+        # Re-apply the activity's current audience (visibility may have
+        # changed since publication) and re-attach its Mention tags.
+        mention_actor_urls = [m.actor_url for m in activity.mentions if m.actor_url]
+        to, cc = activity_audience(activity.visibility, activity.source_actor, mention_actor_urls)
+        rebuilt["to"] = to
+        rebuilt["cc"] = cc
+        payload["to"] = to
+        payload["cc"] = cc
+        if activity.mentions:
+            tags = rebuilt.setdefault("tag", [])
+            seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
+            for mention in activity.mentions:
+                if mention.actor_url and mention.handle.lower() not in seen:
+                    tags.append({"type": "Mention", "href": mention.actor_url, "name": mention.handle})
+                    seen.add(mention.handle.lower())
         rebuilt["updated"] = now
         payload["object"] = rebuilt
         flag_modified(activity, "payload")
