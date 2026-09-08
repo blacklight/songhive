@@ -370,7 +370,9 @@ drops handles on blocked or non-allowed instances via
 `services/federation.is_domain_blocked`; `@user@domain` handles naming the
 local instance resolve locally instead. `render_mentions` builds safe HTML —
 resolved handles become anchors via `pubby.render_link_anchor`, surrounding
-text is escaped and linkified by `pubby.render_post_html` — and
+text is escaped and linkified by `pubby.render_post_html` (which also
+converts newlines to `<br>`, since remote servers render `content`/`summary`
+as HTML and would collapse literal newlines) — and
 `process_mentions` is the single entry point returning resolved mentions,
 rendered HTML, hashtags, and ActivityPub `Mention`/`Hashtag` tags.
 `ActivityTarget` rows track per-inbox outbound delivery state (`pending`,
@@ -510,7 +512,9 @@ library uploads), and entity visibility transitions to `public` — calls
 `Create(Audio)` payload for the freshly minted `federation_object_id`,
 stores it on a `create` activity whose `source_id` matches the published
 object URL (`{actor_url}/objects/{federation_object_id}`), keeps the
-one-off `status` post text in `content_source`, and delivers through
+one-off `status` post text in `content_source`, persists its resolved
+mentions as `activity_mentions` rows, records the caller-selected
+`visibility` (default `public`), and delivers through
 `fan_out_activity` so each reached inbox is booked in `activity_targets`
 and later retraction reaches exactly those inboxes. When a public track
 goes private, `retract_track_publications` soft-deletes the live
@@ -546,6 +550,24 @@ Live activities are only served when their visibility federates
 stored `payload` verbatim for payload-bearing activities (e.g. `Like`), or
 a synthesized `Note` carrying the rendered `content`, the
 `activity_audience`-derived `to`/`cc`, `Mention` tags, and `inReplyTo`.
+
+Served track objects are built by `_track_object_document`, which extends
+the `track_to_audio_object` payload with a top-level `@context` and the
+`public` `to`/`cc` audience — remote fetchers (e.g. Mastodon's URL lookup)
+reject context-less documents, and an audience-less object would be
+imported as a direct-only status. The object's `attributedTo` leads with
+the publishing actor rather than the artist page URL because remote
+importers take its first entry as the author and only actor URLs are
+dereferenceable. `GET /tracks/{track_id}` content-negotiates on top of
+that: requests accepting `application/activity+json`/`application/ld+json`
+receive the same `Audio` document (the track page URL is the `text/html`
+`url` advertised in every published object, so remote servers fetch it when
+a user pastes the link into a search box), while browsers receive the SPA
+shell annotated with a `Link: rel="alternate"` header and a
+`<link rel="alternate" type="application/activity+json">` element pointing
+at the object URL. The object is only served while the track is published
+(`federation_object_id` set): unpublished tracks answer 404 so a remote
+fetch cannot resurrect a retracted post under a different id.
 
 ### Genres
 
@@ -903,9 +925,15 @@ the HTTP routes.
   public track to the fediverse at any time (the "Fediverse" tab of the
   share dialog). It accepts an optional `status` — a one-off post text used
   as the `Create(Audio)` object's `content` instead of the stored
-  `description`; the status is never persisted on the track. Each manual
-  publication mints a fresh `federation_object_id` so every post is a
-  distinct remote object.
+  `description`, run through the `process_mentions` pipeline so `@handle`s
+  become links, `Mention` tags, and `activity_mentions` rows — and an
+  optional `visibility` (default `public`) selecting the post's audience:
+  `public`/`followers`/`mentioned` federate to their respective audiences,
+  while `private`/`local` record the activity without delivering it. The
+  status is never persisted on the track. The `to`/`cc` addressing derived
+  from the visibility is applied to both the `Create` envelope and the
+  embedded `Audio` object. Each manual publication mints a fresh
+  `federation_object_id` so every post is a distinct remote object.
 - `Delete(Tombstone)` is sent when a track is made non-public or deleted.
 - Profile changes (display name, bio, avatar, links) refresh the cached actor
   document via `sync_user_actor` and are pushed to follower inboxes as
@@ -1178,7 +1206,9 @@ REST API under `/api/v1/`:
 
 ```
 /users/{username}               # Per-user ActivityPub actor document
+/users/{username}/objects/{id}  # Dereferenceable ActivityPub objects (Audio, Note, Tombstone, stored payloads)
 /@{username}                    # Mastodon-style alias / browser redirect
+/tracks/{id}                    # Track page: Audio object for AP clients, SPA + rel=alternate hints for browsers
 /.well-known/webfinger          # WebFinger discovery
 /.well-known/nodeinfo           # NodeInfo (Mastodon compat)
 /ap/actor                       # Instance-level Application actor
@@ -1198,10 +1228,10 @@ Docker Compose (`docker-compose.yml`) provides a reference deployment:
 - `redis` — Redis (broker + cache + sessions)
 - `nginx` — Reverse proxy (`docker/nginx.conf`). It proxies federation routes
 (`/.well-known/*`, `/ap/*`, `/users/<user>`, `/@<user>`, etc.) to the
-application and performs content negotiation for `/@<user>` and
-`/users/<user>`: requests that accept `application/activity+json` or
-`application/ld+json` are proxied to the backend, while browser `text/html`
-requests fall through to the Vue SPA.
+application and performs content negotiation for `/@<user>`,
+`/users/<user>`, and `/tracks/<id>`: requests that accept
+`application/activity+json` or `application/ld+json` are proxied to the
+backend, while browser `text/html` requests fall through to the Vue SPA.
 
 Persistent data is stored under `volumes/`.
 

@@ -41,10 +41,14 @@ All notable changes to this project will be documented in this file.
   `services/activities.update_activity` — `@handle`s are re-resolved, the
   rendered `content` and `activity_mentions` rows are replaced, and an
   embedded payload object's `content`/`tag` are rebuilt via
-  `pubby.set_object_content` plus the pipeline's `Mention` tags. Visibility
-  changes flow through `VisibilityRules.cascade_visibility_update` so
-  inboxes that already received the activity get an `Update` or a
-  `Delete(Tombstone)`.
+  `pubby.set_object_content` plus the pipeline's `Mention` tags — and fan
+  an `Update` carrying the rebuilt object (stamped with `updated`) out to
+  the inboxes recorded as `sent` via
+  `services/activities.fan_out_activity_update`; inboxes first reached by
+  the edit (e.g. newly mentioned actors) receive the stored `Create`
+  instead. Visibility changes flow through
+  `VisibilityRules.cascade_visibility_update` so inboxes that already
+  received the activity get an `Update` or a `Delete(Tombstone)`.
 - `federation`: Add a mention pipeline (`services/mentions.py`) that
   extracts `@user`/`@user@domain` handles from activity content, resolves
   local handles against the users table and remote handles via WebFinger
@@ -60,9 +64,51 @@ All notable changes to this project will be documented in this file.
   enforced in SQL so keyset pagination on `(published_at, id)` stays
   correct. Supports `activity_type`/`source_type` filters, an opaque
   base64url `cursor`, and `limit` (1–100, default 20).
+- `federation`: Add `DELETE /api/v1/activities/{id}` for activity
+  retraction. Behind the same `acl.can_manage` gate as `PATCH`, it calls
+  `services/activities.retract_activity`: local activities are soft-deleted
+  and a `Delete(Tombstone)` is fanned out to every inbox recorded as `sent`
+  in `activity_targets`, while remote activities are simply removed
+  locally.
+- `federation`: Add post visibility selection to track publication.
+  `POST /api/v1/tracks/{id}/publish` accepts an optional `visibility`
+  (default `public`) which is stored on the recorded `create` activity and
+  drives the `to`/`cc` addressing of both the `Create` envelope and the
+  embedded `Audio` object via `activity_audience`; `public`/`followers`
+  reach follower inboxes plus remote mentioned actors, `mentioned` reaches
+  only the mentioned actors, and `private`/`local` record the share without
+  federating it. The one-off `status` now also runs through the
+  `process_mentions` pipeline — `@handle`s are resolved into
+  `activity_mentions` rows, `Mention` tags, and mention-aware `content` —
+  so `mentioned` publications have a deliverable audience. The Share →
+  Fediverse tab gains a visibility picker, and visibility edits now rewrite
+  the stored payload's `to`/`cc` (`cascade_visibility_update`) so
+  re-deliveries carry the current audience; `sync_track_publications`
+  re-applies the stored audience and `Mention` tags when rebuilding the
+  object after a metadata edit.
 
 ### Changed
 
+- `federation`: Track publications are now recorded as local `create`
+  activities. Every publish path — `POST /api/v1/tracks/{id}/publish`,
+  file uploads and imports of public tracks, bulk library uploads, Celery
+  `process_upload`, and entity visibility transitions to `public` — calls
+  `services/activities.record_track_publication`, which stores the
+  `Create(Audio)` payload on an `Activity` row (entity- and
+  `local_object_id`-linked to the track, `source_id` matching the
+  published object URL) and fans it out through `fan_out_activity` so each
+  delivered inbox is tracked in `activity_targets`. Publications therefore
+  appear in the entity's activity feed and can be retracted per-activity.
+  The superseded `services/federation.publish_track_activity` is removed;
+  `unpublish_track_activity` still drives track-level `Delete(Tombstone)`
+  on visibility loss and entity deletion, and
+  `services/activities.retract_track_publications` soft-deletes the
+  publication rows when a track leaves the fediverse. Metadata edits on a
+  published track — `PATCH /api/v1/tracks/{id}` touching `title`,
+  `artist_name`, `description`, or `genre` — re-sync the stored object via
+  `services/activities.sync_track_publications` and fan an `Update`
+  carrying the rebuilt `Audio` out to delivered inboxes; a one-off
+  `status` used at publication time is preserved as the post body.
 - `federation`: Delegate federation primitives to pubby 0.3.2 — domain
   normalization and allow/block matching (`pubby.moderation`), async→sync
   database URL conversion (`pubby.storage.adapters.db.to_sync_url`), actor
@@ -78,11 +124,56 @@ All notable changes to this project will be documented in this file.
   `Visibility`-to-audience adapter in `federation.activities`.
 - `federation`: The instance-level `/ap` inbox and pubby's outbound fan-out
   now enforce the configured `allowed_instances`/`blocked_instances` lists.
+- `federation`: The federated `Audio` object's `name` is now an anchor —
+  `<a href="{track_url}">{artist} - {title}</a>` — so Mastodon-family
+  servers render the post header as a link to the track page instead of
+  the bare title. (Mastodon interpolates `name` unescaped into the
+  converted-object `<h2>`; the appended track-URL line it adds on its own
+  is not under our control, and is rendered as plain text there because
+  Mastodon's link extractor does not recognize the `.music` gTLD.)
 - `federation`: Federated `Audio` durations are now emitted as proper
   ISO-8601 strings with hour support (e.g. `PT1H2M3S` for tracks ≥ 1 hour,
   `PT2M` instead of `PT2M0S`).
 - `federation`: Outbound deliveries now send a `User-Agent: pubby/<version>`
   header and also sign `Content-Length`; `Accept` is no longer sent.
+
+### Fixed
+
+- `federation`: Published `Audio` objects now render their post text on
+  Mastodon-family servers: they treat `Audio` as a "converted" object type
+  and display `name`/`summary`/`url` instead of `content`, so the rendered
+  description (or the one-off `status` from `POST
+  /api/v1/tracks/{id}/publish`) is now mirrored into `summary`. The `url`
+  links also carry `mimeType` alongside `mediaType` so remote link
+  selection picks the `text/html` track page rather than the raw audio
+  download URL.
+- `federation`: Tracks shared via Share → Fediverse (and any other publish
+  path) now appear under `/{entity}/{id}/activities` and in the
+  `activities` table. Publication previously only delivered a
+  `Create(Audio)` to follower inboxes without recording an `Activity` row,
+  so the share was invisible in the feed and could not be retracted.
+- `federation`: Line breaks in federated post text are now preserved on
+  remote servers. `pubby.render_post_html`/`pubby.render_bio_html` convert
+  newlines to `<br>` elements — ActivityPub `content`/`summary` are HTML
+  fields, and Mastodon-family renderers collapsed literal newlines into
+  spaces. This applies to activity `content`, the `Audio` object's
+  `content`/`summary`, and actor bios.
+- `federation`: Published track URLs are now resolvable from remote
+  servers, so pasting `https://{domain}/tracks/{id}` into e.g. Mastodon's
+  search box imports the post. `GET /tracks/{track_id}` content-negotiates:
+  clients accepting `application/activity+json`/`application/ld+json`
+  receive the track's `Audio` object, while browsers get the SPA shell
+  annotated with a `Link: rel="alternate"` header and a
+  `<link rel="alternate">` element pointing at the object URL. The object
+  is only served while the track is published (`federation_object_id`
+  set). Served track objects — at both the track page and
+  `/users/{username}/objects/{id}` — now carry a top-level `@context`
+  (context-less documents were rejected upstream) and the `public`
+  `to`/`cc` audience (audience-less objects imported as direct-only),
+  and `attributedTo` leads with the publishing actor instead of the
+  non-dereferenceable artist page URL so remote importers resolve the
+  author. `docker/nginx.conf` proxies AP `Accept` requests for
+  `/tracks/<id>` to the backend while browsers keep getting the SPA.
 
 ## 0.0.15
 
