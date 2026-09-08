@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..config.schema import SonghiveConfig
+from ..federation.storage import create_activitypub_storage
 from ..models._enums import Visibility
 from ..models.activity import (
     ACTIVITY_ENTITY_TYPES,
@@ -57,6 +58,7 @@ __all__ = [
     "list_activities",
     "resolve_audience",
     "resolve_entity",
+    "resolve_source_actor_avatars",
     "update_activity",
 ]
 
@@ -290,6 +292,93 @@ async def list_activities(
         activities = activities[:limit]
         next_cursor = _encode_activity_cursor(activities[-1])
     return activities, next_cursor
+
+
+def _actor_doc_avatar_url(actor_doc: Optional[dict]) -> Optional[str]:
+    """Extract an avatar URL from a cached ActivityPub actor document."""
+    if not actor_doc:
+        return None
+    icon = actor_doc.get("icon")
+    if isinstance(icon, dict):
+        return icon.get("url")
+    if isinstance(icon, list):
+        for item in icon:
+            if isinstance(item, dict):
+                url = item.get("url")
+                if url:
+                    return url
+    if isinstance(icon, str):
+        return icon
+    return None
+
+
+async def resolve_source_actor_avatars(
+    session: AsyncSession,
+    activities: List[Activity],
+    config: SonghiveConfig,
+) -> Dict[str, Optional[str]]:
+    """Map each activity id to its source actor's avatar URL.
+
+    Local activities resolve to the owner's ``avatar_url``. Remote activities
+    are looked up in the federation actor cache, which avoids network calls
+    and only returns a URL when the instance has previously fetched the actor.
+    Activities whose actor cannot be resolved fall back to ``None``.
+    """
+    if not activities:
+        return {}
+
+    result: Dict[str, Optional[str]] = {str(a.id): None for a in activities}
+
+    local_activities = [a for a in activities if a.source_type == "local"]
+    if local_activities:
+        owner_ids = {a.owner_user_id for a in local_activities if a.owner_user_id}
+        if owner_ids:
+            rows = await session.execute(select(User.id, User.avatar_url).where(User.id.in_(owner_ids)))
+            avatar_by_user = {str(row[0]): row[1] for row in rows}
+            for activity in local_activities:
+                if activity.owner_user_id:
+                    result[str(activity.id)] = avatar_by_user.get(str(activity.owner_user_id))
+
+        # Some local activities may use a ``urn:songhive:user:<username>``
+        # actor without an ``owner_user_id``. Resolve those by username.
+        usernames = [
+            a.source_actor[len("urn:songhive:user:") :]
+            for a in local_activities
+            if not a.owner_user_id and a.source_actor.startswith("urn:songhive:user:")
+        ]
+        if usernames:
+            rows = await session.execute(select(User.username, User.avatar_url).where(User.username.in_(usernames)))
+            avatar_by_username = {row[0]: row[1] for row in rows}
+            for activity in local_activities:
+                if not activity.owner_user_id and activity.source_actor.startswith("urn:songhive:user:"):
+                    username = activity.source_actor[len("urn:songhive:user:") :]
+                    result[str(activity.id)] = avatar_by_username.get(username)
+
+    if not config.federation.enabled or not config.federation.instance_domain:
+        return result
+
+    remote_actors: Dict[str, str] = {
+        str(a.id): a.source_actor
+        for a in activities
+        if a.source_type == "remote" and a.source_actor.startswith(("http://", "https://"))
+    }
+    if remote_actors:
+        try:
+            storage = await asyncio.to_thread(create_activitypub_storage, config.database.url)
+
+            async def _get_remote_avatar(actor_url: str) -> Optional[str]:
+                doc = await asyncio.to_thread(storage.get_cached_actor, actor_url)
+                return _actor_doc_avatar_url(doc)
+
+            unique_actors = list(set(remote_actors.values()))
+            resolved = await asyncio.gather(*[_get_remote_avatar(url) for url in unique_actors])
+            avatar_by_actor = dict(zip(unique_actors, resolved))
+            for activity_id, actor_url in remote_actors.items():
+                result[activity_id] = avatar_by_actor.get(actor_url)
+        except Exception:
+            logger.exception("Failed to resolve remote actor avatars")
+
+    return result
 
 
 async def _fan_out_visibility_update(

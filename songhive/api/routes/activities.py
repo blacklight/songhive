@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config.schema import SonghiveConfig
 from ...models import Visibility
 from ...models.activity import Activity
 from ...models.user import User
@@ -55,6 +56,7 @@ class ActivityResponse(BaseModel):
     source_id: str
     local_object_id: Optional[str] = None
     owner_user_id: Optional[str] = None
+    source_actor_avatar_url: Optional[str] = None
     visibility: Visibility
     in_reply_to_activity_id: Optional[str] = None
     content: Optional[str] = None
@@ -81,6 +83,7 @@ async def list_entity_activities(
     limit: int = Query(20, ge=1, le=100),
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
 ):
     """List the activities attached to an entity, newest first.
 
@@ -113,10 +116,18 @@ async def list_entity_activities(
         cursor=cursor,
         limit=limit,
     )
+    avatar_map = await activity_service.resolve_source_actor_avatars(db, activities, config)
     return ActivityListResponse(
-        activities=[ActivityResponse.model_validate(a) for a in activities],
+        activities=[_build_activity_response(a, avatar_map.get(str(a.id))) for a in activities],
         next_cursor=next_cursor,
     )
+
+
+def _build_activity_response(activity: Activity, avatar_url: Optional[str]) -> ActivityResponse:
+    """Build an ``ActivityResponse`` with the resolved source actor avatar."""
+    response = ActivityResponse.model_validate(activity)
+    response.source_actor_avatar_url = avatar_url
+    return response
 
 
 @router.patch("/{activity_id}")

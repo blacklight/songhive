@@ -143,7 +143,26 @@ async def test_list_endpoint_response_shape(client, db_session, regular_user, ot
     assert item["published_at"]
     assert item["in_reply_to_activity_id"] is None
     assert item["mentions"] == [{"handle": "@regular", "actor_url": None, "user_id": regular_user.id}]
+    assert item["source_actor_avatar_url"] is None
     assert "payload" not in item
+
+
+@pytest.mark.asyncio
+async def test_list_endpoint_includes_owner_avatar(client, db_session, regular_user, other_user, auth_headers):
+    """Local activities expose the owner's avatar URL when one is set."""
+    track = await _make_track(db_session, other_user)
+    other_user.avatar_url = "https://local.example/avatars/other.png"
+    await db_session.flush()
+
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.get(f"/api/v1/track/{track.id}/activities", headers=auth_headers(regular_user))
+
+    assert resp.status_code == 200
+    (item,) = resp.json()["activities"]
+    assert item["source_actor_avatar_url"] == "https://local.example/avatars/other.png"
 
 
 @pytest.mark.asyncio
