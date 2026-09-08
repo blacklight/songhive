@@ -1,3 +1,5 @@
+from typing import Union
+
 from ..models.track import Track
 
 
@@ -21,8 +23,9 @@ def get_hashtag_url(domain: str, name: str) -> str:
     return f"https://{domain}/hashtags/{name}"
 
 
-def get_track_url(track: Track, domain: str) -> str:
-    return f"https://{domain}/tracks/{track.id}"
+def get_track_url(track: Union[Track, str], domain: str) -> str:
+    track_id = track.id if isinstance(track, Track) else track
+    return f"https://{domain}/tracks/{track_id}"
 
 
 def get_stream_url(track: Track, domain: str) -> str:

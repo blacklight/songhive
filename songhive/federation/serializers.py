@@ -21,7 +21,12 @@ from ..services.genres import extract_genres_from_track, genres_to_hashtags
 from ._common import get_hashtag_url, get_stream_url, get_track_url
 
 
-def set_post_content(obj: dict, description: Optional[str], domain: str) -> None:
+def set_post_content(
+    obj: dict,
+    description: Optional[str],
+    domain: str,
+    link_href: Optional[str] = None,
+) -> None:
     """
     Render a track description into the object's ``content`` field.
 
@@ -31,9 +36,12 @@ def set_post_content(obj: dict, description: Optional[str], domain: str) -> None
 
     :func:`normalize_post_content` is applied afterwards so the rendered
     body ends with the track-page link and any stale ``summary`` is removed.
+    ``link_href`` is forwarded as the link's target — pass the track page
+    URL explicitly for objects (e.g. ``Note`` shares) whose ``url`` is the
+    object's own id rather than the track page.
     """
     set_object_content(obj, description or "", partial(get_hashtag_url, domain))
-    normalize_post_content(obj)
+    normalize_post_content(obj, link_href=link_href)
 
 
 # Object types Songhive emits as federated posts and normalizes content for.
@@ -43,31 +51,33 @@ def set_post_content(obj: dict, description: Optional[str], domain: str) -> None
 _POST_OBJECT_TYPES = frozenset({"Audio", "Note"})
 
 
-def normalize_post_content(obj: dict) -> None:
+def normalize_post_content(obj: dict, link_href: Optional[str] = None) -> None:
     """
     Normalize a federated post object's body for remote renderers.
 
     Ensures ``content`` ends with a ``{artist} - {title}`` link to the
-    object's ``text/html`` ``url`` — the anchor that used to be emitted as
-    the object's ``name``.  It is appended rather than prepended so that on
-    Akkoma — which already renders ``name`` as its own
+    object's page — the anchor that used to be emitted as the object's
+    ``name``.  The link target is ``link_href`` when given, otherwise the
+    ``text/html`` entry of the object's ``url``.  It is appended rather than
+    prepended so that on Akkoma — which already renders ``name`` as its own
     ``<p><a href="{url}">{name}</a></p>`` header — the same link does not
     appear twice in a row at the top of the post.  For ``Note`` objects the
     link is also the only in-body link to the track page that Mastodon
-    renders, since a ``Note``'s ``url`` is not shown in the post body.
+    renders: a ``Note``'s ``url`` is the share's own object id (not shown in
+    the post body), so callers pass the track page as ``link_href``.
 
     Any ``summary`` is removed: Akkoma and Mastodon both treat a non-empty
     ``summary`` as a content warning, so mirroring the rendered body into it
     surfaced the raw post HTML as a CW header.  The function is idempotent —
     a previously appended link block is stripped before re-appending, so
     repeated content re-renders (edits, metadata re-syncs) never duplicate
-    it.  No-op for objects that are not ``Audio``/``Note`` or whose ``url``
-    has no ``text/html`` link.
+    it.  No-op for objects that are not ``Audio``/``Note`` or for which no
+    linkable page URL can be found.
     """
     if obj.get("type") not in _POST_OBJECT_TYPES:
         return
     obj.pop("summary", None)
-    block = _track_link_block(obj)
+    block = _track_link_block(obj, link_href)
     if block is None:
         return
     body = obj.get("content")
@@ -78,29 +88,41 @@ def normalize_post_content(obj: dict) -> None:
     obj["content"] = f"{body}{block}"
 
 
-def _track_link_block(obj: dict) -> Optional[str]:
+def _track_link_block(obj: dict, link_href: Optional[str] = None) -> Optional[str]:
     """
     Return the ``<p><a href="{track page}">{artist} - {title}</a></p>`` block
     appended to a post object's ``content``, or ``None`` when it cannot be
-    built from the object's ``name`` and ``url``.
+    built from the object's ``name`` and a page URL.
+
+    The link target is ``link_href`` when given; otherwise it is derived
+    from the object's ``url`` — the ``text/html`` entry of a ``Link`` list
+    (``Audio`` objects) or a plain-string ``url`` pointing at a page other
+    than the object itself (legacy ``Note`` objects stored the track page
+    there; current ``Note`` objects carry their own object id as ``url`` and
+    must get the page through ``link_href``).
     """
     name = obj.get("name")
-    urls = obj.get("url")
     if not isinstance(name, str) or not name:
         return None
-    href: Optional[str] = None
-    if isinstance(urls, str):
-        # ``Note`` objects carry the track page as a plain ``url`` string.
-        href = urls
-    elif isinstance(urls, list):
-        href = next(
-            (
-                entry.get("href")
-                for entry in urls
-                if isinstance(entry, dict) and (entry.get("mediaType") or entry.get("mimeType")) == "text/html"
-            ),
-            None,
-        )
+    href: Optional[str] = link_href
+    if href is None:
+        urls = obj.get("url")
+        if isinstance(urls, str):
+            # A plain-string ``url`` equal to ``id`` is the object's own
+            # self-referential object URL (a share's id), not a page to
+            # link to — unlike an ``Audio`` object, whose ``id`` may
+            # legitimately be the track page.
+            if urls != obj.get("id"):
+                href = urls
+        elif isinstance(urls, list):
+            href = next(
+                (
+                    entry.get("href")
+                    for entry in urls
+                    if isinstance(entry, dict) and (entry.get("mediaType") or entry.get("mimeType")) == "text/html"
+                ),
+                None,
+            )
     if not isinstance(href, str) or not is_linkable_url(href):
         return None
     # ``name`` is stored HTML-escaped; unescape the label first so
@@ -261,7 +283,7 @@ def track_to_audio_object(
     if tags:
         obj["tag"] = tags
 
-    set_post_content(obj, getattr(track, "description", None), domain)
+    set_post_content(obj, getattr(track, "description", None), domain, link_href=track_url)
 
     if stream_url:
         obj["attachment"] = [
@@ -298,8 +320,13 @@ def track_to_note_object(
 
     - ``name`` stays ``{artist} - {title}`` — Akkoma renders it as its own
       linked header, while Mastodon ignores ``name`` on ``Note`` objects.
-    - ``url`` is the track page as a plain string — for ``Note`` objects the
-      audio lives in ``attachment`` instead of the ``url`` list.
+    - ``url`` is the share's own object id: a ``Note`` is a distinct object
+      from the track's canonical ``Audio``, so it must not claim the track
+      page as its ``url`` (the track page dereferences to the ``Audio``
+      object — that is why a remote URL search for it returns the ``Audio``,
+      never a share). The share's own object URL dereferences to this
+      ``Note`` document, and browsers are redirected to the entity's
+      activity feed by the object route.
     - ``attachment`` embeds the stream as an ``Audio``-typed media object so
       remote servers render an inline player; on Akkoma the generic ``Audio``
       type also survives the ``application/octet-stream`` mediaType rewrite
@@ -335,7 +362,7 @@ def track_to_note_object(
         "id": object_id,
         "name": _track_name(track, artist),
         "published": published.isoformat(),
-        "url": track_url,
+        "url": object_id,
         "attributedTo": _track_attributed_to(artist, domain, actor_url),
     }
 
@@ -343,7 +370,7 @@ def track_to_note_object(
     if tags:
         obj["tag"] = tags
 
-    set_post_content(obj, getattr(track, "description", None), domain)
+    set_post_content(obj, getattr(track, "description", None), domain, link_href=track_url)
 
     if stream_url:
         attachment: dict = {

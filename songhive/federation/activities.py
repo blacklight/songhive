@@ -101,7 +101,7 @@ def create_audio_activity(
         return None
 
     if description:
-        set_post_content(audio_object, description, domain)
+        set_post_content(audio_object, description, domain, link_href=get_track_url(track, domain))
 
     if duration is not None:
         audio_object["duration"] = format_duration(duration)
@@ -154,7 +154,7 @@ def create_note_activity(
         return None
 
     if description:
-        set_post_content(note_object, description, domain)
+        set_post_content(note_object, description, domain, link_href=get_track_url(track, domain))
 
     return _create_object_activity(actor_url, note_object, visibility, mention_actor_urls)
 
@@ -341,6 +341,9 @@ def build_activity_object(activity: Activity) -> dict:
         "@context": "https://www.w3.org/ns/activitystreams",
         "id": activity.source_id,
         "type": "Note",
+        # ``url`` mirrors ``id``: the object's own dereferenceable URL — the
+        # object route redirects browsers to the entity's activity feed.
+        "url": activity.source_id,
         "attributedTo": activity.source_actor,
         "to": to,
         "cc": cc,

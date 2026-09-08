@@ -28,7 +28,11 @@ All notable changes to this project will be documented in this file.
   activity's `source_id` identifies the object — and
   payload-less content activities are served as a `Note` synthesized by
   `federation/activities.build_activity_object`. Only federating
-  visibilities (`mentioned`/`followers`/`public`) are served.
+  visibilities (`mentioned`/`followers`/`public`) are served. Since
+  object URLs double as the objects' own `url`, clients not accepting an
+  ActivityStreams media type are redirected to the SPA: a track-resolved
+  object goes to the track page, an activity-resolved object to the
+  entity's activity feed.
 - `federation`: Add activity interactions — `POST
   /api/v1/activities/{id}/like` records an idempotent `like` activity that
   inherits the target's visibility, stores an ActivityPub `Like` payload
@@ -100,7 +104,14 @@ All notable changes to this project will be documented in this file.
   objects (e.g. Mastodon) — with the stream embedded as an `Audio`-typed
   attachment linked to the track's canonical object; `audio` republishes
   the canonical `Create(Audio)` media object, minting a fresh
-  `federation_object_id` per publication. The one-off `status` now also
+  `federation_object_id` per publication. A `Note` share's `url` is its
+  own object id rather than the track page: the track URL is the
+  canonical `Audio` object's identity (it dereferences to the `Audio`
+  document, which is why a remote URL search returns only that object),
+  and giving the share its own `url` keeps the two objects' identities
+  distinct. The track page still ends the share's `content` as the
+  appended link `normalize_post_content` emits — the page is now passed
+  explicitly (`link_href`) since the object's `url` no longer carries it. The one-off `status` now also
   runs through the
   `process_mentions` pipeline — `@handle`s are resolved into
   `activity_mentions` rows, `Mention` tags, and mention-aware `content` —

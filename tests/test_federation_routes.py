@@ -392,7 +392,9 @@ async def test_get_object_serves_create_payload_object(fed_client, db_session, r
         "type": "Note",
         "name": "TestArtist - My Song",
         "content": "<p>sharing</p>",
-        "url": "https://music.example.com/tracks/track-1",
+        # The share's ``url`` is its own object id — the track page belongs
+        # to the canonical ``Audio`` object.
+        "url": f"{actor_url}/objects/share-1",
         "to": ["https://www.w3.org/ns/activitystreams#Public"],
         "cc": [f"{actor_url}/followers"],
     }
@@ -417,6 +419,37 @@ async def test_get_object_serves_create_payload_object(fed_client, db_session, r
     assert data["id"] == f"{actor_url}/objects/share-1"
     # The envelope is not re-served as the object document.
     assert "object" not in data
+
+
+async def test_get_object_redirects_browsers_to_track_page(fed_client, db_session, regular_user):
+    """A browser opening a track-resolved object URL lands on the track page."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-1",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/objects/pub-1", follow_redirects=False)
+    assert response.status_code == status.HTTP_307_TEMPORARY_REDIRECT
+    assert response.headers["location"] == f"/tracks/{track.id}"
+
+
+async def test_get_object_redirects_browsers_to_entity_feed(fed_client, db_session, regular_user):
+    """A browser opening a share's object URL lands on the entity's feed."""
+    db_session.add(_make_activity(regular_user, object_id="share-1"))
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/objects/share-1", follow_redirects=False)
+    assert response.status_code == status.HTTP_307_TEMPORARY_REDIRECT
+    assert response.headers["location"] == "/tracks/track-1/activities"
 
 
 async def test_get_object_synthesizes_note_for_content_activity(fed_client, db_session, regular_user):

@@ -23,8 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..config.schema import SonghiveConfig
+from ..federation import get_track_url
 from ..federation.storage import create_activitypub_storage
-from ..models._enums import Visibility
+from ..models import Visibility
 from ..models.activity import (
     ACTIVITY_ENTITY_TYPES,
     ACTIVITY_TYPES,
@@ -548,7 +549,7 @@ class VisibilityRules:
                     ActivityMention.actor_url.is_not(None),
                 )
             )
-            mention_actor_urls: List[str] = [url for url in mention_rows.scalars().all() if url]
+            mention_actor_urls: List[str] = [url for url in mention_rows.scalars().all() if url]  # type: ignore
             to, cc = activity_audience(new_value, activity.source_actor, mention_actor_urls)
             payload["to"] = to
             payload["cc"] = cc
@@ -698,7 +699,13 @@ async def update_activity(
 
         from ..federation.serializers import normalize_post_content
 
-        normalize_post_content(obj)
+        # The appended page link targets the entity's frontend page — a
+        # share's object ``url`` is its own id, so the page cannot be
+        # derived from the stored object for ``Note`` shares.
+        link_href = (
+            get_track_url(activity.entity_id, domain=domain) if activity.entity_type == "track" and domain else None
+        )
+        normalize_post_content(obj, link_href=link_href)
         activity.content = obj.get("content")
         if processed.tags:
             tags = obj.setdefault("tag", [])
@@ -1144,6 +1151,7 @@ async def record_track_publication(
     ``object_type`` value. Flushes without committing; the caller owns the
     transaction.
     """
+    from ..federation._common import get_track_url
     from ..federation.activities import create_audio_activity, create_note_activity
     from ..federation.serializers import normalize_post_content
 
@@ -1200,7 +1208,7 @@ async def record_track_publication(
     if processed is not None and isinstance(obj, dict):
         if processed.html:
             obj["content"] = processed.html
-        normalize_post_content(obj)
+        normalize_post_content(obj, link_href=get_track_url(track, config.federation.instance_domain))
         if processed.tags:
             tags = obj.setdefault("tag", [])
             seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
@@ -1308,6 +1316,7 @@ async def sync_track_publications(
     or no live local ``create`` activities exist. Flushes without
     committing; the caller owns the transaction.
     """
+    from ..federation import get_track_url
     from ..federation.activities import activity_audience
     from ..federation.serializers import (
         set_post_content,
@@ -1392,7 +1401,7 @@ async def sync_track_publications(
         # the post body; the track description only fills the content when
         # no status was given.
         if activity.content_source:
-            set_post_content(rebuilt, activity.content_source, domain)
+            set_post_content(rebuilt, activity.content_source, domain, link_href=get_track_url(track, domain))
         # Re-apply the activity's current audience (visibility may have
         # changed since publication) and re-attach its Mention tags.
         mention_rows = await session.execute(
@@ -1402,7 +1411,7 @@ async def sync_track_publications(
             )
         )
         mentions = list(mention_rows.scalars().all())
-        mention_actor_urls = [m.actor_url for m in mentions if m.actor_url]
+        mention_actor_urls: List[str] = [m.actor_url for m in mentions if m.actor_url]  # type: ignore
         to, cc = activity_audience(activity.visibility, activity.source_actor, mention_actor_urls)
         rebuilt["to"] = to
         rebuilt["cc"] = cc

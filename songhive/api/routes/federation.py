@@ -69,6 +69,17 @@ async def _get_active_user(db: AsyncSession, username: str) -> Any:
     return user
 
 
+# Frontend route collections per activity entity type (the SPA only
+# pluralizes ``library`` irregularly).
+_ENTITY_ROUTE_PLURALS = {"library": "libraries"}
+
+
+def _entity_activities_url(entity_type: str, entity_id: str) -> str:
+    """Return the SPA route listing an entity's activities."""
+    plural = _ENTITY_ROUTE_PLURALS.get(entity_type, f"{entity_type}s")
+    return f"/{plural}/{entity_id}/activities"
+
+
 def _track_object_document(track: Track, owner: Any, config: SonghiveConfig) -> Optional[dict]:
     """
     Build the dereferenceable ``Audio`` document for a published track.
@@ -182,6 +193,12 @@ async def get_object(
     embedded in ``Delete(Tombstone)`` deliveries. Live activities are only
     served for visibilities that federate — ``private`` and ``local``
     objects never left the instance and answer 404.
+
+    Object URLs double as the objects' own ``url`` (e.g. a ``Note`` share's
+    permalink on remote servers), so clients not accepting an
+    ActivityStreams media type are redirected to the SPA: a track-resolved
+    object goes to the track page, an activity-resolved object to the
+    entity's activity feed.
     """
     config = _federation_config(request)
     user = await _get_active_user(db, username)
@@ -197,6 +214,11 @@ async def get_object(
     )
     track = result.scalar_one_or_none()
     if track is not None:
+        if not _accepts_activitypub(request):
+            # The object's ``url`` is its own dereferenceable id: browsers
+            # opening it (e.g. a remote status's "open original" link) land
+            # on the track's page.
+            return RedirectResponse(url=f"/tracks/{track.id}", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
         document = _track_object_document(track, user, config)
         if document is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -215,6 +237,15 @@ async def get_object(
     activity = activity_result.scalar_one_or_none()
     if activity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    if not _accepts_activitypub(request):
+        # Shares carry their own object id as ``url``; redirect browsers to
+        # the activity feed of the entity the object is attached to instead
+        # of serving raw JSON.
+        return RedirectResponse(
+            url=_entity_activities_url(activity.entity_type, activity.entity_id),
+            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        )
 
     if activity.deleted_at is not None:
         tombstone = {"@context": AP_CONTEXT, **build_tombstone_object(activity.source_id)}

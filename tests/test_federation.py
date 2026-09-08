@@ -434,9 +434,11 @@ def test_track_to_note_object():
     assert obj["id"] == "https://music.example.com/users/alice/objects/note-1"
     assert obj["name"] == "TestArtist - TestTrack"
     assert obj["published"]
-    # The track page is the object's url; the content ends with the link to
-    # it so the post body carries a usable link on Mastodon.
-    assert obj["url"] == "https://music.example.com/tracks/track-1"
+    # The share is a distinct object: ``url`` is its own object id, not the
+    # track page (which dereferences to the canonical ``Audio`` object).
+    assert obj["url"] == "https://music.example.com/users/alice/objects/note-1"
+    # The content still ends with the link to the track page so the post
+    # body carries a usable link on Mastodon.
     assert obj["content"] == ('<p><a href="https://music.example.com/tracks/track-1">TestArtist - TestTrack</a></p>')
     assert "summary" not in obj
     assert obj["attributedTo"] == [

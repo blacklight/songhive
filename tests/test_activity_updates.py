@@ -207,7 +207,11 @@ async def test_update_activity_normalizes_audio_payload(db_session, regular_user
                 "summary": "old",
                 "url": [
                     {"type": "Link", "href": "https://local.example/audio/stream", "mediaType": "audio/mpeg"},
-                    {"type": "Link", "href": "https://local.example/tracks/1", "mediaType": "text/html"},
+                    {
+                        "type": "Link",
+                        "href": f"https://local.example/tracks/{track.id}",
+                        "mediaType": "text/html",
+                    },
                 ],
             },
         },
@@ -220,7 +224,9 @@ async def test_update_activity_normalizes_audio_payload(db_session, regular_user
 
     obj = activity.payload["object"]
     assert "summary" not in obj
-    assert obj["content"] == ('new post<p><a href="https://local.example/tracks/1">Test Artist - Test Track</a></p>')
+    assert obj["content"] == (
+        f'new post<p><a href="https://local.example/tracks/{track.id}">Test Artist - Test Track</a></p>'
+    )
     assert activity.content == obj["content"]
 
 
@@ -229,7 +235,7 @@ async def test_update_activity_audio_link_is_not_duplicated(db_session, regular_
     """Re-normalizing an already-linked ``Audio`` content does not duplicate the link."""
     config.federation.instance_domain = "local.example"
     track = await _make_track(db_session, regular_user)
-    link = '<p><a href="https://local.example/tracks/1">Test Artist - Test Track</a></p>'
+    link = f'<p><a href="https://local.example/tracks/{track.id}">Test Artist - Test Track</a></p>'
     activity = _make_activity(
         "track",
         track.id,
@@ -242,7 +248,11 @@ async def test_update_activity_audio_link_is_not_duplicated(db_session, regular_
                 "name": "Test Artist - Test Track",
                 "content": f"old{link}",
                 "url": [
-                    {"type": "Link", "href": "https://local.example/tracks/1", "mediaType": "text/html"},
+                    {
+                        "type": "Link",
+                        "href": f"https://local.example/tracks/{track.id}",
+                        "mediaType": "text/html",
+                    },
                 ],
             },
         },
@@ -254,6 +264,44 @@ async def test_update_activity_audio_link_is_not_duplicated(db_session, regular_
     await db_session.flush()
 
     assert activity.payload["object"]["content"] == f"new post{link}"
+
+
+@pytest.mark.asyncio
+async def test_update_activity_note_share_keeps_track_link(db_session, regular_user, config):
+    """Editing a ``Note`` share re-appends the track link despite ``url`` being the object's id.
+
+    A share's ``url`` is its own object id, so the track page cannot be
+    derived from the stored object — ``update_activity`` passes it
+    explicitly for track-bound activities.
+    """
+    config.federation.instance_domain = "local.example"
+    track = await _make_track(db_session, regular_user)
+    object_id = "https://local.example/users/alice/objects/share-1"
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "object": {
+                "id": object_id,
+                "type": "Note",
+                "name": "Test Artist - Test Track",
+                "content": "old",
+                "url": object_id,
+            },
+        },
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    await update_activity(db_session, activity, content_source="new post", config=config)
+    await db_session.flush()
+
+    obj = activity.payload["object"]
+    assert obj["content"] == (
+        f'new post<p><a href="https://local.example/tracks/{track.id}">Test Artist - Test Track</a></p>'
+    )
 
 
 @pytest.mark.asyncio
@@ -985,7 +1033,7 @@ async def test_sync_track_publications_rebuilds_note_share(db_session, regular_u
                 "type": "Note",
                 "name": "Test Artist - Test Track",
                 "published": "2026-03-14T12:00:00+00:00",
-                "url": f"https://local.example/tracks/{track.id}",
+                "url": object_id,
                 "content": "custom share text",
                 "attachment": [
                     {
@@ -1013,11 +1061,16 @@ async def test_sync_track_publications_rebuilds_note_share(db_session, regular_u
     obj = activity.payload["object"]
     assert obj["type"] == "Note"
     assert obj["id"] == object_id
+    # The share's ``url`` is its own object id — the track page stays in the
+    # appended content link.
+    assert obj["url"] == object_id
     assert "Renamed" in obj["name"]
     # The stored share date is preserved rather than re-stamped.
     assert obj["published"] == "2026-03-14T12:00:00+00:00"
-    # The one-off share text survives the metadata re-sync.
+    # The one-off share text survives the metadata re-sync, still ending
+    # with the track-page link.
     assert "custom share text" in obj["content"]
+    assert obj["content"].endswith(f'<a href="https://local.example/tracks/{track.id}">Test Artist - Renamed</a></p>')
     assert obj["attachment"][0]["type"] == "Audio"
     assert obj["attachment"][0]["id"] == "https://local.example/users/regular/objects/obj-1"
     assert obj["updated"]

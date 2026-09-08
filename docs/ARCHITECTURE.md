@@ -564,6 +564,12 @@ except `Create` envelopes, whose embedded object is served instead because
 the activity's `source_id` identifies the published object, not the
 envelope — or a synthesized `Note` carrying the rendered `content`, the
 `activity_audience`-derived `to`/`cc`, `Mention` tags, and `inReplyTo`.
+Because object URLs double as the objects' own `url` (a `Note` share's
+permalink on remote servers), clients not accepting an ActivityStreams
+media type are redirected to the SPA rather than served JSON: a
+track-resolved object redirects to `/tracks/{id}`, an activity-resolved
+object to `/{entity_type}s/{entity_id}/activities` (`libraries` for
+`library`).
 
 Served track objects are built by `_track_object_document`, which extends
 the `track_to_audio_object` payload with a top-level `@context` and the
@@ -957,8 +963,15 @@ the HTTP routes.
   drops `content` on `Audio` objects, which it treats as a converted type)
   — with the stream embedded as an `Audio`-typed attachment linked to the
   track's canonical object when it has one; each share mints its own object
-  id. `audio` republishes the canonical `Create(Audio)` media object. The
-  status is never persisted on the track. The `to`/`cc` addressing derived
+  id, and the share's `url` is that object id rather than the track page:
+  the track URL dereferences to the canonical `Audio` object, so a remote
+  URL lookup (e.g. Mastodon's search box) resolves the `Audio`, while the
+  share keeps a distinct identity resolvable through its own object URL.
+  The track page still ends the share's `content` as the appended
+  `{artist} - {title}` link — `normalize_post_content` takes the page URL
+  explicitly (`link_href`) since it can no longer be read from the object's
+  `url`. `audio` republishes the canonical `Create(Audio)` media object.
+  The status is never persisted on the track. The `to`/`cc` addressing derived
   from the visibility is applied to both the `Create` envelope and the
   embedded object. Each `audio` publication mints a fresh
   `federation_object_id` so every post is a distinct remote object.
