@@ -247,6 +247,12 @@ async function remove() {
   background-color: var(--color-surface);
 }
 
+@media (min-width: 75rem) {
+  .activity-card {
+    width: calc(70rem - var(--sidebar-width));
+  }
+}
+
 .activity-card__header {
   display: flex;
   gap: var(--space-3);

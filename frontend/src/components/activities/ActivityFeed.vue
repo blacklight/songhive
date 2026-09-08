@@ -98,7 +98,14 @@ watch(() => [props.entityType, props.entityId], refresh);
 .activity-feed__list {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: var(--space-3);
+}
+
+@media (min-width: 75rem) {
+  .activity-feed__list {
+    align-items: center;
+  }
 }
 
 .activity-feed__empty {
