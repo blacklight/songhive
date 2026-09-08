@@ -650,6 +650,53 @@ def test_publish_track_without_status(client, sample_tracks, regular_user, auth_
     assert mock.call_args.kwargs["status"] is None
 
 
+def test_publish_track_with_visibility(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """The visibility field selects the published post's audience."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={"status": "hi", "visibility": "followers"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    mock.assert_called_once()
+    assert mock.call_args.kwargs["visibility"] == Visibility.FOLLOWERS
+    assert mock.call_args.kwargs["status"] == "hi"
+
+
+def test_publish_track_default_visibility_is_public(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """Publishing without a visibility defaults to a public post."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    assert mock.call_args.kwargs["visibility"] == Visibility.PUBLIC
+
+
+def test_publish_track_invalid_visibility(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """An unknown visibility value is rejected."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={"visibility": "bogus"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 422
+    mock.assert_not_called()
+
+
 def test_publish_track_mints_fresh_object_id(client, sample_tracks, regular_user, auth_headers, monkeypatch):
     """Every manual publication mints a new ActivityPub object id."""
     _enable_federation(client)
@@ -787,6 +834,7 @@ async def test_publish_track_logs_audit_entry(
     )
     assert entry is not None
     assert entry.details["status"] == "Hello fediverse"
+    assert entry.details["visibility"] == "public"
 
 
 def _patch_track_enrich(monkeypatch):

@@ -506,3 +506,74 @@ async def test_delete_remote_activity_removes_local_copy(client, db_session, reg
     deliver_mock.delay.assert_not_called()
     remaining = await db_session.scalar(select(Activity).where(Activity.id == activity.id))
     assert remaining is None
+
+
+@pytest.mark.asyncio
+async def test_list_endpoint_includes_source_actor_display_name(client, db_session, regular_user, auth_headers):
+    """Local activities expose the owner's display name (or username fallback)."""
+    track = await _make_track(db_session, regular_user)
+    regular_user.display_name = "Regular User"
+    await db_session.flush()
+
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=regular_user.id,
+        source_actor=regular_user.actor_url or "urn:songhive:user:regular",
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.get(f"/api/v1/track/{track.id}/activities", headers=auth_headers(regular_user))
+
+    assert resp.status_code == 200
+    (item,) = resp.json()["activities"]
+    assert item["source_actor_display_name"] == "Regular User"
+    assert item["source_actor_avatar_url"] is None
+
+
+class _FakeActorCache:
+    """In-memory stand-in for the pubby actor cache."""
+
+    def __init__(self, cached: dict):
+        self.cached = cached
+
+    def get_cached_actor(self, actor_id, max_age_seconds=86400.0):
+        return self.cached.get(actor_id)
+
+
+@pytest.mark.asyncio
+async def test_list_endpoint_resolves_remote_actor_display_name(
+    client, db_session, regular_user, auth_headers, monkeypatch
+):
+    """Remote activities resolve display name and avatar from the actor cache."""
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        source_type="remote",
+        source_actor="https://remote.example/users/carol",
+        source_id="https://remote.example/users/carol/objects/1",
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    client.app.state.config.federation.enabled = True
+    client.app.state.config.federation.instance_domain = "local.example"
+
+    fake_cache = _FakeActorCache(
+        {
+            "https://remote.example/users/carol": {
+                "name": "Carol Remote",
+                "icon": {"url": "https://remote.example/carol.png"},
+            }
+        }
+    )
+    monkeypatch.setattr("songhive.services.activities.create_activitypub_storage", lambda url: fake_cache)
+
+    resp = client.get(f"/api/v1/track/{track.id}/activities", headers=auth_headers(regular_user))
+
+    assert resp.status_code == 200
+    (item,) = resp.json()["activities"]
+    assert item["source_actor_display_name"] == "Carol Remote"
+    assert item["source_actor_avatar_url"] == "https://remote.example/carol.png"

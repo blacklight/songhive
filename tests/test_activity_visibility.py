@@ -325,6 +325,41 @@ async def test_cascade_visibility_update_mentioned_audience(db_session, regular_
 
 
 @pytest.mark.asyncio
+async def test_cascade_visibility_update_rewrites_stored_audience(db_session, regular_user):
+    """The stored payload's to/cc follows the new visibility."""
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        source_actor=regular_user.actor_url,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "to": [AS_PUBLIC],
+            "cc": [f"{regular_user.actor_url}/followers"],
+            "object": {
+                "id": "https://local.example/users/regular/objects/1",
+                "to": [AS_PUBLIC],
+                "cc": [f"{regular_user.actor_url}/followers"],
+            },
+        },
+    )
+    activity.mentions.append(
+        ActivityMention(handle="@bob@remote.example", actor_url="https://remote.example/users/bob")
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    await VisibilityRules.cascade_visibility_update(db_session, activity, Visibility.MENTIONED)
+
+    assert activity.payload["to"] == ["https://remote.example/users/bob"]
+    assert activity.payload["cc"] == []
+    assert activity.payload["object"]["to"] == ["https://remote.example/users/bob"]
+    assert activity.payload["object"]["cc"] == []
+
+
+@pytest.mark.asyncio
 async def test_cascade_visibility_update_retracts_when_unfederated(db_session, regular_user, monkeypatch):
     """Downgrading to private/local sends a Tombstone so remotes drop the object."""
     regular_user.actor_url = "https://local.example/users/regular"

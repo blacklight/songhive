@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from celery.exceptions import Retry
+from fastapi import HTTPException
 from pubby.content import render_bio_html, render_post_html, render_verified_link
 from sqlalchemy import select
 
@@ -24,7 +25,7 @@ from songhive.federation.actors import (
 )
 from songhive.federation.serializers import track_to_audio_object
 from songhive.models import Visibility
-from songhive.models.activity import ActivityTarget
+from songhive.models.activity import ActivityMention, ActivityTarget
 from songhive.models.album import Album  # noqa: F401
 from songhive.models.artist import Artist
 from songhive.models.track import Track
@@ -95,6 +96,49 @@ def test_create_audio_activity():
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
         for link in activity["object"]["url"]
     )
+    # The default audience is public, applied to both the envelope and the
+    # embedded object.
+    assert activity["to"] == ["https://www.w3.org/ns/activitystreams#Public"]
+    assert activity["cc"] == ["https://music.example.com/users/alice/followers"]
+    assert activity["object"]["to"] == activity["to"]
+    assert activity["object"]["cc"] == activity["cc"]
+
+
+def test_create_audio_activity_visibility_audience():
+    """The visibility argument drives the to/cc addressing."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-123"
+
+    followers_activity = create_audio_activity(
+        actor_url="https://music.example.com/users/alice",
+        track=track,
+        artist=artist,
+        domain="music.example.com",
+        visibility=Visibility.FOLLOWERS,
+    )
+    assert followers_activity is not None
+    assert followers_activity["to"] == ["https://music.example.com/users/alice/followers"]
+    assert followers_activity["cc"] == []
+    assert followers_activity["object"]["to"] == followers_activity["to"]
+
+    mentioned_activity = create_audio_activity(
+        actor_url="https://music.example.com/users/alice",
+        track=track,
+        artist=artist,
+        domain="music.example.com",
+        visibility="mentioned",
+        mention_actor_urls=["https://remote.example/users/bob"],
+    )
+    assert mentioned_activity is not None
+    assert mentioned_activity["to"] == ["https://remote.example/users/bob"]
+    assert mentioned_activity["object"]["to"] == ["https://remote.example/users/bob"]
 
 
 def test_track_to_audio_object():
@@ -818,6 +862,170 @@ async def test_record_track_publication_noops_when_not_public(db_session):
         config=_fed_config(),
     )
     assert activity is None
+
+
+def _publication_track() -> Track:
+    """Build a publishable public track with a minted object id."""
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+    track.federation_object_id = "obj-1"
+    return track
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_followers_visibility(db_session, monkeypatch):
+    """A followers publication is addressed to the followers collection only."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+
+    monkeypatch.setattr(
+        "songhive.services.federation.get_follower_inboxes",
+        lambda *a, **k: ["https://a.example/inbox"],
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+        visibility=Visibility.FOLLOWERS,
+    )
+
+    assert activity is not None
+    assert activity.visibility == "followers"
+    followers = f"{user.actor_url}/followers"
+    assert activity.payload["to"] == [followers]
+    assert activity.payload["cc"] == []
+    assert activity.payload["object"]["to"] == [followers]
+    assert activity.payload["object"]["cc"] == []
+    deliver_mock.delay.assert_called_once()
+    assert deliver_mock.delay.call_args[0][1] == "https://a.example/inbox"
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_mentioned_visibility(db_session, monkeypatch):
+    """A mentioned publication resolves @handles and addresses them only."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+
+    monkeypatch.setattr(
+        "songhive.services.mentions.resolve_actor_url",
+        lambda username, domain, timeout=10: f"https://{domain}/users/{username}",
+    )
+    monkeypatch.setattr(
+        "songhive.services.federation.resolve_actor_inbox",
+        lambda actor_url, config, **kwargs: "https://remote.example/inbox",
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+        status="for @bob@remote.example",
+        visibility=Visibility.MENTIONED,
+    )
+
+    assert activity is not None
+    assert activity.visibility == "mentioned"
+    assert activity.payload["to"] == ["https://remote.example/users/bob"]
+    assert activity.payload["cc"] == []
+    obj = activity.payload["object"]
+    assert obj["to"] == ["https://remote.example/users/bob"]
+    assert '<a href="https://remote.example/users/bob">@bob@remote.example</a>' in obj["content"]
+    assert {
+        "type": "Mention",
+        "href": "https://remote.example/users/bob",
+        "name": "@bob@remote.example",
+    } in obj["tag"]
+
+    mentions = [
+        m
+        for m in (await db_session.execute(select(ActivityMention))).scalars().all()
+        if str(m.activity_id) == str(activity.id)
+    ]
+    assert [(m.handle, m.actor_url) for m in mentions] == [("@bob@remote.example", "https://remote.example/users/bob")]
+
+    # ``mentioned`` reaches only the mentioned actor's inbox, not followers.
+    deliver_mock.delay.assert_called_once()
+    assert deliver_mock.delay.call_args[0][1] == "https://remote.example/inbox"
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_local_visibility_does_not_federate(db_session, monkeypatch):
+    """A local publication is recorded without any remote delivery."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+        visibility=Visibility.LOCAL,
+    )
+
+    assert activity is not None
+    assert activity.visibility == "local"
+    assert activity.payload["to"] == []
+    assert activity.payload["cc"] == []
+    assert activity.payload["object"]["to"] == []
+    deliver_mock.delay.assert_not_called()
+    targets = [
+        t
+        for t in (await db_session.execute(select(ActivityTarget))).scalars().all()
+        if str(t.activity_id) == str(activity.id)
+    ]
+    assert targets == []
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_invalid_visibility(db_session):
+    """An unknown visibility value is rejected with a 422."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+
+    with pytest.raises(HTTPException) as excinfo:
+        await record_track_publication(
+            db_session,
+            track=track,
+            artist=artist,
+            owner=user,
+            config=_fed_config(),
+            visibility="bogus",
+        )
+    assert excinfo.value.status_code == 422
 
 
 @pytest.mark.asyncio
