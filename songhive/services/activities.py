@@ -59,6 +59,7 @@ __all__ = [
     "resolve_audience",
     "resolve_entity",
     "resolve_source_actor_avatars",
+    "sync_track_publications",
     "update_activity",
 ]
 
@@ -1136,6 +1137,114 @@ async def retract_track_publications(
     if rows:
         await session.flush()
     return len(rows)
+
+
+async def sync_track_publications(
+    session: AsyncSession,
+    track: Track,
+    *,
+    config: SonghiveConfig,
+) -> int:
+    """
+    Re-sync the stored ``Create(Audio)`` objects after a track edit.
+
+    Finds the track's live local ``create`` activities and rebuilds each
+    payload's embedded ``Audio`` object from the track's current metadata —
+    title, artist, description, genres, duration, URLs — so remote
+    instances see the edits. The object id is kept stable: the fanned-out
+    ``Update`` replaces the remote copy rather than re-creating it. When a
+    publication was recorded with a one-off ``status`` (stored as
+    ``content_source``), that text is re-applied as the object's content so
+    a metadata edit does not clobber the intentional post body. The
+    activity's ``content`` column is refreshed to match the rebuilt object.
+
+    Each re-synced activity then goes through
+    :func:`fan_out_activity_update`, which delivers an ``Update`` to the
+    inboxes that already received it.
+
+    Returns the number of re-synced activities. No-ops — returning 0 —
+    when federation is disabled, the track is not public or has no artist,
+    or no live local ``create`` activities exist. Flushes without
+    committing; the caller owns the transaction.
+    """
+    from ..federation.serializers import set_audio_description, track_to_audio_object
+
+    if not config.federation.enabled or not config.federation.instance_domain:
+        return 0
+    if not track or track.visibility != Visibility.PUBLIC.value or not track.artist_id:
+        return 0
+
+    rows = (
+        (
+            await session.execute(
+                select(Activity).where(
+                    Activity.entity_type == "track",
+                    Activity.entity_id == str(track.id),
+                    Activity.activity_type == "create",
+                    Activity.source_type == "local",
+                    Activity.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return 0
+
+    artist = await session.get(Artist, track.artist_id)
+    if artist is None:
+        return 0
+
+    domain = config.federation.instance_domain
+    now = datetime.now(timezone.utc).isoformat()
+    synced: List[Activity] = []
+    for activity in rows:
+        payload = activity.payload
+        if not isinstance(payload, dict):
+            continue
+        object_doc = payload.get("object")
+        if not isinstance(object_doc, dict):
+            continue
+
+        rebuilt = track_to_audio_object(
+            track,
+            artist,
+            domain,
+            actor_url=activity.source_actor,
+            ap_object_id=object_doc.get("id") or activity.source_id,
+        )
+        if rebuilt is None:
+            continue
+        # A publication recorded with a one-off status keeps that text as
+        # the post body; the track description only fills the content when
+        # no status was given.
+        if activity.content_source:
+            set_audio_description(rebuilt, activity.content_source, domain)
+        rebuilt["updated"] = now
+        payload["object"] = rebuilt
+        flag_modified(activity, "payload")
+        activity.content = rebuilt.get("content")
+        synced.append(activity)
+
+    if not synced:
+        return 0
+    await session.flush()
+
+    for activity in synced:
+        try:
+            await fan_out_activity_update(session, activity, config)
+        except Exception as e:
+            # Fan-out is best-effort: a broker or resolution failure must
+            # not fail the track edit itself — the rebuilt payload remains
+            # stored and is served by the object-dereference route.
+            logger.exception(
+                "Failed to fan out update for activity %s: %s: %s",
+                activity.id,
+                type(e),
+                e,
+            )
+    return len(synced)
 
 
 async def retract_activity(session: AsyncSession, activity: Activity) -> None:

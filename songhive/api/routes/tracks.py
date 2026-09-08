@@ -166,6 +166,16 @@ _TAG_SYNC_FIELDS = {
     "release_year",
 }
 
+# Track fields mirrored into the published ``Audio`` object by
+# ``track_to_audio_object``; edits to any of them re-sync the stored
+# ``Create`` payload and fan out an ``Update`` to delivered inboxes.
+_PUBLICATION_SYNC_FIELDS = {
+    "title",
+    "artist_name",
+    "description",
+    "genre",
+}
+
 
 def _should_sync_tags(body: TrackUpdate) -> bool:
     """Return True when the update payload contains tag-relevant metadata."""
@@ -768,6 +778,14 @@ async def update_track(
     await _handle_visibility_changes(
         track, previous_visibility=previous_visibility, request=request, background_tasks=background_tasks, db=db
     )
+
+    # Metadata edits that alter the published ``Audio`` object re-sync the
+    # stored ``Create`` payload and fan an ``Update`` out to the inboxes
+    # that already received it. Runs after the visibility transition so a
+    # public -> non-public change retracts the publications first.
+    if _PUBLICATION_SYNC_FIELDS & body.model_fields_set:
+        await activities.sync_track_publications(db, track, config=request.app.state.config)
+        await db.commit()
 
     if _should_sync_tags(body):
         external_track = track.external_track

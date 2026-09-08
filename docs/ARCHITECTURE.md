@@ -459,11 +459,21 @@ re-runs the `process_mentions` pipeline on the new `content_source`:
 when the stored `payload` embeds a dict `object` — the object's `content`
 and `tag` are rebuilt (`pubby.set_object_content` merges hashtags while
 preserving pre-existing tags, then the pipeline's `Mention` tags and HTML
-are layered on). A `visibility` edit goes through
-`cascade_visibility_update` so already-delivered inboxes receive an
-`Update` or a `Delete(Tombstone)`. Content-only edits still do not fan
-out an `Update` — `resolve_audience`/`fan_out_activity` provide the
-inbox targeting, but no `Update` payload is built for content edits yet.
+are layered on) and it is stamped with `updated`. A `visibility` edit
+goes through `cascade_visibility_update` so already-delivered inboxes
+receive an `Update` or a `Delete(Tombstone)`. Content edits then federate
+through `services.activities.fan_out_activity_update` — invoked after both
+edits so the final visibility applies — which wraps the rebuilt object in
+an `Update` (`federation.activities.create_object_update_activity`, with
+`to`/`cc` rewritten to the current audience) and delivers it via
+`deletion.enqueue_activity_delivery` to every inbox recorded as `sent`.
+`fan_out_activity` then re-delivers the stored payload to inboxes first
+reached by the edit (e.g. a newly mentioned actor), so those recipients
+get the `Create` carrying the updated object rather than an `Update` for
+an object they have never seen. The fan-out no-ops for remote or
+retracted activities, payloads without an embedded dict `object`,
+non-federating visibilities, disabled federation, and owners without a
+signing key.
 
 `GET /api/v1/{entity_type}/{entity_id}/activities` (a second router in
 `api/routes/activities.py`, mounted at `api_prefix`) is the public read
@@ -505,7 +515,16 @@ one-off `status` post text in `content_source`, and delivers through
 and later retraction reaches exactly those inboxes. When a public track
 goes private, `retract_track_publications` soft-deletes the live
 publication rows for the retracted object alongside the track-level
-`unpublish_track_activity` `Delete(Tombstone)`.
+`unpublish_track_activity` `Delete(Tombstone)`. Metadata edits on a
+published track — `PATCH /api/v1/tracks/{id}` touching `title`,
+`artist_name`, `description`, or `genre` — re-sync the stored object
+through `services/activities.sync_track_publications`: each live local
+`create` activity's `payload.object` is rebuilt from
+`track_to_audio_object` (keeping the object id stable, stamping
+`updated`), a one-off `status` kept in `content_source` is re-applied as
+the post body so the track description does not clobber it, and the
+result fans out via `fan_out_activity_update` so delivered inboxes get an
+`Update` carrying the refreshed object.
 `get_activity_unpublish_info` returns the `ActivityUnpublishInfo`
 (activity id, `source_id`, `actor_url`, sent inboxes) used for that
 delivery, and `federation/activities.py` builds the `Delete(Tombstone)`

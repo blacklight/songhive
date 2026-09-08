@@ -21,7 +21,11 @@ from songhive.models.activity import Activity, ActivityMention, ActivityTarget
 from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.models.user import User
-from songhive.services.activities import fan_out_activity_update, update_activity
+from songhive.services.activities import (
+    fan_out_activity_update,
+    sync_track_publications,
+    update_activity,
+)
 
 
 async def _make_artist(session, name: str = "Test Artist") -> Artist:
@@ -644,3 +648,208 @@ async def test_update_endpoint_fans_out_update(client, db_session, regular_user,
     assert payload["object"]["updated"]
     assert inbox == "https://a.example/inbox"
     assert key_id == f"{regular_user.actor_url}#main-key"
+
+
+# ---------------------------------------------------------------------------
+# sync_track_publications — track metadata edits re-sync published objects
+# ---------------------------------------------------------------------------
+
+
+def _publication_activity(track, owner: User, **overrides) -> Activity:
+    """Build a local ``create`` activity carrying a ``Create(Audio)`` payload."""
+    object_id = "https://local.example/users/regular/objects/pub-1"
+    params = {
+        "source_actor": owner.actor_url,
+        "source_id": object_id,
+        "owner_user_id": owner.id,
+        "payload": {
+            "type": "Create",
+            "object": {
+                "id": object_id,
+                "type": "Audio",
+                "name": "Test Artist - Test Track",
+                "content": "old description",
+            },
+        },
+    }
+    params.update(overrides)
+    return _make_activity("track", track.id, **params)
+
+
+@pytest.mark.asyncio
+async def test_sync_track_publications_rebuilds_and_fans_out(db_session, regular_user, config, monkeypatch):
+    """A track metadata edit rebuilds the published object and fans an Update out."""
+    config = _fed_config(config)
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    activity = _publication_activity(track, regular_user)
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    track.title = "Renamed"
+    track.description = "fresh description"
+    await db_session.flush()
+
+    _patch_resolution(monkeypatch)
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    assert await sync_track_publications(db_session, track, config=config) == 1
+
+    obj = activity.payload["object"]
+    assert obj["id"] == "https://local.example/users/regular/objects/pub-1"
+    assert "Renamed" in obj["name"]
+    assert "fresh description" in obj["content"]
+    assert obj["summary"] == obj["content"]
+    assert obj["updated"]
+    assert activity.content == obj["content"]
+
+    deliver.delay.assert_called_once()
+    payload, inbox, key_id, _ = deliver.delay.call_args.args
+    assert payload["type"] == "Update"
+    assert payload["object"]["id"] == obj["id"]
+    assert "fresh description" in payload["object"]["content"]
+    assert payload["object"]["updated"]
+    assert inbox == "https://a.example/inbox"
+    assert key_id == f"{regular_user.actor_url}#main-key"
+
+
+@pytest.mark.asyncio
+async def test_sync_track_publications_preserves_oneoff_status(db_session, regular_user, config, monkeypatch):
+    """A publication made with a custom status keeps that text as the post body."""
+    config = _fed_config(config)
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    activity = _publication_activity(
+        track,
+        regular_user,
+        content_source="custom share text",
+        content="custom share text",
+    )
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    track.title = "Renamed"
+    track.description = "fresh description"
+    await db_session.flush()
+
+    _patch_resolution(monkeypatch)
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    assert await sync_track_publications(db_session, track, config=config) == 1
+
+    obj = activity.payload["object"]
+    assert "custom share text" in obj["content"]
+    assert "fresh description" not in obj["content"]
+    assert "Renamed" in obj["name"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"source_type": "remote"},
+        {"deleted_at": datetime.now(timezone.utc)},
+        {"payload": None},
+        {"payload": {"type": "Create", "object": "https://remote.example/objects/1"}},
+        {"activity_type": "like"},
+    ],
+)
+async def test_sync_track_publications_skips_non_publication_rows(
+    db_session, regular_user, config, monkeypatch, overrides
+):
+    """Remote, retracted, payload-less, and non-create activities are untouched."""
+    config = _fed_config(config)
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    activity = _publication_activity(track, regular_user, **overrides)
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    track.description = "fresh description"
+    await db_session.flush()
+
+    _patch_resolution(monkeypatch)
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    assert await sync_track_publications(db_session, track, config=config) == 0
+    deliver.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_track_publications_noop_gates(db_session, regular_user, config, monkeypatch):
+    """Non-public tracks, missing artists, and disabled federation do nothing."""
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user, visibility=Visibility.LOCAL.value)
+    activity = _publication_activity(track, regular_user, visibility=Visibility.LOCAL.value)
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    await db_session.flush()
+
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    # Non-public track.
+    config = _fed_config(config)
+    assert await sync_track_publications(db_session, track, config=config) == 0
+
+    # Federation disabled.
+    track.visibility = Visibility.PUBLIC.value
+    config.federation.enabled = False
+    assert await sync_track_publications(db_session, track, config=config) == 0
+    deliver.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_track_update_endpoint_syncs_publication(client, db_session, regular_user, auth_headers, monkeypatch):
+    """PATCH /tracks/{id} re-syncs the stored object and delivers an Update."""
+    config = client.app.state.config
+    config.federation.enabled = True
+    config.federation.instance_domain = "local.example"
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    activity = _publication_activity(track, regular_user)
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    await db_session.flush()
+
+    _patch_resolution(monkeypatch)
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    resp = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"description": "brand new description", "title": "New Title"},
+        headers=auth_headers(regular_user),
+    )
+
+    assert resp.status_code == 200
+    deliver.delay.assert_called_once()
+    payload, inbox, _, _ = deliver.delay.call_args.args
+    assert payload["type"] == "Update"
+    assert "brand new description" in payload["object"]["content"]
+    assert "New Title" in payload["object"]["name"]
+    assert payload["object"]["updated"]
+    assert inbox == "https://a.example/inbox"
+
+
+@pytest.mark.asyncio
+async def test_track_update_endpoint_without_publication(client, db_session, regular_user, auth_headers, monkeypatch):
+    """A metadata edit on an unpublished track delivers nothing."""
+    config = client.app.state.config
+    config.federation.enabled = True
+    config.federation.instance_domain = "local.example"
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+
+    _patch_resolution(monkeypatch)
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    resp = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"description": "brand new description"},
+        headers=auth_headers(regular_user),
+    )
+
+    assert resp.status_code == 200
+    deliver.delay.assert_not_called()
