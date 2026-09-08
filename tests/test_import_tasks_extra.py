@@ -478,7 +478,7 @@ def test_process_upload_public_track_publishes_federation(tmp_path, task_config,
             upload=MagicMock(id="upload-2"),
         )
     )
-    mock_publish = MagicMock()
+    mock_publish = AsyncMock()
     mock_broadcast = MagicMock()
 
     monkeypatch.setattr("songhive.config.load_config", lambda *a, **k: task_config)
@@ -486,7 +486,7 @@ def test_process_upload_public_track_publishes_federation(tmp_path, task_config,
     monkeypatch.setattr("songhive.models.base.get_session", _fake_session(fake_session))
     monkeypatch.setattr("songhive.storage.get_storage", lambda *a, **k: MagicMock())
     monkeypatch.setattr("songhive.services.import_.import_audio_file", mock_import)
-    monkeypatch.setattr("songhive.tasks.import_.publish_track_activity", mock_publish)
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", mock_publish)
     monkeypatch.setattr("songhive.ws.events.EventWebSocket.broadcast", mock_broadcast)
 
     result = process_upload.run("lib", "owner-1", file_path=str(song))

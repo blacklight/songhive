@@ -37,9 +37,9 @@ from ...models.album import Album
 from ...models.external_track import ExternalTrack
 from ...models.stored_file import StoredFile
 from ...models.user import User
-from ...services import acl, audit, deletion, music
+from ...services import acl, activities, audit, deletion, music
 from ...services.auth import get_user_by_id
-from ...services.federation import ensure_user_actor, publish_track_activity, unpublish_track_activity
+from ...services.federation import ensure_user_actor, unpublish_track_activity
 from ...services.genres import (
     genres_to_hashtags,
     remove_genre_from_entity,
@@ -134,6 +134,7 @@ class TrackPublishRequest(BaseModel):
     """Request body for manually publishing a track to ActivityPub."""
 
     status: Optional[str] = None
+    visibility: Optional[Visibility] = None
 
 
 class TrackPublishResponse(BaseModel):
@@ -164,6 +165,16 @@ _TAG_SYNC_FIELDS = {
     "track_number",
     "disc_number",
     "release_year",
+}
+
+# Track fields mirrored into the published ``Audio`` object by
+# ``track_to_audio_object``; edits to any of them re-sync the stored
+# ``Create`` payload and fan out an ``Update`` to delivered inboxes.
+_PUBLICATION_SYNC_FIELDS = {
+    "title",
+    "artist_name",
+    "description",
+    "genre",
 }
 
 
@@ -356,14 +367,14 @@ async def _handle_visibility_changes(
             if not track.federation_object_id:
                 track.federation_object_id = str(uuid.uuid4())
                 await db.commit()
-            background_tasks.add_task(
-                publish_track_activity,
-                track,
-                artist,
-                owner,
-                request.app.state.config,
-                track.federation_object_id,
+            await activities.record_track_publication(
+                db,
+                track=track,
+                artist=artist,
+                owner=owner,
+                config=request.app.state.config,
             )
+            await db.commit()
 
     if (
         previous_visibility == Visibility.PUBLIC.value
@@ -383,6 +394,7 @@ async def _handle_visibility_changes(
                 object_id,
             )
             track.federation_object_id = None
+            await activities.retract_track_publications(db, track, object_id=object_id)
             await db.commit()
 
 
@@ -768,6 +780,14 @@ async def update_track(
         track, previous_visibility=previous_visibility, request=request, background_tasks=background_tasks, db=db
     )
 
+    # Metadata edits that alter the published ``Audio`` object re-sync the
+    # stored ``Create`` payload and fan an ``Update`` out to the inboxes
+    # that already received it. Runs after the visibility transition so a
+    # public -> non-public change retracts the publications first.
+    if _PUBLICATION_SYNC_FIELDS & body.model_fields_set:
+        await activities.sync_track_publications(db, track, config=request.app.state.config)
+        await db.commit()
+
     if _should_sync_tags(body):
         external_track = track.external_track
         if external_track is not None:
@@ -1022,17 +1042,24 @@ async def enrich_track_route(
 async def publish_track(
     track_id: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     body: TrackPublishRequest = Body(default_factory=TrackPublishRequest),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
 ):
-    """Publish a public track to the owner's ActivityPub followers.
+    """
+    Publish a public track to the owner's ActivityPub followers.
 
-    Sends a fresh ``Create(Audio)`` activity for the track. The optional
-    ``status`` is a one-off post text used as the object's ``content`` instead
-    of the track's stored ``description``; it is never persisted. A new
+    Records a ``create`` activity carrying a fresh ``Create(Audio)`` payload
+    for the track — making the share visible in the track's activity feed and
+    retractable via ``DELETE /api/v1/activities/{id}`` — and delivers it to
+    the inboxes its audience resolves to. The optional ``status`` is a
+    one-off post text used as the object's ``content`` instead of the track's
+    stored ``description``; it is never persisted. ``visibility`` selects the
+    post's audience (``public`` by default): ``public`` and ``followers``
+    reach the owner's follower inboxes plus remote mentioned actors,
+    ``mentioned`` reaches only the mentioned actors, and
+    ``private``/``local`` record the activity without federating it. A new
     ``federation_object_id`` is minted on every call so each publication is a
     distinct remote object unaffected by earlier ``Tombstone`` deletions.
     """
@@ -1059,6 +1086,7 @@ async def publish_track(
         )
 
     status_text = (body.status or "").strip() or None
+    publish_visibility = body.visibility or Visibility.PUBLIC
 
     ensure_user_actor(current_user, config)
     track.federation_object_id = str(uuid.uuid4())
@@ -1069,22 +1097,25 @@ async def publish_track(
         action="track.publish",
         target_type="track",
         target_id=track_id,
-        details={"title": track.title, "status": status_text},
+        details={
+            "title": track.title,
+            "status": status_text,
+            "visibility": publish_visibility.value,
+        },
         ip_address=client_ip(request),
+    )
+    await activities.record_track_publication(
+        db,
+        track=track,
+        artist=track.artist,
+        owner=current_user,
+        config=config,
+        status=status_text,
+        visibility=publish_visibility,
     )
     await db.commit()
 
     object_id = f"{current_user.actor_url}/objects/{track.federation_object_id}"
-    background_tasks.add_task(
-        publish_track_activity,
-        track,
-        track.artist,
-        current_user,
-        config,
-        track.federation_object_id,
-        status=status_text,
-    )
-
     return TrackPublishResponse(track_id=track_id, enqueued=True, object_id=object_id)
 
 

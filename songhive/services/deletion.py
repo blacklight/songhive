@@ -9,6 +9,7 @@ permission checks; callers are responsible for those at the route layer.
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import delete, func, select, update
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..models._enums import Visibility
+from ..models.activity import Activity, ActivityTarget
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.external_library import ExternalLibrary
@@ -61,6 +63,17 @@ class UnpublishInfo:
     track: Track
     artist: Optional[Artist]
     owner: Optional[User]
+
+
+@dataclass
+class ActivityUnpublishInfo:
+    """Information needed to enqueue a federation ``Delete(Tombstone)`` for a
+    retracted local activity."""
+
+    activity_id: str
+    source_id: str
+    actor_url: str
+    inboxes: List[str]
 
 
 @dataclass
@@ -204,6 +217,7 @@ async def _delete_track_dependents(
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "track", ShareGrant.item_id == track.id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "track", ShareToken.item_id == track.id))
     await session.execute(delete(Report).where(Report.target_type == "track", Report.target_id == track.id))
+    await cascade_delete_entity(session, "track", str(track.id))
 
     await session.execute(delete(Track).where(Track.id == track.id))
 
@@ -364,6 +378,7 @@ async def delete_album(
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "album", ShareGrant.item_id == album.id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "album", ShareToken.item_id == album.id))
     await session.execute(delete(Report).where(Report.target_type == "album", Report.target_id == album.id))
+    await cascade_delete_entity(session, "album", str(album.id))
     await session.execute(delete(Album).where(Album.id == album.id))
 
     if album.cover_file is not None:
@@ -444,6 +459,7 @@ async def delete_artist(
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "artist", ShareGrant.item_id == artist.id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "artist", ShareToken.item_id == artist.id))
     await session.execute(delete(Report).where(Report.target_type == "artist", Report.target_id == artist.id))
+    await cascade_delete_entity(session, "artist", str(artist.id))
     await session.execute(delete(Artist).where(Artist.id == artist.id))
 
     if artist.image_file is not None:
@@ -498,6 +514,7 @@ async def delete_playlist(
         delete(ShareToken).where(ShareToken.item_type == "playlist", ShareToken.item_id == playlist.id)
     )
     await session.execute(delete(Report).where(Report.target_type == "playlist", Report.target_id == playlist.id))
+    await cascade_delete_entity(session, "playlist", str(playlist.id))
     await session.execute(delete(Playlist).where(Playlist.id == playlist.id))
 
     return deletion
@@ -544,6 +561,7 @@ async def delete_library(
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "library", ShareGrant.item_id == library.id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "library", ShareToken.item_id == library.id))
     await session.execute(delete(Report).where(Report.target_type == "library", Report.target_id == library.id))
+    await cascade_delete_entity(session, "library", str(library.id))
     await session.execute(delete(Library).where(Library.id == library.id))
 
     return deletion
@@ -653,3 +671,97 @@ async def cleanup_empty_artist_and_album(
         await _delete_empty_album(session, storage, album_id)
     if artist_id is not None:
         await _delete_empty_artist(session, storage, artist_id)
+
+
+async def get_activity_unpublish_info(session: AsyncSession, activity: Activity) -> ActivityUnpublishInfo:
+    """Collect the fan-out information for an activity.
+
+    The inbox list is derived from the activity's delivery targets that were
+    successfully sent; pending, failed, and skipped targets are excluded.
+    """
+    result = await session.execute(
+        select(ActivityTarget.inbox_url).where(
+            ActivityTarget.activity_id == activity.id,
+            ActivityTarget.state == "sent",
+        )
+    )
+    return ActivityUnpublishInfo(
+        activity_id=str(activity.id),
+        source_id=activity.source_id,
+        actor_url=activity.source_actor,
+        inboxes=list(result.scalars().all()),
+    )
+
+
+def enqueue_activity_delivery(info: ActivityUnpublishInfo, owner: Optional[User], payload: dict) -> None:
+    """
+    Enqueue a signed delivery of ``payload`` to every inbox an activity reached.
+
+    Delivery is skipped when the activity never reached any inbox or the owner
+    has no signing key.
+    """
+    if not info.inboxes or owner is None or not owner.private_key_pem:
+        return
+
+    from ..tasks.federation import deliver_activity
+
+    actor_key_id = f"{info.actor_url}#main-key"
+    for inbox in info.inboxes:
+        try:
+            deliver_activity.delay(payload, inbox, actor_key_id, owner.private_key_pem)  # type: ignore
+        except Exception as e:
+            logger.warning(
+                "Cannot enqueue activity delivery for %s to inbox %s: %s: %s",
+                info.activity_id,
+                inbox,
+                type(e),
+                e,
+            )
+
+
+def _enqueue_activity_delete(info: ActivityUnpublishInfo, owner: Optional[User]) -> None:
+    """Enqueue a ``Delete(Tombstone)`` delivery for each inbox an activity reached."""
+    from ..federation.activities import create_tombstone_delete_activity
+
+    payload = create_tombstone_delete_activity(info.actor_url, info.source_id)
+    enqueue_activity_delivery(info, owner, payload)
+
+
+async def cascade_delete_entity(
+    session: AsyncSession,
+    entity_type: str,
+    entity_id: str,
+) -> List[ActivityUnpublishInfo]:
+    """Cascade-delete every activity attached to ``(entity_type, entity_id)``.
+
+    Local activities are soft-deleted (``deleted_at`` is set) and a
+    ``Delete(Tombstone)`` delivery is enqueued for every inbox the activity
+    was previously sent to.  Remote activities are hard-deleted without
+    fan-out.  Returns the unpublish info for each retracted local activity.
+
+    Like the other helpers in this module the caller owns the transaction;
+    this function does not commit.
+    """
+    result = await session.execute(
+        select(Activity).where(
+            Activity.entity_type == entity_type,
+            Activity.entity_id == str(entity_id),
+        )
+    )
+    activities = result.scalars().all()
+
+    retracted: List[ActivityUnpublishInfo] = []
+    now = datetime.now(timezone.utc)
+    for activity in activities:
+        if activity.source_type == "local":
+            if activity.deleted_at is not None:
+                continue
+            info = await get_activity_unpublish_info(session, activity)
+            owner = await session.get(User, activity.owner_user_id) if activity.owner_user_id else None
+            _enqueue_activity_delete(info, owner)
+            activity.deleted_at = now
+            retracted.append(info)
+        else:
+            await session.delete(activity)
+
+    return retracted

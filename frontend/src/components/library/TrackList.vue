@@ -1141,6 +1141,12 @@ const menuItems = computed(() => {
   }
 
   items.push({
+    key: "activities",
+    label: t("activities.view"),
+    icon: "comments",
+  });
+
+  items.push({
     key: "share",
     label: t("common.share"),
     icon: "share-nodes",
@@ -1242,6 +1248,12 @@ async function onMenuSelect(key: string) {
       break;
     case "go-to-artist":
       if (track.artist_id) router.push(`/artists/${track.artist_id}`);
+      break;
+    case "activities":
+      await router.push({
+        name: "trackActivities",
+        params: { id: track.id },
+      });
       break;
     case "enrich":
       try {
@@ -2040,10 +2052,6 @@ async function onMenuSelect(key: string) {
   font: inherit;
 }
 
-.track-list__compact-title:hover {
-  color: var(--color-accent-contrast);
-}
-
 .track-list__compact-artist {
   color: var(--color-text-muted);
   font-size: 0.875rem;
@@ -2083,8 +2091,19 @@ a.track-list__compact-artist:hover {
   background-color: var(--color-surface-raised);
 }
 
-.track-list__compact-item--current:hover {
-  background-color: var(--color-surface-raised);
+.track-list__compact-item--current:hover,
+:deep(.track-list__row--current:hover) {
+  background-color: var(--color-surface-hover) !important;
+}
+
+.track-list__compact-item--current *,
+:deep(.track-list__row--current *) {
+  color: var(--color-accent-contrast) !important;
+}
+
+.track-list__compact-item--current:hover *,
+:deep(.track-list__row--current:hover *) {
+  color: var(--color-text-hover) !important;
 }
 
 .track-list

@@ -2,6 +2,7 @@
 Federation route tests.
 """
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,8 @@ from fastapi.testclient import TestClient
 
 from songhive.api.app import create_app
 from songhive.api.deps import get_db
-from songhive.models._enums import Visibility
+from songhive.models import Visibility
+from songhive.models.activity import Activity, ActivityMention
 from songhive.models.artist import Artist
 from songhive.models.base import init_db
 from songhive.models.track import Track
@@ -255,7 +257,11 @@ async def test_get_object_returns_audio_for_public_track(fed_client, db_session,
 
     data = response.json()
     assert data["type"] == "Audio"
+    assert data["@context"] == "https://www.w3.org/ns/activitystreams"
     assert data["id"] == "https://music.example.com/users/regular/objects/pub-1"
+    assert data["to"] == ["https://www.w3.org/ns/activitystreams#Public"]
+    assert data["cc"] == ["https://music.example.com/users/regular/followers"]
+    assert data["attributedTo"][0] == "https://music.example.com/users/regular"
     assert any(
         link["mediaType"] == "text/html" and link["href"].startswith("https://music.example.com/tracks/")
         for link in data["url"]
@@ -329,6 +335,342 @@ async def test_get_object_returns_404_when_audio_object_is_none(fed_client, db_s
         "/users/regular/objects/pub-none",
         headers={"Accept": ACTIVITY_JSON},
     )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+def _make_activity(owner, object_id: str = "act-1", **overrides) -> Activity:
+    """Build a local activity owned by ``owner`` with a valid object identity."""
+    actor_url = f"https://music.example.com/users/{owner.username}"
+    params = {
+        "entity_type": "track",
+        "entity_id": "track-1",
+        "activity_type": "create",
+        "source_type": "local",
+        "source_actor": actor_url,
+        "source_id": f"{actor_url}/objects/{object_id}",
+        "local_object_id": object_id,
+        "owner_user_id": str(owner.id),
+        "visibility": Visibility.PUBLIC.value,
+    }
+    params.update(overrides)
+    return Activity(**params)
+
+
+async def test_get_object_returns_stored_activity_payload(fed_client, db_session, regular_user):
+    """GET /users/{username}/objects/{object_id} serves a stored AP payload as-is."""
+    actor_url = "https://music.example.com/users/regular"
+    payload = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": f"{actor_url}/objects/like-1",
+        "type": "Like",
+        "actor": actor_url,
+        "object": "https://remote.example/objects/9",
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [f"{actor_url}/followers"],
+    }
+    db_session.add(_make_activity(regular_user, object_id="like-1", activity_type="like", payload=payload))
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/objects/like-1", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    assert ACTIVITY_JSON in response.headers["content-type"]
+
+    data = response.json()
+    assert data == payload
+
+
+async def test_get_object_synthesizes_note_for_content_activity(fed_client, db_session, regular_user):
+    """A payload-less local activity is served as a Note object."""
+    actor_url = "https://music.example.com/users/regular"
+    parent = _make_activity(regular_user, object_id="parent-1")
+    db_session.add(parent)
+    await db_session.flush()
+
+    activity = _make_activity(
+        regular_user,
+        object_id="note-1",
+        activity_type="reply",
+        content='<p>hi <a href="https://remote.example/users/bob">@bob@remote.example</a></p>',
+        in_reply_to_activity_id=str(parent.id),
+    )
+    db_session.add(activity)
+    await db_session.flush()
+    db_session.add(
+        ActivityMention(
+            activity_id=str(activity.id),
+            handle="@bob@remote.example",
+            actor_url="https://remote.example/users/bob",
+        )
+    )
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/objects/note-1", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+    assert data["type"] == "Note"
+    assert data["id"] == f"{actor_url}/objects/note-1"
+    assert data["attributedTo"] == actor_url
+    assert data["content"].startswith("<p>hi")
+    assert data["published"]
+    assert data["to"] == ["https://www.w3.org/ns/activitystreams#Public"]
+    assert data["cc"] == [f"{actor_url}/followers"]
+    assert data["inReplyTo"] == f"{actor_url}/objects/parent-1"
+    assert data["tag"] == [
+        {"type": "Mention", "href": "https://remote.example/users/bob", "name": "@bob@remote.example"}
+    ]
+
+
+async def test_get_object_returns_tombstone_for_deleted_activity(fed_client, db_session, regular_user):
+    """A soft-deleted activity is served as a Tombstone object."""
+    activity = _make_activity(
+        regular_user,
+        object_id="gone-1",
+        deleted_at=datetime.now(timezone.utc),
+    )
+    db_session.add(activity)
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/objects/gone-1", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+    assert data["type"] == "Tombstone"
+    assert data["id"] == "https://music.example.com/users/regular/objects/gone-1"
+    assert data["@context"] == "https://www.w3.org/ns/activitystreams"
+
+
+async def test_get_object_serves_followers_activity(fed_client, db_session, regular_user):
+    """Federating non-public visibilities (e.g. followers) are dereferenceable."""
+    db_session.add(_make_activity(regular_user, object_id="fol-1", visibility=Visibility.FOLLOWERS.value))
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/objects/fol-1", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["type"] == "Note"
+    assert data["to"] == ["https://music.example.com/users/regular/followers"]
+
+
+@pytest.mark.parametrize("visibility", [Visibility.PRIVATE.value, Visibility.LOCAL.value])
+async def test_get_object_returns_404_for_non_federated_activity(fed_client, db_session, regular_user, visibility):
+    """private/local activities never left the instance and answer 404."""
+    db_session.add(_make_activity(regular_user, object_id="hidden-1", visibility=visibility))
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/objects/hidden-1", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_served_tombstone_matches_delete_payload_object():
+    """The served Tombstone object matches the one embedded in Delete deliveries."""
+    from songhive.federation.activities import build_tombstone_object, create_tombstone_delete_activity
+
+    delete = create_tombstone_delete_activity("https://x.example/users/a", "https://x.example/objects/1")
+    assert delete["type"] == "Delete"
+    assert delete["object"] == build_tombstone_object("https://x.example/objects/1")
+
+
+async def test_get_object_returns_404_for_other_users_activity(fed_client, db_session, regular_user, other_user):
+    """An activity is only served under its owner's object namespace."""
+    db_session.add(_make_activity(other_user, object_id="act-other"))
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/objects/act-other", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_get_object_returns_404_for_unknown_object(fed_client, regular_user):
+    """An object id matching neither a track nor an activity returns 404."""
+    response = fed_client.get("/users/regular/objects/nope", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_track_page_serves_audio_object_for_activitypub_accept(fed_client, db_session, regular_user):
+    """GET /tracks/{id} dereferences to the Audio object for AP clients."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-page",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    assert ACTIVITY_JSON in response.headers["content-type"]
+
+    actor_url = "https://music.example.com/users/regular"
+    data = response.json()
+    assert data["@context"] == "https://www.w3.org/ns/activitystreams"
+    assert data["type"] == "Audio"
+    assert data["id"] == f"{actor_url}/objects/pub-page"
+    assert data["to"] == ["https://www.w3.org/ns/activitystreams#Public"]
+    assert data["cc"] == [f"{actor_url}/followers"]
+    assert data["attributedTo"][0] == actor_url
+    assert any(
+        link["mediaType"] == "text/html" and link["href"] == f"https://music.example.com/tracks/{track.id}"
+        for link in data["url"]
+    )
+
+
+async def test_track_page_serves_audio_object_for_mastodon_accept(fed_client, db_session, regular_user):
+    """The combined ld+json/activity+json/html Accept sent by Mastodon gets the object."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-page",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    response = fed_client.get(
+        f"/tracks/{track.id}",
+        headers={
+            "Accept": 'application/ld+json; profile="https://www.w3.org/ns/activitystreams", '
+            "application/activity+json, text/html;q=0.1"
+        },
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert ACTIVITY_JSON in response.headers["content-type"]
+    assert response.json()["type"] == "Audio"
+
+
+async def test_track_page_serves_spa_with_discovery_hints_for_browsers(
+    fed_client, db_session, regular_user, tmp_path, monkeypatch
+):
+    """GET /tracks/{id} serves the SPA shell + rel=alternate hints for HTML clients."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-page",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    index = tmp_path / "index.html"
+    index.write_text("<html><head><title>songhive</title></head><body></body></html>", encoding="utf-8")
+    monkeypatch.setattr("songhive.api.routes.federation._spa_index_path", lambda: index)
+
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": "text/html"})
+    assert response.status_code == status.HTTP_200_OK
+    assert "text/html" in response.headers["content-type"]
+
+    object_url = "https://music.example.com/users/regular/objects/pub-page"
+    assert response.headers["Link"] == f'<{object_url}>; rel="alternate"; type="{ACTIVITY_JSON}"'
+    assert f'<link rel="alternate" type="{ACTIVITY_JSON}" href="{object_url}"></head>' in response.text
+
+
+async def test_track_page_serves_plain_spa_for_unpublished_track(
+    fed_client, db_session, regular_user, tmp_path, monkeypatch
+):
+    """HTML requests for unpublished tracks get the SPA shell without AP hints."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id=None,
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    index = tmp_path / "index.html"
+    index.write_text("<html><head></head><body></body></html>", encoding="utf-8")
+    monkeypatch.setattr("songhive.api.routes.federation._spa_index_path", lambda: index)
+
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": "text/html"})
+    assert response.status_code == status.HTTP_200_OK
+    assert "Link" not in response.headers
+    assert 'rel="alternate"' not in response.text
+
+
+async def test_track_page_returns_404_for_unpublished_track(fed_client, db_session, regular_user):
+    """AP requests for tracks without a federation_object_id return 404."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id=None,
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_track_page_returns_404_for_private_track(fed_client, db_session, regular_user):
+    """AP requests for non-public tracks return 404."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Private Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+        federation_object_id="pub-priv",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_track_page_returns_404_for_unknown_track(fed_client):
+    """AP requests for unknown track ids return 404."""
+    response = fed_client.get("/tracks/nope", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_track_page_returns_404_for_inactive_owner(fed_client, db_session, regular_user):
+    """AP requests return 404 when the track owner is deactivated."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-inactive",
+    )
+    db_session.add(track)
+    regular_user.is_active = False
+    await db_session.commit()
+
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 

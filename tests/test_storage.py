@@ -500,9 +500,20 @@ async def test_s3_store_and_retrieve_minio():
     assert large_retrieved is not None
     assert large_retrieved.read_bytes() == large
 
+    err = None
     assert await storage.exists(large_path) is True
-    assert await storage.delete(large_path) is True
-    assert await storage.delete(path) is True
+    try:
+        assert await storage.delete(large_path) is True
+    except Exception as e:
+        err = e
+
+    try:
+        assert await storage.delete(path) is True
+    except Exception as e:
+        err = e
+
+    if err:
+        raise err
 
 
 class _FakeS3Client:

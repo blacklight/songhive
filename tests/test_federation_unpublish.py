@@ -16,7 +16,8 @@ from songhive.models import Visibility
 from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.models.user import User
-from songhive.services.federation import publish_track_activity, unpublish_track_activity
+from songhive.services.activities import record_track_publication
+from songhive.services.federation import unpublish_track_activity
 
 
 @pytest.fixture
@@ -135,11 +136,14 @@ def test_create_audio_activity_and_delete_have_same_object_url():
     assert create["object"]["id"] == delete["object"]["id"]
 
 
-def test_publish_track_activity_enqueues_create_to_followers(fed_config):
-    """The helper builds a Create(Audio) activity and enqueues one delivery per inbox."""
+@pytest.mark.asyncio
+async def test_record_track_publication_enqueues_create_to_followers(db_session, fed_config):
+    """A track publication records a create activity and delivers its payload per inbox."""
     track, artist = _make_public_track()
     track.federation_object_id = "pub-1"
     user = _make_user_with_keys()
+    db_session.add(user)
+    await db_session.flush()
 
     with (
         patch(
@@ -148,14 +152,16 @@ def test_publish_track_activity_enqueues_create_to_followers(fed_config):
         ),
         patch("songhive.tasks.federation.deliver_activity") as mock_deliver,
     ):
-        result = publish_track_activity(track, artist, user, fed_config, track.federation_object_id)
+        activity = await record_track_publication(db_session, track=track, artist=artist, owner=user, config=fed_config)
 
-    assert result == 2
+    assert activity is not None
+    assert activity.entity_type == "track"
+    assert activity.source_id == f"{user.actor_url}/objects/pub-1"
     assert mock_deliver.delay.call_count == 2
     calls = [call.args for call in mock_deliver.delay.call_args_list]
     assert calls[0][1] == "https://a.example/inbox"
     assert calls[1][1] == "https://b.example/inbox"
-    activity = calls[0][0]
-    assert activity["type"] == "Create"
-    assert activity["actor"] == user.actor_url
-    assert activity["object"]["id"] == f"{user.actor_url}/objects/pub-1"
+    payload = calls[0][0]
+    assert payload["type"] == "Create"
+    assert payload["actor"] == user.actor_url
+    assert payload["object"]["id"] == f"{user.actor_url}/objects/pub-1"

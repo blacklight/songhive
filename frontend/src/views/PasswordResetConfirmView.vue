@@ -142,6 +142,6 @@ async function onSubmit() {
 }
 
 .password-reset-confirm-view__links a {
-  color: var(--color-accent-contrast);
+  color: var(--color-text-link);
 }
 </style>

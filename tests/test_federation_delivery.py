@@ -1,5 +1,10 @@
 """
 Tests for the signed outgoing ActivityPub delivery task.
+
+The actual signing and POST are delegated to ``pubby.deliver_activity``;
+these tests patch ``pubby.handlers._outbox.requests.post`` and cover the
+task's retry policy (5xx/429 retry, other 4xx give up) and the federation
+gates that run before delivery.
 """
 
 import json
@@ -12,6 +17,8 @@ from pubby.crypto import export_private_key_pem, generate_rsa_keypair
 
 from songhive.config.schema import SonghiveConfig
 from songhive.tasks.federation import deliver_activity
+
+PUBBY_POST = "pubby.handlers._outbox.requests.post"
 
 
 def _make_config(**federation_overrides):
@@ -51,43 +58,23 @@ def test_deliver_activity_sends_signed_post(monkeypatch):
     activity = {"type": "Create", "object": {"type": "Audio"}}
     inbox_url = "https://remote.example/inbox"
     actor_key_id = "https://music.example.com/users/alice#main-key"
-    signed_headers = {"Signature": 'keyId="foo"', "Host": "remote.example"}
 
-    loaded_key = object()
-    base_headers = {
-        "Content-Type": "application/activity+json",
-        "Accept": "application/activity+json",
-    }
-    body = json.dumps(activity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-
-    with patch("songhive.tasks.federation.requests.post") as mock_post:
+    with patch(PUBBY_POST) as mock_post:
         mock_post.return_value.status_code = 202
-        with (
-            patch("songhive.tasks.federation.sign_request", return_value=signed_headers) as mock_sign,
-            patch(
-                "songhive.tasks.federation.load_private_key",
-                return_value=loaded_key,
-            ) as mock_load_private_key,
-        ):
-            result = deliver_activity.run(activity, inbox_url, actor_key_id, private_key_pem)
+        result = deliver_activity.run(activity, inbox_url, actor_key_id, private_key_pem)
 
     assert result == {"status_code": 202}
-    mock_post.assert_called_once_with(
-        inbox_url,
-        data=body,
-        headers=signed_headers,
-        timeout=15,
-    )
+    mock_post.assert_called_once()
+    call = mock_post.call_args
+    assert call.args[0] == inbox_url
+    assert call.kwargs["data"] == json.dumps(activity).encode("utf-8")
+    assert call.kwargs["timeout"] == 15.0
 
-    mock_load_private_key.assert_called_once_with(private_key_pem)
-    mock_sign.assert_called_once_with(
-        private_key=loaded_key,
-        key_id=actor_key_id,
-        method="POST",
-        url=inbox_url,
-        body=body,
-        headers=base_headers,
-    )
+    headers = call.kwargs["headers"]
+    assert headers["Content-Type"] == "application/activity+json"
+    assert "Signature" in headers
+    assert headers["Content-Length"] == str(len(call.kwargs["data"]))
+    assert headers["User-Agent"].startswith("pubby/")
 
 
 def test_deliver_activity_skips_blocked_domain(monkeypatch):
@@ -101,8 +88,8 @@ def test_deliver_activity_skips_blocked_domain(monkeypatch):
     actor_key_id = "https://music.example.com/ap/actor#main-key"
 
     with (
-        patch("songhive.tasks.federation.requests.post") as mock_post,
-        patch("songhive.tasks.federation.sign_request") as mock_sign,
+        patch(PUBBY_POST) as mock_post,
+        patch("songhive.tasks.federation.load_private_key") as mock_load_key,
     ):
         result = deliver_activity.run(  # type: ignore
             activity,
@@ -113,7 +100,7 @@ def test_deliver_activity_skips_blocked_domain(monkeypatch):
 
     assert result is None
     assert not mock_post.called
-    assert not mock_sign.called
+    assert not mock_load_key.called
 
 
 def test_deliver_activity_retries_on_network_error(monkeypatch):
@@ -128,7 +115,7 @@ def test_deliver_activity_retries_on_network_error(monkeypatch):
     actor_key_id = "https://music.example.com/users/alice#main-key"
     exc = requests.ConnectionError("boom")
 
-    with patch("songhive.tasks.federation.requests.post", side_effect=exc), pytest.raises(Retry):
+    with patch(PUBBY_POST, side_effect=exc), pytest.raises(Retry):
         deliver_activity.run(activity, inbox_url, actor_key_id, private_key_pem)  # type: ignore
 
     assert deliver_activity.retry.call_args.kwargs["countdown"] == 30
@@ -148,7 +135,7 @@ def test_deliver_activity_retries_5xx_with_exponential_countdown(monkeypatch):
     actor_key_id = "https://music.example.com/users/alice#main-key"
 
     mock_response = MagicMock(status_code=503)
-    with patch("songhive.tasks.federation.requests.post", return_value=mock_response), pytest.raises(Retry):
+    with patch(PUBBY_POST, return_value=mock_response), pytest.raises(Retry):
         deliver_activity.run(activity, inbox_url, actor_key_id, private_key_pem)  # type: ignore
 
     assert deliver_activity.retry.call_count == 1
@@ -169,7 +156,7 @@ def test_deliver_activity_retries_429(monkeypatch):
     actor_key_id = "https://music.example.com/users/alice#main-key"
 
     mock_response = MagicMock(status_code=429)
-    with patch("songhive.tasks.federation.requests.post", return_value=mock_response), pytest.raises(Retry):
+    with patch(PUBBY_POST, return_value=mock_response), pytest.raises(Retry):
         deliver_activity.run(activity, inbox_url, actor_key_id, private_key_pem)  # type: ignore
 
     assert deliver_activity.retry.call_args.kwargs["countdown"] == 30
@@ -187,7 +174,7 @@ def test_deliver_activity_does_not_retry_other_4xx(monkeypatch):
     actor_key_id = "https://music.example.com/users/alice#main-key"
 
     mock_response = MagicMock(status_code=404)
-    with patch("songhive.tasks.federation.requests.post", return_value=mock_response):
+    with patch(PUBBY_POST, return_value=mock_response):
         result = deliver_activity.run(activity, inbox_url, actor_key_id, private_key_pem)
 
     assert result is None

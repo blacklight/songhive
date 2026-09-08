@@ -1,4 +1,5 @@
 from . import (
+    activities,
     admin,
     admin_external_libraries,
     albums,
@@ -27,6 +28,7 @@ from . import (
 )
 
 __all__ = [
+    "activities",
     "admin",
     "admin_external_libraries",
     "albums",

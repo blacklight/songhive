@@ -133,6 +133,13 @@ const actions = computed(() => [
     visible: isOwner.value || isPublic.value,
   },
   {
+    key: "activities",
+    label: t("activities.view"),
+    icon: "comments",
+    variant: "secondary" as const,
+    visible: true,
+  },
+  {
     key: "edit",
     label: t("common.edit"),
     icon: "pen-to-square",
@@ -177,6 +184,12 @@ async function onAction(key: string) {
         album.value.owner_id,
         album.value.visibility,
       );
+      break;
+    case "activities":
+      await router.push({
+        name: "albumActivities",
+        params: { id: album.value.id },
+      });
       break;
     case "edit":
       await router.push({

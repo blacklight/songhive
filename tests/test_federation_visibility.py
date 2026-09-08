@@ -212,7 +212,7 @@ def test_track_to_audio_object_falls_back_to_stored_file_content_type():
 
 
 def test_track_to_audio_object_attribution_with_actor_url():
-    """When an actor_url is provided, attributedTo includes both artist and actor."""
+    """When an actor_url is provided, attributedTo leads with the actor then the artist."""
     track = _make_track(Visibility.PUBLIC.value)
     artist = _make_artist()
     actor_url = "https://music.example.com/users/alice"
@@ -220,8 +220,8 @@ def test_track_to_audio_object_attribution_with_actor_url():
 
     assert obj is not None
     assert obj["attributedTo"] == [
-        f"https://music.example.com/artists/{artist.id}",
         actor_url,
+        f"https://music.example.com/artists/{artist.id}",
     ]
 
 
@@ -249,8 +249,8 @@ def test_create_audio_activity_includes_actor_attribution():
 
     assert activity is not None
     assert activity["object"]["attributedTo"] == [
-        f"https://music.example.com/artists/{artist.id}",
         actor_url,
+        f"https://music.example.com/artists/{artist.id}",
     ]
     assert "attachment" in activity["object"]
     assert activity["object"]["attachment"][0]["type"] == "Document"

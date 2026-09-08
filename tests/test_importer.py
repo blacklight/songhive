@@ -704,7 +704,7 @@ def _patch_process_upload_env(monkeypatch, tmp_path):
     monkeypatch.setattr("songhive.config.load_config", lambda *_: _make_process_config(tmp_path))
     monkeypatch.setattr("songhive.models.base.init_db", Mock())
     monkeypatch.setattr("songhive.storage.get_storage", lambda cfg: storage_backend)
-    monkeypatch.setattr("songhive.tasks.import_.publish_track_activity", Mock())
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", AsyncMock())
 
     return storage_backend
 
@@ -822,15 +822,15 @@ def test_process_upload_publishes_public_track(_patch_process_upload_env, monkey
     monkeypatch.setattr("songhive.services.import_.import_audio_file", import_mock)
     ws_mock = Mock()
     monkeypatch.setattr("songhive.ws.events.EventWebSocket", ws_mock)
-    publish_mock = Mock()
-    monkeypatch.setattr("songhive.tasks.import_.publish_track_activity", publish_mock)
+    publish_mock = AsyncMock()
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", publish_mock)
 
     return_id = process_upload("lib-1", "user-1", stored_file_id="sf-1", visibility="public")
 
     assert return_id == "upload-1"
     assert track.federation_object_id is not None
     publish_mock.assert_called_once()
-    assert publish_mock.call_args.args[0] is track
+    assert publish_mock.call_args.kwargs["track"] is track
 
 
 def test_process_upload_handles_duplicate(_patch_process_upload_env, monkeypatch, tmp_path):

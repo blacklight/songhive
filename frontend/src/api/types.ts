@@ -5016,6 +5016,8 @@ export interface components {
     TrackPublishRequest: {
       /** Status */
       status?: string | null;
+      /** Visibility */
+      visibility?: components["schemas"]["Visibility"] | null;
     };
     /**
      * TrackPublishResponse

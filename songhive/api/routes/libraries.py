@@ -28,8 +28,8 @@ from ...models._enums import Visibility
 from ...models.artist import Artist
 from ...models.library import Library
 from ...models.user import User
-from ...services import acl, audit, deletion, music
-from ...services.federation import publish_track_activity, unpublish_track_activity
+from ...services import acl, activities, audit, deletion, music
+from ...services.federation import unpublish_track_activity
 from ...services.hashtags import (
     add_hashtags_to_entity,
     remove_hashtag_from_entity,
@@ -323,17 +323,16 @@ async def upload_track(
         await db.commit()
         if result.track.visibility == Visibility.PUBLIC.value and user is not None:
             result.track.federation_object_id = str(uuid.uuid4())
-            await db.commit()
             artist = await db.get(Artist, result.track.artist_id)
             if artist is not None:
-                background_tasks.add_task(
-                    publish_track_activity,
-                    result.track,
-                    artist,
-                    user,
-                    request.app.state.config,
-                    result.track.federation_object_id,
+                await activities.record_track_publication(
+                    db,
+                    track=result.track,
+                    artist=artist,
+                    owner=user,
+                    config=request.app.state.config,
                 )
+            await db.commit()
     except DuplicateTrackError as exc:
         existing = await music.get_track(db, exc.existing_track_id)
         return JSONResponse(
@@ -384,17 +383,16 @@ async def _import_single_sync_file(
         await db.commit()
         if background_tasks is not None and result.track.visibility == Visibility.PUBLIC.value and user is not None:
             result.track.federation_object_id = str(uuid.uuid4())
-            await db.commit()
             artist = await db.get(Artist, result.track.artist_id)
             if artist is not None:
-                background_tasks.add_task(
-                    publish_track_activity,
-                    result.track,
-                    artist,
-                    user,
-                    config,
-                    result.track.federation_object_id,
+                await activities.record_track_publication(
+                    db,
+                    track=result.track,
+                    artist=artist,
+                    owner=user,
+                    config=config,
                 )
+            await db.commit()
         assert result.upload is not None
         return BulkUploadResult(
             filename=filename,

@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.types import Receive, Send
 
-from ..config.schema import SonghiveConfig
+from ..config import SonghiveConfig, get_default_user_agent
 from ..models.base import dispose_engine, get_session, init_db
 from ..services.acl import audit_ownerless_private
 from ..services.redis import close_redis_client, get_redis_client
@@ -21,6 +21,7 @@ from ..services.settings import apply_settings_overrides
 from ..version import __version__
 from .errors import install_error_handlers
 from .routes import (
+    activities,
     admin,
     admin_external_libraries,
     albums,
@@ -204,6 +205,8 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(sessions.router, prefix=api_prefix, tags=["sessions"])
     app.include_router(api_tokens.router, prefix=api_prefix, tags=["api-tokens"])
     app.include_router(users.router, prefix=api_prefix, tags=["users"])
+    app.include_router(activities.router, prefix=api_prefix, tags=["activities"])
+    app.include_router(activities.entity_router, prefix=api_prefix, tags=["activities"])
     app.include_router(artists.router, prefix=api_prefix, tags=["artists"])
     app.include_router(albums.router, prefix=api_prefix, tags=["albums"])
     app.include_router(tracks.router, prefix=api_prefix, tags=["tracks"])
@@ -269,6 +272,9 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
             storage=storage,
             actor_config=actor_config,
             private_key_path=str(private_key_path),
+            allowed_instances=config.federation.allowed_instances,
+            blocked_instances=config.federation.blocked_instances,
+            user_agent=get_default_user_agent(),
         )
         bind_activitypub(app, handler, prefix="/ap")
         bind_mastodon_api(

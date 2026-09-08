@@ -85,6 +85,7 @@ songhive/
 │   │   ├── auth.py         # Login, registration, token refresh, password reset
 │   │   ├── sessions.py     # List and revoke active refresh-token sessions
 │   │   ├── users.py        # User profiles, avatar, links, password change
+│   │   ├── activities.py   # Activity interactions (like, …)
 │   │   ├── artists.py
 │   │   ├── albums.py
 │   │   ├── tracks.py
@@ -113,7 +114,8 @@ songhive/
 │   └── versions/           # Revision scripts
 ├── models/                 # SQLAlchemy mapped models + shared enums
 │   ├── base.py             # DeclarativeBase, UUID PK, timestamps, async session factory
-│   ├── _enums.py           # Visibility enum (private / local / public)
+│   ├── _enums.py           # Visibility enum (private / mentioned / local / followers / public)
+│   ├── activity.py         # Activity, ActivityMention, ActivityTarget (federation interaction layer)
 │   ├── user.py             # User (roles: user / moderator / admin; federation fields)
 │   ├── user_link.py        # Profile links (validated URL list)
 │   ├── invite.py           # Invite codes (max_uses, expiry)
@@ -141,12 +143,15 @@ songhive/
 │   └── setting.py          # Runtime-editable instance settings (key/JSON-value)
 ├── services/               # Business logic layer
 │   ├── acl.py              # Three-level visibility + share-grant + share-token ACL
+│   ├── activities.py       # Activity domain service (entity resolution, creation, interactions)
 │   ├── auth.py             # User lookup, password hashing, session helpers
 │   ├── audit.py            # Audit log helpers
+│   ├── deletion.py         # Cascade deletion + activity retraction fan-out
 │   ├── email.py            # SMTP email (verification, password reset)
 │   ├── federation.py       # Actor provisioning, domain allow/block, inbox dispatch
 │   ├── genres.py           # Genre validation, association and listing
 │   ├── import_.py          # Import pipeline orchestration
+│   ├── mentions.py         # @handle extraction, local/WebFinger resolution, safe HTML rendering
 │   ├── metadata.py         # Tag extraction coordination
 │   ├── music.py            # Music library helpers
 │   ├── musicbrainz.py      # MusicBrainz + Cover Art Archive enrichment (async httpx)
@@ -326,12 +331,243 @@ can be changed via the admin API without a restart.
 └─────────────┘
 ```
 
-**Visibility levels** (`Visibility` enum, applies to tracks, albums, artists,
+**Visibility levels** (`Visibility` enum) are ordered from most to least
+restrictive: `private < mentioned < local < followers < public`
+(`Visibility.rank`, `Visibility.can_contain`). Entity visibility currently
+uses `private`, `local`, and `public` (applies to tracks, albums, artists,
 libraries, stored files):
 
 - `private` — visible only to the owner (and users with a `ShareGrant`)
 - `local` — visible to authenticated users on the same instance
 - `public` — visible to everyone including federated instances
+
+The `mentioned` and `followers` levels exist for the activities layer
+(`Activity.visibility`) and are not yet meaningful for entity ACLs.
+
+### Activities
+
+`Activity` records federation-relevant events (`create`, `announce`, `like`,
+`reply`, `quote`, `mention`, `update`, `delete`, `webmention`) attached to an
+entity through `(entity_type, entity_id)` — where `entity_type` is one of
+`track`, `album`, `artist`, `playlist`, `library`. Each row tracks its origin
+via `source_type` (`local` or a remote source), `source_actor`, and
+`source_id` (unique per source), with `local_object_id` as an optional
+canonical local identifier. Activities support threading through
+`in_reply_to_activity_id`, arbitrary JSON `payload`s, Markdown source vs
+rendered content (`content_source` / `content` / `content_type`), and soft
+deletion (`deleted_at`, `retracted`). An activity's `visibility` must not
+exceed its parent entity's visibility (`Visibility.can_contain`).
+
+`ActivityMention` rows capture `@handle` mentions embedded in content, with
+optional `actor_url` / `user_id` resolution and a `notified_at` marker.
+`services/mentions.py` implements the mention pipeline: `MENTION_REGEX`
+extracts `@user` and `@user@domain` handles, `resolve_mentions` resolves bare
+handles against the local `users` table (case-insensitive, active users only)
+and remote handles through `pubby.resolve_actor_url` (run in a thread, with
+Pubby's `https://{domain}/@{username}` fallback on lookup failure). Remote
+resolution is gated on `federation.enabled`, requires a dotted domain, and
+drops handles on blocked or non-allowed instances via
+`services/federation.is_domain_blocked`; `@user@domain` handles naming the
+local instance resolve locally instead. `render_mentions` builds safe HTML —
+resolved handles become anchors via `pubby.render_link_anchor`, surrounding
+text is escaped and linkified by `pubby.render_post_html` (which also
+converts newlines to `<br>`, since remote servers render `content`/`summary`
+as HTML and would collapse literal newlines) — and
+`process_mentions` is the single entry point returning resolved mentions,
+rendered HTML, hashtags, and ActivityPub `Mention`/`Hashtag` tags.
+`ActivityTarget` rows track per-inbox outbound delivery state (`pending`,
+`sent`, `failed`, `skipped`) with `attempts` / `last_error` /
+`last_attempt_at` bookkeeping. Tracks already published to the fediverse
+(`federation_object_id` set) are backfilled as `create` activities by
+migration `4adb5fbea9d6`.
+
+`services/activities.py` is the domain entry point: `resolve_entity` maps an
+`(entity_type, entity_id)` pair to its model row, and
+`create_local_activity` validates the entity (404), enforces
+`Visibility.can_contain` against the entity (422 — entities without a
+visibility column, currently `Artist`, act as public containers), checks
+`acl.can_manage` (403), then persists the activity plus any pre-resolved
+`ActivityMention` rows. Local source identity reuses the author's
+`actor_url`, falling back to a `urn:songhive:user:{username}` URN when the
+user has no provisioned federation identity; `source_id` embeds the same
+UUID as `local_object_id` (`{actor}/objects/{uuid}`) so section-9 object
+routes can resolve it.
+
+`can_view_activity` decides who may see an activity: the containing entity
+must pass `acl.can_access`, and the activity's own `visibility` applies on
+top (`public` follows the entity check; `local`/`followers` require an
+authenticated user; `mentioned` requires the owner, an admin, or a mentioned
+user; `private` is owner/admin-only; retracted activities are never
+viewable). Interactions are layered on top of `create_local_activity`:
+`like_activity` records an idempotent `like` (400 on a duplicate, 404 on a
+retracted target) that inherits the target's visibility and stores a
+`federation/activities.create_like_activity` `Like` payload whose `to`/`cc`
+come from `activity_audience`. Interactions skip the `can_manage` gate
+(`require_manage=False`) — view access on the target is enough — while
+content-producing activity types still require manage rights. The
+`POST /api/v1/activities/{id}/like` endpoint performs the 404/403/400
+checks, provisions the liker's actor keys (`ensure_user_actor`), commits,
+then calls `services/activities.fan_out_like_activity`: for remote targets
+it resolves the liked author's inbox via
+`services/federation.resolve_actor_inbox` (the `federation_actor_cache`
+table first, then a signed actor-document fetch, preferring `sharedInbox`)
+and hands it to `fan_out_activity` alongside the like's own audience.
+
+`resolve_audience` maps an activity's visibility to the set of remote
+**inbox URLs** it should reach: `public` and `followers` activities go to
+the author's follower inboxes (`services/federation.get_follower_inboxes`
+reads Pubby's `federation_followers` storage via `pubby.collect_inboxes`,
+preferring `shared_inbox` and deduplicating) plus every remote mentioned
+actor, while `mentioned` activities reach only the mentioned actors.
+Mentions that resolved to a local user (`user_id` set) or an actor URL on
+the local instance domain have no remote inbox and are excluded, as are
+non-HTTP(S) actor URLs; `private` and `local` never federate. Mentioned
+inboxes are resolved concurrently through `resolve_actor_inbox`, signed
+with the owner's key.
+
+`fan_out_activity` is the delivery step: it unions the resolved audience
+with caller-supplied `extra_inboxes`, drops inboxes already booked, and
+creates an `ActivityTarget` row per remaining inbox before enqueueing
+`tasks.federation.deliver_activity` (which applies the federation gate, the
+blocked-domain gate, and exponential-backoff retries). Targets are marked
+`sent` once the task accepts the job, `failed` with `last_error` when
+enqueueing raises, and `skipped` — without an attempt — for blocked or
+non-allowed inbox domains; `pending` remains the default for rows staged
+without a dispatch attempt. Fan-out no-ops for remote or retracted
+activities, missing payloads, non-federating visibilities, disabled
+federation, and owners without a signing key.
+
+`VisibilityRules` centralizes the containment policy: `can_contain` and
+`enforce_activity_visibility` (used by `create_local_activity`) validate an
+activity's visibility against its entity's, while
+`cascade_visibility_update` changes a local activity's visibility and fans
+the change out to the inboxes recorded as `sent` in `activity_targets`.
+When the new visibility still federates (`Visibility.federates`:
+`mentioned`, `followers`, `public`) those inboxes receive an `Update`
+carrying the new `to`/`cc` audience built by
+`federation.activities.create_visibility_update_activity` on top of
+`activity_audience`; when it does not (`private`, `local`) a
+`Delete(Tombstone)` retracts the object instead. Remote activities and
+soft-deleted local activities never fan out, and deliveries are signed with
+the activity owner's key through `deletion.enqueue_activity_delivery`.
+
+`PATCH /api/v1/activities/{id}` handles author edits behind an
+`acl.can_manage` check on the containing entity (owner or admin — the same
+gate `create_local_activity` applies to content-producing types). A
+`content` edit goes through `services.activities.update_activity`, which
+re-runs the `process_mentions` pipeline on the new `content_source`:
+`content` is re-rendered as mention-aware safe HTML, the
+`activity_mentions` rows are replaced with the newly resolved set, and —
+when the stored `payload` embeds a dict `object` — the object's `content`
+and `tag` are rebuilt (`pubby.set_object_content` merges hashtags while
+preserving pre-existing tags, then the pipeline's `Mention` tags and HTML
+are layered on) and it is stamped with `updated`. A `visibility` edit
+goes through `cascade_visibility_update` so already-delivered inboxes
+receive an `Update` or a `Delete(Tombstone)`. Content edits then federate
+through `services.activities.fan_out_activity_update` — invoked after both
+edits so the final visibility applies — which wraps the rebuilt object in
+an `Update` (`federation.activities.create_object_update_activity`, with
+`to`/`cc` rewritten to the current audience) and delivers it via
+`deletion.enqueue_activity_delivery` to every inbox recorded as `sent`.
+`fan_out_activity` then re-delivers the stored payload to inboxes first
+reached by the edit (e.g. a newly mentioned actor), so those recipients
+get the `Create` carrying the updated object rather than an `Update` for
+an object they have never seen. The fan-out no-ops for remote or
+retracted activities, payloads without an embedded dict `object`,
+non-federating visibilities, disabled federation, and owners without a
+signing key.
+
+`GET /api/v1/{entity_type}/{entity_id}/activities` (a second router in
+`api/routes/activities.py`, mounted at `api_prefix`) is the public read
+endpoint. It validates `entity_type` against `ACTIVITY_ENTITY_TYPES`
+(400), resolves the entity (404), and gates on `acl.can_access` (403) —
+anonymous requesters may read publicly accessible entities, matching the
+other read endpoints; share tokens are not honored, consistent with the
+like/edit routes. `services.activities.list_activities` then applies the
+same per-activity visibility rules as `can_view_activity` in SQL
+(`_activity_visibility_filter`) so pagination cannot leak or under-fill
+pages, supports `activity_type`/`source_type` filters, and
+keyset-paginates on `(published_at, id)` newest-first with an opaque
+base64url cursor (`limit` 1–100, default 20; malformed cursors return
+400). Responses are serialized through
+`ActivityResponse`/`ActivityListResponse`: the raw `payload`,
+`retracted`, and `deleted_at` stay internal while resolved mentions are
+included.
+
+Deletion is handled by `services/deletion.py`'s `cascade_delete_entity`,
+which is invoked from every entity delete path (track, album, artist,
+playlist, library). Local activities are soft-deleted (`deleted_at` set)
+and a `Delete(Tombstone)` is enqueued through `deliver_activity` for every
+inbox recorded as `sent` in `activity_targets`, signed with the activity
+owner's private key; remote activities are hard-deleted without fan-out.
+Single-activity retraction follows the same rules through
+`services/activities.retract_activity`, exposed as `DELETE
+/api/v1/activities/{id}` behind `acl.can_manage` on the containing entity.
+
+Track fediverse publications are recorded as activities too: every publish
+path — the manual `POST /api/v1/tracks/{id}/publish`, uploads and imports
+of public tracks (including the `process_upload` Celery task and bulk
+library uploads), and entity visibility transitions to `public` — calls
+`services/activities.record_track_publication`. It builds the
+`Create(Audio)` payload for the freshly minted `federation_object_id`,
+stores it on a `create` activity whose `source_id` matches the published
+object URL (`{actor_url}/objects/{federation_object_id}`), keeps the
+one-off `status` post text in `content_source`, persists its resolved
+mentions as `activity_mentions` rows, records the caller-selected
+`visibility` (default `public`), and delivers through
+`fan_out_activity` so each reached inbox is booked in `activity_targets`
+and later retraction reaches exactly those inboxes. When a public track
+goes private, `retract_track_publications` soft-deletes the live
+publication rows for the retracted object alongside the track-level
+`unpublish_track_activity` `Delete(Tombstone)`. Metadata edits on a
+published track — `PATCH /api/v1/tracks/{id}` touching `title`,
+`artist_name`, `description`, or `genre` — re-sync the stored object
+through `services/activities.sync_track_publications`: each live local
+`create` activity's `payload.object` is rebuilt from
+`track_to_audio_object` (keeping the object id stable, stamping
+`updated`), a one-off `status` kept in `content_source` is re-applied as
+the post body so the track description does not clobber it, and the
+result fans out via `fan_out_activity_update` so delivered inboxes get an
+`Update` carrying the refreshed object.
+`get_activity_unpublish_info` returns the `ActivityUnpublishInfo`
+(activity id, `source_id`, `actor_url`, sent inboxes) used for that
+delivery, and `federation/activities.py` builds the `Delete(Tombstone)`
+payload via `create_tombstone_delete_activity` — a thin adapter around
+`pubby.build_delete_activity` (0.3.2) that keeps a plain string `@context`.
+
+`GET /users/{username}/objects/{object_id}` in `api/routes/federation.py`
+is the dereference endpoint for federated objects. Public tracks still
+resolve through `Track.federation_object_id` to their `Audio` object; when
+no track matches, an `Activity` is resolved by `local_object_id` or
+`source_id`, scoped to the requested user (`owner_user_id`), so an object
+is only served under its owner's namespace. Soft-deleted activities answer
+with a `Tombstone` object (`federation/activities.build_tombstone_object`)
+whose shape mirrors the object embedded in `Delete(Tombstone)` deliveries.
+Live activities are only served when their visibility federates
+(`Visibility.federates`: `mentioned`, `followers`, `public`) —
+`private`/`local` objects were never distributed and answer 404.
+`federation/activities.build_activity_object` produces the document: the
+stored `payload` verbatim for payload-bearing activities (e.g. `Like`), or
+a synthesized `Note` carrying the rendered `content`, the
+`activity_audience`-derived `to`/`cc`, `Mention` tags, and `inReplyTo`.
+
+Served track objects are built by `_track_object_document`, which extends
+the `track_to_audio_object` payload with a top-level `@context` and the
+`public` `to`/`cc` audience — remote fetchers (e.g. Mastodon's URL lookup)
+reject context-less documents, and an audience-less object would be
+imported as a direct-only status. The object's `attributedTo` leads with
+the publishing actor rather than the artist page URL because remote
+importers take its first entry as the author and only actor URLs are
+dereferenceable. `GET /tracks/{track_id}` content-negotiates on top of
+that: requests accepting `application/activity+json`/`application/ld+json`
+receive the same `Audio` document (the track page URL is the `text/html`
+`url` advertised in every published object, so remote servers fetch it when
+a user pastes the link into a search box), while browsers receive the SPA
+shell annotated with a `Link: rel="alternate"` header and a
+`<link rel="alternate" type="application/activity+json">` element pointing
+at the object URL. The object is only served while the track is published
+(`federation_object_id` set): unpublished tracks answer 404 so a remote
+fetch cannot resurrect a retracted post under a different id.
 
 ### Genres
 
@@ -619,11 +855,30 @@ Recursive deletion collects unpublish information for public tracks and enqueues
 
 Federation is powered by [pubby](https://github.com/blacklight/pubby) mounted
 on the FastAPI app via its FastAPI adapter. Per-user actor routes and WebFinger
-discovery are in `api/routes/federation.py`. Outbound plaintext→HTML rendering
-(escaping, URL linkification, `rel="tag"`/`rel="me"` anchors, `Hashtag` and
-`PropertyValue` tag/attachment builders) is delegated to `pubby.content`; the
-instance's `/hashtags/{name}` route convention is injected via
-`federation/_common.py`'s `get_hashtag_url`.
+discovery are in `api/routes/federation.py`. The general-purpose primitives are
+delegated to pubby:
+
+- Outbound plaintext→HTML rendering (escaping, URL linkification,
+  `rel="tag"`/`rel="me"` anchors, `Hashtag` and `PropertyValue`
+  tag/attachment builders) and `Audio` object content/duration formatting
+  (`set_object_content`, `format_duration`) come from `pubby.content`; the
+  instance's `/hashtags/{name}` route convention is injected via
+  `federation/_common.py`'s `get_hashtag_url`.
+- Instance allow/block matching (`normalize_domain`, `extract_domain`,
+  `is_domain_blocked`) comes from `pubby.moderation`; `services/federation.py`
+  keeps thin wrappers that inject `config.federation.allowed_instances` /
+  `blocked_instances`.
+- Async→sync database URL conversion for pubby's synchronous SQLAlchemy
+  storage is `pubby.storage.adapters.db.to_sync_url` (applied by
+  `init_db_storage` inside `create_activitypub_storage`).
+- Actor private-key provisioning is `pubby.crypto.ensure_private_key_file`.
+- Follower inbox collection is `pubby.collect_inboxes`; one-shot signed
+  delivery is `pubby.deliver_activity` (the Celery task keeps the retry
+  policy).
+
+Songhive keeps orchestration: Celery tasks and their retry policy, per-user
+actor documents built from the `User` model, `federation_*` table naming, and
+the HTTP routes.
 
 **Actor model:**
 
@@ -649,7 +904,20 @@ instance's `/hashtags/{name}` route convention is injected via
   scheme-less link text, and `#hashtags` become `rel="tag"` links to this
   instance's `/hashtags/{name}` pages. Hashtags found in the description are
   also appended to the object's `tag` list, and the media download URL is
-  attached as a `Document` with the audio MIME type.
+  attached as a `Document` with the audio MIME type. The rendered text is
+  additionally mirrored into `summary` (`mirror_content_to_summary`):
+  Mastodon-family servers treat `Audio` as a "converted" object type and
+  render `name`/`summary`/`url` rather than `content`, so the post text
+  would otherwise be dropped there. The object's `name` is emitted as an
+  anchor — `<a href="{track_url}">{artist} - {title}</a>` — because those
+  servers interpolate `name` unescaped into the post's `<h2>` header,
+  turning the header into a link to the track page (it falls back to
+  escaped plain text if the track URL is not linkable). The `url` links
+  also mirror `mediaType`
+  into `mimeType` — Mastodon's link selection reads the non-standard
+  `mimeType` key and defaults untyped links to `text/html`, so without it
+  the raw audio download URL would be chosen for display instead of the
+  track page.
 - Each public lifecycle gets a fresh `Track.federation_object_id` (generated
   on every transition to public) so a previous `Tombstone` at the same URL
   cannot block re-publication.
@@ -657,9 +925,15 @@ instance's `/hashtags/{name}` route convention is injected via
   public track to the fediverse at any time (the "Fediverse" tab of the
   share dialog). It accepts an optional `status` — a one-off post text used
   as the `Create(Audio)` object's `content` instead of the stored
-  `description`; the status is never persisted on the track. Each manual
-  publication mints a fresh `federation_object_id` so every post is a
-  distinct remote object.
+  `description`, run through the `process_mentions` pipeline so `@handle`s
+  become links, `Mention` tags, and `activity_mentions` rows — and an
+  optional `visibility` (default `public`) selecting the post's audience:
+  `public`/`followers`/`mentioned` federate to their respective audiences,
+  while `private`/`local` record the activity without delivering it. The
+  status is never persisted on the track. The `to`/`cc` addressing derived
+  from the visibility is applied to both the `Create` envelope and the
+  embedded `Audio` object. Each manual publication mints a fresh
+  `federation_object_id` so every post is a distinct remote object.
 - `Delete(Tombstone)` is sent when a track is made non-public or deleted.
 - Profile changes (display name, bio, avatar, links) refresh the cached actor
   document via `sync_user_actor` and are pushed to follower inboxes as
@@ -686,8 +960,18 @@ instance's `/hashtags/{name}` route convention is injected via
   actor via pubby's `ActorConfig` and mounts both ActivityPub and Mastodon API
   compatibility endpoints.
 
-**Domain allow/block lists** are checked in `services/federation.py`
-(`is_domain_allowed`) before processing incoming activities.
+**Domain allow/block lists** (`federation.allowed_instances` /
+`federation.blocked_instances`) are enforced at several seams:
+
+- `POST /users/{username}/inbox` in `api/routes/federation.py` rejects with
+  403 before queueing (`is_domain_allowed`).
+- `tasks/federation.py`'s `process_incoming` passes the lists to pubby's
+  `InboxProcessor`, which drops the activity before signature verification.
+- The instance-level `/ap/inbox` and pubby's outbound fan-out get the same
+  filtering via `allowed_instances`/`blocked_instances` on
+  `ActivityPubHandler` (`_setup_federation` in `api/app.py`).
+- `tasks/federation.py`'s `deliver_activity` drops outbound deliveries to
+  blocked domains before signing.
 
 ---
 
@@ -870,6 +1154,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/ui/` | Headless base components (button, input, select, avatar, table, pagination, search, context menu, entity actions) |
 | `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
 | `frontend/src/components/entity/` | Reusable entity grid/list components (e.g. `BulkEditableGrid` for bulk selection and deletion) |
+| `frontend/src/components/activities/` | Activity feed components (`ActivityFeed` filter tabs + cursor pagination, `ActivityCard`, `ActivityEditModal`) backed by `stores/activities.ts` and `api/activities.ts` |
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
 | `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
@@ -877,6 +1162,17 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |
+
+Entity detail pages expose an "Activities" action that navigates to
+`/{entity}/{id}/activities` (`EntityActivitiesView`, shared across `track`,
+`album`, `artist`, `playlist`, and `library`). The feed reads
+`GET /api/v1/{entity_type}/{entity_id}/activities` with `activity_type` /
+`source_type` filters and keyset `cursor` pagination; liking an activity calls
+`POST /api/v1/activities/{id}/like` and editing one calls
+`PATCH /api/v1/activities/{id}` (shown to the activity owner and admins). Card
+content is rendered as HTML only for `local` activities — their `content` is
+sanitized server-side by the mention pipeline — while remote `content` is
+stripped to plain text to avoid trusting remote-supplied markup.
 
 The frontend is also a Progressive Web App. `/manifest.webmanifest` is served
 from the backend so the PWA name follows the configured instance name and the
@@ -922,7 +1218,9 @@ REST API under `/api/v1/`:
 
 ```
 /users/{username}               # Per-user ActivityPub actor document
+/users/{username}/objects/{id}  # Dereferenceable ActivityPub objects (Audio, Note, Tombstone, stored payloads)
 /@{username}                    # Mastodon-style alias / browser redirect
+/tracks/{id}                    # Track page: Audio object for AP clients, SPA + rel=alternate hints for browsers
 /.well-known/webfinger          # WebFinger discovery
 /.well-known/nodeinfo           # NodeInfo (Mastodon compat)
 /ap/actor                       # Instance-level Application actor
@@ -942,10 +1240,10 @@ Docker Compose (`docker-compose.yml`) provides a reference deployment:
 - `redis` — Redis (broker + cache + sessions)
 - `nginx` — Reverse proxy (`docker/nginx.conf`). It proxies federation routes
 (`/.well-known/*`, `/ap/*`, `/users/<user>`, `/@<user>`, etc.) to the
-application and performs content negotiation for `/@<user>` and
-`/users/<user>`: requests that accept `application/activity+json` or
-`application/ld+json` are proxied to the backend, while browser `text/html`
-requests fall through to the Vue SPA.
+application and performs content negotiation for `/@<user>`,
+`/users/<user>`, and `/tracks/<id>`: requests that accept
+`application/activity+json` or `application/ld+json` are proxied to the
+backend, while browser `text/html` requests fall through to the Vue SPA.
 
 Persistent data is stored under `volumes/`.
 

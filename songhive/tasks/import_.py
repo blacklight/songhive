@@ -15,7 +15,7 @@ from ..config import AUDIO_EXTENSIONS
 from ..models._enums import Visibility
 from ..models.track import Track
 from ..models.user import User
-from ..services.federation import publish_track_activity
+from ..services import activities
 from .celery import celery_app
 
 logger = logging.getLogger(__name__)
@@ -109,14 +109,14 @@ def process_upload(
                     await session.commit()
                     artist = track.artist
                     if owner is not None and artist is not None:
-                        await asyncio.to_thread(
-                            publish_track_activity,
-                            track,
-                            artist,
-                            owner,
-                            config,
-                            track.federation_object_id,
+                        await activities.record_track_publication(
+                            session,
+                            track=track,
+                            artist=artist,
+                            owner=owner,
+                            config=config,
                         )
+                        await session.commit()
 
                 assert result.upload is not None
                 EventWebSocket.broadcast(

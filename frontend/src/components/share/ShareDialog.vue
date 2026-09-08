@@ -13,6 +13,7 @@ import {
   type ShareTokenResponse,
 } from "@/api/shares";
 import { publishTrack } from "@/api/tracks";
+import type { ActivityVisibility } from "@/api/activities";
 import { getApiErrorMessage, ApiError } from "@/api/client";
 import { useOwnership } from "@/composables/useOwnership";
 import { useConfirmStore } from "@/stores/confirm";
@@ -22,6 +23,7 @@ import { formatDateTime } from "@/i18n";
 import AppModal from "@/components/feedback/AppModal.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
+import AppSelect from "@/components/ui/AppSelect.vue";
 import AppTable from "@/components/ui/AppTable.vue";
 
 export interface Props {
@@ -109,8 +111,24 @@ const isCreatingGrant = ref(false);
 const isCreatingUrl = ref(false);
 
 const statusText = ref("");
+const publishVisibility = ref<ActivityVisibility>("public");
 const isPublishing = ref(false);
 const publishError = ref<string | null>(null);
+
+const PUBLISH_VISIBILITIES: ActivityVisibility[] = [
+  "public",
+  "followers",
+  "mentioned",
+  "local",
+  "private",
+];
+
+const publishVisibilityOptions = computed(() =>
+  PUBLISH_VISIBILITIES.map((value) => ({
+    value,
+    label: t(`activities.visibility.${value}`),
+  })),
+);
 
 const newUrl = ref<string | null>(null);
 const newToken = ref<string | null>(null);
@@ -312,6 +330,7 @@ async function publish() {
   try {
     await publishTrack(props.itemId, {
       status: statusText.value.trim() || null,
+      visibility: publishVisibility.value,
     });
     statusText.value = "";
     toast.push({
@@ -363,6 +382,7 @@ watch(
       grantsError.value = null;
       urlsError.value = null;
       statusText.value = "";
+      publishVisibility.value = "public";
       publishError.value = null;
     }
   },
@@ -513,6 +533,13 @@ watch(
             as="textarea"
             :label="t('browse.share.fediverseStatus')"
             :hint="t('browse.share.fediverseStatusHint')"
+            :disabled="isPublishing"
+          />
+          <AppSelect
+            v-model="publishVisibility"
+            :options="publishVisibilityOptions"
+            :label="t('browse.share.fediverseVisibility')"
+            :hint="t('browse.share.fediverseVisibilityHint')"
             :disabled="isPublishing"
           />
           <AppButton

@@ -4,13 +4,13 @@ Federation tasks: process incoming and deliver outgoing ActivityPub activities.
 
 import asyncio
 import base64
-import json
 import logging
 from typing import Optional
 
 import requests
 from pubby import ActivityPubError, SignatureVerificationError
-from pubby.crypto import load_private_key, sign_request
+from pubby import deliver_activity as pubby_deliver_activity
+from pubby.crypto import load_private_key
 from pubby.handlers._inbox import InboxProcessor
 
 from ..config import load_config
@@ -73,11 +73,6 @@ def process_incoming(
         logger.warning("Incoming activity has no usable actor; dropping")
         return None
 
-    sender_domain = extract_domain(actor)
-    if is_domain_blocked(sender_domain, config):
-        logger.info("Dropping activity from blocked or non-allowed domain: %s", sender_domain)
-        return None
-
     storage = get_federation_storage(config.database.url)
     domain = config.federation.instance_domain
 
@@ -107,6 +102,8 @@ def process_incoming(
         actor_id=actor_id,
         private_key=private_key,
         key_id=key_id,
+        allowed_instances=config.federation.allowed_instances,
+        blocked_instances=config.federation.blocked_instances,
     )
 
     body: Optional[bytes] = None
@@ -180,41 +177,30 @@ def deliver_activity(
         logger.info("Dropping delivery to blocked or non-allowed domain: %s", inbox_domain)
         return None
 
-    body = json.dumps(activity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    headers = {
-        "Content-Type": "application/activity+json",
-        "Accept": "application/activity+json",
-    }
-
     private_key = load_private_key(private_key_pem)
-    signed_headers = sign_request(
-        private_key=private_key,
-        key_id=actor_key_id,
-        method="POST",
-        url=inbox_url,
-        body=body,
-        headers=headers,
-    )
 
     try:
-        response = requests.post(inbox_url, data=body, headers=signed_headers, timeout=15)
+        status_code = pubby_deliver_activity(
+            activity,
+            inbox_url,
+            key_id=actor_key_id,
+            private_key=private_key,
+            timeout=15.0,
+        )
     except requests.RequestException as exc:
         logger.warning("Delivery to %s failed (%s); retrying", inbox_url, type(exc).__name__)
         raise self.retry(countdown=30 * 2**self.request.retries, exc=exc)
 
-    if 200 <= response.status_code < 400:
-        logger.info("Delivered activity to %s (status %s)", inbox_url, response.status_code)
-        return {"status_code": response.status_code}
+    if status_code < 400:
+        logger.info("Delivered activity to %s (status %s)", inbox_url, status_code)
+        return {"status_code": status_code}
 
-    if response.status_code >= 500 or response.status_code == 429:
-        logger.warning("Delivery to %s returned %s; retrying", inbox_url, response.status_code)
-        retry_exc = requests.HTTPError(
-            f"Delivery failed with status {response.status_code}",
-            response=response,
-        )
+    if status_code >= 500 or status_code == 429:
+        logger.warning("Delivery to %s returned %s; retrying", inbox_url, status_code)
+        retry_exc = requests.HTTPError(f"Delivery failed with status {status_code}")
         raise self.retry(countdown=30 * 2**self.request.retries, exc=retry_exc)
 
-    logger.warning("Delivery to %s returned %s; giving up", inbox_url, response.status_code)
+    logger.warning("Delivery to %s returned %s; giving up", inbox_url, status_code)
     return None
 
 

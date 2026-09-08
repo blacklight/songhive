@@ -9,15 +9,22 @@ thread when inside an async context.
 
 import logging
 from typing import Optional
-from urllib.parse import urlparse
 
-from pubby.crypto import export_private_key_pem, export_public_key_pem, generate_rsa_keypair
+from pubby import collect_inboxes
+from pubby import resolve_actor_inbox as _pubby_resolve_actor_inbox
+from pubby.crypto import (
+    export_private_key_pem,
+    export_public_key_pem,
+    generate_rsa_keypair,
+)
+from pubby.moderation import extract_domain as _pubby_extract_domain
+from pubby.moderation import is_domain_blocked as _pubby_is_domain_blocked
+from pubby.moderation import normalize_domain as _pubby_normalize_domain
 
-from ..config.schema import SonghiveConfig
-from ..federation._common import get_actor_url
+from ..config import SonghiveConfig, get_default_user_agent
+from ..federation import get_actor_url
 from ..federation.storage import create_activitypub_storage
-from ..models._enums import Visibility
-from ..models.user import User
+from ..models import User
 
 logger = logging.getLogger(__name__)
 
@@ -26,24 +33,15 @@ def normalize_instance_domain(domain: str) -> str:
     """
     Normalize a domain for allow/block comparisons.
 
-    Strips URL schemes and paths, then lower-cases the hostname.
+    Strips URL schemes, paths, ports and credentials, then lower-cases the
+    hostname. Delegates to ``pubby.moderation``.
     """
-    if not domain:
-        return ""
-    value = domain.strip().lower()
-    if value.startswith(("http://", "https://")):
-        parsed = urlparse(value)
-        host = parsed.hostname or ""
-    else:
-        host = value.split("/")[0]
-    return host.strip()
+    return _pubby_normalize_domain(domain)
 
 
 def extract_domain(url_or_actor: str) -> str:
     """Extract a normalized domain from an actor URL or other HTTP(S) value."""
-    if not url_or_actor:
-        return ""
-    return normalize_instance_domain(url_or_actor)
+    return _pubby_extract_domain(url_or_actor)
 
 
 def is_domain_blocked(domain: str, config: SonghiveConfig) -> bool:
@@ -53,19 +51,15 @@ def is_domain_blocked(domain: str, config: SonghiveConfig) -> bool:
     - Empty allow-list means allow all (except explicit blocks).
     - Blocked domains take precedence over allowed domains.
     - Comparisons are case-insensitive and ignore URL schemes/paths.
+
+    Delegates to ``pubby.moderation.is_domain_blocked`` with the configured
+    allow/block lists.
     """
-    normalized = normalize_instance_domain(domain)
-    if not normalized:
-        return False
-
-    allowed = {normalize_instance_domain(d) for d in config.federation.allowed_instances}
-    blocked = {normalize_instance_domain(d) for d in config.federation.blocked_instances}
-
-    if normalized in blocked:
-        return True
-    if allowed and normalized not in allowed:
-        return True
-    return False
+    return _pubby_is_domain_blocked(
+        domain,
+        allowed=config.federation.allowed_instances,
+        blocked=config.federation.blocked_instances,
+    )
 
 
 def is_domain_allowed(domain: str, config: SonghiveConfig) -> bool:
@@ -110,78 +104,45 @@ def get_follower_inboxes(actor_url: str, database_url: str) -> list[str]:
     Reads pubby's follower storage, prefers shared inboxes, and deduplicates.
     """
     storage = create_activitypub_storage(database_url)
-    followers = storage.get_followers(actor_id=actor_url)
-
-    seen: set[str] = set()
-    inboxes: list[str] = []
-    for follower in followers:
-        inbox = follower.shared_inbox or follower.inbox
-        if not inbox:
-            continue
-        if inbox in seen:
-            continue
-        seen.add(inbox)
-        inboxes.append(inbox)
-
-    return inboxes
+    return collect_inboxes(storage.get_followers(actor_id=actor_url))
 
 
-def publish_track_activity(
-    track,
-    artist,
-    user: User,
+def resolve_actor_inbox(
+    actor_url: str,
     config: SonghiveConfig,
-    ap_object_id: Optional[str] = None,
-    status: Optional[str] = None,
-) -> int:
+    *,
+    key_id: Optional[str] = None,
+    private_key_pem: Optional[str] = None,
+    timeout: float = 10.0,
+) -> Optional[str]:
     """
-    Publish a ``Create(Audio)`` activity to the user's follower inboxes.
+    Resolve a remote actor's inbox URL.
 
-    Returns the number of remote inboxes enqueued. The function no-ops when
-    federation is disabled, the track is not public, the user has no actor
-    credentials, or the audio object cannot be serialized.
+    Consults the ``federation_actor_cache`` table first (via pubby's
+    storage); on a miss the actor document is fetched over HTTP(S) — signed
+    when a key is available — and cached.  Returns ``None`` for non-HTTP(S)
+    actor ids, blocked or non-allowed domains, and resolution failures.
 
-    ``ap_object_id`` is the ActivityPub object id that will appear on the
-    ``Audio`` object. Callers should persist it on ``track.federation_object_id``
-    so that a later ``Delete(Tombstone)`` can reference the same id.
+    This is a thin Songhive adapter around ``pubby.resolve_actor_inbox``:
+    it creates the storage backend from Songhive config and passes the
+    configured allow/block lists and ``User-Agent``.
 
-    ``status`` is an optional one-off post text that overrides the track's
-    stored ``description`` as the object's ``content``. It is never persisted
-    on the track.
+    This is a synchronous, ``requests``-based call: async callers should
+    invoke it through ``asyncio.to_thread``.
     """
-    if not config.federation.enabled or not config.federation.instance_domain:
-        return 0
-    if not track or track.visibility != Visibility.PUBLIC.value:
-        return 0
-    if not user or not user.actor_url or not user.private_key_pem:
-        return 0
-    if not artist:
-        return 0
-
-    from ..federation.activities import create_audio_activity
-    from ..tasks.federation import deliver_activity
-
-    object_id = ap_object_id or track.federation_object_id
-    if object_id and not object_id.startswith(("http://", "https://")):
-        object_id = f"{user.actor_url}/objects/{object_id}"
-
-    activity = create_audio_activity(
-        actor_url=user.actor_url,
-        track=track,
-        artist=artist,
-        domain=config.federation.instance_domain,
-        description=status,
-        ap_object_id=object_id,
+    if not actor_url.startswith(("http://", "https://")):
+        return None
+    storage = create_activitypub_storage(config.database.url)
+    return _pubby_resolve_actor_inbox(
+        actor_url,
+        storage,
+        private_key=private_key_pem,
+        key_id=key_id,
+        allowed_instances=config.federation.allowed_instances,
+        blocked_instances=config.federation.blocked_instances,
+        user_agent=get_default_user_agent(),
+        timeout=timeout,
     )
-    if not activity:
-        return 0
-
-    inboxes = get_follower_inboxes(user.actor_url, config.database.url)
-    actor_key_id = f"{user.actor_url}#main-key"
-    for inbox in inboxes:
-        deliver_activity.delay(activity, inbox, actor_key_id, user.private_key_pem)  # type: ignore
-
-    return len(inboxes)
 
 
 def unpublish_track_activity(

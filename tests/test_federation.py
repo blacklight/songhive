@@ -9,7 +9,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from celery.exceptions import Retry
+from fastapi import HTTPException
 from pubby.content import render_bio_html, render_post_html, render_verified_link
+from sqlalchemy import select
 
 from songhive.config.schema import SonghiveConfig
 from songhive.federation._common import get_hashtag_url
@@ -23,12 +25,14 @@ from songhive.federation.actors import (
 )
 from songhive.federation.serializers import track_to_audio_object
 from songhive.models import Visibility
+from songhive.models.activity import ActivityMention, ActivityTarget
 from songhive.models.album import Album  # noqa: F401
 from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
-from songhive.services.federation import publish_actor_update, publish_track_activity
+from songhive.services.activities import record_track_publication
+from songhive.services.federation import publish_actor_update
 from songhive.tasks.federation import _load_user_actor, deliver_activity, process_incoming
 
 
@@ -82,13 +86,59 @@ def test_create_audio_activity():
     assert activity is not None
     assert activity["type"] == "Create"
     assert activity["object"]["type"] == "Audio"
-    assert activity["object"]["name"] == "My Song"
+    # ``name`` carries an "{artist} - {title}" anchor to the track page so
+    # Mastodon-family servers render the post header as a link.
+    assert activity["object"]["name"] == '<a href="https://music.example.com/tracks/track-123">TestArtist - My Song</a>'
     assert activity["object"]["content"] == "A great track"
+    assert activity["object"]["summary"] == "A great track"
     assert "PT3M15S" in activity["object"]["duration"]
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
         for link in activity["object"]["url"]
     )
+    # The default audience is public, applied to both the envelope and the
+    # embedded object.
+    assert activity["to"] == ["https://www.w3.org/ns/activitystreams#Public"]
+    assert activity["cc"] == ["https://music.example.com/users/alice/followers"]
+    assert activity["object"]["to"] == activity["to"]
+    assert activity["object"]["cc"] == activity["cc"]
+
+
+def test_create_audio_activity_visibility_audience():
+    """The visibility argument drives the to/cc addressing."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-123"
+
+    followers_activity = create_audio_activity(
+        actor_url="https://music.example.com/users/alice",
+        track=track,
+        artist=artist,
+        domain="music.example.com",
+        visibility=Visibility.FOLLOWERS,
+    )
+    assert followers_activity is not None
+    assert followers_activity["to"] == ["https://music.example.com/users/alice/followers"]
+    assert followers_activity["cc"] == []
+    assert followers_activity["object"]["to"] == followers_activity["to"]
+
+    mentioned_activity = create_audio_activity(
+        actor_url="https://music.example.com/users/alice",
+        track=track,
+        artist=artist,
+        domain="music.example.com",
+        visibility="mentioned",
+        mention_actor_urls=["https://remote.example/users/bob"],
+    )
+    assert mentioned_activity is not None
+    assert mentioned_activity["to"] == ["https://remote.example/users/bob"]
+    assert mentioned_activity["object"]["to"] == ["https://remote.example/users/bob"]
 
 
 def test_track_to_audio_object():
@@ -108,8 +158,13 @@ def test_track_to_audio_object():
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
     assert obj["type"] == "Audio"
-    assert obj["name"] == "TestTrack"
-    assert obj["duration"] == "PT2M0S"
+    assert obj["name"] == '<a href="https://music.example.com/tracks/track-1">TestArtist - TestTrack</a>'
+    assert obj["duration"] == "PT2M"
+    # ``mimeType`` mirrors ``mediaType`` so Mastodon's ``url_to_href`` selects
+    # the ``text/html`` track page for display instead of the audio download.
+    assert all(link["mimeType"] == link["mediaType"] for link in obj["url"])
+    html_link = next(link for link in obj["url"] if link["mimeType"] == "text/html")
+    assert html_link["href"] == "https://music.example.com/tracks/track-1"
     assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"}]
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
@@ -311,6 +366,27 @@ def test_create_audio_activity_renders_track_description():
         'Fresh <a href="https://music.example.com/hashtags/beats" rel="tag">#beats</a> '
         'at <a href="https://band.example.com">band.example.com</a>'
     )
+    # Mirrored to ``summary`` so Mastodon-style "converted" Audio objects
+    # render the description instead of dropping ``content``.
+    assert activity["object"]["summary"] == activity["object"]["content"]
+
+
+def test_track_to_audio_object_without_description_has_no_content_or_summary():
+    """Audio objects without a description carry neither content nor summary."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
+    assert "content" not in obj
+    assert "summary" not in obj
 
 
 def test_federation_app_setup(tmp_path):
@@ -349,6 +425,51 @@ def test_federation_app_setup(tmp_path):
         # A second create_app call should reuse the existing persisted key.
         assert key_path.exists()
         assert key_path.stat().st_size > 0
+
+
+def test_federation_app_inbox_drops_blocked_domain(tmp_path):
+    """The instance /ap/inbox silently drops activities from blocked domains."""
+    from fastapi.testclient import TestClient
+
+    from songhive.api.app import create_app
+    from songhive.config.schema import SonghiveConfig
+
+    config = SonghiveConfig(
+        database={"url": f"sqlite+aiosqlite:///{tmp_path / 'songhive.db'}"},
+        federation={
+            "enabled": True,
+            "instance_domain": "music.example.com",
+            "instance_name": "Songhive",
+            "private_key_path": tmp_path / "actor.pem",
+            "blocked_instances": ["evil.example"],
+        },
+    )
+
+    app = create_app(config)
+
+    with TestClient(app) as client:
+        # Blocked actors are dropped before signature verification.
+        blocked = client.post(
+            "/ap/inbox",
+            json={
+                "type": "Follow",
+                "actor": "https://evil.example/users/bob",
+                "object": "https://music.example.com/ap/actor",
+            },
+        )
+        assert blocked.status_code == 202
+
+        # Non-blocked actors reach signature verification and are rejected
+        # for the missing Signature header instead.
+        allowed = client.post(
+            "/ap/inbox",
+            json={
+                "type": "Follow",
+                "actor": "https://friend.example/users/carol",
+                "object": "https://music.example.com/ap/actor",
+            },
+        )
+        assert allowed.status_code == 401
 
 
 def test_user_to_actor_document_includes_avatar_and_links():
@@ -609,9 +730,12 @@ def test_publish_actor_update_enqueues_update_to_followers(monkeypatch):
     assert pem == "private"
 
 
-def test_publish_track_activity_uses_status_as_content(monkeypatch):
-    """publish_track_activity forwards a one-off status as the object content."""
+@pytest.mark.asyncio
+async def test_record_track_publication_uses_status_as_content(db_session, monkeypatch):
+    """record_track_publication stores the one-off status as the object content."""
     user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
     artist = Artist(name="TestArtist")
     artist.id = "artist-1"
     track = Track(
@@ -632,29 +756,55 @@ def test_publish_track_activity_uses_status_as_content(monkeypatch):
     deliver_mock = MagicMock()
     monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
 
-    result = publish_track_activity(
-        track,
-        artist,
-        user,
-        _fed_config(),
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
         status="Fresh post about #beats",
     )
 
-    assert result == 1
-    deliver_mock.delay.assert_called_once()
-    activity = deliver_mock.delay.call_args[0][0]
-    assert activity["type"] == "Create"
-    assert activity["object"]["id"] == f"{user.actor_url}/objects/obj-1"
-    assert activity["object"]["content"].startswith("Fresh post about")
-    assert "stored description" not in activity["object"]["content"]
-    assert {"type": "Hashtag", "name": "#beats", "href": "https://music.example.com/hashtags/beats"} in activity[
+    assert activity is not None
+    assert activity.activity_type == "create"
+    assert activity.source_type == "local"
+    assert activity.entity_type == "track"
+    assert activity.entity_id == "track-1"
+    assert activity.visibility == "public"
+    assert activity.source_id == f"{user.actor_url}/objects/obj-1"
+    assert activity.local_object_id == "obj-1"
+    assert activity.content_source == "Fresh post about #beats"
+    assert activity.content is not None and activity.content.startswith("Fresh post about")
+
+    payload = activity.payload
+    assert payload["type"] == "Create"
+    assert payload["object"]["id"] == f"{user.actor_url}/objects/obj-1"
+    assert payload["object"]["content"].startswith("Fresh post about")
+    assert payload["object"]["summary"] == payload["object"]["content"]
+    assert "stored description" not in payload["object"]["content"]
+    assert {"type": "Hashtag", "name": "#beats", "href": "https://music.example.com/hashtags/beats"} in payload[
         "object"
     ]["tag"]
 
+    deliver_mock.delay.assert_called_once()
+    assert deliver_mock.delay.call_args[0][0] is payload
+    assert deliver_mock.delay.call_args[0][1] == "https://a.example/inbox"
 
-def test_publish_track_activity_without_status_uses_track_description(monkeypatch):
-    """publish_track_activity falls back to the stored description content."""
+    # The delivered inbox is tracked so a later retraction can reach it.
+    targets = [
+        t
+        for t in (await db_session.execute(select(ActivityTarget))).scalars().all()
+        if t.activity_id == str(activity.id)
+    ]
+    assert [(t.inbox_url, t.state) for t in targets] == [("https://a.example/inbox", "sent")]
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_without_status_uses_track_description(db_session, monkeypatch):
+    """record_track_publication falls back to the stored description content."""
     user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
     artist = Artist(name="TestArtist")
     artist.id = "artist-1"
     track = Track(
@@ -674,11 +824,208 @@ def test_publish_track_activity_without_status_uses_track_description(monkeypatc
     deliver_mock = MagicMock()
     monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
 
-    result = publish_track_activity(track, artist, user, _fed_config())
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+    )
 
-    assert result == 1
-    activity = deliver_mock.delay.call_args[0][0]
-    assert activity["object"]["content"] == "stored description"
+    assert activity is not None
+    assert activity.payload["object"]["content"] == "stored description"
+    deliver_mock.delay.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_noops_when_not_public(db_session):
+    """Non-public tracks record no activity and enqueue no deliveries."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        visibility=Visibility.PRIVATE.value,
+    )
+    track.id = "track-1"
+    track.federation_object_id = "obj-1"
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+    )
+    assert activity is None
+
+
+def _publication_track() -> Track:
+    """Build a publishable public track with a minted object id."""
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+    track.federation_object_id = "obj-1"
+    return track
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_followers_visibility(db_session, monkeypatch):
+    """A followers publication is addressed to the followers collection only."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+
+    monkeypatch.setattr(
+        "songhive.services.federation.get_follower_inboxes",
+        lambda *a, **k: ["https://a.example/inbox"],
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+        visibility=Visibility.FOLLOWERS,
+    )
+
+    assert activity is not None
+    assert activity.visibility == "followers"
+    followers = f"{user.actor_url}/followers"
+    assert activity.payload["to"] == [followers]
+    assert activity.payload["cc"] == []
+    assert activity.payload["object"]["to"] == [followers]
+    assert activity.payload["object"]["cc"] == []
+    deliver_mock.delay.assert_called_once()
+    assert deliver_mock.delay.call_args[0][1] == "https://a.example/inbox"
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_mentioned_visibility(db_session, monkeypatch):
+    """A mentioned publication resolves @handles and addresses them only."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+
+    monkeypatch.setattr(
+        "songhive.services.mentions.resolve_actor_url",
+        lambda username, domain, timeout=10: f"https://{domain}/users/{username}",
+    )
+    monkeypatch.setattr(
+        "songhive.services.federation.resolve_actor_inbox",
+        lambda actor_url, config, **kwargs: "https://remote.example/inbox",
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+        status="for @bob@remote.example",
+        visibility=Visibility.MENTIONED,
+    )
+
+    assert activity is not None
+    assert activity.visibility == "mentioned"
+    assert activity.payload["to"] == ["https://remote.example/users/bob"]
+    assert activity.payload["cc"] == []
+    obj = activity.payload["object"]
+    assert obj["to"] == ["https://remote.example/users/bob"]
+    assert '<a href="https://remote.example/users/bob">@bob@remote.example</a>' in obj["content"]
+    assert {
+        "type": "Mention",
+        "href": "https://remote.example/users/bob",
+        "name": "@bob@remote.example",
+    } in obj["tag"]
+
+    mentions = [
+        m
+        for m in (await db_session.execute(select(ActivityMention))).scalars().all()
+        if str(m.activity_id) == str(activity.id)
+    ]
+    assert [(m.handle, m.actor_url) for m in mentions] == [("@bob@remote.example", "https://remote.example/users/bob")]
+
+    # ``mentioned`` reaches only the mentioned actor's inbox, not followers.
+    deliver_mock.delay.assert_called_once()
+    assert deliver_mock.delay.call_args[0][1] == "https://remote.example/inbox"
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_local_visibility_does_not_federate(db_session, monkeypatch):
+    """A local publication is recorded without any remote delivery."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+        visibility=Visibility.LOCAL,
+    )
+
+    assert activity is not None
+    assert activity.visibility == "local"
+    assert activity.payload["to"] == []
+    assert activity.payload["cc"] == []
+    assert activity.payload["object"]["to"] == []
+    deliver_mock.delay.assert_not_called()
+    targets = [
+        t
+        for t in (await db_session.execute(select(ActivityTarget))).scalars().all()
+        if str(t.activity_id) == str(activity.id)
+    ]
+    assert targets == []
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_invalid_visibility(db_session):
+    """An unknown visibility value is rejected with a 422."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+
+    with pytest.raises(HTTPException) as excinfo:
+        await record_track_publication(
+            db_session,
+            track=track,
+            artist=artist,
+            owner=user,
+            config=_fed_config(),
+            visibility="bogus",
+        )
+    assert excinfo.value.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -815,10 +1162,10 @@ def _patch_process_incoming(monkeypatch, config=None):
     """Apply common monkeypatches for process_incoming tests."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: config or _fed_config())
     monkeypatch.setattr(
-        "songhive.federation.storage.get_or_create_private_key",
+        "songhive.tasks.federation.get_or_create_private_key",
         lambda *a, **k: MagicMock(read_text=lambda *a, **k: "pem"),
     )
-    monkeypatch.setattr("songhive.federation.actors.get_federation_storage", lambda *a, **k: MagicMock())
+    monkeypatch.setattr("songhive.tasks.federation.get_federation_storage", lambda *a, **k: MagicMock())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda *a, **k: "private_key")
     monkeypatch.setattr("songhive.tasks.federation.init_db", lambda *a, **k: None)
 
@@ -919,13 +1266,11 @@ def test_deliver_activity_blocked_domain(monkeypatch):
 
 
 def test_deliver_activity_success(monkeypatch):
-    """deliver_activity posts signed requests and returns a serializable result."""
+    """deliver_activity delegates the signed POST to pubby and returns the status."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
-    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={"Signature": "sig"}))
-
-    response = MagicMock(status_code=200)
-    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(return_value=response))
+    pubby_deliver = MagicMock(return_value=200)
+    monkeypatch.setattr("songhive.tasks.federation.pubby_deliver_activity", pubby_deliver)
 
     self = _deliver_self()
     result = deliver_activity.run.__func__(
@@ -936,6 +1281,13 @@ def test_deliver_activity_success(monkeypatch):
         "pem",
     )
     assert result == {"status_code": 200}
+    pubby_deliver.assert_called_once_with(
+        {"type": "Create"},
+        "https://example.com/inbox",
+        key_id="https://music.example.com/actor#main-key",
+        private_key="private_key",
+        timeout=15.0,
+    )
 
 
 def test_deliver_activity_request_exception_retries(monkeypatch):
@@ -944,10 +1296,10 @@ def test_deliver_activity_request_exception_retries(monkeypatch):
 
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
-    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={}))
-
-    exc = RequestException("network down")
-    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(side_effect=exc))
+    monkeypatch.setattr(
+        "songhive.tasks.federation.pubby_deliver_activity",
+        MagicMock(side_effect=RequestException("network down")),
+    )
 
     self = _deliver_self(retries=1)
     with pytest.raises(Retry):
@@ -960,10 +1312,7 @@ def test_deliver_activity_5xx_retries(monkeypatch):
     """deliver_activity retries on 5xx responses."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
-    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={}))
-
-    response = MagicMock(status_code=503)
-    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(return_value=response))
+    monkeypatch.setattr("songhive.tasks.federation.pubby_deliver_activity", MagicMock(return_value=503))
 
     self = _deliver_self(retries=0)
     with pytest.raises(Retry):
@@ -976,10 +1325,7 @@ def test_deliver_activity_4xx_gives_up(monkeypatch):
     """deliver_activity gives up on non-retryable 4xx responses."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
-    monkeypatch.setattr("songhive.tasks.federation.sign_request", MagicMock(return_value={}))
-
-    response = MagicMock(status_code=400)
-    monkeypatch.setattr("songhive.tasks.federation.requests.post", MagicMock(return_value=response))
+    monkeypatch.setattr("songhive.tasks.federation.pubby_deliver_activity", MagicMock(return_value=400))
 
     self = _deliver_self()
     assert deliver_activity.run.__func__(self, {"type": "Create"}, "https://example.com/inbox", "key", "pem") is None

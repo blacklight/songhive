@@ -2,10 +2,17 @@
 Serializers: convert internal models to ActivityPub objects.
 """
 
+import html
 from functools import partial
 from typing import Optional
 
-from pubby.content import build_hashtag_tags, render_post_html
+from pubby.content import (
+    build_hashtag_tags,
+    format_duration,
+    is_linkable_url,
+    render_link_anchor,
+    set_object_content,
+)
 from sqlalchemy import inspect as sa_inspect
 
 from ..models._enums import Visibility
@@ -22,19 +29,31 @@ def set_audio_description(obj: dict, description: Optional[str], domain: str) ->
     The description is HTML-escaped, with http(s) URLs and ``#hashtags``
     linkified so remote servers render them as usable links.  Hashtags found
     in the text are also appended to the object's ``tag`` list.
+
+    The rendered text is also mirrored into ``summary``: Mastodon-family
+    servers treat ``Audio`` as a "converted" object type and render
+    ``name``/``summary``/``url`` instead of ``content``, so without the
+    mirror the post text is silently dropped there.
     """
-    if not description or not description.strip():
+    set_object_content(obj, description or "", partial(get_hashtag_url, domain))
+    mirror_content_to_summary(obj)
+
+
+def mirror_content_to_summary(obj: dict) -> None:
+    """
+    Mirror ``content`` into ``summary`` on ``Audio`` objects (or clear it).
+
+    Mastodon-style "converted" object types (``Audio``, ``Video``, ``Image``,
+    ``Article``, ``Page``, ``Event``) ignore ``content`` and render
+    ``name`` + ``summary`` + ``url`` as the post body.  Mirroring keeps the
+    post text visible there while remaining a no-op for other object types.
+    """
+    if obj.get("type") != "Audio":
         return
-    hashtag_url = partial(get_hashtag_url, domain)
-    rendered = render_post_html(description, hashtag_url)
-    if rendered.html:
-        obj["content"] = rendered.html
-    if not rendered.hashtags:
-        return
-    tags = obj.setdefault("tag", [])
-    seen = {tag.get("name") for tag in tags}
-    new_names = [name for name in rendered.hashtags if f"#{name}" not in seen]
-    tags.extend(build_hashtag_tags(new_names, hashtag_url))
+    if obj.get("content"):
+        obj["summary"] = obj["content"]
+    else:
+        obj.pop("summary", None)
 
 
 def track_to_audio_object(
@@ -78,26 +97,51 @@ def track_to_audio_object(
 
     media_type = track.audio_mime_type or audio_file_content_type or "audio/mpeg"
 
+    # Mastodon-family servers render ``Audio`` (a "converted" object type)
+    # as ``<h2>{name}</h2>`` + ``summary`` + the object ``url``,
+    # interpolating ``name`` into the markup unescaped: emitting an anchor
+    # turns the post header into an "{artist} - {title}" link to the track
+    # page.  The label and href are escaped; ``name`` falls back to escaped
+    # plain text if the URL is not linkable.
+    title_label = f"{artist.name} - {track.title}"
+    name = render_link_anchor(track_url, label=title_label) if is_linkable_url(track_url) else html.escape(title_label)
+
     obj = {
         "type": "Audio",
         "id": object_id,
-        "name": track.title,
+        "name": name,
+        # ``mimeType`` mirrors ``mediaType``: Mastodon's url_to_href reads the
+        # non-standard ``mimeType`` key and falls back to "text/html" per link,
+        # so without it the audio download URL would be picked for display
+        # instead of the track page.
         "url": [
-            {"type": "Link", "href": stream_url, "mediaType": media_type},
-            {"type": "Link", "href": track_url, "mediaType": "text/html"},
+            {
+                "type": "Link",
+                "href": stream_url,
+                "mediaType": media_type,
+                "mimeType": media_type,
+            },
+            {
+                "type": "Link",
+                "href": track_url,
+                "mediaType": "text/html",
+                "mimeType": "text/html",
+            },
         ],
     }
 
     artist_url = f"https://{domain}/artists/{artist.id}"
+    # ``attributedTo`` leads with the publishing actor: remote servers take
+    # its first entry as the object's author when importing a dereferenced
+    # object (e.g. Mastodon's URL-search fetch), and the artist page URL is
+    # not dereferenceable as an actor.
     if actor_url:
-        obj["attributedTo"] = [artist_url, actor_url]
+        obj["attributedTo"] = [actor_url, artist_url]
     else:
         obj["attributedTo"] = artist_url
 
     if track.duration:
-        minutes = int(track.duration // 60)
-        seconds = int(track.duration % 60)
-        obj["duration"] = f"PT{minutes}M{seconds}S"
+        obj["duration"] = format_duration(track.duration)
 
     if track.genre:
         genre_names = extract_genres_from_track(track)
