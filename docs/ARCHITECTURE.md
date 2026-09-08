@@ -1154,6 +1154,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/ui/` | Headless base components (button, input, select, avatar, table, pagination, search, context menu, entity actions) |
 | `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
 | `frontend/src/components/entity/` | Reusable entity grid/list components (e.g. `BulkEditableGrid` for bulk selection and deletion) |
+| `frontend/src/components/activities/` | Activity feed components (`ActivityFeed` filter tabs + cursor pagination, `ActivityCard`, `ActivityEditModal`) backed by `stores/activities.ts` and `api/activities.ts` |
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
 | `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
@@ -1161,6 +1162,17 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |
+
+Entity detail pages expose an "Activities" action that navigates to
+`/{entity}/{id}/activities` (`EntityActivitiesView`, shared across `track`,
+`album`, `artist`, `playlist`, and `library`). The feed reads
+`GET /api/v1/{entity_type}/{entity_id}/activities` with `activity_type` /
+`source_type` filters and keyset `cursor` pagination; liking an activity calls
+`POST /api/v1/activities/{id}/like` and editing one calls
+`PATCH /api/v1/activities/{id}` (shown to the activity owner and admins). Card
+content is rendered as HTML only for `local` activities — their `content` is
+sanitized server-side by the mention pipeline — while remote `content` is
+stripped to plain text to avoid trusting remote-supplied markup.
 
 The frontend is also a Progressive Web App. `/manifest.webmanifest` is served
 from the backend so the PWA name follows the configured instance name and the

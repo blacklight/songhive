@@ -4,6 +4,7 @@ import {
   apiRequest,
   apiRequestWithHeaders,
 } from "./client";
+import type { ActivityVisibility } from "./activities";
 import { buildUrl } from "./config";
 import type { components } from "./types";
 
@@ -107,6 +108,11 @@ export interface TrackPublishRequest {
    * stored on the track's ``description`` metadata field.
    */
   status?: string | null;
+  /**
+   * Audience of the published post. Defaults to ``public``; ``private`` and
+   * ``local`` record the activity without federating it.
+   */
+  visibility?: ActivityVisibility | null;
 }
 
 export interface TrackPublishResponse {

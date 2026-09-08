@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `frontend`: Add activity feeds for entities. A shared
+  `EntityActivitiesView` (lazy routes `/{track|album|artist|playlist|library}/{id}/activities`,
+  linked from each entity detail page's actions and from the track
+  list's per-row context menu) renders
+  `components/activities/ActivityFeed.vue` — filter tabs mapping to the
+  endpoint's `activity_type`/`source_type` params, keyset `cursor`
+  "load more" pagination, and per-activity `ActivityCard`s with a like
+  action (`POST /api/v1/activities/{id}/like`) and an owner/admin edit
+  modal (`PATCH /api/v1/activities/{id}`). Backed by
+  `stores/activities.ts` and `api/activities.ts`; remote activity content
+  is stripped to plain text rather than trusting remote-supplied HTML.
 - `federation`: Extend `GET /users/{username}/objects/{object_id}` to
   dereference activities in addition to tracks. Activities resolve by
   `local_object_id`/`source_id` under their owner's namespace;
@@ -70,6 +81,9 @@ All notable changes to this project will be documented in this file.
   and a `Delete(Tombstone)` is fanned out to every inbox recorded as `sent`
   in `activity_targets`, while remote activities are simply removed
   locally.
+- `frontend`: Activity cards gain an owner/admin delete action (confirm
+  dialog → `DELETE /api/v1/activities/{id}`) so federated shares can be
+  retracted from the feed.
 - `federation`: Add post visibility selection to track publication.
   `POST /api/v1/tracks/{id}/publish` accepts an optional `visibility`
   (default `public`) which is stored on the recorded `create` activity and

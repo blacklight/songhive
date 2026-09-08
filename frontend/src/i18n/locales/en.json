@@ -836,9 +836,11 @@
       "publicUrlHint": "Anyone can view this public page.",
       "preview": "Preview",
       "fediverse": "Fediverse",
-      "fediverseHint": "Publish this track as an ActivityPub post to your followers.",
+      "fediverseHint": "Publish this track as an ActivityPub post.",
       "fediverseStatus": "Post text",
-      "fediverseStatusHint": "Optional. Used as the post content instead of the track description — URLs and #hashtags become links. It is not stored on the track.",
+      "fediverseStatusHint": "Optional. Used as the post content instead of the track description — URLs, #hashtags and {'@'}mentions become links. It is not stored on the track.",
+      "fediverseVisibility": "Visibility",
+      "fediverseVisibilityHint": "Who the post reaches. \"Followers\" and \"mentioned\" posts federate to that audience only; \"local\" and \"private\" posts stay on this instance.",
       "fediversePublish": "Publish",
       "fediversePublished": "Track published to the fediverse.",
       "fediversePublishError": "Could not publish: {message}",
@@ -964,5 +966,52 @@
     "goToArtist": "Go to artist {name}",
     "goToTrack": "Go to track {title}",
     "albumArtwork": "Album artwork"
+  },
+  "activities": {
+    "title": "Activities",
+    "view": "Activities",
+    "backTo": "Back to {entity}",
+    "empty": "No activities yet.",
+    "loadMore": "Load more",
+    "like": "Like",
+    "liked": "Liked",
+    "likeError": "Could not like this activity.",
+    "filters": {
+      "all": "All",
+      "local": "Local",
+      "remote": "Remote",
+      "replies": "Replies",
+      "boosts": "Boosts",
+      "likes": "Likes"
+    },
+    "types": {
+      "announce": "Boosted",
+      "like": "Liked this",
+      "reply": "Replied",
+      "quote": "Quoted",
+      "mention": "Mentioned",
+      "update": "Updated",
+      "delete": "Deleted",
+      "webmention": "Webmention"
+    },
+    "visibility": {
+      "public": "Public",
+      "followers": "Followers",
+      "mentioned": "Mentioned",
+      "local": "Local",
+      "private": "Private"
+    },
+    "edit": {
+      "title": "Edit activity",
+      "content": "Content",
+      "visibility": "Visibility",
+      "error": "Could not update this activity."
+    },
+    "delete": {
+      "title": "Delete activity",
+      "confirm": "Delete this activity? A retraction will be sent to the Fediverse if it was published there.",
+      "done": "Activity deleted.",
+      "error": "Could not delete this activity."
+    }
   }
 }

@@ -182,6 +182,13 @@ const actions = computed(() => [
     visible: true,
   },
   {
+    key: "activities",
+    label: t("activities.view"),
+    icon: "comments",
+    variant: "secondary" as const,
+    visible: true,
+  },
+  {
     key: "edit",
     label: t("common.edit"),
     icon: "pen-to-square",
@@ -214,6 +221,12 @@ async function onAction(key: string) {
   switch (key) {
     case "share":
       openShare("artist", artist.value.id, artist.value.name, null, null);
+      break;
+    case "activities":
+      await router.push({
+        name: "artistActivities",
+        params: { id: artist.value.id },
+      });
       break;
     case "edit":
       await router.push({

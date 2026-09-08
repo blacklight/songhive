@@ -24,7 +24,7 @@ const sizeClasses = {
 const hasAvatar = computed(() => !!props.src && !hasError.value);
 
 const classes = computed(() => {
-  let classes = ["app-avatar"];
+  const classes = ["app-avatar"];
   if (!hasAvatar.value) {
     classes.push("app-avatar--initials");
   }
@@ -33,7 +33,8 @@ const classes = computed(() => {
     return classes;
   }
 
-  return ["app-avatar", sizeClasses[props.size] || sizeClasses.md];
+  classes.push(sizeClasses[props.size] || sizeClasses.md);
+  return classes;
 });
 
 function initials(name: string): string {

@@ -458,8 +458,51 @@ describe("ShareDialog", () => {
 
     expect(tracksApi.publishTrack).toHaveBeenCalledWith("track-1", {
       status: "Now playing #demo",
+      visibility: "public",
     });
     expect(textarea.value).toBe("");
+  });
+
+  it("publishes a track with the selected post visibility", async () => {
+    vi.mocked(tracksApi.publishTrack).mockResolvedValue({
+      track_id: "track-1",
+      enqueued: true,
+      object_id: "https://music.example.com/users/alice/objects/obj-1",
+    });
+
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-1",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    await fediverseTab?.click();
+    await flushPromises();
+
+    const select = document.body.querySelector("select") as HTMLSelectElement;
+    expect(select).toBeDefined();
+    select.value = "followers";
+    select.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const publishButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("browse.share.fediversePublish"),
+    );
+    await publishButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.publishTrack).toHaveBeenCalledWith("track-1", {
+      status: null,
+      visibility: "followers",
+    });
   });
 
   it("publishes a track without a status", async () => {
@@ -494,6 +537,7 @@ describe("ShareDialog", () => {
 
     expect(tracksApi.publishTrack).toHaveBeenCalledWith("track-1", {
       status: null,
+      visibility: "public",
     });
   });
 

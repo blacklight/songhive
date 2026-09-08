@@ -70,6 +70,11 @@ function createTestRouter() {
         name: "trackEdit",
         component: { template: "<div/>" },
       },
+      {
+        path: "/tracks/:id/activities",
+        name: "trackActivities",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -339,6 +344,20 @@ describe("TrackList", () => {
 
     await clickMenuItem(i18n.global.t("browse.contextMenu.goToTrack"));
     expect(router.currentRoute.value.path).toBe("/tracks/track-1");
+  });
+
+  it("navigates to the track activities from the context menu", async () => {
+    const router = createTestRouter();
+    const tracks = [makeTrack()];
+    ({ wrapper } = mountTrackList({ tracks, context: "Artist" }, router));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    await clickMenuItem(i18n.global.t("activities.view"));
+    expect(router.currentRoute.value.path).toBe("/tracks/track-1/activities");
+    expect(router.currentRoute.value.name).toBe("trackActivities");
   });
 
   it("navigates to the track edit view from the context menu when the user can manage the track", async () => {

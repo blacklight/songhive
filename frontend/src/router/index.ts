@@ -127,6 +127,53 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/LibraryEditView.vue"),
         meta: { requiresAuth: true },
       },
+      // Activity feeds are public reads: the endpoint serves `public`
+      // activities to anonymous users, matching the entity detail routes.
+      {
+        path: "tracks/:id/activities",
+        name: "trackActivities",
+        component: () => import("@/views/EntityActivitiesView.vue"),
+        props: (route) => ({
+          entityType: "track",
+          entityId: String(route.params.id),
+        }),
+      },
+      {
+        path: "albums/:id/activities",
+        name: "albumActivities",
+        component: () => import("@/views/EntityActivitiesView.vue"),
+        props: (route) => ({
+          entityType: "album",
+          entityId: String(route.params.id),
+        }),
+      },
+      {
+        path: "artists/:id/activities",
+        name: "artistActivities",
+        component: () => import("@/views/EntityActivitiesView.vue"),
+        props: (route) => ({
+          entityType: "artist",
+          entityId: String(route.params.id),
+        }),
+      },
+      {
+        path: "playlists/:id/activities",
+        name: "playlistActivities",
+        component: () => import("@/views/EntityActivitiesView.vue"),
+        props: (route) => ({
+          entityType: "playlist",
+          entityId: String(route.params.id),
+        }),
+      },
+      {
+        path: "libraries/:id/activities",
+        name: "libraryActivities",
+        component: () => import("@/views/EntityActivitiesView.vue"),
+        props: (route) => ({
+          entityType: "library",
+          entityId: String(route.params.id),
+        }),
+      },
       // History and favorites are Phase 5 views that require authentication.
       {
         path: "history",

@@ -1141,6 +1141,12 @@ const menuItems = computed(() => {
   }
 
   items.push({
+    key: "activities",
+    label: t("activities.view"),
+    icon: "comments",
+  });
+
+  items.push({
     key: "share",
     label: t("common.share"),
     icon: "share-nodes",
@@ -1242,6 +1248,12 @@ async function onMenuSelect(key: string) {
       break;
     case "go-to-artist":
       if (track.artist_id) router.push(`/artists/${track.artist_id}`);
+      break;
+    case "activities":
+      await router.push({
+        name: "trackActivities",
+        params: { id: track.id },
+      });
       break;
     case "enrich":
       try {
