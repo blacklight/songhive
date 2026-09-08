@@ -131,8 +131,12 @@ def track_to_audio_object(
     }
 
     artist_url = f"https://{domain}/artists/{artist.id}"
+    # ``attributedTo`` leads with the publishing actor: remote servers take
+    # its first entry as the object's author when importing a dereferenced
+    # object (e.g. Mastodon's URL-search fetch), and the artist page URL is
+    # not dereferenceable as an actor.
     if actor_url:
-        obj["attributedTo"] = [artist_url, actor_url]
+        obj["attributedTo"] = [actor_url, artist_url]
     else:
         obj["attributedTo"] = artist_url
 
