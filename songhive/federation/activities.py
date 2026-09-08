@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Iterable, List, Optional, Tuple
 
-from pubby import build_delete_activity, build_like_activity
+from pubby import build_delete_activity, build_like_activity, build_update_activity
 from pubby.content import format_duration
 
 from ..models import Visibility
@@ -102,26 +102,51 @@ def create_visibility_update_activity(
     Create an ``Update`` activity announcing a new audience for ``object_id``.
 
     The embedded object is a partial representation carrying only the fields
-    that changed: the ``to``/``cc`` audience derived from ``visibility``.
+    that changed: the ``to``/``cc`` audience derived from ``visibility``
+    (``pubby.build_update_activity`` additionally stamps ``updated`` on it).
+
+    Thin Songhive adapter around ``pubby.build_update_activity``: it keeps
+    the ``Visibility``-to-audience mapping local and delegates the generic
+    payload construction to Pubby.
     """
     to, cc = activity_audience(visibility, actor_url, mention_actor_urls)
-    now = datetime.now(timezone.utc).isoformat()
+    return build_update_activity(
+        actor_id=actor_url,
+        object_doc={"id": object_id, "attributedTo": actor_url},
+        to=to,
+        cc=cc,
+        context="https://www.w3.org/ns/activitystreams",
+    )
 
-    return {
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "id": f"{actor_url}/activities/{uuid.uuid4()}",
-        "type": "Update",
-        "actor": actor_url,
-        "published": now,
-        "to": to,
-        "cc": cc,
-        "object": {
-            "id": object_id,
-            "attributedTo": actor_url,
-            "to": to,
-            "cc": cc,
-        },
-    }
+
+def create_object_update_activity(
+    actor_url: str,
+    object_doc: dict,
+    visibility: "Visibility | str",
+    mention_actor_urls: Iterable[str] = (),
+) -> dict:
+    """
+    Create an ``Update`` activity carrying the full updated ``object_doc``.
+
+    Unlike :func:`create_visibility_update_activity` — which embeds a
+    partial object carrying only the new audience — this embeds the complete
+    object document so remote instances refresh their cached copy (e.g.
+    after an author content edit). ``pubby.build_update_activity`` rewrites
+    the object's ``to``/``cc`` to the audience derived from ``visibility``
+    and stamps ``updated`` so remote servers can surface the edit.
+
+    Thin Songhive adapter around ``pubby.build_update_activity``: it keeps
+    the ``Visibility``-to-audience mapping local and delegates the generic
+    payload construction to Pubby.
+    """
+    to, cc = activity_audience(visibility, actor_url, mention_actor_urls)
+    return build_update_activity(
+        actor_id=actor_url,
+        object_doc=object_doc,
+        to=to,
+        cc=cc,
+        context="https://www.w3.org/ns/activitystreams",
+    )
 
 
 def create_like_activity(

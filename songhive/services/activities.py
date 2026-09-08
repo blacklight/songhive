@@ -51,6 +51,7 @@ __all__ = [
     "can_view_activity",
     "create_local_activity",
     "fan_out_activity",
+    "fan_out_activity_update",
     "fan_out_like_activity",
     "like_activity",
     "list_activities",
@@ -513,7 +514,11 @@ async def update_activity(
     ``content`` and ``tag`` are rebuilt too: ``pubby.set_object_content``
     merges hashtag tags while preserving pre-existing tags, the
     mention-aware pipeline rendering wins for ``content``, and the
-    pipeline's ``Mention`` tags are merged in.
+    pipeline's ``Mention`` tags are merged in. The object is also stamped
+    with ``updated`` so served documents and remote copies can surface the
+    edit. Remote propagation of the edit is layered on top by
+    :func:`fan_out_activity_update`, which the caller invokes separately so
+    a pending visibility change can be applied first.
 
     Raises ``HTTPException`` 404 when the activity has been retracted.
     Flushes without committing; the caller owns the transaction.
@@ -548,6 +553,7 @@ async def update_activity(
             tags = obj.setdefault("tag", [])
             seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
             tags.extend(tag for tag in processed.tags if str(tag.get("name", "")).lower() not in seen)
+        obj["updated"] = datetime.now(timezone.utc).isoformat()
         flag_modified(activity, "payload")
 
     await session.flush()
@@ -848,6 +854,84 @@ async def fan_out_like_activity(
             extra_inboxes.add(inbox)
 
     return await fan_out_activity(session, like, config, owner=author, extra_inboxes=extra_inboxes)
+
+
+async def fan_out_activity_update(
+    session: AsyncSession,
+    activity: Activity,
+    config: SonghiveConfig,
+    *,
+    owner: Optional[User] = None,
+) -> int:
+    """
+    Deliver an ``Update`` for ``activity``'s edited object to its audience.
+
+    The ``Update`` — built by
+    ``federation.activities.create_object_update_activity`` — embeds the
+    full updated object document (the dict ``object`` of the stored
+    ``payload``, already rebuilt by :func:`update_activity`) and is sent to
+    every inbox recorded as ``sent`` in ``activity_targets`` so remote
+    instances refresh their cached copy. Afterwards the stored payload is
+    re-delivered through :func:`fan_out_activity`, which dedupes on recorded
+    targets: any inbox first reached by the edit (e.g. an actor newly added
+    to the mentions) receives the original ``Create`` carrying the updated
+    object rather than an ``Update`` for an object it has never seen.
+
+    Returns the number of ``Update`` deliveries enqueued. The function
+    no-ops for remote or retracted activities, payloads without an embedded
+    dict ``object`` (e.g. a ``Like``, whose object is a bare id and carries
+    no editable content), non-federating visibilities, disabled federation,
+    and owners without a signing key. Flushes without committing; the caller
+    owns the transaction.
+    """
+    if (
+        activity.source_type != "local"
+        or activity.deleted_at is not None
+        or not config.federation.enabled
+        or not config.federation.instance_domain
+    ):
+        return 0
+    try:
+        visibility = Visibility(activity.visibility)
+    except ValueError:
+        return 0
+    if not Visibility.federates(visibility):
+        return 0
+
+    payload = activity.payload
+    object_doc = payload.get("object") if isinstance(payload, dict) else None
+    if not isinstance(object_doc, dict):
+        return 0
+
+    if owner is None and activity.owner_user_id:
+        owner = await session.get(User, activity.owner_user_id)
+    if owner is None or not owner.private_key_pem:
+        return 0
+
+    from ..federation.activities import create_object_update_activity
+    from .deletion import enqueue_activity_delivery, get_activity_unpublish_info
+
+    info = await get_activity_unpublish_info(session, activity)
+    sent = 0
+    if info.inboxes:
+        mention_rows = await session.execute(
+            select(ActivityMention.actor_url).where(
+                ActivityMention.activity_id == activity.id,
+                ActivityMention.actor_url.is_not(None),
+            )
+        )
+        mention_actor_urls: List[str] = [url for url in mention_rows.scalars().all() if url]  # type: ignore
+        update = create_object_update_activity(
+            info.actor_url,
+            {**object_doc, "id": object_doc.get("id") or activity.source_id},
+            visibility,
+            mention_actor_urls=mention_actor_urls,
+        )
+        enqueue_activity_delivery(info, owner, update)
+        sent = len(info.inboxes)
+
+    await fan_out_activity(session, activity, config, owner=owner)
+    return sent
 
 
 async def record_track_publication(

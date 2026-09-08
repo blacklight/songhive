@@ -127,7 +127,14 @@ async def update_activity(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update an activity's content and/or visibility."""
+    """
+    Update an activity's content and/or visibility.
+
+    Content edits fan an ``Update`` carrying the rebuilt object out to the
+    inboxes that already received the activity; visibility edits cascade an
+    ``Update`` (new audience) or a ``Delete(Tombstone)`` (non-federating
+    visibility) through ``cascade_visibility_update``.
+    """
     activity = await db.get(Activity, activity_id)
     if activity is None or activity.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
@@ -145,6 +152,15 @@ async def update_activity(
         # cascade_visibility_update resolves the entity and enforces
         # containment internally (404 missing entity, 422 violation).
         await activity_service.VisibilityRules.cascade_visibility_update(db, activity, body.visibility)
+    if body.content is not None:
+        # Fan out after the visibility edit so the Update carries the final
+        # audience; it no-ops when the (new) visibility does not federate.
+        try:
+            await activity_service.fan_out_activity_update(db, activity, config)
+        except Exception as e:
+            # Fan-out is best-effort: a broker or resolution failure must not
+            # fail the edit itself.
+            logger.exception("Failed to fan out update for activity %s: %s: %s", activity_id, type(e), e)
 
     await db.commit()
     return {"status": "ok"}

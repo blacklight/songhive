@@ -1,23 +1,27 @@
 """
 Activity update tests - the ``update_activity`` service and the
 ``PATCH /api/v1/activities/{id}`` endpoint: content edits re-run the
-mention pipeline, replace ``activity_mentions`` rows, and rebuild an
-embedded payload object's ``content``/``tag``; visibility edits cascade
+mention pipeline, replace ``activity_mentions`` rows, rebuild an
+embedded payload object's ``content``/``tag``, and fan an ``Update``
+carrying the rebuilt object out to the inboxes that already received the
+activity via ``fan_out_activity_update``; visibility edits cascade
 through ``VisibilityRules.cascade_visibility_update``.
 """
 
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
+from songhive.federation.activities import create_object_update_activity
 from songhive.models._enums import Visibility
-from songhive.models.activity import Activity, ActivityMention
+from songhive.models.activity import Activity, ActivityMention, ActivityTarget
 from songhive.models.artist import Artist
 from songhive.models.track import Track
 from songhive.models.user import User
-from songhive.services.activities import update_activity
+from songhive.services.activities import fan_out_activity_update, update_activity
 
 
 async def _make_artist(session, name: str = "Test Artist") -> Artist:
@@ -61,6 +65,36 @@ async def _mention_rows(session, activity_id) -> list[ActivityMention]:
     """Return the persisted mention rows for an activity."""
     result = await session.execute(select(ActivityMention).where(ActivityMention.activity_id == activity_id))
     return list(result.scalars().all())
+
+
+async def _target_rows(session, activity_id) -> list[ActivityTarget]:
+    """Return the persisted delivery targets for an activity."""
+    result = await session.execute(select(ActivityTarget).where(ActivityTarget.activity_id == activity_id))
+    return list(result.scalars().all())
+
+
+def _fed_config(config):
+    """Enable federation on the test config."""
+    config.federation.enabled = True
+    config.federation.instance_domain = "local.example"
+    return config
+
+
+def _federated_user(user: User) -> User:
+    """Give a test user a provisioned actor URL and signing key."""
+    user.actor_url = "https://local.example/users/regular"
+    user.private_key_pem = "private-key"
+    return user
+
+
+def _patch_resolution(monkeypatch, followers=(), inboxes=None):
+    """Stub follower collection and per-actor inbox resolution."""
+    followers_mock = MagicMock(return_value=list(followers))
+    monkeypatch.setattr("songhive.services.federation.get_follower_inboxes", followers_mock)
+    inboxes = dict(inboxes or {})
+    resolve_mock = MagicMock(side_effect=lambda actor_url, config, **_: inboxes.get(actor_url))
+    monkeypatch.setattr("songhive.services.federation.resolve_actor_inbox", resolve_mock)
+    return followers_mock, resolve_mock
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +177,7 @@ async def test_update_activity_rebuilds_payload_object(db_session, regular_user,
 
     obj = activity.payload["object"]
     assert 'href="https://local.example/users/other"' in obj["content"]
+    assert obj["updated"]
     tag_names = {tag["name"] for tag in obj["tag"]}
     assert tag_names == {"#genre", "#rock", "@other"}
     mention = next(tag for tag in obj["tag"] if tag["type"] == "Mention")
@@ -345,3 +380,267 @@ async def test_update_endpoint_retracted(client, db_session, regular_user, auth_
         headers=auth_headers(regular_user),
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# create_object_update_activity
+# ---------------------------------------------------------------------------
+
+
+def test_create_object_update_activity():
+    """The Update embeds the full object with rewritten audience and a stamp."""
+    object_doc = {
+        "id": "https://local.example/users/alice/objects/1",
+        "type": "Note",
+        "content": "<p>edited</p>",
+        "to": ["https://stale.example/audience"],
+    }
+    payload = create_object_update_activity(
+        "https://local.example/users/alice",
+        object_doc,
+        Visibility.PUBLIC,
+    )
+
+    assert payload["type"] == "Update"
+    assert payload["actor"] == "https://local.example/users/alice"
+    assert payload["id"].startswith("https://local.example/users/alice/activities/")
+    assert payload["to"] == ["https://www.w3.org/ns/activitystreams#Public"]
+    assert payload["cc"] == ["https://local.example/users/alice/followers"]
+    obj = payload["object"]
+    assert obj["id"] == object_doc["id"]
+    assert obj["content"] == "<p>edited</p>"
+    assert obj["to"] == payload["to"]
+    assert obj["cc"] == payload["cc"]
+    assert obj["updated"] == payload["published"]
+    # The stored document is not mutated.
+    assert object_doc["to"] == ["https://stale.example/audience"]
+    assert "updated" not in object_doc
+
+
+# ---------------------------------------------------------------------------
+# fan_out_activity_update
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fan_out_activity_update_delivers_to_sent_inboxes(db_session, regular_user, config, monkeypatch):
+    """A content edit fans an Update carrying the rebuilt object to sent inboxes."""
+    config = _fed_config(config)
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        source_actor=regular_user.actor_url,
+        owner_user_id=regular_user.id,
+        content="old",
+        content_source="old",
+        payload={
+            "type": "Create",
+            "object": {
+                "id": "https://local.example/users/regular/objects/1",
+                "type": "Note",
+                "content": "old",
+            },
+        },
+    )
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    activity.targets.append(ActivityTarget(inbox_url="https://b.example/inbox", state="sent"))
+    activity.targets.append(ActivityTarget(inbox_url="https://c.example/inbox", state="failed"))
+    db_session.add(activity)
+    await db_session.flush()
+
+    await update_activity(db_session, activity, content_source="edited content", config=config)
+
+    _patch_resolution(monkeypatch)
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    assert await fan_out_activity_update(db_session, activity, config) == 2
+
+    assert deliver.delay.call_count == 2
+    for call in deliver.delay.call_args_list:
+        payload, inbox, key_id, key = call.args
+        assert payload["type"] == "Update"
+        assert payload["actor"] == regular_user.actor_url
+        obj = payload["object"]
+        assert obj["id"] == "https://local.example/users/regular/objects/1"
+        assert "edited content" in obj["content"]
+        assert obj["updated"]
+        assert obj["to"] == payload["to"]
+        assert inbox in {"https://a.example/inbox", "https://b.example/inbox"}
+        assert key_id == f"{regular_user.actor_url}#main-key"
+        assert key == "private-key"
+
+
+@pytest.mark.asyncio
+async def test_fan_out_activity_update_reaches_new_mentions(db_session, regular_user, config, monkeypatch):
+    """Actors first reached by the edit receive the stored payload, not the Update."""
+    config = _fed_config(config)
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        source_actor=regular_user.actor_url,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "object": {"id": "https://local.example/users/regular/objects/1", "content": "old"},
+        },
+    )
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    activity.mentions.append(
+        ActivityMention(handle="@bob@remote.example", actor_url="https://remote.example/users/bob")
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    _patch_resolution(monkeypatch, inboxes={"https://remote.example/users/bob": "https://remote.example/inbox"})
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    assert await fan_out_activity_update(db_session, activity, config) == 1
+
+    deliveries = {call.args[1]: call.args[0] for call in deliver.delay.call_args_list}
+    assert set(deliveries) == {"https://a.example/inbox", "https://remote.example/inbox"}
+    assert deliveries["https://a.example/inbox"]["type"] == "Update"
+    # The new recipient gets the stored Create carrying the updated object.
+    assert deliveries["https://remote.example/inbox"] is activity.payload
+    targets = {t.inbox_url: t for t in await _target_rows(db_session, activity.id)}
+    assert targets["https://remote.example/inbox"].state == "sent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"source_type": "remote"},
+        {"visibility": Visibility.PRIVATE.value},
+        {"visibility": Visibility.LOCAL.value},
+        {"payload": {"type": "Like", "object": "https://remote.example/objects/1"}},
+        {"payload": None},
+        {"deleted_at": datetime.now(timezone.utc)},
+    ],
+)
+async def test_fan_out_activity_update_noop(db_session, regular_user, config, monkeypatch, overrides):
+    """Remote, retracted, non-federating, or object-less activities deliver nothing."""
+    config = _fed_config(config)
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    params = {
+        "source_actor": regular_user.actor_url,
+        "owner_user_id": regular_user.id,
+        "payload": {
+            "type": "Create",
+            "object": {"id": "https://local.example/users/regular/objects/1", "content": "old"},
+        },
+    }
+    params.update(overrides)
+    activity = _make_activity("track", track.id, **params)
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    await db_session.flush()
+
+    _patch_resolution(monkeypatch, followers=["https://new.example/inbox"])
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    assert await fan_out_activity_update(db_session, activity, config) == 0
+    deliver.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fan_out_activity_update_disabled_federation(db_session, regular_user, config, monkeypatch):
+    """No delivery happens when federation is disabled."""
+    config.federation.enabled = False
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        source_actor=regular_user.actor_url,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "object": {"id": "https://local.example/users/regular/objects/1", "content": "old"},
+        },
+    )
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    await db_session.flush()
+
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    assert await fan_out_activity_update(db_session, activity, config) == 0
+    deliver.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fan_out_activity_update_without_signing_key(db_session, regular_user, config, monkeypatch):
+    """No delivery happens when the owner cannot sign."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        source_actor=regular_user.actor_url,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "object": {"id": "https://local.example/users/regular/objects/1", "content": "old"},
+        },
+    )
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    await db_session.flush()
+
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    assert await fan_out_activity_update(db_session, activity, config) == 0
+    deliver.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_endpoint_fans_out_update(client, db_session, regular_user, auth_headers, monkeypatch):
+    """A content edit through the API delivers an Update to sent inboxes."""
+    config = client.app.state.config
+    config.federation.enabled = True
+    config.federation.instance_domain = "local.example"
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        source_actor=regular_user.actor_url,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "object": {"id": "https://local.example/users/regular/objects/1", "content": "old"},
+        },
+    )
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    await db_session.flush()
+
+    _patch_resolution(monkeypatch)
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    resp = client.patch(
+        f"/api/v1/activities/{activity.id}",
+        json={"content": "edited"},
+        headers=auth_headers(regular_user),
+    )
+
+    assert resp.status_code == 200
+    deliver.delay.assert_called_once()
+    payload, inbox, key_id, _ = deliver.delay.call_args.args
+    assert payload["type"] == "Update"
+    assert "edited" in payload["object"]["content"]
+    assert payload["object"]["updated"]
+    assert inbox == "https://a.example/inbox"
+    assert key_id == f"{regular_user.actor_url}#main-key"
