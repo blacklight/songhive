@@ -47,11 +47,12 @@ function cleanupSignalHandler(
 
 export async function uploadFile(
   file: File,
-  visibility: "private" | "local" | "public" = "public",
+  visibility: components["schemas"]["Visibility"] = "public",
   onProgress?: (percent: number) => void,
   libraryId?: string,
   abortSignal?: AbortSignal,
   description?: string,
+  publish?: boolean,
 ): Promise<FileUploadResult> {
   const auth = getAuthHeader();
   if (!auth) {
@@ -61,6 +62,7 @@ export async function uploadFile(
   const url = buildUrl(`${API_PREFIX}/files/upload`, {
     visibility,
     library_id: libraryId,
+    publish: publish || undefined,
   });
 
   return new Promise((resolve, reject) => {
@@ -150,11 +152,12 @@ export async function uploadFile(
 
 export async function bulkUploadFiles(
   files: File[],
-  visibility: "private" | "local" | "public" = "public",
+  visibility: components["schemas"]["Visibility"] = "public",
   onProgress?: (percent: number) => void,
   libraryId?: string,
   abortSignal?: AbortSignal,
   description?: string,
+  publish?: boolean,
 ): Promise<BulkFileUploadResult[]> {
   const auth = getAuthHeader();
   if (!auth) {
@@ -164,6 +167,7 @@ export async function bulkUploadFiles(
   const url = buildUrl(`${API_PREFIX}/files/upload/bulk`, {
     visibility,
     library_id: libraryId,
+    publish: publish || undefined,
   });
 
   const totalSize = files.reduce((sum, file) => sum + file.size, 0);

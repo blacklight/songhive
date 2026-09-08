@@ -89,6 +89,10 @@ class ImportResult:
     library_track: Optional[LibraryTrack]
     stored_file: Optional[StoredFile]
     was_duplicate: bool
+    # Whether the caller asked to publish the track to the fediverse. Only
+    # populated on the external-duplicate token resolution path — direct
+    # imports receive the flag as a parameter and already know it.
+    publish: bool = False
 
 
 async def _find_or_create_artist(
@@ -518,6 +522,7 @@ async def _store_duplicate_token(
     content_type: str,
     stored_file_was_duplicate: bool,
     description: Optional[str] = None,
+    publish: bool = False,
 ) -> str:
     """Store a short-lived duplicate-resolution token in Redis and return it."""
     token = str(uuid.uuid4())
@@ -534,6 +539,7 @@ async def _store_duplicate_token(
         "content_type": content_type,
         "stored_file_was_duplicate": stored_file_was_duplicate,
         "description": description,
+        "publish": publish,
     }
     await redis.setex(key, 600, json.dumps(payload))
     return token
@@ -556,6 +562,7 @@ async def import_audio_file(
     external_duplicate_action: Optional[Literal["keep_local", "discard_upload"]] = None,
     redis: Optional[Redis] = None,
     description: Optional[str] = None,
+    publish: bool = False,
 ) -> ImportResult:
     """
     Import an audio file: store it, extract metadata, create artist/album/track
@@ -577,6 +584,9 @@ async def import_audio_file(
     :param external_duplicate_action: Resolution action for external duplicates.
     :param redis: Optional Redis client for duplicate-token storage.
     :param description: Optional free-text description for the created track.
+    :param publish: Whether the caller asked to federate the track. Stored on
+        the external-duplicate resolution token so the ``publish`` choice
+        survives the pending-upload round-trip.
     :returns: Import result with the created records.
     :raises DuplicateTrackError: When a duplicate is detected and ``force`` is
         ``False``.
@@ -630,6 +640,7 @@ async def import_audio_file(
                     content_type,
                     stored_file_was_duplicate,
                     description=description,
+                    publish=publish,
                 )
             existing_track_id = ""
             for et in external_duplicates:
@@ -800,6 +811,7 @@ async def resolve_external_duplicate(
         redis=redis,
         description=data.get("description"),
     )
+    result.publish = bool(data.get("publish", False))
 
     await redis.delete(key)
     return result

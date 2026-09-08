@@ -440,6 +440,85 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/activities/{activity_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete Activity
+     * @description Retract an activity.
+     *
+     *     Local activities are soft-deleted and a ``Delete(Tombstone)`` is fanned
+     *     out to every inbox the activity previously reached; remote activities
+     *     are simply removed locally.
+     */
+    delete: operations["delete_activity_api_v1_activities__activity_id__delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Activity
+     * @description Update an activity's content and/or visibility.
+     *
+     *     Content edits fan an ``Update`` carrying the rebuilt object out to the
+     *     inboxes that already received the activity; visibility edits cascade an
+     *     ``Update`` (new audience) or a ``Delete(Tombstone)`` (non-federating
+     *     visibility) through ``cascade_visibility_update``.
+     */
+    patch: operations["update_activity_api_v1_activities__activity_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/activities/{activity_id}/like": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Like Activity
+     * @description Like an activity.
+     */
+    post: operations["like_activity_api_v1_activities__activity_id__like_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/{entity_type}/{entity_id}/activities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Entity Activities
+     * @description List the activities attached to an entity, newest first.
+     *
+     *     Anonymous requesters see only ``public`` activities on publicly
+     *     accessible entities; authenticated users additionally see ``local`` and
+     *     ``followers`` activities, activities they own, and ``mentioned``
+     *     activities that name them. Pass the returned ``next_cursor`` back as
+     *     ``cursor`` to fetch the next page.
+     */
+    get: operations["list_entity_activities_api_v1__entity_type___entity_id__activities_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/artists/": {
     parameters: {
       query?: never;
@@ -893,11 +972,24 @@ export interface paths {
      * Publish Track
      * @description Publish a public track to the owner's ActivityPub followers.
      *
-     *     Sends a fresh ``Create(Audio)`` activity for the track. The optional
-     *     ``status`` is a one-off post text used as the object's ``content`` instead
-     *     of the track's stored ``description``; it is never persisted. A new
-     *     ``federation_object_id`` is minted on every call so each publication is a
-     *     distinct remote object unaffected by earlier ``Tombstone`` deletions.
+     *     Records a ``create`` activity carrying a fresh ``Create`` payload for
+     *     the track — making the share visible in the track's activity feed and
+     *     retractable via ``DELETE /api/v1/activities/{id}`` — and delivers it to
+     *     the inboxes its audience resolves to. The optional ``status`` is a
+     *     one-off post text used as the object's ``content`` instead of the track's
+     *     stored ``description``; it is never persisted. ``visibility`` selects the
+     *     post's audience (``public`` by default): ``public`` and ``followers``
+     *     reach the owner's follower inboxes plus remote mentioned actors,
+     *     ``mentioned`` reaches only the mentioned actors, and
+     *     ``private``/``local`` record the activity without federating it.
+     *
+     *     ``object_type`` selects the federated object shape: ``note`` (the
+     *     default) shares the track as a ``Create(Note)`` — the post body renders
+     *     on every remote server — while ``audio`` republishes the canonical
+     *     ``Create(Audio)`` media object. A new ``federation_object_id`` is minted
+     *     on every ``audio`` call so each publication is a distinct remote object
+     *     unaffected by earlier ``Tombstone`` deletions; ``note`` shares mint their
+     *     own per-share object id instead.
      */
     post: operations["publish_track_api_v1_tracks__track_id__publish_post"];
     delete?: never;
@@ -1258,6 +1350,11 @@ export interface paths {
     /**
      * Upload Track
      * @description Upload a single audio file into a library.
+     *
+     *     When ``publish`` is set and the instance federates, a newly created
+     *     public track is published to the owner's ActivityPub followers as a
+     *     ``Create(Audio)`` activity, if federation is enabled; otherwise the
+     *     track stays local.
      */
     post: operations["upload_track_api_v1_libraries__library_id__tracks_post"];
     delete?: never;
@@ -1278,6 +1375,9 @@ export interface paths {
     /**
      * Bulk Upload Tracks
      * @description Upload many audio files into a library.
+     *
+     *     When ``publish`` is set and the instance federates, each newly created
+     *     public track is published to the owner's ActivityPub followers.
      */
     post: operations["bulk_upload_tracks_api_v1_libraries__library_id__tracks_bulk_post"];
     delete?: never;
@@ -2607,8 +2707,11 @@ export interface paths {
      *     Audio files are imported directly through ``import_audio_file`` so the
      *     audio-only content hash is used for both the stored file and the track.
      *     This avoids creating a second full-file ``StoredFile`` row for the same
-     *     audio upload. ``description`` is stored on the created track, and a newly
-     *     created public track is published to the owner's ActivityPub followers.
+     *     audio upload. ``description`` is stored on the created track. When
+     *     ``publish`` is set and the instance federates, a newly created public
+     *     track is published to the owner's ActivityPub followers as a
+     *     ``Create(Audio)`` activity, if federation is enabled; otherwise the track
+     *     stays local and has no associated activity object.
      */
     post: operations["upload_file_api_v1_files_upload_post"];
     delete?: never;
@@ -2632,7 +2735,9 @@ export interface paths {
      *
      *     Audio files are imported as tracks; other files are stored as-is. The whole
      *     request is subject to the same per-IP rate limit as ``/files/upload``, and to
-     *     per-request limits on the number of files and total request size.
+     *     per-request limits on the number of files and total request size. When
+     *     ``publish`` is set, each newly created public track is published to the
+     *     owner's ActivityPub followers, if federation is enabled on the instance.
      */
     post: operations["bulk_upload_files_api_v1_files_upload_bulk_post"];
     delete?: never;
@@ -2849,11 +2954,8 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /**
-     * Get Instance V1
-     * @description Return Mastodon-compatible instance metadata (v1).
-     */
-    get: operations["get_instance_v1_api_v1_instance_get"];
+    /** Mastodon Instance V1 */
+    get: operations["mastodon_instance_v1_api_v1_instance_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2869,11 +2971,8 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /**
-     * Get Instance Peers
-     * @description Return a list of known peer instance domains.
-     */
-    get: operations["get_instance_peers_api_v1_instance_peers_get"];
+    /** Mastodon Instance Peers */
+    get: operations["mastodon_instance_peers_api_v1_instance_peers_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2889,11 +2988,8 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /**
-     * Get Instance V2
-     * @description Return Mastodon-compatible instance metadata (v2).
-     */
-    get: operations["get_instance_v2_api_v2_instance_get"];
+    /** Mastodon Instance V2 */
+    get: operations["mastodon_instance_v2_api_v2_instance_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2942,10 +3038,377 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/.well-known/webfinger": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Webfinger */
+    get: operations["webfinger__well_known_webfinger_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/.well-known/nodeinfo": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Nodeinfo Discovery */
+    get: operations["nodeinfo_discovery__well_known_nodeinfo_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nodeinfo/2.1": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Nodeinfo */
+    get: operations["nodeinfo_nodeinfo_2_1_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/actor": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Actor */
+    get: operations["actor_ap_actor_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/inbox": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Inbox */
+    post: operations["inbox_ap_inbox_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/outbox": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Outbox */
+    get: operations["outbox_ap_outbox_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/followers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Followers */
+    get: operations["followers_ap_followers_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/following": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Following */
+    get: operations["following_ap_following_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ap/actor/quote_authorizations/{auth_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Quote Authorization */
+    get: operations["quote_authorization_ap_actor_quote_authorizations__auth_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nodeinfo/2.0.json": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Nodeinfo 20 */
+    get: operations["nodeinfo_20_nodeinfo_2_0_json_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nodeinfo/2.0": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Nodeinfo 20 */
+    get: operations["nodeinfo_20_nodeinfo_2_0_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/nodeinfo/2.1.json": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Nodeinfo 21 Json */
+    get: operations["nodeinfo_21_json_nodeinfo_2_1_json_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/accounts/lookup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Mastodon Accounts Lookup */
+    get: operations["mastodon_accounts_lookup_api_v1_accounts_lookup_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/accounts/{account_id}/statuses": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Mastodon Accounts Statuses */
+    get: operations["mastodon_accounts_statuses_api_v1_accounts__account_id__statuses_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/accounts/{account_id}/followers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Mastodon Accounts Followers */
+    get: operations["mastodon_accounts_followers_api_v1_accounts__account_id__followers_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/accounts/{account_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Mastodon Accounts Get */
+    get: operations["mastodon_accounts_get_api_v1_accounts__account_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/statuses/{status_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Mastodon Statuses Get */
+    get: operations["mastodon_statuses_get_api_v1_statuses__status_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /**
+     * ActivityListResponse
+     * @description A page of activities.
+     */
+    ActivityListResponse: {
+      /** Activities */
+      activities: components["schemas"]["ActivityResponse"][];
+      /** Next Cursor */
+      next_cursor?: string | null;
+    };
+    /**
+     * ActivityMentionResponse
+     * @description Serialized activity mention.
+     */
+    ActivityMentionResponse: {
+      /** Handle */
+      handle: string;
+      /** Actor Url */
+      actor_url?: string | null;
+      /** User Id */
+      user_id?: string | null;
+    };
+    /**
+     * ActivityResponse
+     * @description Serialized activity.
+     */
+    ActivityResponse: {
+      /** Id */
+      id: string;
+      /** Entity Type */
+      entity_type: string;
+      /** Entity Id */
+      entity_id: string;
+      /** Activity Type */
+      activity_type: string;
+      /** Source Type */
+      source_type: string;
+      /** Source Actor */
+      source_actor: string;
+      /** Source Id */
+      source_id: string;
+      /** Local Object Id */
+      local_object_id?: string | null;
+      /** Owner User Id */
+      owner_user_id?: string | null;
+      /** Source Actor Avatar Url */
+      source_actor_avatar_url?: string | null;
+      /** Source Actor Display Name */
+      source_actor_display_name?: string | null;
+      visibility: components["schemas"]["Visibility"];
+      /** In Reply To Activity Id */
+      in_reply_to_activity_id?: string | null;
+      /** Content */
+      content?: string | null;
+      /** Content Source */
+      content_source?: string | null;
+      /** Content Type */
+      content_type?: string | null;
+      /**
+       * Published At
+       * Format: date-time
+       */
+      published_at: string;
+      /**
+       * Mentions
+       * @default []
+       */
+      mentions: components["schemas"]["ActivityMentionResponse"][];
+    };
+    /**
+     * ActivityUpdate
+     * @description Activity partial update.
+     */
+    ActivityUpdate: {
+      /** Content */
+      content?: string | null;
+      visibility?: components["schemas"]["Visibility"] | null;
+    };
     /**
      * AddLibraryTracksRequest
      * @description Request body for adding tracks, albums, or artists to a library.
@@ -4218,6 +4681,11 @@ export interface components {
       version: string;
       /** Songhive Version */
       songhive_version: string;
+      /**
+       * Federation Enabled
+       * @default false
+       */
+      federation_enabled: boolean;
       urls?: components["schemas"]["_Urls"];
       stats: components["schemas"]["_Stats"];
       /** Thumbnail */
@@ -5016,8 +5484,13 @@ export interface components {
     TrackPublishRequest: {
       /** Status */
       status?: string | null;
-      /** Visibility */
       visibility?: components["schemas"]["Visibility"] | null;
+      /**
+       * Object Type
+       * @default note
+       * @enum {string}
+       */
+      object_type: "note" | "audio";
     };
     /**
      * TrackPublishResponse
@@ -5274,10 +5747,10 @@ export interface components {
     };
     /**
      * Visibility
-     * @description Visibility levels for shareable media items.
+     * @description Visibility levels for shareable media items and activities.
      * @enum {string}
      */
-    Visibility: "private" | "local" | "public";
+    Visibility: "private" | "mentioned" | "local" | "followers" | "public";
     /** _Stats */
     _Stats: {
       /**
@@ -6306,6 +6779,140 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PublicUserResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_activity_api_v1_activities__activity_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_activity_api_v1_activities__activity_id__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ActivityUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  like_activity_api_v1_activities__activity_id__like_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_entity_activities_api_v1__entity_type___entity_id__activities_get: {
+    parameters: {
+      query?: {
+        activity_type?: string | null;
+        source_type?: string | null;
+        cursor?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        entity_type: string;
+        entity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityListResponse"];
         };
       };
       /** @description Validation Error */
@@ -8344,6 +8951,7 @@ export interface operations {
         force?: boolean;
         visibility?: components["schemas"]["Visibility"];
         enrich?: boolean;
+        publish?: boolean;
       };
       header?: never;
       path: {
@@ -8383,6 +8991,7 @@ export interface operations {
         force?: boolean;
         visibility?: components["schemas"]["Visibility"];
         enrich?: boolean;
+        publish?: boolean;
       };
       header?: never;
       path: {
@@ -10896,6 +11505,7 @@ export interface operations {
         visibility?: components["schemas"]["Visibility"];
         library_id?: string | null;
         external_duplicate_action?: ("keep_local" | "discard_upload") | null;
+        publish?: boolean;
       };
       header?: never;
       path?: never;
@@ -10935,6 +11545,7 @@ export interface operations {
         visibility?: components["schemas"]["Visibility"];
         library_id?: string | null;
         external_duplicate_action?: ("keep_local" | "discard_upload") | null;
+        publish?: boolean;
       };
       header?: never;
       path?: never;
@@ -11353,7 +11964,7 @@ export interface operations {
       };
     };
   };
-  get_instance_v1_api_v1_instance_get: {
+  mastodon_instance_v1_api_v1_instance_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -11368,12 +11979,12 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["InstanceV1"];
+          "application/json": unknown;
         };
       };
     };
   };
-  get_instance_peers_api_v1_instance_peers_get: {
+  mastodon_instance_peers_api_v1_instance_peers_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -11388,12 +11999,12 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": string[];
+          "application/json": unknown;
         };
       };
     };
   };
-  get_instance_v2_api_v2_instance_get: {
+  mastodon_instance_v2_api_v2_instance_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -11408,7 +12019,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["InstanceV2"];
+          "application/json": unknown;
         };
       };
     };
@@ -11453,6 +12064,447 @@ export interface operations {
       };
       header?: never;
       path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  webfinger__well_known_webfinger_get: {
+    parameters: {
+      query?: {
+        resource?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  nodeinfo_discovery__well_known_nodeinfo_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  nodeinfo_nodeinfo_2_1_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  actor_ap_actor_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  inbox_ap_inbox_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  outbox_ap_outbox_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  followers_ap_followers_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  following_ap_following_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  quote_authorization_ap_actor_quote_authorizations__auth_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        auth_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  nodeinfo_20_nodeinfo_2_0_json_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  nodeinfo_20_nodeinfo_2_0_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  nodeinfo_21_json_nodeinfo_2_1_json_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  mastodon_accounts_lookup_api_v1_accounts_lookup_get: {
+    parameters: {
+      query?: {
+        acct?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mastodon_accounts_statuses_api_v1_accounts__account_id__statuses_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        max_id?: string | null;
+        since_id?: string | null;
+        only_media?: boolean;
+        exclude_replies?: boolean;
+        exclude_reblogs?: boolean;
+        tagged?: string | null;
+      };
+      header?: never;
+      path: {
+        account_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mastodon_accounts_followers_api_v1_accounts__account_id__followers_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        max_id?: string | null;
+        since_id?: string | null;
+      };
+      header?: never;
+      path: {
+        account_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mastodon_accounts_get_api_v1_accounts__account_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        account_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mastodon_statuses_get_api_v1_statuses__status_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        status_id: string;
+      };
       cookie?: never;
     };
     requestBody?: never;

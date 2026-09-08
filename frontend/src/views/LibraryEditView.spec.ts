@@ -5,6 +5,7 @@ import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
+import { useInstanceStore } from "@/stores/instance";
 import * as librariesApi from "@/api/libraries";
 import type { LibraryResponse, LibraryUpdate } from "@/api/libraries";
 import type { TrackResponse } from "@/api/tracks";
@@ -435,6 +436,65 @@ describe("LibraryEditView", () => {
         force: true,
         enrich: false,
       }),
+    );
+  });
+
+  it("uploads a public track with fediverse publishing enabled", async () => {
+    setAuthenticated("user-1");
+    const instanceStore = useInstanceStore();
+    instanceStore.instance = { federation_enabled: true } as never;
+    await mountAt("/libraries/library-1/edit");
+
+    // Set the upload visibility to public so the publish checkbox appears.
+    const visibilityInputs = document.body.querySelectorAll("select");
+    const uploadVisibilityInput = visibilityInputs[1] as HTMLSelectElement;
+    uploadVisibilityInput.value = "public";
+    uploadVisibilityInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const checkboxes = document.body.querySelectorAll('input[type="checkbox"]');
+    const publishCheckbox = checkboxes[2] as HTMLInputElement;
+    expect(publishCheckbox).toBeDefined();
+    expect(document.body.textContent).toContain(
+      i18n.global.t("browse.libraryManagement.publish"),
+    );
+    publishCheckbox.checked = true;
+    publishCheckbox.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const fileInput = document.body.querySelectorAll(
+      '.library-edit-view__file-input[type="file"]',
+    )[0] as HTMLInputElement;
+    const file = new File(["audio"], "song.mp3", { type: "audio/mpeg" });
+    setFiles(fileInput, [file]);
+    fileInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(librariesApi.uploadTrack).toHaveBeenCalledWith(
+      "library-1",
+      file,
+      expect.objectContaining({
+        visibility: "public",
+        publish: true,
+      }),
+    );
+  });
+
+  it("hides the publish checkbox when federation is disabled", async () => {
+    setAuthenticated("user-1");
+    await mountAt("/libraries/library-1/edit");
+
+    const visibilityInputs = document.body.querySelectorAll("select");
+    const uploadVisibilityInput = visibilityInputs[1] as HTMLSelectElement;
+    uploadVisibilityInput.value = "public";
+    uploadVisibilityInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(
+      document.body.querySelectorAll('input[type="checkbox"]'),
+    ).toHaveLength(2);
+    expect(document.body.textContent).not.toContain(
+      i18n.global.t("browse.libraryManagement.publish"),
     );
   });
 

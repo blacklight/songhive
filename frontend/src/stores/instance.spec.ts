@@ -26,6 +26,7 @@ function makeInstance(
     registrations: true,
     approval_required: false,
     invites_enabled: false,
+    federation_enabled: false,
     configuration: {},
     contact_account: null,
     rules: [],
@@ -60,6 +61,7 @@ describe("useInstanceStore", () => {
         registrations: true,
         approval_required: true,
         invites_enabled: true,
+        federation_enabled: true,
       }),
     );
 
@@ -68,6 +70,7 @@ describe("useInstanceStore", () => {
     expect(store.registrations).toBe(true);
     expect(store.approvalRequired).toBe(true);
     expect(store.invitesEnabled).toBe(true);
+    expect(store.federationEnabled).toBe(true);
   });
 
   it("defaults registrations to false and records an error on failure", async () => {

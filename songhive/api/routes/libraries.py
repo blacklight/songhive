@@ -29,7 +29,7 @@ from ...models.artist import Artist
 from ...models.library import Library
 from ...models.user import User
 from ...services import acl, activities, audit, deletion, music
-from ...services.federation import unpublish_track_activity
+from ...services.federation import ensure_user_actor, unpublish_track_activity
 from ...services.hashtags import (
     add_hashtags_to_entity,
     remove_hashtag_from_entity,
@@ -286,17 +286,24 @@ async def _track_response(
 async def upload_track(
     library_id: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     force: bool = Query(False),
     visibility: Visibility = Query(Visibility.PRIVATE),
     enrich: bool = Query(True),
+    publish: bool = Query(False),
     description: Optional[str] = Form(None),
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
 ):
-    """Upload a single audio file into a library."""
+    """
+    Upload a single audio file into a library.
+
+    When ``publish`` is set and the instance federates, a newly created
+    public track is published to the owner's ActivityPub followers as a
+    ``Create(Audio)`` activity, if federation is enabled; otherwise the
+    track stays local.
+    """
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -319,9 +326,11 @@ async def upload_track(
             enrich=enrich,
             content_type=file.content_type,
             description=description,
+            publish=publish,
         )
         await db.commit()
-        if result.track.visibility == Visibility.PUBLIC.value and user is not None:
+        if publish and result.track.visibility == Visibility.PUBLIC.value and user is not None:
+            ensure_user_actor(user, request.app.state.config)
             result.track.federation_object_id = str(uuid.uuid4())
             artist = await db.get(Artist, result.track.artist_id)
             if artist is not None:
@@ -364,6 +373,7 @@ async def _import_single_sync_file(
     enrich: bool,
     background_tasks: Optional[BackgroundTasks],
     config: SonghiveConfig,
+    publish: bool = False,
 ) -> BulkUploadResult:
     """Import a single uploaded audio file and return a per-file result."""
     filename = upload_file.filename or "audio.mp3"
@@ -379,9 +389,16 @@ async def _import_single_sync_file(
             force=force,
             enrich=enrich,
             content_type=upload_file.content_type,
+            publish=publish,
         )
         await db.commit()
-        if background_tasks is not None and result.track.visibility == Visibility.PUBLIC.value and user is not None:
+        if (
+            publish
+            and background_tasks is not None
+            and result.track.visibility == Visibility.PUBLIC.value
+            and user is not None
+        ):
+            ensure_user_actor(user, config)
             result.track.federation_object_id = str(uuid.uuid4())
             artist = await db.get(Artist, result.track.artist_id)
             if artist is not None:
@@ -425,6 +442,7 @@ async def _upload_sync_batch(
     enrich: bool,
     background_tasks: BackgroundTasks,
     config: SonghiveConfig,
+    publish: bool = False,
 ) -> List[BulkUploadResult]:
     """Import a small batch of audio files synchronously."""
     results: List[BulkUploadResult] = []
@@ -441,6 +459,7 @@ async def _upload_sync_batch(
                 enrich,
                 background_tasks,
                 config,
+                publish=publish,
             )
         )
     return results
@@ -455,6 +474,7 @@ async def _upload_async_batch(
     visibility: Visibility,
     force: bool,
     enrich: bool,
+    publish: bool = False,
 ) -> JSONResponse:
     """Store a large batch of files and enqueue background processing."""
     stored_files = []
@@ -483,6 +503,7 @@ async def _upload_async_batch(
             visibility=visibility.value,
             force=force,
             enrich=enrich,
+            publish=publish,
             content_type=stored.content_type,
             source="upload",
         )
@@ -502,11 +523,17 @@ async def bulk_upload_tracks(
     force: bool = Query(False),
     visibility: Visibility = Query(Visibility.PRIVATE),
     enrich: bool = Query(True),
+    publish: bool = Query(False),
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
 ):
-    """Upload many audio files into a library."""
+    """
+    Upload many audio files into a library.
+
+    When ``publish`` is set and the instance federates, each newly created
+    public track is published to the owner's ActivityPub followers.
+    """
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -530,6 +557,7 @@ async def bulk_upload_tracks(
             enrich,
             background_tasks,
             config,
+            publish=publish,
         )
 
     return await _upload_async_batch(
@@ -541,6 +569,7 @@ async def bulk_upload_tracks(
         visibility,
         force,
         enrich,
+        publish=publish,
     )
 
 

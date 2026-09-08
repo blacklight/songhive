@@ -3,6 +3,7 @@ Serializers: convert internal models to ActivityPub objects.
 """
 
 import html
+from datetime import datetime, timezone
 from functools import partial
 from typing import Optional
 
@@ -15,14 +16,12 @@ from pubby.content import (
 )
 from sqlalchemy import inspect as sa_inspect
 
-from ..models._enums import Visibility
-from ..models.artist import Artist
-from ..models.track import Track
+from ..models import Artist, Track, Visibility
 from ..services.genres import extract_genres_from_track, genres_to_hashtags
 from ._common import get_hashtag_url, get_stream_url, get_track_url
 
 
-def set_audio_description(obj: dict, description: Optional[str], domain: str) -> None:
+def set_post_content(obj: dict, description: Optional[str], domain: str) -> None:
     """
     Render a track description into the object's ``content`` field.
 
@@ -30,30 +29,168 @@ def set_audio_description(obj: dict, description: Optional[str], domain: str) ->
     linkified so remote servers render them as usable links.  Hashtags found
     in the text are also appended to the object's ``tag`` list.
 
-    The rendered text is also mirrored into ``summary``: Mastodon-family
-    servers treat ``Audio`` as a "converted" object type and render
-    ``name``/``summary``/``url`` instead of ``content``, so without the
-    mirror the post text is silently dropped there.
+    :func:`normalize_post_content` is applied afterwards so the rendered
+    body ends with the track-page link and any stale ``summary`` is removed.
     """
     set_object_content(obj, description or "", partial(get_hashtag_url, domain))
-    mirror_content_to_summary(obj)
+    normalize_post_content(obj)
 
 
-def mirror_content_to_summary(obj: dict) -> None:
+# Object types Songhive emits as federated posts and normalizes content for.
+# ``Audio`` is the published track object; ``Note`` is the shape used for
+# shares, since Mastodon renders ``content`` only for ``Note``/``Question``
+# objects (``Audio`` is a "converted" type rendered from name/summary/url).
+_POST_OBJECT_TYPES = frozenset({"Audio", "Note"})
+
+
+def normalize_post_content(obj: dict) -> None:
     """
-    Mirror ``content`` into ``summary`` on ``Audio`` objects (or clear it).
+    Normalize a federated post object's body for remote renderers.
 
-    Mastodon-style "converted" object types (``Audio``, ``Video``, ``Image``,
-    ``Article``, ``Page``, ``Event``) ignore ``content`` and render
-    ``name`` + ``summary`` + ``url`` as the post body.  Mirroring keeps the
-    post text visible there while remaining a no-op for other object types.
+    Ensures ``content`` ends with a ``{artist} - {title}`` link to the
+    object's ``text/html`` ``url`` — the anchor that used to be emitted as
+    the object's ``name``.  It is appended rather than prepended so that on
+    Akkoma — which already renders ``name`` as its own
+    ``<p><a href="{url}">{name}</a></p>`` header — the same link does not
+    appear twice in a row at the top of the post.  For ``Note`` objects the
+    link is also the only in-body link to the track page that Mastodon
+    renders, since a ``Note``'s ``url`` is not shown in the post body.
+
+    Any ``summary`` is removed: Akkoma and Mastodon both treat a non-empty
+    ``summary`` as a content warning, so mirroring the rendered body into it
+    surfaced the raw post HTML as a CW header.  The function is idempotent —
+    a previously appended link block is stripped before re-appending, so
+    repeated content re-renders (edits, metadata re-syncs) never duplicate
+    it.  No-op for objects that are not ``Audio``/``Note`` or whose ``url``
+    has no ``text/html`` link.
     """
-    if obj.get("type") != "Audio":
+    if obj.get("type") not in _POST_OBJECT_TYPES:
         return
-    if obj.get("content"):
-        obj["summary"] = obj["content"]
-    else:
-        obj.pop("summary", None)
+    obj.pop("summary", None)
+    block = _track_link_block(obj)
+    if block is None:
+        return
+    body = obj.get("content")
+    if not isinstance(body, str):
+        body = ""
+    if body.endswith(block):
+        body = body[: -len(block)]
+    obj["content"] = f"{body}{block}"
+
+
+def _track_link_block(obj: dict) -> Optional[str]:
+    """
+    Return the ``<p><a href="{track page}">{artist} - {title}</a></p>`` block
+    appended to a post object's ``content``, or ``None`` when it cannot be
+    built from the object's ``name`` and ``url``.
+    """
+    name = obj.get("name")
+    urls = obj.get("url")
+    if not isinstance(name, str) or not name:
+        return None
+    href: Optional[str] = None
+    if isinstance(urls, str):
+        # ``Note`` objects carry the track page as a plain ``url`` string.
+        href = urls
+    elif isinstance(urls, list):
+        href = next(
+            (
+                entry.get("href")
+                for entry in urls
+                if isinstance(entry, dict) and (entry.get("mediaType") or entry.get("mimeType")) == "text/html"
+            ),
+            None,
+        )
+    if not isinstance(href, str) or not is_linkable_url(href):
+        return None
+    # ``name`` is stored HTML-escaped; unescape the label first so
+    # ``render_link_anchor``'s own escaping does not double-escape it.
+    return f"<p>{render_link_anchor(href, label=html.unescape(name))}</p>"
+
+
+def _unloaded_attrs(track: Track) -> frozenset:
+    """
+    Return the track's unloaded ORM attributes.
+
+    ``audio_file`` and ``created_at`` are only read when already loaded:
+    implicit queries would raise ``MissingGreenlet`` in the async contexts
+    these serializers are called from.
+    """
+    return getattr(sa_inspect(track), "unloaded", frozenset())
+
+
+def _track_media_type(track: Track, unloaded: frozenset) -> str:
+    """
+    Return the track's audio MIME type.
+
+    Prefers the persisted ``audio_mime_type``; only falls back to the
+    related ``StoredFile`` when it is already loaded.
+    """
+    audio_file_content_type = None
+    if not track.audio_mime_type and "audio_file" not in unloaded:
+        audio_file = getattr(track, "audio_file", None)
+        if audio_file is not None:
+            audio_file_content_type = audio_file.content_type
+
+    return track.audio_mime_type or audio_file_content_type or "audio/mpeg"
+
+
+def _track_published(track: Track, unloaded: frozenset) -> datetime:
+    """
+    Return a stable publication timestamp for the track object.
+
+    The track creation time keeps ``published`` stable across
+    re-serializations of the same object (Update rebuilds, the
+    object-dereference route); a missing or unloaded value falls back to
+    the current UTC time.
+    """
+    published = track.created_at if "created_at" not in unloaded else None
+    if published is None:
+        published = datetime.now(timezone.utc)
+    elif published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    return published
+
+
+def _track_name(track: Track, artist: Artist) -> str:
+    """
+    Return the plain-text ``{artist} - {title}`` object name.
+
+    It used to carry an ``<a href="{track_url}">`` anchor because Mastodon
+    interpolates ``name`` unescaped into the post header — but Akkoma wraps
+    ``name`` in its own link to the object ``url``, which produced nested
+    anchors.  The link lives at the end of ``content`` instead (see
+    ``normalize_post_content``).  The label is HTML-escaped so a crafted
+    artist/title cannot inject markup on servers that still interpolate
+    ``name`` unescaped.
+    """
+    return html.escape(f"{artist.name} - {track.title}", quote=False)
+
+
+def _track_attributed_to(artist: Artist, domain: str, actor_url: Optional[str]) -> "str | list":
+    """
+    Return the object's ``attributedTo``.
+
+    The publishing actor leads when known: remote servers take its first
+    entry as the object's author when importing a dereferenced object (e.g.
+    Mastodon's URL-search fetch), and the artist page URL is not
+    dereferenceable as an actor.
+    """
+    artist_url = f"https://{domain}/artists/{artist.id}"
+    if actor_url:
+        return [actor_url, artist_url]
+    return artist_url
+
+
+def _track_genre_tags(track: Track, domain: str) -> Optional[list]:
+    """Return ``Hashtag`` tags for the track's genres, when it has any."""
+    if not track.genre:
+        return None
+    genre_names = extract_genres_from_track(track)
+    if not genre_names:
+        return None
+    genre_tags = list(dict.fromkeys(genres_to_hashtags(genre_names)))
+    return build_hashtag_tags(genre_tags, partial(get_hashtag_url, domain))
 
 
 def track_to_audio_object(
@@ -84,32 +221,18 @@ def track_to_audio_object(
     track_url = get_track_url(track=track, domain=domain)
     stream_url = stream_url or get_stream_url(track=track, domain=domain)
     object_id = ap_object_id or track_url
+    unloaded = _unloaded_attrs(track)
+    media_type = _track_media_type(track, unloaded)
 
-    # Prefer the persisted MIME type; only fall back to the related StoredFile
-    # when it is already loaded to avoid an implicit query in async contexts.
-    audio_file_content_type = None
-    if not track.audio_mime_type:
-        track_state = sa_inspect(track)
-        if "audio_file" not in getattr(track_state, "unloaded", {}):
-            audio_file = getattr(track, "audio_file", None)
-            if audio_file is not None:
-                audio_file_content_type = audio_file.content_type
-
-    media_type = track.audio_mime_type or audio_file_content_type or "audio/mpeg"
-
-    # Mastodon-family servers render ``Audio`` (a "converted" object type)
-    # as ``<h2>{name}</h2>`` + ``summary`` + the object ``url``,
-    # interpolating ``name`` into the markup unescaped: emitting an anchor
-    # turns the post header into an "{artist} - {title}" link to the track
-    # page.  The label and href are escaped; ``name`` falls back to escaped
-    # plain text if the URL is not linkable.
-    title_label = f"{artist.name} - {track.title}"
-    name = render_link_anchor(track_url, label=title_label) if is_linkable_url(track_url) else html.escape(title_label)
+    # ``published`` feeds the remote post's date (Akkoma falls back to the
+    # Unix epoch when it is missing).
+    published = _track_published(track, unloaded)
 
     obj = {
         "type": "Audio",
         "id": object_id,
-        "name": name,
+        "name": _track_name(track, artist),
+        "published": published.isoformat(),
         # ``mimeType`` mirrors ``mediaType``: Mastodon's url_to_href reads the
         # non-standard ``mimeType`` key and falls back to "text/html" per link,
         # so without it the audio download URL would be picked for display
@@ -128,28 +251,17 @@ def track_to_audio_object(
                 "mimeType": "text/html",
             },
         ],
+        "attributedTo": _track_attributed_to(artist, domain, actor_url),
     }
-
-    artist_url = f"https://{domain}/artists/{artist.id}"
-    # ``attributedTo`` leads with the publishing actor: remote servers take
-    # its first entry as the object's author when importing a dereferenced
-    # object (e.g. Mastodon's URL-search fetch), and the artist page URL is
-    # not dereferenceable as an actor.
-    if actor_url:
-        obj["attributedTo"] = [actor_url, artist_url]
-    else:
-        obj["attributedTo"] = artist_url
 
     if track.duration:
         obj["duration"] = format_duration(track.duration)
 
-    if track.genre:
-        genre_names = extract_genres_from_track(track)
-        if genre_names:
-            genre_tags = list(dict.fromkeys(genres_to_hashtags(genre_names)))
-            obj["tag"] = build_hashtag_tags(genre_tags, partial(get_hashtag_url, domain))
+    tags = _track_genre_tags(track, domain)
+    if tags:
+        obj["tag"] = tags
 
-    set_audio_description(obj, getattr(track, "description", None), domain)
+    set_post_content(obj, getattr(track, "description", None), domain)
 
     if stream_url:
         obj["attachment"] = [
@@ -160,5 +272,90 @@ def track_to_audio_object(
                 "name": track.title,
             }
         ]
+
+    return obj
+
+
+def track_to_note_object(
+    track: Track,
+    artist: Artist,
+    domain: str,
+    stream_url: Optional[str] = None,
+    actor_url: Optional[str] = None,
+    ap_object_id: Optional[str] = None,
+    audio_object_id: Optional[str] = None,
+    published: Optional[datetime] = None,
+) -> Optional[dict]:
+    """
+    Serialize a Track to an ActivityPub ``Note`` carrying the audio.
+
+    A ``Note`` is the only object shape whose ``content`` Mastodon renders
+    (``Audio`` is a "converted" type synthesized from ``name``/``summary``/
+    ``url``), so shares meant to display a post body are published as
+    ``Create(Note)`` instead of ``Create(Audio)``.
+
+    The track is still represented inside the object:
+
+    - ``name`` stays ``{artist} - {title}`` — Akkoma renders it as its own
+      linked header, while Mastodon ignores ``name`` on ``Note`` objects.
+    - ``url`` is the track page as a plain string — for ``Note`` objects the
+      audio lives in ``attachment`` instead of the ``url`` list.
+    - ``attachment`` embeds the stream as an ``Audio``-typed media object so
+      remote servers render an inline player; on Akkoma the generic ``Audio``
+      type also survives the ``application/octet-stream`` mediaType rewrite
+      for MIME values outside its table (the MastoAPI attachment ``type``
+      falls back to the object's type and still resolves to ``audio``).
+      ``audio_object_id`` sets the attachment's ``id`` to the published
+      ``Audio`` object so music-aware servers can dereference the canonical
+      track object.
+    - ``content`` ends with the track-page link (``normalize_post_content``)
+      so the post body carries a usable link on servers that do not surface
+      ``url`` — e.g. Mastodon, which only renders ``content`` for a ``Note``.
+
+    ``published`` defaults to the current time (a share is a new post); the
+    caller passes the stored stamp when re-serializing an existing share so
+    remote posts keep their original date.
+    """
+    if artist is None or getattr(track, "visibility", None) != Visibility.PUBLIC.value:
+        return None
+
+    track_url = get_track_url(track=track, domain=domain)
+    stream_url = stream_url or get_stream_url(track=track, domain=domain)
+    object_id = ap_object_id or track_url
+    unloaded = _unloaded_attrs(track)
+    media_type = _track_media_type(track, unloaded)
+
+    if published is None:
+        published = datetime.now(timezone.utc)
+    elif published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+
+    obj = {
+        "type": "Note",
+        "id": object_id,
+        "name": _track_name(track, artist),
+        "published": published.isoformat(),
+        "url": track_url,
+        "attributedTo": _track_attributed_to(artist, domain, actor_url),
+    }
+
+    tags = _track_genre_tags(track, domain)
+    if tags:
+        obj["tag"] = tags
+
+    set_post_content(obj, getattr(track, "description", None), domain)
+
+    if stream_url:
+        attachment: dict = {
+            "type": "Audio",
+            "mediaType": media_type,
+            "url": stream_url,
+            "name": track.title,
+        }
+        if audio_object_id:
+            attachment["id"] = audio_object_id
+        if track.duration:
+            attachment["duration"] = format_duration(track.duration)
+        obj["attachment"] = [attachment]
 
     return obj

@@ -17,6 +17,7 @@ import type { ActivityVisibility } from "@/api/activities";
 import { getApiErrorMessage, ApiError } from "@/api/client";
 import { useOwnership } from "@/composables/useOwnership";
 import { useConfirmStore } from "@/stores/confirm";
+import { useInstanceStore } from "@/stores/instance";
 import { useToastStore } from "@/stores/toast";
 import { getPublicUrl, isPublicResource } from "@/utils/share";
 import { formatDateTime } from "@/i18n";
@@ -41,6 +42,7 @@ const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 const confirm = useConfirmStore();
 const toast = useToastStore();
+const instanceStore = useInstanceStore();
 const { isOwner } = useOwnership(computed(() => props.ownerId ?? null));
 
 type TabKey = "grants" | "urls" | "fediverse" | "public";
@@ -68,7 +70,7 @@ const availableTabs = computed(() => {
       label: t("browse.share.shareUrls"),
       icon: "link",
     });
-    if (props.itemType === "track") {
+    if (props.itemType === "track" && instanceStore.federationEnabled) {
       tabs.push({
         key: "fediverse",
         label: t("browse.share.fediverse"),
@@ -112,6 +114,7 @@ const isCreatingUrl = ref(false);
 
 const statusText = ref("");
 const publishVisibility = ref<ActivityVisibility>("public");
+const publishObjectType = ref<"note" | "audio">("note");
 const isPublishing = ref(false);
 const publishError = ref<string | null>(null);
 
@@ -128,6 +131,17 @@ const publishVisibilityOptions = computed(() =>
     value,
     label: t(`activities.visibility.${value}`),
   })),
+);
+
+const publishObjectTypeOptions = computed(() => [
+  { value: "note", label: t("browse.share.fediverseTypeNote") },
+  { value: "audio", label: t("browse.share.fediverseTypeAudio") },
+]);
+
+const publishObjectTypeHint = computed(() =>
+  publishObjectType.value === "audio"
+    ? t("browse.share.fediverseTypeAudioHint")
+    : t("browse.share.fediverseTypeNoteHint"),
 );
 
 const newUrl = ref<string | null>(null);
@@ -331,6 +345,7 @@ async function publish() {
     await publishTrack(props.itemId, {
       status: statusText.value.trim() || null,
       visibility: publishVisibility.value,
+      object_type: publishObjectType.value,
     });
     statusText.value = "";
     toast.push({
@@ -383,6 +398,7 @@ watch(
       urlsError.value = null;
       statusText.value = "";
       publishVisibility.value = "public";
+      publishObjectType.value = "note";
       publishError.value = null;
     }
   },
@@ -533,6 +549,13 @@ watch(
             as="textarea"
             :label="t('browse.share.fediverseStatus')"
             :hint="t('browse.share.fediverseStatusHint')"
+            :disabled="isPublishing"
+          />
+          <AppSelect
+            v-model="publishObjectType"
+            :options="publishObjectTypeOptions"
+            :label="t('browse.share.fediverseType')"
+            :hint="publishObjectTypeHint"
             :disabled="isPublishing"
           />
           <AppSelect

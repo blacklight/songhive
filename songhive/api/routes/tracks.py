@@ -135,6 +135,11 @@ class TrackPublishRequest(BaseModel):
 
     status: Optional[str] = None
     visibility: Optional[Visibility] = None
+    # ``note`` (default) shares the track as a ``Note`` post whose ``content``
+    # remote servers render — ``Audio`` is a "converted" type on Mastodon
+    # whose post text is dropped. ``audio`` republishes the track's canonical
+    # ``Audio`` object instead.
+    object_type: Literal["note", "audio"] = "note"
 
 
 class TrackPublishResponse(BaseModel):
@@ -394,7 +399,7 @@ async def _handle_visibility_changes(
                 object_id,
             )
             track.federation_object_id = None
-            await activities.retract_track_publications(db, track, object_id=object_id)
+            await activities.retract_track_publications(db, track)
             await db.commit()
 
 
@@ -1050,8 +1055,8 @@ async def publish_track(
     """
     Publish a public track to the owner's ActivityPub followers.
 
-    Records a ``create`` activity carrying a fresh ``Create(Audio)`` payload
-    for the track — making the share visible in the track's activity feed and
+    Records a ``create`` activity carrying a fresh ``Create`` payload for
+    the track — making the share visible in the track's activity feed and
     retractable via ``DELETE /api/v1/activities/{id}`` — and delivers it to
     the inboxes its audience resolves to. The optional ``status`` is a
     one-off post text used as the object's ``content`` instead of the track's
@@ -1059,9 +1064,15 @@ async def publish_track(
     post's audience (``public`` by default): ``public`` and ``followers``
     reach the owner's follower inboxes plus remote mentioned actors,
     ``mentioned`` reaches only the mentioned actors, and
-    ``private``/``local`` record the activity without federating it. A new
-    ``federation_object_id`` is minted on every call so each publication is a
-    distinct remote object unaffected by earlier ``Tombstone`` deletions.
+    ``private``/``local`` record the activity without federating it.
+
+    ``object_type`` selects the federated object shape: ``note`` (the
+    default) shares the track as a ``Create(Note)`` — the post body renders
+    on every remote server — while ``audio`` republishes the canonical
+    ``Create(Audio)`` media object. A new ``federation_object_id`` is minted
+    on every ``audio`` call so each publication is a distinct remote object
+    unaffected by earlier ``Tombstone`` deletions; ``note`` shares mint their
+    own per-share object id instead.
     """
     if not config.federation.enabled or not config.federation.instance_domain:
         raise HTTPException(
@@ -1087,9 +1098,11 @@ async def publish_track(
 
     status_text = (body.status or "").strip() or None
     publish_visibility = body.visibility or Visibility.PUBLIC
+    object_type = body.object_type
 
     ensure_user_actor(current_user, config)
-    track.federation_object_id = str(uuid.uuid4())
+    if object_type == "audio":
+        track.federation_object_id = str(uuid.uuid4())
 
     await audit.log_action(
         db,
@@ -1101,10 +1114,11 @@ async def publish_track(
             "title": track.title,
             "status": status_text,
             "visibility": publish_visibility.value,
+            "object_type": object_type,
         },
         ip_address=client_ip(request),
     )
-    await activities.record_track_publication(
+    activity = await activities.record_track_publication(
         db,
         track=track,
         artist=track.artist,
@@ -1112,11 +1126,15 @@ async def publish_track(
         config=config,
         status=status_text,
         visibility=publish_visibility,
+        object_type=object_type,
     )
     await db.commit()
 
-    object_id = f"{current_user.actor_url}/objects/{track.federation_object_id}"
-    return TrackPublishResponse(track_id=track_id, enqueued=True, object_id=object_id)
+    return TrackPublishResponse(
+        track_id=track_id,
+        enqueued=activity is not None,
+        object_id=activity.source_id if activity is not None else "",
+    )
 
 
 @router.post("/{track_id}/hashtags", response_model=TrackResponse)

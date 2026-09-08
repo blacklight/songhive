@@ -19,6 +19,9 @@ export const useInstanceStore = defineStore("instance", () => {
   const invitesEnabled = computed(
     () => instance.value?.invites_enabled ?? false,
   );
+  const federationEnabled = computed(
+    () => instance.value?.federation_enabled ?? false,
+  );
   const loading = computed(() => status.value === "loading");
   const name = computed(() => instance.value?.title || "Songhive");
 
@@ -47,6 +50,7 @@ export const useInstanceStore = defineStore("instance", () => {
     registrations,
     approvalRequired,
     invitesEnabled,
+    federationEnabled,
     loading,
     name,
     load,

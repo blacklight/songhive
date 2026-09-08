@@ -113,6 +113,13 @@ export interface TrackPublishRequest {
    * ``local`` record the activity without federating it.
    */
   visibility?: ActivityVisibility | null;
+  /**
+   * Federated object shape: ``note`` (the default) shares the track as a
+   * post whose text renders on every remote server; ``audio`` republishes
+   * the canonical ``Audio`` media object, which some servers (e.g. Mastodon)
+   * render without the post text.
+   */
+  object_type?: "note" | "audio" | null;
 }
 
 export interface TrackPublishResponse {

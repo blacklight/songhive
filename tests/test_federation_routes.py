@@ -379,6 +379,46 @@ async def test_get_object_returns_stored_activity_payload(fed_client, db_session
     assert data == payload
 
 
+async def test_get_object_serves_create_payload_object(fed_client, db_session, regular_user):
+    """A stored ``Create`` payload is dereferenced as its embedded object.
+
+    The activity's ``source_id`` identifies the shared/published object (not
+    the ``Create`` envelope), so the route must serve the object document —
+    e.g. the ``Note`` of a track share — for remote fetches to resolve it.
+    """
+    actor_url = "https://music.example.com/users/regular"
+    note = {
+        "id": f"{actor_url}/objects/share-1",
+        "type": "Note",
+        "name": "TestArtist - My Song",
+        "content": "<p>sharing</p>",
+        "url": "https://music.example.com/tracks/track-1",
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [f"{actor_url}/followers"],
+    }
+    payload = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": f"{actor_url}/activities/create-1",
+        "type": "Create",
+        "actor": actor_url,
+        "object": note,
+        "to": note["to"],
+        "cc": note["cc"],
+    }
+    db_session.add(_make_activity(regular_user, object_id="share-1", payload=payload))
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/objects/share-1", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+    assert data["@context"] == "https://www.w3.org/ns/activitystreams"
+    assert data["type"] == "Note"
+    assert data["id"] == f"{actor_url}/objects/share-1"
+    # The envelope is not re-served as the object document.
+    assert "object" not in data
+
+
 async def test_get_object_synthesizes_note_for_content_activity(fed_client, db_session, regular_user):
     """A payload-less local activity is served as a Note object."""
     actor_url = "https://music.example.com/users/regular"

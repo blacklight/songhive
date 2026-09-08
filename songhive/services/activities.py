@@ -695,9 +695,11 @@ async def update_activity(
             obj["content"] = processed.html
         else:
             obj.pop("content", None)
-        from ..federation.serializers import mirror_content_to_summary
 
-        mirror_content_to_summary(obj)
+        from ..federation.serializers import normalize_post_content
+
+        normalize_post_content(obj)
+        activity.content = obj.get("content")
         if processed.tags:
             tags = obj.setdefault("tag", [])
             seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
@@ -1093,17 +1095,31 @@ async def record_track_publication(
     config: SonghiveConfig,
     status: Optional[str] = None,
     visibility: "Visibility | str" = Visibility.PUBLIC,
+    object_type: str = "audio",
 ) -> Optional[Activity]:
-    """Record and fan out a ``create`` activity for a fediverse track share.
+    """
+    Record and fan out a ``create`` activity for a fediverse track share.
 
-    Builds the ``Create(Audio)`` payload for the track's current
-    ``federation_object_id`` (the caller must mint it first, and commit the
-    session so remote fetches of ``{actor_url}/objects/{id}`` can resolve),
-    stores it as a local ``create`` activity attached to the track — making
-    the publication visible in the entity's activity feed — and delivers it
-    through :func:`fan_out_activity`, which records one ``ActivityTarget``
-    per inbox so the publication can later be retracted with a
-    ``Delete(Tombstone)``.
+    ``object_type`` selects the federated object shape:
+
+    - ``"audio"`` publishes the track as an ``Audio`` object built from the
+      track's current ``federation_object_id`` (the caller must mint it
+      first, and commit the session so remote fetches of
+      ``{actor_url}/objects/{id}`` can resolve). ``Audio`` is the canonical
+      track publication, but it is a "converted" type on Mastodon — the
+      remote status shows only the track name and link, not ``content``.
+    - ``"note"`` publishes the track as a ``Note`` whose ``content`` is the
+      post body (which Mastodon does render) and whose ``attachment``
+      embeds the stream as an ``Audio``-typed media object. A fresh object
+      id is minted per share — the share is a distinct object, not the
+      track's canonical ``Audio`` — and the attachment's ``id`` points at
+      the published ``Audio`` object when the track has one.
+
+    The payload is stored as a local ``create`` activity attached to the
+    track — making the publication visible in the entity's activity feed —
+    and delivered through :func:`fan_out_activity`, which records one
+    ``ActivityTarget`` per inbox so the publication can later be retracted
+    with a ``Delete(Tombstone)``.
 
     ``status`` is an optional one-off post text used as the object's
     ``content`` instead of the track's stored ``description``; it is never
@@ -1123,20 +1139,23 @@ async def record_track_publication(
 
     Returns ``None`` — recording nothing — when federation is disabled, the
     track is not public, the artist is missing, the owner has no actor
-    credentials, or no ``federation_object_id`` is set. Raises
-    ``HTTPException`` 422 for an invalid ``visibility`` value. Flushes
-    without committing; the caller owns the transaction.
+    credentials, or (for ``"audio"``) no ``federation_object_id`` is set.
+    Raises ``HTTPException`` 422 for an invalid ``visibility`` or
+    ``object_type`` value. Flushes without committing; the caller owns the
+    transaction.
     """
-    from ..federation.activities import create_audio_activity
-    from ..federation.serializers import mirror_content_to_summary
+    from ..federation.activities import create_audio_activity, create_note_activity
+    from ..federation.serializers import normalize_post_content
 
+    if object_type not in ("audio", "note"):
+        raise HTTPException(422, detail=f'Invalid object_type: {object_type}. Valid types: "audio", "note"')
     if not config.federation.enabled or not config.federation.instance_domain:
         return None
     if not track or track.visibility != Visibility.PUBLIC.value:
         return None
     if not artist or not owner or not owner.actor_url or not owner.private_key_pem:
         return None
-    if not track.federation_object_id:
+    if object_type == "audio" and not track.federation_object_id:
         return None
 
     try:
@@ -1148,17 +1167,32 @@ async def record_track_publication(
     processed = await process_mentions(session, status, config) if status else None
     mention_actor_urls = [m.actor_url for m in processed.mentions if m.actor_url] if processed else []
 
-    object_id = f"{owner.actor_url}/objects/{track.federation_object_id}"
-    payload = create_audio_activity(
-        actor_url=owner.actor_url,
-        track=track,
-        artist=artist,
-        domain=config.federation.instance_domain,
-        description=status,
-        ap_object_id=object_id,
-        visibility=activity_visibility,
-        mention_actor_urls=mention_actor_urls,
+    if object_type == "audio":
+        object_uuid = str(track.federation_object_id)
+        audio_object_id = None
+    else:
+        object_uuid = str(uuid.uuid4())
+        audio_object_id = (
+            f"{owner.actor_url}/objects/{track.federation_object_id}" if track.federation_object_id else None
+        )
+    object_id = f"{owner.actor_url}/objects/{object_uuid}"
+    args = {
+        "actor_url": owner.actor_url,
+        "track": track,
+        "artist": artist,
+        "domain": config.federation.instance_domain,
+        "description": status,
+        "ap_object_id": object_id,
+        "visibility": activity_visibility,
+        "mention_actor_urls": mention_actor_urls,
+    }
+
+    payload = (
+        create_note_activity(**args, audio_object_id=audio_object_id)
+        if object_type == "note"
+        else create_audio_activity(**args)
     )
+
     if not payload:
         return None
 
@@ -1166,7 +1200,7 @@ async def record_track_publication(
     if processed is not None and isinstance(obj, dict):
         if processed.html:
             obj["content"] = processed.html
-            mirror_content_to_summary(obj)
+        normalize_post_content(obj)
         if processed.tags:
             tags = obj.setdefault("tag", [])
             seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
@@ -1179,7 +1213,7 @@ async def record_track_publication(
         source_type="local",
         source_actor=owner.actor_url,
         source_id=object_id,
-        local_object_id=str(track.federation_object_id),
+        local_object_id=object_uuid,
         owner_user_id=owner.id,
         visibility=activity_visibility.value,
         content=obj.get("content") if isinstance(obj, dict) else None,
@@ -1206,36 +1240,37 @@ async def record_track_publication(
 async def retract_track_publications(
     session: AsyncSession,
     track: Track,
-    *,
-    object_id: Optional[str] = None,
 ) -> int:
-    """Soft-delete a track's live publication activities.
+    """
+    Soft-delete a track's live publication activities, with tombstones.
 
     Used when the track leaves the fediverse (e.g. a public → non-public
     visibility transition) so stale ``create`` rows stop appearing in the
     feed and stop serving their stored payload from the object-dereference
-    route. ``object_id`` narrows the retraction to the rows published with a
-    specific ``federation_object_id``. No remote fan-out happens here — the
-    caller is responsible for the track-level ``Delete(Tombstone)``.
-    Returns the number of retracted rows. Flushes without committing; the
-    caller owns the transaction.
+    route. Every publication — the canonical ``Audio`` and any ``Note``
+    shares, which mint their own object ids — is retracted through
+    :func:`retract_activity` so a ``Delete(Tombstone)`` for its own
+    ``source_id`` is delivered to the inboxes that received it. Returns the
+    number of retracted rows. Flushes without committing; the caller owns
+    the transaction.
     """
-    stmt = select(Activity).where(
-        Activity.entity_type == "track",
-        Activity.entity_id == str(track.id),
-        Activity.activity_type == "create",
-        Activity.source_type == "local",
-        Activity.deleted_at.is_(None),
+    rows = (
+        (
+            await session.execute(
+                select(Activity).where(
+                    Activity.entity_type == "track",
+                    Activity.entity_id == str(track.id),
+                    Activity.activity_type == "create",
+                    Activity.source_type == "local",
+                    Activity.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    if object_id:
-        stmt = stmt.where(Activity.local_object_id == str(object_id))
-
-    rows = (await session.execute(stmt)).scalars().all()
-    now = datetime.now(timezone.utc)
     for row in rows:
-        row.deleted_at = now
-    if rows:
-        await session.flush()
+        await retract_activity(session, row)
     return len(rows)
 
 
@@ -1246,11 +1281,12 @@ async def sync_track_publications(
     config: SonghiveConfig,
 ) -> int:
     """
-    Re-sync the stored ``Create(Audio)`` objects after a track edit.
+    Re-sync the stored ``Create`` objects after a track edit.
 
     Finds the track's live local ``create`` activities and rebuilds each
-    payload's embedded ``Audio`` object from the track's current metadata —
-    title, artist, description, genres, duration, URLs — so remote
+    payload's embedded ``Audio`` or ``Note`` object — dispatched on the
+    stored object's ``type`` — from the track's current metadata
+    (title, artist, description, genres, duration, URLs) so remote
     instances see the edits. The object id is kept stable: the fanned-out
     ``Update`` replaces the remote copy rather than re-creating it. When a
     publication was recorded with a one-off ``status`` (stored as
@@ -1273,7 +1309,11 @@ async def sync_track_publications(
     committing; the caller owns the transaction.
     """
     from ..federation.activities import activity_audience
-    from ..federation.serializers import set_audio_description, track_to_audio_object
+    from ..federation.serializers import (
+        set_post_content,
+        track_to_audio_object,
+        track_to_note_object,
+    )
 
     if not config.federation.enabled or not config.federation.instance_domain:
         return 0
@@ -1313,20 +1353,46 @@ async def sync_track_publications(
         if not isinstance(object_doc, dict):
             continue
 
-        rebuilt = track_to_audio_object(
-            track,
-            artist,
-            domain,
-            actor_url=activity.source_actor,
-            ap_object_id=object_doc.get("id") or activity.source_id,
-        )
+        if object_doc.get("type") == "Note":
+            # ``Note`` shares keep their own object id and stamp the
+            # attachment with the track's current ``Audio`` object id; the
+            # stored ``published`` is preserved so the remote post keeps its
+            # original date.
+            published = None
+            stored_published = object_doc.get("published")
+            if isinstance(stored_published, str):
+                try:
+                    published = datetime.fromisoformat(stored_published)
+                except ValueError:
+                    published = None
+            rebuilt = track_to_note_object(
+                track,
+                artist,
+                domain,
+                actor_url=activity.source_actor,
+                ap_object_id=object_doc.get("id") or activity.source_id,
+                audio_object_id=(
+                    f"{activity.source_actor}/objects/{track.federation_object_id}"
+                    if track.federation_object_id
+                    else None
+                ),
+                published=published,
+            )
+        else:
+            rebuilt = track_to_audio_object(
+                track,
+                artist,
+                domain,
+                actor_url=activity.source_actor,
+                ap_object_id=object_doc.get("id") or activity.source_id,
+            )
         if rebuilt is None:
             continue
         # A publication recorded with a one-off status keeps that text as
         # the post body; the track description only fills the content when
         # no status was given.
         if activity.content_source:
-            set_audio_description(rebuilt, activity.content_source, domain)
+            set_post_content(rebuilt, activity.content_source, domain)
         # Re-apply the activity's current audience (visibility may have
         # changed since publication) and re-attach its Mention tags.
         mention_rows = await session.execute(

@@ -15,7 +15,11 @@ from sqlalchemy import select
 
 from songhive.config.schema import SonghiveConfig
 from songhive.federation._common import get_hashtag_url
-from songhive.federation.activities import create_audio_activity, create_update_actor_activity
+from songhive.federation.activities import (
+    create_audio_activity,
+    create_note_activity,
+    create_update_actor_activity,
+)
 from songhive.federation.actors import (
     get_actor_url,
     get_federation_storage,
@@ -23,7 +27,7 @@ from songhive.federation.actors import (
     sync_user_actor,
     user_to_actor_document,
 )
-from songhive.federation.serializers import track_to_audio_object
+from songhive.federation.serializers import track_to_audio_object, track_to_note_object
 from songhive.models import Visibility
 from songhive.models.activity import ActivityMention, ActivityTarget
 from songhive.models.album import Album  # noqa: F401
@@ -85,12 +89,20 @@ def test_create_audio_activity():
     )
     assert activity is not None
     assert activity["type"] == "Create"
+    # The Create envelope is stamped with a unique id and a publication
+    # timestamp so remote servers can deduplicate and date it.
+    assert activity["id"].startswith("https://music.example.com/users/alice/activities/")
+    assert activity["published"]
     assert activity["object"]["type"] == "Audio"
-    # ``name`` carries an "{artist} - {title}" anchor to the track page so
-    # Mastodon-family servers render the post header as a link.
-    assert activity["object"]["name"] == '<a href="https://music.example.com/tracks/track-123">TestArtist - My Song</a>'
-    assert activity["object"]["content"] == "A great track"
-    assert activity["object"]["summary"] == "A great track"
+    # ``name`` is plain text; the "{artist} - {title}" link to the track page
+    # is appended to ``content`` instead so Akkoma does not produce nested
+    # anchors or a raw-HTML content warning.
+    assert activity["object"]["name"] == "TestArtist - My Song"
+    assert activity["object"]["content"] == (
+        'A great track<p><a href="https://music.example.com/tracks/track-123">TestArtist - My Song</a></p>'
+    )
+    assert "summary" not in activity["object"]
+    assert activity["object"]["published"]
     assert "PT3M15S" in activity["object"]["duration"]
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
@@ -158,7 +170,8 @@ def test_track_to_audio_object():
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
     assert obj["type"] == "Audio"
-    assert obj["name"] == '<a href="https://music.example.com/tracks/track-1">TestArtist - TestTrack</a>'
+    assert obj["name"] == "TestArtist - TestTrack"
+    assert obj["published"]
     assert obj["duration"] == "PT2M"
     # ``mimeType`` mirrors ``mediaType`` so Mastodon's ``url_to_href`` selects
     # the ``text/html`` track page for display instead of the audio download.
@@ -268,9 +281,12 @@ def test_track_to_audio_object_renders_description():
 
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
+    # The rendered description is followed by the "{artist} - {title}" link
+    # to the track page.
     assert obj["content"] == (
         'My new <a href="https://music.example.com/hashtags/lofi" rel="tag">#LoFi</a> '
         'song: <a href="https://band.example.com/song">band.example.com/song</a>'
+        '<p><a href="https://music.example.com/tracks/track-1">TestArtist - TestTrack</a></p>'
     )
     # Genre hashtag and description hashtag are merged, deduplicated by name.
     assert obj["tag"] == [
@@ -314,7 +330,7 @@ def test_track_to_audio_object_escapes_description():
 
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
-    assert obj["content"] == "&lt;script&gt;alert(1)&lt;/script&gt;"
+    assert obj["content"].startswith("&lt;script&gt;alert(1)&lt;/script&gt;")
 
 
 def test_track_to_audio_object_media_attachment():
@@ -365,14 +381,15 @@ def test_create_audio_activity_renders_track_description():
     assert activity["object"]["content"] == (
         'Fresh <a href="https://music.example.com/hashtags/beats" rel="tag">#beats</a> '
         'at <a href="https://band.example.com">band.example.com</a>'
+        '<p><a href="https://music.example.com/tracks/track-123">TestArtist - My Song</a></p>'
     )
-    # Mirrored to ``summary`` so Mastodon-style "converted" Audio objects
-    # render the description instead of dropping ``content``.
-    assert activity["object"]["summary"] == activity["object"]["content"]
+    # ``summary`` is never emitted: on Akkoma (and Mastodon ``Note``s) it is
+    # rendered as a content warning, not as post body.
+    assert "summary" not in activity["object"]
 
 
-def test_track_to_audio_object_without_description_has_no_content_or_summary():
-    """Audio objects without a description carry neither content nor summary."""
+def test_track_to_audio_object_without_description_has_link_content_and_no_summary():
+    """Audio objects without a description carry only the track link as content."""
     artist = Artist(name="TestArtist")
     artist.id = "artist-1"
     track = Track(
@@ -385,7 +402,114 @@ def test_track_to_audio_object_without_description_has_no_content_or_summary():
 
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
-    assert "content" not in obj
+    assert obj["content"] == ('<p><a href="https://music.example.com/tracks/track-1">TestArtist - TestTrack</a></p>')
+    assert "summary" not in obj
+
+
+def test_track_to_note_object():
+    """A public Track serializes to a Note carrying the audio attachment."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        duration=120.0,
+        genre="Rock",
+        audio_mime_type="audio/flac",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    obj = track_to_note_object(
+        track,
+        artist,
+        "music.example.com",
+        actor_url="https://music.example.com/users/alice",
+        ap_object_id="https://music.example.com/users/alice/objects/note-1",
+        audio_object_id="https://music.example.com/users/alice/objects/obj-1",
+    )
+    assert obj is not None
+    assert obj["type"] == "Note"
+    assert obj["id"] == "https://music.example.com/users/alice/objects/note-1"
+    assert obj["name"] == "TestArtist - TestTrack"
+    assert obj["published"]
+    # The track page is the object's url; the content ends with the link to
+    # it so the post body carries a usable link on Mastodon.
+    assert obj["url"] == "https://music.example.com/tracks/track-1"
+    assert obj["content"] == ('<p><a href="https://music.example.com/tracks/track-1">TestArtist - TestTrack</a></p>')
+    assert "summary" not in obj
+    assert obj["attributedTo"] == [
+        "https://music.example.com/users/alice",
+        "https://music.example.com/artists/artist-1",
+    ]
+    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"}]
+    # The stream rides as an Audio-typed attachment linked to the canonical
+    # Audio object.
+    assert obj["attachment"] == [
+        {
+            "type": "Audio",
+            "id": "https://music.example.com/users/alice/objects/obj-1",
+            "mediaType": "audio/flac",
+            "url": "https://music.example.com/api/v1/files/file-1/download",
+            "name": "TestTrack",
+            "duration": "PT2M",
+        }
+    ]
+
+
+def test_track_to_note_object_rejects_non_public_track():
+    """Non-public tracks serialize to None."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        visibility=Visibility.PRIVATE.value,
+    )
+    track.id = "track-1"
+
+    assert track_to_note_object(track, artist, "music.example.com") is None
+
+
+def test_create_note_activity():
+    """Create(Note) wraps the Note object with the selected audience."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="My Song",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        description="Fresh #beats at https://band.example.com",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-123"
+
+    activity = create_note_activity(
+        actor_url="https://music.example.com/users/alice",
+        track=track,
+        artist=artist,
+        domain="music.example.com",
+        description="Sharing this track",
+        ap_object_id="https://music.example.com/users/alice/objects/share-1",
+    )
+    assert activity is not None
+    assert activity["type"] == "Create"
+    assert activity["actor"] == "https://music.example.com/users/alice"
+    assert activity["id"].startswith("https://music.example.com/users/alice/activities/")
+    assert activity["published"]
+    assert activity["to"] == ["https://www.w3.org/ns/activitystreams#Public"]
+    assert activity["cc"] == ["https://music.example.com/users/alice/followers"]
+
+    obj = activity["object"]
+    assert obj["type"] == "Note"
+    assert obj["id"] == "https://music.example.com/users/alice/objects/share-1"
+    assert obj["to"] == activity["to"]
+    assert obj["cc"] == activity["cc"]
+    assert obj["content"].startswith("Sharing this track")
+    assert obj["content"].endswith(
+        '<p><a href="https://music.example.com/tracks/track-123">TestArtist - My Song</a></p>'
+    )
     assert "summary" not in obj
 
 
@@ -780,7 +904,12 @@ async def test_record_track_publication_uses_status_as_content(db_session, monke
     assert payload["type"] == "Create"
     assert payload["object"]["id"] == f"{user.actor_url}/objects/obj-1"
     assert payload["object"]["content"].startswith("Fresh post about")
-    assert payload["object"]["summary"] == payload["object"]["content"]
+    # No ``summary`` mirror — a non-empty ``summary`` becomes a content
+    # warning on Akkoma/Mastodon — and the content ends with the track link.
+    assert "summary" not in payload["object"]
+    assert payload["object"]["content"].endswith(
+        '<p><a href="https://music.example.com/tracks/track-1">TestArtist - My Song</a></p>'
+    )
     assert "stored description" not in payload["object"]["content"]
     assert {"type": "Hashtag", "name": "#beats", "href": "https://music.example.com/hashtags/beats"} in payload[
         "object"
@@ -833,7 +962,9 @@ async def test_record_track_publication_without_status_uses_track_description(db
     )
 
     assert activity is not None
-    assert activity.payload["object"]["content"] == "stored description"
+    assert activity.payload["object"]["content"] == (
+        'stored description<p><a href="https://music.example.com/tracks/track-1">TestArtist - My Song</a></p>'
+    )
     deliver_mock.delay.assert_called_once()
 
 
@@ -1024,6 +1155,132 @@ async def test_record_track_publication_invalid_visibility(db_session):
             owner=user,
             config=_fed_config(),
             visibility="bogus",
+        )
+    assert excinfo.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_note_share(db_session, monkeypatch):
+    """object_type='note' stores a Create(Note) share with its own object id."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+
+    inboxes = ["https://a.example/inbox"]
+    monkeypatch.setattr(
+        "songhive.services.federation.get_follower_inboxes",
+        lambda *a, **k: inboxes,
+    )
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+        status="Fresh post about #beats",
+        object_type="note",
+    )
+
+    assert activity is not None
+    assert activity.activity_type == "create"
+    # A share mints its own object id — the track's canonical Audio
+    # publication id stays untouched.
+    assert activity.local_object_id != "obj-1"
+    assert activity.source_id == f"{user.actor_url}/objects/{activity.local_object_id}"
+    assert track.federation_object_id == "obj-1"
+    assert activity.content_source == "Fresh post about #beats"
+
+    payload = activity.payload
+    assert payload["type"] == "Create"
+    obj = payload["object"]
+    assert obj["type"] == "Note"
+    assert obj["id"] == activity.source_id
+    assert obj["content"].startswith("Fresh post about")
+    assert obj["content"].endswith('<p><a href="https://music.example.com/tracks/track-1">TestArtist - My Song</a></p>')
+    # The attachment links back to the published Audio object.
+    assert obj["attachment"][0]["type"] == "Audio"
+    assert obj["attachment"][0]["id"] == f"{user.actor_url}/objects/obj-1"
+
+    deliver_mock.delay.assert_called_once()
+    assert deliver_mock.delay.call_args[0][0] is payload
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_note_without_federation_object_id(db_session, monkeypatch):
+    """A Note share works on a track that was never published as Audio."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+    track.federation_object_id = None
+
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+        object_type="note",
+    )
+
+    assert activity is not None
+    assert activity.payload["object"]["type"] == "Note"
+    assert track.federation_object_id is None
+    # No Audio object to link: the attachment keeps the bare stream URL.
+    assert "id" not in activity.payload["object"]["attachment"][0]
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_audio_requires_federation_object_id(db_session, monkeypatch):
+    """object_type='audio' still requires a minted federation_object_id."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+    track.federation_object_id = None
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=user,
+        config=_fed_config(),
+        object_type="audio",
+    )
+    assert activity is None
+
+
+@pytest.mark.asyncio
+async def test_record_track_publication_invalid_object_type(db_session):
+    """An unknown object_type is rejected with a 422."""
+    user = _make_federated_user()
+    db_session.add(user)
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+
+    with pytest.raises(HTTPException) as excinfo:
+        await record_track_publication(
+            db_session,
+            track=track,
+            artist=artist,
+            owner=user,
+            config=_fed_config(),
+            object_type="video",
         )
     assert excinfo.value.status_code == 422
 

@@ -11,6 +11,7 @@ import {
   type BulkFileUploadResult,
 } from "@/api/files";
 import { listLibraries, type LibraryResponse } from "@/api/libraries";
+import { useInstanceStore } from "@/stores/instance";
 import { useToastStore } from "@/stores/toast";
 import FilesView from "./FilesView.vue";
 
@@ -195,6 +196,7 @@ describe("FilesView", () => {
       undefined,
       expect.any(AbortSignal),
       undefined,
+      false,
     );
     expect(router.push).toHaveBeenCalledWith({
       name: "file",
@@ -232,6 +234,52 @@ describe("FilesView", () => {
       undefined,
       expect.any(AbortSignal),
       "My new #demo track",
+      false,
+    );
+  });
+
+  it("passes the publish flag when the fediverse checkbox is checked", async () => {
+    vi.mocked(uploadFile).mockResolvedValue(createStoredFile("f1"));
+    const instanceStore = useInstanceStore();
+    instanceStore.instance = { federation_enabled: true } as never;
+
+    await mountView();
+
+    const publishCheckbox = wrapper
+      .findAll('input[type="checkbox"]')
+      .find((c) =>
+        c.element.parentElement?.textContent?.includes(
+          i18n.global.t("pages.files.publishFediverse"),
+        ),
+      )?.element as HTMLInputElement | undefined;
+    expect(publishCheckbox).toBeDefined();
+    publishCheckbox!.checked = true;
+    publishCheckbox!.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const fileInput = wrapper.find('input[type="file"]')
+      .element as HTMLInputElement;
+    const file = new File(["contents"], "song.mp3", { type: "audio/mpeg" });
+    setFiles(fileInput, [file]);
+    fileInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(uploadFile).toHaveBeenCalledWith(
+      file,
+      "public",
+      expect.any(Function),
+      undefined,
+      expect.any(AbortSignal),
+      undefined,
+      true,
+    );
+  });
+
+  it("hides the publish checkbox when federation is disabled", async () => {
+    await mountView();
+
+    expect(wrapper.text()).not.toContain(
+      i18n.global.t("pages.files.publishFediverse"),
     );
   });
 
@@ -267,6 +315,7 @@ describe("FilesView", () => {
       "lib2",
       expect.any(AbortSignal),
       undefined,
+      false,
     );
     expect(router.push).toHaveBeenCalledWith({
       name: "track",
@@ -425,6 +474,7 @@ describe("FilesView", () => {
       undefined,
       expect.any(AbortSignal),
       undefined,
+      false,
     );
     expect(router.push).not.toHaveBeenCalled();
     expect(toast.toasts).toHaveLength(1);

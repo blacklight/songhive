@@ -110,7 +110,12 @@ export function listLibraryTracks(
 export function uploadTrack(
   id: string,
   file: File,
-  params?: { force?: boolean; visibility?: Visibility; enrich?: boolean },
+  params?: {
+    force?: boolean;
+    visibility?: Visibility;
+    enrich?: boolean;
+    publish?: boolean;
+  },
 ): Promise<unknown> {
   const body = new FormData();
   body.append("file", file);
@@ -124,7 +129,12 @@ export function uploadTrack(
 export function bulkUploadTracks(
   id: string,
   files: File[],
-  params?: { force?: boolean; visibility?: Visibility; enrich?: boolean },
+  params?: {
+    force?: boolean;
+    visibility?: Visibility;
+    enrich?: boolean;
+    publish?: boolean;
+  },
 ): Promise<unknown> {
   const body = new FormData();
   files.forEach((file) => body.append("files", file));

@@ -36,7 +36,7 @@ from ...models.stored_file import StoredFile
 from ...models.track import Track
 from ...models.user import User
 from ...services import acl, activities, audit, deletion, music
-from ...services.federation import unpublish_track_activity
+from ...services.federation import ensure_user_actor, unpublish_track_activity
 from ...services.import_ import (
     DuplicateTrackError,
     ExternalDuplicateError,
@@ -190,6 +190,7 @@ async def _process_single_upload(
     external_duplicate_action: Optional[Literal["keep_local", "discard_upload"]] = None,
     redis: Optional[Redis] = None,
     description: Optional[str] = None,
+    publish: bool = False,
 ) -> _UploadOutcome:
     """Store or import a single uploaded file and return the outcome."""
     content_type = file.content_type or "application/octet-stream"
@@ -215,6 +216,7 @@ async def _process_single_upload(
                 external_duplicate_action=external_duplicate_action,
                 redis=redis,
                 description=description,
+                publish=publish,
             )
             stored_file = result.stored_file
             is_duplicate = result.was_duplicate
@@ -284,6 +286,7 @@ async def _publish_new_track(
     """
     if track is None or track.visibility != Visibility.PUBLIC.value:
         return
+    ensure_user_actor(owner, config)
     if not track.federation_object_id:
         track.federation_object_id = str(uuid.uuid4())
     artist = await db.get(Artist, track.artist_id) if track.artist_id else None
@@ -308,6 +311,7 @@ async def upload_file(
     visibility: Visibility = Query(Visibility.PRIVATE),
     library_id: Optional[str] = Query(None),
     external_duplicate_action: Optional[Literal["keep_local", "discard_upload"]] = Query(None),
+    publish: bool = Query(False),
     description: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     storage: StorageService = Depends(get_storage_service),
@@ -325,8 +329,11 @@ async def upload_file(
     Audio files are imported directly through ``import_audio_file`` so the
     audio-only content hash is used for both the stored file and the track.
     This avoids creating a second full-file ``StoredFile`` row for the same
-    audio upload. ``description`` is stored on the created track, and a newly
-    created public track is published to the owner's ActivityPub followers.
+    audio upload. ``description`` is stored on the created track. When
+    ``publish`` is set and the instance federates, a newly created public
+    track is published to the owner's ActivityPub followers as a
+    ``Create(Audio)`` activity, if federation is enabled; otherwise the track
+    stays local and has no associated activity object.
     """
     library: Optional[Library] = None
     if library_id is not None:
@@ -342,6 +349,7 @@ async def upload_file(
         external_duplicate_action=external_duplicate_action,
         redis=redis,
         description=description,
+        publish=publish,
     )
     if outcome.error == "File too large":
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
@@ -377,7 +385,8 @@ async def upload_file(
 
     assert outcome.stored_file is not None
     db.add(outcome.stored_file)
-    await _publish_new_track(db, outcome.track, current_user, config)
+    if publish:
+        await _publish_new_track(db, outcome.track, current_user, config)
     await db.commit()
 
     logger.info("Uploaded file %s (%s bytes)", outcome.stored_file.id, outcome.stored_file.size)
@@ -391,11 +400,11 @@ async def upload_file(
 )
 async def bulk_upload_files(
     request: Request,
-    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     visibility: Visibility = Query(Visibility.PRIVATE),
     library_id: Optional[str] = Query(None),
     external_duplicate_action: Optional[Literal["keep_local", "discard_upload"]] = Query(None),
+    publish: bool = Query(False),
     description: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     storage: StorageService = Depends(get_storage_service),
@@ -406,7 +415,9 @@ async def bulk_upload_files(
 
     Audio files are imported as tracks; other files are stored as-is. The whole
     request is subject to the same per-IP rate limit as ``/files/upload``, and to
-    per-request limits on the number of files and total request size.
+    per-request limits on the number of files and total request size. When
+    ``publish`` is set, each newly created public track is published to the
+    owner's ActivityPub followers, if federation is enabled on the instance.
     """
     config = storage.config
 
@@ -448,6 +459,7 @@ async def bulk_upload_files(
                 external_duplicate_action=external_duplicate_action,
                 redis=redis,
                 description=description,
+                publish=publish,
             )
             if outcome.track is not None:
                 created_tracks.append(outcome.track)
@@ -498,8 +510,9 @@ async def bulk_upload_files(
 
         results.append(result)
 
-    for track in created_tracks:
-        await _publish_new_track(db, track, current_user, request.app.state.config)
+    if publish:
+        for track in created_tracks:
+            await _publish_new_track(db, track, current_user, request.app.state.config)
 
     await db.commit()
     return results
@@ -512,7 +525,6 @@ async def bulk_upload_files(
 )
 async def resolve_upload_duplicate(
     response: Response,
-    background_tasks: BackgroundTasks,
     body: ExternalDuplicateResolutionRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -543,8 +555,10 @@ async def resolve_upload_duplicate(
         ) from None
 
     # ``stored_file`` is only set when a new track was actually imported
-    # (``keep_local``); the discard path returns a pre-existing track.
-    new_track = result.track if result.stored_file is not None else None
+    # (``keep_local``); the discard path returns a pre-existing track. The
+    # ``publish`` choice made when the upload hit the duplicate warning was
+    # stored on the resolution token.
+    new_track = result.track if result.stored_file is not None and result.publish else None
     await _publish_new_track(db, new_track, current_user, config)
 
     await db.commit()

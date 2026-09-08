@@ -30,6 +30,7 @@ import { useEntityHashtags } from "@/composables/useEntityHashtags";
 import HashtagInput from "@/components/hashtags/HashtagInput.vue";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useConfirmStore } from "@/stores/confirm";
+import { useInstanceStore } from "@/stores/instance";
 import { useToastStore } from "@/stores/toast";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -46,6 +47,7 @@ const route = useRoute();
 const router = useRouter();
 const confirm = useConfirmStore();
 const toast = useToastStore();
+const instanceStore = useInstanceStore();
 
 const libraryId = computed(() => String(route.params.id));
 const library = ref<LibraryResponse | null>(null);
@@ -61,6 +63,7 @@ const isDeleting = ref(false);
 const uploadVisibility = ref<Visibility>("private");
 const uploadForce = ref(false);
 const uploadEnrich = ref(true);
+const uploadPublish = ref(false);
 const isUploading = ref(false);
 const isBulkUploading = ref(false);
 const uploadError = ref<string | null>(null);
@@ -245,6 +248,7 @@ async function onSingleFileChange(event: Event) {
       visibility: uploadVisibility.value,
       force: uploadForce.value,
       enrich: uploadEnrich.value,
+      publish: uploadPublish.value,
     });
     toast.push({
       type: "success",
@@ -278,6 +282,7 @@ async function onBulkFileChange(event: Event) {
       visibility: uploadVisibility.value,
       force: uploadForce.value,
       enrich: uploadEnrich.value,
+      publish: uploadPublish.value,
     });
     toast.push({
       type: "success",
@@ -537,6 +542,16 @@ watch(
           <label class="library-edit-view__checkbox">
             <input v-model="uploadEnrich" type="checkbox" />
             {{ t("browse.libraryManagement.enrich") }}
+          </label>
+          <label
+            v-if="
+              instanceStore.federationEnabled && uploadVisibility === 'public'
+            "
+            class="library-edit-view__checkbox"
+            :title="t('browse.libraryManagement.publishHint')"
+          >
+            <input v-model="uploadPublish" type="checkbox" />
+            {{ t("browse.libraryManagement.publish") }}
           </label>
         </div>
 

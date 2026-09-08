@@ -347,12 +347,12 @@ def test_upload_track_other_user_forbidden(client, sample_libraries, other_user,
 async def test_upload_track_public_triggers_federation_publish(
     client, sample_libraries, regular_user, auth_headers, monkeypatch, db_session
 ):
-    """Uploading a public track sets a federation object id."""
+    """Uploading a public track with ``publish=true`` sets a federation object id."""
     monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
     library = next(lib for lib in sample_libraries if lib["visibility"] == "public")
 
     response = client.post(
-        f"/api/v1/libraries/{library['id']}/tracks?visibility=public",
+        f"/api/v1/libraries/{library['id']}/tracks?visibility=public&publish=true",
         files={"file": ("song.mp3", io.BytesIO(b"public audio"), "audio/mpeg")},
         headers=auth_headers(regular_user),
     )
@@ -361,6 +361,25 @@ async def test_upload_track_public_triggers_federation_publish(
 
     track = await db_session.get(Track, track_id)
     assert track.federation_object_id is not None
+
+
+async def test_upload_track_public_without_publish_has_no_federation_id(
+    client, sample_libraries, regular_user, auth_headers, monkeypatch, db_session
+):
+    """Uploading a public track without ``publish`` leaves it unfederated."""
+    monkeypatch.setattr("songhive.services.import_.extract_metadata", lambda _: _fake_metadata())
+    library = next(lib for lib in sample_libraries if lib["visibility"] == "public")
+
+    response = client.post(
+        f"/api/v1/libraries/{library['id']}/tracks?visibility=public",
+        files={"file": ("song.mp3", io.BytesIO(b"local audio"), "audio/mpeg")},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 201
+    track_id = response.json()["track"]["id"]
+
+    track = await db_session.get(Track, track_id)
+    assert track.federation_object_id is None
 
 
 def test_upload_track_duplicate_returns_409(client, sample_libraries, regular_user, auth_headers, monkeypatch):

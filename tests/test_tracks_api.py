@@ -311,13 +311,19 @@ def _patch_publish(monkeypatch):
 
     ``mock.published_object_ids`` snapshots ``track.federation_object_id`` at
     call time so tests can compare object ids across re-publications (the
-    track object is mutated between calls).
+    track object is mutated between calls). The mock returns a stand-in
+    activity whose ``source_id`` mirrors the real function's
+    ``{actor}/objects/{id}`` shape so the endpoint's response has an object
+    id to report.
     """
     published_object_ids = []
     mock = AsyncMock()
 
     async def _record(*args, **kwargs):
-        published_object_ids.append(kwargs["track"].federation_object_id)
+        track = kwargs["track"]
+        published_object_ids.append(track.federation_object_id)
+        owner = kwargs["owner"]
+        return MagicMock(source_id=f"{owner.actor_url}/objects/{track.federation_object_id}")
 
     mock.side_effect = _record
     mock.published_object_ids = published_object_ids
@@ -597,14 +603,14 @@ def _enable_federation(client):
 
 
 def test_publish_track_enqueues_activity_with_status(client, sample_tracks, regular_user, auth_headers, monkeypatch):
-    """POST /tracks/{id}/publish enqueues a Create(Audio) carrying the status text."""
+    """POST /tracks/{id}/publish with ``audio`` mints an object carrying the status text."""
     _enable_federation(client)
     track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
     mock = _patch_publish(monkeypatch)
 
     response = client.post(
         f"/api/v1/tracks/{track.id}/publish",
-        json={"status": "Now playing #demo"},
+        json={"status": "Now playing #demo", "object_type": "audio"},
         headers=auth_headers(regular_user),
     )
     assert response.status_code == 200
@@ -697,23 +703,60 @@ def test_publish_track_invalid_visibility(client, sample_tracks, regular_user, a
     mock.assert_not_called()
 
 
+def test_publish_track_defaults_to_note_share(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """A manual share defaults to ``note`` and leaves federation_object_id alone."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    track.federation_object_id = "existing-obj"
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    mock.assert_called_once()
+    assert mock.call_args.kwargs["object_type"] == "note"
+    # ``note`` shares mint their own object id — the track's canonical
+    # ``federation_object_id`` is only re-minted for ``audio`` publications.
+    assert track.federation_object_id == "existing-obj"
+    assert mock.published_object_ids == ["existing-obj"]
+
+
 def test_publish_track_mints_fresh_object_id(client, sample_tracks, regular_user, auth_headers, monkeypatch):
-    """Every manual publication mints a new ActivityPub object id."""
+    """Every ``audio`` publication mints a new ActivityPub object id."""
     _enable_federation(client)
     track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
     mock = _patch_publish(monkeypatch)
     headers = auth_headers(regular_user)
 
-    first = client.post(f"/api/v1/tracks/{track.id}/publish", json={}, headers=headers)
-    second = client.post(f"/api/v1/tracks/{track.id}/publish", json={}, headers=headers)
+    first = client.post(f"/api/v1/tracks/{track.id}/publish", json={"object_type": "audio"}, headers=headers)
+    second = client.post(f"/api/v1/tracks/{track.id}/publish", json={"object_type": "audio"}, headers=headers)
     assert first.status_code == 200
     assert second.status_code == 200
 
     assert mock.call_count == 2
+    assert all(call.kwargs["object_type"] == "audio" for call in mock.call_args_list)
     first_id = mock.published_object_ids[0]
     second_id = mock.published_object_ids[1]
     assert first_id != second_id
     assert second.json()["object_id"].endswith(f"/objects/{second_id}")
+
+
+def test_publish_track_invalid_object_type(client, sample_tracks, regular_user, auth_headers, monkeypatch):
+    """An unknown object_type value is rejected."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={"object_type": "video"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 422
+    mock.assert_not_called()
 
 
 def test_publish_track_private_rejected(client, sample_tracks, regular_user, auth_headers, monkeypatch):

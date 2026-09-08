@@ -115,7 +115,9 @@ def test_create_audio_activity_includes_public_download_url():
     assert activity is not None
     assert activity["type"] == "Create"
     assert activity["object"]["type"] == "Audio"
-    assert activity["object"]["content"] == "A great track"
+    assert activity["object"]["content"] == (
+        'A great track<p><a href="https://music.example.com/tracks/track-1">TestArtist - TestTrack</a></p>'
+    )
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
         for link in activity["object"]["url"]

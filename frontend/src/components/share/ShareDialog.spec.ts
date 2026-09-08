@@ -6,6 +6,7 @@ import { i18n } from "@/i18n";
 import { formatDateTime } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
+import { useInstanceStore } from "@/stores/instance";
 import * as sharesApi from "@/api/shares";
 import * as tracksApi from "@/api/tracks";
 import ConfirmDialog from "@/components/feedback/ConfirmDialog.vue";
@@ -58,6 +59,11 @@ function setAuthenticated(userId = "user-1") {
   authStore.expiresAt = Date.now() + 10000;
   authStore.status = "authenticated";
   authStore.user = { id: userId, username: "alice" } as never;
+}
+
+function setFederated() {
+  const instanceStore = useInstanceStore();
+  instanceStore.instance = { federation_enabled: true } as never;
 }
 
 function mountOpen(props: Record<string, unknown> = {}) {
@@ -424,6 +430,7 @@ describe("ShareDialog", () => {
     });
 
     setAuthenticated("user-1");
+    setFederated();
     wrapper = mountOpen({
       itemType: "track",
       itemId: "track-1",
@@ -459,8 +466,58 @@ describe("ShareDialog", () => {
     expect(tracksApi.publishTrack).toHaveBeenCalledWith("track-1", {
       status: "Now playing #demo",
       visibility: "public",
+      object_type: "note",
     });
     expect(textarea.value).toBe("");
+  });
+
+  it("publishes a track as an Audio object when selected", async () => {
+    vi.mocked(tracksApi.publishTrack).mockResolvedValue({
+      track_id: "track-1",
+      enqueued: true,
+      object_id: "https://music.example.com/users/alice/objects/obj-1",
+    });
+
+    setAuthenticated("user-1");
+    setFederated();
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      title: "My Song",
+      ownerId: "user-1",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    await fediverseTab?.click();
+    await flushPromises();
+
+    // The first select is the post-type picker.
+    const typeSelect = document.body.querySelector(
+      "select",
+    ) as HTMLSelectElement;
+    expect(typeSelect).toBeDefined();
+    expect(typeSelect.value).toBe("note");
+    typeSelect.value = "audio";
+    typeSelect.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const publishButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("browse.share.fediversePublish"),
+    );
+    await publishButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.publishTrack).toHaveBeenCalledWith("track-1", {
+      status: null,
+      visibility: "public",
+      object_type: "audio",
+    });
   });
 
   it("publishes a track with the selected post visibility", async () => {
@@ -471,6 +528,7 @@ describe("ShareDialog", () => {
     });
 
     setAuthenticated("user-1");
+    setFederated();
     wrapper = mountOpen({
       itemType: "track",
       itemId: "track-1",
@@ -485,7 +543,10 @@ describe("ShareDialog", () => {
     await fediverseTab?.click();
     await flushPromises();
 
-    const select = document.body.querySelector("select") as HTMLSelectElement;
+    // The second select is the visibility picker.
+    const select = document.body.querySelectorAll(
+      "select",
+    )[1] as HTMLSelectElement;
     expect(select).toBeDefined();
     select.value = "followers";
     select.dispatchEvent(new Event("change"));
@@ -502,6 +563,7 @@ describe("ShareDialog", () => {
     expect(tracksApi.publishTrack).toHaveBeenCalledWith("track-1", {
       status: null,
       visibility: "followers",
+      object_type: "note",
     });
   });
 
@@ -513,6 +575,7 @@ describe("ShareDialog", () => {
     });
 
     setAuthenticated("user-1");
+    setFederated();
     wrapper = mountOpen({
       itemType: "track",
       itemId: "track-1",
@@ -538,6 +601,7 @@ describe("ShareDialog", () => {
     expect(tracksApi.publishTrack).toHaveBeenCalledWith("track-1", {
       status: null,
       visibility: "public",
+      object_type: "note",
     });
   });
 
@@ -547,6 +611,7 @@ describe("ShareDialog", () => {
     );
 
     setAuthenticated("user-1");
+    setFederated();
     wrapper = mountOpen({
       itemType: "track",
       itemId: "track-1",
@@ -574,7 +639,24 @@ describe("ShareDialog", () => {
 
   it("hides the fediverse tab for non-track items", async () => {
     setAuthenticated("user-1");
+    setFederated();
     wrapper = mountOpen({ ownerId: "user-1", visibility: "public" });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    expect(fediverseTab).toBeUndefined();
+  });
+
+  it("hides the fediverse tab when federation is disabled", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-1",
+      visibility: "public",
+    });
     await flushPromises();
 
     const fediverseTab = Array.from(
@@ -585,6 +667,7 @@ describe("ShareDialog", () => {
 
   it("hides the fediverse tab from non-owners", async () => {
     setAuthenticated("user-1");
+    setFederated();
     wrapper = mountOpen({
       itemType: "track",
       itemId: "track-1",
@@ -601,6 +684,7 @@ describe("ShareDialog", () => {
 
   it("shows a not-public hint instead of the publish form for private tracks", async () => {
     setAuthenticated("user-1");
+    setFederated();
     wrapper = mountOpen({
       itemType: "track",
       itemId: "track-1",

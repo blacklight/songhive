@@ -19,9 +19,11 @@ import {
   type LibraryResponse,
 } from "@/api/libraries";
 import { useEntityList } from "@/composables/useEntityList";
+import { useInstanceStore } from "@/stores/instance";
 import { useToastStore } from "@/stores/toast";
 import { formatBytes, toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
@@ -32,8 +34,10 @@ import ExternalDuplicateModal from "@/components/external-libraries/ExternalDupl
 const { t } = useI18n();
 const router = useRouter();
 const toast = useToastStore();
+const instanceStore = useInstanceStore();
 
 const visibility = ref<Visibility>("public");
+const publishToFediverse = ref(false);
 const description = ref("");
 const uploading = ref(false);
 const isBulkUploading = ref(false);
@@ -338,6 +342,7 @@ async function handleSingleFileUpload(
       libraryId,
       signal,
       description.value.trim() || undefined,
+      publishToFediverse.value,
     );
     results.push(result);
   } catch (err) {
@@ -364,6 +369,7 @@ async function handleMultipleFilesUpload(
       libraryId,
       signal,
       description.value.trim() || undefined,
+      publishToFediverse.value,
     );
     for (const [index, item] of bulkResults.entries()) {
       if (uploadCancelled.value) {
@@ -586,6 +592,14 @@ async function onFileChange(event: Event) {
         v-model="description"
         as="textarea"
         :label="t('browse.edit.description')"
+        :disabled="uploading"
+      />
+
+      <AppCheckbox
+        v-if="instanceStore.federationEnabled && visibility === 'public'"
+        v-model="publishToFediverse"
+        :label="t('pages.files.publishFediverse')"
+        :hint="t('pages.files.publishFediverseHint')"
         :disabled="uploading"
       />
 

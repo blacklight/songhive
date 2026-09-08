@@ -14,9 +14,44 @@ from ..models.activity import Activity
 from ..models.artist import Artist
 from ..models.track import Track
 from ._common import get_stream_url, get_track_url
-from .serializers import set_audio_description, track_to_audio_object
+from .serializers import set_post_content, track_to_audio_object, track_to_note_object
 
 AS_PUBLIC = "https://www.w3.org/ns/activitystreams#Public"
+AS_CONTEXT = "https://www.w3.org/ns/activitystreams"
+
+
+def _create_object_activity(
+    actor_url: str,
+    object_doc: dict,
+    visibility: "Visibility | str",
+    mention_actor_urls: Iterable[str],
+) -> dict:
+    """
+    Wrap ``object_doc`` in a ``Create`` activity envelope.
+
+    The ``to``/``cc`` addressing derived by :func:`activity_audience` is
+    applied to both the envelope and the embedded object (remote servers
+    read the object's audience to scope it), so a ``followers`` or
+    ``mentioned`` publication does not look public when dereferenced or
+    re-delivered.
+
+    The envelope carries a unique ``id`` and a ``published`` stamp: remote
+    servers deduplicate and date activities by them.
+    """
+    to, cc = activity_audience(visibility, actor_url, mention_actor_urls)
+    object_doc["to"] = to
+    object_doc["cc"] = cc
+
+    return {
+        "@context": AS_CONTEXT,
+        "id": f"{actor_url}/activities/{uuid.uuid4()}",
+        "type": "Create",
+        "actor": actor_url,
+        "published": datetime.now(timezone.utc).isoformat(),
+        "object": object_doc,
+        "to": to,
+        "cc": cc,
+    }
 
 
 def create_audio_activity(
@@ -40,11 +75,15 @@ def create_audio_activity(
     the track's ``description`` (escaped HTML with linkified URLs and
     hashtags); ``description`` overrides it when provided.
 
-    ``visibility`` selects the post's audience: the ``to``/``cc`` addressing
-    derived by :func:`activity_audience` is applied to both the ``Create``
-    envelope and the embedded ``Audio`` object (remote servers read the
-    object's audience to scope it), so a ``followers`` or ``mentioned``
-    publication does not look public when dereferenced or re-delivered.
+    ``visibility`` selects the post's audience; see
+    :func:`_create_object_activity` for how the ``to``/``cc`` addressing is
+    applied. The object itself carries ``published`` so remote renderers
+    (e.g. Akkoma) do not fall back to the Unix epoch for the post date.
+
+    Note that ``Audio`` is a "converted" object type on Mastodon: remote
+    statuses are rendered from ``name``/``url`` only and ``content`` is not
+    displayed. Use :func:`create_note_activity` for shares whose text should
+    render everywhere.
     """
     if track.visibility != Visibility.PUBLIC.value:
         return None
@@ -62,23 +101,62 @@ def create_audio_activity(
         return None
 
     if description:
-        set_audio_description(audio_object, description, domain)
+        set_post_content(audio_object, description, domain)
 
     if duration is not None:
         audio_object["duration"] = format_duration(duration)
 
-    to, cc = activity_audience(visibility, actor_url, mention_actor_urls)
-    audio_object["to"] = to
-    audio_object["cc"] = cc
+    return _create_object_activity(actor_url, audio_object, visibility, mention_actor_urls)
 
-    return {
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Create",
-        "actor": actor_url,
-        "object": audio_object,
-        "to": to,
-        "cc": cc,
-    }
+
+def create_note_activity(
+    actor_url: str,
+    track: Track,
+    artist: Artist,
+    domain: str,
+    *,
+    description: Optional[str] = None,
+    ap_object_id: Optional[str] = None,
+    audio_object_id: Optional[str] = None,
+    published: Optional[datetime] = None,
+    visibility: "Visibility | str" = Visibility.PUBLIC,
+    mention_actor_urls: Iterable[str] = (),
+) -> Optional[dict]:
+    """
+    Create a Create(Note) activity for sharing a track as a post.
+
+    The ``Note`` carries the post body in ``content`` — which Mastodon
+    renders, unlike ``Audio`` objects — and embeds the stream as an
+    ``Audio``-typed attachment so remote servers still surface an inline
+    player. Non-public tracks produce no activity. ``description`` is the
+    one-off post text; when omitted the track's stored ``description`` is
+    used. ``audio_object_id`` links the attachment to the published
+    ``Audio`` object when the track has one. ``published`` defaults to now
+    and should be the stored stamp when re-serializing an existing share.
+
+    ``visibility`` selects the post's audience; see
+    :func:`_create_object_activity` for how the ``to``/``cc`` addressing is
+    applied.
+    """
+    if track.visibility != Visibility.PUBLIC.value:
+        return None
+
+    note_object = track_to_note_object(
+        track,
+        artist,
+        domain,
+        actor_url=actor_url,
+        ap_object_id=ap_object_id,
+        audio_object_id=audio_object_id,
+        published=published,
+    )
+    if note_object is None:
+        return None
+
+    if description:
+        set_post_content(note_object, description, domain)
+
+    return _create_object_activity(actor_url, note_object, visibility, mention_actor_urls)
 
 
 def activity_audience(
@@ -236,18 +314,25 @@ def build_activity_object(activity: Activity) -> dict:
 
     Payload-bearing activities (e.g. a ``Like`` built by
     :func:`create_like_activity`) already carry their complete AP document in
-    ``activity.payload`` — it is returned as-is. Otherwise, a ``Note`` object
-    is synthesized from the activity's rendered content, the audience derived
-    from its visibility via :func:`activity_audience`, and its ``Mention``
-    tags, so the activity's ``source_id`` stays dereferenceable for remote
-    instances.
+    ``activity.payload``. For ``Create`` payloads the embedded object is
+    served instead of the envelope: the activity's ``source_id`` identifies
+    the object (e.g. ``{actor}/objects/{id}`` of a published ``Audio`` or
+    shared ``Note``), so dereferencing it must return the object document.
+    Other payloads are returned as-is. Payload-less activities get a ``Note``
+    object synthesized from the activity's rendered content, the audience
+    derived from its visibility via :func:`activity_audience`, and its
+    ``Mention`` tags, so the activity's ``source_id`` stays dereferenceable
+    for remote instances.
 
     ``activity.mentions`` and ``activity.in_reply_to_activity`` are read
     directly — both are ``selectin`` relationships and are expected to be
     loaded by the caller's query.
     """
     if isinstance(activity.payload, dict):
-        return activity.payload
+        payload = activity.payload
+        if payload.get("type") == "Create" and isinstance(payload.get("object"), dict):
+            return {"@context": payload.get("@context", AS_CONTEXT), **payload["object"]}
+        return payload
 
     mention_actor_urls: List[str] = [m.actor_url for m in activity.mentions if m.actor_url]  # type: ignore
     to, cc = activity_audience(activity.visibility, activity.source_actor, mention_actor_urls)

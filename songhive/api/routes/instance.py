@@ -81,6 +81,7 @@ class InstanceV1(BaseModel):
     email: str = ""
     version: str
     songhive_version: str
+    federation_enabled: bool = False
     urls: _Urls = Field(default_factory=_Urls)
     stats: _Stats
     thumbnail: Optional[str] = None
@@ -226,6 +227,7 @@ async def get_instance_v1(
         short_description=config.federation.instance_description,
         version=version,
         songhive_version=__version__,
+        federation_enabled=config.federation.enabled and bool(config.federation.instance_domain),
         stats=_Stats(
             user_count=user_count,
             status_count=0,

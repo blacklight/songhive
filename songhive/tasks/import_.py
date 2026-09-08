@@ -34,11 +34,16 @@ def process_upload(
     enrich: bool = True,
     source: str = "upload",
     content_type: Optional[str] = None,
+    publish: bool = True,
 ) -> str:
     """
     Process a stored audio file or a filesystem path and import it into a library.
 
     Exactly one of ``stored_file_id`` or ``file_path`` must be provided.
+    ``publish`` controls whether a newly created public track is published to
+    the owner's ActivityPub followers (``Create(Audio)``); it defaults to
+    ``True`` so directory scans keep their existing behaviour, while uploads
+    opt in explicitly.
 
     :returns: The ID of the created Upload record, or the existing track ID on
         duplicate detection (when ``force`` is ``False``).
@@ -99,7 +104,7 @@ def process_upload(
                     if file is not None:
                         file.close()
 
-                if owner_id and result.track.visibility == Visibility.PUBLIC.value:
+                if publish and owner_id and result.track.visibility == Visibility.PUBLIC.value:
                     owner = await session.get(User, owner_id)
                     loaded_track = await session.execute(
                         select(Track).options(selectinload(Track.artist)).where(Track.id == str(result.track.id))

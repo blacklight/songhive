@@ -506,25 +506,37 @@ Single-activity retraction follows the same rules through
 
 Track fediverse publications are recorded as activities too: every publish
 path — the manual `POST /api/v1/tracks/{id}/publish`, uploads and imports
-of public tracks (including the `process_upload` Celery task and bulk
-library uploads), and entity visibility transitions to `public` — calls
-`services/activities.record_track_publication`. It builds the
-`Create(Audio)` payload for the freshly minted `federation_object_id`,
-stores it on a `create` activity whose `source_id` matches the published
-object URL (`{actor_url}/objects/{federation_object_id}`), keeps the
+of public tracks that opt in with `publish=true` (including the
+`process_upload` Celery task and bulk library uploads), and entity
+visibility transitions to `public` — calls
+`services/activities.record_track_publication`. Uploads are local-only by
+default: without the flag the track gets no `federation_object_id` and no
+publication activity. `record_track_publication` builds a `Create`
+envelope around one of two object shapes, selected by `object_type`:
+`audio` (the canonical publication — the `Audio` object built on the
+track's freshly minted `federation_object_id`) or `note` (a share whose
+`content` renders as the post body on every remote server and whose
+`Audio`-typed attachment links back to the track's published object; a
+fresh object id is minted per share). It stores the payload on a `create`
+activity whose `source_id` matches the published object URL
+(`{actor_url}/objects/{object_id}`), keeps the
 one-off `status` post text in `content_source`, persists its resolved
 mentions as `activity_mentions` rows, records the caller-selected
 `visibility` (default `public`), and delivers through
 `fan_out_activity` so each reached inbox is booked in `activity_targets`
 and later retraction reaches exactly those inboxes. When a public track
-goes private, `retract_track_publications` soft-deletes the live
-publication rows for the retracted object alongside the track-level
+goes private, `retract_track_publications` soft-deletes all the live
+publication rows — both the canonical `Audio` and any `Note` shares —
+delivering a `Delete(Tombstone)` per publication `source_id` through
+`retract_activity`, alongside the track-level
 `unpublish_track_activity` `Delete(Tombstone)`. Metadata edits on a
 published track — `PATCH /api/v1/tracks/{id}` touching `title`,
 `artist_name`, `description`, or `genre` — re-sync the stored object
 through `services/activities.sync_track_publications`: each live local
 `create` activity's `payload.object` is rebuilt from
-`track_to_audio_object` (keeping the object id stable, stamping
+`track_to_audio_object` or `track_to_note_object` depending on the stored
+object `type` (keeping the object id stable — and the `published` stamp
+for `Note` shares — while stamping
 `updated`), a one-off `status` kept in `content_source` is re-applied as
 the post body so the track description does not clobber it, and the
 result fans out via `fan_out_activity_update` so delivered inboxes get an
@@ -547,8 +559,10 @@ Live activities are only served when their visibility federates
 (`Visibility.federates`: `mentioned`, `followers`, `public`) —
 `private`/`local` objects were never distributed and answer 404.
 `federation/activities.build_activity_object` produces the document: the
-stored `payload` verbatim for payload-bearing activities (e.g. `Like`), or
-a synthesized `Note` carrying the rendered `content`, the
+stored `payload` verbatim for payload-bearing activities (e.g. `Like`) —
+except `Create` envelopes, whose embedded object is served instead because
+the activity's `source_id` identifies the published object, not the
+envelope — or a synthesized `Note` carrying the rendered `content`, the
 `activity_audience`-derived `to`/`cc`, `Mention` tags, and `inReplyTo`.
 
 Served track objects are built by `_track_object_document`, which extends
@@ -893,26 +907,34 @@ the HTTP routes.
 
 **Activity lifecycle:**
 
-- Uploaded tracks are published as `Audio` objects via `Create` activity.
-  This happens on every track-creation path: the `/api/v1/files/upload`
-  endpoints (single, bulk, and external-duplicate resolution), the
-  `/{library_id}/tracks` upload endpoints, and the background `process_upload`
-  Celery task.
+- Uploaded tracks are published as `Audio` objects via `Create` activity —
+  only when explicitly requested. Uploads are local-only by default; the
+  `/api/v1/files/upload` endpoints (single and bulk) and the
+  `/{library_id}/tracks` upload endpoints take an opt-in `publish=true`
+  flag (surfaced in the UI as a "Publish on the Fediverse" checkbox shown
+  when the instance federates), which the synchronous library bulk path and
+  the background `process_upload` Celery task honour. Without the flag the
+  track receives no `federation_object_id` and no publication activity.
+  `process_upload` defaults the flag to `true` so directory scans keep
+  publishing imported public tracks.
 - The published `Audio` object carries the track's `description` (a free-text
   field settable at upload time or via `PATCH /tracks/{id}`) as its
   `content`: the text is HTML-escaped, http(s) URLs become anchors with
   scheme-less link text, and `#hashtags` become `rel="tag"` links to this
   instance's `/hashtags/{name}` pages. Hashtags found in the description are
   also appended to the object's `tag` list, and the media download URL is
-  attached as a `Document` with the audio MIME type. The rendered text is
-  additionally mirrored into `summary` (`mirror_content_to_summary`):
-  Mastodon-family servers treat `Audio` as a "converted" object type and
-  render `name`/`summary`/`url` rather than `content`, so the post text
-  would otherwise be dropped there. The object's `name` is emitted as an
-  anchor — `<a href="{track_url}">{artist} - {title}</a>` — because those
-  servers interpolate `name` unescaped into the post's `<h2>` header,
-  turning the header into a link to the track page (it falls back to
-  escaped plain text if the track URL is not linkable). The `url` links
+  attached as a `Document` with the audio MIME type. The rendered `content`
+  ends with a `<p><a href="{track_url}">{artist} - {title}</a></p>` link
+  back to the track page (`normalize_post_content`), and `summary` is left
+  unset: Akkoma and Mastodon both treat a non-empty `summary` as a content
+  warning, so mirroring the post body into it surfaced the raw HTML as a CW
+  header on Akkoma. The object's `name` is plain text
+  `{artist} - {title}` (HTML-escaped): Akkoma already wraps `name` in its
+  own anchor to the object `url`, so an HTML `name` produced nested
+  anchors. The object also carries a stable `published` timestamp (the
+  track's `created_at`) — Akkoma falls back to the Unix epoch when it is
+  missing — and the `Create` envelope is stamped with a unique `id` and its
+  own `published`. The `url` links
   also mirror `mediaType`
   into `mimeType` — Mastodon's link selection reads the non-standard
   `mimeType` key and defaults untyped links to `text/html`, so without it
@@ -921,18 +943,24 @@ the HTTP routes.
 - Each public lifecycle gets a fresh `Track.federation_object_id` (generated
   on every transition to public) so a previous `Tombstone` at the same URL
   cannot block re-publication.
-- `POST /api/v1/tracks/{id}/publish` lets the track's owner re-publish a
+- `POST /api/v1/tracks/{id}/publish` lets the track's owner publish a
   public track to the fediverse at any time (the "Fediverse" tab of the
   share dialog). It accepts an optional `status` — a one-off post text used
-  as the `Create(Audio)` object's `content` instead of the stored
+  as the object's `content` instead of the stored
   `description`, run through the `process_mentions` pipeline so `@handle`s
-  become links, `Mention` tags, and `activity_mentions` rows — and an
+  become links, `Mention` tags, and `activity_mentions` rows — an
   optional `visibility` (default `public`) selecting the post's audience:
   `public`/`followers`/`mentioned` federate to their respective audiences,
-  while `private`/`local` record the activity without delivering it. The
+  while `private`/`local` record the activity without delivering it, and an
+  optional `object_type` (default `note`). `note` shares the track as a
+  `Create(Note)` — the post body renders on every remote server (Mastodon
+  drops `content` on `Audio` objects, which it treats as a converted type)
+  — with the stream embedded as an `Audio`-typed attachment linked to the
+  track's canonical object when it has one; each share mints its own object
+  id. `audio` republishes the canonical `Create(Audio)` media object. The
   status is never persisted on the track. The `to`/`cc` addressing derived
   from the visibility is applied to both the `Create` envelope and the
-  embedded `Audio` object. Each manual publication mints a fresh
+  embedded object. Each `audio` publication mints a fresh
   `federation_object_id` so every post is a distinct remote object.
 - `Delete(Tombstone)` is sent when a track is made non-public or deleted.
 - Profile changes (display name, bio, avatar, links) refresh the cached actor

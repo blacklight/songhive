@@ -596,7 +596,7 @@ def test_upload_audio_with_description_stores_it(files_client, regular_user, aut
 
 
 def test_public_audio_upload_publishes_track(files_client, regular_user, auth_headers, monkeypatch):
-    """A public audio upload enqueues a Create(Audio) publication."""
+    """A public audio upload with ``publish=true`` enqueues a Create(Audio) publication."""
     monkeypatch.setattr(
         "songhive.services.import_.extract_metadata",
         lambda _: AudioMetadata(
@@ -610,7 +610,7 @@ def test_public_audio_upload_publishes_track(files_client, regular_user, auth_he
 
     headers = auth_headers(regular_user)
     response = files_client.post(
-        "/api/v1/files/upload?visibility=public",
+        "/api/v1/files/upload?visibility=public&publish=true",
         files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
         data={"description": "public post text"},
         headers=headers,
@@ -627,6 +627,54 @@ def test_public_audio_upload_publishes_track(files_client, regular_user, auth_he
     assert str(call["owner"].id) == str(regular_user.id)
     assert call["config"] is files_client.app.state.config
     assert call_track.federation_object_id
+
+
+async def test_public_audio_upload_without_publish_stays_local(
+    files_client, regular_user, auth_headers, monkeypatch, db_session
+):
+    """A public audio upload without ``publish`` has no federation object or activity."""
+    from sqlalchemy import select
+
+    from songhive.models.activity import Activity
+    from songhive.models.track import Track
+
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(
+            title="Unpublished Song",
+            artist="Unpublished Artist",
+            mimetype="audio/mpeg",
+        ),
+    )
+    publish_mock = AsyncMock()
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", publish_mock)
+
+    headers = auth_headers(regular_user)
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    track_id = response.headers["X-Track-Id"]
+
+    publish_mock.assert_not_called()
+    track = await db_session.get(Track, track_id)
+    assert track.federation_object_id is None
+    rows = (
+        (
+            await db_session.execute(
+                select(Activity).where(
+                    Activity.entity_type == "track",
+                    Activity.entity_id == track_id,
+                    Activity.activity_type == "create",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []
 
 
 def test_private_audio_upload_does_not_publish(files_client, regular_user, auth_headers, monkeypatch):
@@ -676,7 +724,7 @@ def test_bulk_public_audio_uploads_publish_tracks(files_client, regular_user, au
     ]
 
     response = files_client.post(
-        "/api/v1/files/upload/bulk?visibility=public",
+        "/api/v1/files/upload/bulk?visibility=public&publish=true",
         files=files,
         data={"description": "bulk description"},
         headers=headers,

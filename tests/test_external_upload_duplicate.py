@@ -278,6 +278,76 @@ async def test_resolve_discard_upload_returns_external_track(
 
 
 @pytest.mark.asyncio
+async def test_resolve_keep_local_honours_publish_flag(
+    client,
+    regular_user,
+    auth_headers,
+    db_session,
+    monkeypatch,
+):
+    """The upload-time ``publish`` choice survives the token round-trip."""
+    _, _, track, _ = await _create_external_track_for_user(db_session, regular_user)
+    await db_session.commit()
+
+    publish_mock = AsyncMock()
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", publish_mock)
+
+    headers = auth_headers(regular_user)
+    response = client.post(
+        "/api/v1/files/upload?visibility=public&publish=true",
+        files={"file": ("match.mp3", b"match audio content", "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == status.HTTP_409_CONFLICT
+    token = response.json()["token"]
+
+    resolve = client.post(
+        "/api/v1/files/upload/resolve-duplicate",
+        json={"token": token, "action": "keep_local"},
+        headers=headers,
+    )
+    assert resolve.status_code == status.HTTP_200_OK
+    publish_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_resolve_keep_local_without_publish_stays_local(
+    client,
+    regular_user,
+    auth_headers,
+    db_session,
+    monkeypatch,
+):
+    """A resolved upload defaults to local-only: no federation publication."""
+    _, _, track, _ = await _create_external_track_for_user(db_session, regular_user)
+    await db_session.commit()
+
+    publish_mock = AsyncMock()
+    monkeypatch.setattr("songhive.services.activities.record_track_publication", publish_mock)
+
+    headers = auth_headers(regular_user)
+    response = client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("match.mp3", b"match audio content", "audio/mpeg")},
+        headers=headers,
+    )
+    assert response.status_code == status.HTTP_409_CONFLICT
+    token = response.json()["token"]
+
+    resolve = client.post(
+        "/api/v1/files/upload/resolve-duplicate",
+        json={"token": token, "action": "keep_local"},
+        headers=headers,
+    )
+    assert resolve.status_code == status.HTTP_200_OK
+    publish_mock.assert_not_called()
+
+    resolved_track = await db_session.get(Track, resolve.headers["X-Track-Id"])
+    assert resolved_track is not None
+    assert resolved_track.federation_object_id is None
+
+
+@pytest.mark.asyncio
 async def test_resolve_expired_token_returns_404(
     client,
     regular_user,

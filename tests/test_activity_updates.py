@@ -189,8 +189,8 @@ async def test_update_activity_rebuilds_payload_object(db_session, regular_user,
 
 
 @pytest.mark.asyncio
-async def test_update_activity_mirrors_summary_on_audio_payload(db_session, regular_user, config):
-    """An embedded ``Audio`` payload object mirrors ``content`` into ``summary``."""
+async def test_update_activity_normalizes_audio_payload(db_session, regular_user, config):
+    """An edited ``Audio`` payload drops ``summary`` and keeps the track link in ``content``."""
     config.federation.instance_domain = "local.example"
     track = await _make_track(db_session, regular_user)
     activity = _make_activity(
@@ -202,8 +202,13 @@ async def test_update_activity_mirrors_summary_on_audio_payload(db_session, regu
             "object": {
                 "id": "https://local.example/users/alice/objects/1",
                 "type": "Audio",
+                "name": "Test Artist - Test Track",
                 "content": "old",
                 "summary": "old",
+                "url": [
+                    {"type": "Link", "href": "https://local.example/audio/stream", "mediaType": "audio/mpeg"},
+                    {"type": "Link", "href": "https://local.example/tracks/1", "mediaType": "text/html"},
+                ],
             },
         },
     )
@@ -214,8 +219,41 @@ async def test_update_activity_mirrors_summary_on_audio_payload(db_session, regu
     await db_session.flush()
 
     obj = activity.payload["object"]
-    assert obj["summary"] == obj["content"]
-    assert "new post" in obj["summary"]
+    assert "summary" not in obj
+    assert obj["content"] == ('new post<p><a href="https://local.example/tracks/1">Test Artist - Test Track</a></p>')
+    assert activity.content == obj["content"]
+
+
+@pytest.mark.asyncio
+async def test_update_activity_audio_link_is_not_duplicated(db_session, regular_user, config):
+    """Re-normalizing an already-linked ``Audio`` content does not duplicate the link."""
+    config.federation.instance_domain = "local.example"
+    track = await _make_track(db_session, regular_user)
+    link = '<p><a href="https://local.example/tracks/1">Test Artist - Test Track</a></p>'
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "object": {
+                "id": "https://local.example/users/alice/objects/1",
+                "type": "Audio",
+                "name": "Test Artist - Test Track",
+                "content": f"old{link}",
+                "url": [
+                    {"type": "Link", "href": "https://local.example/tracks/1", "mediaType": "text/html"},
+                ],
+            },
+        },
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    await update_activity(db_session, activity, content_source="new post", config=config)
+    await db_session.flush()
+
+    assert activity.payload["object"]["content"] == f"new post{link}"
 
 
 @pytest.mark.asyncio
@@ -766,7 +804,11 @@ async def test_sync_track_publications_rebuilds_and_fans_out(db_session, regular
     assert obj["id"] == "https://local.example/users/regular/objects/pub-1"
     assert "Renamed" in obj["name"]
     assert "fresh description" in obj["content"]
-    assert obj["summary"] == obj["content"]
+    assert "summary" not in obj
+    assert obj["content"].endswith(
+        f'<p><a href="https://local.example/tracks/{track.id}">Test Artist - Renamed</a></p>'
+    )
+    assert obj["published"]
     assert obj["updated"]
     assert activity.content == obj["content"]
 
@@ -920,3 +962,67 @@ async def test_track_update_endpoint_without_publication(client, db_session, reg
 
     assert resp.status_code == 200
     deliver.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_track_publications_rebuilds_note_share(db_session, regular_user, config, monkeypatch):
+    """A metadata edit rebuilds a ``Note`` share as a Note, not an Audio."""
+    config = _fed_config(config)
+    _federated_user(regular_user)
+    track = await _make_track(db_session, regular_user)
+    track.federation_object_id = "obj-1"
+    object_id = "https://local.example/users/regular/objects/share-1"
+    activity = _publication_activity(
+        track,
+        regular_user,
+        source_id=object_id,
+        content_source="custom share text",
+        content="custom share text",
+        payload={
+            "type": "Create",
+            "object": {
+                "id": object_id,
+                "type": "Note",
+                "name": "Test Artist - Test Track",
+                "published": "2026-03-14T12:00:00+00:00",
+                "url": f"https://local.example/tracks/{track.id}",
+                "content": "custom share text",
+                "attachment": [
+                    {
+                        "type": "Audio",
+                        "id": "https://local.example/users/regular/objects/obj-1",
+                        "mediaType": "audio/mpeg",
+                        "url": "https://local.example/api/v1/files/file-1/download",
+                        "name": "Test Track",
+                    }
+                ],
+            },
+        },
+    )
+    activity.targets.append(ActivityTarget(inbox_url="https://a.example/inbox", state="sent"))
+    db_session.add(activity)
+    track.title = "Renamed"
+    await db_session.flush()
+
+    _patch_resolution(monkeypatch)
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    assert await sync_track_publications(db_session, track, config=config) == 1
+
+    obj = activity.payload["object"]
+    assert obj["type"] == "Note"
+    assert obj["id"] == object_id
+    assert "Renamed" in obj["name"]
+    # The stored share date is preserved rather than re-stamped.
+    assert obj["published"] == "2026-03-14T12:00:00+00:00"
+    # The one-off share text survives the metadata re-sync.
+    assert "custom share text" in obj["content"]
+    assert obj["attachment"][0]["type"] == "Audio"
+    assert obj["attachment"][0]["id"] == "https://local.example/users/regular/objects/obj-1"
+    assert obj["updated"]
+
+    deliver.delay.assert_called_once()
+    payload, _, _, _ = deliver.delay.call_args.args
+    assert payload["type"] == "Update"
+    assert payload["object"]["type"] == "Note"

@@ -23,7 +23,9 @@ All notable changes to this project will be documented in this file.
   soft-deleted activities are served as `Tombstone` objects (the shared
   `federation/activities.build_tombstone_object` shape, mirroring the
   object embedded in `Delete` deliveries), live
-  payload-bearing activities return their stored AP document, and
+  payload-bearing activities return their stored AP document — `Create`
+  envelopes are unwrapped so the embedded object is served, since the
+  activity's `source_id` identifies the object — and
   payload-less content activities are served as a `Note` synthesized by
   `federation/activities.build_activity_object`. Only federating
   visibilities (`mentioned`/`followers`/`public`) are served.
@@ -84,31 +86,52 @@ All notable changes to this project will be documented in this file.
 - `frontend`: Activity cards gain an owner/admin delete action (confirm
   dialog → `DELETE /api/v1/activities/{id}`) so federated shares can be
   retracted from the feed.
-- `federation`: Add post visibility selection to track publication.
-  `POST /api/v1/tracks/{id}/publish` accepts an optional `visibility`
-  (default `public`) which is stored on the recorded `create` activity and
-  drives the `to`/`cc` addressing of both the `Create` envelope and the
-  embedded `Audio` object via `activity_audience`; `public`/`followers`
+- `federation`: Add post visibility and object-type selection to track
+  publication. `POST /api/v1/tracks/{id}/publish` accepts an optional
+  `visibility` (default `public`) which is stored on the recorded `create`
+  activity and drives the `to`/`cc` addressing of both the `Create`
+  envelope and the embedded object via `activity_audience`;
+  `public`/`followers`
   reach follower inboxes plus remote mentioned actors, `mentioned` reaches
   only the mentioned actors, and `private`/`local` record the share without
-  federating it. The one-off `status` now also runs through the
+  federating it. An optional `object_type` (default `note`) selects the
+  federated object shape: `note` shares the track as a `Create(Note)` —
+  the post body renders on remote servers that drop `content` on `Audio`
+  objects (e.g. Mastodon) — with the stream embedded as an `Audio`-typed
+  attachment linked to the track's canonical object; `audio` republishes
+  the canonical `Create(Audio)` media object, minting a fresh
+  `federation_object_id` per publication. The one-off `status` now also
+  runs through the
   `process_mentions` pipeline — `@handle`s are resolved into
   `activity_mentions` rows, `Mention` tags, and mention-aware `content` —
   so `mentioned` publications have a deliverable audience. The Share →
-  Fediverse tab gains a visibility picker, and visibility edits now rewrite
+  Fediverse tab gains a visibility picker and a `Note`/`Audio` selector
+  with guidance text, and visibility edits now rewrite
   the stored payload's `to`/`cc` (`cascade_visibility_update`) so
   re-deliveries carry the current audience; `sync_track_publications`
   re-applies the stored audience and `Mention` tags when rebuilding the
   object after a metadata edit.
+- `federation`: Make upload-time federation publication opt-in. The
+  `/api/v1/files/upload` endpoints and `/{library_id}/tracks` uploads take
+  a `publish` flag (default `false`); without it, uploaded tracks stay
+  local with no `federation_object_id` and no publication activity. The
+  flag is carried through bulk uploads, the synchronous library import
+  path, the `process_upload` Celery task (which defaults it to `true` so
+  directory scans keep publishing), and the external-duplicate resolution
+  token so the choice survives the pending-upload round-trip. The instance
+  endpoint exposes `federation_enabled`, and the upload forms show a
+  "Publish on the Fediverse" checkbox only when the instance federates and
+  the upload visibility is `public`.
 
 ### Changed
 
 - `federation`: Track publications are now recorded as local `create`
   activities. Every publish path — `POST /api/v1/tracks/{id}/publish`,
-  file uploads and imports of public tracks, bulk library uploads, Celery
-  `process_upload`, and entity visibility transitions to `public` — calls
+  uploads and imports of public tracks that opt in with `publish=true`,
+  bulk library uploads, Celery `process_upload`, and entity visibility
+  transitions to `public` — calls
   `services/activities.record_track_publication`, which stores the
-  `Create(Audio)` payload on an `Activity` row (entity- and
+  `Create` payload on an `Activity` row (entity- and
   `local_object_id`-linked to the track, `source_id` matching the
   published object URL) and fans it out through `fan_out_activity` so each
   delivered inbox is tracked in `activity_targets`. Publications therefore
@@ -116,12 +139,15 @@ All notable changes to this project will be documented in this file.
   The superseded `services/federation.publish_track_activity` is removed;
   `unpublish_track_activity` still drives track-level `Delete(Tombstone)`
   on visibility loss and entity deletion, and
-  `services/activities.retract_track_publications` soft-deletes the
-  publication rows when a track leaves the fediverse. Metadata edits on a
+  `services/activities.retract_track_publications` retracts every live
+  publication row — the canonical `Audio` and any `Note` shares — through
+  `retract_activity`, delivering a per-publication `Delete(Tombstone)` for
+  each `source_id` when a track leaves the fediverse. Metadata edits on a
   published track — `PATCH /api/v1/tracks/{id}` touching `title`,
   `artist_name`, `description`, or `genre` — re-sync the stored object via
-  `services/activities.sync_track_publications` and fan an `Update`
-  carrying the rebuilt `Audio` out to delivered inboxes; a one-off
+  `services/activities.sync_track_publications`, dispatching on the stored
+  object `type` (`Audio` or `Note`), and fan an `Update`
+  carrying the rebuilt object out to delivered inboxes; a one-off
   `status` used at publication time is preserved as the post body.
 - `federation`: Delegate federation primitives to pubby 0.3.2 — domain
   normalization and allow/block matching (`pubby.moderation`), async→sync
