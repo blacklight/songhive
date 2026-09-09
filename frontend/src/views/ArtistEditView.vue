@@ -15,8 +15,8 @@ import {
 } from "@/api/artists";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
-import { useEntityHashtags } from "@/composables/useEntityHashtags";
-import HashtagInput from "@/components/hashtags/HashtagInput.vue";
+import { useEntityTags } from "@/composables/useEntityTags";
+import TagInput from "@/components/tags/TagInput.vue";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -49,12 +49,12 @@ const coverError = ref<string | null>(null);
 
 const { canManage } = useCanManage();
 
-const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
+const { tags, resetTags, syncTags } = useEntityTags();
 
 function resetForm() {
   name.value = artist.value?.name ?? "";
   bio.value = artist.value?.bio ?? "";
-  resetHashtags(artist.value?.hashtags ?? null);
+  resetTags(artist.value?.tags ?? null);
   error.value = null;
 }
 
@@ -62,7 +62,7 @@ async function loadArtist() {
   loading.value = true;
   error.value = null;
   try {
-    artist.value = await getArtist(artistId.value, { include: "hashtags" });
+    artist.value = await getArtist(artistId.value, { include: "tags" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -98,7 +98,7 @@ async function onSubmit() {
 
   try {
     await updateArtist(artistId.value, body);
-    await syncHashtags("artists", artistId.value);
+    await syncTags("artists", artistId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/artists/${artistId.value}`);
   } catch (err) {
@@ -141,7 +141,7 @@ async function onDelete() {
 
 async function refreshArtist() {
   try {
-    artist.value = await getArtist(artistId.value, { include: "hashtags" });
+    artist.value = await getArtist(artistId.value, { include: "tags" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -258,11 +258,11 @@ watch(
         />
         <AppInput v-model="bio" as="textarea" :label="'Bio'" :rows="6" />
 
-        <HashtagInput
+        <TagInput
           v-if="canManage"
-          v-model="hashtags"
-          :placeholder="t('hashtags.placeholder')"
-          :aria-label="t('hashtags.label')"
+          v-model="tags"
+          :placeholder="t('tags.placeholder')"
+          :aria-label="t('tags.label')"
         />
 
         <div class="artist-edit-view__actions">

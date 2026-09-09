@@ -43,7 +43,7 @@ function createAlbum(
     genre: null,
     owner_id: ownerId,
     visibility: "public",
-    hashtags: [],
+    tags: [],
     genres: [],
   };
 }
@@ -100,7 +100,7 @@ describe("AlbumEditView", () => {
     const router = await mountAt("/albums/album-1/edit");
 
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
-      include: "hashtags,genres",
+      include: "tags,genres",
     });
     expect(wrapper.text()).toContain("Edit album");
 
@@ -120,7 +120,7 @@ describe("AlbumEditView", () => {
     const router = await mountAt("/albums/album-1/edit");
 
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
-      include: "hashtags,genres",
+      include: "tags,genres",
     });
     expect(router.currentRoute.value.path).toBe("/albums/album-1");
   });
@@ -130,7 +130,7 @@ describe("AlbumEditView", () => {
     const router = await mountAt("/albums/album-1/edit");
 
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
-      include: "hashtags,genres",
+      include: "tags,genres",
     });
     expect(wrapper.text()).toContain("Edit album");
     expect(router.currentRoute.value.path).toBe("/albums/album-1/edit");

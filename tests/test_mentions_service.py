@@ -241,23 +241,23 @@ def test_render_mentions_unresolved_stays_inert():
     assert render_mentions("hi @bob", [mention]).html == "hi @bob"
 
 
-def test_render_mentions_collects_hashtags():
-    """Hashtags in the text are linkified and collected."""
+def test_render_mentions_collects_tags():
+    """Tags in the text are linkified and collected."""
     rendered = render_mentions("hey @bob #Music #music", [], domain="local.example")
 
     assert rendered.hashtags == ["music"]
-    assert 'href="https://local.example/hashtags/music"' in rendered.html
+    assert 'href="https://local.example/tags/music"' in rendered.html
 
 
-def test_render_mentions_uses_relative_hashtag_links_without_domain():
-    """Without an instance domain, hashtag links fall back to local paths."""
+def test_render_mentions_uses_relative_tag_links_without_domain():
+    """Without an instance domain, tag links fall back to local paths."""
     rendered = render_mentions("#music", [])
-    assert rendered.html == '<a href="/hashtags/music" rel="tag">#music</a>'
+    assert rendered.html == '<a href="/tags/music" rel="tag">#music</a>'
 
 
 @pytest.mark.asyncio
 async def test_process_mentions_end_to_end(db_session, tmp_path, other_user, monkeypatch):
-    """The pipeline returns mentions, rendered HTML, hashtags, and AP tags."""
+    """The pipeline returns mentions, rendered HTML, tags, and AP tags."""
     config = _fed_config(tmp_path)
     _fake_resolve(monkeypatch)
 
@@ -270,11 +270,11 @@ async def test_process_mentions_end_to_end(db_session, tmp_path, other_user, mon
     assert [m.handle for m in processed.mentions] == ["@other", "@bob@remote.example"]
     assert '<a href="https://local.example/users/other">@other</a>' in processed.html
     assert '<a href="https://remote.example/users/bob">@bob@remote.example</a>' in processed.html
-    assert processed.hashtags == ["tunes"]
+    assert processed.tag_names == ["tunes"]
     assert processed.tags == [
         {"type": "Mention", "href": "https://local.example/users/other", "name": "@other"},
         {"type": "Mention", "href": "https://remote.example/users/bob", "name": "@bob@remote.example"},
-        {"type": "Hashtag", "name": "#tunes", "href": "https://local.example/hashtags/tunes"},
+        {"type": "Hashtag", "name": "#tunes", "href": "https://local.example/tags/tunes"},
     ]
 
 

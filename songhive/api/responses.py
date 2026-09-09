@@ -106,7 +106,7 @@ class TrackResponse(BaseModel):
     artist: Optional[ArtistSummary] = None
     album: Optional[AlbumSummary] = None
     owner: Optional[UserSummary] = None
-    hashtags: List[str] = []
+    tags: List[str] = []
     genres: List[str] = []
     favorited: Optional[bool] = None
     is_external: bool = False

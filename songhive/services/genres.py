@@ -28,9 +28,9 @@ from ..models.album import Album
 from ..models.genre import Genre, GenreAlbum, GenreTrack
 from ..models.track import Track
 from ..models.user import User
-from ..services.hashtags import validate_hashtag_name
 from ..services.metadata import AudioMetadata
 from ..services.storage import is_unique_constraint_error
+from ..services.tags import validate_tag_name
 from .acl import _list_access_predicate
 
 logger = logging.getLogger(__name__)
@@ -512,25 +512,25 @@ async def delete_genre_globally(session: AsyncSession, genre_name: str) -> Optio
     return genre
 
 
-def genres_to_hashtags(genre_names: List[str]) -> List[str]:
+def genres_to_tags(genre_names: List[str]) -> List[str]:
     """
-    Convert normalised genre names to valid hashtag names.
+    Convert normalised genre names to valid tag names.
 
     Spaces are replaced with underscores and names that do not form valid
-    hashtags are skipped.
+    tags are skipped.
     """
-    hashtags: List[str] = []
+    tags: List[str] = []
     seen: set[str] = set()
     for name in genre_names:
         tag = re.sub(r"[^a-z0-9_]+", "_", name.lower())
         try:
-            tag = validate_hashtag_name(tag)
+            tag = validate_tag_name(tag)
         except ValueError:
             continue
         if tag not in seen:
             seen.add(tag)
-            hashtags.append(tag)
-    return hashtags
+            tags.append(tag)
+    return tags
 
 
 async def propagate_album_genres(session: AsyncSession, album: Album) -> List[str]:

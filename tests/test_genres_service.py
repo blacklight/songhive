@@ -14,7 +14,7 @@ from songhive.services.genres import (
     delete_genre_globally,
     extract_genres_from_metadata,
     extract_genres_from_track,
-    genres_to_hashtags,
+    genres_to_tags,
     get_genres_for_entity,
     get_items_for_genre,
     list_genres,
@@ -27,8 +27,8 @@ from songhive.services.genres import (
     sync_album_genres,
     validate_genre_name,
 )
-from songhive.services.hashtags import get_hashtags_for_entity
 from songhive.services.metadata import AudioMetadata
+from songhive.services.tags import get_tags_for_entity
 
 
 async def _make_artist(session, name: str = "Test Artist") -> Artist:
@@ -139,17 +139,17 @@ class TestExtraction:
         assert extract_genres_from_track(track) == []
 
 
-class TestGenreToHashtag:
-    """Tests for the genre-to-hashtag bridge."""
+class TestGenreToTag:
+    """Tests for the genre-to-tag bridge."""
 
-    def test_genres_to_hashtags_replaces_spaces(self):
-        assert genres_to_hashtags(["hip hop", "drum and bass"]) == ["hip_hop", "drum_and_bass"]
+    def test_genres_to_tags_replaces_spaces(self):
+        assert genres_to_tags(["hip hop", "drum and bass"]) == ["hip_hop", "drum_and_bass"]
 
-    def test_genres_to_hashtags_skips_invalid(self):
-        assert genres_to_hashtags(["rock", "123"]) == ["rock"]
+    def test_genres_to_tags_skips_invalid(self):
+        assert genres_to_tags(["rock", "123"]) == ["rock"]
 
-    def test_genres_to_hashtags_deduplicates(self):
-        assert genres_to_hashtags(["rock", "Rock", "hip hop"]) == ["rock", "hip_hop"]
+    def test_genres_to_tags_deduplicates(self):
+        assert genres_to_tags(["rock", "Rock", "hip hop"]) == ["rock", "hip_hop"]
 
 
 class TestAddAndRemove:
@@ -213,26 +213,26 @@ class TestAddAndRemove:
 
         assert await get_genres_for_entity(db_session, "track", track.id) == []
 
-    async def test_set_genres_creates_hashtags(self, db_session, regular_user):
-        """Setting genres should also create the corresponding hashtags."""
+    async def test_set_genres_creates_tags(self, db_session, regular_user):
+        """Setting genres should also create the corresponding tags."""
         artist = await _make_artist(db_session)
         track = await _make_track(db_session, artist, owner=regular_user, genre="hip hop")
 
-        # Caller is responsible for the hashtag bridge using genres_to_hashtags.
-        from songhive.services.hashtags import add_hashtags_to_entity
+        # Caller is responsible for the tag bridge using genres_to_tags.
+        from songhive.services.tags import add_tags_to_entity
 
         await set_genres_for_entity(db_session, "track", track.id, ["hip hop", "rock"])
-        await add_hashtags_to_entity(
+        await add_tags_to_entity(
             db_session,
             "track",
             track.id,
-            genres_to_hashtags(["hip hop", "rock"]),
+            genres_to_tags(["hip hop", "rock"]),
         )
 
         entity_genres = await get_genres_for_entity(db_session, "track", track.id)
         assert entity_genres == ["hip hop", "rock"]
-        hashtags = await get_hashtags_for_entity(db_session, "track", track.id)
-        assert [h.name for h in hashtags] == ["hip_hop", "rock"]
+        tags = await get_tags_for_entity(db_session, "track", track.id)
+        assert [h.name for h in tags] == ["hip_hop", "rock"]
 
 
 class TestListingAndVisibility:

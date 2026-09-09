@@ -6,7 +6,7 @@ Bare ``@user`` handles resolve against the local ``users`` table;
 (:func:`pubby.resolve_actor_url`) after the domain passes the configured
 federation allow/block lists.  Rendering produces safe HTML via
 ``pubby.content`` helpers — mention handles become anchors while the
-surrounding text is escaped and its URLs and ``#hashtags`` linkified.
+surrounding text is escaped and its URLs and ``#tags`` linkified.
 """
 
 import asyncio
@@ -27,7 +27,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
-from ..federation import get_actor_url, get_hashtag_url
+from ..federation import get_actor_url, get_tag_url
 from ..models.user import User
 from .federation import is_domain_blocked, normalize_instance_domain
 
@@ -36,7 +36,7 @@ __all__ = [
     "ProcessedMentions",
     "ResolvedMention",
     "extract_mentions",
-    "hashtag_url_factory",
+    "tag_url_factory",
     "process_mentions",
     "render_mentions",
     "resolve_mention",
@@ -86,14 +86,14 @@ class ProcessedMentions:
 
     ``mentions`` feeds ``activity_mentions`` rows (via
     ``create_local_activity(mentions=[m.as_dict() for m in ...])``), ``html``
-    is the rendered ``content``, ``hashtags`` the normalized hashtag names
+    is the rendered ``content``, ``tag_names`` the normalized tag names
     found in the text, and ``tags`` the ActivityPub ``tag`` list (``Mention``
     tags first, then ``Hashtag`` tags).
     """
 
     mentions: List[ResolvedMention]
     html: str
-    hashtags: List[str]
+    tag_names: List[str]
     tags: List[dict]
 
 
@@ -243,11 +243,11 @@ async def resolve_mentions(
     return mentions
 
 
-def hashtag_url_factory(domain: str) -> Callable[[str], str]:
-    """Return a ``hashtag_url`` callback for ``pubby.content`` renderers."""
+def tag_url_factory(domain: str) -> Callable[[str], str]:
+    """Return a ``tag_url`` callback for ``pubby.content`` renderers."""
     if domain:
-        return partial(get_hashtag_url, domain)
-    return lambda name: f"/hashtags/{name}"
+        return partial(get_tag_url, domain)
+    return lambda name: f"/tags/{name}"
 
 
 def render_mentions(
@@ -261,24 +261,24 @@ def render_mentions(
 
     Resolved mentions become anchors via ``pubby.render_link_anchor``; the
     text between them is rendered by ``pubby.render_post_html`` (escaped, with
-    URLs and ``#hashtags`` linkified).  Unresolved handles — and resolved
+    URLs and ``#tags`` linkified).  Unresolved handles — and resolved
     mentions without an actor URL — are emitted as inert escaped text.
-    ``domain`` is the instance domain used to build hashtag links.
+    ``domain`` is the instance domain used to build tag links.
     """
     by_handle = {mention.handle.lower(): mention for mention in mentions}
-    hashtag_url = hashtag_url_factory(domain)
+    tag_url = tag_url_factory(domain)
     parts: List[str] = []
-    hashtags: List[str] = []
+    tags: List[str] = []
     seen: set[str] = set()
     pos = 0
 
     def _render_segment(segment: str) -> None:
-        rendered = render_post_html(segment, hashtag_url)
+        rendered = render_post_html(segment, tag_url)
         parts.append(rendered.html)
         for name in rendered.hashtags:
             if name not in seen:
                 seen.add(name)
-                hashtags.append(name)
+                tags.append(name)
 
     for match in MENTION_REGEX.finditer(text or ""):
         _render_segment(text[pos : match.start()])
@@ -291,7 +291,7 @@ def render_mentions(
             parts.append(html.escape(handle))
 
     _render_segment("" if text is None else text[pos:])
-    return RenderedContent("".join(parts), hashtags)
+    return RenderedContent("".join(parts), tags)
 
 
 async def process_mentions(
@@ -307,19 +307,19 @@ async def process_mentions(
     This is the single entry point activity creation and editing call before
     persisting or federating content: it returns the resolved mentions (for
     ``activity_mentions`` rows), the rendered ``html`` (for ``content``), the
-    extracted ``hashtags``, and the ActivityPub ``tags`` (``Mention`` tags for
-    resolved actors plus ``Hashtag`` tags for linkified hashtags).
+    extracted ``tag_names``, and the ActivityPub ``tags`` (``Mention`` tags for
+    resolved actors plus ``Hashtag`` tags for linkified tags).
     """
     mentions = await resolve_mentions(session, text, config, timeout=timeout)
     domain = (config.federation.instance_domain or "").strip()
     rendered = render_mentions(text, mentions, domain=domain)
 
     tags = [tag for mention in mentions if (tag := mention.to_tag()) is not None]
-    tags.extend(build_hashtag_tags(rendered.hashtags, hashtag_url_factory(domain)))
+    tags.extend(build_hashtag_tags(rendered.hashtags, tag_url_factory(domain)))
 
     return ProcessedMentions(
         mentions=mentions,
         html=rendered.html,
-        hashtags=rendered.hashtags,
+        tag_names=rendered.hashtags,
         tags=tags,
     )

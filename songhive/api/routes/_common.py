@@ -10,10 +10,10 @@ from ...models.user import User
 from ...services import acl
 
 
-class HashtagListRequest(BaseModel):
-    """Add/remove hashtags on a resource."""
+class TagListRequest(BaseModel):
+    """Add/remove tags on a resource."""
 
-    hashtags: List[str]
+    tags: List[str]
 
 
 class GenreListRequest(BaseModel):

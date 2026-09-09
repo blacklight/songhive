@@ -14,7 +14,7 @@ from pubby.content import render_bio_html, render_post_html, render_verified_lin
 from sqlalchemy import select
 
 from songhive.config.schema import SonghiveConfig
-from songhive.federation._common import get_hashtag_url
+from songhive.federation._common import get_tag_url
 from songhive.federation.activities import (
     create_audio_activity,
     create_note_activity,
@@ -178,15 +178,15 @@ def test_track_to_audio_object():
     assert all(link["mimeType"] == link["mediaType"] for link in obj["url"])
     html_link = next(link for link in obj["url"] if link["mimeType"] == "text/html")
     assert html_link["href"] == "https://music.example.com/tracks/track-1"
-    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"}]
+    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/tags/rock"}]
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
         for link in obj["url"]
     )
 
 
-def test_track_to_audio_object_emits_multiple_genre_hashtags():
-    """Multi-genre tracks emit one ActivityPub Hashtag tag per genre."""
+def test_track_to_audio_object_emits_multiple_genre_tags():
+    """Multi-genre tracks emit one ActivityPub Tag tag per genre."""
     artist = Artist(name="TestArtist")
     artist.id = "artist-1"
     track = Track(
@@ -202,13 +202,13 @@ def test_track_to_audio_object_emits_multiple_genre_hashtags():
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
     assert obj["tag"] == [
-        {"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"},
-        {"type": "Hashtag", "name": "#pop", "href": "https://music.example.com/hashtags/pop"},
+        {"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/tags/rock"},
+        {"type": "Hashtag", "name": "#pop", "href": "https://music.example.com/tags/pop"},
     ]
 
 
 def test_track_to_audio_object_converts_spaces_to_underscores():
-    """Genre names with spaces are emitted as underscore-separated hashtags."""
+    """Genre names with spaces are emitted as underscore-separated tags."""
     artist = Artist(name="TestArtist")
     artist.id = "artist-1"
     track = Track(
@@ -223,45 +223,44 @@ def test_track_to_audio_object_converts_spaces_to_underscores():
 
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
-    assert obj["tag"] == [{"type": "Hashtag", "name": "#hip_hop", "href": "https://music.example.com/hashtags/hip_hop"}]
+    assert obj["tag"] == [{"type": "Hashtag", "name": "#hip_hop", "href": "https://music.example.com/tags/hip_hop"}]
 
 
-def test_render_post_html_linkifies_urls_and_hashtags():
-    """Post text renders URLs as anchors and hashtags as tag links."""
+def test_render_post_html_linkifies_urls_and_tags():
+    """Post text renders URLs as anchors and tags as tag links."""
     rendered = render_post_html(
         "New track #LoFi out now: https://band.example.com/song #chill",
-        partial(get_hashtag_url, "music.example.com"),
+        partial(get_tag_url, "music.example.com"),
     )
     assert rendered.html == (
-        'New track <a href="https://music.example.com/hashtags/lofi" rel="tag">#LoFi</a> '
+        'New track <a href="https://music.example.com/tags/lofi" rel="tag">#LoFi</a> '
         'out now: <a href="https://band.example.com/song">band.example.com/song</a> '
-        '<a href="https://music.example.com/hashtags/chill" rel="tag">#chill</a>'
+        '<a href="https://music.example.com/tags/chill" rel="tag">#chill</a>'
     )
     assert rendered.hashtags == ["lofi", "chill"]
 
 
 def test_render_post_html_escapes_text():
     """Description text is HTML-escaped; markup cannot be injected."""
-    rendered = render_post_html('<b>bold</b> #tag "quotes"', partial(get_hashtag_url, "music.example.com"))
+    rendered = render_post_html('<b>bold</b> #tag "quotes"', partial(get_tag_url, "music.example.com"))
     assert rendered.html == (
-        '&lt;b&gt;bold&lt;/b&gt; <a href="https://music.example.com/hashtags/tag" rel="tag">#tag</a> '
-        "&quot;quotes&quot;"
+        '&lt;b&gt;bold&lt;/b&gt; <a href="https://music.example.com/tags/tag" rel="tag">#tag</a> ' "&quot;quotes&quot;"
     )
     assert rendered.hashtags == ["tag"]
 
 
 def test_render_post_html_skips_invalid_tokens():
-    """Numeric-only hashtags and hostless URLs stay as escaped text."""
-    rendered = render_post_html("code #123 and https:// here a#b", partial(get_hashtag_url, "music.example.com"))
+    """Numeric-only tags and hostless URLs stay as escaped text."""
+    rendered = render_post_html("code #123 and https:// here a#b", partial(get_tag_url, "music.example.com"))
     assert rendered.html == "code #123 and https:// here a#b"
     assert rendered.hashtags == []
 
 
-def test_render_post_html_dedupes_hashtags():
-    """Repeated hashtags produce a single tag entry."""
-    rendered = render_post_html("#rock #Rock #ROCK", partial(get_hashtag_url, "music.example.com"))
+def test_render_post_html_dedupes_tags():
+    """Repeated tags produce a single tag entry."""
+    rendered = render_post_html("#rock #Rock #ROCK", partial(get_tag_url, "music.example.com"))
     assert rendered.hashtags == ["rock"]
-    assert rendered.html.count('href="https://music.example.com/hashtags/rock"') == 3
+    assert rendered.html.count('href="https://music.example.com/tags/rock"') == 3
 
 
 def test_track_to_audio_object_renders_description():
@@ -284,19 +283,19 @@ def test_track_to_audio_object_renders_description():
     # The rendered description is followed by the "{artist} - {title}" link
     # to the track page.
     assert obj["content"] == (
-        'My new <a href="https://music.example.com/hashtags/lofi" rel="tag">#LoFi</a> '
+        'My new <a href="https://music.example.com/tags/lofi" rel="tag">#LoFi</a> '
         'song: <a href="https://band.example.com/song">band.example.com/song</a>'
         '<p><a href="https://music.example.com/tracks/track-1">TestArtist - TestTrack</a></p>'
     )
-    # Genre hashtag and description hashtag are merged, deduplicated by name.
+    # Genre tag and description tag are merged, deduplicated by name.
     assert obj["tag"] == [
-        {"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"},
-        {"type": "Hashtag", "name": "#lofi", "href": "https://music.example.com/hashtags/lofi"},
+        {"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/tags/rock"},
+        {"type": "Hashtag", "name": "#lofi", "href": "https://music.example.com/tags/lofi"},
     ]
 
 
 def test_track_to_audio_object_description_dedupes_genre():
-    """A description hashtag matching a genre does not duplicate the tag."""
+    """A description tag matching a genre does not duplicate the tag."""
     artist = Artist(name="TestArtist")
     artist.id = "artist-1"
     track = Track(
@@ -311,7 +310,7 @@ def test_track_to_audio_object_description_dedupes_genre():
 
     obj = track_to_audio_object(track, artist, "music.example.com")
     assert obj is not None
-    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"}]
+    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/tags/rock"}]
     assert "#rock" in obj["content"]
 
 
@@ -379,7 +378,7 @@ def test_create_audio_activity_renders_track_description():
     )
     assert activity is not None
     assert activity["object"]["content"] == (
-        'Fresh <a href="https://music.example.com/hashtags/beats" rel="tag">#beats</a> '
+        'Fresh <a href="https://music.example.com/tags/beats" rel="tag">#beats</a> '
         'at <a href="https://band.example.com">band.example.com</a>'
         '<p><a href="https://music.example.com/tracks/track-123">TestArtist - My Song</a></p>'
     )
@@ -445,7 +444,7 @@ def test_track_to_note_object():
         "https://music.example.com/users/alice",
         "https://music.example.com/artists/artist-1",
     ]
-    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/hashtags/rock"}]
+    assert obj["tag"] == [{"type": "Hashtag", "name": "#rock", "href": "https://music.example.com/tags/rock"}]
     # The stream rides as an Audio-typed attachment linked to the canonical
     # Audio object.
     assert obj["attachment"] == [
@@ -913,9 +912,9 @@ async def test_record_track_publication_uses_status_as_content(db_session, monke
         '<p><a href="https://music.example.com/tracks/track-1">TestArtist - My Song</a></p>'
     )
     assert "stored description" not in payload["object"]["content"]
-    assert {"type": "Hashtag", "name": "#beats", "href": "https://music.example.com/hashtags/beats"} in payload[
-        "object"
-    ]["tag"]
+    assert {"type": "Hashtag", "name": "#beats", "href": "https://music.example.com/tags/beats"} in payload["object"][
+        "tag"
+    ]
 
     deliver_mock.delay.assert_called_once()
     assert deliver_mock.delay.call_args[0][0] is payload

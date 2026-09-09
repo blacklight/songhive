@@ -137,7 +137,7 @@ describe("AppLayout", () => {
       "Albums",
       "Tracks",
       "Playlists",
-      "Hashtags",
+      "Tags",
       "Genres",
       "About",
     ]);
@@ -173,7 +173,7 @@ describe("AppLayout", () => {
       "Albums",
       "Tracks",
       "Playlists",
-      "Hashtags",
+      "Tags",
       "Genres",
       "History",
       "Favorites",

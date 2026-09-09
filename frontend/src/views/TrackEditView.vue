@@ -13,7 +13,7 @@ import {
 } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
-import { useEntityHashtags } from "@/composables/useEntityHashtags";
+import { useEntityTags } from "@/composables/useEntityTags";
 import { useEntityGenres } from "@/composables/useEntityGenres";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
@@ -58,7 +58,7 @@ const canRenameFile = computed(
   () => !track.value?.is_external || track.value?.can_rename_source !== false,
 );
 
-const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
+const { tags, resetTags, syncTags } = useEntityTags();
 const { genres, resetGenres, syncGenres } = useEntityGenres();
 
 function resetForm() {
@@ -74,7 +74,7 @@ function resetForm() {
   filename.value = track.value?.filename ?? "";
   description.value = track.value?.description ?? "";
   visibility.value = toVisibility(track.value?.visibility);
-  resetHashtags(track.value?.hashtags ?? null);
+  resetTags(track.value?.tags ?? null);
   resetGenres(track.value?.genres ?? null);
   error.value = null;
 }
@@ -84,7 +84,7 @@ async function loadTrack() {
   error.value = null;
   try {
     track.value = await getTrack(trackId.value, {
-      include: "artist,album,hashtags,genres",
+      include: "artist,album,tags,genres",
     });
   } catch (err) {
     error.value =
@@ -132,7 +132,7 @@ async function onSubmit() {
 
   try {
     await updateTrack(trackId.value, body);
-    await syncHashtags("tracks", trackId.value);
+    await syncTags("tracks", trackId.value);
     await syncGenres("tracks", trackId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/tracks/${trackId.value}`);
@@ -176,7 +176,7 @@ async function onDelete() {
 
 async function refreshTrack() {
   try {
-    track.value = await getTrack(trackId.value, { include: "hashtags,genres" });
+    track.value = await getTrack(trackId.value, { include: "tags,genres" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -257,7 +257,7 @@ watch(
         v-model:release-year="releaseYear"
         v-model:filename="filename"
         v-model:visibility="visibility"
-        v-model:hashtags="hashtags"
+        v-model:tags="tags"
         v-model:description="description"
         :can-rename-file="canRenameFile"
         @submit="onSubmit"

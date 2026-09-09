@@ -108,7 +108,7 @@ def _patch_resolution(monkeypatch, followers=(), inboxes=None):
 
 @pytest.mark.asyncio
 async def test_update_activity_renders_content(db_session, regular_user, other_user, config):
-    """A content edit re-renders safe HTML with mention and hashtag links."""
+    """A content edit re-renders safe HTML with mention and tag links."""
     config.federation.instance_domain = "local.example"
     track = await _make_track(db_session, regular_user)
     activity = _make_activity(
@@ -131,7 +131,7 @@ async def test_update_activity_renders_content(db_session, regular_user, other_u
     assert activity.content_source == "hi @other #rock"
     assert activity.content_type == "text/markdown"
     assert 'href="https://local.example/users/other"' in activity.content
-    assert 'href="https://local.example/hashtags/rock"' in activity.content
+    assert 'href="https://local.example/tags/rock"' in activity.content
 
 
 @pytest.mark.asyncio
@@ -164,7 +164,7 @@ async def test_update_activity_rebuilds_payload_object(db_session, regular_user,
             "object": {
                 "id": "https://local.example/users/alice/objects/1",
                 "content": "old",
-                "tag": [{"type": "Hashtag", "name": "#genre", "href": "/hashtags/genre"}],
+                "tag": [{"type": "Hashtag", "name": "#genre", "href": "/tags/genre"}],
             },
         },
     )

@@ -14,7 +14,7 @@ import AppPagination from "@/components/ui/AppPagination.vue";
 import AppTabs from "@/components/ui/AppTabs.vue";
 import SortControl from "@/components/ui/SortControl.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
-import TaggedItemCard from "@/components/hashtags/TaggedItemCard.vue";
+import TaggedItemCard from "@/components/tags/TaggedItemCard.vue";
 import TrackList from "@/components/library/TrackList.vue";
 
 export interface Item {
@@ -36,7 +36,7 @@ export interface ListResult {
   offset: number;
 }
 
-export type ItemKind = "hashtag" | "genre";
+export type ItemKind = "tag" | "genre";
 
 export interface Props {
   kind: ItemKind;
@@ -73,7 +73,7 @@ const visibleTypes = ref<string[]>([]);
 const page = computed(() => Math.floor(offset.value / LIMIT) + 1);
 const isTrackActive = computed(() => activeType.value === "track");
 
-const icon = computed(() => (props.kind === "hashtag" ? "hashtag" : "tag"));
+const icon = "tag";
 
 const entityPluralKeys: Record<string, string> = {
   artist: "browse.entities.artists",
@@ -119,7 +119,7 @@ async function fetchItems() {
         include: "artist,album",
         ...(props.kind === "genre"
           ? { genre: props.name }
-          : { hashtag: props.name }),
+          : { tag: props.name }),
       });
       tracks.value = result.tracks;
       total.value = result.total;

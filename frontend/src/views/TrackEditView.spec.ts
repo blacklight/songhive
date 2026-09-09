@@ -45,7 +45,7 @@ function createTrack(
     visibility: "public",
     filename: "Song One.mp3",
     owner_id: ownerId,
-    hashtags: [],
+    tags: [],
     genres: ["rock"],
     artist: { id: "artist-1", name: "Sample Artist" },
     album: {
@@ -109,7 +109,7 @@ describe("TrackEditView", () => {
     const router = await mountAt("/tracks/track-1/edit");
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "artist,album,hashtags,genres",
+      include: "artist,album,tags,genres",
     });
     expect(wrapper.text()).toContain("Edit track");
 
@@ -130,7 +130,7 @@ describe("TrackEditView", () => {
     const router = await mountAt("/tracks/track-1/edit");
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "artist,album,hashtags,genres",
+      include: "artist,album,tags,genres",
     });
     expect(router.currentRoute.value.path).toBe("/tracks/track-1");
   });
@@ -140,7 +140,7 @@ describe("TrackEditView", () => {
     const router = await mountAt("/tracks/track-1/edit");
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "artist,album,hashtags,genres",
+      include: "artist,album,tags,genres",
     });
     expect(wrapper.text()).toContain("Edit track");
     expect(router.currentRoute.value.path).toBe("/tracks/track-1/edit");

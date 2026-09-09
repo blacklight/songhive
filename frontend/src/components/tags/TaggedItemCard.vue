@@ -40,7 +40,7 @@ const icon = computed(() => {
     playlist: "list",
     library: "folder-open",
   };
-  return icons[props.type] ?? "hashtag";
+  return icons[props.type] ?? "tag";
 });
 
 const title = computed(() => {
@@ -91,7 +91,7 @@ const link = computed(() => {
 });
 
 // TODO: Each card fetches its entity individually. Consider a batch-resolve
-// endpoint (e.g. POST /hashtags/{name}/items:resolve) to avoid N+1 requests.
+// endpoint (e.g. POST /tags/{name}/items:resolve) to avoid N+1 requests.
 async function load() {
   loading.value = true;
   error.value = null;

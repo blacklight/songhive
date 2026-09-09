@@ -73,7 +73,7 @@ def create_audio_activity(
     public download endpoint for the track's audio file, and is also included
     as a ``Document`` attachment. The object's ``content`` is rendered from
     the track's ``description`` (escaped HTML with linkified URLs and
-    hashtags); ``description`` overrides it when provided.
+    tags); ``description`` overrides it when provided.
 
     ``visibility`` selects the post's audience; see
     :func:`_create_object_activity` for how the ``to``/``cc`` addressing is

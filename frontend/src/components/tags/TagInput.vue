@@ -20,8 +20,8 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   "update:modelValue": [value: string[]];
-  add: [hashtag: string];
-  remove: [hashtag: string];
+  add: [tag: string];
+  remove: [tag: string];
   search: [value: string];
   focus: [];
   blur: [];
@@ -34,7 +34,7 @@ const error = ref<string | null>(null);
 const inputRef = ref<HTMLInputElement | null>(null);
 
 const containerId = computed(
-  () => props.id || `hashtag-input-${Math.random().toString(36).slice(2)}`,
+  () => props.id || `tag-input-${Math.random().toString(36).slice(2)}`,
 );
 const inputId = computed(() => props.inputId || `${containerId.value}-input`);
 
@@ -48,16 +48,16 @@ function normalize(raw: string): string {
 function validateTag(raw: string): string | null {
   const tag = normalize(raw);
   if (!tag) {
-    return t("hashtags.emptyTag");
+    return t("tags.emptyTag");
   }
   if (tag.length > 64) {
-    return t("hashtags.tooLong");
+    return t("tags.tooLong");
   }
   if (!VALID_TAG.test(tag)) {
-    return t("hashtags.invalidCharacters");
+    return t("tags.invalidCharacters");
   }
   if (!HAS_LETTER.test(tag)) {
-    return t("hashtags.noLetter");
+    return t("tags.noLetter");
   }
   return null;
 }
@@ -192,23 +192,23 @@ defineExpose({
 </script>
 
 <template>
-  <div class="hashtag-input">
+  <div class="tag-input">
     <div
       :id="containerId"
-      class="hashtag-input__container"
-      :class="{ 'hashtag-input__container--error': !!error }"
+      class="tag-input__container"
+      :class="{ 'tag-input__container--error': !!error }"
       @click="focusInput"
     >
       <span
         v-for="(tag, index) in modelValue"
         :key="tag"
-        class="hashtag-input__chip"
+        class="tag-input__chip"
       >
-        <span class="hashtag-input__chip-text">{{ tag }}</span>
+        <span class="tag-input__chip-text">{{ tag }}</span>
         <button
           type="button"
-          class="hashtag-input__chip-remove"
-          :aria-label="t('hashtags.removeTag', { tag })"
+          class="tag-input__chip-remove"
+          :aria-label="t('tags.removeTag', { tag })"
           @click.stop="removeTag(index)"
         >
           <AppIcon name="xmark" />
@@ -219,9 +219,9 @@ defineExpose({
         ref="inputRef"
         v-model="inputValue"
         type="text"
-        class="hashtag-input__field"
-        :placeholder="placeholder || t('hashtags.placeholder')"
-        :aria-label="ariaLabel || t('hashtags.ariaLabel')"
+        class="tag-input__field"
+        :placeholder="placeholder || t('tags.placeholder')"
+        :aria-label="ariaLabel || t('tags.ariaLabel')"
         @input="onInput"
         @keydown="onKeyDown"
         @focus="onFocus"
@@ -229,19 +229,19 @@ defineExpose({
         @paste="onPaste"
       />
     </div>
-    <p v-if="error" class="hashtag-input__error" role="alert">{{ error }}</p>
-    <p class="hashtag-input__hint">{{ t("hashtags.hint") }}</p>
+    <p v-if="error" class="tag-input__error" role="alert">{{ error }}</p>
+    <p class="tag-input__hint">{{ t("tags.hint") }}</p>
   </div>
 </template>
 
 <style scoped>
-.hashtag-input {
+.tag-input {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
 
-.hashtag-input__container {
+.tag-input__container {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -255,16 +255,16 @@ defineExpose({
   cursor: text;
 }
 
-.hashtag-input__container:focus-within {
+.tag-input__container:focus-within {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
 }
 
-.hashtag-input__container--error {
+.tag-input__container--error {
   border-color: var(--color-danger);
 }
 
-.hashtag-input__chip {
+.tag-input__chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -276,13 +276,13 @@ defineExpose({
   max-width: 100%;
 }
 
-.hashtag-input__chip-text {
+.tag-input__chip-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.hashtag-input__chip-remove {
+.tag-input__chip-remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -295,7 +295,7 @@ defineExpose({
   line-height: 1;
 }
 
-.hashtag-input__field {
+.tag-input__field {
   flex: 1;
   min-width: 6rem;
   border: none;
@@ -306,13 +306,13 @@ defineExpose({
   outline: none;
 }
 
-.hashtag-input__error {
+.tag-input__error {
   margin: 0;
   font-size: 0.875rem;
   color: var(--color-danger);
 }
 
-.hashtag-input__hint {
+.tag-input__hint {
   margin: 0;
   font-size: 0.75rem;
   color: var(--color-text-muted);

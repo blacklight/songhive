@@ -16,8 +16,8 @@ import {
 } from "@/api/playlists";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
-import { useEntityHashtags } from "@/composables/useEntityHashtags";
-import HashtagInput from "@/components/hashtags/HashtagInput.vue";
+import { useEntityTags } from "@/composables/useEntityTags";
+import TagInput from "@/components/tags/TagInput.vue";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import { toVisibility } from "@/utils/entity";
@@ -55,7 +55,7 @@ const { canManage } = useCanManage(
   computed(() => playlist.value?.owner_id ?? null),
 );
 
-const { hashtags, resetHashtags, syncHashtags } = useEntityHashtags();
+const { tags, resetTags, syncTags } = useEntityTags();
 
 const visibilityOptions = computed(() => [
   { value: "private", label: t("browse.visibility.private") },
@@ -67,7 +67,7 @@ function resetForm() {
   name.value = playlist.value?.name ?? "";
   description.value = playlist.value?.description ?? "";
   visibility.value = toVisibility(playlist.value?.visibility);
-  resetHashtags(playlist.value?.hashtags ?? null);
+  resetTags(playlist.value?.tags ?? null);
   error.value = null;
 }
 
@@ -76,7 +76,7 @@ async function loadPlaylist() {
   error.value = null;
   try {
     playlist.value = await getPlaylist(playlistId.value, {
-      include: "hashtags",
+      include: "tags",
     });
   } catch (err) {
     error.value =
@@ -114,7 +114,7 @@ async function onSubmit() {
 
   try {
     await updatePlaylist(playlistId.value, body);
-    await syncHashtags("playlists", playlistId.value);
+    await syncTags("playlists", playlistId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/playlists/${playlistId.value}`);
   } catch (err) {
@@ -158,7 +158,7 @@ async function onDelete() {
 async function refreshPlaylist() {
   try {
     playlist.value = await getPlaylist(playlistId.value, {
-      include: "hashtags",
+      include: "tags",
     });
   } catch (err) {
     error.value =
@@ -285,11 +285,11 @@ watch(
           :options="visibilityOptions"
         />
 
-        <HashtagInput
+        <TagInput
           v-if="canManage"
-          v-model="hashtags"
-          :placeholder="t('hashtags.placeholder')"
-          :aria-label="t('hashtags.label')"
+          v-model="tags"
+          :placeholder="t('tags.placeholder')"
+          :aria-label="t('tags.label')"
         />
 
         <div class="playlist-edit-view__actions">

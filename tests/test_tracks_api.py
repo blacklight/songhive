@@ -63,17 +63,17 @@ def test_list_tracks_filters_by_visibility(client, sample_tracks, regular_user, 
     assert _titles(owner) == {"Public Track", "Local Track", "Private Track"}
 
 
-def test_list_tracks_filters_by_hashtag(client, sample_tracks, regular_user, auth_headers):
-    """List endpoints can filter tracks by hashtag."""
+def test_list_tracks_filters_by_tag(client, sample_tracks, regular_user, auth_headers):
+    """List endpoints can filter tracks by tag."""
     track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
     headers = auth_headers(regular_user)
     client.post(
-        f"/api/v1/tracks/{track.id}/hashtags",
-        json={"hashtags": ["rock"]},
+        f"/api/v1/tracks/{track.id}/tags",
+        json={"tags": ["rock"]},
         headers=headers,
     )
 
-    response = client.get("/api/v1/tracks", params={"hashtag": "rock"}, headers=headers)
+    response = client.get("/api/v1/tracks", params={"tag": "rock"}, headers=headers)
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 1

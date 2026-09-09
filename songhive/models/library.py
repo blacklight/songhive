@@ -14,7 +14,7 @@ from ._enums import Visibility
 from .base import Base
 
 if TYPE_CHECKING:
-    from .hashtag import Hashtag, HashtagLibrary
+    from .tag import Tag, TagLibrary
 
 
 class Library(Base):
@@ -53,14 +53,14 @@ class Library(Base):
         lazy="selectin",
         viewonly=True,
     )
-    hashtags: Mapped[List["Hashtag"]] = relationship(
-        "Hashtag",
-        secondary="hashtag_libraries",
+    tags: Mapped[List["Tag"]] = relationship(
+        "Tag",
+        secondary="tag_libraries",
         viewonly=True,
         lazy="selectin",
     )
-    hashtag_associations: Mapped[List["HashtagLibrary"]] = relationship(
-        "HashtagLibrary",
+    tag_associations: Mapped[List["TagLibrary"]] = relationship(
+        "TagLibrary",
         back_populates="library",
         cascade="all, delete-orphan",
         lazy="selectin",

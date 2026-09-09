@@ -200,14 +200,14 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
       {
-        path: "hashtags",
-        name: "hashtags",
-        component: () => import("@/views/HashtagsView.vue"),
+        path: "tags",
+        name: "tags",
+        component: () => import("@/views/TagsView.vue"),
       },
       {
-        path: "hashtags/:name",
-        name: "hashtag",
-        component: () => import("@/views/HashtagView.vue"),
+        path: "tags/:name",
+        name: "tag",
+        component: () => import("@/views/TagView.vue"),
       },
       {
         path: "genres",

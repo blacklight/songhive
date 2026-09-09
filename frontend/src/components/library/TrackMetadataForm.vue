@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import GenreInput from "@/components/genres/GenreInput.vue";
-import HashtagInput from "@/components/hashtags/HashtagInput.vue";
+import TagInput from "@/components/tags/TagInput.vue";
 
 export interface Props {
   bulk?: boolean;
@@ -27,7 +27,7 @@ const discNumber = defineModel<string>("discNumber", { required: true });
 const releaseYear = defineModel<string>("releaseYear", { required: true });
 const filename = defineModel<string>("filename", { required: true });
 const visibility = defineModel<string>("visibility", { required: true });
-const hashtags = defineModel<string[]>("hashtags", { required: true });
+const tags = defineModel<string[]>("tags", { required: true });
 const description = defineModel<string>("description", { default: "" });
 
 const emit = defineEmits<{ submit: [] }>();
@@ -113,10 +113,10 @@ const visibilityOptions = computed(() => {
       :disabled="props.disabled"
     />
 
-    <HashtagInput
-      v-model="hashtags"
-      :placeholder="t('hashtags.placeholder')"
-      :aria-label="t('hashtags.label')"
+    <TagInput
+      v-model="tags"
+      :placeholder="t('tags.placeholder')"
+      :aria-label="t('tags.label')"
     />
 
     <div v-if="$slots.default" class="track-metadata-form__actions">

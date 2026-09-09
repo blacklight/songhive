@@ -5,7 +5,7 @@ import { RouterLink } from "vue-router";
 import AppIcon from "@/components/ui/AppIcon.vue";
 
 export interface Props {
-  hashtags: string[];
+  tags: string[];
   genres?: string[];
   removable?: boolean;
   clickable?: boolean;
@@ -20,60 +20,60 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  click: [hashtag: string];
-  remove: [hashtag: string];
+  click: [tag: string];
+  remove: [tag: string];
 }>();
 
 const { t } = useI18n();
 
-function genreToHashtag(name: string): string {
+function genreToTag(name: string): string {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9_]+/g, "_")
     .replace(/^_+|_+$/g, "");
 }
 
-const visibleHashtags = computed(() => {
-  const genreHashtags = new Set(props.genres.map(genreToHashtag));
-  return props.hashtags.filter((hashtag) => !genreHashtags.has(hashtag));
+const visibleTags = computed(() => {
+  const genreTags = new Set(props.genres.map(genreToTag));
+  return props.tags.filter((tag) => !genreTags.has(tag));
 });
 
-function onClick(hashtag: string) {
+function onClick(tag: string) {
   if (props.clickable) {
-    emit("click", hashtag);
+    emit("click", tag);
   }
 }
 
-function onRemove(hashtag: string, event: MouseEvent) {
+function onRemove(tag: string, event: MouseEvent) {
   event.preventDefault();
   event.stopPropagation();
-  emit("remove", hashtag);
+  emit("remove", tag);
 }
 </script>
 
 <template>
-  <ul class="hashtag-list">
+  <ul class="tag-list">
     <li
-      v-for="hashtag in visibleHashtags"
-      :key="hashtag"
-      class="hashtag-list__item"
-      :class="`hashtag-list__item--${size}`"
+      v-for="tag in visibleTags"
+      :key="tag"
+      class="tag-list__item"
+      :class="`tag-list__item--${size}`"
     >
       <component
         :is="clickable ? RouterLink : 'span'"
-        :to="clickable ? `/hashtags/${encodeURIComponent(hashtag)}` : undefined"
-        class="hashtag-list__chip"
-        :class="{ 'hashtag-list__chip--clickable': clickable }"
-        @click="clickable ? onClick(hashtag) : undefined"
+        :to="clickable ? `/tags/${encodeURIComponent(tag)}` : undefined"
+        class="tag-list__chip"
+        :class="{ 'tag-list__chip--clickable': clickable }"
+        @click="clickable ? onClick(tag) : undefined"
       >
-        <AppIcon name="hashtag" />
-        <span class="hashtag-list__name">{{ hashtag }}</span>
+        <AppIcon name="tag" />
+        <span class="tag-list__name">{{ tag }}</span>
         <button
           v-if="removable"
           type="button"
-          class="hashtag-list__remove"
-          :aria-label="t('hashtags.removeTag', { tag: hashtag })"
-          @click="onRemove(hashtag, $event)"
+          class="tag-list__remove"
+          :aria-label="t('tags.removeTag', { tag: tag })"
+          @click="onRemove(tag, $event)"
         >
           <AppIcon name="xmark" />
         </button>
@@ -83,7 +83,7 @@ function onRemove(hashtag: string, event: MouseEvent) {
 </template>
 
 <style scoped>
-.hashtag-list {
+.tag-list {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -93,11 +93,11 @@ function onRemove(hashtag: string, event: MouseEvent) {
   padding: 0;
 }
 
-.hashtag-list__item {
+.tag-list__item {
   display: inline-flex;
 }
 
-.hashtag-list__chip {
+.tag-list__chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -111,18 +111,18 @@ function onRemove(hashtag: string, event: MouseEvent) {
   transition: background-color var(--transition-fast);
 }
 
-.hashtag-list__chip--clickable:hover {
+.tag-list__chip--clickable:hover {
   background-color: var(--color-surface-hover);
   text-decoration: none;
 }
 
-.hashtag-list__name {
+.tag-list__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.hashtag-list__remove {
+.tag-list__remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -25,19 +25,19 @@ from ...models.user import User
 from ...services import acl, audit, deletion, music
 from ...services.federation import unpublish_track_activity
 from ...services.genres import (
-    genres_to_hashtags,
+    genres_to_tags,
     propagate_track_genres,
     remove_genre_from_entity,
     set_genres_for_entity,
     split_genre_string,
     validate_genre_name,
 )
-from ...services.hashtags import (
-    add_hashtags_to_entity,
-    remove_hashtag_from_entity,
-    validate_hashtag_name,
-)
 from ...services.storage import StorageService
+from ...services.tags import (
+    add_tags_to_entity,
+    remove_tag_from_entity,
+    validate_tag_name,
+)
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
 from .._sorting import SortParams, get_sort
@@ -58,7 +58,7 @@ from ..responses import (
     build_track_summary,
     build_user_summary,
 )
-from ._common import GenreListRequest, HashtagListRequest, HasOwnerId, redact_owner
+from ._common import GenreListRequest, HasOwnerId, TagListRequest, redact_owner
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import _enqueue_track_enrichment, _enqueue_track_tag_sync, _handle_visibility_changes
 
@@ -83,7 +83,7 @@ class AlbumResponse(BaseModel):
     artist: Optional[ArtistSummary] = None
     owner: Optional[UserSummary] = None
     tracks: Optional[List[TrackSummary]] = None
-    hashtags: List[str] = []
+    tags: List[str] = []
     genres: List[str] = []
 
 
@@ -116,11 +116,11 @@ def _album_track_sort_key(t: Track):
     return (t.disc_number or 0, t.track_number or 0, t.created_at)
 
 
-def _album_hashtags(album) -> List[str]:
-    """Return loaded hashtag names, avoiding a lazy load."""
-    if not _is_loaded(album, "hashtags"):
+def _album_tags(album) -> List[str]:
+    """Return loaded tag names, avoiding a lazy load."""
+    if not _is_loaded(album, "tags"):
         return []
-    return [h.name for h in album.hashtags]
+    return [h.name for h in album.tags]
 
 
 def _album_genres(album) -> List[str]:
@@ -169,7 +169,7 @@ async def _build_album_response(
         artist=artist,
         owner=owner,
         tracks=tracks,
-        hashtags=_album_hashtags(album),
+        tags=_album_tags(album),
         genres=_album_genres(album),
     )
 
@@ -187,7 +187,7 @@ async def list_albums(
     sort: SortParams = Depends(get_sort({"title", "artist_name", "created_at", "updated_at", "release_year"}, "title")),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "hashtags", "genres"})),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "tags", "genres"})),
 ):
     """List or search albums visible to the requester."""
     total = await music.count_albums(
@@ -227,7 +227,7 @@ async def get_album(
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "hashtags", "genres"})),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "tags", "genres"})),
 ):
     """Get an album by ID."""
     album = await music.get_album(db, album_id, include=set(include.values))
@@ -246,7 +246,7 @@ async def update_album(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "hashtags", "genres"})),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "tags", "genres"})),
 ):
     """Partially update an album."""
     album = await music.get_album(db, album_id, include=set(include.values))
@@ -270,9 +270,9 @@ async def update_album(
         genre_names = split_genre_string(body.genre)
         await set_genres_for_entity(db, "album", album_id, genre_names)
         if genre_names:
-            hashtag_names = genres_to_hashtags(genre_names)
-            if hashtag_names:
-                await add_hashtags_to_entity(db, "album", album_id, hashtag_names, user_id=None)
+            tag_names = genres_to_tags(genre_names)
+            if tag_names:
+                await add_tags_to_entity(db, "album", album_id, tag_names, user_id=None)
         await propagate_track_genres(db, album)
     visibility_track_changes: List[Tuple[Track, str]] = []
     if body.visibility is not None:
@@ -322,7 +322,7 @@ async def upload_album_cover(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "hashtags", "genres"})),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "tags", "genres"})),
 ):
     """Upload album cover art."""
     album = await music.get_album(db, album_id, include=set(include.values))
@@ -369,7 +369,7 @@ async def delete_album_cover(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "hashtags", "genres"})),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "tags", "genres"})),
 ):
     """Remove album cover art."""
     album = await music.get_album(db, album_id, include=set(include.values))
@@ -509,17 +509,17 @@ async def enrich_album(
     return AlbumEnrichResponse(album_id=album_id, enqueued=enqueued)
 
 
-@router.post("/{album_id}/hashtags", response_model=AlbumResponse)
-async def add_album_hashtags(
+@router.post("/{album_id}/tags", response_model=AlbumResponse)
+async def add_album_tags(
     album_id: str,
     request: Request,
-    body: HashtagListRequest,
+    body: TagListRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "hashtags", "genres"})),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "tags", "genres"})),
 ):
-    """Add hashtags to an album."""
+    """Add tags to an album."""
     album = await music.get_album(db, album_id, include={"artist"})
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
@@ -531,11 +531,11 @@ async def add_album_hashtags(
         )
 
     try:
-        await add_hashtags_to_entity(
+        await add_tags_to_entity(
             db,
             "album",
             album_id,
-            body.hashtags,
+            body.tags,
             user_id=current_user.id,
         )
     except ValueError as exc:
@@ -544,31 +544,31 @@ async def add_album_hashtags(
             detail=str(exc),
         ) from exc
 
-    album = await music.get_album(db, album_id, include=set(include.values) | {"artist", "hashtags"})
+    album = await music.get_album(db, album_id, include=set(include.values) | {"artist", "tags"})
     await audit.log_action(
         db,
         actor_id=current_user.id,
-        action="hashtag.add",
+        action="tag.add",
         target_type="album",
         target_id=album_id,
-        details={"hashtags": [validate_hashtag_name(h) for h in body.hashtags]},
+        details={"tags": [validate_tag_name(h) for h in body.tags]},
         ip_address=client_ip(request),
     )
     await db.commit()
     return await _build_album_response(album, current_user, storage, include)
 
 
-@router.delete("/{album_id}/hashtags/{hashtag}", response_model=AlbumResponse)
-async def remove_album_hashtag(
+@router.delete("/{album_id}/tags/{tag}", response_model=AlbumResponse)
+async def remove_album_tag(
     album_id: str,
-    hashtag: str,
+    tag: str,
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "hashtags", "genres"})),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "tags", "genres"})),
 ):
-    """Remove a hashtag from an album."""
+    """Remove a tag from an album."""
     album = await music.get_album(db, album_id, include={"artist"})
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
@@ -580,7 +580,7 @@ async def remove_album_hashtag(
         )
 
     try:
-        await remove_hashtag_from_entity(db, "album", album_id, hashtag)
+        await remove_tag_from_entity(db, "album", album_id, tag)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -591,10 +591,10 @@ async def remove_album_hashtag(
     await audit.log_action(
         db,
         actor_id=current_user.id,
-        action="hashtag.remove",
+        action="tag.remove",
         target_type="album",
         target_id=album_id,
-        details={"hashtag": validate_hashtag_name(hashtag)},
+        details={"tag": validate_tag_name(tag)},
         ip_address=client_ip(request),
     )
     await db.commit()
@@ -609,7 +609,7 @@ async def set_album_genres(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "hashtags", "genres"})),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "tags", "genres"})),
 ):
     """Set/replace the genres on an album."""
     album = await music.get_album(db, album_id, include={"artist"})
@@ -634,9 +634,9 @@ async def set_album_genres(
         album.genre = "; ".join(normalised) if normalised else None
         await set_genres_for_entity(db, "album", album_id, normalised)
 
-        hashtag_names = genres_to_hashtags(normalised)
-        if hashtag_names:
-            await add_hashtags_to_entity(db, "album", album_id, hashtag_names, user_id=None)
+        tag_names = genres_to_tags(normalised)
+        if tag_names:
+            await add_tags_to_entity(db, "album", album_id, tag_names, user_id=None)
 
         await propagate_track_genres(db, album)
     except ValueError as exc:
@@ -672,7 +672,7 @@ async def remove_album_genre(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "hashtags", "genres"})),
+    include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "tags", "genres"})),
 ):
     """Remove a genre from an album."""
     album = await music.get_album(db, album_id, include={"artist"})

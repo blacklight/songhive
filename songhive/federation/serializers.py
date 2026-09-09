@@ -17,8 +17,8 @@ from pubby.content import (
 from sqlalchemy import inspect as sa_inspect
 
 from ..models import Artist, Track, Visibility
-from ..services.genres import extract_genres_from_track, genres_to_hashtags
-from ._common import get_hashtag_url, get_stream_url, get_track_url
+from ..services.genres import extract_genres_from_track, genres_to_tags
+from ._common import get_stream_url, get_tag_url, get_track_url
 
 
 def set_post_content(
@@ -30,8 +30,8 @@ def set_post_content(
     """
     Render a track description into the object's ``content`` field.
 
-    The description is HTML-escaped, with http(s) URLs and ``#hashtags``
-    linkified so remote servers render them as usable links.  Hashtags found
+    The description is HTML-escaped, with http(s) URLs and ``#tags``
+    linkified so remote servers render them as usable links.  Tags found
     in the text are also appended to the object's ``tag`` list.
 
     :func:`normalize_post_content` is applied afterwards so the rendered
@@ -40,7 +40,7 @@ def set_post_content(
     URL explicitly for objects (e.g. ``Note`` shares) whose ``url`` is the
     object's own id rather than the track page.
     """
-    set_object_content(obj, description or "", partial(get_hashtag_url, domain))
+    set_object_content(obj, description or "", partial(get_tag_url, domain))
     normalize_post_content(obj, link_href=link_href)
 
 
@@ -211,8 +211,8 @@ def _track_genre_tags(track: Track, domain: str) -> Optional[list]:
     genre_names = extract_genres_from_track(track)
     if not genre_names:
         return None
-    genre_tags = list(dict.fromkeys(genres_to_hashtags(genre_names)))
-    return build_hashtag_tags(genre_tags, partial(get_hashtag_url, domain))
+    genre_tags = list(dict.fromkeys(genres_to_tags(genre_names)))
+    return build_hashtag_tags(genre_tags, partial(get_tag_url, domain))
 
 
 def track_to_audio_object(

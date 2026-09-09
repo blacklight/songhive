@@ -1,5 +1,5 @@
 """
-Tests for the hashtag service.
+Tests for the tag service.
 """
 
 import pytest
@@ -11,18 +11,18 @@ from songhive.models.library import Library
 from songhive.models.playlist import Playlist
 from songhive.models.track import Track
 from songhive.models.user import User
-from songhive.services.hashtags import (
-    add_hashtags_to_entity,
-    delete_hashtag_globally,
-    extract_hashtags_from_metadata,
-    extract_hashtags_from_track,
-    get_hashtags_for_entity,
-    get_items_for_hashtag,
-    list_hashtags,
-    remove_hashtag_from_entity,
-    validate_hashtag_name,
-)
 from songhive.services.metadata import AudioMetadata
+from songhive.services.tags import (
+    add_tags_to_entity,
+    delete_tag_globally,
+    extract_tags_from_metadata,
+    extract_tags_from_track,
+    get_items_for_tag,
+    get_tags_for_entity,
+    list_tags,
+    remove_tag_from_entity,
+    validate_tag_name,
+)
 
 
 async def _make_artist(session, name: str = "Test Artist") -> Artist:
@@ -100,49 +100,49 @@ async def _make_library(
 
 
 class TestValidation:
-    """Tests for hashtag validation and metadata extraction."""
+    """Tests for tag validation and metadata extraction."""
 
     def test_validate_strips_leading_hash(self):
-        assert validate_hashtag_name("#Rock") == "rock"
+        assert validate_tag_name("#Rock") == "rock"
 
     def test_validate_lowercases(self):
-        assert validate_hashtag_name("RoCk") == "rock"
+        assert validate_tag_name("RoCk") == "rock"
 
     def test_validate_allows_underscores(self):
-        assert validate_hashtag_name("chill_vibes") == "chill_vibes"
+        assert validate_tag_name("chill_vibes") == "chill_vibes"
 
     def test_validate_rejects_only_digits(self):
         with pytest.raises(ValueError):
-            validate_hashtag_name("123")
+            validate_tag_name("123")
 
     def test_validate_rejects_invalid_chars(self):
         with pytest.raises(ValueError):
-            validate_hashtag_name("rock&roll")
+            validate_tag_name("rock&roll")
 
     def test_extract_from_genre(self):
         metadata = AudioMetadata(genre="Rock, Pop; Chill")
-        assert extract_hashtags_from_metadata(metadata) == ["rock", "pop", "chill"]
+        assert extract_tags_from_metadata(metadata) == ["rock", "pop", "chill"]
 
     def test_extract_from_raw_tags(self):
         metadata = AudioMetadata(raw_tags={"TXXX:TAGS": ["#Synthwave", "Retrowave"]})
-        assert extract_hashtags_from_metadata(metadata) == ["synthwave", "retrowave"]
+        assert extract_tags_from_metadata(metadata) == ["synthwave", "retrowave"]
 
     def test_extract_deduplicates(self):
         metadata = AudioMetadata(
             genre="Rock",
             raw_tags={"TAGS": ["Rock", "Indie"]},
         )
-        assert extract_hashtags_from_metadata(metadata) == ["rock", "indie"]
+        assert extract_tags_from_metadata(metadata) == ["rock", "indie"]
 
 
 class TestAddAndRemove:
-    """Tests for adding and removing hashtags from entities."""
+    """Tests for adding and removing tags from entities."""
 
-    async def test_add_hashtags_to_track(self, db_session, regular_user):
+    async def test_add_tags_to_track(self, db_session, regular_user):
         artist = await _make_artist(db_session)
         track = await _make_track(db_session, artist, owner=regular_user)
 
-        tags = await add_hashtags_to_entity(
+        tags = await add_tags_to_entity(
             db_session,
             "track",
             track.id,
@@ -151,147 +151,147 @@ class TestAddAndRemove:
         )
 
         assert [t.name for t in tags] == ["rock", "indie_folk"]
-        entity_tags = await get_hashtags_for_entity(db_session, "track", track.id)
+        entity_tags = await get_tags_for_entity(db_session, "track", track.id)
         assert [t.name for t in entity_tags] == ["indie_folk", "rock"]
 
     async def test_add_is_idempotent(self, db_session, regular_user):
         artist = await _make_artist(db_session)
         track = await _make_track(db_session, artist, owner=regular_user)
 
-        first = await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
-        second = await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        first = await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        second = await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
 
         assert first[0].id == second[0].id
-        assert len(await get_hashtags_for_entity(db_session, "track", track.id)) == 1
+        assert len(await get_tags_for_entity(db_session, "track", track.id)) == 1
 
-    async def test_remove_hashtag_from_track(self, db_session, regular_user):
+    async def test_remove_tag_from_track(self, db_session, regular_user):
         artist = await _make_artist(db_session)
         track = await _make_track(db_session, artist, owner=regular_user)
-        await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
 
-        await remove_hashtag_from_entity(db_session, "track", track.id, "#Rock")
+        await remove_tag_from_entity(db_session, "track", track.id, "#Rock")
 
-        assert await get_hashtags_for_entity(db_session, "track", track.id) == []
+        assert await get_tags_for_entity(db_session, "track", track.id) == []
 
     async def test_add_to_unknown_entity_raises(self, db_session):
         with pytest.raises(ValueError, match="Unknown entity type"):
-            await add_hashtags_to_entity(db_session, "widget", "abc", ["rock"])
+            await add_tags_to_entity(db_session, "widget", "abc", ["rock"])
 
     async def test_add_to_missing_entity_raises(self, db_session):
         with pytest.raises(ValueError, match="track not found"):
-            await add_hashtags_to_entity(db_session, "track", "missing", ["rock"])
+            await add_tags_to_entity(db_session, "track", "missing", ["rock"])
 
 
 class TestListingAndVisibility:
-    """Tests for listing hashtags and visibility-aware item queries."""
+    """Tests for listing tags and visibility-aware item queries."""
 
-    async def test_list_hashtags_counts_public_items(self, db_session, regular_user):
+    async def test_list_tags_counts_public_items(self, db_session, regular_user):
         artist = await _make_artist(db_session)
         track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
-        await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
 
-        summaries, total = await list_hashtags(db_session)
+        summaries, total = await list_tags(db_session)
         assert total == 1
         assert len(summaries) == 1
         assert summaries[0].name == "rock"
         assert summaries[0].item_count == 1
 
-    async def test_list_hashtags_hides_private_items_from_anonymous(self, db_session, regular_user):
+    async def test_list_tags_hides_private_items_from_anonymous(self, db_session, regular_user):
         artist = await _make_artist(db_session)
         track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PRIVATE.value)
-        await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
 
-        summaries, total = await list_hashtags(db_session)
+        summaries, total = await list_tags(db_session)
         assert total == 0
 
-    async def test_list_hashtags_owner_sees_private(self, db_session, regular_user):
+    async def test_list_tags_owner_sees_private(self, db_session, regular_user):
         artist = await _make_artist(db_session)
         track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PRIVATE.value)
-        await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
 
-        summaries, total = await list_hashtags(db_session, user=regular_user)
+        summaries, total = await list_tags(db_session, user=regular_user)
         assert total == 1
 
     async def test_user_scoped_listing(self, db_session, regular_user, other_user):
         artist = await _make_artist(db_session)
         track1 = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
         track2 = await _make_track(db_session, artist, owner=other_user, visibility=Visibility.PUBLIC.value)
-        await add_hashtags_to_entity(db_session, "track", track1.id, ["rock"], user_id=regular_user.id)
-        await add_hashtags_to_entity(db_session, "track", track2.id, ["jazz"], user_id=other_user.id)
+        await add_tags_to_entity(db_session, "track", track1.id, ["rock"], user_id=regular_user.id)
+        await add_tags_to_entity(db_session, "track", track2.id, ["jazz"], user_id=other_user.id)
 
-        summaries, total = await list_hashtags(db_session, user=regular_user, target_user_id=regular_user.id)
+        summaries, total = await list_tags(db_session, user=regular_user, target_user_id=regular_user.id)
         assert total == 1
         assert summaries[0].name == "rock"
 
-    async def test_get_items_for_hashtag(self, db_session, regular_user):
+    async def test_get_items_for_tag(self, db_session, regular_user):
         artist = await _make_artist(db_session)
         track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
         album = await _make_album(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
-        await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
-        await add_hashtags_to_entity(db_session, "album", album.id, ["rock"], user_id=regular_user.id)
+        await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        await add_tags_to_entity(db_session, "album", album.id, ["rock"], user_id=regular_user.id)
 
-        items, total = await get_items_for_hashtag(db_session, "rock")
+        items, total = await get_items_for_tag(db_session, "rock")
         assert total == 2
         assert sorted([(i.type, i.id) for i in items]) == [
             ("album", str(album.id)),
             ("track", str(track.id)),
         ]
 
-    async def test_get_items_for_missing_hashtag(self, db_session):
-        items, total = await get_items_for_hashtag(db_session, "nope")
+    async def test_get_items_for_missing_tag(self, db_session):
+        items, total = await get_items_for_tag(db_session, "nope")
         assert total == 0
         assert items == []
 
-    async def test_get_items_for_invalid_hashtag_returns_empty(self, db_session):
-        items, total = await get_items_for_hashtag(db_session, "foo bar")
+    async def test_get_items_for_invalid_tag_returns_empty(self, db_session):
+        items, total = await get_items_for_tag(db_session, "foo bar")
         assert total == 0
         assert items == []
 
-    async def test_get_items_for_hashtag_by_type(self, db_session, regular_user):
+    async def test_get_items_for_tag_by_type(self, db_session, regular_user):
         artist = await _make_artist(db_session)
         track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
         album = await _make_album(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
-        await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
-        await add_hashtags_to_entity(db_session, "album", album.id, ["rock"], user_id=regular_user.id)
-        await add_hashtags_to_entity(db_session, "artist", artist.id, ["rock"])
+        await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        await add_tags_to_entity(db_session, "album", album.id, ["rock"], user_id=regular_user.id)
+        await add_tags_to_entity(db_session, "artist", artist.id, ["rock"])
 
-        track_items, total = await get_items_for_hashtag(db_session, "rock", item_type="track")
+        track_items, total = await get_items_for_tag(db_session, "rock", item_type="track")
         assert total == 1
         assert [(i.type, i.id) for i in track_items] == [("track", str(track.id))]
 
-        album_items, total = await get_items_for_hashtag(db_session, "rock", item_type="album")
+        album_items, total = await get_items_for_tag(db_session, "rock", item_type="album")
         assert total == 1
         assert [(i.type, i.id) for i in album_items] == [("album", str(album.id))]
 
-        artist_items, total = await get_items_for_hashtag(db_session, "rock", item_type="artist")
+        artist_items, total = await get_items_for_tag(db_session, "rock", item_type="artist")
         assert total == 1
         assert [(i.type, i.id) for i in artist_items] == [("artist", str(artist.id))]
 
-        unknown_items, total = await get_items_for_hashtag(db_session, "rock", item_type="library")
+        unknown_items, total = await get_items_for_tag(db_session, "rock", item_type="library")
         assert total == 0
         assert unknown_items == []
 
 
 class TestDelete:
-    """Tests for global hashtag deletion."""
+    """Tests for global tag deletion."""
 
-    async def test_delete_hashtag_globally(self, db_session, regular_user):
+    async def test_delete_tag_globally(self, db_session, regular_user):
         artist = await _make_artist(db_session)
         track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
-        await add_hashtags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
 
-        deleted = await delete_hashtag_globally(db_session, "rock")
+        deleted = await delete_tag_globally(db_session, "rock")
         assert deleted is not None
         assert deleted.name == "rock"
-        assert await get_hashtags_for_entity(db_session, "track", track.id) == []
+        assert await get_tags_for_entity(db_session, "track", track.id) == []
 
-    async def test_delete_missing_hashtag_returns_none(self, db_session):
-        deleted = await delete_hashtag_globally(db_session, "nope")
+    async def test_delete_missing_tag_returns_none(self, db_session):
+        deleted = await delete_tag_globally(db_session, "nope")
         assert deleted is None
 
 
 class TestExtraction:
-    """Tests for automatic hashtag extraction from metadata and tracks."""
+    """Tests for automatic tag extraction from metadata and tracks."""
 
     def test_extract_from_track(self):
         track = Track(
@@ -301,8 +301,8 @@ class TestExtraction:
             raw_metadata={"TXXX:TAGS": ["#Synthwave", "Retrowave"]},
             owner_id="user-id",
         )
-        assert extract_hashtags_from_track(track) == ["rock", "pop", "chill", "synthwave", "retrowave"]
+        assert extract_tags_from_track(track) == ["rock", "pop", "chill", "synthwave", "retrowave"]
 
     def test_extract_from_track_with_no_tags(self):
         track = Track(title="Test Track", artist_id="artist-id")
-        assert extract_hashtags_from_track(track) == []
+        assert extract_tags_from_track(track) == []

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from .album import Album
     from .artist import Artist
     from .genre import Genre, GenreTrack
-    from .hashtag import Hashtag, HashtagTrack
+    from .tag import Tag, TagTrack
 
 
 class Track(Base):
@@ -79,14 +79,14 @@ class Track(Base):
     audio_file = relationship("StoredFile", foreign_keys=[audio_file_id], lazy="selectin")
     image_file = relationship("StoredFile", foreign_keys=[image_file_id], lazy="selectin")
     owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
-    hashtags: Mapped[List["Hashtag"]] = relationship(
-        "Hashtag",
-        secondary="hashtag_tracks",
+    tags: Mapped[List["Tag"]] = relationship(
+        "Tag",
+        secondary="tag_tracks",
         viewonly=True,
         lazy="selectin",
     )
-    hashtag_associations: Mapped[List["HashtagTrack"]] = relationship(
-        "HashtagTrack",
+    tag_associations: Mapped[List["TagTrack"]] = relationship(
+        "TagTrack",
         back_populates="track",
         cascade="all, delete-orphan",
         lazy="selectin",

@@ -16,13 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.audit_log import AuditLog
-from ..models.hashtag import Hashtag
 from ..models.invite import Invite
 from ..models.library import Library
 from ..models.oauth_client import OAuth2Client
 from ..models.playlist import Playlist
 from ..models.report import Report
 from ..models.stored_file import StoredFile
+from ..models.tag import Tag
 from ..models.track import Track
 from ..models.user import User
 
@@ -144,7 +144,7 @@ _TARGET_NAME_FIELDS: dict[str, Tuple[Any, List[str], List[str]]] = {
     "album": (Album, ["title"], ["title"]),
     "artist": (Artist, ["name"], ["name"]),
     "file": (StoredFile, ["original_filename"], ["original_filename"]),
-    "hashtag": (Hashtag, ["name"], ["name"]),
+    "tag": (Tag, ["name"], ["name"]),
     "invite": (Invite, ["code"], ["code"]),
     "library": (Library, ["name"], ["name"]),
     "oauth_client": (OAuth2Client, ["name", "client_id"], ["name", "client_id"]),

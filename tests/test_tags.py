@@ -18,7 +18,7 @@ from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 from songhive.music.metadata import AudioMetadataWrite, extract_metadata
 from songhive.services.genres import get_genres_for_entity
-from songhive.services.hashtags import get_hashtags_for_entity
+from songhive.services.tags import get_tags_for_entity
 from songhive.tasks.tags import _build_metadata, _prepare_cover_art, _resolve_cover_file, sync_track_tags
 
 
@@ -283,8 +283,8 @@ async def test_prepare_cover_art_clears_when_no_cover_resolves():
     assert meta.clear_cover_art is True
 
 
-def test_sync_track_tags_propagates_genres_and_hashtags(tmp_path, monkeypatch):
-    """The Celery task normalizes genres, creates hashtags, and propagates them to albums."""
+def test_sync_track_tags_propagates_genres_and_tags(tmp_path, monkeypatch):
+    """The Celery task normalizes genres, creates tags, and propagates them to albums."""
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'genre_tags.db'}"
     media_dir = tmp_path / "media"
     media_dir.mkdir()
@@ -340,14 +340,14 @@ def test_sync_track_tags_propagates_genres_and_hashtags(tmp_path, monkeypatch):
             from sqlalchemy import select
 
             track_genres = await get_genres_for_entity(session, "track", track_id)
-            hashtags = await get_hashtags_for_entity(session, "track", track_id)
+            tags = await get_tags_for_entity(session, "track", track_id)
             album_genres = await get_genres_for_entity(session, "album", album_id)
             album_result = await session.execute(select(Album).where(Album.id == album_id))
             album = album_result.scalar_one()
-            return track_genres, [h.name for h in hashtags], album_genres, album.genre
+            return track_genres, [h.name for h in tags], album_genres, album.genre
 
-    track_genres, track_hashtags, album_genres, album_genre = asyncio.run(_verify())
+    track_genres, track_tags, album_genres, album_genre = asyncio.run(_verify())
     assert track_genres == ["hip hop", "rock"]
-    assert track_hashtags == ["hip_hop", "rock"]
+    assert track_tags == ["hip_hop", "rock"]
     assert album_genres == ["hip hop", "rock"]
     assert album_genre == "hip hop; rock"

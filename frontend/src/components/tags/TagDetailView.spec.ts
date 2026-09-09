@@ -15,7 +15,7 @@ vi.mock("@/api/tracks", () => ({
   listTracksWithMeta: vi.fn(),
 }));
 
-vi.mock("@/components/hashtags/TaggedItemCard.vue", () => ({
+vi.mock("@/components/tags/TaggedItemCard.vue", () => ({
   default: {
     template:
       '<div class="tagged-item-card-stub" :data-type="type" :data-id="id">{{ type }}:{{ id }}</div>',

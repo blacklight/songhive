@@ -33,13 +33,13 @@ from ..models.track import Track
 from ..models.upload import Upload
 from .genres import (
     extract_genres_from_metadata,
-    genres_to_hashtags,
+    genres_to_tags,
     set_genres_for_entity,
     sync_album_genres,
 )
-from .hashtags import add_hashtags_to_entity, extract_hashtags_from_metadata
 from .metadata import AudioMetadata, extract_metadata
 from .storage import StorageService, audio_hash
+from .tags import add_tags_to_entity, extract_tags_from_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -729,11 +729,11 @@ async def import_audio_file(
     if album:
         await sync_album_genres(session, album)
 
-    auto_tags = extract_hashtags_from_metadata(metadata)
-    genre_hashtags = genres_to_hashtags(genre_names)
-    auto_tags = list(dict.fromkeys(auto_tags + genre_hashtags))
+    auto_tags = extract_tags_from_metadata(metadata)
+    genre_tags = genres_to_tags(genre_names)
+    auto_tags = list(dict.fromkeys(auto_tags + genre_tags))
     if auto_tags:
-        await add_hashtags_to_entity(
+        await add_tags_to_entity(
             session,
             "track",
             str(track.id),

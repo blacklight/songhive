@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
-import { listHashtags, type HashtagSummary } from "@/api/hashtags";
+import { listTags, type TagSummary } from "@/api/tags";
 import { getApiErrorMessage } from "@/api/client";
 import { useDebounce } from "@/composables/useDebounce";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -16,7 +16,7 @@ const { t } = useI18n();
 
 const LIMIT = 48;
 
-const items = ref<HashtagSummary[]>([]);
+const items = ref<TagSummary[]>([]);
 const total = ref(0);
 const offset = ref(0);
 const loading = ref(false);
@@ -42,7 +42,7 @@ async function load() {
   error.value = null;
 
   try {
-    const result = await listHashtags({
+    const result = await listTags({
       q: query.value || undefined,
       limit: LIMIT,
       offset: offset.value,
@@ -92,15 +92,13 @@ onMounted(() => load());
 </script>
 
 <template>
-  <div class="hashtags-view">
-    <div class="hashtags-view__header">
-      <AppPageTitle icon="hashtag">{{
-        t("hashtags.allHashtags")
-      }}</AppPageTitle>
+  <div class="tags-view">
+    <div class="tags-view__header">
+      <AppPageTitle icon="tag">{{ t("tags.allTags") }}</AppPageTitle>
 
       <SearchBar
         :model-value="query"
-        :placeholder="t('hashtags.searchPlaceholder')"
+        :placeholder="t('tags.searchPlaceholder')"
         @update:model-value="search"
       />
 
@@ -113,35 +111,31 @@ onMounted(() => load());
       />
     </div>
 
-    <div v-if="loading && items.length === 0" class="hashtags-view__skeleton">
+    <div v-if="loading && items.length === 0" class="tags-view__skeleton">
       <SkeletonLoader variant="page" />
     </div>
 
-    <div v-else-if="error" class="hashtags-view__error" role="alert">
+    <div v-else-if="error" class="tags-view__error" role="alert">
       <span>{{ error }}</span>
       <AppButton size="sm" icon="rotate-right" @click="retry">
         {{ t("common.retry") }}
       </AppButton>
     </div>
 
-    <div
-      v-else-if="items.length === 0"
-      class="hashtags-view__empty"
-      role="status"
-    >
-      {{ t("hashtags.empty") }}
+    <div v-else-if="items.length === 0" class="tags-view__empty" role="status">
+      {{ t("tags.empty") }}
     </div>
 
     <template v-else>
-      <ul class="hashtags-view__grid" role="list">
-        <li v-for="item in items" :key="item.name" class="hashtags-view__item">
+      <ul class="tags-view__grid" role="list">
+        <li v-for="item in items" :key="item.name" class="tags-view__item">
           <RouterLink
-            :to="`/hashtags/${encodeURIComponent(item.name)}`"
-            class="hashtags-view__card"
+            :to="`/tags/${encodeURIComponent(item.name)}`"
+            class="tags-view__card"
           >
-            <span class="hashtags-view__name">{{ item.name }}</span>
-            <span class="hashtags-view__count">
-              {{ t("hashtags.itemCount", { count: item.item_count }) }}
+            <span class="tags-view__name">{{ item.name }}</span>
+            <span class="tags-view__count">
+              {{ t("tags.itemCount", { count: item.item_count }) }}
             </span>
           </RouterLink>
         </li>
@@ -159,13 +153,13 @@ onMounted(() => load());
 </template>
 
 <style scoped>
-.hashtags-view {
+.tags-view {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
 
-.hashtags-view__header {
+.tags-view__header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -173,11 +167,11 @@ onMounted(() => load());
   gap: var(--space-3);
 }
 
-.hashtags-view__skeleton {
+.tags-view__skeleton {
   min-height: 16rem;
 }
 
-.hashtags-view__error {
+.tags-view__error {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -188,13 +182,13 @@ onMounted(() => load());
   color: var(--color-danger);
 }
 
-.hashtags-view__empty {
+.tags-view__empty {
   text-align: center;
   padding: var(--space-8);
   color: var(--color-text-muted);
 }
 
-.hashtags-view__grid {
+.tags-view__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
   gap: var(--space-3);
@@ -203,7 +197,7 @@ onMounted(() => load());
   padding: 0;
 }
 
-.hashtags-view__card {
+.tags-view__card {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -217,18 +211,18 @@ onMounted(() => load());
   transition: background-color var(--transition-fast);
 }
 
-.hashtags-view__card:hover {
+.tags-view__card:hover {
   background-color: var(--color-surface-hover);
 }
 
-.hashtags-view__name {
+.tags-view__name {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.hashtags-view__count {
+.tags-view__count {
   font-size: 0.75rem;
   color: var(--color-text-muted);
 }

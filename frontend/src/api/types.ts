@@ -380,7 +380,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/users/{user_id}/hashtags": {
+  "/api/v1/users": {
     parameters: {
       query?: never;
       header?: never;
@@ -388,10 +388,10 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List User Hashtags
-     * @description List hashtags for resources owned by a specific user.
+     * List Public Users Route
+     * @description List active public users, optionally filtered and sorted.
      */
-    get: operations["list_user_hashtags_api_v1_users__user_id__hashtags_get"];
+    get: operations["list_public_users_route_api_v1_users_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -400,7 +400,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/users/{user_id}/hashtags/{hashtag}": {
+  "/api/v1/users/{user_id}/tags": {
     parameters: {
       query?: never;
       header?: never;
@@ -408,10 +408,50 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List User Hashtag Items
-     * @description List items for a hashtag on resources owned by a specific user.
+     * List User Tags
+     * @description List tags for resources owned by a specific user.
      */
-    get: operations["list_user_hashtag_items_api_v1_users__user_id__hashtags__hashtag__get"];
+    get: operations["list_user_tags_api_v1_users__user_id__tags_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/{user_id}/tags/{tag}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List User Tag Items
+     * @description List items for a tag on resources owned by a specific user.
+     */
+    get: operations["list_user_tag_items_api_v1_users__user_id__tags__tag__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/{username}/activities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List User Activities Route
+     * @description List a user's visible activities.
+     */
+    get: operations["list_user_activities_route_api_v1_users__username__activities_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -615,7 +655,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/artists/{artist_id}/hashtags": {
+  "/api/v1/artists/{artist_id}/tags": {
     parameters: {
       query?: never;
       header?: never;
@@ -625,17 +665,17 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Add Artist Hashtags
-     * @description Add hashtags to an artist (admin only).
+     * Add Artist Tags
+     * @description Add tags to an artist (admin only).
      */
-    post: operations["add_artist_hashtags_api_v1_artists__artist_id__hashtags_post"];
+    post: operations["add_artist_tags_api_v1_artists__artist_id__tags_post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/artists/{artist_id}/hashtags/{hashtag}": {
+  "/api/v1/artists/{artist_id}/tags/{tag}": {
     parameters: {
       query?: never;
       header?: never;
@@ -646,10 +686,10 @@ export interface paths {
     put?: never;
     post?: never;
     /**
-     * Remove Artist Hashtag
-     * @description Remove a hashtag from an artist (admin only).
+     * Remove Artist Tag
+     * @description Remove a tag from an artist (admin only).
      */
-    delete: operations["remove_artist_hashtag_api_v1_artists__artist_id__hashtags__hashtag__delete"];
+    delete: operations["remove_artist_tag_api_v1_artists__artist_id__tags__tag__delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -747,7 +787,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/albums/{album_id}/hashtags": {
+  "/api/v1/albums/{album_id}/tags": {
     parameters: {
       query?: never;
       header?: never;
@@ -757,17 +797,17 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Add Album Hashtags
-     * @description Add hashtags to an album.
+     * Add Album Tags
+     * @description Add tags to an album.
      */
-    post: operations["add_album_hashtags_api_v1_albums__album_id__hashtags_post"];
+    post: operations["add_album_tags_api_v1_albums__album_id__tags_post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/albums/{album_id}/hashtags/{hashtag}": {
+  "/api/v1/albums/{album_id}/tags/{tag}": {
     parameters: {
       query?: never;
       header?: never;
@@ -778,10 +818,10 @@ export interface paths {
     put?: never;
     post?: never;
     /**
-     * Remove Album Hashtag
-     * @description Remove a hashtag from an album.
+     * Remove Album Tag
+     * @description Remove a tag from an album.
      */
-    delete: operations["remove_album_hashtag_api_v1_albums__album_id__hashtags__hashtag__delete"];
+    delete: operations["remove_album_tag_api_v1_albums__album_id__tags__tag__delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -998,7 +1038,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/tracks/{track_id}/hashtags": {
+  "/api/v1/tracks/{track_id}/tags": {
     parameters: {
       query?: never;
       header?: never;
@@ -1008,17 +1048,17 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Add Track Hashtags
-     * @description Add hashtags to a track.
+     * Add Track Tags
+     * @description Add tags to a track.
      */
-    post: operations["add_track_hashtags_api_v1_tracks__track_id__hashtags_post"];
+    post: operations["add_track_tags_api_v1_tracks__track_id__tags_post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/tracks/{track_id}/hashtags/{hashtag}": {
+  "/api/v1/tracks/{track_id}/tags/{tag}": {
     parameters: {
       query?: never;
       header?: never;
@@ -1029,10 +1069,10 @@ export interface paths {
     put?: never;
     post?: never;
     /**
-     * Remove Track Hashtag
-     * @description Remove a hashtag from a track.
+     * Remove Track Tag
+     * @description Remove a tag from a track.
      */
-    delete: operations["remove_track_hashtag_api_v1_tracks__track_id__hashtags__hashtag__delete"];
+    delete: operations["remove_track_tag_api_v1_tracks__track_id__tags__tag__delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -1242,7 +1282,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/playlists/{playlist_id}/hashtags": {
+  "/api/v1/playlists/{playlist_id}/tags": {
     parameters: {
       query?: never;
       header?: never;
@@ -1252,17 +1292,17 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Add Playlist Hashtags
-     * @description Add hashtags to a playlist.
+     * Add Playlist Tags
+     * @description Add tags to a playlist.
      */
-    post: operations["add_playlist_hashtags_api_v1_playlists__playlist_id__hashtags_post"];
+    post: operations["add_playlist_tags_api_v1_playlists__playlist_id__tags_post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/playlists/{playlist_id}/hashtags/{hashtag}": {
+  "/api/v1/playlists/{playlist_id}/tags/{tag}": {
     parameters: {
       query?: never;
       header?: never;
@@ -1273,10 +1313,10 @@ export interface paths {
     put?: never;
     post?: never;
     /**
-     * Remove Playlist Hashtag
-     * @description Remove a hashtag from a playlist.
+     * Remove Playlist Tag
+     * @description Remove a tag from a playlist.
      */
-    delete: operations["remove_playlist_hashtag_api_v1_playlists__playlist_id__hashtags__hashtag__delete"];
+    delete: operations["remove_playlist_tag_api_v1_playlists__playlist_id__tags__tag__delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -1494,7 +1534,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/libraries/{library_id}/hashtags": {
+  "/api/v1/libraries/{library_id}/tags": {
     parameters: {
       query?: never;
       header?: never;
@@ -1504,17 +1544,17 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Add Library Hashtags
-     * @description Add hashtags to a library.
+     * Add Library Tags
+     * @description Add tags to a library.
      */
-    post: operations["add_library_hashtags_api_v1_libraries__library_id__hashtags_post"];
+    post: operations["add_library_tags_api_v1_libraries__library_id__tags_post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/libraries/{library_id}/hashtags/{hashtag}": {
+  "/api/v1/libraries/{library_id}/tags/{tag}": {
     parameters: {
       query?: never;
       header?: never;
@@ -1525,16 +1565,16 @@ export interface paths {
     put?: never;
     post?: never;
     /**
-     * Remove Library Hashtag
-     * @description Remove a hashtag from a library.
+     * Remove Library Tag
+     * @description Remove a tag from a library.
      */
-    delete: operations["remove_library_hashtag_api_v1_libraries__library_id__hashtags__hashtag__delete"];
+    delete: operations["remove_library_tag_api_v1_libraries__library_id__tags__tag__delete"];
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/hashtags/": {
+  "/api/v1/tags/": {
     parameters: {
       query?: never;
       header?: never;
@@ -1542,10 +1582,10 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List All Hashtags
-     * @description List hashtags linked to resources visible to the requester.
+     * List All Tags
+     * @description List tags linked to resources visible to the requester.
      */
-    get: operations["list_all_hashtags_api_v1_hashtags__get"];
+    get: operations["list_all_tags_api_v1_tags__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1554,7 +1594,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/hashtags/{hashtag}": {
+  "/api/v1/tags/{tag}": {
     parameters: {
       query?: never;
       header?: never;
@@ -1562,17 +1602,17 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List Hashtag Items
-     * @description List visible items for a specific hashtag.
+     * List Tag Items
+     * @description List visible items for a specific tag.
      */
-    get: operations["list_hashtag_items_api_v1_hashtags__hashtag__get"];
+    get: operations["list_tag_items_api_v1_tags__tag__get"];
     put?: never;
     post?: never;
     /**
-     * Delete Global Hashtag
-     * @description Delete a hashtag and all its associations (admin only).
+     * Delete Global Tag
+     * @description Delete a tag and all its associations (admin only).
      */
-    delete: operations["delete_global_hashtag_api_v1_hashtags__hashtag__delete"];
+    delete: operations["delete_global_tag_api_v1_tags__tag__delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -2954,8 +2994,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Mastodon Instance V1 */
-    get: operations["mastodon_instance_v1_api_v1_instance_get"];
+    /**
+     * Get Instance V1
+     * @description Return Mastodon-compatible instance metadata (v1).
+     */
+    get: operations["get_instance_v1_api_v1_instance_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2971,8 +3014,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Mastodon Instance Peers */
-    get: operations["mastodon_instance_peers_api_v1_instance_peers_get"];
+    /**
+     * Get Instance Peers
+     * @description Return a list of known peer instance domains.
+     */
+    get: operations["get_instance_peers_api_v1_instance_peers_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2988,8 +3034,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Mastodon Instance V2 */
-    get: operations["mastodon_instance_v2_api_v2_instance_get"];
+    /**
+     * Get Instance V2
+     * @description Return Mastodon-compatible instance metadata (v2).
+     */
+    get: operations["get_instance_v2_api_v2_instance_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -3030,295 +3079,6 @@ export interface paths {
      * @description Return the same manifest as JSON for clients that prefer .json.
      */
     get: operations["pwa_manifest_json_manifest_json_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/.well-known/webfinger": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Webfinger */
-    get: operations["webfinger__well_known_webfinger_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/.well-known/nodeinfo": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Nodeinfo Discovery */
-    get: operations["nodeinfo_discovery__well_known_nodeinfo_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nodeinfo/2.1": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Nodeinfo */
-    get: operations["nodeinfo_nodeinfo_2_1_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/ap/actor": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Actor */
-    get: operations["actor_ap_actor_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/ap/inbox": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Inbox */
-    post: operations["inbox_ap_inbox_post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/ap/outbox": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Outbox */
-    get: operations["outbox_ap_outbox_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/ap/followers": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Followers */
-    get: operations["followers_ap_followers_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/ap/following": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Following */
-    get: operations["following_ap_following_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/ap/actor/quote_authorizations/{auth_id}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Quote Authorization */
-    get: operations["quote_authorization_ap_actor_quote_authorizations__auth_id__get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nodeinfo/2.0.json": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Nodeinfo 20 */
-    get: operations["nodeinfo_20_nodeinfo_2_0_json_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nodeinfo/2.0": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Nodeinfo 20 */
-    get: operations["nodeinfo_20_nodeinfo_2_0_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/nodeinfo/2.1.json": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Nodeinfo 21 Json */
-    get: operations["nodeinfo_21_json_nodeinfo_2_1_json_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/accounts/lookup": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Mastodon Accounts Lookup */
-    get: operations["mastodon_accounts_lookup_api_v1_accounts_lookup_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/accounts/{account_id}/statuses": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Mastodon Accounts Statuses */
-    get: operations["mastodon_accounts_statuses_api_v1_accounts__account_id__statuses_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/accounts/{account_id}/followers": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Mastodon Accounts Followers */
-    get: operations["mastodon_accounts_followers_api_v1_accounts__account_id__followers_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/accounts/{account_id}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Mastodon Accounts Get */
-    get: operations["mastodon_accounts_get_api_v1_accounts__account_id__get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/statuses/{status_id}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Mastodon Statuses Get */
-    get: operations["mastodon_statuses_get_api_v1_statuses__status_id__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -3620,10 +3380,10 @@ export interface components {
       /** Tracks */
       tracks?: components["schemas"]["TrackSummary"][] | null;
       /**
-       * Hashtags
+       * Tags
        * @default []
        */
-      hashtags: string[];
+      tags: string[];
       /**
        * Genres
        * @default []
@@ -3838,10 +3598,10 @@ export interface components {
       /** Tracks */
       tracks?: components["schemas"]["TrackSummary"][] | null;
       /**
-       * Hashtags
+       * Tags
        * @default []
        */
-      hashtags: string[];
+      tags: string[];
     };
     /**
      * ArtistSummary
@@ -4622,18 +4382,18 @@ export interface components {
       detail?: components["schemas"]["ValidationError"][];
     };
     /**
-     * HashtagListRequest
-     * @description Add/remove hashtags on a resource.
+     * TagListRequest
+     * @description Add/remove tags on a resource.
      */
-    HashtagListRequest: {
-      /** Hashtags */
-      hashtags: string[];
+    TagListRequest: {
+      /** Tags */
+      tags: string[];
     };
     /**
-     * HashtagSummaryResponse
-     * @description Hashtag summary for list responses.
+     * TagSummaryResponse
+     * @description Tag summary for list responses.
      */
-    HashtagSummaryResponse: {
+    TagSummaryResponse: {
       /** Name */
       name: string;
       /** Item Count */
@@ -4775,10 +4535,10 @@ export interface components {
       /** Tracks */
       tracks?: components["schemas"]["TrackSummary"][] | null;
       /**
-       * Hashtags
+       * Tags
        * @default []
        */
-      hashtags: string[];
+      tags: string[];
     };
     /**
      * LibraryUpdate
@@ -4932,10 +4692,10 @@ export interface components {
       /** Tracks */
       tracks?: components["schemas"]["TrackSummary"][] | null;
       /**
-       * Hashtags
+       * Tags
        * @default []
        */
-      hashtags: string[];
+      tags: string[];
     };
     /**
      * PlaylistUpdate
@@ -4972,6 +4732,12 @@ export interface components {
       bio?: string | null;
       /** Avatar Url */
       avatar_url?: string | null;
+      role?: components["schemas"]["UserRole"] | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
       /** Links */
       links?: components["schemas"]["UserLinkOutput"][];
     };
@@ -5442,7 +5208,7 @@ export interface components {
     };
     /**
      * TaggedItemResponse
-     * @description A single item associated with a hashtag.
+     * @description A single item associated with a tag.
      */
     TaggedItemResponse: {
       /** Type */
@@ -5546,10 +5312,10 @@ export interface components {
       album?: components["schemas"]["AlbumSummary"] | null;
       owner?: components["schemas"]["UserSummary"] | null;
       /**
-       * Hashtags
+       * Tags
        * @default []
        */
-      hashtags: string[];
+      tags: string[];
       /**
        * Genres
        * @default []
@@ -6684,9 +6450,11 @@ export interface operations {
       };
     };
   };
-  list_user_hashtags_api_v1_users__user_id__hashtags_get: {
+  list_public_users_route_api_v1_users_get: {
     parameters: {
       query?: {
+        /** @description Search users by username or display name */
+        q?: string | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
@@ -6695,9 +6463,7 @@ export interface operations {
         sort_dir?: string | null;
       };
       header?: never;
-      path: {
-        user_id: string;
-      };
+      path?: never;
       cookie?: never;
     };
     requestBody?: never;
@@ -6708,7 +6474,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["HashtagSummaryResponse"][];
+          "application/json": components["schemas"]["PublicUserResponse"][];
         };
       };
       /** @description Validation Error */
@@ -6722,7 +6488,7 @@ export interface operations {
       };
     };
   };
-  list_user_hashtag_items_api_v1_users__user_id__hashtags__hashtag__get: {
+  list_user_tags_api_v1_users__user_id__tags_get: {
     parameters: {
       query?: {
         limit?: number;
@@ -6735,7 +6501,45 @@ export interface operations {
       header?: never;
       path: {
         user_id: string;
-        hashtag: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TagSummaryResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_user_tag_items_api_v1_users__user_id__tags__tag__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+        /** @description Field to sort by */
+        sort_by?: string | null;
+        /** @description Sort direction (asc or desc) */
+        sort_dir?: string | null;
+      };
+      header?: never;
+      path: {
+        user_id: string;
+        tag: string;
       };
       cookie?: never;
     };
@@ -6748,6 +6552,44 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TaggedItemResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_user_activities_route_api_v1_users__username__activities_get: {
+    parameters: {
+      query?: {
+        /** @description Activity feed mode (posts or all) */
+        mode?: string;
+        /** @description Filter by source type */
+        source_type?: string | null;
+        cursor?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        username: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityListResponse"];
         };
       };
       /** @description Validation Error */
@@ -6937,7 +6779,7 @@ export interface operations {
         sort_by?: string | null;
         /** @description Sort direction (asc or desc) */
         sort_dir?: string | null;
-        /** @description Comma-separated relations to include. Allowed: albums, hashtags, tracks */
+        /** @description Comma-separated relations to include. Allowed: albums, tags, tracks */
         include?: string | null;
       };
       header?: never;
@@ -6969,7 +6811,7 @@ export interface operations {
   get_artist_api_v1_artists__artist_id__get: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: albums, hashtags, tracks */
+        /** @description Comma-separated relations to include. Allowed: albums, tags, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7035,7 +6877,7 @@ export interface operations {
   update_artist_api_v1_artists__artist_id__patch: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: albums, hashtags, tracks */
+        /** @description Comma-separated relations to include. Allowed: albums, tags, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7073,7 +6915,7 @@ export interface operations {
   upload_artist_image_api_v1_artists__artist_id__image_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: albums, hashtags, tracks */
+        /** @description Comma-separated relations to include. Allowed: albums, tags, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7111,7 +6953,7 @@ export interface operations {
   delete_artist_image_api_v1_artists__artist_id__image_delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: albums, hashtags, tracks */
+        /** @description Comma-separated relations to include. Allowed: albums, tags, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7145,7 +6987,7 @@ export interface operations {
   upload_artist_cover_api_v1_artists__artist_id__cover_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: albums, hashtags, tracks */
+        /** @description Comma-separated relations to include. Allowed: albums, tags, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7183,7 +7025,7 @@ export interface operations {
   delete_artist_cover_api_v1_artists__artist_id__cover_delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: albums, hashtags, tracks */
+        /** @description Comma-separated relations to include. Allowed: albums, tags, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7214,10 +7056,10 @@ export interface operations {
       };
     };
   };
-  add_artist_hashtags_api_v1_artists__artist_id__hashtags_post: {
+  add_artist_tags_api_v1_artists__artist_id__tags_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: albums, hashtags, tracks */
+        /** @description Comma-separated relations to include. Allowed: albums, tags, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7228,7 +7070,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["HashtagListRequest"];
+        "application/json": components["schemas"]["TagListRequest"];
       };
     };
     responses: {
@@ -7252,16 +7094,16 @@ export interface operations {
       };
     };
   };
-  remove_artist_hashtag_api_v1_artists__artist_id__hashtags__hashtag__delete: {
+  remove_artist_tag_api_v1_artists__artist_id__tags__tag__delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: albums, hashtags, tracks */
+        /** @description Comma-separated relations to include. Allowed: albums, tags, tracks */
         include?: string | null;
       };
       header?: never;
       path: {
         artist_id: string;
-        hashtag: string;
+        tag: string;
       };
       cookie?: never;
     };
@@ -7297,13 +7139,15 @@ export interface operations {
         year_to?: number | null;
         /** @description Filter by genre name */
         genre?: string | null;
+        /** @description Filter by owner's username */
+        owner_username?: string | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
         sort_by?: string | null;
         /** @description Sort direction (asc or desc) */
         sort_dir?: string | null;
-        /** @description Comma-separated relations to include. Allowed: artist, genres, hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: artist, genres, tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7335,7 +7179,7 @@ export interface operations {
   get_album_api_v1_albums__album_id__get: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: artist, genres, hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: artist, genres, tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7401,7 +7245,7 @@ export interface operations {
   update_album_api_v1_albums__album_id__patch: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: artist, genres, hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: artist, genres, tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7439,7 +7283,7 @@ export interface operations {
   upload_album_cover_api_v1_albums__album_id__cover_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: artist, genres, hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: artist, genres, tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7477,7 +7321,7 @@ export interface operations {
   delete_album_cover_api_v1_albums__album_id__cover_delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: artist, genres, hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: artist, genres, tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7539,10 +7383,10 @@ export interface operations {
       };
     };
   };
-  add_album_hashtags_api_v1_albums__album_id__hashtags_post: {
+  add_album_tags_api_v1_albums__album_id__tags_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: artist, genres, hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: artist, genres, tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7553,7 +7397,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["HashtagListRequest"];
+        "application/json": components["schemas"]["TagListRequest"];
       };
     };
     responses: {
@@ -7577,16 +7421,16 @@ export interface operations {
       };
     };
   };
-  remove_album_hashtag_api_v1_albums__album_id__hashtags__hashtag__delete: {
+  remove_album_tag_api_v1_albums__album_id__tags__tag__delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: artist, genres, hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: artist, genres, tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
       path: {
         album_id: string;
-        hashtag: string;
+        tag: string;
       };
       cookie?: never;
     };
@@ -7615,7 +7459,7 @@ export interface operations {
   set_album_genres_api_v1_albums__album_id__genres_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: artist, genres, hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: artist, genres, tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7653,7 +7497,7 @@ export interface operations {
   remove_album_genre_api_v1_albums__album_id__genres__genre__delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: artist, genres, hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: artist, genres, tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -7726,7 +7570,7 @@ export interface operations {
         artist_id?: string | null;
         album_id?: string | null;
         genre?: string | null;
-        hashtag?: string | null;
+        tag?: string | null;
         year_from?: number | null;
         year_to?: number | null;
         library_id?: string | null;
@@ -7734,13 +7578,15 @@ export interface operations {
         favorited?: boolean | null;
         /** @description Center the returned chunk on this track */
         around_track_id?: string | null;
+        /** @description Filter by owner's username */
+        owner_username?: string | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
         sort_by?: string | null;
         /** @description Sort direction (asc or desc) */
         sort_dir?: string | null;
-        /** @description Comma-separated relations to include. Allowed: album, artist, genres, hashtags, owner */
+        /** @description Comma-separated relations to include. Allowed: album, artist, genres, tags, owner */
         include?: string | null;
       };
       header?: never;
@@ -7772,7 +7618,7 @@ export interface operations {
   get_track_api_v1_tracks__track_id__get: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: album, artist, genres, hashtags, owner */
+        /** @description Comma-separated relations to include. Allowed: album, artist, genres, tags, owner */
         include?: string | null;
       };
       header?: never;
@@ -7835,7 +7681,7 @@ export interface operations {
   update_track_api_v1_tracks__track_id__patch: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: album, artist, genres, hashtags, owner */
+        /** @description Comma-separated relations to include. Allowed: album, artist, genres, tags, owner */
         include?: string | null;
       };
       header?: never;
@@ -7873,7 +7719,7 @@ export interface operations {
   upload_track_image_api_v1_tracks__track_id__image_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: album, artist, genres, hashtags, owner */
+        /** @description Comma-separated relations to include. Allowed: album, artist, genres, tags, owner */
         include?: string | null;
       };
       header?: never;
@@ -7911,7 +7757,7 @@ export interface operations {
   delete_track_image_api_v1_tracks__track_id__image_delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: album, artist, genres, hashtags, owner */
+        /** @description Comma-separated relations to include. Allowed: album, artist, genres, tags, owner */
         include?: string | null;
       };
       header?: never;
@@ -8041,10 +7887,10 @@ export interface operations {
       };
     };
   };
-  add_track_hashtags_api_v1_tracks__track_id__hashtags_post: {
+  add_track_tags_api_v1_tracks__track_id__tags_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: album, artist, genres, hashtags, owner */
+        /** @description Comma-separated relations to include. Allowed: album, artist, genres, tags, owner */
         include?: string | null;
       };
       header?: never;
@@ -8055,7 +7901,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["HashtagListRequest"];
+        "application/json": components["schemas"]["TagListRequest"];
       };
     };
     responses: {
@@ -8079,16 +7925,16 @@ export interface operations {
       };
     };
   };
-  remove_track_hashtag_api_v1_tracks__track_id__hashtags__hashtag__delete: {
+  remove_track_tag_api_v1_tracks__track_id__tags__tag__delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: album, artist, genres, hashtags, owner */
+        /** @description Comma-separated relations to include. Allowed: album, artist, genres, tags, owner */
         include?: string | null;
       };
       header?: never;
       path: {
         track_id: string;
-        hashtag: string;
+        tag: string;
       };
       cookie?: never;
     };
@@ -8117,7 +7963,7 @@ export interface operations {
   set_track_genres_api_v1_tracks__track_id__genres_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: album, artist, genres, hashtags, owner */
+        /** @description Comma-separated relations to include. Allowed: album, artist, genres, tags, owner */
         include?: string | null;
       };
       header?: never;
@@ -8155,7 +8001,7 @@ export interface operations {
   remove_track_genre_api_v1_tracks__track_id__genres__genre__delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: album, artist, genres, hashtags, owner */
+        /** @description Comma-separated relations to include. Allowed: album, artist, genres, tags, owner */
         include?: string | null;
       };
       header?: never;
@@ -8190,13 +8036,15 @@ export interface operations {
   list_playlists_api_v1_playlists__get: {
     parameters: {
       query?: {
+        /** @description Filter by owner's username */
+        owner_username?: string | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
         sort_by?: string | null;
         /** @description Sort direction (asc or desc) */
         sort_dir?: string | null;
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -8263,7 +8111,7 @@ export interface operations {
   get_playlist_api_v1_playlists__playlist_id__get: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -8329,7 +8177,7 @@ export interface operations {
   update_playlist_api_v1_playlists__playlist_id__patch: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -8367,7 +8215,7 @@ export interface operations {
   upload_playlist_image_api_v1_playlists__playlist_id__image_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -8405,7 +8253,7 @@ export interface operations {
   delete_playlist_image_api_v1_playlists__playlist_id__image_delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -8439,7 +8287,7 @@ export interface operations {
   upload_playlist_cover_api_v1_playlists__playlist_id__cover_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -8477,7 +8325,7 @@ export interface operations {
   delete_playlist_cover_api_v1_playlists__playlist_id__cover_delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -8653,10 +8501,10 @@ export interface operations {
       };
     };
   };
-  add_playlist_hashtags_api_v1_playlists__playlist_id__hashtags_post: {
+  add_playlist_tags_api_v1_playlists__playlist_id__tags_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -8667,7 +8515,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["HashtagListRequest"];
+        "application/json": components["schemas"]["TagListRequest"];
       };
     };
     responses: {
@@ -8691,16 +8539,16 @@ export interface operations {
       };
     };
   };
-  remove_playlist_hashtag_api_v1_playlists__playlist_id__hashtags__hashtag__delete: {
+  remove_playlist_tag_api_v1_playlists__playlist_id__tags__tag__delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
       path: {
         playlist_id: string;
-        hashtag: string;
+        tag: string;
       };
       cookie?: never;
     };
@@ -8729,6 +8577,8 @@ export interface operations {
   list_libraries_api_v1_libraries__get: {
     parameters: {
       query?: {
+        /** @description Filter by owner's username */
+        owner_username?: string | null;
         /** @description Include external libraries (admin only) */
         include_external?: boolean;
         limit?: number;
@@ -8737,7 +8587,7 @@ export interface operations {
         sort_by?: string | null;
         /** @description Sort direction (asc or desc) */
         sort_dir?: string | null;
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -8804,7 +8654,7 @@ export interface operations {
   get_library_api_v1_libraries__library_id__get: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -8870,7 +8720,7 @@ export interface operations {
   update_library_api_v1_libraries__library_id__patch: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -9133,7 +8983,7 @@ export interface operations {
   upload_library_image_api_v1_libraries__library_id__image_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -9171,7 +9021,7 @@ export interface operations {
   delete_library_image_api_v1_libraries__library_id__image_delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -9205,7 +9055,7 @@ export interface operations {
   upload_library_cover_api_v1_libraries__library_id__cover_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -9243,7 +9093,7 @@ export interface operations {
   delete_library_cover_api_v1_libraries__library_id__cover_delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -9274,10 +9124,10 @@ export interface operations {
       };
     };
   };
-  add_library_hashtags_api_v1_libraries__library_id__hashtags_post: {
+  add_library_tags_api_v1_libraries__library_id__tags_post: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
@@ -9288,7 +9138,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["HashtagListRequest"];
+        "application/json": components["schemas"]["TagListRequest"];
       };
     };
     responses: {
@@ -9312,16 +9162,16 @@ export interface operations {
       };
     };
   };
-  remove_library_hashtag_api_v1_libraries__library_id__hashtags__hashtag__delete: {
+  remove_library_tag_api_v1_libraries__library_id__tags__tag__delete: {
     parameters: {
       query?: {
-        /** @description Comma-separated relations to include. Allowed: hashtags, owner, tracks */
+        /** @description Comma-separated relations to include. Allowed: tags, owner, tracks */
         include?: string | null;
       };
       header?: never;
       path: {
         library_id: string;
-        hashtag: string;
+        tag: string;
       };
       cookie?: never;
     };
@@ -9347,10 +9197,10 @@ export interface operations {
       };
     };
   };
-  list_all_hashtags_api_v1_hashtags__get: {
+  list_all_tags_api_v1_tags__get: {
     parameters: {
       query?: {
-        /** @description Search hashtag names */
+        /** @description Search tag names */
         q?: string | null;
         limit?: number;
         offset?: number;
@@ -9371,7 +9221,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["HashtagSummaryResponse"][];
+          "application/json": components["schemas"]["TagSummaryResponse"][];
         };
       };
       /** @description Validation Error */
@@ -9385,7 +9235,7 @@ export interface operations {
       };
     };
   };
-  list_hashtag_items_api_v1_hashtags__hashtag__get: {
+  list_tag_items_api_v1_tags__tag__get: {
     parameters: {
       query?: {
         /** @description Filter by item type */
@@ -9399,7 +9249,7 @@ export interface operations {
       };
       header?: never;
       path: {
-        hashtag: string;
+        tag: string;
       };
       cookie?: never;
     };
@@ -9425,12 +9275,12 @@ export interface operations {
       };
     };
   };
-  delete_global_hashtag_api_v1_hashtags__hashtag__delete: {
+  delete_global_tag_api_v1_tags__tag__delete: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        hashtag: string;
+        tag: string;
       };
       cookie?: never;
     };
@@ -11964,7 +11814,7 @@ export interface operations {
       };
     };
   };
-  mastodon_instance_v1_api_v1_instance_get: {
+  get_instance_v1_api_v1_instance_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -11979,12 +11829,12 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["InstanceV1"];
         };
       };
     };
   };
-  mastodon_instance_peers_api_v1_instance_peers_get: {
+  get_instance_peers_api_v1_instance_peers_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -11999,12 +11849,12 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": string[];
         };
       };
     };
   };
-  mastodon_instance_v2_api_v2_instance_get: {
+  get_instance_v2_api_v2_instance_get: {
     parameters: {
       query?: never;
       header?: never;
@@ -12019,7 +11869,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["InstanceV2"];
         };
       };
     };
@@ -12064,447 +11914,6 @@ export interface operations {
       };
       header?: never;
       path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  webfinger__well_known_webfinger_get: {
-    parameters: {
-      query?: {
-        resource?: string | null;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  nodeinfo_discovery__well_known_nodeinfo_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  nodeinfo_nodeinfo_2_1_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  actor_ap_actor_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  inbox_ap_inbox_post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  outbox_ap_outbox_get: {
-    parameters: {
-      query?: {
-        limit?: number;
-        offset?: number;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  followers_ap_followers_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  following_ap_following_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  quote_authorization_ap_actor_quote_authorizations__auth_id__get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        auth_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  nodeinfo_20_nodeinfo_2_0_json_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  nodeinfo_20_nodeinfo_2_0_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  nodeinfo_21_json_nodeinfo_2_1_json_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  mastodon_accounts_lookup_api_v1_accounts_lookup_get: {
-    parameters: {
-      query?: {
-        acct?: string | null;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  mastodon_accounts_statuses_api_v1_accounts__account_id__statuses_get: {
-    parameters: {
-      query?: {
-        limit?: number;
-        max_id?: string | null;
-        since_id?: string | null;
-        only_media?: boolean;
-        exclude_replies?: boolean;
-        exclude_reblogs?: boolean;
-        tagged?: string | null;
-      };
-      header?: never;
-      path: {
-        account_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  mastodon_accounts_followers_api_v1_accounts__account_id__followers_get: {
-    parameters: {
-      query?: {
-        limit?: number;
-        max_id?: string | null;
-        since_id?: string | null;
-      };
-      header?: never;
-      path: {
-        account_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  mastodon_accounts_get_api_v1_accounts__account_id__get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        account_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  mastodon_statuses_get_api_v1_statuses__status_id__get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        status_id: string;
-      };
       cookie?: never;
     };
     requestBody?: never;

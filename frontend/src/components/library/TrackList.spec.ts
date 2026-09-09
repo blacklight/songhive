@@ -40,9 +40,9 @@ vi.mock("@/api/tracks", () => ({
     .mockResolvedValue({ track_id: "track-1", enqueued: true }),
 }));
 
-vi.mock("@/api/hashtags", () => ({
-  addHashtags: vi.fn().mockResolvedValue(undefined),
-  removeHashtag: vi.fn().mockResolvedValue(undefined),
+vi.mock("@/api/tags", () => ({
+  addTags: vi.fn().mockResolvedValue(undefined),
+  removeTag: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/api/favorites", () => ({
@@ -699,10 +699,10 @@ describe("TrackList", () => {
     await flushPromises();
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "artist,album,hashtags,genres",
+      include: "artist,album,tags,genres",
     });
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-2", {
-      include: "artist,album,hashtags,genres",
+      include: "artist,album,tags,genres",
     });
 
     const artistInput = document.body.querySelectorAll(

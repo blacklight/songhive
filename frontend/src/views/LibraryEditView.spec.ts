@@ -146,7 +146,7 @@ describe("LibraryEditView", () => {
     const router = await mountAt("/libraries/library-1/edit");
 
     expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1", {
-      include: "hashtags",
+      include: "tags",
     });
     expect(wrapper.text()).toContain("Edit library");
 
@@ -166,7 +166,7 @@ describe("LibraryEditView", () => {
     const router = await mountAt("/libraries/library-1/edit");
 
     expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1", {
-      include: "hashtags",
+      include: "tags",
     });
     expect(router.currentRoute.value.path).toBe("/libraries/library-1");
   });
@@ -176,7 +176,7 @@ describe("LibraryEditView", () => {
     const router = await mountAt("/libraries/library-1/edit");
 
     expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1", {
-      include: "hashtags",
+      include: "tags",
     });
     expect(wrapper.text()).toContain("Edit library");
     expect(router.currentRoute.value.path).toBe("/libraries/library-1/edit");

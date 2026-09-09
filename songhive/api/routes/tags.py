@@ -1,5 +1,5 @@
 """
-Global and admin hashtag endpoints.
+Global and admin tag endpoints.
 """
 
 from datetime import datetime
@@ -11,23 +11,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.user import User
 from ...services import audit
-from ...services.hashtags import (
-    HASHTAG_ITEM_TYPES,
-    HashtagSummary,
-    delete_hashtag_globally,
-    get_items_for_hashtag,
-    list_hashtags,
-    validate_hashtag_name,
+from ...services.tags import (
+    TAG_ITEM_TYPES,
+    TagSummary,
+    delete_tag_globally,
+    get_items_for_tag,
+    list_tags,
+    validate_tag_name,
 )
 from .._common import Pagination, client_ip, get_pagination
 from .._sorting import SortParams, get_sort
 from ..deps import get_current_user_optional, get_db, require_admin
 
-router = APIRouter(prefix="/hashtags")
+router = APIRouter(prefix="/tags")
 
 
-class HashtagSummaryResponse(BaseModel):
-    """Hashtag summary for list responses."""
+class TagSummaryResponse(BaseModel):
+    """Tag summary for list responses."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -38,7 +38,7 @@ class HashtagSummaryResponse(BaseModel):
 
 
 class TaggedItemResponse(BaseModel):
-    """A single item associated with a hashtag."""
+    """A single item associated with a tag."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -46,9 +46,9 @@ class TaggedItemResponse(BaseModel):
     id: str
 
 
-def _summaries_response(summaries: List[HashtagSummary]) -> List[HashtagSummaryResponse]:
+def _summaries_response(summaries: List[TagSummary]) -> List[TagSummaryResponse]:
     return [
-        HashtagSummaryResponse(
+        TagSummaryResponse(
             name=s.name,
             item_count=s.item_count,
             first_used=s.first_used,
@@ -58,17 +58,17 @@ def _summaries_response(summaries: List[HashtagSummary]) -> List[HashtagSummaryR
     ]
 
 
-@router.get("/", response_model=List[HashtagSummaryResponse])
-async def list_all_hashtags(
+@router.get("/", response_model=List[TagSummaryResponse])
+async def list_all_tags(
     response: Response,
-    q: Optional[str] = Query(None, description="Search hashtag names"),
+    q: Optional[str] = Query(None, description="Search tag names"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"name", "item_count", "first_used", "last_used"}, "name")),
     db: AsyncSession = Depends(get_db),
 ):
-    """List hashtags linked to resources visible to the requester."""
-    summaries, total = await list_hashtags(
+    """List tags linked to resources visible to the requester."""
+    summaries, total = await list_tags(
         db,
         user=user,
         query=q,
@@ -81,34 +81,34 @@ async def list_all_hashtags(
     return _summaries_response(summaries)
 
 
-@router.get("/{hashtag}", response_model=List[TaggedItemResponse])
-async def list_hashtag_items(
+@router.get("/{tag}", response_model=List[TaggedItemResponse])
+async def list_tag_items(
     response: Response,
-    hashtag: str,
+    tag: str,
     type: Optional[str] = Query(None, description="Filter by item type"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"type", "created_at"}, "created_at")),
     db: AsyncSession = Depends(get_db),
 ):
-    """List visible items for a specific hashtag."""
+    """List visible items for a specific tag."""
     try:
-        validate_hashtag_name(hashtag)
+        validate_tag_name(tag)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Hashtag not found",
+            detail="Tag not found",
         ) from None
 
-    if type is not None and type not in HASHTAG_ITEM_TYPES:
+    if type is not None and type not in TAG_ITEM_TYPES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid item type: {type}",
         )
 
-    items, total = await get_items_for_hashtag(
+    items, total = await get_items_for_tag(
         db,
-        hashtag_name=hashtag,
+        tag_name=tag,
         user=user,
         item_type=type,
         limit=pagination.limit,
@@ -120,33 +120,33 @@ async def list_hashtag_items(
     return [TaggedItemResponse(type=i.type, id=i.id) for i in items]
 
 
-@router.delete("/{hashtag}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_global_hashtag(
+@router.delete("/{tag}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_global_tag(
     request: Request,
-    hashtag: str,
+    tag: str,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a hashtag and all its associations (admin only)."""
+    """Delete a tag and all its associations (admin only)."""
     try:
-        validate_hashtag_name(hashtag)
+        validate_tag_name(tag)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Hashtag not found",
+            detail="Tag not found",
         ) from None
 
-    deleted = await delete_hashtag_globally(db, hashtag)
+    deleted = await delete_tag_globally(db, tag)
     if deleted is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hashtag not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
 
     await audit.log_action(
         db,
         actor_id=admin.id,
-        action="hashtag.delete",
-        target_type="hashtag",
+        action="tag.delete",
+        target_type="tag",
         target_id=deleted.id,
-        details={"name": hashtag},
+        details={"name": tag},
         ip_address=client_ip(request),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

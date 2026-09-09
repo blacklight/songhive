@@ -14,7 +14,7 @@ from .base import Base, TZDateTime
 if TYPE_CHECKING:
     from .artist import Artist
     from .genre import Genre, GenreAlbum
-    from .hashtag import Hashtag, HashtagAlbum
+    from .tag import Tag, TagAlbum
     from .track import Track
 
 
@@ -45,14 +45,14 @@ class Album(Base):
     cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")
     owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
     tracks: Mapped[List["Track"]] = relationship("Track", back_populates="album", lazy="selectin")
-    hashtags: Mapped[List["Hashtag"]] = relationship(
-        "Hashtag",
-        secondary="hashtag_albums",
+    tags: Mapped[List["Tag"]] = relationship(
+        "Tag",
+        secondary="tag_albums",
         viewonly=True,
         lazy="selectin",
     )
-    hashtag_associations: Mapped[List["HashtagAlbum"]] = relationship(
-        "HashtagAlbum",
+    tag_associations: Mapped[List["TagAlbum"]] = relationship(
+        "TagAlbum",
         back_populates="album",
         cascade="all, delete-orphan",
         lazy="selectin",

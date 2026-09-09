@@ -33,7 +33,7 @@ function createTestRouter() {
       { path: "/", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
-      { path: "/hashtags/:name", component: { template: "<div/>" } },
+      { path: "/tags/:name", component: { template: "<div/>" } },
       { path: "/genres/:name", component: { template: "<div/>" } },
     ],
   });
@@ -42,7 +42,7 @@ function createTestRouter() {
 function createAlbum(
   id: string,
   title: string,
-  hashtags: string[] = [],
+  tags: string[] = [],
 ): AlbumResponse {
   return {
     id,
@@ -55,7 +55,7 @@ function createAlbum(
     genre: null,
     owner_id: "user-1",
     visibility: "public",
-    hashtags,
+    tags,
     genres: [],
   };
 }
@@ -99,7 +99,7 @@ function createTrack(id: string, title: string): TrackResponse {
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
     owner_id: "user-1",
-    hashtags: [],
+    tags: [],
     genres: [],
     artist: { id: "artist-1", name: "The Larks", image_url: null },
     album: {
@@ -154,7 +154,7 @@ describe("AlbumView", () => {
     await mountAt("/albums/album-1");
 
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
-      include: "hashtags,genres",
+      include: "tags,genres",
     });
     expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
     expect(tracksApi.listTracks).toHaveBeenCalledWith({
@@ -175,7 +175,7 @@ describe("AlbumView", () => {
     expect(wrapper.find(".album-view__owner").text()).toContain("user-1");
   });
 
-  it("renders album hashtags", async () => {
+  it("renders album tags", async () => {
     vi.mocked(albumsApi.getAlbum).mockResolvedValue(
       createAlbum("album-1", "Meadowland", ["rock", "indie"]),
     );
@@ -185,12 +185,10 @@ describe("AlbumView", () => {
     expect(wrapper.text()).toContain("indie");
   });
 
-  it("does not render an empty hashtag section", async () => {
+  it("does not render an empty tag section", async () => {
     await mountAt("/albums/album-1");
 
-    expect(wrapper.text()).not.toContain(
-      i18n.global.t("browse.detail.hashtags"),
-    );
+    expect(wrapper.text()).not.toContain(i18n.global.t("browse.detail.tags"));
   });
 
   it("shows an error banner with a retry button", async () => {
@@ -260,7 +258,7 @@ describe("AlbumView", () => {
     await flushPromises();
 
     expect(albumsApi.getAlbum).toHaveBeenLastCalledWith("album-2", {
-      include: "hashtags,genres",
+      include: "tags,genres",
     });
     expect(wrapper.text()).toContain("Sunset");
   });

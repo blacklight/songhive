@@ -22,12 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models.user import User
 from ...services import acl, audit, deletion, music
 from ...services.federation import unpublish_track_activity
-from ...services.hashtags import (
-    add_hashtags_to_entity,
-    remove_hashtag_from_entity,
-    validate_hashtag_name,
-)
 from ...services.storage import StorageService
+from ...services.tags import (
+    add_tags_to_entity,
+    remove_tag_from_entity,
+    validate_tag_name,
+)
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
 from .._sorting import SortParams, get_sort
@@ -40,7 +40,7 @@ from ..responses import (
     build_album_summary,
     build_track_summary,
 )
-from ._common import HashtagListRequest
+from ._common import TagListRequest
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import _enqueue_track_tag_sync
 
@@ -61,7 +61,7 @@ class ArtistResponse(BaseModel):
     cover_url: Optional[str] = None
     albums: Optional[List[AlbumSummary]] = None
     tracks: Optional[List[TrackSummary]] = None
-    hashtags: List[str] = []
+    tags: List[str] = []
 
 
 class ArtistUpdate(BaseModel):
@@ -95,11 +95,11 @@ def _artist_track_sort_key(track):
     return (track.album_id or "", track.disc_number or 0, track.track_number or 0, track.created_at)
 
 
-def _artist_hashtags(artist) -> List[str]:
-    """Return loaded hashtag names, avoiding a lazy load."""
-    if not _is_loaded(artist, "hashtags"):
+def _artist_tags(artist) -> List[str]:
+    """Return loaded tag names, avoiding a lazy load."""
+    if not _is_loaded(artist, "tags"):
         return []
-    return [h.name for h in artist.hashtags]
+    return [h.name for h in artist.tags]
 
 
 async def _build_artist_response(
@@ -139,7 +139,7 @@ async def _build_artist_response(
         cover_url=await _cover_url(artist, storage),
         albums=albums,
         tracks=tracks,
-        hashtags=_artist_hashtags(artist),
+        tags=_artist_tags(artist),
     )
 
 
@@ -151,7 +151,7 @@ async def list_artists(
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"albums", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
     """List or search artists."""
     total = await music.count_artists(db, query=q)
@@ -173,7 +173,7 @@ async def get_artist(
     artist_id: str,
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"albums", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
     """Get an artist by ID."""
     artist = await music.get_artist(db, artist_id, include=set(include.values))
@@ -191,7 +191,7 @@ async def update_artist(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"albums", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
     """Partially update an artist."""
     artist = await music.get_artist(db, artist_id, include=set(include.values))
@@ -240,7 +240,7 @@ async def upload_artist_image(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"albums", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
     """Upload an artist image."""
     artist = await music.get_artist(db, artist_id, include=set(include.values))
@@ -284,7 +284,7 @@ async def upload_artist_cover(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"albums", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
     """Upload artist cover art."""
     artist = await music.get_artist(db, artist_id, include=set(include.values))
@@ -327,7 +327,7 @@ async def delete_artist_image(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"albums", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
     """Remove an artist image."""
     artist = await music.get_artist(db, artist_id, include=set(include.values))
@@ -363,7 +363,7 @@ async def delete_artist_cover(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"albums", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
     """Remove artist cover art."""
     artist = await music.get_artist(db, artist_id, include=set(include.values))
@@ -454,17 +454,17 @@ async def delete_artist(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{artist_id}/hashtags", response_model=ArtistResponse)
-async def add_artist_hashtags(
+@router.post("/{artist_id}/tags", response_model=ArtistResponse)
+async def add_artist_tags(
     artist_id: str,
     request: Request,
-    body: HashtagListRequest,
+    body: TagListRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"albums", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
-    """Add hashtags to an artist (admin only)."""
+    """Add tags to an artist (admin only)."""
     artist = await music.get_artist(db, artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
@@ -476,11 +476,11 @@ async def add_artist_hashtags(
         )
 
     try:
-        await add_hashtags_to_entity(
+        await add_tags_to_entity(
             db,
             "artist",
             artist_id,
-            body.hashtags,
+            body.tags,
             user_id=current_user.id,
         )
     except ValueError as exc:
@@ -489,31 +489,31 @@ async def add_artist_hashtags(
             detail=str(exc),
         ) from exc
 
-    artist = await music.get_artist(db, artist_id, include=set(include.values) | {"hashtags"})
+    artist = await music.get_artist(db, artist_id, include=set(include.values) | {"tags"})
     await audit.log_action(
         db,
         actor_id=current_user.id,
-        action="hashtag.add",
+        action="tag.add",
         target_type="artist",
         target_id=artist_id,
-        details={"hashtags": [validate_hashtag_name(h) for h in body.hashtags]},
+        details={"tags": [validate_tag_name(h) for h in body.tags]},
         ip_address=client_ip(request),
     )
     await db.commit()
     return await _build_artist_response(artist, storage, include)
 
 
-@router.delete("/{artist_id}/hashtags/{hashtag}", response_model=ArtistResponse)
-async def remove_artist_hashtag(
+@router.delete("/{artist_id}/tags/{tag}", response_model=ArtistResponse)
+async def remove_artist_tag(
     artist_id: str,
-    hashtag: str,
+    tag: str,
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"albums", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
-    """Remove a hashtag from an artist (admin only)."""
+    """Remove a tag from an artist (admin only)."""
     artist = await music.get_artist(db, artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
@@ -525,21 +525,21 @@ async def remove_artist_hashtag(
         )
 
     try:
-        await remove_hashtag_from_entity(db, "artist", artist_id, hashtag)
+        await remove_tag_from_entity(db, "artist", artist_id, tag)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
 
-    artist = await music.get_artist(db, artist_id, include=set(include.values) | {"hashtags"})
+    artist = await music.get_artist(db, artist_id, include=set(include.values) | {"tags"})
     await audit.log_action(
         db,
         actor_id=current_user.id,
-        action="hashtag.remove",
+        action="tag.remove",
         target_type="artist",
         target_id=artist_id,
-        details={"hashtag": validate_hashtag_name(hashtag)},
+        details={"tag": validate_tag_name(tag)},
         ip_address=client_ip(request),
     )
     await db.commit()

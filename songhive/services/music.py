@@ -16,11 +16,11 @@ from ..models.external_library import ExternalLibrary
 from ..models.external_track import ExternalTrack
 from ..models.favorite import Favorite
 from ..models.genre import Genre, GenreAlbum, GenreTrack
-from ..models.hashtag import Hashtag, HashtagTrack
 from ..models.library import Library
 from ..models.library_track import LibraryTrack
 from ..models.playlist import Playlist, PlaylistTrack
 from ..models.radio import Radio
+from ..models.tag import Tag, TagTrack
 from ..models.track import Track
 from ..models.user import User
 from .acl import apply_access_filter
@@ -54,8 +54,8 @@ def _track_selectin_options(include: Optional[Set[str]]) -> List[Any]:
             )
         if "owner" in include:
             options.append(selectinload(Track.owner))
-        if "hashtags" in include:
-            options.append(selectinload(Track.hashtags))
+        if "tags" in include:
+            options.append(selectinload(Track.tags))
         if "genres" in include:
             options.append(selectinload(Track.genres))
     return options
@@ -82,8 +82,8 @@ def _album_selectin_options(include: Optional[Set[str]]) -> List[Any]:
                     selectinload(Track.image_file),
                 )
             )
-        if "hashtags" in include:
-            options.append(selectinload(Album.hashtags))
+        if "tags" in include:
+            options.append(selectinload(Album.tags))
         if "genres" in include:
             options.append(selectinload(Album.genres))
     return options
@@ -115,8 +115,8 @@ def _artist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
                     selectinload(Track.image_file),
                 )
             )
-        if "hashtags" in include:
-            options.append(selectinload(Artist.hashtags))
+        if "tags" in include:
+            options.append(selectinload(Artist.tags))
     return options
 
 
@@ -141,8 +141,8 @@ def _library_selectin_options(include: Optional[Set[str]]) -> List[Any]:
                     selectinload(Track.image_file),
                 )
             )
-        if "hashtags" in include:
-            options.append(selectinload(Library.hashtags))
+        if "tags" in include:
+            options.append(selectinload(Library.tags))
     return options
 
 
@@ -169,8 +169,8 @@ def _playlist_selectin_options(include: Optional[Set[str]]) -> List[Any]:
                     )
                 )
             )
-        if "hashtags" in include:
-            options.append(selectinload(Playlist.hashtags))
+        if "tags" in include:
+            options.append(selectinload(Playlist.tags))
     return options
 
 
@@ -492,7 +492,7 @@ def _build_tracks_stmt(
     artist_id: Optional[str] = None,
     album_id: Optional[str] = None,
     genre: Optional[str] = None,
-    hashtag: Optional[str] = None,
+    tag: Optional[str] = None,
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
@@ -521,11 +521,11 @@ def _build_tracks_stmt(
                     .where(Genre.name == genre_name)
                 )
             )
-    if hashtag:
+    if tag:
         stmt = (
-            stmt.join(HashtagTrack, HashtagTrack.track_id == Track.id)
-            .join(Hashtag, Hashtag.id == HashtagTrack.hashtag_id)
-            .where(Hashtag.name == hashtag)
+            stmt.join(TagTrack, TagTrack.track_id == Track.id)
+            .join(Tag, Tag.id == TagTrack.tag_id)
+            .where(Tag.name == tag)
         )
     if file_id:
         stmt = stmt.where(
@@ -576,7 +576,7 @@ async def list_tracks(
     artist_id: Optional[str] = None,
     album_id: Optional[str] = None,
     genre: Optional[str] = None,
-    hashtag: Optional[str] = None,
+    tag: Optional[str] = None,
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
@@ -603,7 +603,7 @@ async def list_tracks(
         artist_id=artist_id,
         album_id=album_id,
         genre=genre,
-        hashtag=hashtag,
+        tag=tag,
         year_from=year_from,
         year_to=year_to,
         library_id=library_id,
@@ -656,7 +656,7 @@ async def count_tracks(
     artist_id: Optional[str] = None,
     album_id: Optional[str] = None,
     genre: Optional[str] = None,
-    hashtag: Optional[str] = None,
+    tag: Optional[str] = None,
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
@@ -671,7 +671,7 @@ async def count_tracks(
         artist_id=artist_id,
         album_id=album_id,
         genre=genre,
-        hashtag=hashtag,
+        tag=tag,
         year_from=year_from,
         year_to=year_to,
         library_id=library_id,

@@ -4,9 +4,9 @@ import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useToastStore } from "@/stores/toast";
 import * as tracksApi from "@/api/tracks";
-import * as hashtagsApi from "@/api/hashtags";
+import * as tagsApi from "@/api/tags";
 import type { TrackResponse } from "@/api/tracks";
-import HashtagInput from "@/components/hashtags/HashtagInput.vue";
+import TagInput from "@/components/tags/TagInput.vue";
 import BulkTrackEditModal from "./BulkTrackEditModal.vue";
 
 vi.mock("@/api/tracks", () => ({
@@ -14,9 +14,9 @@ vi.mock("@/api/tracks", () => ({
   updateTrack: vi.fn(),
 }));
 
-vi.mock("@/api/hashtags", () => ({
-  addHashtags: vi.fn().mockResolvedValue(undefined),
-  removeHashtag: vi.fn().mockResolvedValue(undefined),
+vi.mock("@/api/tags", () => ({
+  addTags: vi.fn().mockResolvedValue(undefined),
+  removeTag: vi.fn().mockResolvedValue(undefined),
 }));
 
 function makeTrack(overrides: Partial<TrackResponse> = {}): TrackResponse {
@@ -33,7 +33,7 @@ function makeTrack(overrides: Partial<TrackResponse> = {}): TrackResponse {
     filename: "one.mp3",
     is_external: false,
     can_rename_source: true,
-    hashtags: ["live"],
+    tags: ["live"],
     genres: ["rock"],
     artist: { id: "artist-1", name: "Shared Artist" },
     album: {
@@ -112,15 +112,15 @@ describe("BulkTrackEditModal", () => {
     await openModal(wrapper);
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "artist,album,hashtags,genres",
+      include: "artist,album,tags,genres",
     });
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-2", {
-      include: "artist,album,hashtags,genres",
+      include: "artist,album,tags,genres",
     });
 
     const inputs = formInputs();
     // Order: title, artist, album, genre input, track number, disc number,
-    // release year, filename, hashtag input.
+    // release year, filename, tag input.
     expect(inputs[0]!.value).toBe(""); // titles differ
     expect(inputs[1]!.value).toBe("Shared Artist");
     expect(inputs[2]!.value).toBe("Shared Album");
@@ -158,8 +158,8 @@ describe("BulkTrackEditModal", () => {
     expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-2", {
       artist_name: "New Artist",
     });
-    expect(hashtagsApi.addHashtags).not.toHaveBeenCalled();
-    expect(hashtagsApi.removeHashtag).not.toHaveBeenCalled();
+    expect(tagsApi.addTags).not.toHaveBeenCalled();
+    expect(tagsApi.removeTag).not.toHaveBeenCalled();
 
     expect(wrapper.emitted("saved")).toBeTruthy();
     expect(wrapper.emitted("close")).toBeTruthy();
@@ -207,10 +207,10 @@ describe("BulkTrackEditModal", () => {
     expect(wrapper.emitted("close")).toBeFalsy();
   });
 
-  it("syncs hashtags per track when the field is modified", async () => {
+  it("syncs tags per track when the field is modified", async () => {
     const tracks = [
-      makeTrack({ id: "track-1", hashtags: ["a", "b"] }),
-      makeTrack({ id: "track-2", hashtags: ["b", "c"] }),
+      makeTrack({ id: "track-1", tags: ["a", "b"] }),
+      makeTrack({ id: "track-2", tags: ["b", "c"] }),
     ];
     for (const track of tracks) {
       vi.mocked(tracksApi.getTrack).mockResolvedValueOnce(track);
@@ -219,40 +219,24 @@ describe("BulkTrackEditModal", () => {
     wrapper = mountModal(["track-1", "track-2"]);
     await openModal(wrapper);
 
-    const hashtagInput = wrapper.findComponent(HashtagInput);
-    expect(hashtagInput.exists()).toBe(true);
-    hashtagInput.vm.$emit("update:modelValue", ["x"]);
+    const tagInput = wrapper.findComponent(TagInput);
+    expect(tagInput.exists()).toBe(true);
+    tagInput.vm.$emit("update:modelValue", ["x"]);
     await flushPromises();
 
     await clickSave();
 
     expect(tracksApi.updateTrack).not.toHaveBeenCalled();
-    expect(hashtagsApi.addHashtags).toHaveBeenCalledWith("tracks", "track-1", {
-      hashtags: ["x"],
+    expect(tagsApi.addTags).toHaveBeenCalledWith("tracks", "track-1", {
+      tags: ["x"],
     });
-    expect(hashtagsApi.addHashtags).toHaveBeenCalledWith("tracks", "track-2", {
-      hashtags: ["x"],
+    expect(tagsApi.addTags).toHaveBeenCalledWith("tracks", "track-2", {
+      tags: ["x"],
     });
-    expect(hashtagsApi.removeHashtag).toHaveBeenCalledWith(
-      "tracks",
-      "track-1",
-      "a",
-    );
-    expect(hashtagsApi.removeHashtag).toHaveBeenCalledWith(
-      "tracks",
-      "track-1",
-      "b",
-    );
-    expect(hashtagsApi.removeHashtag).toHaveBeenCalledWith(
-      "tracks",
-      "track-2",
-      "b",
-    );
-    expect(hashtagsApi.removeHashtag).toHaveBeenCalledWith(
-      "tracks",
-      "track-2",
-      "c",
-    );
+    expect(tagsApi.removeTag).toHaveBeenCalledWith("tracks", "track-1", "a");
+    expect(tagsApi.removeTag).toHaveBeenCalledWith("tracks", "track-1", "b");
+    expect(tagsApi.removeTag).toHaveBeenCalledWith("tracks", "track-2", "b");
+    expect(tagsApi.removeTag).toHaveBeenCalledWith("tracks", "track-2", "c");
     expect(wrapper.emitted("saved")).toBeTruthy();
   });
 

@@ -16,15 +16,15 @@ from ..models.track import Track
 from ..music.metadata import AudioMetadataWrite, write_metadata
 from ..services.genres import (
     extract_genres_from_track,
-    genres_to_hashtags,
+    genres_to_tags,
     get_genres_for_entity,
     propagate_album_genres,
     set_genres_for_entity,
     set_track_inherited_genres,
 )
-from ..services.hashtags import add_hashtags_to_entity, extract_hashtags_from_track
 from ..services.metadata import _guess_image_mime
 from ..services.storage import StorageService
+from ..services.tags import add_tags_to_entity, extract_tags_from_track
 from ..storage import S3Storage
 from .celery import celery_app
 
@@ -83,9 +83,9 @@ async def _sync_track_tags(track_id: str, config) -> bool:
 
             meta = _build_metadata(track)
 
-            auto_tags = extract_hashtags_from_track(track)
+            auto_tags = extract_tags_from_track(track)
             if auto_tags:
-                await add_hashtags_to_entity(
+                await add_tags_to_entity(
                     session,
                     "track",
                     track_id,
@@ -107,24 +107,24 @@ async def _sync_track_tags(track_id: str, config) -> bool:
 
             genre_names = extract_genres_from_track(track)
             if genre_names:
-                hashtag_names = genres_to_hashtags(genre_names)
+                tag_names = genres_to_tags(genre_names)
                 if is_inherited:
-                    if hashtag_names:
-                        await add_hashtags_to_entity(
+                    if tag_names:
+                        await add_tags_to_entity(
                             session,
                             "track",
                             track_id,
-                            hashtag_names,
+                            tag_names,
                             user_id=None,
                         )
                 else:
                     await set_genres_for_entity(session, "track", track_id, genre_names)
-                    if hashtag_names:
-                        await add_hashtags_to_entity(
+                    if tag_names:
+                        await add_tags_to_entity(
                             session,
                             "track",
                             track_id,
-                            hashtag_names,
+                            tag_names,
                             user_id=None,
                         )
 

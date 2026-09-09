@@ -1,11 +1,11 @@
 import { apiRequest, apiRequestWithHeaders } from "./client";
 import type { components } from "./types";
 
-export type HashtagSummary = components["schemas"]["HashtagSummaryResponse"];
+export type TagSummary = components["schemas"]["TagSummaryResponse"];
 export type TaggedItem = components["schemas"]["TaggedItemResponse"];
-export type HashtagListRequest = components["schemas"]["HashtagListRequest"];
+export type TagListRequest = components["schemas"]["TagListRequest"];
 
-export interface ListHashtagsParams {
+export interface ListTagsParams {
   [key: string]: string | number | undefined;
   q?: string;
   limit?: number;
@@ -14,13 +14,13 @@ export interface ListHashtagsParams {
   sort_dir?: "asc" | "desc";
 }
 
-export interface ListHashtagsResult {
-  items: HashtagSummary[];
+export interface ListTagsResult {
+  items: TagSummary[];
   total: number;
   offset: number;
 }
 
-export interface ListHashtagItemsParams {
+export interface ListTagItemsParams {
   [key: string]: string | number | undefined;
   limit?: number;
   offset?: number;
@@ -29,7 +29,7 @@ export interface ListHashtagItemsParams {
   type?: TaggedItemType;
 }
 
-export interface ListHashtagItemsResult {
+export interface ListTagItemsResult {
   items: TaggedItem[];
   total: number;
   offset: number;
@@ -40,10 +40,10 @@ export type EntityType =
 export type TaggedItemType =
   "artist" | "album" | "track" | "playlist" | "library";
 
-export async function listHashtags(
-  params?: ListHashtagsParams,
-): Promise<ListHashtagsResult> {
-  const response = await apiRequestWithHeaders<HashtagSummary[]>("/hashtags", {
+export async function listTags(
+  params?: ListTagsParams,
+): Promise<ListTagsResult> {
+  const response = await apiRequestWithHeaders<TagSummary[]>("/tags", {
     query: params,
   });
   const offsetHeader = response.headers.get("X-List-Offset");
@@ -55,12 +55,12 @@ export async function listHashtags(
   };
 }
 
-export async function listHashtagItems(
-  hashtag: string,
-  params?: ListHashtagItemsParams,
-): Promise<ListHashtagItemsResult> {
+export async function listTagItems(
+  tag: string,
+  params?: ListTagItemsParams,
+): Promise<ListTagItemsResult> {
   const response = await apiRequestWithHeaders<TaggedItem[]>(
-    `/hashtags/${encodeURIComponent(hashtag)}`,
+    `/tags/${encodeURIComponent(tag)}`,
     { query: params },
   );
   const offsetHeader = response.headers.get("X-List-Offset");
@@ -72,40 +72,39 @@ export async function listHashtagItems(
   };
 }
 
-export function deleteHashtag(hashtag: string): Promise<unknown> {
-  return apiRequest<unknown>(`/hashtags/${encodeURIComponent(hashtag)}`, {
+export function deleteTag(tag: string): Promise<unknown> {
+  return apiRequest<unknown>(`/tags/${encodeURIComponent(tag)}`, {
     method: "DELETE",
   });
 }
 
-export function addHashtags(
+export function addTags(
   type: EntityType,
   id: string,
-  body: HashtagListRequest,
+  body: TagListRequest,
 ): Promise<unknown> {
-  return apiRequest<unknown>(`/${type}/${id}/hashtags`, {
+  return apiRequest<unknown>(`/${type}/${id}/tags`, {
     method: "POST",
     body,
   });
 }
 
-export function removeHashtag(
+export function removeTag(
   type: EntityType,
   id: string,
-  hashtag: string,
+  tag: string,
 ): Promise<unknown> {
-  return apiRequest<unknown>(
-    `/${type}/${id}/hashtags/${encodeURIComponent(hashtag)}`,
-    { method: "DELETE" },
-  );
+  return apiRequest<unknown>(`/${type}/${id}/tags/${encodeURIComponent(tag)}`, {
+    method: "DELETE",
+  });
 }
 
-export async function listUserHashtags(
+export async function listUserTags(
   userId: string,
-  params?: ListHashtagsParams,
-): Promise<ListHashtagsResult> {
-  const response = await apiRequestWithHeaders<HashtagSummary[]>(
-    `/users/${userId}/hashtags`,
+  params?: ListTagsParams,
+): Promise<ListTagsResult> {
+  const response = await apiRequestWithHeaders<TagSummary[]>(
+    `/users/${userId}/tags`,
     { query: params },
   );
   const offsetHeader = response.headers.get("X-List-Offset");
@@ -117,13 +116,13 @@ export async function listUserHashtags(
   };
 }
 
-export async function listUserHashtagItems(
+export async function listUserTagItems(
   userId: string,
-  hashtag: string,
-  params?: ListHashtagItemsParams,
-): Promise<ListHashtagItemsResult> {
+  tag: string,
+  params?: ListTagItemsParams,
+): Promise<ListTagItemsResult> {
   const response = await apiRequestWithHeaders<TaggedItem[]>(
-    `/users/${userId}/hashtags/${encodeURIComponent(hashtag)}`,
+    `/users/${userId}/tags/${encodeURIComponent(tag)}`,
     { query: params },
   );
   const offsetHeader = response.headers.get("X-List-Offset");

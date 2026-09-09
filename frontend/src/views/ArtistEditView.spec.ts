@@ -95,7 +95,7 @@ describe("ArtistEditView", () => {
     const router = await mountAt("/artists/artist-1/edit");
 
     expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1", {
-      include: "hashtags",
+      include: "tags",
     });
     expect(wrapper.text()).toContain("Edit artist");
 
@@ -115,7 +115,7 @@ describe("ArtistEditView", () => {
     const router = await mountAt("/artists/artist-1/edit");
 
     expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1", {
-      include: "hashtags",
+      include: "tags",
     });
     expect(router.currentRoute.value.path).toBe("/artists/artist-1");
   });

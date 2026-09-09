@@ -18,9 +18,9 @@ def get_outbox_url(domain: str, username: str) -> str:
     return f"https://{domain}/users/{username}/outbox"
 
 
-def get_hashtag_url(domain: str, name: str) -> str:
-    """Get the local URL of a hashtag page."""
-    return f"https://{domain}/hashtags/{name}"
+def get_tag_url(domain: str, name: str) -> str:
+    """Get the local URL of a tag page."""
+    return f"https://{domain}/tags/{name}"
 
 
 def get_track_url(track: Union[Track, str], domain: str) -> str:

@@ -11,6 +11,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
+from songhive.migrations.utils import table_exists
+
 # revision identifiers, used by Alembic.
 revision: str = "55e5cbed94e8"
 down_revision: Union[str, Sequence[str], None] = "8ad99ccdcef2"
@@ -63,6 +65,8 @@ def _entity_association_table(table: str, entity_column: str, entity_table: str)
 
 def upgrade() -> None:
     """Upgrade schema."""
+    if table_exists("hashtags") or table_exists("tags"):
+        return
     op.create_table(
         "hashtags",
         sa.Column("id", sa.String(), nullable=False),

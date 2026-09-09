@@ -10,7 +10,6 @@ from .external_sync_run import ExternalSyncRun
 from .external_track import ExternalTrack
 from .favorite import Favorite
 from .genre import Genre, GenreAlbum, GenreTrack
-from .hashtag import Hashtag, HashtagAlbum, HashtagArtist, HashtagLibrary, HashtagPlaylist, HashtagTrack
 from .history import ListeningHistory
 from .invite import Invite
 from .library import Library
@@ -23,6 +22,7 @@ from .setting import Setting
 from .share_grant import ShareGrant
 from .share_token import ShareToken
 from .stored_file import StoredFile
+from .tag import Tag, TagAlbum, TagArtist, TagLibrary, TagPlaylist, TagTrack
 from .track import Track
 from .transcoded_file import TranscodedFile
 from .upload import Upload
@@ -46,12 +46,12 @@ __all__ = [
     "GenreAlbum",
     "GenreTrack",
     "get_session",
-    "Hashtag",
-    "HashtagAlbum",
-    "HashtagArtist",
-    "HashtagLibrary",
-    "HashtagPlaylist",
-    "HashtagTrack",
+    "Tag",
+    "TagAlbum",
+    "TagArtist",
+    "TagLibrary",
+    "TagPlaylist",
+    "TagTrack",
     "init_db",
     "reset_db",
     "Invite",

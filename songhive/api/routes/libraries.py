@@ -30,13 +30,13 @@ from ...models.library import Library
 from ...models.user import User
 from ...services import acl, activities, audit, deletion, music
 from ...services.federation import ensure_user_actor, unpublish_track_activity
-from ...services.hashtags import (
-    add_hashtags_to_entity,
-    remove_hashtag_from_entity,
-    validate_hashtag_name,
-)
 from ...services.import_ import DuplicateTrackError, ImportResult, import_audio_file
 from ...services.storage import StorageService
+from ...services.tags import (
+    add_tags_to_entity,
+    remove_tag_from_entity,
+    validate_tag_name,
+)
 from ...tasks.import_ import process_upload, scan_directory
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
@@ -50,7 +50,7 @@ from ..deps import (
 )
 from ..middleware.rate_limit import rate_limit_account
 from ..responses import TrackResponse, TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
-from ._common import HashtagListRequest, HasOwnerId, redact_owner
+from ._common import HasOwnerId, TagListRequest, redact_owner
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import _build_track_response
 
@@ -72,7 +72,7 @@ class LibraryResponse(BaseModel):
     can_write: bool = False
     owner: Optional[UserSummary] = None
     tracks: Optional[List[TrackSummary]] = None
-    hashtags: List[str] = []
+    tags: List[str] = []
 
 
 def _can_write_library(user: Optional[User], library: Library) -> bool:
@@ -147,11 +147,11 @@ async def _library_cover_url(library: Library, storage: StorageService) -> Optio
     return None
 
 
-def _library_hashtags(library: Library) -> List[str]:
-    """Return loaded hashtag names, avoiding a lazy load."""
-    if not _is_loaded(library, "hashtags"):
+def _library_tags(library: Library) -> List[str]:
+    """Return loaded tag names, avoiding a lazy load."""
+    if not _is_loaded(library, "tags"):
         return []
-    return [h.name for h in library.hashtags]
+    return [h.name for h in library.tags]
 
 
 async def _build_library_response(
@@ -185,7 +185,7 @@ async def _build_library_response(
         can_write=_can_write_library(user, library),
         owner=owner,
         tracks=tracks,
-        hashtags=_library_hashtags(library),
+        tags=_library_tags(library),
     )
 
 
@@ -198,7 +198,7 @@ async def list_libraries(
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
     """List libraries visible to the requester."""
     if include_external and (user is None or not user.is_admin):
@@ -259,7 +259,7 @@ async def get_library(
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
     """Get a library by ID."""
     library = await music.get_library(db, library_id, include=set(include.values))
@@ -786,7 +786,7 @@ async def update_library(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
     """Partially update a library."""
     library = await music.get_library(db, library_id, include=set(include.values))
@@ -833,7 +833,7 @@ async def upload_library_image(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
     """Upload a library image."""
     library = await music.get_library(db, library_id, include=set(include.values))
@@ -878,7 +878,7 @@ async def upload_library_cover(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
     """Upload library cover art."""
     library = await music.get_library(db, library_id, include=set(include.values))
@@ -922,7 +922,7 @@ async def delete_library_image(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
     """Remove a library image."""
     library = await music.get_library(db, library_id, include=set(include.values))
@@ -958,7 +958,7 @@ async def delete_library_cover(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
     """Remove library cover art."""
     library = await music.get_library(db, library_id, include=set(include.values))
@@ -1051,17 +1051,17 @@ async def delete_library(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{library_id}/hashtags", response_model=LibraryResponse)
-async def add_library_hashtags(
+@router.post("/{library_id}/tags", response_model=LibraryResponse)
+async def add_library_tags(
     library_id: str,
     request: Request,
-    body: HashtagListRequest,
+    body: TagListRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
-    """Add hashtags to a library."""
+    """Add tags to a library."""
     library = await music.get_library(db, library_id, include={"owner"})
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
@@ -1073,11 +1073,11 @@ async def add_library_hashtags(
         )
 
     try:
-        await add_hashtags_to_entity(
+        await add_tags_to_entity(
             db,
             "library",
             library_id,
-            body.hashtags,
+            body.tags,
             user_id=current_user.id,
         )
     except ValueError as exc:
@@ -1086,33 +1086,33 @@ async def add_library_hashtags(
             detail=str(exc),
         ) from exc
 
-    library = await music.get_library(db, library_id, include=set(include.values) | {"owner", "hashtags"})
+    library = await music.get_library(db, library_id, include=set(include.values) | {"owner", "tags"})
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
     await audit.log_action(
         db,
         actor_id=current_user.id,
-        action="hashtag.add",
+        action="tag.add",
         target_type="library",
         target_id=library_id,
-        details={"hashtags": [validate_hashtag_name(h) for h in body.hashtags]},
+        details={"tags": [validate_tag_name(h) for h in body.tags]},
         ip_address=client_ip(request),
     )
     await db.commit()
     return await _build_library_response(library, current_user, storage, include)
 
 
-@router.delete("/{library_id}/hashtags/{hashtag}", response_model=LibraryResponse)
-async def remove_library_hashtag(
+@router.delete("/{library_id}/tags/{tag}", response_model=LibraryResponse)
+async def remove_library_tag(
     library_id: str,
-    hashtag: str,
+    tag: str,
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"owner", "tracks", "hashtags"})),
+    include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
-    """Remove a hashtag from a library."""
+    """Remove a tag from a library."""
     library = await music.get_library(db, library_id, include={"owner"})
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
@@ -1124,23 +1124,23 @@ async def remove_library_hashtag(
         )
 
     try:
-        await remove_hashtag_from_entity(db, "library", library_id, hashtag)
+        await remove_tag_from_entity(db, "library", library_id, tag)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
 
-    library = await music.get_library(db, library_id, include=set(include.values) | {"owner", "hashtags"})
+    library = await music.get_library(db, library_id, include=set(include.values) | {"owner", "tags"})
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
     await audit.log_action(
         db,
         actor_id=current_user.id,
-        action="hashtag.remove",
+        action="tag.remove",
         target_type="library",
         target_id=library_id,
-        details={"hashtag": validate_hashtag_name(hashtag)},
+        details={"tag": validate_tag_name(tag)},
         ip_address=client_ip(request),
     )
     await db.commit()

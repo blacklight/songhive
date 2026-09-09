@@ -39,7 +39,7 @@ const targetTypeOptions = [
   { value: "album", label: t("pages.admin.audit.targetTypes.album") },
   { value: "artist", label: t("pages.admin.audit.targetTypes.artist") },
   { value: "library", label: t("pages.admin.audit.targetTypes.library") },
-  { value: "hashtag", label: t("pages.admin.audit.targetTypes.hashtag") },
+  { value: "tag", label: t("pages.admin.audit.targetTypes.tag") },
   { value: "report", label: t("pages.admin.audit.targetTypes.report") },
   { value: "file", label: t("pages.admin.audit.targetTypes.file") },
   { value: "invite", label: t("pages.admin.audit.targetTypes.invite") },

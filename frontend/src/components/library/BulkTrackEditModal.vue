@@ -11,7 +11,7 @@ import {
   type TrackResponse,
   type TrackUpdate,
 } from "@/api/tracks";
-import { addHashtags, removeHashtag } from "@/api/hashtags";
+import { addTags, removeTag } from "@/api/tags";
 import { getApiErrorMessage } from "@/api/client";
 import { parseNumber } from "@/utils/entity";
 import { useToastStore } from "@/stores/toast";
@@ -43,7 +43,7 @@ const discNumber = ref("");
 const releaseYear = ref("");
 const filename = ref("");
 const visibility = ref("");
-const hashtags = ref<string[]>([]);
+const tags = ref<string[]>([]);
 
 interface BulkInitialValues {
   title: string;
@@ -55,7 +55,7 @@ interface BulkInitialValues {
   releaseYear: string;
   filename: string;
   visibility: string;
-  hashtags: string[];
+  tags: string[];
 }
 
 const initial = ref<BulkInitialValues | null>(null);
@@ -117,7 +117,7 @@ function initForm() {
     ),
     filename: sharedScalar(tracks.map((track) => track.filename ?? "")) ?? "",
     visibility: sharedScalar(tracks.map((track) => track.visibility)) ?? "",
-    hashtags: sharedList(tracks.map((track) => track.hashtags)) ?? [],
+    tags: sharedList(tracks.map((track) => track.tags)) ?? [],
   };
 
   title.value = initial.value.title;
@@ -129,7 +129,7 @@ function initForm() {
   releaseYear.value = initial.value.releaseYear;
   filename.value = initial.value.filename;
   visibility.value = initial.value.visibility;
-  hashtags.value = [...initial.value.hashtags];
+  tags.value = [...initial.value.tags];
 }
 
 async function loadTracks() {
@@ -140,7 +140,7 @@ async function loadTracks() {
   try {
     fetchedTracks.value = await Promise.all(
       props.trackIds.map((id) =>
-        getTrack(id, { include: "artist,album,hashtags,genres" }),
+        getTrack(id, { include: "artist,album,tags,genres" }),
       ),
     );
     initForm();
@@ -212,15 +212,15 @@ function buildUpdate(): TrackUpdate | null {
   return Object.keys(body).length > 0 ? body : null;
 }
 
-async function syncTrackHashtags(track: TrackResponse, desired: string[]) {
-  const current = new Set(track.hashtags ?? []);
-  const toAdd = desired.filter((hashtag) => !current.has(hashtag));
-  const toRemove = [...current].filter((hashtag) => !desired.includes(hashtag));
+async function syncTrackTags(track: TrackResponse, desired: string[]) {
+  const current = new Set(track.tags ?? []);
+  const toAdd = desired.filter((tag) => !current.has(tag));
+  const toRemove = [...current].filter((tag) => !desired.includes(tag));
   if (toAdd.length > 0) {
-    await addHashtags("tracks", track.id, { hashtags: toAdd });
+    await addTags("tracks", track.id, { tags: toAdd });
   }
-  for (const hashtag of toRemove) {
-    await removeHashtag("tracks", track.id, hashtag);
+  for (const tag of toRemove) {
+    await removeTag("tracks", track.id, tag);
   }
 }
 
@@ -228,25 +228,24 @@ async function onSubmit() {
   if (loading.value || saving.value || !loaded.value) return;
 
   const body = buildUpdate();
-  const hashtagsDirty =
-    initial.value !== null &&
-    !listsEqual(hashtags.value, initial.value.hashtags);
+  const tagsDirty =
+    initial.value !== null && !listsEqual(tags.value, initial.value.tags);
 
-  if (!body && !hashtagsDirty) {
+  if (!body && !tagsDirty) {
     error.value = t("browse.bulkEdit.nothingToUpdate");
     return;
   }
 
   saving.value = true;
   error.value = null;
-  const desiredHashtags = [...hashtags.value];
+  const desiredTags = [...tags.value];
   const results = await Promise.allSettled(
     fetchedTracks.value.map(async (track) => {
       if (body) {
         await updateTrack(track.id, body);
       }
-      if (hashtagsDirty) {
-        await syncTrackHashtags(track, desiredHashtags);
+      if (tagsDirty) {
+        await syncTrackTags(track, desiredTags);
       }
     }),
   );
@@ -323,7 +322,7 @@ async function onSubmit() {
           v-model:release-year="releaseYear"
           v-model:filename="filename"
           v-model:visibility="visibility"
-          v-model:hashtags="hashtags"
+          v-model:tags="tags"
           bulk
           :can-rename-file="canRenameFile"
           :disabled="saving"

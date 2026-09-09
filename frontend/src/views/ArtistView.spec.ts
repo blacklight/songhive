@@ -33,7 +33,7 @@ function createTestRouter() {
       { path: "/", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
-      { path: "/hashtags/:name", component: { template: "<div/>" } },
+      { path: "/tags/:name", component: { template: "<div/>" } },
     ],
   });
 }
@@ -41,7 +41,7 @@ function createTestRouter() {
 function createArtist(
   id: string,
   name: string,
-  hashtags: string[] = [],
+  tags: string[] = [],
 ): ArtistResponse {
   return {
     id,
@@ -50,7 +50,7 @@ function createArtist(
     bio: "A great artist.",
     image_file_id: null,
     image_url: null,
-    hashtags,
+    tags,
   };
 }
 
@@ -81,7 +81,7 @@ function createTrack(id: string, title: string): TrackResponse {
     audio_url: "https://example.com/audio.mp3",
     visibility: "public",
     owner_id: "user-1",
-    hashtags: [],
+    tags: [],
     artist: { id: "artist-1", name: "The Larks", image_url: null },
     album: {
       id: "album-1",
@@ -151,7 +151,7 @@ describe("ArtistView", () => {
     await mountAt("/artists/artist-1");
 
     expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1", {
-      include: "hashtags",
+      include: "tags",
     });
     expect(albumsApi.listAlbums).toHaveBeenCalledWith({
       q: "",
@@ -176,7 +176,7 @@ describe("ArtistView", () => {
     expect(wrapper.text()).toContain("Song One");
   });
 
-  it("renders artist hashtags", async () => {
+  it("renders artist tags", async () => {
     vi.mocked(artistsApi.getArtist).mockResolvedValue(
       createArtist("artist-1", "The Larks", ["rock", "indie"]),
     );
@@ -259,7 +259,7 @@ describe("ArtistView", () => {
     await flushPromises();
 
     expect(artistsApi.getArtist).toHaveBeenLastCalledWith("artist-2", {
-      include: "hashtags",
+      include: "tags",
     });
     expect(wrapper.text()).toContain("Night Owls");
   });

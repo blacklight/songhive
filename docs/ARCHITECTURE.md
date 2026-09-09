@@ -92,7 +92,7 @@ songhive/
 │   │   ├── playlists.py
 │   │   ├── libraries.py
 │   │   ├── favorites.py
-│   │   ├── hashtags.py     # Global hashtag browsing and admin deletion
+│   │   ├── tags.py     # Global tag browsing and admin deletion
 │   │   ├── genres.py       # Global genre browsing and admin deletion
 │   │   ├── history.py      # Listening history
 │   │   ├── radios.py       # Dynamic radio generation
@@ -101,7 +101,7 @@ songhive/
 │   │   ├── share_urls.py   # Share URL tokens (revocable short links)
 │   │   ├── share.py        # Public token resolver (redirects + sets cookie)
 │   │   ├── reports.py      # Content moderation reports + admin review
-│   │   ├── federation.py   # Per-user ActivityPub actors + WebFinger
+│   │   ├── federation.py   # ActivityPub object endpoints (tracks, objects) + WebFinger
 │   │   ├── admin.py        # Admin endpoints (settings, stats, user management)
 │   │   ├── external_libraries.py # User external library CRUD, sync, tracks
 │   │   └── admin_external_libraries.py # Admin external library management
@@ -374,7 +374,7 @@ text is escaped and linkified by `pubby.render_post_html` (which also
 converts newlines to `<br>`, since remote servers render `content`/`summary`
 as HTML and would collapse literal newlines) — and
 `process_mentions` is the single entry point returning resolved mentions,
-rendered HTML, hashtags, and ActivityPub `Mention`/`Hashtag` tags.
+rendered HTML, tags, and ActivityPub `Mention`/`Hashtag` tags.
 `ActivityTarget` rows track per-inbox outbound delivery state (`pending`,
 `sent`, `failed`, `skipped`) with `attempts` / `last_error` /
 `last_attempt_at` bookkeeping. Tracks already published to the fediverse
@@ -459,7 +459,7 @@ re-runs the `process_mentions` pipeline on the new `content_source`:
 `content` is re-rendered as mention-aware safe HTML, the
 `activity_mentions` rows are replaced with the newly resolved set, and —
 when the stored `payload` embeds a dict `object` — the object's `content`
-and `tag` are rebuilt (`pubby.set_object_content` merges hashtags while
+and `tag` are rebuilt (`pubby.set_object_content` merges tags while
 preserving pre-existing tags, then the pipeline's `Mention` tags and HTML
 are layered on) and it is stamped with `updated`. A `visibility` edit
 goes through `cascade_visibility_update` so already-delivered inboxes
@@ -606,13 +606,13 @@ filtering. `GenreTrack.inherited` distinguishes album-inherited values from
 explicit track-level overrides. `services/genres.py` validates names, manages
 associations, propagates album genres down to tracks that have no explicit
 genre of their own, and re-derives the album genre from the intersection of its
-tracks' explicit genres. The hashtag system receives the same genre-derived
-tags: the genre string is split and mapped to valid hashtag names so
-genre-derived hashtags appear alongside user-created ones. The public API
+tracks' explicit genres. The tag system receives the same genre-derived
+tags: the genre string is split and mapped to valid tag names so
+genre-derived tags appear alongside user-created ones. The public API
 exposes global genre listing and deletion in `api/routes/genres.py`, and
 per-resource genre management is supported through `POST`/`DELETE` sub-routes on
 tracks and albums as well as the `genre` field on track/album updates. The
-frontend mirrors the hashtag browsing experience: `GenresView` and `GenreView`
+frontend mirrors the tag browsing experience: `GenresView` and `GenreView`
 list and filter genres, `GenreInput`/`GenreList` let users edit and display
 genres on tracks and albums, and the sidebar provides a top-level "Genres"
 navigation link.
@@ -889,8 +889,8 @@ delegated to pubby:
   `rel="tag"`/`rel="me"` anchors, `Hashtag` and `PropertyValue`
   tag/attachment builders) and `Audio` object content/duration formatting
   (`set_object_content`, `format_duration`) come from `pubby.content`; the
-  instance's `/hashtags/{name}` route convention is injected via
-  `federation/_common.py`'s `get_hashtag_url`.
+  instance's `/tags/{name}` route convention is injected via
+  `federation/_common.py`'s `get_tag_url`.
 - Instance allow/block matching (`normalize_domain`, `extract_domain`,
   `is_domain_blocked`) comes from `pubby.moderation`; `services/federation.py`
   keeps thin wrappers that inject `config.federation.allowed_instances` /
@@ -933,8 +933,8 @@ the HTTP routes.
 - The published `Audio` object carries the track's `description` (a free-text
   field settable at upload time or via `PATCH /tracks/{id}`) as its
   `content`: the text is HTML-escaped, http(s) URLs become anchors with
-  scheme-less link text, and `#hashtags` become `rel="tag"` links to this
-  instance's `/hashtags/{name}` pages. Hashtags found in the description are
+  scheme-less link text, and `#tags` become `rel="tag"` links to this
+  instance's `/tags/{name}` pages. Tags found in the description are
   also appended to the object's `tag` list, and the media download URL is
   attached as a `Document` with the audio MIME type. The rendered `content`
   ends with a `<p><a href="{track_url}">{artist} - {title}</a></p>` link
@@ -998,8 +998,8 @@ the HTTP routes.
   validation is left as escaped text.
 - Following/unfollowing uses standard AP `Follow`/`Undo(Follow)` activities.
 - `track.genre` is split into multiple `Hashtag` tags on the published
-  `Audio` object, with spaces converted to underscores. Hashtag tags include
-  an `href` pointing at the instance's `/hashtags/{name}` page.
+  `Audio` object, with spaces converted to underscores. These tags include
+  an `href` pointing at the instance's `/tags/{name}` page.
 - Per-actor follower isolation is delegated to pubby's `target_actor_id`.
 
 **Instance-level actor:**
@@ -1120,7 +1120,7 @@ The tag rewrite is performed by the `sync_track_tags` Celery task
    embedded tags using `mutagen`.
 5. Reconciles the track's `Genre` associations from `track.genre` or from the
    parent album when the track has no explicit genre, creates the corresponding
-   hashtag associations via `genres_to_hashtags`, and propagates the album's
+   tag associations via `genres_to_tags`, and propagates the album's
    genre from the intersection of its tracks' explicit genres.
 6. Updates `StoredFile.size`. For S3, re-uploads the rewritten file to the same
    key; for local storage, the file is already in place.

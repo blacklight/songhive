@@ -73,10 +73,10 @@ const navItems = computed<NavItem[]>(() => [
     icon: "list",
   },
   {
-    name: t("nav.hashtags"),
-    to: "/hashtags",
+    name: t("nav.tags"),
+    to: "/tags",
     requiresAuth: false,
-    icon: "hashtag",
+    icon: "tag",
   },
   {
     name: t("nav.genres"),

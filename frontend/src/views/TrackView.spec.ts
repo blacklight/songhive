@@ -33,7 +33,7 @@ function createTestRouter() {
       { path: "/tracks/:id", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
-      { path: "/hashtags/:name", component: { template: "<div/>" } },
+      { path: "/tags/:name", component: { template: "<div/>" } },
       { path: "/genres/:name", component: { template: "<div/>" } },
     ],
   });
@@ -42,7 +42,7 @@ function createTestRouter() {
 function createTrack(
   id: string,
   title: string,
-  hashtags: string[] = [],
+  tags: string[] = [],
   genres: string[] = [],
   image_url: string | null = null,
 ): TrackResponse {
@@ -59,7 +59,7 @@ function createTrack(
     image_url,
     visibility: "public",
     owner_id: "user-1",
-    hashtags,
+    tags,
     genres,
   };
 }
@@ -132,7 +132,7 @@ describe("TrackView", () => {
     await mountAt("/tracks/track-1");
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "hashtags,genres",
+      include: "tags,genres",
     });
     expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1");
@@ -144,7 +144,7 @@ describe("TrackView", () => {
     expect(wrapper.text()).toContain("3:05");
   });
 
-  it("renders track hashtags", async () => {
+  it("renders track tags", async () => {
     vi.mocked(tracksApi.getTrack).mockResolvedValue(
       createTrack("track-1", "Song One", ["rock", "indie"]),
     );
@@ -154,12 +154,10 @@ describe("TrackView", () => {
     expect(wrapper.text()).toContain("indie");
   });
 
-  it("does not render an empty hashtag section", async () => {
+  it("does not render an empty tag section", async () => {
     await mountAt("/tracks/track-1");
 
-    expect(wrapper.text()).not.toContain(
-      i18n.global.t("browse.detail.hashtags"),
-    );
+    expect(wrapper.text()).not.toContain(i18n.global.t("browse.detail.tags"));
   });
 
   it("plays the track", async () => {
@@ -209,7 +207,7 @@ describe("TrackView", () => {
     await flushPromises();
 
     expect(tracksApi.getTrack).toHaveBeenLastCalledWith("track-2", {
-      include: "hashtags,genres",
+      include: "tags,genres",
     });
     expect(wrapper.text()).toContain("Song Two");
   });

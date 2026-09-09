@@ -32,7 +32,7 @@ import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
-import HashtagList from "@/components/hashtags/HashtagList.vue";
+import TagList from "@/components/tags/TagList.vue";
 import GenreList from "@/components/genres/GenreList.vue";
 
 const { t } = useI18n();
@@ -231,7 +231,7 @@ async function loadAlbum() {
   loading.value = true;
   error.value = null;
   try {
-    album.value = await getAlbum(albumId.value, { include: "hashtags,genres" });
+    album.value = await getAlbum(albumId.value, { include: "tags,genres" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -337,8 +337,8 @@ watch(
             </span>
           </div>
 
-          <div v-if="album.hashtags?.length" class="album-view__hashtags">
-            <HashtagList :hashtags="album.hashtags" :genres="album.genres" />
+          <div v-if="album.tags?.length" class="album-view__tags">
+            <TagList :tags="album.tags" :genres="album.genres" />
           </div>
 
           <div v-if="album.genres?.length" class="album-view__genres">
@@ -546,13 +546,13 @@ watch(
   margin-top: var(--space-2);
 }
 
-.album-view__hashtags {
+.album-view__tags {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
 
-.album-view__hashtags-label {
+.album-view__tags-label {
   font-size: 0.875rem;
   color: var(--color-text-muted);
 }

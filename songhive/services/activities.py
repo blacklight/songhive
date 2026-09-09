@@ -41,7 +41,7 @@ from ..models.track import Track
 from ..models.user import User
 from . import federation as federation_service
 from .acl import can_access, can_manage
-from .mentions import hashtag_url_factory, process_mentions
+from .mentions import process_mentions, tag_url_factory
 
 logger = logging.getLogger(__name__)
 
@@ -662,7 +662,7 @@ async def update_activity(
     activity's ``activity_mentions`` rows.  When the stored ``payload``
     embeds a dict ``object`` (e.g. a ``Create`` activity's object), its
     ``content`` and ``tag`` are rebuilt too: ``pubby.set_object_content``
-    merges hashtag tags while preserving pre-existing tags, the
+    merges tag tags while preserving pre-existing tags, the
     mention-aware pipeline rendering wins for ``content``, and the
     pipeline's ``Mention`` tags are merged in. The object is also stamped
     with ``updated`` so served documents and remote copies can surface the
@@ -691,7 +691,7 @@ async def update_activity(
     if isinstance(payload, dict) and isinstance(payload.get("object"), dict):
         obj = payload["object"]
         domain = (config.federation.instance_domain or "").strip()
-        set_object_content(obj, content_source, hashtag_url_factory(domain))
+        set_object_content(obj, content_source, tag_url_factory(domain))
         if processed.html:
             obj["content"] = processed.html
         else:
