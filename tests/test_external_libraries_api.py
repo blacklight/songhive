@@ -140,7 +140,7 @@ async def test_create_rejects_unknown_provider(client, regular_user, auth_header
         json=_create_payload({"provider_type": "not-real"}),
         headers=auth_headers(regular_user),
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio
@@ -156,7 +156,7 @@ async def test_create_rejects_include_in_library_index(client, regular_user, aut
         json=_create_payload({"include_in_library_index": True}),
         headers=auth_headers(regular_user),
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio
@@ -333,7 +333,7 @@ async def test_update_rejects_provider_type(client, regular_user, auth_headers, 
         json={"provider_type": "fake"},
         headers=auth_headers(regular_user),
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio
@@ -347,7 +347,7 @@ async def test_update_rejects_include_in_library_index(client, regular_user, aut
             json={"include_in_library_index": value},
             headers=auth_headers(regular_user),
         )
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
     # An update that omits the field is allowed.
     response = client.patch(

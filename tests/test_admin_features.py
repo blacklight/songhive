@@ -604,7 +604,7 @@ async def test_bulk_action_invalid_action(client, db_session, make_user, auth_he
         headers=headers,
         json={"action": "ban", "user_ids": [user.id]},
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio

@@ -214,7 +214,7 @@ async def test_destructive_delete_requires_confirm(client, regular_user, auth_he
         json={"delete_source": True},
         headers=auth_headers(regular_user),
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
     await db_session.refresh(external_track)
     assert external_track.state == "active"
@@ -254,7 +254,7 @@ async def test_destructive_delete_unsupported_adapter(client, regular_user, auth
         json={"delete_source": True, "confirm": "DELETE"},
         headers=auth_headers(regular_user),
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio
@@ -276,7 +276,7 @@ async def test_destructive_delete_rejects_read_only_library(
         json={"delete_source": True, "confirm": "DELETE"},
         headers=auth_headers(regular_user),
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio

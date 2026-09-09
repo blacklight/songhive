@@ -439,7 +439,7 @@ async def _validate_and_encrypt_config(
         adapter_cls = get_external_adapter(provider_type)
     except KeyError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Unknown provider type: {provider_type}",
         ) from exc
 
@@ -448,7 +448,7 @@ async def _validate_and_encrypt_config(
         capabilities = await adapter.validate_config(config)
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=_sanitize_error(exc),
         ) from exc
 
@@ -468,7 +468,7 @@ async def _create_external_library(
     """Persist a new external library after validation and encryption."""
     if body.include_in_library_index and not allow_include_in_index:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="include_in_library_index is not allowed",
         )
 
@@ -616,7 +616,7 @@ async def create_external_library(
 
     if not _provider_allowed_for_create(body.provider_type, current_user, config):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Provider type not allowed",
         )
 
@@ -669,7 +669,7 @@ async def update_external_library(
 
     if "include_in_library_index" in body.model_fields_set:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="include_in_library_index is not allowed",
         )
 
@@ -885,7 +885,7 @@ async def list_external_tracks(
     valid_states = {"active", "shadowed", "tombstoned", "missing", "error"}
     if state is not None and state not in valid_states:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid state: {state}",
         )
 
@@ -984,12 +984,12 @@ async def _ensure_can_delete_source(
     capabilities = external_library.capabilities or {}
     if not capabilities.get("write_tags"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="External library is not writeable",
         )
     if not capabilities.get("delete_source"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Adapter does not support source deletion",
         )
 
@@ -997,7 +997,7 @@ async def _ensure_can_delete_source(
     try:
         adapter_cls = get_external_adapter(external_library.provider_type)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown provider") from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unknown provider") from exc
 
     adapter = adapter_cls()
     await adapter.validate_config(decrypted)
@@ -1059,7 +1059,7 @@ async def _delete_track_source(
     """
     if not body.confirm or body.confirm != "DELETE":
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Confirm must be 'DELETE'",
         )
 
@@ -1097,7 +1097,7 @@ async def restore_external_track(
     try:
         adapter_cls = get_external_adapter(external_library.provider_type)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown provider") from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unknown provider") from exc
 
     adapter = adapter_cls()
     await adapter.validate_config(decrypted)

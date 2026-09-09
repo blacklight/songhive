@@ -525,7 +525,7 @@ async def add_tracks_to_playlist(
 
     if not body.track_ids and not body.album_id and not body.artist_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="At least one source must be provided",
         )
 
@@ -632,7 +632,7 @@ async def remove_tracks_from_playlist(
 
     if not body.track_ids:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="track_ids must not be empty",
         )
 
@@ -683,7 +683,7 @@ async def reorder_playlist_tracks_route(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 

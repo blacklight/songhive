@@ -423,7 +423,7 @@ async def bulk_upload_files(
 
     if len(files) > config.max_bulk_upload_files:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Too many files: maximum is {config.max_bulk_upload_files}",
         )
 

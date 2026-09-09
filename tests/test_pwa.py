@@ -74,7 +74,7 @@ def test_pwa_manifest_accent_color(client):
 def test_pwa_manifest_rejects_invalid_theme(client):
     """An unknown ?theme value is rejected with a validation error."""
     response = client.get("/manifest.webmanifest?theme=purple")
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_pwa_manifest_json_alias(client):

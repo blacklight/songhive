@@ -102,7 +102,7 @@ async def list_genre_items(
 
     if type is not None and type not in GENRE_ITEM_TYPES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid item type: {type}",
         )
 

@@ -213,4 +213,4 @@ async def test_admin_terminate_celery_tasks_rejects_empty_list(client, make_user
         headers=auth_headers(admin),
         json={"task_ids": []},
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT

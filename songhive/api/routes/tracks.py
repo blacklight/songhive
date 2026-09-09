@@ -241,7 +241,7 @@ async def _rename_track_file(db: AsyncSession, track: Track, new_filename: str) 
         return await _rename_external_track_file(db, track, cast(ExternalTrack, external_track), new_filename)
 
     raise HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail="Track has no media file to rename",
     )
 
@@ -256,14 +256,14 @@ async def _rename_external_track_file(
     external_library = external_track.external_library
     if external_library is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Track has no external library",
         )
 
     capabilities = external_library.capabilities or {}
     if not capabilities.get("rename_source"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="External library does not support renaming",
         )
 
@@ -299,7 +299,7 @@ async def _rename_external_track_file(
         ) from exc
     except (ExternalLibraryError, UnsupportedExternalOperation) as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 
@@ -544,7 +544,7 @@ async def download_track(
     except ExternalItemNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except UnsupportedExternalOperation as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
     if stream is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -1103,7 +1103,7 @@ async def publish_track(
 
     if track.visibility != Visibility.PUBLIC.value:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Only public tracks can be published",
         )
 

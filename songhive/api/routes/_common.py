@@ -57,7 +57,7 @@ async def load_and_authorize(
     """
     if item_type not in acl.ITEM_TYPES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Invalid item type",
         )
 

@@ -139,7 +139,7 @@ async def test_admin_create_include_in_library_index_rejected_when_disabled(
         json=_admin_create_payload({"include_in_library_index": True}),
         headers=auth_headers(admin_user),
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 async def _create_user_library(client, regular_user, auth_headers, monkeypatch) -> dict:

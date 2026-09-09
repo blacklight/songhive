@@ -630,7 +630,7 @@ async def add_tracks_to_library(
 
     if not body.track_ids and not body.album_id and not body.artist_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="At least one source must be provided",
         )
 
@@ -675,7 +675,7 @@ async def remove_tracks_from_library(
 
     if not body.track_ids:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="track_ids must not be empty",
         )
 

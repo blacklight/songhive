@@ -199,7 +199,7 @@ async def update_admin_external_library(
     if "include_in_library_index" in body.model_fields_set:
         if body.include_in_library_index and not allow_include_in_index:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="include_in_library_index is not allowed",
             )
         external_library.include_in_library_index = body.include_in_library_index or False
@@ -388,7 +388,7 @@ async def list_admin_external_tracks(
     valid_states = {"active", "shadowed", "tombstoned", "missing", "error"}
     if state is not None and state not in valid_states:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid state: {state}",
         )
 
@@ -431,7 +431,7 @@ async def restore_admin_external_track(
     try:
         adapter_cls = get_external_adapter(external_library.provider_type)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown provider") from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unknown provider") from exc
 
     adapter = adapter_cls()
     await adapter.validate_config(decrypted)
@@ -580,7 +580,7 @@ async def bulk_delete_admin_external_tracks(
     """Tombstone or destructively delete multiple external tracks."""
     if not body.external_track_ids:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="external_track_ids is required",
         )
 
@@ -604,7 +604,7 @@ async def bulk_delete_admin_external_tracks(
     if body.delete_source:
         if not body.confirm or body.confirm != "DELETE":
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Confirm must be 'DELETE'",
             )
 
