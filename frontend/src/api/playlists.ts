@@ -8,6 +8,7 @@ export type Visibility = components["schemas"]["Visibility"];
 export type TrackResponse = components["schemas"]["TrackResponse"];
 
 export function listPlaylists(params?: {
+  owner_username?: string;
   limit?: number;
   offset?: number;
   sort_by?: string;

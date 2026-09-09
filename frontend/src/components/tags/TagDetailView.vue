@@ -5,6 +5,7 @@ import { useRoute, useRouter } from "vue-router";
 import { getApiErrorMessage } from "@/api/client";
 import { listTracksWithMeta } from "@/api/tracks";
 import type { TrackResponse } from "@/api/tracks";
+import type { ActivityListResponse, ActivityResponse } from "@/api/activities";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
@@ -14,6 +15,7 @@ import AppPagination from "@/components/ui/AppPagination.vue";
 import AppTabs from "@/components/ui/AppTabs.vue";
 import SortControl from "@/components/ui/SortControl.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import ActivityCard from "@/components/activities/ActivityCard.vue";
 import TaggedItemCard from "@/components/tags/TaggedItemCard.vue";
 import TrackList from "@/components/library/TrackList.vue";
 
@@ -38,12 +40,21 @@ export interface ListResult {
 
 export type ItemKind = "tag" | "genre";
 
+export interface ActivityListParams {
+  limit?: number;
+  cursor?: string;
+}
+
 export interface Props {
   kind: ItemKind;
   name: string;
   availableTypes: string[];
   loadItems: (name: string, params: ListParams) => Promise<ListResult>;
   deleteItem: (name: string) => Promise<unknown>;
+  activityLoader?: (
+    name: string,
+    params: ActivityListParams,
+  ) => Promise<ActivityListResponse>;
 }
 
 const props = defineProps<Props>();
@@ -70,8 +81,14 @@ const sortDir = ref<"asc" | "desc">("desc");
 const activeType = ref<string>("");
 const visibleTypes = ref<string[]>([]);
 
+const activities = ref<ActivityResponse[]>([]);
+const activityCursor = ref<string | null>(null);
+const activityHasMore = ref(false);
+const activityLoadingMore = ref(false);
+
 const page = computed(() => Math.floor(offset.value / LIMIT) + 1);
 const isTrackActive = computed(() => activeType.value === "track");
+const isActivityActive = computed(() => activeType.value === "activity");
 
 const icon = "tag";
 
@@ -81,6 +98,7 @@ const entityPluralKeys: Record<string, string> = {
   track: "browse.entities.tracks",
   playlist: "browse.entities.playlists",
   library: "browse.entities.libraries",
+  activity: "browse.entities.activities",
 };
 
 const tabs = computed(() =>
@@ -106,6 +124,23 @@ async function updateQueryType(type: string) {
   await router.replace({ query: { ...route.query, type } });
 }
 
+async function fetchActivityPage(append: boolean, cursor: string | null) {
+  if (!props.activityLoader) return;
+
+  const result = await props.activityLoader(props.name, {
+    limit: LIMIT,
+    cursor: cursor ?? undefined,
+  });
+
+  if (append) {
+    activities.value = [...activities.value, ...result.activities];
+  } else {
+    activities.value = result.activities;
+  }
+  activityCursor.value = result.next_cursor ?? null;
+  activityHasMore.value = !!result.next_cursor;
+}
+
 async function fetchItems() {
   error.value = null;
 
@@ -125,6 +160,8 @@ async function fetchItems() {
       total.value = result.total;
       offset.value = result.offset;
       items.value = [];
+    } else if (activeType.value === "activity" && props.activityLoader) {
+      await fetchActivityPage(false, null);
     } else {
       const result = await props.loadItems(props.name, {
         limit: LIMIT,
@@ -160,12 +197,17 @@ async function loadVisibleTypes() {
   error.value = null;
   items.value = [];
   tracks.value = [];
+  activities.value = [];
   total.value = 0;
   offset.value = 0;
 
   try {
     const counts = await Promise.all(
       props.availableTypes.map(async (type) => {
+        if (type === "activity" && props.activityLoader) {
+          const result = await props.activityLoader(props.name, { limit: 1 });
+          return { type, total: result.activities.length };
+        }
         const result = await props.loadItems(props.name, {
           limit: 1,
           offset: 0,
@@ -210,8 +252,33 @@ async function onTabChange(type: string) {
   sortDir.value = "desc";
   items.value = [];
   tracks.value = [];
+  activities.value = [];
+  activityCursor.value = null;
+  activityHasMore.value = false;
   await updateQueryType(type);
   void load();
+}
+
+async function loadMoreActivities() {
+  if (
+    activityLoadingMore.value ||
+    !activityHasMore.value ||
+    !activityCursor.value
+  )
+    return;
+
+  activityLoadingMore.value = true;
+  error.value = null;
+  try {
+    await fetchActivityPage(true, activityCursor.value);
+  } catch (err) {
+    error.value =
+      getApiErrorMessage(err) ||
+      (err instanceof Error ? err.message : t("errors.unknown"));
+    activityHasMore.value = false;
+  } finally {
+    activityLoadingMore.value = false;
+  }
 }
 
 function onPageChange(nextPage: number) {
@@ -283,6 +350,9 @@ watch(
     sortDir.value = "desc";
     items.value = [];
     tracks.value = [];
+    activities.value = [];
+    activityCursor.value = null;
+    activityHasMore.value = false;
     void load();
   },
 );
@@ -294,6 +364,9 @@ watch(
     activeType.value = "";
     sortBy.value = "created_at";
     sortDir.value = "desc";
+    activities.value = [];
+    activityCursor.value = null;
+    activityHasMore.value = false;
     void loadVisibleTypes();
   },
 );
@@ -329,6 +402,7 @@ onMounted(() => loadVisibleTypes());
         />
 
         <SortControl
+          v-if="!isActivityActive"
           :model-value="sortBy"
           :direction="sortDir"
           :options="sortOptions"
@@ -340,7 +414,13 @@ onMounted(() => loadVisibleTypes());
     </div>
 
     <div
-      v-if="loading && !isTrackActive && items.length === 0"
+      v-if="
+        loading &&
+        !isTrackActive &&
+        !isActivityActive &&
+        items.length === 0 &&
+        activities.length === 0
+      "
       class="tag-detail-view__skeleton"
     >
       <SkeletonLoader variant="page" />
@@ -354,7 +434,7 @@ onMounted(() => loadVisibleTypes());
     </div>
 
     <div
-      v-else-if="!isTrackActive && items.length === 0"
+      v-else-if="!isTrackActive && !isActivityActive && items.length === 0"
       class="tag-detail-view__empty"
       role="status"
     >
@@ -372,6 +452,34 @@ onMounted(() => loadVisibleTypes());
       @updated="load"
     />
 
+    <template v-else-if="isActivityActive">
+      <div
+        v-if="!loading && activities.length === 0"
+        class="tag-detail-view__empty"
+        role="status"
+      >
+        {{ t("activities.empty") }}
+      </div>
+
+      <div v-else class="tag-detail-view__activities" role="list">
+        <ActivityCard
+          v-for="activity in activities"
+          :key="activity.id"
+          :activity="activity"
+        />
+      </div>
+
+      <AppButton
+        v-if="activityHasMore"
+        variant="secondary"
+        class="tag-detail-view__more"
+        :loading="activityLoadingMore"
+        @click="loadMoreActivities"
+      >
+        {{ t("activities.loadMore") }}
+      </AppButton>
+    </template>
+
     <template v-else>
       <div class="tag-detail-view__grid" role="list">
         <TaggedItemCard
@@ -384,7 +492,7 @@ onMounted(() => loadVisibleTypes());
     </template>
 
     <AppPagination
-      v-if="total > LIMIT"
+      v-if="!isActivityActive && total > LIMIT"
       :page="page"
       :total="total"
       :per-page="LIMIT"
@@ -447,6 +555,16 @@ onMounted(() => loadVisibleTypes());
   text-align: center;
   padding: var(--space-8);
   color: var(--color-text-muted);
+}
+
+.tag-detail-view__activities {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.tag-detail-view__more {
+  align-self: stretch;
 }
 
 .tag-detail-view__grid {

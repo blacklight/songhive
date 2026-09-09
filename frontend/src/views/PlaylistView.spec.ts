@@ -28,6 +28,11 @@ function createTestRouter() {
       { path: "/playlists/:id", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
+      {
+        path: "/@:username",
+        name: "userProfile",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -39,6 +44,12 @@ function createPlaylist(id: string, name: string): PlaylistResponse {
     owner_id: "user-1",
     description: "A mix for the highway.",
     visibility: "public",
+    owner: {
+      id: "user-1",
+      username: "user-1",
+      display_name: null,
+      avatar_url: null,
+    },
   };
 }
 
@@ -110,7 +121,9 @@ describe("PlaylistView", () => {
 
     await mountAt("/playlists/playlist-1");
 
-    expect(playlistsApi.getPlaylist).toHaveBeenCalledWith("playlist-1");
+    expect(playlistsApi.getPlaylist).toHaveBeenCalledWith("playlist-1", {
+      include: "owner",
+    });
     expect(playlistsApi.listPlaylistTracks).toHaveBeenCalledWith("playlist-1", {
       limit: 20,
       offset: 0,
@@ -170,7 +183,9 @@ describe("PlaylistView", () => {
     await router.push("/playlists/playlist-2");
     await flushPromises();
 
-    expect(playlistsApi.getPlaylist).toHaveBeenLastCalledWith("playlist-2");
+    expect(playlistsApi.getPlaylist).toHaveBeenLastCalledWith("playlist-2", {
+      include: "owner",
+    });
     expect(wrapper.text()).toContain("Chill");
   });
 

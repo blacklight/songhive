@@ -2,9 +2,10 @@
 User profile routes.
 """
 
+from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,8 +14,9 @@ from ...config.schema import SonghiveConfig
 from ...federation.actors import sync_user_actor
 from ...models.user import User, UserRole
 from ...models.user_link import UserLink
+from ...services import activities as activity_service
 from ...services import audit
-from ...services.auth import get_user_by_username
+from ...services.auth import get_user_by_username, list_public_users
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from ...services.tags import get_items_for_tag, list_tags, validate_tag_name
@@ -25,6 +27,7 @@ from .._common import Pagination, client_ip, get_pagination
 from .._sorting import SortParams, get_sort
 from ..deps import get_config, get_current_user, get_current_user_optional, get_db, get_redis, get_storage_service
 from ..middleware.rate_limit import rate_limit_account
+from .activities import ActivityListResponse, _build_activity_response
 from .tags import TaggedItemResponse, TagSummaryResponse
 
 router = APIRouter(prefix="/users")
@@ -85,6 +88,8 @@ class PublicUserResponse(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
+    role: Optional[UserRole] = None
+    created_at: datetime
     links: List[UserLinkOutput] = Field(default_factory=list)
 
 
@@ -265,6 +270,27 @@ async def delete_current_user(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get("", response_model=List[PublicUserResponse])
+async def list_public_users_route(
+    response: Response,
+    q: Optional[str] = Query(None, description="Search users by username or display name"),
+    pagination: Pagination = Depends(get_pagination),
+    sort: SortParams = Depends(get_sort({"username", "created_at"}, "username")),
+    db: AsyncSession = Depends(get_db),
+):
+    """List active public users, optionally filtered and sorted."""
+    users, total = await list_public_users(
+        db,
+        q=q,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        sort_by=sort.field,
+        sort_dir=sort.direction,
+    )
+    pagination.set_total(response, total)
+    return [PublicUserResponse.model_validate(u) for u in users]
+
+
 @router.get("/{user_id}/tags", response_model=List[TagSummaryResponse])
 async def list_user_tags(
     response: Response,
@@ -333,6 +359,46 @@ async def list_user_tag_items(
     )
     pagination.set_total(response, total)
     return [TaggedItemResponse.model_validate(i) for i in items]
+
+
+@router.get("/{username}/activities", response_model=ActivityListResponse)
+async def list_user_activities_route(
+    username: str,
+    mode: str = Query("posts", description="Activity feed mode (posts or all)"),
+    source_type: Optional[str] = Query(None, description="Filter by source type"),
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """List a user's visible activities."""
+    target = await get_user_by_username(db, username)
+    if target is None or not target.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if mode not in ("posts", "all"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid mode")
+
+    activities, next_cursor = await activity_service.list_user_activities(
+        db,
+        owner_user_id=str(target.id),
+        user=user,
+        mode=mode,
+        source_type=source_type,
+        cursor=cursor,
+        limit=limit,
+    )
+    profile_map = await activity_service.resolve_source_actor_profiles(db, activities, config)
+    return ActivityListResponse(
+        activities=[
+            _build_activity_response(
+                a,
+                profile_map.get(str(a.id), activity_service.ActorProfile()),
+            )
+            for a in activities
+        ],
+        next_cursor=next_cursor,
+    )
 
 
 @router.get("/{username}", response_model=PublicUserResponse)

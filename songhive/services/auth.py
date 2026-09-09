@@ -3,11 +3,11 @@ Authentication service: user registration, login, password hashing.
 """
 
 import hashlib
-from typing import Optional, cast
+from typing import List, Optional, Tuple, cast
 
 import bcrypt
 from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
@@ -112,3 +112,32 @@ async def create_user(
     session.add(user)
     await session.flush()
     return user
+
+
+async def list_public_users(
+    session: AsyncSession,
+    *,
+    q: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+    sort_by: str = "username",
+    sort_dir: str = "asc",
+) -> Tuple[List[User], int]:
+    """List active public users with optional search and sorting."""
+    stmt = select(User).where(User.is_active.is_(True))
+    if q:
+        pattern = f"%{q}%"
+        stmt = stmt.where(
+            or_(
+                User.username.ilike(pattern),
+                User.display_name.ilike(pattern),
+            )
+        )
+
+    total = (await session.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
+    field = getattr(User, sort_by) if hasattr(User, sort_by) else User.username
+    order = field.asc() if sort_dir == "asc" else field.desc()
+    tie_breaker = User.id.asc() if sort_dir == "asc" else User.id.desc()
+    stmt = stmt.order_by(order, tie_breaker).offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all()), total

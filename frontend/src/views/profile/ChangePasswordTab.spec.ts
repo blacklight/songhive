@@ -17,7 +17,7 @@ function createTestRouter() {
   return createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: "/profile", component: { template: "<div/>" } },
+      { path: "/settings", component: { template: "<div/>" } },
       { path: "/login", component: { template: "<div/>" } },
     ],
   });
@@ -47,7 +47,7 @@ describe("ChangePasswordTab", () => {
 
   it("submits the change password form", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ChangePasswordTab, {
@@ -71,7 +71,7 @@ describe("ChangePasswordTab", () => {
 
   it("rejects non-matching new passwords", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ChangePasswordTab, {

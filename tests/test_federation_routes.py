@@ -130,22 +130,29 @@ async def test_alias_returns_actor_for_ld_json_accept(fed_client, regular_user):
     assert data["type"] == "Person"
 
 
-async def test_alias_redirects_for_html_accept(fed_client, regular_user):
-    """GET /@{username} redirects browsers to the local profile route."""
+async def test_alias_serves_spa_for_html_accept(fed_client, regular_user, tmp_path, monkeypatch):
+    """GET /@{username} serves the SPA shell for browser requests."""
+    index = tmp_path / "index.html"
+    index.write_text("<html><head></head><body></body></html>", encoding="utf-8")
+    monkeypatch.setattr("songhive.api.routes.profile_pages._spa_index_path", lambda: index)
+
     response = fed_client.get(
         "/@regular",
         headers={"Accept": "text/html"},
-        follow_redirects=False,
     )
-    assert response.status_code == status.HTTP_307_TEMPORARY_REDIRECT
-    assert response.headers["location"] == "/api/v1/users/regular"
+    assert response.status_code == status.HTTP_200_OK
+    assert "text/html" in response.headers["content-type"]
 
 
-async def test_alias_redirects_without_accept(fed_client, regular_user):
-    """GET /@{username} redirects by default for plain browser requests."""
-    response = fed_client.get("/@regular", follow_redirects=False)
-    assert response.status_code == status.HTTP_307_TEMPORARY_REDIRECT
-    assert response.headers["location"] == "/api/v1/users/regular"
+async def test_alias_serves_spa_without_accept(fed_client, regular_user, tmp_path, monkeypatch):
+    """GET /@{username} serves the SPA shell for plain browser requests."""
+    index = tmp_path / "index.html"
+    index.write_text("<html><head></head><body></body></html>", encoding="utf-8")
+    monkeypatch.setattr("songhive.api.routes.profile_pages._spa_index_path", lambda: index)
+
+    response = fed_client.get("/@regular")
+    assert response.status_code == status.HTTP_200_OK
+    assert "text/html" in response.headers["content-type"]
 
 
 async def test_alias_unknown_user_returns_404(fed_client):
@@ -641,7 +648,7 @@ async def test_track_page_serves_spa_with_discovery_hints_for_browsers(
 
     index = tmp_path / "index.html"
     index.write_text("<html><head><title>songhive</title></head><body></body></html>", encoding="utf-8")
-    monkeypatch.setattr("songhive.api.routes.federation._spa_index_path", lambda: index)
+    monkeypatch.setattr("songhive.api.routes.profile_pages._spa_index_path", lambda: index)
 
     response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": "text/html"})
     assert response.status_code == status.HTTP_200_OK
@@ -672,7 +679,7 @@ async def test_track_page_serves_plain_spa_for_unpublished_track(
 
     index = tmp_path / "index.html"
     index.write_text("<html><head></head><body></body></html>", encoding="utf-8")
-    monkeypatch.setattr("songhive.api.routes.federation._spa_index_path", lambda: index)
+    monkeypatch.setattr("songhive.api.routes.profile_pages._spa_index_path", lambda: index)
 
     response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": "text/html"})
     assert response.status_code == status.HTTP_200_OK

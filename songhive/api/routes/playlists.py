@@ -2,7 +2,7 @@
 Playlist routes.
 """
 
-from typing import List, Optional, Set, cast
+from typing import List, Optional, Set
 
 from fastapi import (
     APIRouter,
@@ -24,6 +24,7 @@ from ...models._enums import Visibility
 from ...models.playlist import Playlist
 from ...models.user import User
 from ...services import acl, audit, deletion, music
+from ...services.auth import get_user_by_username
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from ...services.tags import (
@@ -43,7 +44,7 @@ from ..deps import (
 )
 from ..middleware.rate_limit import rate_limit_account
 from ..responses import TrackResponse, TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
-from ._common import HasOwnerId, TagListRequest, redact_owner
+from ._common import TagListRequest
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import _build_track_response
 
@@ -148,7 +149,7 @@ async def _build_playlist_response(
 ) -> PlaylistResponse:
     """Build a PlaylistResponse with optional nested summaries."""
     owner = None
-    owner_id = redact_owner(cast(HasOwnerId, playlist), user)
+    owner_id = playlist.owner_id
     if "owner" in include and owner_id is not None and playlist.owner:
         owner = await build_user_summary(playlist.owner)
     tracks = None
@@ -179,6 +180,7 @@ async def _build_playlist_response(
 @router.get("/", response_model=List[PlaylistResponse])
 async def list_playlists(
     response: Response,
+    owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
@@ -187,10 +189,19 @@ async def list_playlists(
     include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
     """List playlists visible to the requester."""
-    total = await music.count_playlists(db, user=user)
+    if owner_username:
+        owner = await get_user_by_username(db, owner_username)
+        if owner is None or not owner.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        owner_id = str(owner.id)
+    else:
+        owner_id = None
+
+    total = await music.count_playlists(db, user=user, owner_id=owner_id)
     rows = await music.list_playlists(
         db,
         user=user,
+        owner_id=owner_id,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),

@@ -4,7 +4,7 @@ Library routes.
 
 import uuid
 from pathlib import Path
-from typing import List, Optional, Set, cast
+from typing import List, Optional, Set
 
 from fastapi import (
     APIRouter,
@@ -29,6 +29,7 @@ from ...models.artist import Artist
 from ...models.library import Library
 from ...models.user import User
 from ...services import acl, activities, audit, deletion, music
+from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor, unpublish_track_activity
 from ...services.import_ import DuplicateTrackError, ImportResult, import_audio_file
 from ...services.storage import StorageService
@@ -50,7 +51,7 @@ from ..deps import (
 )
 from ..middleware.rate_limit import rate_limit_account
 from ..responses import TrackResponse, TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
-from ._common import HasOwnerId, TagListRequest, redact_owner
+from ._common import TagListRequest
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import _build_track_response
 
@@ -162,7 +163,7 @@ async def _build_library_response(
 ) -> LibraryResponse:
     """Build a LibraryResponse with optional nested summaries."""
     owner = None
-    owner_id = redact_owner(cast(HasOwnerId, library), user)
+    owner_id = library.owner_id
     if "owner" in include and owner_id is not None and library.owner:
         owner = await build_user_summary(library.owner)
     tracks = None
@@ -193,6 +194,7 @@ async def _build_library_response(
 async def list_libraries(
     response: Response,
     user: Optional[User] = Depends(get_current_user_optional),
+    owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
     include_external: bool = Query(False, description="Include external libraries (admin only)"),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
@@ -201,16 +203,25 @@ async def list_libraries(
     include: IncludeQuery = Depends(get_include({"owner", "tracks", "tags"})),
 ):
     """List libraries visible to the requester."""
+    if owner_username:
+        owner = await get_user_by_username(db, owner_username)
+        if owner is None or not owner.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        owner_id = str(owner.id)
+    else:
+        owner_id = None
+
     if include_external and (user is None or not user.is_admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
         )
 
-    total = await music.count_libraries(db, user=user, include_external=include_external)
+    total = await music.count_libraries(db, user=user, owner_id=owner_id, include_external=include_external)
     rows = await music.list_libraries(
         db,
         user=user,
+        owner_id=owner_id,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),

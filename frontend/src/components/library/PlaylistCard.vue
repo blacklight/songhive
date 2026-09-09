@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import type { PlaylistResponse } from "@/api/playlists";
+import UserLink from "@/components/user/UserLink.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 
 export interface Props {
@@ -24,16 +25,6 @@ const owner = computed(() => {
   // The backend only returns owner_id for other users; resolving their
   // display names requires a denormalized field or a user lookup.
   return null;
-});
-
-const ownerName = computed(() => {
-  if (!owner?.value) return "";
-  return owner.value.display_name ?? owner.value.username;
-});
-
-const ownerAvatarUrl = computed(() => {
-  if (!owner?.value) return "";
-  return owner.value.avatar_url ?? "";
 });
 
 const visibilityText = computed(() => {
@@ -78,16 +69,14 @@ const visibilityIcon = computed(() => {
       {{ props.playlist.description }}
     </span>
     <div class="playlist-card__meta">
-      <span v-if="ownerName" :title="ownerName" class="playlist-card__owner">
-        <AppAvatar
-          v-if="ownerAvatarUrl"
-          :src="ownerAvatarUrl"
-          :name="ownerName"
-          width="16px"
-        />
-
-        {{ ownerName }}
-      </span>
+      <UserLink
+        v-if="owner"
+        class="playlist-card__owner"
+        size="sm"
+        :username="owner.username"
+        :display-name="owner.display_name"
+        :avatar-url="owner.avatar_url"
+      />
       <span :title="visibilityText" class="playlist-card__visibility">
         <i :class="visibilityIcon" />
       </span>
@@ -134,11 +123,11 @@ const visibilityIcon = computed(() => {
 .playlist-card__meta {
   display: flex;
   font-size: 0.75rem;
-  opacity: 0.75;
+  opacity: 0.85;
   flex-wrap: wrap;
   gap: calc(0.5 * var(--space-1));
   color: var(--color-text-muted);
-  margin-top: var(--space-1);
+  margin: var(--space-2) 0;
 }
 
 .playlist-card__visibility,

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 
 if TYPE_CHECKING:
+    from .activity import ActivityTag
     from .album import Album
     from .artist import Artist
     from .library import Library
@@ -51,6 +52,12 @@ class Tag(Base):
     )
     libraries: Mapped[List["TagLibrary"]] = relationship(
         "TagLibrary",
+        back_populates="tag",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    activities: Mapped[List["ActivityTag"]] = relationship(
+        "ActivityTag",
         back_populates="tag",
         cascade="all, delete-orphan",
         lazy="selectin",

@@ -16,6 +16,11 @@ function createTestRouter() {
         name: "library",
         component: { template: "<div/>" },
       },
+      {
+        path: "/@:username",
+        name: "userProfile",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }

@@ -175,6 +175,8 @@
     "about": "About",
     "admin": "Admin",
     "profile": "Profile",
+    "settings": "Settings",
+    "users": "Users",
     "externalLibraries": "External libraries",
     "login": "Log in"
   },
@@ -632,8 +634,15 @@
       "password": "Password",
       "apiTokens": "API Tokens",
       "sessions": "Sessions",
-      "externalLibraries": "External libraries"
+      "externalLibraries": "External libraries",
+      "posts": "Posts",
+      "activity": "Activity",
+      "tracks": "Tracks",
+      "albums": "Albums",
+      "libraries": "Libraries",
+      "playlists": "Playlists"
     },
+    "copyHandle": "Copy fediverse handle",
     "displayName": "Display name",
     "bio": "Bio",
     "avatar": "Avatar",
@@ -708,6 +717,17 @@
       "revokeCurrentSuccess": "Session revoked. Logging out..."
     }
   },
+  "users": {
+    "title": "Users",
+    "search": "Search users…",
+    "sort": {
+      "label": "Sort by",
+      "username": "Username",
+      "createdAt": "Date joined"
+    },
+    "joined": "Joined",
+    "empty": "No users found."
+  },
   "browse": {
     "entities": {
       "artists": "Artists",
@@ -715,6 +735,7 @@
       "tracks": "Tracks",
       "playlists": "Playlists",
       "libraries": "Libraries",
+      "activities": "Activities",
       "files": "Files",
       "artist": "Artist",
       "album": "Album",
@@ -1018,6 +1039,10 @@
       "content": "Content",
       "visibility": "Visibility",
       "error": "Could not update this activity."
+    },
+    "copyUrl": {
+      "done": "Activity URL copied to clipboard.",
+      "error": "Could not copy the activity URL."
     },
     "delete": {
       "title": "Delete activity",

@@ -35,6 +35,11 @@ function createTestRouter() {
       { path: "/albums/:id", component: { template: "<div/>" } },
       { path: "/tags/:name", component: { template: "<div/>" } },
       { path: "/genres/:name", component: { template: "<div/>" } },
+      {
+        path: "/@:username",
+        name: "userProfile",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -61,6 +66,12 @@ function createTrack(
     owner_id: "user-1",
     tags,
     genres,
+    owner: {
+      id: "user-1",
+      username: "user-1",
+      display_name: null,
+      avatar_url: null,
+    },
   };
 }
 
@@ -132,7 +143,7 @@ describe("TrackView", () => {
     await mountAt("/tracks/track-1");
 
     expect(tracksApi.getTrack).toHaveBeenCalledWith("track-1", {
-      include: "tags,genres",
+      include: "tags,genres,owner",
     });
     expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1");
@@ -207,7 +218,7 @@ describe("TrackView", () => {
     await flushPromises();
 
     expect(tracksApi.getTrack).toHaveBeenLastCalledWith("track-2", {
-      include: "tags,genres",
+      include: "tags,genres,owner",
     });
     expect(wrapper.text()).toContain("Song Two");
   });

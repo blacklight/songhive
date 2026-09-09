@@ -23,7 +23,7 @@ const router = useRouter();
 
 const isAdmin = computed(() => route.path.startsWith("/admin"));
 const basePath = computed(() =>
-  isAdmin.value ? "/admin/external-libraries" : "/profile/external-libraries",
+  isAdmin.value ? "/admin/external-libraries" : "/settings/external-libraries",
 );
 
 const libraries = ref<ExternalLibraryResponse[]>([]);

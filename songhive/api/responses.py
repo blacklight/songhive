@@ -44,6 +44,7 @@ class UserSummary(BaseModel):
     username: str
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
+    actor_url: Optional[str] = None
 
 
 class AlbumSummary(BaseModel):
@@ -238,4 +239,5 @@ async def build_user_summary(user) -> Optional[UserSummary]:
         username=user.username,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
+        actor_url=user.actor_url,
     )

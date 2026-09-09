@@ -10,7 +10,7 @@ the activity to remote inboxes.
 
 import re
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import (
     JSON,
@@ -27,6 +27,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from .base import Base, TZDateTime
+
+if TYPE_CHECKING:
+    from .tag import Tag
 
 ACTIVITY_ENTITY_TYPES = ("track", "album", "artist", "playlist", "library")
 ACTIVITY_TYPES = (
@@ -111,6 +114,12 @@ class Activity(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    tags: Mapped[List["ActivityTag"]] = relationship(
+        "ActivityTag",
+        back_populates="activity",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
     in_reply_to_activity: Mapped[Optional["Activity"]] = relationship(
         "Activity",
         remote_side="Activity.id",
@@ -155,6 +164,25 @@ class ActivityMention(Base):
         if value is not None and not _MENTION_HANDLE_RE.match(value):
             raise ValueError(f"Invalid mention handle: {value}")
         return value
+
+
+class ActivityTag(Base):
+    """Association between an activity and a hashtag found in its content."""
+
+    __tablename__ = "activity_tags"
+    __table_args__ = (UniqueConstraint("activity_id", "tag_id", name="uq_activity_tags_activity_id_tag_id"),)
+
+    activity_id: Mapped[str] = mapped_column(
+        ForeignKey("activities.id", ondelete="CASCADE"),
+        index=True,
+    )
+    tag_id: Mapped[str] = mapped_column(
+        ForeignKey("tags.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    activity: Mapped["Activity"] = relationship("Activity", back_populates="tags")
+    tag: Mapped["Tag"] = relationship("Tag", back_populates="activities")
 
 
 class ActivityTarget(Base):

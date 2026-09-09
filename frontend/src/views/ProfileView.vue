@@ -66,7 +66,7 @@ const currentComponent = computed(() => {
       <RouterLink
         v-for="item in tabs"
         :key="item.key"
-        :to="{ path: '/profile', query: { tab: item.key } }"
+        :to="{ path: '/settings', query: { tab: item.key } }"
         :class="[
           'profile-view__tab',
           { 'profile-view__tab--active': tab === item.key },

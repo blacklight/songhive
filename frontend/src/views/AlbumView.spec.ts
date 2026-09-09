@@ -35,6 +35,11 @@ function createTestRouter() {
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/tags/:name", component: { template: "<div/>" } },
       { path: "/genres/:name", component: { template: "<div/>" } },
+      {
+        path: "/@:username",
+        name: "userProfile",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -57,6 +62,12 @@ function createAlbum(
     visibility: "public",
     tags,
     genres: [],
+    owner: {
+      id: "user-1",
+      username: "user-1",
+      display_name: null,
+      avatar_url: null,
+    },
   };
 }
 
@@ -154,7 +165,7 @@ describe("AlbumView", () => {
     await mountAt("/albums/album-1");
 
     expect(albumsApi.getAlbum).toHaveBeenCalledWith("album-1", {
-      include: "tags,genres",
+      include: "tags,genres,owner",
     });
     expect(artistsApi.getArtist).toHaveBeenCalledWith("artist-1");
     expect(tracksApi.listTracks).toHaveBeenCalledWith({
@@ -258,7 +269,7 @@ describe("AlbumView", () => {
     await flushPromises();
 
     expect(albumsApi.getAlbum).toHaveBeenLastCalledWith("album-2", {
-      include: "tags,genres",
+      include: "tags,genres,owner",
     });
     expect(wrapper.text()).toContain("Sunset");
   });

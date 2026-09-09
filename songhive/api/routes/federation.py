@@ -4,12 +4,10 @@ Per-user ActivityPub federation routes and WebFinger discovery.
 
 import asyncio
 import base64
-from html import escape
-from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -21,13 +19,14 @@ from ...federation.activities import (
     build_activity_object,
     build_tombstone_object,
 )
-from ...federation.actors import get_federation_storage, user_to_actor_document
+from ...federation.actors import get_federation_storage
 from ...federation.serializers import track_to_audio_object
 from ...models import Activity, Track, Visibility
 from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor, extract_domain, is_domain_allowed
 from ...tasks.federation import process_incoming
 from ..deps import get_db
+from .profile_pages import _accepts_activitypub, _get_active_user, _spa_response
 
 router = APIRouter(include_in_schema=False)
 
@@ -45,12 +44,6 @@ def _federation_config(request: Request) -> SonghiveConfig:
     return config
 
 
-def _accepts_activitypub(request: Request) -> bool:
-    """Return True when the client requests an ActivityPub document."""
-    accept = request.headers.get("accept", "")
-    return ACTIVITY_JSON in accept or LD_JSON in accept
-
-
 def _ordered_collection(collection_id: str, items: list[str]) -> dict[str, Any]:
     return {
         "@context": AP_CONTEXT,
@@ -59,14 +52,6 @@ def _ordered_collection(collection_id: str, items: list[str]) -> dict[str, Any]:
         "totalItems": len(items),
         "orderedItems": items,
     }
-
-
-async def _get_active_user(db: AsyncSession, username: str) -> Any:
-    """Return an active user or raise 404."""
-    user = await get_user_by_username(db, username)
-    if user is None or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return user
 
 
 # Frontend route collections per activity entity type (the SPA only
@@ -140,66 +125,6 @@ def _track_object_document(track: Track, owner: Any, config: SonghiveConfig) -> 
         "to": to,
         "cc": cc,
     }
-
-
-def _spa_index_path() -> Path:
-    """Return the path of the built SPA entry point."""
-    return Path(__file__).resolve().parents[2] / "static" / "index.html"
-
-
-def _spa_response(alternate_url: Optional[str] = None) -> HTMLResponse:
-    """
-    Serve the SPA shell for browser requests.
-
-    When ``alternate_url`` points at a dereferenceable ActivityPub object,
-    the page is annotated with the discovery hints remote servers look for
-    when they fetch an HTML page: a ``Link: rel="alternate"`` response header
-    and a matching ``<link rel="alternate">`` element in the document head.
-    """
-    index = _spa_index_path()
-    if not index.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-
-    body = index.read_text(encoding="utf-8")
-    headers: dict[str, str] = {}
-    if alternate_url:
-        tag = f'<link rel="alternate" type="{ACTIVITY_JSON}" href="{escape(alternate_url, quote=True)}">'
-        body = body.replace("</head>", f"{tag}</head>", 1) if "</head>" in body else f"{body}{tag}"
-        headers["Link"] = f'<{alternate_url}>; rel="alternate"; type="{ACTIVITY_JSON}"'
-
-    return HTMLResponse(content=body, headers=headers)
-
-
-@router.get("/users/{username}")
-async def get_actor(
-    username: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Return a user's ActivityPub Person document."""
-    config = _federation_config(request)
-    user = await _get_active_user(db, username)
-    ensure_user_actor(user, config)
-    actor = user_to_actor_document(user, config.federation.instance_domain)
-    return JSONResponse(content=actor, media_type=ACTIVITY_JSON)
-
-
-@router.get("/@{username}")
-async def get_user_alias(
-    username: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Resolve a Mastodon-like alias to an actor or local profile."""
-    config = _federation_config(request)
-    user = await _get_active_user(db, username)
-
-    if _accepts_activitypub(request):
-        ensure_user_actor(user, config)
-        actor = user_to_actor_document(user, config.federation.instance_domain)
-        return JSONResponse(content=actor, media_type=ACTIVITY_JSON)
-
-    return RedirectResponse(url=f"/api/v1/users/{username}", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @router.get("/users/{username}/objects/{object_id}")

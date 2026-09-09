@@ -50,13 +50,13 @@ def test_list_playlists_filters_by_visibility(client, sample_playlists, regular_
     assert _names(owner) == {"Public Playlist", "Local Playlist", "Private Playlist"}
 
 
-def test_get_public_playlist_redacts_owner_for_non_owner(client, sample_playlists, other_user, auth_headers):
-    """Non-owners see a null owner_id for public playlists."""
+def test_get_public_playlist_shows_owner_for_non_owner(client, sample_playlists, other_user, auth_headers):
+    """Non-owners see the owner_id for public playlists they can access."""
     playlist = next(p for p in sample_playlists if p["visibility"] == "public")
 
     response = client.get(f"/api/v1/playlists/{playlist['id']}", headers=auth_headers(other_user))
     assert response.status_code == 200
-    assert response.json()["owner_id"] is None
+    assert response.json()["owner_id"] == playlist["owner_id"]
     assert response.json()["visibility"] == "public"
 
 

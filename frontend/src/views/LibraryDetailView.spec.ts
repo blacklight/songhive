@@ -22,6 +22,11 @@ function createTestRouter() {
       { path: "/libraries/:id", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
+      {
+        path: "/@:username",
+        name: "userProfile",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -34,6 +39,12 @@ function createLibrary(id: string, name: string): LibraryResponse {
     description: "Main music library.",
     visibility: "public",
     can_write: true,
+    owner: {
+      id: "user-1",
+      username: "user-1",
+      display_name: null,
+      avatar_url: null,
+    },
   };
 }
 
@@ -99,7 +110,9 @@ describe("LibraryDetailView", () => {
 
     await mountAt("/libraries/library-1");
 
-    expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1");
+    expect(librariesApi.getLibrary).toHaveBeenCalledWith("library-1", {
+      include: "owner",
+    });
     expect(librariesApi.listLibraryTracks).toHaveBeenCalledWith("library-1", {
       limit: 20,
       offset: 0,
@@ -196,7 +209,9 @@ describe("LibraryDetailView", () => {
     await router.push("/libraries/library-2");
     await flushPromises();
 
-    expect(librariesApi.getLibrary).toHaveBeenLastCalledWith("library-2");
+    expect(librariesApi.getLibrary).toHaveBeenLastCalledWith("library-2", {
+      include: "owner",
+    });
     expect(wrapper.text()).toContain("Secondary");
   });
 });

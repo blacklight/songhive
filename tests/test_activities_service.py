@@ -23,6 +23,7 @@ from songhive.services import deletion
 from songhive.services.activities import (
     ActivityCreateParams,
     create_local_activity,
+    list_activities_for_tag,
     resolve_entity,
 )
 from songhive.services.storage import StorageService
@@ -622,3 +623,71 @@ async def test_delete_track_cascades_to_activities(db_session, regular_user, sto
     assert await db_session.get(Activity, remote.id) is None
     # Activities for other entities are untouched.
     assert other.deleted_at is None
+
+
+@pytest.mark.asyncio
+async def test_create_local_activity_extracts_hashtags(db_session, regular_user):
+    """Creating a local activity persists #hashtags as ActivityTag rows."""
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+
+    activity = await create_local_activity(
+        db_session,
+        entity_type="track",
+        entity_id=track.id,
+        activity_type="create",
+        author=regular_user,
+        visibility=Visibility.PUBLIC,
+        content="<p>#rock #POP</p>",
+        content_source="#rock #POP",
+    )
+    await db_session.flush()
+
+    from songhive.models.activity import ActivityTag
+    from songhive.models.tag import Tag
+
+    result = await db_session.execute(
+        select(Tag.name)
+        .join(ActivityTag, ActivityTag.tag_id == Tag.id)
+        .where(ActivityTag.activity_id == str(activity.id))
+    )
+    tag_names = set(result.scalars().all())
+    assert tag_names == {"rock", "pop"}
+
+
+@pytest.mark.asyncio
+async def test_list_activities_for_tag_visibility(db_session, regular_user):
+    """list_activities_for_tag returns only visible activities."""
+    regular_user.actor_url = "https://local.example/users/regular"
+    public_track = await _make_track(db_session, regular_user)
+    private_track = await _make_track(db_session, regular_user, visibility=Visibility.PRIVATE.value)
+
+    public = await create_local_activity(
+        db_session,
+        entity_type="track",
+        entity_id=public_track.id,
+        activity_type="create",
+        author=regular_user,
+        visibility=Visibility.PUBLIC,
+        content="<p>#rock</p>",
+        content_source="#rock",
+    )
+    private = await create_local_activity(
+        db_session,
+        entity_type="track",
+        entity_id=private_track.id,
+        activity_type="create",
+        author=regular_user,
+        visibility=Visibility.PRIVATE,
+        content="<p>#rock</p>",
+        content_source="#rock",
+    )
+    await db_session.flush()
+
+    # Public activity is visible to anonymous users.
+    public_results, _ = await list_activities_for_tag(db_session, "rock")
+    assert [a.id for a in public_results] == [public.id]
+
+    # Owner sees both public and private activities.
+    all_results, _ = await list_activities_for_tag(db_session, "rock", user=regular_user)
+    assert {a.id for a in all_results} == {public.id, private.id}

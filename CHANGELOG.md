@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `tags`: Add an "Activities" section to tag detail pages. A new
+  `activity_tags` association table links `Activity` and `Tag` rows.
+  Activities that contain hashtags are parsed on local creation,
+  update, federated track publication, and track metadata resync.
+  `GET /api/v1/tags/{tag}/activities` returns a cursor-paginated
+  `ActivityListResponse` filtered by activity visibility and containing
+  entity access. The frontend `TagDetailView` gains an optional
+  `activityLoader` prop and renders matched `ActivityCard`s in a new
+  "Activities" tab with a "Load more" button.
 - `frontend`: Add activity feeds for entities. A shared
   `EntityActivitiesView` (lazy routes `/{track|album|artist|playlist|library}/{id}/activities`,
   linked from each entity detail page's actions and from the track
@@ -138,6 +147,12 @@ All notable changes to this project will be documented in this file.
   endpoint exposes `federation_enabled`, and the upload forms show a
   "Publish on the Fediverse" checkbox only when the instance federates and
   the upload visibility is `public`.
+- `ui`: Entity detail pages (library, playlist, album, track) now render
+  the owner with the `UserLink` component, linking local users to
+  `/@{username}` and remote users to their `actor_url`. `useEntityMeta`
+  returns the full `UserSummary` owner object, and backend detail responses
+  expose `owner_id` for any ACL-authorized viewer and include a nested
+  `owner` summary via `?include=owner`.
 
 ### Changed
 

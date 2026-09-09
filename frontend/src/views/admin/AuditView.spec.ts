@@ -1,10 +1,26 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
+import { createRouter, createMemoryHistory } from "vue-router";
 import { i18n } from "@/i18n";
 import * as adminApi from "@/api/admin";
 import type { AuditLogResponse } from "@/api/admin";
 import AuditView from "./AuditView.vue";
+
+function createTestRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/", component: { template: "<div/>" } },
+      {
+        path: "/users/:username",
+        name: "userProfile",
+        component: { template: "<div/>" },
+      },
+      { path: "/tracks/:id", name: "track", component: { template: "<div/>" } },
+    ],
+  });
+}
 
 vi.mock("@/api/admin", () => ({
   listAuditLogs: vi.fn(),
@@ -61,7 +77,9 @@ describe("AuditView", () => {
   it("lists audit logs on mount", async () => {
     vi.mocked(adminApi.listAuditLogs).mockResolvedValue([createAuditLog("a1")]);
 
-    wrapper = mount(AuditView, { global: { plugins: [i18n] } });
+    wrapper = mount(AuditView, {
+      global: { plugins: [i18n, createTestRouter()] },
+    });
     await flushPromises();
 
     expect(adminApi.listAuditLogs).toHaveBeenCalledWith({
@@ -78,7 +96,9 @@ describe("AuditView", () => {
       .mockResolvedValueOnce([createAuditLog("a1")])
       .mockResolvedValueOnce([]);
 
-    wrapper = mount(AuditView, { global: { plugins: [i18n] } });
+    wrapper = mount(AuditView, {
+      global: { plugins: [i18n, createTestRouter()] },
+    });
     await flushPromises();
 
     const input = wrapper.find('input[type="search"]');
@@ -99,7 +119,7 @@ describe("AuditView", () => {
 
     wrapper = mount(AuditView, {
       attachTo: document.body,
-      global: { plugins: [i18n] },
+      global: { plugins: [i18n, createTestRouter()] },
     });
     await flushPromises();
 
@@ -120,15 +140,17 @@ describe("AuditView", () => {
 
     wrapper = mount(AuditView, {
       global: {
-        plugins: [i18n],
+        plugins: [i18n, createTestRouter()],
         stubs: { RouterLink: true },
       },
     });
     await flushPromises();
 
-    const link = wrapper.findComponent({ name: "RouterLink" });
-    expect(link.exists()).toBe(true);
-    expect(link.props("to")).toEqual({
+    const links = wrapper.findAllComponents({ name: "RouterLink" });
+    expect(links.length).toBeGreaterThan(0);
+    const trackLink = links.find((link) => link.props("to")?.name === "track");
+    expect(trackLink).toBeDefined();
+    expect(trackLink?.props("to")).toEqual({
       name: "track",
       params: { id: "track-1" },
     });

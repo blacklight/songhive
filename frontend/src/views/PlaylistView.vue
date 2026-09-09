@@ -33,6 +33,7 @@ import ShareDialog from "@/components/share/ShareDialog.vue";
 type TrackListInstance = InstanceType<typeof TrackList>;
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import SortControl from "@/components/ui/SortControl.vue";
+import UserLink from "@/components/user/UserLink.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -77,8 +78,7 @@ const {
   },
 );
 
-const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
-  useEntityMeta(playlist);
+const { owner, visibilityText, visibilityIcon } = useEntityMeta(playlist);
 
 const { isOwner } = useOwnership(
   computed(() => playlist.value?.owner_id ?? null),
@@ -242,7 +242,7 @@ async function loadPlaylist() {
   loading.value = true;
   error.value = null;
   try {
-    playlist.value = await getPlaylist(playlistId.value);
+    playlist.value = await getPlaylist(playlistId.value, { include: "owner" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -307,19 +307,12 @@ watch(
         </p>
 
         <div class="playlist-view__meta">
-          <span
-            v-if="ownerName"
-            :title="ownerName"
+          <UserLink
+            v-if="owner"
+            :owner="owner"
+            size="sm"
             class="playlist-view__owner"
-          >
-            <AppAvatar
-              v-if="ownerAvatarUrl"
-              :src="ownerAvatarUrl"
-              :name="ownerName"
-              width="16px"
-            />
-            {{ ownerName }}
-          </span>
+          />
           <span :title="visibilityText" class="playlist-view__visibility">
             <i :class="visibilityIcon" />
           </span>
@@ -504,24 +497,10 @@ watch(
   align-items: center;
 }
 
-.playlist-view__owner {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
 .playlist-view__visibility {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-}
-
-:deep(.playlist-view__owner img) {
-  margin: 0;
-}
-
-:deep(.playlist-view__owner .app-avatar--initials) {
-  font-size: 0.55rem;
 }
 
 .playlist-view__header-actions {

@@ -84,7 +84,8 @@ songhive/
 │   ├── routes/             # Route modules (one file per resource)
 │   │   ├── auth.py         # Login, registration, token refresh, password reset
 │   │   ├── sessions.py     # List and revoke active refresh-token sessions
-│   │   ├── users.py        # User profiles, avatar, links, password change
+│   │   ├── users.py        # Public user profiles, directory, per-user activity feed; authenticated profile updates
+│   │   ├── profile_pages.py # Browser SPA profile routes, rel="me" link injection, ActivityPub negotiation
 │   │   ├── activities.py   # Activity interactions (like, …)
 │   │   ├── artists.py
 │   │   ├── albums.py
@@ -107,7 +108,8 @@ songhive/
 │   │   └── admin_external_libraries.py # Admin external library management
 │   └── middleware/
 │       ├── auth.py         # JWT decode middleware + access-token helpers
-│       └── rate_limit.py   # Redis sliding-window rate limiting (IP / user)
+│       ├── rate_limit.py   # Redis sliding-window rate limiting (IP / user)
+│       └── proxy.py        # X-Forwarded-Proto scheme handling behind reverse proxies
 ├── migrations/             # Alembic database migrations
 │   ├── env.py              # Migration environment (imports all models)
 │   ├── script.py.mako      # Template for generated revisions
@@ -358,6 +360,13 @@ rendered content (`content_source` / `content` / `content_type`), and soft
 deletion (`deleted_at`, `retracted`). An activity's `visibility` must not
 exceed its parent entity's visibility (`Visibility.can_contain`).
 
+`ActivityTag` rows link `Activity` and `Tag`, populated whenever an activity
+contains hashtags (`#tag`) in its `content_source`/`content`. They enable
+`GET /api/v1/tags/{tag}/activities`, which returns tag-matching activities
+subject to the same visibility and entity ACL rules as other activity feeds.
+Remote ActivityPub content is processed by Pubby and is not currently
+materialized as local `Activity` rows, so hashtags from remote posts cannot
+be associated on the Songhive side unless Pubby stores or forwards them.
 `ActivityMention` rows capture `@handle` mentions embedded in content, with
 optional `actor_url` / `user_id` resolution and a `notified_at` marker.
 `services/mentions.py` implements the mention pipeline: `MENTION_REGEX`
@@ -816,6 +825,10 @@ alembic revision --autogenerate -m "add example column"
   FastAPI dependencies. Media `DELETE` endpoints use `rate_limit_account` for
   per-user rate limiting on destructive operations. Fails open when Redis is unavailable.
 
+### Owner exposure
+
+Entity detail responses for `Track`, `Album`, `Library`, and `Playlist` include `owner_id` whenever the requester has ACL access to the entity; `?include=owner` adds a nested `UserSummary` with `actor_url`, `username`, `display_name`, and `avatar_url`. The frontend `useEntityMeta` composable returns this full owner object, and `UserLink` routes local users to `/@{username}` and remote users to their `actor_url`.
+
 ---
 
 ## File Storage & Upload Pipeline
@@ -1203,10 +1216,11 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
 | `frontend/src/components/entity/` | Reusable entity grid/list components (e.g. `BulkEditableGrid` for bulk selection and deletion) |
 | `frontend/src/components/activities/` | Activity feed components (`ActivityFeed` filter tabs + cursor pagination, `ActivityCard`, `ActivityEditModal`) backed by `stores/activities.ts` and `api/activities.ts` |
+| `frontend/src/components/user/` | Reusable user display components (`UserLink`) used across activity cards, resource owner metadata, file details, audit logs, and admin lists. `UserLink` renders local users as `RouterLink`s to `/@{username}`, remote users as external links to `actor_url`, and accepts either a full `UserSummary` owner or legacy `username`/`displayName`/`avatarUrl`/`remoteUrl` props |
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
 | `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
-| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, Profile, plus 403/404 and placeholder views) |
+| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, `/settings` for the authenticated user, `UserProfileView` for `/@{username}`, `UsersDirectoryView` for `/users`, plus 403/404 and placeholder views). `UserProfileView` renders user bios through the `RichText` component, which linkifies hashtags, mentions and URLs; library, playlist, album, and track detail views render the owner through the `UserLink` component |
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |
@@ -1243,7 +1257,7 @@ REST API under `/api/v1/`:
 ```
 /api/v1/
 ├── auth/           # Login, register, token refresh, password reset, verify email, sessions
-├── users/          # User profiles, avatar, links, invite management
+├── users/          # Public user profiles, directory, per-user activity feeds; authenticated profile updates
 ├── artists/        # Artist CRUD + search
 ├── albums/         # Album CRUD + search
 ├── tracks/         # Track CRUD + search
@@ -1265,9 +1279,9 @@ REST API under `/api/v1/`:
 **Federation endpoints** (mounted by pubby when federation is enabled):
 
 ```
-/users/{username}               # Per-user ActivityPub actor document
+/users/{username}               # Per-user ActivityPub actor document (AP clients) or browser redirect to /@{username}
 /users/{username}/objects/{id}  # Dereferenceable ActivityPub objects (Audio, Note, Tombstone, stored payloads)
-/@{username}                    # Mastodon-style alias / browser redirect
+/@{username}                    # Mastodon-style profile: AP actor for AP clients, SPA shell for browsers with rel="me" links
 /tracks/{id}                    # Track page: Audio object for AP clients, SPA + rel=alternate hints for browsers
 /.well-known/webfinger          # WebFinger discovery
 /.well-known/nodeinfo           # NodeInfo (Mastodon compat)
@@ -1288,10 +1302,11 @@ Docker Compose (`docker-compose.yml`) provides a reference deployment:
 - `redis` — Redis (broker + cache + sessions)
 - `nginx` — Reverse proxy (`docker/nginx.conf`). It proxies federation routes
 (`/.well-known/*`, `/ap/*`, `/users/<user>`, `/@<user>`, etc.) to the
-application and performs content negotiation for `/@<user>`,
-`/users/<user>`, and `/tracks/<id>`: requests that accept
-`application/activity+json` or `application/ld+json` are proxied to the
-backend, while browser `text/html` requests fall through to the Vue SPA.
+application. Browser `text/html` requests for `/@<user>` and
+`/users/<user>` are also proxied to FastAPI, where `api/routes/profile_pages.py`
+performs ActivityPub/browser content negotiation and injects `rel="me"` links
+into the SPA shell. The Vue SPA still handles `/tracks/<id>` directly, with
+`rel="alternate"` ActivityPub hints supplied by the backend.
 
 Persistent data is stored under `volumes/`.
 

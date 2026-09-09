@@ -9,6 +9,7 @@ export function listAlbums(params?: {
   artist_id?: string;
   year_from?: number;
   year_to?: number;
+  owner_username?: string;
   limit?: number;
   offset?: number;
   include?: string;

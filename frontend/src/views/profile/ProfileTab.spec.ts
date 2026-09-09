@@ -23,7 +23,7 @@ function createTestRouter() {
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: { template: "<div/>" } },
-      { path: "/profile", component: { template: "<div/>" } },
+      { path: "/settings", component: { template: "<div/>" } },
     ],
   });
 }
@@ -64,7 +64,7 @@ describe("ProfileTab", () => {
 
   it("pre-fills from authStore.user", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileTab, {
@@ -81,7 +81,7 @@ describe("ProfileTab", () => {
 
   it("sends the expected payload", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileTab, {
@@ -109,7 +109,7 @@ describe("ProfileTab", () => {
 
   it("sends an empty links array when all links are removed", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileTab, {
@@ -137,7 +137,7 @@ describe("ProfileTab", () => {
 
   it("sends null for cleared text fields so they are reset server-side", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileTab, {
@@ -162,7 +162,7 @@ describe("ProfileTab", () => {
 
   it("does not show the remove avatar button when there is no avatar", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileTab, {
@@ -188,7 +188,7 @@ describe("ProfileTab", () => {
     });
 
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileTab, {
@@ -212,7 +212,7 @@ describe("ProfileTab", () => {
 
   it("rejects link URLs that do not start with http:// or https://", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileTab, {
@@ -250,7 +250,7 @@ describe("ProfileTab", () => {
 
   it("hides resend verification when the user does not need it", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileTab, {
@@ -275,7 +275,7 @@ describe("ProfileTab", () => {
     store.user = { ...store.user!, email_verified: false };
 
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileTab, {
@@ -298,7 +298,7 @@ describe("ProfileTab", () => {
 
   it("opens the delete account dialog when the delete button is clicked", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     document.body.innerHTML = "";
@@ -320,7 +320,7 @@ describe("ProfileTab", () => {
 
   it("shows an error when the delete confirmation text does not match", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     document.body.innerHTML = "";
@@ -360,7 +360,7 @@ describe("ProfileTab", () => {
     vi.mocked(usersApi.deleteMe).mockResolvedValue(undefined);
 
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     document.body.innerHTML = "";

@@ -67,7 +67,7 @@ const libraryId = computed(() => {
 });
 const isNew = computed(() => !libraryId.value);
 const basePath = computed(() =>
-  isAdmin.value ? "/admin/external-libraries" : "/profile/external-libraries",
+  isAdmin.value ? "/admin/external-libraries" : "/settings/external-libraries",
 );
 
 const tab = ref<"details" | "tracks" | "syncRuns">("details");

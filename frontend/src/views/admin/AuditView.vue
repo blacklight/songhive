@@ -7,6 +7,9 @@ import { useMediaQuery } from "@/composables/useMediaQuery";
 import { useDebounce } from "@/composables/useDebounce";
 import { formatDateTime } from "@/i18n";
 import { listAuditLogs, type AuditLogResponse } from "@/api/admin";
+import type { components } from "@/api/types";
+
+type UserSummary = components["schemas"]["UserSummary"];
 import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppModal from "@/components/feedback/AppModal.vue";
@@ -14,6 +17,7 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import AppTable from "@/components/ui/AppTable.vue";
+import UserLink from "@/components/user/UserLink.vue";
 
 const { t } = useI18n();
 const isWide = useMediaQuery("(min-width: 1280px)", true);
@@ -99,10 +103,6 @@ function targetTypeLabel(type: string | null): string {
   return translated !== key ? translated : type;
 }
 
-function actorDisplayName(log: AuditLogResponse): string {
-  return log.actor_name || log.actor_username || log.actor_id || "—";
-}
-
 function targetDisplayName(log: AuditLogResponse): string {
   return log.target_name || log.target_username || log.target_id || "—";
 }
@@ -131,6 +131,15 @@ function closeDetails() {
 function formatDetails(details: unknown): string {
   if (details === null || details === undefined) return "—";
   return JSON.stringify(details, null, 2);
+}
+
+function getOwner(row: AuditLogResponse): UserSummary | null {
+  if (!row.actor_id) return null;
+  return {
+    id: row.actor_id,
+    display_name: row.actor_name,
+    username: row.actor_username || "",
+  };
 }
 
 watch(actionFilter, () => debouncedRefresh());
@@ -191,12 +200,12 @@ onMounted(() => load());
         </template>
 
         <template #row-actor="{ row }">
-          <span
-            :title="(row as AuditLogResponse).actor_id || undefined"
-            class="audit-view__actor"
-          >
-            {{ actorDisplayName(row as AuditLogResponse) }}
-          </span>
+          <UserLink
+            v-if="getOwner(row as AuditLogResponse)"
+            :owner="getOwner(row as AuditLogResponse)"
+            size="sm"
+            class="audit-detail__owner"
+          />
         </template>
 
         <template #row-action="{ row }">
@@ -256,7 +265,12 @@ onMounted(() => load());
             <div>
               <dt>{{ t("pages.admin.audit.actor") }}</dt>
               <dd :title="log.actor_id || undefined">
-                {{ actorDisplayName(log) }}
+                <UserLink
+                  v-if="getOwner(log as AuditLogResponse)"
+                  :owner="getOwner(log as AuditLogResponse)"
+                  size="sm"
+                  class="audit-detail__owner"
+                />
               </dd>
             </div>
             <div v-if="log.target_type">

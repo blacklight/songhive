@@ -650,7 +650,7 @@ def test_get_user_profile_endpoint_returns_links(client, profile_user):
         "url": "https://mastodon.example.com/@alice",
     }
 
-    expected_fields = {"username", "display_name", "bio", "avatar_url", "links"}
+    expected_fields = {"username", "display_name", "bio", "avatar_url", "role", "created_at", "links"}
     assert set(data.keys()) == expected_fields
 
     sensitive_fields = {

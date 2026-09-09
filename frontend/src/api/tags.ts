@@ -1,4 +1,5 @@
 import { apiRequest, apiRequestWithHeaders } from "./client";
+import type { ActivityListResponse } from "./activities";
 import type { components } from "./types";
 
 export type TagSummary = components["schemas"]["TagSummaryResponse"];
@@ -43,7 +44,7 @@ export type TaggedItemType =
 export async function listTags(
   params?: ListTagsParams,
 ): Promise<ListTagsResult> {
-  const response = await apiRequestWithHeaders<TagSummary[]>("/tags", {
+  const response = await apiRequestWithHeaders<TagSummary[]>("/tags/", {
     query: params,
   });
   const offsetHeader = response.headers.get("X-List-Offset");
@@ -132,4 +133,19 @@ export async function listUserTagItems(
     offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
     total: totalHeader ? parseInt(totalHeader, 10) : response.body.length,
   };
+}
+
+export type ListTagActivitiesParams = {
+  cursor?: string;
+  limit?: number;
+};
+
+export async function listTagActivities(
+  tag: string,
+  params?: ListTagActivitiesParams,
+): Promise<ActivityListResponse> {
+  return apiRequest<ActivityListResponse>(
+    `/tags/${encodeURIComponent(tag)}/activities`,
+    { query: params },
+  );
 }

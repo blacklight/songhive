@@ -8,6 +8,7 @@ from songhive.models._enums import Visibility
 from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.track import Track
+from songhive.services.activities import create_local_activity
 from songhive.services.tags import add_tags_to_entity
 
 
@@ -112,3 +113,57 @@ def test_delete_global_tag_missing_returns_404(client, admin_user, auth_headers)
     """Deleting a non-existent valid tag name returns 404."""
     response = client.delete("/api/v1/tags/nope", headers=auth_headers(admin_user))
     assert response.status_code == 404
+
+
+@pytest.fixture
+async def tagged_activity(db_session, regular_user):
+    """Create a public track activity that includes #rock."""
+    artist = Artist(name="Activity Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Tagged Track",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    regular_user.actor_url = "https://local.example/users/regular"
+    activity = await create_local_activity(
+        db_session,
+        entity_type="track",
+        entity_id=track.id,
+        activity_type="create",
+        author=regular_user,
+        visibility=Visibility.PUBLIC,
+        content="<p>#rock</p>",
+        content_source="#rock",
+    )
+    await db_session.flush()
+    return activity
+
+
+def test_list_tag_activities(tagged_activity, client):
+    """The tag activities endpoint returns matching activities."""
+    response = client.get("/api/v1/tags/rock/activities")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["activities"]) == 1
+    assert body["activities"][0]["id"] == str(tagged_activity.id)
+
+
+def test_list_tag_activities_invalid_name_returns_404(client):
+    """Malformed tag names on the activities endpoint return 404."""
+    response = client.get("/api/v1/tags/foo%20bar/activities")
+    assert response.status_code == 404
+
+
+def test_list_tag_activities_empty_for_missing_tag(client):
+    """A valid but unused tag returns an empty activity list."""
+    response = client.get("/api/v1/tags/nosuchtag/activities")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["activities"] == []

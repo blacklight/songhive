@@ -38,7 +38,7 @@ from ...models.external_track import ExternalTrack
 from ...models.stored_file import StoredFile
 from ...models.user import User
 from ...services import acl, activities, audit, deletion, music
-from ...services.auth import get_user_by_id
+from ...services.auth import get_user_by_id, get_user_by_username
 from ...services.federation import ensure_user_actor, unpublish_track_activity
 from ...services.genres import (
     genres_to_tags,
@@ -88,7 +88,7 @@ from ..routes.files import (
     _sanitize_content_disposition,
     _sanitize_filename,
 )
-from ._common import GenreListRequest, HasOwnerId, TagListRequest, redact_owner
+from ._common import GenreListRequest, TagListRequest
 from ._images import remove_entity_image, upload_entity_image
 
 router = APIRouter(prefix="/tracks")
@@ -432,7 +432,7 @@ async def _build_track_response(
     if "album" in include and track.album:
         album = await build_album_summary(track.album, storage)
     owner = None
-    owner_id = redact_owner(cast(HasOwnerId, track), user)
+    owner_id = track.owner_id
     if "owner" in include and owner_id is not None and track.owner:
         owner = await build_user_summary(track.owner)
 
@@ -588,6 +588,7 @@ async def list_tracks(
     library_id: Optional[str] = Query(None),
     favorited: Optional[bool] = Query(None, description="Only return tracks favorited by the current user"),
     around_track_id: Optional[str] = Query(None, description="Center the returned chunk on this track"),
+    owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(
@@ -602,6 +603,14 @@ async def list_tracks(
     include: IncludeQuery = Depends(get_include({"artist", "album", "owner", "tags", "genres"})),
 ):
     """List or search tracks visible to the requester."""
+    if owner_username:
+        owner = await get_user_by_username(db, owner_username)
+        if owner is None or not owner.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        owner_id = str(owner.id)
+    else:
+        owner_id = None
+
     total = await music.count_tracks(
         db,
         query=q,
@@ -614,6 +623,7 @@ async def list_tracks(
         library_id=library_id,
         user=user,
         favorited=favorited,
+        owner_id=owner_id,
     )
     rows, effective_offset = await music.list_tracks(
         db,
@@ -633,6 +643,7 @@ async def list_tracks(
         sort_by=sort.field,
         sort_dir=sort.direction,
         favorited=favorited,
+        owner_id=owner_id,
     )
     pagination.set_total(response, total)
     response.headers["X-List-Offset"] = str(effective_offset)

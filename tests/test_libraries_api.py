@@ -52,13 +52,13 @@ def test_list_libraries_filters_by_visibility(client, sample_libraries, regular_
     assert _names(owner) == {"Public Library", "Local Library", "Private Library"}
 
 
-def test_get_public_library_redacts_owner_for_non_owner(client, sample_libraries, other_user, auth_headers):
-    """Non-owners see a null owner_id for public libraries."""
+def test_get_public_library_shows_owner_for_non_owner(client, sample_libraries, other_user, auth_headers):
+    """Non-owners see the owner_id for public libraries they can access."""
     library = next(lib for lib in sample_libraries if lib["visibility"] == "public")
 
     response = client.get(f"/api/v1/libraries/{library['id']}", headers=auth_headers(other_user))
     assert response.status_code == 200
-    assert response.json()["owner_id"] is None
+    assert response.json()["owner_id"] == library["owner_id"]
     assert response.json()["visibility"] == "public"
 
 

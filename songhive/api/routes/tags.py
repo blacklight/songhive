@@ -9,7 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config.schema import SonghiveConfig
 from ...models.user import User
+from ...services import activities as activity_service
 from ...services import audit
 from ...services.tags import (
     TAG_ITEM_TYPES,
@@ -21,7 +23,8 @@ from ...services.tags import (
 )
 from .._common import Pagination, client_ip, get_pagination
 from .._sorting import SortParams, get_sort
-from ..deps import get_current_user_optional, get_db, require_admin
+from ..deps import get_config, get_current_user_optional, get_db, require_admin
+from .activities import ActivityListResponse, _build_activity_response
 
 router = APIRouter(prefix="/tags")
 
@@ -118,6 +121,40 @@ async def list_tag_items(
     )
     pagination.set_total(response, total)
     return [TaggedItemResponse(type=i.type, id=i.id) for i in items]
+
+
+@router.get("/{tag}/activities", response_model=ActivityListResponse)
+async def list_tag_activities(
+    tag: str,
+    cursor: Optional[str] = Query(None, description="Pagination cursor from the previous page"),
+    limit: int = Query(20, ge=1, le=100),
+    user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """List the visible activities that include ``tag`` as a hashtag."""
+    try:
+        validate_tag_name(tag)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tag not found",
+        ) from None
+
+    activities, next_cursor = await activity_service.list_activities_for_tag(
+        db,
+        tag_name=tag,
+        user=user,
+        cursor=cursor,
+        limit=limit,
+    )
+    profile_map = await activity_service.resolve_source_actor_profiles(db, activities, config)
+    return ActivityListResponse(
+        activities=[
+            _build_activity_response(a, profile_map.get(str(a.id), activity_service.ActorProfile())) for a in activities
+        ],
+        next_cursor=next_cursor,
+    )
 
 
 @router.delete("/{tag}", status_code=status.HTTP_204_NO_CONTENT)

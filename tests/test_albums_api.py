@@ -56,13 +56,13 @@ def test_list_albums_filters_by_visibility(client, sample_albums, regular_user, 
     assert _titles(owner) == {"Public Album", "Local Album", "Private Album"}
 
 
-def test_get_public_album_redacts_owner_for_non_owner(client, sample_albums, other_user, auth_headers):
-    """Non-owners see a null owner_id for public albums."""
+def test_get_public_album_shows_owner_for_non_owner(client, sample_albums, other_user, auth_headers):
+    """Non-owners see the owner_id for public albums they can access."""
     album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
 
     response = client.get(f"/api/v1/albums/{album.id}", headers=auth_headers(other_user))
     assert response.status_code == 200
-    assert response.json()["owner_id"] is None
+    assert response.json()["owner_id"] == str(album.owner_id)
     assert response.json()["visibility"] == "public"
 
 

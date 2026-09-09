@@ -6,6 +6,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import { listTracksWithMeta } from "@/api/tracks";
+import type { ActivityListResponse } from "@/api/activities";
 import TagDetailView, {
   type ListParams,
   type ListResult,
@@ -13,6 +14,14 @@ import TagDetailView, {
 
 vi.mock("@/api/tracks", () => ({
   listTracksWithMeta: vi.fn(),
+}));
+
+vi.mock("@/components/activities/ActivityCard.vue", () => ({
+  default: {
+    template:
+      '<div class="activity-card-stub" :data-id="activity.id">{{ activity.id }}</div>',
+    props: ["activity"],
+  },
 }));
 
 vi.mock("@/components/tags/TaggedItemCard.vue", () => ({
@@ -368,5 +377,55 @@ describe("TagDetailView", () => {
 
     const toast = useToastStore();
     expect(toast.toasts.some((t) => t.message === "Genre deleted.")).toBe(true);
+  });
+
+  it("shows an activities tab when activityLoader returns activities", async () => {
+    const activity: ActivityListResponse = {
+      activities: [
+        {
+          id: "act-1",
+          entity_type: "track",
+          entity_id: "track-1",
+          activity_type: "create",
+          source_type: "local",
+          source_actor: "https://local.example/users/admin",
+          source_id: "https://local.example/users/admin/objects/1",
+          visibility: "public",
+          content: "<p>#rock</p>",
+          published_at: "2024-01-01T00:00:00Z",
+          mentions: [],
+        } as never,
+      ],
+      next_cursor: null,
+    };
+    const activityLoader = vi.fn().mockResolvedValue(activity);
+
+    loadItems.mockImplementation((_name: string, params: ListParams) => {
+      if (params.type === "album") {
+        return Promise.resolve(
+          createListResult([createItem("album", "album-1")], 1),
+        );
+      }
+      return Promise.resolve(createListResult([], 0));
+    });
+
+    await mountView({
+      availableTypes: ["album", "activity"],
+      activityLoader,
+    });
+
+    expect(activityLoader).toHaveBeenCalledWith("rock", { limit: 1 });
+    const tabs = wrapper.findAll(".app-tabs__tab");
+    expect(tabs.some((tab) => tab.text() === "Activities")).toBe(true);
+
+    const activityTab = tabs.find((tab) => tab.text() === "Activities");
+    await activityTab?.trigger("click");
+    await flushPromises();
+
+    expect(activityLoader).toHaveBeenLastCalledWith("rock", { limit: 24 });
+    expect(wrapper.findAll(".activity-card-stub").length).toBe(1);
+    expect(wrapper.find(".activity-card-stub").attributes("data-id")).toBe(
+      "act-1",
+    );
   });
 });

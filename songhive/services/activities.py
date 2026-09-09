@@ -16,9 +16,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type, TypedDict
 
 from fastapi import HTTPException
-from pubby.content import set_object_content
+from pubby.content import render_post_html, set_object_content
 from pydantic import BaseModel, field_validator
-from sqlalchemy import and_, delete, exists, or_, select, true
+from sqlalchemy import and_, delete, exists, or_, select, true, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -31,17 +31,20 @@ from ..models.activity import (
     ACTIVITY_TYPES,
     Activity,
     ActivityMention,
+    ActivityTag,
     ActivityTarget,
 )
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
 from ..models.playlist import Playlist
+from ..models.tag import Tag
 from ..models.track import Track
 from ..models.user import User
 from . import federation as federation_service
 from .acl import can_access, can_manage
 from .mentions import process_mentions, tag_url_factory
+from .tags import _entity_access_predicate, get_or_create_tag, validate_tag_name
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,8 @@ __all__ = [
     "fan_out_like_activity",
     "like_activity",
     "list_activities",
+    "list_activities_for_tag",
+    "list_user_activities",
     "resolve_audience",
     "resolve_entity",
     "resolve_source_actor_profiles",
@@ -132,6 +137,57 @@ def _local_actor_url(author: User) -> str:
     if author.actor_url:
         return author.actor_url
     return f"urn:songhive:user:{author.username}"
+
+
+def _extract_hashtags(text: Optional[str]) -> List[str]:
+    """
+    Extract normalized, deduplicated hashtags from raw or rendered text.
+
+    ``render_post_html`` already recognizes ``#tags`` and normalizes them,
+    so we reuse its parser and discard the rendered HTML.
+    """
+    if not text:
+        return []
+    rendered = render_post_html(text, lambda name: f"/tags/{name}")
+    return rendered.hashtags
+
+
+async def _sync_activity_tags(session: AsyncSession, activity: Activity, tag_names: List[str]) -> None:
+    """
+    Replace ``activity``'s hashtag associations with ``tag_names``.
+
+    Missing ``Tag`` rows are created on demand. Flushes without committing.
+    """
+    seen: set[str] = set()
+    normalized: List[str] = []
+    for name in tag_names:
+        try:
+            validated = validate_tag_name(name)
+        except ValueError:
+            continue
+        if validated not in seen:
+            seen.add(validated)
+            normalized.append(validated)
+
+    result = await session.execute(
+        select(ActivityTag, Tag.name)
+        .join(Tag, ActivityTag.tag_id == Tag.id)
+        .where(ActivityTag.activity_id == str(activity.id))
+    )
+    current: Dict[str, ActivityTag] = {name: assoc for assoc, name in result.all()}
+    to_remove = [assoc for name, assoc in current.items() if name not in seen]
+
+    for name in normalized:
+        if name in current:
+            continue
+        tag = await get_or_create_tag(session, name)
+        session.add(ActivityTag(activity_id=str(activity.id), tag_id=tag.id))
+
+    for assoc in to_remove:
+        await session.delete(assoc)
+
+    if to_remove or any(n not in current for n in normalized):
+        await session.flush()
 
 
 async def can_view_activity(
@@ -278,6 +334,130 @@ async def list_activities(
         stmt = stmt.where(Activity.activity_type == activity_type)
     if source_type is not None:
         stmt = stmt.where(Activity.source_type == source_type)
+    if cursor:
+        published_at, activity_id = _decode_activity_cursor(cursor)
+        stmt = stmt.where(
+            or_(
+                Activity.published_at < published_at,
+                and_(Activity.published_at == published_at, Activity.id < activity_id),
+            )
+        )
+
+    result = await session.execute(stmt.limit(limit + 1))
+    activities = list(result.scalars().all())
+    next_cursor = None
+    if len(activities) > limit:
+        activities = activities[:limit]
+        next_cursor = _encode_activity_cursor(activities[-1])
+    return activities, next_cursor
+
+
+def _accessible_activities_for_tag_cte(tag_name: str, user: Optional[User]) -> Any:
+    """
+    Build a CTE of activity ids that mention ``tag_name`` and are visible.
+
+    Each subquery joins ``Activity`` with the entity it belongs to and applies
+    the same list access predicate used elsewhere, so public tag pages only
+    surface activities the requester may actually view.
+    """
+    subqueries = []
+    for entity_type, model in _ENTITY_MODELS.items():
+        pred = _entity_access_predicate(model, user, entity_type)
+        subq = (
+            select(Activity.id)
+            .join(ActivityTag, ActivityTag.activity_id == Activity.id)
+            .join(Tag, ActivityTag.tag_id == Tag.id)
+            .join(model, and_(Activity.entity_type == entity_type, Activity.entity_id == model.id))
+            .where(
+                Tag.name == tag_name,
+                Activity.deleted_at.is_(None),
+                _activity_visibility_filter(user),
+                pred,
+            )
+        )
+        subqueries.append(subq)
+    return union_all(*subqueries).cte("accessible_activities")
+
+
+async def list_activities_for_tag(
+    session: AsyncSession,
+    tag_name: str,
+    user: Optional[User] = None,
+    cursor: Optional[str] = None,
+    limit: int = 20,
+) -> Tuple[List[Activity], Optional[str]]:
+    """List visible activities that include ``tag_name``, newest first.
+
+    Results are keyset-paginated on ``(published_at, id)`` like the other
+    activity listers. Malformed tag names raise ``HTTPException`` 404.
+    """
+    try:
+        validate_tag_name(tag_name)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Tag not found") from None
+
+    cte = _accessible_activities_for_tag_cte(tag_name, user)
+    stmt = (
+        select(Activity).join(cte, Activity.id == cte.c.id).order_by(Activity.published_at.desc(), Activity.id.desc())
+    )
+
+    if cursor:
+        published_at, activity_id = _decode_activity_cursor(cursor)
+        stmt = stmt.where(
+            or_(
+                Activity.published_at < published_at,
+                and_(Activity.published_at == published_at, Activity.id < activity_id),
+            )
+        )
+
+    result = await session.execute(stmt.limit(limit + 1))
+    activities = list(result.scalars().all())
+    next_cursor = None
+    if len(activities) > limit:
+        activities = activities[:limit]
+        next_cursor = _encode_activity_cursor(activities[-1])
+    return activities, next_cursor
+
+
+async def list_user_activities(
+    session: AsyncSession,
+    *,
+    owner_user_id: str,
+    user: Optional[User] = None,
+    mode: str = "posts",
+    source_type: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 20,
+) -> Tuple[List[Activity], Optional[str]]:
+    """List activities by a user, newest first.
+
+    ``mode="posts"`` returns only the user's published local ``create``
+    activities (Note posts and published-track shares). ``mode="all"`` returns
+    every visible activity they authored or relayed (create, announce, like,
+    reply, ...). Visibility is applied through ``_activity_visibility_filter``.
+    """
+    if mode not in ("posts", "all"):
+        raise HTTPException(status_code=400, detail="Invalid mode")
+
+    stmt = (
+        select(Activity)
+        .where(
+            Activity.owner_user_id == owner_user_id,
+            Activity.deleted_at.is_(None),
+            _activity_visibility_filter(user),
+        )
+        .order_by(Activity.published_at.desc(), Activity.id.desc())
+    )
+
+    if mode == "posts":
+        stmt = stmt.where(
+            Activity.activity_type == "create",
+            Activity.source_type == "local",
+        )
+
+    if source_type is not None:
+        stmt = stmt.where(Activity.source_type == source_type)
+
     if cursor:
         published_at, activity_id = _decode_activity_cursor(cursor)
         stmt = stmt.where(
@@ -644,6 +824,9 @@ async def create_local_activity(
         )
 
     await session.flush()
+
+    source_text = content_source if content_source is not None else content
+    await _sync_activity_tags(session, activity, _extract_hashtags(source_text))
     return activity
 
 
@@ -714,6 +897,7 @@ async def update_activity(
         obj["updated"] = datetime.now(timezone.utc).isoformat()
         flag_modified(activity, "payload")
 
+    await _sync_activity_tags(session, activity, processed.tag_names)
     await session.flush()
     await session.refresh(activity, ["mentions"])
     return activity
@@ -1251,6 +1435,14 @@ async def record_track_publication(
         for mention in processed.mentions:
             session.add(ActivityMention(activity_id=activity.id, **mention.as_dict()))
         await session.flush()
+
+    tag_names = processed.tag_names if processed is not None else []
+    if not tag_names and status is None:
+        tag_names = _extract_hashtags(getattr(track, "description", None) or "")
+    if not tag_names and isinstance(obj, dict) and obj.get("content"):
+        tag_names = _extract_hashtags(obj["content"])
+    await _sync_activity_tags(session, activity, tag_names)
+
     try:
         await fan_out_activity(session, activity, config, owner=owner)
     except Exception as e:
@@ -1443,6 +1635,12 @@ async def sync_track_publications(
         payload["object"] = rebuilt
         flag_modified(activity, "payload")
         activity.content = rebuilt.get("content")
+
+        source_text = activity.content_source or getattr(track, "description", None) or ""
+        if not source_text and rebuilt.get("content"):
+            source_text = rebuilt["content"]
+        await _sync_activity_tags(session, activity, _extract_hashtags(source_text))
+
         synced.append(activity)
 
     if not synced:

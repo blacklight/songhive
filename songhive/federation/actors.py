@@ -58,6 +58,7 @@ def user_to_actor_document(user: User, domain: str) -> dict:
         "preferredUsername": user.username,
         "name": user.display_name or user.username,
         "summary": render_bio_html(user.bio or ""),
+        "published": (user.created_at.isoformat() if user.created_at else datetime.now(timezone.utc).isoformat()),
         "inbox": get_inbox_url(domain, user.username),
         "outbox": get_outbox_url(domain, user.username),
         "followers": f"{actor_url}/followers",

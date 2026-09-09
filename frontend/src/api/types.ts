@@ -5478,6 +5478,8 @@ export interface components {
       display_name?: string | null;
       /** Avatar Url */
       avatar_url?: string | null;
+      /** Actor Url */
+      actor_url?: string | null;
     };
     /** ValidationError */
     ValidationError: {

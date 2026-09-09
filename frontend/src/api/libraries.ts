@@ -10,6 +10,7 @@ export type TrackResponse = components["schemas"]["TrackResponse"];
 export type Visibility = components["schemas"]["Visibility"];
 
 export function listLibraries(params?: {
+  owner_username?: string;
   limit?: number;
   offset?: number;
   sort_by?: string;

@@ -198,7 +198,9 @@ class AuthConfig(BaseSettings):
     )
     trusted_proxy_hops: int = Field(
         default=0,
-        description="Number of trusted proxy hops for X-Forwarded-For parsing; 0 disables header trust",
+        description=(
+            "Number of trusted proxy hops for X-Forwarded-For and X-Forwarded-Proto " "parsing; 0 disables header trust"
+        ),
     )
     secret_key: str = Field(
         description="Secret key for JWT signing",

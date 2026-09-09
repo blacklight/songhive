@@ -2,7 +2,7 @@
 Album routes.
 """
 
-from typing import List, Optional, Tuple, cast
+from typing import List, Optional, Tuple
 
 from fastapi import (
     APIRouter,
@@ -23,6 +23,7 @@ from ...models._enums import Visibility
 from ...models.track import Track
 from ...models.user import User
 from ...services import acl, audit, deletion, music
+from ...services.auth import get_user_by_username
 from ...services.federation import unpublish_track_activity
 from ...services.genres import (
     genres_to_tags,
@@ -58,7 +59,7 @@ from ..responses import (
     build_track_summary,
     build_user_summary,
 )
-from ._common import GenreListRequest, HasOwnerId, TagListRequest, redact_owner
+from ._common import GenreListRequest, TagListRequest
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import _enqueue_track_enrichment, _enqueue_track_tag_sync, _handle_visibility_changes
 
@@ -141,7 +142,7 @@ async def _build_album_response(
     if "artist" in include and album.artist:
         artist = await build_artist_summary(album.artist, storage)
     owner = None
-    owner_id = redact_owner(cast(HasOwnerId, album), user)
+    owner_id = album.owner_id
     if "owner" in include and owner_id is not None and album.owner:
         owner = await build_user_summary(album.owner)
     tracks = None
@@ -182,6 +183,7 @@ async def list_albums(
     year_from: Optional[int] = Query(None),
     year_to: Optional[int] = Query(None),
     genre: Optional[str] = Query(None, description="Filter by genre name"),
+    owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"title", "artist_name", "created_at", "updated_at", "release_year"}, "title")),
@@ -190,6 +192,14 @@ async def list_albums(
     include: IncludeQuery = Depends(get_include({"artist", "owner", "tracks", "tags", "genres"})),
 ):
     """List or search albums visible to the requester."""
+    if owner_username:
+        owner = await get_user_by_username(db, owner_username)
+        if owner is None or not owner.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        owner_id = str(owner.id)
+    else:
+        owner_id = None
+
     total = await music.count_albums(
         db,
         query=q,
@@ -197,6 +207,7 @@ async def list_albums(
         year_from=year_from,
         year_to=year_to,
         genre=genre,
+        owner_id=owner_id,
         user=user,
     )
     rows = await music.list_albums(
@@ -206,6 +217,7 @@ async def list_albums(
         year_from=year_from,
         year_to=year_to,
         genre=genre,
+        owner_id=owner_id,
         user=user,
         limit=pagination.limit,
         offset=pagination.offset,

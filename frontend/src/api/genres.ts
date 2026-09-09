@@ -41,7 +41,7 @@ export type GenreItemType = "track" | "album";
 export async function listGenres(
   params?: ListGenresParams,
 ): Promise<ListGenresResult> {
-  const response = await apiRequestWithHeaders<GenreSummary[]>("/genres", {
+  const response = await apiRequestWithHeaders<GenreSummary[]>("/genres/", {
     query: params,
   });
   const offsetHeader = response.headers.get("X-List-Offset");

@@ -31,6 +31,7 @@ import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import ExternalTrackBadge from "@/components/external-libraries/ExternalTrackBadge.vue";
+import UserLink from "@/components/user/UserLink.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -65,7 +66,7 @@ const coverUrl = computed(
   () => track.value?.image_url || album.value?.cover_url || null,
 );
 
-const { ownerName, visibilityText } = useEntityMeta(track);
+const { owner, visibilityText } = useEntityMeta(track);
 const { isOwner } = useOwnership(computed(() => track.value?.owner_id ?? null));
 const { canManage } = useCanManage(
   computed(() => track.value?.owner_id ?? null),
@@ -195,7 +196,9 @@ async function loadTrack() {
   album.value = null;
 
   try {
-    track.value = await getTrack(trackId.value, { include: "tags,genres" });
+    track.value = await getTrack(trackId.value, {
+      include: "tags,genres,owner",
+    });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -349,13 +352,8 @@ watch(
               {{ visibilityText }}
             </span>
 
-            <span v-if="ownerName" class="track-view__meta-item">
-              <AppIcon
-                name="user"
-                :title="t('browse.detail.owner')"
-                spacing="right"
-              />
-              {{ ownerName }}
+            <span v-if="owner" class="track-view__meta-item">
+              <UserLink :owner="owner" size="sm" class="track-view__owner" />
             </span>
 
             <span v-if="track.is_external" class="track-view__meta-item">

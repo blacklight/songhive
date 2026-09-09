@@ -46,6 +46,39 @@ function createTestRouter() {
             component: { template: "<div/>" },
           },
           {
+            path: "users",
+            name: "usersDirectory",
+            component: { template: "<div/>" },
+          },
+          {
+            path: "users/:username",
+            name: "userRedirect",
+            redirect: (to) => ({
+              path: `/@${String(to.params.username)}`,
+            }),
+          },
+          {
+            path: "@:username",
+            component: { template: "<div/>" },
+            children: [
+              {
+                path: "",
+                name: "userProfile",
+                redirect: { name: "userProfilePosts" },
+              },
+              {
+                path: "posts",
+                name: "userProfilePosts",
+                component: { template: "<div/>" },
+              },
+              {
+                path: "activity",
+                name: "userProfileActivity",
+                component: { template: "<div/>" },
+              },
+            ],
+          },
+          {
             path: "libraries",
             name: "libraries",
             component: { template: "<div/>" },
@@ -78,7 +111,16 @@ function createTestRouter() {
         ],
       },
       { path: "/login", component: { template: "<div/>" } },
-      { path: "/profile", name: "profile", component: { template: "<div/>" } },
+      {
+        path: "/settings",
+        name: "settings",
+        component: { template: "<div/>" },
+      },
+      {
+        path: "/@:username",
+        name: "userProfile",
+        component: { template: "<div/>" },
+      },
       { path: "/:pathMatch(.*)*", component: { template: "<div/>" } },
     ],
   });
@@ -132,6 +174,7 @@ describe("AppLayout", () => {
 
     expect(labels).toEqual([
       "Home",
+      "Users",
       "Library",
       "Artists",
       "Albums",
@@ -168,6 +211,7 @@ describe("AppLayout", () => {
 
     expect(labels).toEqual([
       "Home",
+      "Users",
       "Library",
       "Artists",
       "Albums",
@@ -180,6 +224,7 @@ describe("AppLayout", () => {
       "Files",
       "Radio",
       "About",
+      "Settings",
     ]);
     expect(wrapper.find(".app-layout__login").exists()).toBe(false);
     expect(wrapper.find(".app-layout__user").exists()).toBe(true);
@@ -269,6 +314,32 @@ describe("AppLayout", () => {
     { path: "/files/abc", label: "Files" },
   ])(
     "highlights the $label nav item while viewing $path",
+    async ({ path, label }) => {
+      const { wrapper, store, router } = await mountLayout();
+      authenticateStore(store);
+      await router.push(path);
+      await flushPromises();
+
+      const link = wrapper
+        .findAll(".app-layout__nav li a")
+        .find((a) => a.text().trim() === label);
+      const home = wrapper
+        .findAll(".app-layout__nav li a")
+        .find((a) => a.text().trim() === "Home");
+      expect(link).toBeTruthy();
+      expect(home).toBeTruthy();
+      expect(link!.classes()).toContain("router-link-active");
+      expect(home!.classes()).not.toContain("router-link-active");
+    },
+  );
+
+  it.each([
+    { path: "/users", label: "Users" },
+    { path: "/users/alice", label: "Users" },
+    { path: "/@alice", label: "Users" },
+    { path: "/@alice/activity", label: "Users" },
+  ])(
+    "keeps the Users nav item highlighted while viewing $path",
     async ({ path, label }) => {
       const { wrapper, store, router } = await mountLayout();
       authenticateStore(store);

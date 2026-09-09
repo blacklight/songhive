@@ -46,17 +46,17 @@ function getInputByLabel(label: string): HTMLInputElement | null {
   return document.body.querySelector(`#${forId}`) as HTMLInputElement | null;
 }
 
-function createTestRouter(path = "/profile/external-libraries/new") {
+function createTestRouter(path = "/settings/external-libraries/new") {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: { template: "<div/>" } },
       {
-        path: "/profile/external-libraries/new",
+        path: "/settings/external-libraries/new",
         component: { template: "<div/>" },
       },
       {
-        path: "/profile/external-libraries/:id",
+        path: "/settings/external-libraries/:id",
         component: { template: "<div/>" },
       },
       {
@@ -196,7 +196,7 @@ describe("ExternalLibraryEditView", () => {
       },
     );
 
-    const router = createTestRouter("/profile/external-libraries/el1");
+    const router = createTestRouter("/settings/external-libraries/el1");
     await router.isReady();
     wrapper = mount(ExternalLibraryEditView, {
       attachTo: document.body,

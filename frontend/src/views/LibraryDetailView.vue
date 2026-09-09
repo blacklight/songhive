@@ -29,6 +29,7 @@ import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import SortControl from "@/components/ui/SortControl.vue";
+import UserLink from "@/components/user/UserLink.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -69,8 +70,7 @@ const {
   },
 );
 
-const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
-  useEntityMeta(library);
+const { owner, visibilityText, visibilityIcon } = useEntityMeta(library);
 
 const { isOwner } = useOwnership(
   computed(() => library.value?.owner_id ?? null),
@@ -207,7 +207,7 @@ async function loadLibrary() {
   loading.value = true;
   error.value = null;
   try {
-    library.value = await getLibrary(libraryId.value);
+    library.value = await getLibrary(libraryId.value, { include: "owner" });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -275,19 +275,12 @@ watch(
         </p>
 
         <div class="library-detail-view__meta">
-          <span
-            v-if="ownerName"
-            :title="ownerName"
+          <UserLink
+            v-if="owner"
+            :owner="owner"
+            size="sm"
             class="library-detail-view__owner"
-          >
-            <AppAvatar
-              v-if="ownerAvatarUrl"
-              :src="ownerAvatarUrl"
-              :name="ownerName"
-              width="16px"
-            />
-            {{ ownerName }}
-          </span>
+          />
           <span :title="visibilityText" class="library-detail-view__visibility">
             <i :class="visibilityIcon" />
           </span>
@@ -465,24 +458,10 @@ watch(
   align-items: center;
 }
 
-.library-detail-view__owner {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
 .library-detail-view__visibility {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-}
-
-:deep(.library-detail-view__owner img) {
-  margin: 0;
-}
-
-:deep(.library-detail-view__owner .app-avatar--initials) {
-  font-size: 0.55rem;
 }
 
 .library-detail-view__header-actions {

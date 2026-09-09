@@ -1,5 +1,5 @@
 import type { paths } from "./types";
-import { apiRequest } from "./client";
+import { apiRequest, apiRequestWithHeaders } from "./client";
 
 export type UserResponse =
   paths["/api/v1/users/me"]["get"]["responses"]["200"]["content"]["application/json"];
@@ -11,10 +11,25 @@ export type ChangePasswordRequest =
   paths["/api/v1/users/me/password"]["post"]["requestBody"]["content"]["application/json"];
 export type ChangePasswordResponse =
   paths["/api/v1/users/me/password"]["post"]["responses"]["200"]["content"]["application/json"];
+export type UserListResponse =
+  paths["/api/v1/users"]["get"]["responses"]["200"]["content"]["application/json"];
 
 export interface DeleteAccountRequest {
   confirmation: string;
   recursive: boolean;
+}
+
+export interface ListUsersParams {
+  q?: string;
+  limit?: number;
+  offset?: number;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
+}
+
+export interface ListUsersResult {
+  users: PublicUserResponse[];
+  total: number;
 }
 
 export function getMe(): Promise<UserResponse> {
@@ -36,6 +51,20 @@ export function changePassword(
 
 export function getPublic(username: string): Promise<PublicUserResponse> {
   return apiRequest<PublicUserResponse>(`/users/${username}`);
+}
+
+export async function listPublicUsers(
+  params?: ListUsersParams,
+): Promise<ListUsersResult> {
+  const response = await apiRequestWithHeaders<UserListResponse>("/users", {
+    query: params as
+      Record<string, string | number | boolean | undefined | null> | undefined,
+  });
+  const total = response.headers.get("X-Total-Count");
+  return {
+    users: response.body,
+    total: total ? parseInt(total, 10) : response.body.length,
+  };
 }
 
 export function deleteMe(body: DeleteAccountRequest): Promise<void> {

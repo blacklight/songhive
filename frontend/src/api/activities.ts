@@ -74,6 +74,15 @@ export function listEntityActivities(
   );
 }
 
+export function listUserActivities(
+  username: string,
+  params?: ListActivitiesParams & { mode?: "posts" | "all" },
+): Promise<ActivityListResponse> {
+  return apiRequest<ActivityListResponse>(`/users/${username}/activities`, {
+    query: params,
+  });
+}
+
 export function updateActivity(
   activityId: string,
   body: ActivityUpdate,

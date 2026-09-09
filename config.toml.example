@@ -90,8 +90,9 @@ enabled = true
 # Supported: "open", "invite-only", "approval-required", "closed"
 registration_mode = "open"
 require_email_verification = false
-# Number of trusted reverse-proxy hops for X-Forwarded-For parsing.
-# 0 disables trust in the header.
+# Number of trusted reverse-proxy hops. A value greater than 0 enables
+# X-Forwarded-For client-IP parsing and X-Forwarded-Proto scheme detection.
+# 0 disables trust in both headers.
 # trusted_proxy_hops = 0
 # JWT signing secret. Generate a strong random key of at least 32 bytes and
 # replace this placeholder, e.g.:

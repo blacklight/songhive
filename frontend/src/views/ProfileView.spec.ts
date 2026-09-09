@@ -34,7 +34,7 @@ function createTestRouter() {
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: { template: "<div/>" } },
-      { path: "/profile", component: ProfileView },
+      { path: "/settings", component: ProfileView },
     ],
   });
 }
@@ -85,7 +85,7 @@ describe("ProfileView", () => {
 
   it("renders the profile tab by default", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileView, {
@@ -102,7 +102,7 @@ describe("ProfileView", () => {
 
   it("switches to the API tokens tab via query", async () => {
     const router = createTestRouter();
-    await router.push("/profile?tab=apiTokens");
+    await router.push("/settings?tab=apiTokens");
     await router.isReady();
 
     const wrapper = mount(ProfileView, {
@@ -117,7 +117,7 @@ describe("ProfileView", () => {
 
   it("switches to the sessions tab and lists sessions", async () => {
     const router = createTestRouter();
-    await router.push("/profile?tab=sessions");
+    await router.push("/settings?tab=sessions");
     await router.isReady();
 
     const wrapper = mount(ProfileView, {
@@ -132,7 +132,7 @@ describe("ProfileView", () => {
 
   it("switches to the password tab", async () => {
     const router = createTestRouter();
-    await router.push("/profile?tab=password");
+    await router.push("/settings?tab=password");
     await router.isReady();
 
     const wrapper = mount(ProfileView, {
@@ -147,7 +147,7 @@ describe("ProfileView", () => {
 
   it("updates the query when a tab link is clicked", async () => {
     const router = createTestRouter();
-    await router.push("/profile");
+    await router.push("/settings");
     await router.isReady();
 
     const wrapper = mount(ProfileView, {
@@ -167,7 +167,7 @@ describe("ProfileView", () => {
 
   it("switches to the external libraries tab via query", async () => {
     const router = createTestRouter();
-    await router.push("/profile?tab=externalLibraries");
+    await router.push("/settings?tab=externalLibraries");
     await router.isReady();
 
     const wrapper = mount(ProfileView, {

@@ -42,11 +42,24 @@ function isNavItemActive(item: NavItem): boolean {
   if (item.to === "/") {
     return route.path === "/";
   }
+  if (item.to === "/users") {
+    return (
+      route.path === "/users" ||
+      route.path.startsWith("/users/") ||
+      /^\/@[^/]+(?:\/|$)/.test(route.path)
+    );
+  }
   return route.path === item.to || route.path.startsWith(`${item.to}/`);
 }
 
 const navItems = computed<NavItem[]>(() => [
   { name: t("nav.home"), to: "/", requiresAuth: false, icon: "house" },
+  {
+    name: t("nav.users"),
+    to: "/users",
+    requiresAuth: false,
+    icon: "users",
+  },
   {
     name: t("nav.library"),
     to: "/libraries",
@@ -109,6 +122,12 @@ const navItems = computed<NavItem[]>(() => [
     requiresAuth: false,
     icon: "circle-info",
   },
+  {
+    name: t("nav.settings"),
+    to: "/settings",
+    requiresAuth: true,
+    icon: "cog",
+  },
 ]);
 
 const visibleNavItems = computed(() =>
@@ -123,6 +142,12 @@ const loginItem = {
   to: "/login",
   icon: "right-to-bracket",
 };
+
+const publicProfileLink = computed(() =>
+  authStore.user
+    ? { name: "userProfile", params: { username: authStore.user.username } }
+    : "/",
+);
 </script>
 
 <template>
@@ -197,7 +222,7 @@ const loginItem = {
 
       <footer v-else class="app-layout__menu-footer">
         <RouterLink
-          :to="{ name: 'profile' }"
+          :to="publicProfileLink"
           class="app-layout__user"
           @click="isMobileMenuOpen = false"
         >
@@ -251,7 +276,7 @@ const loginItem = {
   background-color: var(--color-bg);
   color: var(--color-text);
 
-  --logout-btn-width: 2.5rem;
+  --footer-btn-width: 2.5rem;
 }
 
 .app-layout__menu-toggle {
@@ -374,7 +399,7 @@ const loginItem = {
 }
 
 .app-layout__user {
-  width: calc(100% - var(--space-3) - var(--logout-btn-width));
+  width: calc(100% - var(--space-3) - var(--footer-btn-width));
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -406,7 +431,7 @@ const loginItem = {
 }
 
 .app-layout__logout {
-  width: var(--logout-btn-width);
+  width: var(--footer-btn-width);
   margin-top: 0;
   color: var(--color-text-menu);
 }

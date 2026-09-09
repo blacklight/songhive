@@ -108,13 +108,13 @@ def test_list_tracks_filters_by_genre(client, sample_tracks, regular_user, auth_
     assert len(response.json()) == 1
 
 
-def test_get_public_track_redacts_owner_for_non_owner(client, sample_tracks, other_user, auth_headers):
-    """Non-owners see a null owner_id for public tracks."""
+def test_get_public_track_shows_owner_for_non_owner(client, sample_tracks, other_user, auth_headers):
+    """Non-owners see the owner_id for public tracks they can access."""
     track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
 
     response = client.get(f"/api/v1/tracks/{track.id}", headers=auth_headers(other_user))
     assert response.status_code == 200
-    assert response.json()["owner_id"] is None
+    assert response.json()["owner_id"] == str(track.owner_id)
     assert response.json()["visibility"] == "public"
 
 

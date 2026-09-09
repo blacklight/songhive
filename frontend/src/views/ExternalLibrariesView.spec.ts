@@ -19,11 +19,11 @@ function createTestRouter() {
     routes: [
       { path: "/", component: { template: "<div/>" } },
       {
-        path: "/profile/external-libraries",
+        path: "/settings/external-libraries",
         component: { template: "<div/>" },
       },
       {
-        path: "/profile/external-libraries/:id",
+        path: "/settings/external-libraries/:id",
         component: { template: "<div/>" },
       },
       { path: "/admin/external-libraries", component: { template: "<div/>" } },

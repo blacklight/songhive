@@ -34,6 +34,7 @@ import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vu
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import TagList from "@/components/tags/TagList.vue";
 import GenreList from "@/components/genres/GenreList.vue";
+import UserLink from "@/components/user/UserLink.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -77,8 +78,7 @@ const {
 
 const artistName = computed(() => artist.value?.name ?? "");
 
-const { ownerName, ownerAvatarUrl, visibilityText, visibilityIcon } =
-  useEntityMeta(album);
+const { owner, visibilityText, visibilityIcon } = useEntityMeta(album);
 const { isOwner } = useOwnership(computed(() => album.value?.owner_id ?? null));
 const { canManage } = useCanManage(
   computed(() => album.value?.owner_id ?? null),
@@ -231,7 +231,9 @@ async function loadAlbum() {
   loading.value = true;
   error.value = null;
   try {
-    album.value = await getAlbum(albumId.value, { include: "tags,genres" });
+    album.value = await getAlbum(albumId.value, {
+      include: "tags,genres,owner",
+    });
   } catch (err) {
     error.value =
       getApiErrorMessage(err) ||
@@ -318,19 +320,12 @@ watch(
               </span>
             </span>
             <span class="album-view__meta-item">
-              <span
-                v-if="ownerName"
-                :title="ownerName"
+              <UserLink
+                v-if="owner"
+                :owner="owner"
+                size="sm"
                 class="album-view__owner"
-              >
-                <AppAvatar
-                  v-if="ownerAvatarUrl"
-                  :src="ownerAvatarUrl"
-                  :name="ownerName"
-                  width="16px"
-                />
-                {{ ownerName }}
-              </span>
+              />
               <span :title="visibilityText" class="album-view__visibility">
                 <i :class="visibilityIcon" />
               </span>
@@ -515,24 +510,10 @@ watch(
   gap: var(--space-3);
 }
 
-.album-view__owner {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
 .album-view__visibility {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-}
-
-:deep(.album-view__owner img) {
-  margin: 0;
-}
-
-:deep(.album-view__owner .app-avatar--initials) {
-  font-size: 0.55rem;
 }
 
 .album-view__description {

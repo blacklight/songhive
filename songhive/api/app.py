@@ -20,6 +20,7 @@ from ..services.redis import close_redis_client, get_redis_client
 from ..services.settings import apply_settings_overrides
 from ..version import __version__
 from .errors import install_error_handlers
+from .middleware.proxy import ForwardedProtoMiddleware
 from .routes import (
     activities,
     admin,
@@ -37,6 +38,7 @@ from .routes import (
     instance,
     libraries,
     playlists,
+    profile_pages,
     pwa,
     radios,
     reports,
@@ -179,6 +181,13 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.state.storage_service = None
     app.state.storage_service_config = None
 
+    # Trust X-Forwarded-Proto from trusted reverse proxies so that
+    # request.url / request.base_url use the public scheme (e.g. https).
+    app.add_middleware(
+        ForwardedProtoMiddleware,
+        trusted_hops=config.auth.trusted_proxy_hops,
+    )
+
     # CORS middleware
     allow_credentials = True
     if "*" in config.server.cors_origins:
@@ -205,6 +214,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(sessions.router, prefix=api_prefix, tags=["sessions"])
     app.include_router(api_tokens.router, prefix=api_prefix, tags=["api-tokens"])
     app.include_router(users.router, prefix=api_prefix, tags=["users"])
+    app.include_router(tags.router, prefix=api_prefix, tags=["tags"])
     app.include_router(activities.router, prefix=api_prefix, tags=["activities"])
     app.include_router(activities.entity_router, prefix=api_prefix, tags=["activities"])
     app.include_router(artists.router, prefix=api_prefix, tags=["artists"])
@@ -212,7 +222,6 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(tracks.router, prefix=api_prefix, tags=["tracks"])
     app.include_router(playlists.router, prefix=api_prefix, tags=["playlists"])
     app.include_router(libraries.router, prefix=api_prefix, tags=["libraries"])
-    app.include_router(tags.router, prefix=api_prefix, tags=["tags"])
     app.include_router(genres.router, prefix=api_prefix, tags=["genres"])
     app.include_router(favorites.router, prefix=api_prefix, tags=["favorites"])
     app.include_router(history.router, prefix=api_prefix, tags=["history"])
@@ -233,6 +242,10 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(instance.v1_router, prefix="/api/v1")
     app.include_router(instance.v2_router, prefix="/api/v2")
     app.include_router(pwa.router)
+
+    # User profile / ActivityPub actor routes (always mounted, even when
+    # federation is disabled, so browser profile pages keep working).
+    app.include_router(profile_pages.router)
 
     # Federation routes
     if config.federation.enabled and config.federation.instance_domain:
