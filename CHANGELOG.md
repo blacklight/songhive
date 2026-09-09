@@ -33,6 +33,11 @@ All notable changes to this project will be documented in this file.
   ActivityStreams media type are redirected to the SPA: a track-resolved
   object goes to the track page, an activity-resolved object to the
   entity's activity feed.
+- `federation`: `GET /tracks/{track_id}` now redirects ActivityPub fetches
+  (303 See Other) to the track's earliest surviving local share when no
+  published `Audio` object exists, so a remote URL search (e.g. pasting a
+  track link into Mastodon) resolves to the first `Note` post instead of
+  answering 404.
 - `federation`: Add activity interactions — `POST
   /api/v1/activities/{id}/like` records an idempotent `like` activity that
   inherits the target's visibility, stores an ActivityPub `Like` payload

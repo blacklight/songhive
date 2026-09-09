@@ -80,6 +80,33 @@ def _entity_activities_url(entity_type: str, entity_id: str) -> str:
     return f"/{plural}/{entity_id}/activities"
 
 
+_FEDERATING_VISIBILITIES = [v.value for v in Visibility if Visibility.federates(v)]
+
+
+async def _earliest_track_post(db: AsyncSession, track_id: str) -> Optional[Activity]:
+    """
+    Return the oldest live local ``create`` activity attached to a track.
+
+    Used as the fallback object for ``GET /tracks/{id}`` when no canonical
+    ``Audio`` is published: remote fetches are redirected to the earliest
+    surviving share so the track URL keeps resolving to a post.
+    """
+    result = await db.execute(
+        select(Activity)
+        .where(
+            Activity.entity_type == "track",
+            Activity.entity_id == track_id,
+            Activity.activity_type == "create",
+            Activity.source_type == "local",
+            Activity.deleted_at.is_(None),
+            Activity.visibility.in_(_FEDERATING_VISIBILITIES),
+        )
+        .order_by(Activity.published_at.asc(), Activity.id.asc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 def _track_object_document(track: Track, owner: Any, config: SonghiveConfig) -> Optional[dict]:
     """
     Build the dereferenceable ``Audio`` document for a published track.
@@ -279,8 +306,12 @@ async def get_track_page(
     pointing at the object.
 
     The object is only served while the track is published to the fediverse
-    (``federation_object_id`` set): unpublished tracks keep answering 404 so
-    a remote fetch cannot resurrect a retracted post under a different id.
+    (``federation_object_id`` set). When no ``Audio`` exists, remote fetches
+    are instead redirected (303 See Other) to the track's earliest surviving
+    local share — the object-dereference route then serves that activity's
+    ``Note`` document — so the track URL still resolves to a post. Tracks
+    with neither a published object nor live shares answer 404, so a remote
+    fetch cannot resurrect a retracted post under a different id.
     """
     config = _federation_config(request)
     result = await db.execute(
@@ -301,12 +332,13 @@ async def get_track_page(
         ensure_user_actor(owner, config)
 
     if _accepts_activitypub(request):
-        if track is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        document = _track_object_document(track, owner, config)
-        if document is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        return JSONResponse(content=document, media_type=ACTIVITY_JSON)
+        document = _track_object_document(track, owner, config) if track is not None else None
+        if document is not None:
+            return JSONResponse(content=document, media_type=ACTIVITY_JSON)
+        share = await _earliest_track_post(db, track_id)
+        if share is not None:
+            return RedirectResponse(url=share.source_id, status_code=status.HTTP_303_SEE_OTHER)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     alternate_url = f"{owner.actor_url}/objects/{track.federation_object_id}" if track is not None else None
     return _spa_response(alternate_url)

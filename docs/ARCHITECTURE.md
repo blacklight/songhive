@@ -586,8 +586,15 @@ a user pastes the link into a search box), while browsers receive the SPA
 shell annotated with a `Link: rel="alternate"` header and a
 `<link rel="alternate" type="application/activity+json">` element pointing
 at the object URL. The object is only served while the track is published
-(`federation_object_id` set): unpublished tracks answer 404 so a remote
-fetch cannot resurrect a retracted post under a different id.
+(`federation_object_id` set). When no `Audio` exists, ActivityPub fetches
+are redirected (303 See Other) to the track's earliest live local `create`
+activity — `_earliest_track_post` picks the oldest non-deleted,
+federating-visibility row and the object route then serves that share's
+`Note` document — so a URL search on an Audio-less track still resolves to
+a post (remote fetchers like Mastodon follow the redirect and import the
+redirected object under its own `id`). Tracks with neither a published
+object nor live shares answer 404 so a remote fetch cannot resurrect a
+retracted post under a different id.
 
 ### Genres
 

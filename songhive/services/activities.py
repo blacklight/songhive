@@ -13,7 +13,7 @@ import base64
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type, TypedDict
 
 from fastapi import HTTPException
 from pubby.content import set_object_content
@@ -1093,6 +1093,19 @@ async def fan_out_activity_update(
     return sent
 
 
+class _TrackPublicationKwargs(TypedDict):
+    """Keyword arguments shared by ``create_note_activity``/``create_audio_activity``."""
+
+    actor_url: str
+    track: Track
+    artist: Artist
+    domain: str
+    description: Optional[str]
+    ap_object_id: Optional[str]
+    visibility: "Visibility | str"
+    mention_actor_urls: Iterable[str]
+
+
 async def record_track_publication(
     session: AsyncSession,
     *,
@@ -1173,7 +1186,9 @@ async def record_track_publication(
     VisibilityRules.enforce_activity_visibility(activity_visibility, _entity_visibility(track))
 
     processed = await process_mentions(session, status, config) if status else None
-    mention_actor_urls = [m.actor_url for m in processed.mentions if m.actor_url] if processed else []
+    mention_actor_urls: List[str] = (  # type: ignore
+        [m.actor_url for m in processed.mentions if m.actor_url] if processed else []
+    )
 
     if object_type == "audio":
         object_uuid = str(track.federation_object_id)
@@ -1184,7 +1199,7 @@ async def record_track_publication(
             f"{owner.actor_url}/objects/{track.federation_object_id}" if track.federation_object_id else None
         )
     object_id = f"{owner.actor_url}/objects/{object_uuid}"
-    args = {
+    args: _TrackPublicationKwargs = {
         "actor_url": owner.actor_url,
         "track": track,
         "artist": artist,

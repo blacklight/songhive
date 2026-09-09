@@ -700,6 +700,140 @@ async def test_track_page_returns_404_for_unpublished_track(fed_client, db_sessi
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
+async def test_track_page_redirects_to_earliest_live_share(fed_client, db_session, regular_user):
+    """AP lookups on a track without an Audio object resolve to its earliest share.
+
+    Remote servers (e.g. Mastodon) follow the redirect to the share's object
+    URL, where the object route serves the ``Note`` document — so searching a
+    track URL still surfaces a post when only ``Note`` shares exist.
+    """
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Shared Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id=None,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    track_id = str(track.id)
+    db_session.add_all(
+        [
+            _make_activity(
+                regular_user,
+                object_id="share-later",
+                entity_id=track_id,
+                published_at=datetime(2024, 6, 1, tzinfo=timezone.utc),
+            ),
+            _make_activity(
+                regular_user,
+                object_id="share-first",
+                entity_id=track_id,
+                published_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            ),
+            # Retracted shares are skipped even when they are the oldest.
+            _make_activity(
+                regular_user,
+                object_id="share-retracted",
+                entity_id=track_id,
+                published_at=datetime(2023, 1, 1, tzinfo=timezone.utc),
+                deleted_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            ),
+            # Non-federating shares are never exposed to remote fetches.
+            _make_activity(
+                regular_user,
+                object_id="share-private",
+                entity_id=track_id,
+                published_at=datetime(2023, 6, 1, tzinfo=timezone.utc),
+                visibility=Visibility.PRIVATE.value,
+            ),
+            # Interactions are not posts and must not be picked.
+            _make_activity(
+                regular_user,
+                object_id="like-early",
+                entity_id=track_id,
+                activity_type="like",
+                published_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    response = fed_client.get(f"/tracks/{track_id}", headers={"Accept": ACTIVITY_JSON}, follow_redirects=False)
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert response.headers["location"] == "https://music.example.com/users/regular/objects/share-first"
+
+    note = fed_client.get("/users/regular/objects/share-first", headers={"Accept": ACTIVITY_JSON})
+    assert note.status_code == status.HTTP_200_OK
+    assert note.json()["type"] == "Note"
+
+
+async def test_track_page_serves_audio_over_existing_shares(fed_client, db_session, regular_user):
+    """A published Audio object always takes precedence over earlier shares."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Published Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-shared",
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    db_session.add(
+        _make_activity(
+            regular_user,
+            object_id="share-old",
+            entity_id=str(track.id),
+            published_at=datetime(2023, 1, 1, tzinfo=timezone.utc),
+        )
+    )
+    await db_session.commit()
+
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["type"] == "Audio"
+
+
+async def test_track_page_returns_404_when_only_private_shares(fed_client, db_session, regular_user):
+    """AP lookups return 404 when no live federating share exists."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Quiet Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id=None,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    db_session.add(
+        _make_activity(
+            regular_user,
+            object_id="share-hidden",
+            entity_id=str(track.id),
+            visibility=Visibility.PRIVATE.value,
+        )
+    )
+    await db_session.commit()
+
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
 async def test_track_page_returns_404_for_private_track(fed_client, db_session, regular_user):
     """AP requests for non-public tracks return 404."""
     artist = Artist(name="Artist")
