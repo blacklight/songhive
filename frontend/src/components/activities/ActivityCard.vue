@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RouterLink } from "vue-router";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import type { ActivityResponse } from "@/api/activities";
@@ -68,6 +69,14 @@ const actorName = computed(() => {
     return `@${shortName}@${host}`;
   }
   return `@${shortName}`;
+});
+
+const actorUrl = computed(() => {
+  const { shortName, host } = parseActor(props.activity.source_actor);
+  if (host && props.activity.source_type === "remote") {
+    return `https://${host}/@${shortName}`;
+  }
+  return `/@${shortName}`;
 });
 
 const actorDisplayName = computed(
@@ -171,15 +180,30 @@ async function copyUrl() {
     <header class="activity-card__header">
       <AppAvatar :src="actorAvatar" :name="actorDisplayName" size="sm" />
       <div class="activity-card__meta">
-        <span class="activity-card__actor">
+        <a
+          v-if="props.activity.source_type === 'remote'"
+          :href="actorUrl"
+          class="activity-card__actor"
+          target="_blank"
+        >
           <span class="activity-card__display-name">{{
             actorDisplayName
           }}</span>
           <span class="activity-card__handle">{{ actorName }}</span>
-        </span>
-        <span class="activity-card__time">{{
+        </a>
+        <RouterLink
+          v-else
+          :to="'/@' + actorShortName"
+          class="activity-card__actor"
+        >
+          <span class="activity-card__display-name">{{
+            actorDisplayName
+          }}</span>
+          <span class="activity-card__handle">{{ actorName }}</span>
+        </RouterLink>
+        <a :href="props.activity.source_id" class="activity-card__time">{{
           formatDateTime(activity.published_at)
-        }}</span>
+        }}</a>
       </div>
       <div class="activity-card__badges">
         <span v-if="typeLabel" class="activity-card__type" :title="typeLabel">
@@ -291,6 +315,17 @@ async function copyUrl() {
   flex-direction: column;
   align-items: baseline;
   word-break: break-all;
+  text-decoration: none;
+}
+
+.activity-card__time {
+  text-decoration: none;
+}
+
+.activity-card__actor:hover,
+.activity-card__time:hover {
+  color: var(--color-text-hover);
+  text-decoration: underline;
 }
 
 .activity-card__display-name {

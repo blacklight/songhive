@@ -106,6 +106,7 @@ describe("SearchBar", () => {
         modelValue: "",
         autocomplete: true,
         autocompleteMinLength: 3,
+        autocompleteDelay: 300,
         autocompleteFetcher: fetcher,
       },
     });

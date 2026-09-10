@@ -34,6 +34,21 @@ function page(
   return { activities, next_cursor: nextCursor };
 }
 
+function mountFeed(
+  props: { entityType: string; entityId: string } = {
+    entityType: "track",
+    entityId: "t1",
+  },
+) {
+  return mount(ActivityFeed, {
+    props,
+    global: {
+      stubs: { RouterLink: true },
+      renderStubDefaultSlot: true,
+    },
+  });
+}
+
 describe("ActivityFeed", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -41,9 +56,7 @@ describe("ActivityFeed", () => {
 
   it("loads and renders activities on mount", async () => {
     listEntityActivities.mockResolvedValueOnce(page([createActivity("a1")]));
-    const wrapper = mount(ActivityFeed, {
-      props: { entityType: "track", entityId: "t1" },
-    });
+    const wrapper = mountFeed();
     await flushPromises();
     expect(listEntityActivities).toHaveBeenCalledWith("track", "t1", {
       cursor: undefined,
@@ -53,18 +66,14 @@ describe("ActivityFeed", () => {
 
   it("shows the empty state when there are no activities", async () => {
     listEntityActivities.mockResolvedValueOnce(page([]));
-    const wrapper = mount(ActivityFeed, {
-      props: { entityType: "track", entityId: "t1" },
-    });
+    const wrapper = mountFeed();
     await flushPromises();
     expect(wrapper.text()).toContain("No activities yet.");
   });
 
   it("reloads with filter params when a tab is selected", async () => {
     listEntityActivities.mockResolvedValue(page([]));
-    const wrapper = mount(ActivityFeed, {
-      props: { entityType: "track", entityId: "t1" },
-    });
+    const wrapper = mountFeed();
     await flushPromises();
     const tabs = wrapper.findAll(".app-tabs__tab");
     const repliesTab = tabs.find((tab) => tab.text() === "Replies");
@@ -80,9 +89,7 @@ describe("ActivityFeed", () => {
     listEntityActivities
       .mockResolvedValueOnce(page([createActivity("a1")], "c1"))
       .mockResolvedValueOnce(page([createActivity("a2")]));
-    const wrapper = mount(ActivityFeed, {
-      props: { entityType: "track", entityId: "t1" },
-    });
+    const wrapper = mountFeed();
     await flushPromises();
     const more = wrapper
       .findAll("button")
@@ -101,9 +108,7 @@ describe("ActivityFeed", () => {
 
   it("shows an error with a retry button on failure", async () => {
     listEntityActivities.mockRejectedValueOnce(new Error("boom"));
-    const wrapper = mount(ActivityFeed, {
-      props: { entityType: "track", entityId: "t1" },
-    });
+    const wrapper = mountFeed();
     await flushPromises();
     expect(wrapper.text()).toContain("boom");
   });
