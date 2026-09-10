@@ -94,6 +94,7 @@ async function load(append = false) {
     } else if (props.tab === "tracks") {
       const result = await listTracksWithMeta({
         owner_username: username.value,
+        include: "artist,album",
         limit,
         offset: offset.value,
       });
