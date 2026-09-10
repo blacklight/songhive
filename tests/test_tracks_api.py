@@ -1980,3 +1980,24 @@ async def test_update_track_filename_external_sanitizes_path_traversal(client, r
     refreshed = result.scalar_one()
     assert refreshed.provider_key == "music/hacked.mp3"
     assert refreshed.raw_metadata.get("display_path") == "music/hacked.mp3"
+
+
+def test_shared_user_can_access_private_track(client, sample_tracks, regular_user, other_user, auth_headers):
+    """A shared user can see and access a private track."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+
+    create = client.post(
+        "/api/v1/shares",
+        json={"item_type": "track", "item_id": str(track.id), "user_id": other_user.username},
+        headers=auth_headers(regular_user),
+    )
+    assert create.status_code == 201
+    assert create.json()["user_id"] == str(other_user.id)
+
+    list_response = client.get("/api/v1/tracks", headers=auth_headers(other_user))
+    assert list_response.status_code == 200
+    assert any(t["id"] == str(track.id) for t in list_response.json())
+
+    get_response = client.get(f"/api/v1/tracks/{track.id}", headers=auth_headers(other_user))
+    assert get_response.status_code == 200
+    assert get_response.json()["id"] == str(track.id)

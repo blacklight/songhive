@@ -162,7 +162,7 @@ const urlColumns = [
 const grantRows = computed(() =>
   grants.value.map((grant) => ({
     id: grant.id,
-    user_id: grant.user_id,
+    user_id: grant.username ?? grant.user_id,
     createdAt: formatDateTime(grant.created_at),
     actions: "",
   })),
@@ -298,7 +298,9 @@ async function revokeGrant(grantId: string) {
 
   const confirmed = await confirm.open({
     title: t("browse.share.revoke"),
-    message: t("browse.share.revokeConfirm", { user: grant.user_id }),
+    message: t("browse.share.revokeConfirm", {
+      user: grant.username ?? grant.user_id,
+    }),
     danger: true,
     confirmLabel: t("browse.share.revoke"),
   });

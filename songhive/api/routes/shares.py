@@ -3,7 +3,7 @@ Share-grant routes: owner/admin CRUD for giving specific users access to items.
 """
 
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models.share_grant import ShareGrant
 from ...models.user import User
 from ...services import acl, sharing
+from ...services.auth import get_user_by_id, get_user_by_username_or_email
 from .._common import Pagination, get_pagination
 from ..deps import get_current_user, get_db
 from ..middleware.rate_limit import rate_limit_account
@@ -42,7 +43,24 @@ class ShareGrantResponse(BaseModel):
     item_type: str
     item_id: str
     user_id: str
+    username: Optional[str] = None
     created_at: datetime
+
+
+async def _resolve_share_grant_user(session: AsyncSession, value: str) -> User:
+    """Resolve a target user identifier to an active User.
+
+    The value may be a user id (UUID) or a username/email address.
+    """
+    user = await get_user_by_id(session, value)
+    if user is None:
+        user = await get_user_by_username_or_email(session, value)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="User not found",
+        )
+    return user
 
 
 @router.post(
@@ -59,16 +77,19 @@ async def create_share_grant(
     """Grant a specific user access to an item."""
     await load_and_authorize(db, current_user, body.item_type, body.item_id)
 
+    target_user = await _resolve_share_grant_user(db, body.user_id)
     grant = await sharing.create_share_grant(
         db,
         body.item_type,
         body.item_id,
-        body.user_id,
+        target_user.id,
         created_by=current_user.id,
     )
     await db.commit()
 
-    return ShareGrantResponse.model_validate(grant)
+    response = ShareGrantResponse.model_validate(grant)
+    response.username = target_user.username
+    return response
 
 
 @router.get("/", response_model=List[ShareGrantResponse])
@@ -86,7 +107,13 @@ async def list_share_grants(
     total = await sharing.count_share_grants(db, item_type, item_id)
     grants = await sharing.list_share_grants(db, item_type, item_id)
     pagination.set_total(response, total)
-    return [ShareGrantResponse.model_validate(g) for g in grants]
+    responses = []
+    for g in grants:
+        resp = ShareGrantResponse.model_validate(g)
+        if g.user is not None:
+            resp.username = g.user.username
+        responses.append(resp)
+    return responses
 
 
 @router.delete("/{share_id}", status_code=status.HTTP_204_NO_CONTENT)

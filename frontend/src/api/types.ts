@@ -5096,6 +5096,8 @@ export interface components {
       item_id: string;
       /** User Id */
       user_id: string;
+      /** Username */
+      username?: string | null;
       /**
        * Created At
        * Format: date-time

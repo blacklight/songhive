@@ -18,6 +18,30 @@ def private_file(client, regular_user, auth_headers, tmp_path):
     return response.json()
 
 
+@pytest.fixture
+def private_library(client, regular_user, auth_headers):
+    """Create a private library owned by ``regular_user``."""
+    response = client.post(
+        "/api/v1/libraries/?visibility=private",
+        json={"name": "Private Library"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+@pytest.fixture
+def private_playlist(client, regular_user, auth_headers):
+    """Create a private playlist owned by ``regular_user``."""
+    response = client.post(
+        "/api/v1/playlists/?visibility=private",
+        json={"name": "Private Playlist"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
 def test_create_share_grant(client, regular_user, other_user, auth_headers, private_file):
     """An owner can create a share grant for another user."""
     response = client.post(
@@ -30,6 +54,7 @@ def test_create_share_grant(client, regular_user, other_user, auth_headers, priv
     assert data["item_type"] == "file"
     assert data["item_id"] == private_file["id"]
     assert data["user_id"] == str(other_user.id)
+    assert data.get("username") == other_user.username
     assert "id" in data
     assert "created_at" in data
 
@@ -79,6 +104,7 @@ def test_list_share_grants(client, regular_user, other_user, auth_headers, priva
     data = response.json()
     assert len(data) == 1
     assert data[0]["user_id"] == str(other_user.id)
+    assert data[0].get("username") == other_user.username
 
 
 def test_list_share_grants_non_owner_forbidden(client, other_user, auth_headers, private_file):
@@ -163,3 +189,60 @@ def test_admin_can_manage_shares(client, admin_user, other_user, auth_headers, p
 
     delete = client.delete(f"/api/v1/shares/{created.json()['id']}", headers=auth_headers(admin_user))
     assert delete.status_code == 204
+
+
+def test_create_share_grant_by_username(client, regular_user, other_user, auth_headers, private_file):
+    """A share grant accepts a username and stores the resolved user id."""
+    response = client.post(
+        "/api/v1/shares",
+        json={"item_type": "file", "item_id": private_file["id"], "user_id": other_user.username},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["user_id"] == str(other_user.id)
+    assert data["username"] == other_user.username
+
+
+def test_create_share_grant_unknown_user(client, regular_user, auth_headers, private_file):
+    """A share grant for an unknown or inactive user returns 422."""
+    response = client.post(
+        "/api/v1/shares",
+        json={"item_type": "file", "item_id": private_file["id"], "user_id": "no-such-user"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 422
+
+
+def test_shared_user_can_access_private_library(client, regular_user, other_user, auth_headers, private_library):
+    """A shared user can see and access a private library."""
+    client.post(
+        "/api/v1/shares",
+        json={"item_type": "library", "item_id": private_library["id"], "user_id": other_user.username},
+        headers=auth_headers(regular_user),
+    )
+
+    list_response = client.get("/api/v1/libraries", headers=auth_headers(other_user))
+    assert list_response.status_code == 200
+    assert any(lib["id"] == private_library["id"] for lib in list_response.json())
+
+    get_response = client.get(f"/api/v1/libraries/{private_library['id']}", headers=auth_headers(other_user))
+    assert get_response.status_code == 200
+    assert get_response.json()["id"] == private_library["id"]
+
+
+def test_shared_user_can_access_private_playlist(client, regular_user, other_user, auth_headers, private_playlist):
+    """A shared user can see and access a private playlist."""
+    client.post(
+        "/api/v1/shares",
+        json={"item_type": "playlist", "item_id": private_playlist["id"], "user_id": other_user.username},
+        headers=auth_headers(regular_user),
+    )
+
+    list_response = client.get("/api/v1/playlists", headers=auth_headers(other_user))
+    assert list_response.status_code == 200
+    assert any(p["id"] == private_playlist["id"] for p in list_response.json())
+
+    get_response = client.get(f"/api/v1/playlists/{private_playlist['id']}", headers=auth_headers(other_user))
+    assert get_response.status_code == 200
+    assert get_response.json()["id"] == private_playlist["id"]
