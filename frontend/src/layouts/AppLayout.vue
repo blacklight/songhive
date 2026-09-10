@@ -306,11 +306,24 @@ const publicProfileLink = computed(() =>
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+
+  --header-height: 5rem;
+  --footer-height: 2.5rem;
+}
+
+.app-layout__sidebar header {
+  height: var(--header-height);
+}
+
+.app-layout__sidebar footer {
+  height: var(--footer-height);
 }
 
 .app-layout__nav {
   flex: 1;
+  height: calc(100% - var(--header-height) - var(--footer-height));
   min-height: 0;
+  overflow-y: auto;
 }
 
 .app-layout__nav ul {
