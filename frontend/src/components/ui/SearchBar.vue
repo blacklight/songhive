@@ -44,7 +44,7 @@ const props = withDefaults(defineProps<Props>(), {
   ],
   autocompleteMinLength: 2,
   autocompleteLimit: 5,
-  autocompleteDelay: 300,
+  autocompleteDelay: 750,
 });
 
 const emit = defineEmits<{
