@@ -1220,7 +1220,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
 | `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
-| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, `/settings` for the authenticated user, `UserProfileView` for `/@{username}`, `UsersDirectoryView` for `/users`, plus 403/404 and placeholder views). `UserProfileView` renders user bios through the `RichText` component, which linkifies hashtags, mentions and URLs; library, playlist, album, and track detail views render the owner through the `UserLink` component |
+| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, `/settings` for the authenticated user, `UserProfileView` for `/@{username}`, `UsersDirectoryView` for `/users`, `SearchView` for the public `/search` page, plus 403/404 and placeholder views). `SearchView` renders grouped, independently sortable and paginated sections for every searchable entity via `useSearchSections`; the shared `SearchBar` supports an optional autocomplete mode backed by the aggregate `/api/v1/search/` endpoint. `UserProfileView` renders user bios through the `RichText` component, which linkifies hashtags, mentions and URLs; library, playlist, album, and track detail views render the owner through the `UserLink` component |
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |
@@ -1261,6 +1261,9 @@ REST API under `/api/v1/`:
 ├── artists/        # Artist CRUD + search
 ├── albums/         # Album CRUD + search
 ├── tracks/         # Track CRUD + search
+├── search/         # Lightweight aggregate multi-entity search (tracks, albums, artists,
+│                   #   playlists, libraries, users, tags, genres) with normalized result
+│                   #   items; ACL-filtered like the underlying list endpoints
 ├── files/          # Generic file upload/list/download (StoredFile)
 ├── libraries/      # Library management + add/remove tracks/albums/artists
 ├── playlists/      # Playlist CRUD + add/remove/reorder tracks/albums/artists + list tracks

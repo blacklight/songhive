@@ -42,6 +42,7 @@ from .routes import (
     pwa,
     radios,
     reports,
+    search,
     sessions,
     share,
     share_urls,
@@ -222,6 +223,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(tracks.router, prefix=api_prefix, tags=["tracks"])
     app.include_router(playlists.router, prefix=api_prefix, tags=["playlists"])
     app.include_router(libraries.router, prefix=api_prefix, tags=["libraries"])
+    app.include_router(search.router, prefix=api_prefix, tags=["search"])
     app.include_router(genres.router, prefix=api_prefix, tags=["genres"])
     app.include_router(favorites.router, prefix=api_prefix, tags=["favorites"])
     app.include_router(history.router, prefix=api_prefix, tags=["history"])

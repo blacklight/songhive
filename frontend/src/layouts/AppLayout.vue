@@ -55,6 +55,12 @@ function isNavItemActive(item: NavItem): boolean {
 const navItems = computed<NavItem[]>(() => [
   { name: t("nav.home"), to: "/", requiresAuth: false, icon: "house" },
   {
+    name: t("nav.search"),
+    to: "/search",
+    requiresAuth: false,
+    icon: "magnifying-glass",
+  },
+  {
     name: t("nav.users"),
     to: "/users",
     requiresAuth: false,

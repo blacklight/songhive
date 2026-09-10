@@ -39,6 +39,7 @@ from ..models.track import Track
 from ..models.user import User
 from ..services.metadata import AudioMetadata
 from ..services.storage import is_unique_constraint_error
+from ._common import ilike_contains
 from .acl import _list_access_predicate
 
 logger = logging.getLogger(__name__)
@@ -418,7 +419,7 @@ async def list_tags(
     stmt = select(Tag, item_count, first_used, last_used).join(cte, Tag.id == cte.c.tag_id).group_by(Tag.id)
 
     if query:
-        stmt = stmt.where(Tag.name.ilike(f"%{query}%"))
+        stmt = stmt.where(ilike_contains(Tag.name, query))
 
     if sort_by == "name":
         order = _order_clause(Tag.name, sort_dir)

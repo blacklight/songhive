@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config.schema import SonghiveConfig
 from ..models.user import VALID_ROLES, User
 from ..services.federation import ensure_user_actor
+from ._common import ilike_contains
 
 _EMAIL_VALIDATOR = TypeAdapter(EmailStr)
 
@@ -126,11 +127,10 @@ async def list_public_users(
     """List active public users with optional search and sorting."""
     stmt = select(User).where(User.is_active.is_(True))
     if q:
-        pattern = f"%{q}%"
         stmt = stmt.where(
             or_(
-                User.username.ilike(pattern),
-                User.display_name.ilike(pattern),
+                ilike_contains(User.username, q),
+                ilike_contains(User.display_name, q),
             )
         )
 

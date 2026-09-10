@@ -1,5 +1,5 @@
 import type { components } from "./types";
-import { apiRequest } from "./client";
+import { apiRequest, apiRequestWithHeaders } from "./client";
 
 export type PlaylistResponse = components["schemas"]["PlaylistResponse"];
 export type PlaylistCreate = components["schemas"]["PlaylistCreate"];
@@ -8,13 +8,45 @@ export type Visibility = components["schemas"]["Visibility"];
 export type TrackResponse = components["schemas"]["TrackResponse"];
 
 export function listPlaylists(params?: {
+  q?: string;
   owner_username?: string;
   limit?: number;
   offset?: number;
+  include?: string;
   sort_by?: string;
   sort_dir?: "asc" | "desc";
 }): Promise<PlaylistResponse[]> {
   return apiRequest<PlaylistResponse[]>("/playlists/", { query: params });
+}
+
+export interface ListPlaylistsResult {
+  items: PlaylistResponse[];
+  offset: number;
+  total: number;
+}
+
+export async function listPlaylistsWithMeta(params?: {
+  q?: string;
+  owner_username?: string;
+  limit?: number;
+  offset?: number;
+  include?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
+}): Promise<ListPlaylistsResult> {
+  const response = await apiRequestWithHeaders<PlaylistResponse[]>(
+    "/playlists/",
+    {
+      query: params,
+    },
+  );
+  const offsetHeader = response.headers.get("X-List-Offset");
+  const totalHeader = response.headers.get("X-Total-Count");
+  return {
+    items: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
+    total: totalHeader ? parseInt(totalHeader, 10) : response.body.length,
+  };
 }
 
 export function createPlaylist(

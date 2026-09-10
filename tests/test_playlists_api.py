@@ -286,6 +286,38 @@ async def sortable_playlist_tracks(db_session, regular_user):
 
 
 @pytest.mark.asyncio
+async def test_list_playlists_filters_by_query(client, regular_user, db_session, auth_headers):
+    """Playlist list supports filtering by name and description."""
+    from songhive.models.playlist import Playlist
+
+    playlist = Playlist(
+        name="Sunny Tunes",
+        description="Sunny archive tracks",
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    other = Playlist(
+        name="Rainy Tunes",
+        description="Rainy day tracks",
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(playlist)
+    db_session.add(other)
+    await db_session.commit()
+
+    response = client.get(
+        "/api/v1/playlists",
+        params={"q": "sunny"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "Sunny Tunes"
+    assert response.headers["X-Total-Count"] == "1"
+
+
+@pytest.mark.asyncio
 async def test_list_playlist_tracks_sorted_by_position_and_title(
     client,
     regular_user,

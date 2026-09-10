@@ -84,6 +84,7 @@
     "fields": {
       "name": "Name",
       "title": "Title",
+      "username": "Username",
       "artist_name": "Artist",
       "album_title": "Album",
       "created_at": "Date added",
@@ -94,6 +95,25 @@
       "first_used": "First used",
       "last_used": "Last used",
       "type": "Type"
+    }
+  },
+  "search": {
+    "title": "Search",
+    "placeholder": "Search tracks, albums, artists, playlists, libraries, users, tags and genres",
+    "start": "Enter a search term above to find content across Songhive.",
+    "filters": "Search in",
+    "loading": "Loading suggestions",
+    "error": "Could not load suggestions.",
+    "noResults": "No results found.",
+    "entities": {
+      "tracks": "Tracks",
+      "albums": "Albums",
+      "artists": "Artists",
+      "playlists": "Playlists",
+      "libraries": "Libraries",
+      "users": "Users",
+      "tags": "Tags",
+      "genres": "Genres"
     }
   },
   "theme": {
@@ -177,6 +197,7 @@
     "profile": "Profile",
     "settings": "Settings",
     "users": "Users",
+    "search": "Search",
     "externalLibraries": "External libraries",
     "login": "Log in"
   },

@@ -23,6 +23,7 @@ from ..models.radio import Radio
 from ..models.tag import Tag, TagTrack
 from ..models.track import Track
 from ..models.user import User
+from ._common import ilike_contains
 from .acl import apply_access_filter
 from .genres import InvalidGenreName, validate_genre_name
 
@@ -197,7 +198,7 @@ def _build_artists_stmt(query: Optional[str] = None) -> Select[Any]:
     """Build a statement for listing/counting artists."""
     stmt = select(Artist)
     if query:
-        stmt = stmt.where(Artist.name.ilike(f"%{query}%"))
+        stmt = stmt.where(ilike_contains(Artist.name, query))
     return stmt
 
 
@@ -324,7 +325,7 @@ def _build_albums_stmt(
     if owner_id:
         stmt = stmt.where(Album.owner_id == owner_id)
     if query:
-        stmt = stmt.where(Album.title.ilike(f"%{query}%"))
+        stmt = stmt.where(ilike_contains(Album.title, query))
     if artist_id:
         stmt = stmt.where(Album.artist_id == artist_id)
     if year_from is not None:
@@ -449,12 +450,11 @@ def _apply_tracks_query(
         stmt = stmt.join(Artist, Track.artist_id == Artist.id)
         if year_from is None and year_to is None:
             stmt = stmt.outerjoin(Album, Track.album_id == Album.id)
-        pattern = f"%{query}%"
         stmt = stmt.where(
             or_(
-                Track.title.ilike(pattern),
-                Artist.name.ilike(pattern),
-                Album.title.ilike(pattern),
+                ilike_contains(Track.title, query),
+                ilike_contains(Artist.name, query),
+                ilike_contains(Album.title, query),
             )
         )
 
@@ -775,17 +775,20 @@ async def list_playlists(
     session: AsyncSession,
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
+    query: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
     sort_by: str = "name",
     sort_dir: str = "asc",
 ) -> List[Playlist]:
-    """List playlists visible to ``user``."""
+    """List playlists visible to ``user``, optionally filtered by name/description."""
     field = getattr(Playlist, sort_by)
     stmt = select(Playlist).options(*_playlist_selectin_options(include))
     if owner_id:
         stmt = stmt.where(Playlist.owner_id == owner_id)
+    if query:
+        stmt = stmt.where(or_(ilike_contains(Playlist.name, query), ilike_contains(Playlist.description, query)))
     stmt = apply_access_filter(stmt, Playlist, user, "playlist")
     stmt = _apply_sort(stmt, field, sort_dir, Playlist.id)
     stmt = stmt.offset(offset).limit(limit)
@@ -797,11 +800,14 @@ async def count_playlists(
     session: AsyncSession,
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
+    query: Optional[str] = None,
 ) -> int:
     """Return the total number of playlists visible to ``user``."""
     stmt = select(Playlist)
     if owner_id:
         stmt = stmt.where(Playlist.owner_id == owner_id)
+    if query:
+        stmt = stmt.where(or_(ilike_contains(Playlist.name, query), ilike_contains(Playlist.description, query)))
     stmt = apply_access_filter(stmt, Playlist, user, "playlist")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
@@ -829,6 +835,7 @@ async def list_libraries(
     session: AsyncSession,
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
+    query: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
@@ -836,11 +843,13 @@ async def list_libraries(
     sort_dir: str = "asc",
     include_external: bool = False,
 ) -> List[Library]:
-    """List libraries visible to ``user``."""
+    """List libraries visible to ``user``, optionally filtered by name/description."""
     field = getattr(Library, sort_by)
     stmt = select(Library).options(*_library_selectin_options(include))
     if owner_id:
         stmt = stmt.where(Library.owner_id == owner_id)
+    if query:
+        stmt = stmt.where(or_(ilike_contains(Library.name, query), ilike_contains(Library.description, query)))
     if not include_external:
         stmt = stmt.where(
             ~exists().where(
@@ -865,12 +874,15 @@ async def count_libraries(
     session: AsyncSession,
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
+    query: Optional[str] = None,
     include_external: bool = False,
 ) -> int:
     """Return the total number of libraries visible to ``user``."""
     stmt = select(Library)
     if owner_id:
         stmt = stmt.where(Library.owner_id == owner_id)
+    if query:
+        stmt = stmt.where(or_(ilike_contains(Library.name, query), ilike_contains(Library.description, query)))
     if not include_external:
         stmt = stmt.where(
             ~exists().where(

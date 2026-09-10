@@ -31,6 +31,7 @@ from ..models.user import User
 from ..services.metadata import AudioMetadata
 from ..services.storage import is_unique_constraint_error
 from ..services.tags import validate_tag_name
+from ._common import ilike_contains
 from .acl import _list_access_predicate
 
 logger = logging.getLogger(__name__)
@@ -423,7 +424,7 @@ async def list_genres(
     stmt = select(Genre, item_count, first_used, last_used).join(cte, Genre.id == cte.c.genre_id).group_by(Genre.id)
 
     if query:
-        stmt = stmt.where(Genre.name.ilike(f"%{query}%"))
+        stmt = stmt.where(ilike_contains(Genre.name, query))
 
     if sort_by == "name":
         order = _order_clause(Genre.name, sort_dir)

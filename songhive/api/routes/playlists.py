@@ -180,6 +180,7 @@ async def _build_playlist_response(
 @router.get("/", response_model=List[PlaylistResponse])
 async def list_playlists(
     response: Response,
+    q: Optional[str] = Query(None, description="Search playlists"),
     owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
@@ -197,11 +198,12 @@ async def list_playlists(
     else:
         owner_id = None
 
-    total = await music.count_playlists(db, user=user, owner_id=owner_id)
+    total = await music.count_playlists(db, user=user, owner_id=owner_id, query=q)
     rows = await music.list_playlists(
         db,
         user=user,
         owner_id=owner_id,
+        query=q,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),

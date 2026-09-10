@@ -193,6 +193,7 @@ async def _build_library_response(
 @router.get("/", response_model=List[LibraryResponse])
 async def list_libraries(
     response: Response,
+    q: Optional[str] = Query(None, description="Search libraries"),
     user: Optional[User] = Depends(get_current_user_optional),
     owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
     include_external: bool = Query(False, description="Include external libraries (admin only)"),
@@ -217,11 +218,12 @@ async def list_libraries(
             detail="Admin access required",
         )
 
-    total = await music.count_libraries(db, user=user, owner_id=owner_id, include_external=include_external)
+    total = await music.count_libraries(db, user=user, owner_id=owner_id, query=q, include_external=include_external)
     rows = await music.list_libraries(
         db,
         user=user,
         owner_id=owner_id,
+        query=q,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),

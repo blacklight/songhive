@@ -29,6 +29,7 @@ export interface ListUsersParams {
 
 export interface ListUsersResult {
   users: PublicUserResponse[];
+  offset: number;
   total: number;
 }
 
@@ -60,9 +61,11 @@ export async function listPublicUsers(
     query: params as
       Record<string, string | number | boolean | undefined | null> | undefined,
   });
+  const offsetHeader = response.headers.get("X-List-Offset");
   const total = response.headers.get("X-Total-Count");
   return {
     users: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
     total: total ? parseInt(total, 10) : response.body.length,
   };
 }

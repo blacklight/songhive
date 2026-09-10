@@ -1,5 +1,5 @@
 import type { components } from "./types";
-import { apiRequest } from "./client";
+import { apiRequest, apiRequestWithHeaders } from "./client";
 
 export type AlbumResponse = components["schemas"]["AlbumResponse"];
 export type AlbumUpdate = components["schemas"]["AlbumUpdate"];
@@ -9,6 +9,7 @@ export function listAlbums(params?: {
   artist_id?: string;
   year_from?: number;
   year_to?: number;
+  genre?: string;
   owner_username?: string;
   limit?: number;
   offset?: number;
@@ -17,6 +18,37 @@ export function listAlbums(params?: {
   sort_dir?: "asc" | "desc";
 }): Promise<AlbumResponse[]> {
   return apiRequest<AlbumResponse[]>("/albums/", { query: params });
+}
+
+export interface ListAlbumsResult {
+  items: AlbumResponse[];
+  offset: number;
+  total: number;
+}
+
+export async function listAlbumsWithMeta(params?: {
+  q?: string;
+  artist_id?: string;
+  year_from?: number;
+  year_to?: number;
+  genre?: string;
+  owner_username?: string;
+  limit?: number;
+  offset?: number;
+  include?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
+}): Promise<ListAlbumsResult> {
+  const response = await apiRequestWithHeaders<AlbumResponse[]>("/albums/", {
+    query: params,
+  });
+  const offsetHeader = response.headers.get("X-List-Offset");
+  const totalHeader = response.headers.get("X-Total-Count");
+  return {
+    items: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
+    total: totalHeader ? parseInt(totalHeader, 10) : response.body.length,
+  };
 }
 
 export function getAlbum(

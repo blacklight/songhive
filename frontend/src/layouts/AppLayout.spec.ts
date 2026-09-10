@@ -16,6 +16,11 @@ function createTestRouter() {
         children: [
           { path: "", name: "home", component: { template: "<div/>" } },
           {
+            path: "search",
+            name: "search",
+            component: { template: "<div/>" },
+          },
+          {
             path: "artists",
             name: "artists",
             component: { template: "<div/>" },
@@ -174,6 +179,7 @@ describe("AppLayout", () => {
 
     expect(labels).toEqual([
       "Home",
+      "Search",
       "Users",
       "Library",
       "Artists",
@@ -211,6 +217,7 @@ describe("AppLayout", () => {
 
     expect(labels).toEqual([
       "Home",
+      "Search",
       "Users",
       "Library",
       "Artists",
@@ -306,6 +313,7 @@ describe("AppLayout", () => {
   });
 
   it.each([
+    { path: "/search", label: "Search" },
     { path: "/albums/abc", label: "Albums" },
     { path: "/artists/abc", label: "Artists" },
     { path: "/playlists/abc", label: "Playlists" },

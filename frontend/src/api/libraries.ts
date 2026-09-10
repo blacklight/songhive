@@ -1,5 +1,5 @@
 import type { components } from "./types";
-import { apiRequest } from "./client";
+import { apiRequest, apiRequestWithHeaders } from "./client";
 
 export type LibraryResponse = components["schemas"]["LibraryResponse"];
 export type LibraryCreate = components["schemas"]["LibraryCreate"];
@@ -10,13 +10,47 @@ export type TrackResponse = components["schemas"]["TrackResponse"];
 export type Visibility = components["schemas"]["Visibility"];
 
 export function listLibraries(params?: {
+  q?: string;
   owner_username?: string;
+  include_external?: boolean;
   limit?: number;
   offset?: number;
+  include?: string;
   sort_by?: string;
   sort_dir?: "asc" | "desc";
 }): Promise<LibraryResponse[]> {
   return apiRequest<LibraryResponse[]>("/libraries/", { query: params });
+}
+
+export interface ListLibrariesResult {
+  items: LibraryResponse[];
+  offset: number;
+  total: number;
+}
+
+export async function listLibrariesWithMeta(params?: {
+  q?: string;
+  owner_username?: string;
+  include_external?: boolean;
+  limit?: number;
+  offset?: number;
+  include?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
+}): Promise<ListLibrariesResult> {
+  const response = await apiRequestWithHeaders<LibraryResponse[]>(
+    "/libraries/",
+    {
+      query: params,
+    },
+  );
+  const offsetHeader = response.headers.get("X-List-Offset");
+  const totalHeader = response.headers.get("X-Total-Count");
+  return {
+    items: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
+    total: totalHeader ? parseInt(totalHeader, 10) : response.body.length,
+  };
 }
 
 export function createLibrary(
