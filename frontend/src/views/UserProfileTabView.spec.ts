@@ -3,26 +3,27 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
-import { listAlbums } from "@/api/albums";
-import { listLibraries } from "@/api/libraries";
-import { listPlaylists } from "@/api/playlists";
+import { listAlbumsWithMeta } from "@/api/albums";
+import { listLibrariesWithMeta } from "@/api/libraries";
+import { listPlaylistsWithMeta } from "@/api/playlists";
 import { listTracksWithMeta } from "@/api/tracks";
 import { listUserActivities } from "@/api/activities";
 import type { AlbumResponse } from "@/api/albums";
 import type { LibraryResponse } from "@/api/libraries";
 import type { PlaylistResponse } from "@/api/playlists";
+import type { TrackResponse } from "@/api/tracks";
 import UserProfileTabView from "./UserProfileTabView.vue";
 
 vi.mock("@/api/albums", () => ({
-  listAlbums: vi.fn(),
+  listAlbumsWithMeta: vi.fn(),
 }));
 
 vi.mock("@/api/libraries", () => ({
-  listLibraries: vi.fn(),
+  listLibrariesWithMeta: vi.fn(),
 }));
 
 vi.mock("@/api/playlists", () => ({
-  listPlaylists: vi.fn(),
+  listPlaylistsWithMeta: vi.fn(),
 }));
 
 vi.mock("@/api/tracks", () => ({
@@ -88,6 +89,19 @@ function createPlaylist(id: string, name: string): PlaylistResponse {
   };
 }
 
+function createTrack(id: string, title: string): TrackResponse {
+  return {
+    id,
+    title,
+    artist_id: "artist-1",
+    album_id: "album-1",
+    visibility: "public",
+    is_external: false,
+    tags: [],
+    genres: [],
+  } as TrackResponse;
+}
+
 function findLoadMoreButton(wrapper: ReturnType<typeof mount>) {
   return wrapper
     .findAll("button")
@@ -100,9 +114,21 @@ describe("UserProfileTabView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
-    vi.mocked(listAlbums).mockResolvedValue([]);
-    vi.mocked(listLibraries).mockResolvedValue([]);
-    vi.mocked(listPlaylists).mockResolvedValue([]);
+    vi.mocked(listAlbumsWithMeta).mockResolvedValue({
+      items: [],
+      offset: 0,
+      total: 0,
+    });
+    vi.mocked(listLibrariesWithMeta).mockResolvedValue({
+      items: [],
+      offset: 0,
+      total: 0,
+    });
+    vi.mocked(listPlaylistsWithMeta).mockResolvedValue({
+      items: [],
+      offset: 0,
+      total: 0,
+    });
     vi.mocked(listTracksWithMeta).mockResolvedValue({
       tracks: [],
       offset: 0,
@@ -120,7 +146,11 @@ describe("UserProfileTabView", () => {
   });
 
   it("shows an entity-specific empty state", async () => {
-    vi.mocked(listAlbums).mockResolvedValue([]);
+    vi.mocked(listAlbumsWithMeta).mockResolvedValue({
+      items: [],
+      offset: 0,
+      total: 0,
+    });
 
     const router = createTestRouter();
     await router.push("/user1");
@@ -131,7 +161,7 @@ describe("UserProfileTabView", () => {
     });
     await flushPromises();
 
-    expect(listAlbums).toHaveBeenCalledWith({
+    expect(listAlbumsWithMeta).toHaveBeenCalledWith({
       owner_username: "user1",
       limit: 20,
       offset: 0,
@@ -145,14 +175,20 @@ describe("UserProfileTabView", () => {
 
   describe("albums", () => {
     it("appends the next page and hides the button when there are no more results", async () => {
-      const fetcher = vi.mocked(listAlbums);
+      const fetcher = vi.mocked(listAlbumsWithMeta);
       fetcher
-        .mockResolvedValueOnce(
-          Array.from({ length: 20 }, (_, i) =>
+        .mockResolvedValueOnce({
+          items: Array.from({ length: 20 }, (_, i) =>
             createAlbum(`album-${i}`, `Album ${i}`),
           ),
-        )
-        .mockResolvedValueOnce([]);
+          offset: 0,
+          total: 40,
+        })
+        .mockResolvedValueOnce({
+          items: [],
+          offset: 20,
+          total: 20,
+        });
 
       const router = createTestRouter();
       await router.push("/user1");
@@ -190,14 +226,20 @@ describe("UserProfileTabView", () => {
 
   describe("libraries", () => {
     it("appends the next page and hides the button when there are no more results", async () => {
-      const fetcher = vi.mocked(listLibraries);
+      const fetcher = vi.mocked(listLibrariesWithMeta);
       fetcher
-        .mockResolvedValueOnce(
-          Array.from({ length: 20 }, (_, i) =>
+        .mockResolvedValueOnce({
+          items: Array.from({ length: 20 }, (_, i) =>
             createLibrary(`library-${i}`, `Library ${i}`),
           ),
-        )
-        .mockResolvedValueOnce([]);
+          offset: 0,
+          total: 40,
+        })
+        .mockResolvedValueOnce({
+          items: [],
+          offset: 20,
+          total: 20,
+        });
 
       const router = createTestRouter();
       await router.push("/user1");
@@ -227,14 +269,20 @@ describe("UserProfileTabView", () => {
 
   describe("playlists", () => {
     it("appends the next page and hides the button when there are no more results", async () => {
-      const fetcher = vi.mocked(listPlaylists);
+      const fetcher = vi.mocked(listPlaylistsWithMeta);
       fetcher
-        .mockResolvedValueOnce(
-          Array.from({ length: 20 }, (_, i) =>
+        .mockResolvedValueOnce({
+          items: Array.from({ length: 20 }, (_, i) =>
             createPlaylist(`playlist-${i}`, `Playlist ${i}`),
           ),
-        )
-        .mockResolvedValueOnce([]);
+          offset: 0,
+          total: 40,
+        })
+        .mockResolvedValueOnce({
+          items: [],
+          offset: 20,
+          total: 20,
+        });
 
       const router = createTestRouter();
       await router.push("/user1");
@@ -258,6 +306,59 @@ describe("UserProfileTabView", () => {
       });
       expect(wrapper.text()).toContain("Playlist 0");
       expect(wrapper.text()).toContain("Playlist 19");
+      expect(findLoadMoreButton(wrapper)).toBeUndefined();
+    });
+  });
+
+  describe("tracks", () => {
+    it("appends the next page and hides the button when there are no more results", async () => {
+      const fetcher = vi.mocked(listTracksWithMeta);
+      fetcher
+        .mockResolvedValueOnce({
+          tracks: Array.from({ length: 20 }, (_, i) =>
+            createTrack(`track-${i}`, `Track ${i}`),
+          ),
+          offset: 0,
+          total: 40,
+        })
+        .mockResolvedValueOnce({
+          tracks: [],
+          offset: 20,
+          total: 20,
+        });
+
+      const router = createTestRouter();
+      await router.push("/user1");
+      await router.isReady();
+      wrapper = mount(UserProfileTabView, {
+        global: { plugins: [router, i18n] },
+        props: { tab: "tracks" },
+      });
+      await flushPromises();
+
+      expect(fetcher).toHaveBeenLastCalledWith({
+        owner_username: "user1",
+        include: "artist,album",
+        limit: 20,
+        offset: 0,
+      });
+      expect(wrapper.text()).toContain("Track 0");
+      expect(wrapper.text()).toContain("Track 19");
+
+      const loadMore = findLoadMoreButton(wrapper);
+      expect(loadMore).toBeDefined();
+
+      await loadMore?.trigger("click");
+      await flushPromises();
+
+      expect(fetcher).toHaveBeenLastCalledWith({
+        owner_username: "user1",
+        include: "artist,album",
+        limit: 20,
+        offset: 20,
+      });
+      expect(wrapper.text()).toContain("Track 0");
+      expect(wrapper.text()).toContain("Track 19");
       expect(findLoadMoreButton(wrapper)).toBeUndefined();
     });
   });

@@ -7,9 +7,21 @@ import {
   type ActivityListResponse,
 } from "@/api/activities";
 import { listTracksWithMeta, type ListTracksResult } from "@/api/tracks";
-import { listAlbums, type AlbumResponse } from "@/api/albums";
-import { listLibraries, type LibraryResponse } from "@/api/libraries";
-import { listPlaylists, type PlaylistResponse } from "@/api/playlists";
+import {
+  listAlbumsWithMeta,
+  type ListAlbumsResult,
+  type AlbumResponse,
+} from "@/api/albums";
+import {
+  listLibrariesWithMeta,
+  type ListLibrariesResult,
+  type LibraryResponse,
+} from "@/api/libraries";
+import {
+  listPlaylistsWithMeta,
+  type ListPlaylistsResult,
+  type PlaylistResponse,
+} from "@/api/playlists";
 import { getApiErrorMessage } from "@/api/client";
 import ActivityCard from "@/components/activities/ActivityCard.vue";
 import AlbumCard from "@/components/library/AlbumCard.vue";
@@ -32,6 +44,7 @@ const username = computed(() => String(route.params.username));
 const limit = 20;
 
 const loading = ref(false);
+const loadingMore = ref(false);
 const error = ref<string | null>(null);
 const activities = ref<ActivityListResponse | null>(null);
 const tracksResult = ref<ListTracksResult | null>(null);
@@ -73,24 +86,27 @@ function reset() {
   hasMoreEntities.value = false;
   activitiesCursor.value = null;
   activitiesHasMore.value = false;
+  loading.value = false;
+  loadingMore.value = false;
   error.value = null;
 }
 
 async function load(append = false) {
   loading.value = true;
+  if (props.tab === "tracks" && append) {
+    loadingMore.value = true;
+  }
   error.value = null;
   try {
     if (props.tab === "posts" || props.tab === "activity") {
       const mode = props.tab === "posts" ? "posts" : "all";
       const result = await listUserActivities(username.value, {
         mode,
-        cursor: undefined,
         limit,
       });
       activities.value = result;
       activitiesCursor.value = result.next_cursor ?? null;
-      activitiesHasMore.value =
-        !!result.next_cursor || result.activities.length >= limit;
+      activitiesHasMore.value = !!result.next_cursor;
     } else if (props.tab === "tracks") {
       const result = await listTracksWithMeta({
         owner_username: username.value,
@@ -106,60 +122,63 @@ async function load(append = false) {
       } else {
         tracksResult.value = result;
       }
-      hasMoreEntities.value = result.tracks.length === limit;
+      hasMoreEntities.value =
+        offset.value + result.tracks.length < result.total;
     } else if (props.tab === "albums") {
-      const result = await listAlbums({
+      const result: ListAlbumsResult = await listAlbumsWithMeta({
         owner_username: username.value,
         limit,
         offset: offset.value,
       });
       if (append) {
-        albums.value = [...albums.value, ...result];
+        albums.value = [...albums.value, ...result.items];
       } else {
-        albums.value = result;
+        albums.value = result.items;
       }
-      hasMoreEntities.value = result.length === limit;
+      hasMoreEntities.value = offset.value + result.items.length < result.total;
     } else if (props.tab === "libraries") {
-      const result = await listLibraries({
+      const result: ListLibrariesResult = await listLibrariesWithMeta({
         owner_username: username.value,
         limit,
         offset: offset.value,
       });
       if (append) {
-        libraries.value = [...libraries.value, ...result];
+        libraries.value = [...libraries.value, ...result.items];
       } else {
-        libraries.value = result;
+        libraries.value = result.items;
       }
-      hasMoreEntities.value = result.length === limit;
+      hasMoreEntities.value = offset.value + result.items.length < result.total;
     } else if (props.tab === "playlists") {
-      const result = await listPlaylists({
+      const result: ListPlaylistsResult = await listPlaylistsWithMeta({
         owner_username: username.value,
         limit,
         offset: offset.value,
       });
       if (append) {
-        playlists.value = [...playlists.value, ...result];
+        playlists.value = [...playlists.value, ...result.items];
       } else {
-        playlists.value = result;
+        playlists.value = result.items;
       }
-      hasMoreEntities.value = result.length === limit;
+      hasMoreEntities.value = offset.value + result.items.length < result.total;
     }
   } catch (err) {
     error.value = getApiErrorMessage(err) || t("common.error");
     hasMoreEntities.value = false;
   } finally {
     loading.value = false;
+    loadingMore.value = false;
   }
 }
 
 function loadMoreEntities() {
-  if (loading.value || !hasMoreEntities.value) return;
+  if (loading.value || loadingMore.value || !hasMoreEntities.value) return;
   offset.value += limit;
   void load(true);
 }
 
 async function loadMoreActivities() {
-  if (!activitiesCursor.value) return;
+  if (loading.value || !activitiesCursor.value) return;
+  loading.value = true;
   try {
     const result = await listUserActivities(username.value, {
       mode: props.tab === "posts" ? "posts" : "all",
@@ -174,10 +193,12 @@ async function loadMoreActivities() {
       ],
     };
     activitiesCursor.value = result.next_cursor ?? null;
-    activitiesHasMore.value =
-      !!result.next_cursor || result.activities.length >= limit;
+    activitiesHasMore.value = !!result.next_cursor;
   } catch (err) {
     error.value = getApiErrorMessage(err) || t("common.error");
+    activitiesHasMore.value = false;
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -235,10 +256,24 @@ watch([() => props.tab, username], () => {
         v-if="tracksResult"
         :tracks="tracksResult.tracks as TrackResponse[]"
         :loading="loading"
+        :loading-more="loadingMore"
         :total="tracksResult.total"
         :offset="tracksResult.offset"
       />
       <p v-else class="user-profile-tab__empty">{{ emptyMessage }}</p>
+      <div
+        v-if="!error && hasMoreEntities && tracksResult"
+        class="user-profile-tab__more"
+      >
+        <AppButton
+          variant="secondary"
+          :loading="loadingMore"
+          :disabled="loading"
+          @click="loadMoreEntities"
+        >
+          {{ t("common.loadMore") }}
+        </AppButton>
+      </div>
     </template>
 
     <template v-else-if="tab === 'albums'">
