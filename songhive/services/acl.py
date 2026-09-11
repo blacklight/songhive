@@ -57,7 +57,7 @@ def get_item_plural(item_type: str) -> Optional[str]:
     return entry.plural
 
 
-_MAX_DERIVED_DEPTH = 1
+_MAX_DERIVED_DEPTH = 2
 
 
 def _list_access_predicate(model, user: Optional[User], item_type: str):
@@ -70,7 +70,7 @@ def _list_access_predicate(model, user: Optional[User], item_type: str):
     """
     if user is None:
         return model.visibility == Visibility.PUBLIC.value
-    return or_(
+    predicate = or_(
         model.owner_id == user.id,
         model.visibility == Visibility.PUBLIC.value,
         model.visibility == Visibility.LOCAL.value,
@@ -80,6 +80,15 @@ def _list_access_predicate(model, user: Optional[User], item_type: str):
             ShareGrant.user_id == user.id,
         ),
     )
+    # Tracks in a shared album are also accessible to the share recipient.
+    if item_type == "track":
+        album_share = exists().where(
+            ShareGrant.item_type == "album",
+            ShareGrant.item_id == model.album_id,
+            ShareGrant.user_id == user.id,
+        )
+        predicate = or_(predicate, album_share)
+    return predicate
 
 
 def apply_access_filter(
@@ -163,7 +172,20 @@ async def _can_access(  # pylint: disable=too-many-return-statements,too-many-br
     if share_token is not None and await sharing.validate_share_token(session, item_type, item_id, share_token):
         return True
 
-    # Rule 8: derived file access through owning tracks, albums, artists,
+    # Rule 8: tracks inherit access from the album they belong to.
+    if item_type == "track" and depth < _MAX_DERIVED_DEPTH:
+        album_id = getattr(item, "album_id", None)
+        if album_id is not None and await _can_access(
+            session,
+            user,
+            "album",
+            str(album_id),
+            share_token=share_token,
+            depth=depth + 1,
+        ):
+            return True
+
+    # Rule 9: derived file access through owning tracks, albums, artists,
     # libraries, or playlists.
     if item_type == "file" and depth < _MAX_DERIVED_DEPTH:
         track_ids = (await session.execute(select(Track.id).where(Track.audio_file_id == item_id))).scalars().all()

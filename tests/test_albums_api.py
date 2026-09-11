@@ -120,6 +120,56 @@ def test_get_private_album_with_share_token(client, sample_albums, regular_user,
     assert no_token.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_share_grant_album_cascades_to_tracks(
+    client, db_session, sample_albums, regular_user, other_user, auth_headers
+):
+    """Sharing a private album gives the recipient access to its tracks."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    tracks = await _add_album_tracks(db_session, album, regular_user, Visibility.PRIVATE)
+
+    share = client.post(
+        "/api/v1/shares",
+        json={"item_type": "album", "item_id": str(album.id), "user_id": str(other_user.id)},
+        headers=auth_headers(regular_user),
+    )
+    assert share.status_code == 201
+
+    list_response = client.get(
+        f"/api/v1/tracks?album_id={album.id}",
+        headers=auth_headers(other_user),
+    )
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == len(tracks)
+
+    for track in tracks:
+        track_response = client.get(
+            f"/api/v1/tracks/{track.id}",
+            headers=auth_headers(other_user),
+        )
+        assert track_response.status_code == 200
+        assert track_response.json()["id"] == str(track.id)
+
+    client.delete(
+        f"/api/v1/shares/{share.json()['id']}",
+        headers=auth_headers(regular_user),
+    )
+
+    list_after = client.get(
+        f"/api/v1/tracks?album_id={album.id}",
+        headers=auth_headers(other_user),
+    )
+    assert list_after.status_code == 200
+    assert list_after.json() == []
+
+    for track in tracks:
+        track_response = client.get(
+            f"/api/v1/tracks/{track.id}",
+            headers=auth_headers(other_user),
+        )
+        assert track_response.status_code == 403
+
+
 def test_update_album(client, sample_albums, regular_user, auth_headers):
     """Owners can partially update an album."""
     album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)

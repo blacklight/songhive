@@ -275,6 +275,94 @@ async def test_can_access_derived_file_private_album(db_session, regular_user):
 
 
 @pytest.mark.asyncio
+async def test_can_access_track_via_shared_album(db_session, regular_user, make_user):
+    """A track is accessible to a user who has been shared its album."""
+    other_user = await make_user("other", email_verified=True)
+    album = await _make_album(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    track = Track(
+        title="Album Track",
+        artist_id=album.artist_id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    assert await can_access(db_session, other_user, "track", track.id) is False
+
+    await sharing.create_share_grant(db_session, "album", album.id, other_user.id, created_by=regular_user.id)
+    assert await can_access(db_session, other_user, "track", track.id) is True
+
+    await sharing.revoke_share_grant(db_session, "album", album.id, other_user.id)
+    assert await can_access(db_session, other_user, "track", track.id) is False
+
+
+@pytest.mark.asyncio
+async def test_can_access_track_via_album_share_token(db_session, regular_user):
+    """A share URL token for an album also grants access to the album's tracks."""
+    album = await _make_album(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    track = Track(
+        title="Album Track",
+        artist_id=album.artist_id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    token, raw = await sharing.create_share_token(db_session, "album", album.id, created_by=regular_user.id)
+    assert await can_access(db_session, None, "track", track.id, share_token=raw) is True
+
+    await sharing.revoke_share_token(db_session, token.id)
+    assert await can_access(db_session, None, "track", track.id, share_token=raw) is False
+
+
+@pytest.mark.asyncio
+async def test_can_access_file_via_album_share_token(db_session, regular_user):
+    """A share URL token for an album grants access to the album's track audio files."""
+    file = await _make_file(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    album = await _make_album(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    track = Track(
+        title="Album Track",
+        artist_id=album.artist_id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+        audio_file_id=file.id,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    token, raw = await sharing.create_share_token(db_session, "album", album.id, created_by=regular_user.id)
+    assert await can_access(db_session, None, "file", file.id, share_token=raw) is True
+
+    await sharing.revoke_share_token(db_session, token.id)
+    assert await can_access(db_session, None, "file", file.id, share_token=raw) is False
+
+
+@pytest.mark.asyncio
+async def test_filter_accessible_track_ids_includes_shared_album(db_session, regular_user, make_user):
+    """filter_accessible_track_ids includes tracks in a shared album."""
+    other_user = await make_user("other", email_verified=True)
+    album = await _make_album(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    track = Track(
+        title="Album Track",
+        artist_id=album.artist_id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    await sharing.create_share_grant(db_session, "album", album.id, other_user.id, created_by=regular_user.id)
+    accessible = await filter_accessible_track_ids(db_session, other_user, [track.id])
+    assert str(track.id) in accessible
+
+
+@pytest.mark.asyncio
 async def test_can_manage_owner(db_session, regular_user):
     """An owner can manage their track."""
     track = await _make_track(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
