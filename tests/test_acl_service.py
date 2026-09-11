@@ -12,6 +12,8 @@ import pytest
 from songhive.models._enums import Visibility
 from songhive.models.album import Album
 from songhive.models.artist import Artist
+from songhive.models.library import Library
+from songhive.models.library_track import LibraryTrack
 from songhive.models.playlist import Playlist, PlaylistTrack
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
@@ -111,6 +113,24 @@ async def _make_playlist(
 async def _add_track_to_playlist(session, playlist: Playlist, track: Track, position: int = 0) -> None:
     """Add ``track`` to ``playlist`` at the given position."""
     session.add(PlaylistTrack(playlist_id=playlist.id, track_id=track.id, position=position))
+    await session.flush()
+
+
+async def _make_library(session, owner: User | None, visibility: str = Visibility.PRIVATE.value) -> Library:
+    """Create and persist a test library."""
+    library = Library(
+        name="Test Library",
+        owner_id=owner.id if owner is not None else None,
+        visibility=visibility,
+    )
+    session.add(library)
+    await session.flush()
+    return library
+
+
+async def _add_track_to_library(session, library: Library, track: Track) -> None:
+    """Add ``track`` to ``library``."""
+    session.add(LibraryTrack(library_id=library.id, track_id=track.id))
     await session.flush()
 
 
@@ -445,6 +465,70 @@ async def test_filter_accessible_track_ids_includes_shared_playlist(db_session, 
     await _add_track_to_playlist(db_session, playlist, track)
 
     await sharing.create_share_grant(db_session, "playlist", playlist.id, other_user.id, created_by=regular_user.id)
+    accessible = await filter_accessible_track_ids(db_session, other_user, [track.id])
+    assert str(track.id) in accessible
+
+
+@pytest.mark.asyncio
+async def test_can_access_track_via_shared_library(db_session, regular_user, make_user):
+    """A track is accessible to a user who has been shared a library containing it."""
+    other_user = await make_user("other", email_verified=True)
+    library = await _make_library(db_session, owner=regular_user)
+    track = await _make_track(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    await _add_track_to_library(db_session, library, track)
+
+    assert await can_access(db_session, other_user, "track", track.id) is False
+
+    await sharing.create_share_grant(db_session, "library", library.id, other_user.id, created_by=regular_user.id)
+    assert await can_access(db_session, other_user, "track", track.id) is True
+
+    await sharing.revoke_share_grant(db_session, "library", library.id, other_user.id)
+    assert await can_access(db_session, other_user, "track", track.id) is False
+
+
+@pytest.mark.asyncio
+async def test_can_access_track_via_library_share_token(db_session, regular_user):
+    """A share URL token for a library also grants access to the library's tracks."""
+    library = await _make_library(db_session, owner=regular_user)
+    track = await _make_track(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    await _add_track_to_library(db_session, library, track)
+
+    token, raw = await sharing.create_share_token(db_session, "library", library.id, created_by=regular_user.id)
+    assert await can_access(db_session, None, "track", track.id, share_token=raw) is True
+
+    await sharing.revoke_share_token(db_session, token.id)
+    assert await can_access(db_session, None, "track", track.id, share_token=raw) is False
+
+
+@pytest.mark.asyncio
+async def test_can_access_file_via_library_share_token(db_session, regular_user):
+    """A share URL token for a library grants access to the library's track audio files."""
+    file = await _make_file(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    library = await _make_library(db_session, owner=regular_user)
+    track = await _make_track(
+        db_session,
+        owner=regular_user,
+        visibility=Visibility.PRIVATE.value,
+        audio_file=file,
+    )
+    await _add_track_to_library(db_session, library, track)
+
+    token, raw = await sharing.create_share_token(db_session, "library", library.id, created_by=regular_user.id)
+    assert await can_access(db_session, None, "file", file.id, share_token=raw) is True
+
+    await sharing.revoke_share_token(db_session, token.id)
+    assert await can_access(db_session, None, "file", file.id, share_token=raw) is False
+
+
+@pytest.mark.asyncio
+async def test_filter_accessible_track_ids_includes_shared_library(db_session, regular_user, make_user):
+    """filter_accessible_track_ids includes tracks in a shared library."""
+    other_user = await make_user("other", email_verified=True)
+    library = await _make_library(db_session, owner=regular_user)
+    track = await _make_track(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    await _add_track_to_library(db_session, library, track)
+
+    await sharing.create_share_grant(db_session, "library", library.id, other_user.id, created_by=regular_user.id)
     accessible = await filter_accessible_track_ids(db_session, other_user, [track.id])
     assert str(track.id) in accessible
 

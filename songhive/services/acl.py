@@ -16,6 +16,7 @@ from ..models._enums import Visibility
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
+from ..models.library_track import LibraryTrack
 from ..models.playlist import Playlist, PlaylistTrack
 from ..models.radio import Radio
 from ..models.share_grant import ShareGrant
@@ -93,7 +94,13 @@ def _list_access_predicate(model, user: Optional[User], item_type: str):
             ShareGrant.item_type == "playlist",
             ShareGrant.user_id == user.id,
         )
-        predicate = or_(predicate, album_share, playlist_share)
+        library_share = exists().where(
+            LibraryTrack.track_id == model.id,
+            LibraryTrack.library_id == ShareGrant.item_id,
+            ShareGrant.item_type == "library",
+            ShareGrant.user_id == user.id,
+        )
+        predicate = or_(predicate, album_share, playlist_share, library_share)
     return predicate
 
 
@@ -204,6 +211,24 @@ async def _can_access(  # pylint: disable=too-many-return-statements,too-many-br
                 user,
                 "playlist",
                 str(playlist_id),
+                share_token=share_token,
+                depth=depth + 1,
+            ):
+                return True
+
+    # Rule 11: tracks inherit access from libraries they belong to.
+    if item_type == "track" and depth < _MAX_DERIVED_DEPTH:
+        library_ids = (
+            (await session.execute(select(LibraryTrack.library_id).where(LibraryTrack.track_id == item.id)))
+            .scalars()
+            .all()
+        )
+        for library_id in library_ids:
+            if await _can_access(
+                session,
+                user,
+                "library",
+                str(library_id),
                 share_token=share_token,
                 depth=depth + 1,
             ):
