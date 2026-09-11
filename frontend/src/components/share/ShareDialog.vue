@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import {
+  type SearchEntity,
+  type SearchResultItem,
+  searchPreview,
+} from "@/api/search";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -18,6 +23,7 @@ import { getApiErrorMessage, ApiError } from "@/api/client";
 import { useOwnership } from "@/composables/useOwnership";
 import { useConfirmStore } from "@/stores/confirm";
 import { useInstanceStore } from "@/stores/instance";
+import { useSearchSections } from "@/composables/useSearchSections";
 import { useToastStore } from "@/stores/toast";
 import { getPublicUrl, isPublicResource } from "@/utils/share";
 import { formatDateTime } from "@/i18n";
@@ -26,6 +32,7 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import AppTable from "@/components/ui/AppTable.vue";
+import SearchBar from "@/components/ui/SearchBar.vue";
 
 export interface Props {
   open: boolean;
@@ -36,6 +43,7 @@ export interface Props {
   visibility?: string | null;
 }
 
+const { searchAll } = useSearchSections();
 const props = defineProps<Props>();
 const emit = defineEmits<{ close: [] }>();
 
@@ -372,6 +380,24 @@ async function copyToClipboard(text: string) {
   }
 }
 
+function onUserSelect(item: SearchResultItem) {
+  userId.value = item.id;
+}
+
+async function onUserSearch(value: string) {
+  userId.value = value;
+  await searchAll(value, ["users"]);
+}
+
+async function autocompleteFetcher(
+  query: string,
+  entities: SearchEntity[],
+  limit: number,
+) {
+  const response = await searchPreview(query, entities, limit);
+  return response.sections;
+}
+
 function close() {
   emit("close");
 }
@@ -428,11 +454,22 @@ watch(
 
     <div v-if="activeTab === 'grants'" class="share-dialog__panel">
       <div v-if="isOwner" class="share-dialog__form">
-        <AppInput
-          v-model="userId"
-          :label="t('browse.share.user')"
-          :required="true"
+        <SearchBar
+          :model-value="userId"
+          class="bulk-editable-grid__search"
+          :autocomplete="true"
+          :autocomplete-entities="['users']"
+          :autocomplete-fetcher="autocompleteFetcher"
+          :placeholder="
+            t('browse.list.searchPlaceholder', {
+              entity: t('search.entities.users'),
+            })
+          "
+          @select-suggestion="onUserSelect"
+          @search="onUserSearch"
+          @update:model-value="onUserSearch"
         />
+
         <AppButton
           size="sm"
           icon="plus"
