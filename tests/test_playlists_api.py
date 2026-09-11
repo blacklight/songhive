@@ -123,6 +123,92 @@ def test_get_private_playlist_with_share_token(client, sample_playlists, regular
     assert response.json()["id"] == playlist["id"]
 
 
+async def _add_playlist_tracks(db_session, playlist: Playlist, owner, *visibilities):
+    """Create tracks and add them to ``playlist`` with the given visibilities."""
+    artist = Artist(name="Sample Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    tracks = [
+        Track(
+            title=f"Track {i}",
+            artist_id=artist.id,
+            owner_id=str(owner.id),
+            visibility=visibility.value,
+        )
+        for i, visibility in enumerate(visibilities)
+    ]
+    db_session.add_all(tracks)
+    await db_session.flush()
+
+    for position, track in enumerate(tracks):
+        db_session.add(
+            PlaylistTrack(
+                playlist_id=playlist.id,
+                track_id=track.id,
+                position=position,
+            )
+        )
+    await db_session.commit()
+    return tracks
+
+
+@pytest.mark.asyncio
+async def test_share_grant_playlist_cascades_to_tracks(
+    client, db_session, sample_playlists, regular_user, other_user, auth_headers
+):
+    """Sharing a private playlist gives the recipient access to its tracks."""
+    playlist_data = next(p for p in sample_playlists if p["visibility"] == "private")
+    playlist = await db_session.get(Playlist, playlist_data["id"])
+    tracks = await _add_playlist_tracks(db_session, playlist, regular_user, Visibility.PRIVATE)
+
+    share = client.post(
+        "/api/v1/shares",
+        json={"item_type": "playlist", "item_id": str(playlist.id), "user_id": str(other_user.id)},
+        headers=auth_headers(regular_user),
+    )
+    assert share.status_code == 201
+
+    list_response = client.get(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(other_user),
+    )
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == len(tracks)
+
+    for track in tracks:
+        track_response = client.get(
+            f"/api/v1/tracks/{track.id}",
+            headers=auth_headers(other_user),
+        )
+        assert track_response.status_code == 200
+        assert track_response.json()["id"] == str(track.id)
+
+    client.delete(
+        f"/api/v1/shares/{share.json()['id']}",
+        headers=auth_headers(regular_user),
+    )
+
+    list_after = client.get(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        headers=auth_headers(other_user),
+    )
+    assert list_after.status_code == 403
+
+    playlist_after = client.get(
+        f"/api/v1/playlists/{playlist.id}",
+        headers=auth_headers(other_user),
+    )
+    assert playlist_after.status_code == 403
+
+    for track in tracks:
+        track_response = client.get(
+            f"/api/v1/tracks/{track.id}",
+            headers=auth_headers(other_user),
+        )
+        assert track_response.status_code == 403
+
+
 def test_update_playlist_metadata(client, sample_playlists, regular_user, auth_headers):
     """Owners can update a playlist's name, description, and visibility."""
     playlist = next(p for p in sample_playlists if p["visibility"] == "private")

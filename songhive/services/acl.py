@@ -16,7 +16,7 @@ from ..models._enums import Visibility
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
-from ..models.playlist import Playlist
+from ..models.playlist import Playlist, PlaylistTrack
 from ..models.radio import Radio
 from ..models.share_grant import ShareGrant
 from ..models.stored_file import StoredFile
@@ -80,14 +80,20 @@ def _list_access_predicate(model, user: Optional[User], item_type: str):
             ShareGrant.user_id == user.id,
         ),
     )
-    # Tracks in a shared album are also accessible to the share recipient.
+    # Tracks in a shared album or playlist are also accessible to the share recipient.
     if item_type == "track":
         album_share = exists().where(
             ShareGrant.item_type == "album",
             ShareGrant.item_id == model.album_id,
             ShareGrant.user_id == user.id,
         )
-        predicate = or_(predicate, album_share)
+        playlist_share = exists().where(
+            PlaylistTrack.track_id == model.id,
+            PlaylistTrack.playlist_id == ShareGrant.item_id,
+            ShareGrant.item_type == "playlist",
+            ShareGrant.user_id == user.id,
+        )
+        predicate = or_(predicate, album_share, playlist_share)
     return predicate
 
 
@@ -184,6 +190,24 @@ async def _can_access(  # pylint: disable=too-many-return-statements,too-many-br
             depth=depth + 1,
         ):
             return True
+
+    # Rule 10: tracks inherit access from playlists they belong to.
+    if item_type == "track" and depth < _MAX_DERIVED_DEPTH:
+        playlist_ids = (
+            (await session.execute(select(PlaylistTrack.playlist_id).where(PlaylistTrack.track_id == item.id)))
+            .scalars()
+            .all()
+        )
+        for playlist_id in playlist_ids:
+            if await _can_access(
+                session,
+                user,
+                "playlist",
+                str(playlist_id),
+                share_token=share_token,
+                depth=depth + 1,
+            ):
+                return True
 
     # Rule 9: derived file access through owning tracks, albums, artists,
     # libraries, or playlists.
