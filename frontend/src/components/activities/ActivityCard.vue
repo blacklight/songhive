@@ -65,21 +65,29 @@ function parseActor(actor: string): { shortName: string; host?: string } {
   }
 }
 
+// The freshest copy of this activity: cards rendered from lists that are
+// not backed by the store's ``items`` (profile tabs, tag detail,
+// notifications) would otherwise show stale content after an edit.
+const activity = computed(
+  () => store.updatedActivity(props.activity.id) ?? props.activity,
+);
+const removed = computed(() => store.isRemoved(props.activity.id));
+
 const actorShortName = computed(
-  () => parseActor(props.activity.source_actor).shortName,
+  () => parseActor(activity.value.source_actor).shortName,
 );
 
 const actorName = computed(() => {
-  const { shortName, host } = parseActor(props.activity.source_actor);
-  if (host && props.activity.source_type === "remote") {
+  const { shortName, host } = parseActor(activity.value.source_actor);
+  if (host && activity.value.source_type === "remote") {
     return `@${shortName}@${host}`;
   }
   return `@${shortName}`;
 });
 
 const actorUrl = computed(() => {
-  const { shortName, host } = parseActor(props.activity.source_actor);
-  if (host && props.activity.source_type === "remote") {
+  const { shortName, host } = parseActor(activity.value.source_actor);
+  if (host && activity.value.source_type === "remote") {
     return `https://${host}/@${shortName}`;
   }
   return `/@${shortName}`;
@@ -87,25 +95,25 @@ const actorUrl = computed(() => {
 
 const actorDisplayName = computed(
   () =>
-    props.activity.source_actor_display_name?.trim() || actorShortName.value,
+    activity.value.source_actor_display_name?.trim() || actorShortName.value,
 );
 
 const actorAvatar = computed(
-  () => props.activity.source_actor_avatar_url || undefined,
+  () => activity.value.source_actor_avatar_url || undefined,
 );
 
-const typeIcon = computed(() => TYPE_ICONS[props.activity.activity_type] ?? "");
+const typeIcon = computed(() => TYPE_ICONS[activity.value.activity_type] ?? "");
 const typeLabel = computed(() =>
-  props.activity.activity_type === "create"
+  activity.value.activity_type === "create"
     ? ""
-    : t(`activities.types.${props.activity.activity_type}`),
+    : t(`activities.types.${activity.value.activity_type}`),
 );
 
 const visibilityIcon = computed(
-  () => VISIBILITY_ICONS[props.activity.visibility] ?? "globe",
+  () => VISIBILITY_ICONS[activity.value.visibility] ?? "globe",
 );
 const visibilityLabel = computed(() =>
-  t(`activities.visibility.${props.activity.visibility}`),
+  t(`activities.visibility.${activity.value.visibility}`),
 );
 
 // ``content`` is sanitized HTML for local activities (produced by the
@@ -113,24 +121,24 @@ const visibilityLabel = computed(() =>
 // Both are reduced to safe segments: text, line breaks, and linkified
 // mentions, hashtags, and URLs — remote HTML is never rendered verbatim.
 const contentSegments = computed(() => {
-  const raw = props.activity.content ?? props.activity.content_source ?? "";
+  const raw = activity.value.content ?? activity.value.content_source ?? "";
   if (!raw) return [];
   return parseActivityContent(raw, {
     instanceDomain: instanceDomain.value,
-    mentions: props.activity.mentions,
+    mentions: activity.value.mentions,
   });
 });
 
 const canEdit = computed(
   () =>
     authStore.isAuthenticated &&
-    (authStore.isAdmin || authStore.user?.id === props.activity.owner_user_id),
+    (authStore.isAdmin || authStore.user?.id === activity.value.owner_user_id),
 );
 const canLike = computed(
   () =>
     authStore.isAuthenticated &&
-    props.activity.activity_type !== "like" &&
-    props.activity.activity_type !== "delete",
+    activity.value.activity_type !== "like" &&
+    activity.value.activity_type !== "delete",
 );
 const liked = computed(() => store.isLiked(props.activity.id));
 const liking = computed(() => store.isLiking(props.activity.id));
@@ -138,7 +146,7 @@ const deleting = computed(() => store.isDeleting(props.activity.id));
 
 async function like() {
   try {
-    await store.like(props.activity);
+    await store.like(activity.value);
   } catch (err) {
     toast.push({
       type: "error",
@@ -168,7 +176,7 @@ async function remove() {
 
 async function copyUrl() {
   try {
-    await navigator.clipboard.writeText(props.activity.source_id);
+    await navigator.clipboard.writeText(activity.value.source_id);
     toast.push({ type: "success", message: t("activities.copyUrl.done") });
   } catch (err) {
     toast.push({
@@ -180,12 +188,12 @@ async function copyUrl() {
 </script>
 
 <template>
-  <article class="activity-card">
+  <article v-if="!removed" class="activity-card">
     <header class="activity-card__header">
       <AppAvatar :src="actorAvatar" :name="actorDisplayName" size="sm" />
       <div class="activity-card__meta">
         <a
-          v-if="props.activity.source_type === 'remote'"
+          v-if="activity.source_type === 'remote'"
           :href="actorUrl"
           class="activity-card__actor"
           target="_blank"
@@ -205,7 +213,7 @@ async function copyUrl() {
           }}</span>
           <span class="activity-card__handle">{{ actorName }}</span>
         </RouterLink>
-        <a :href="props.activity.source_id" class="activity-card__time">{{
+        <a :href="activity.source_id" class="activity-card__time">{{
           formatDateTime(activity.published_at)
         }}</a>
       </div>
@@ -397,10 +405,6 @@ async function copyUrl() {
 }
 
 .activity-card__content a {
-  color: var(--color-text-link);
-}
-
-.activity-card__content a:visited {
   color: var(--color-text-link);
 }
 

@@ -120,6 +120,19 @@ describe("useActivitiesStore", () => {
     });
     expect(store.items[0].content).toBe("edited");
     expect(store.items[0].visibility).toBe("followers");
+    expect(store.updatedActivity("a1")?.content).toBe("edited");
+  });
+
+  it("update caches the activity even when it is not in the feed", async () => {
+    updateActivity.mockResolvedValue({
+      ...createActivity("a1"),
+      content: "edited",
+      content_source: "edited",
+    });
+    const store = useActivitiesStore();
+    await store.update("a1", { content: "edited" });
+    expect(store.items).toEqual([]);
+    expect(store.updatedActivity("a1")?.content).toBe("edited");
   });
 
   it("remove deletes the activity and drops it from the feed", async () => {
@@ -134,6 +147,8 @@ describe("useActivitiesStore", () => {
     expect(deleteActivity).toHaveBeenCalledWith("a1");
     expect(store.items.map((a) => a.id)).toEqual(["a2"]);
     expect(store.isDeleting("a1")).toBe(false);
+    expect(store.isRemoved("a1")).toBe(true);
+    expect(store.updatedActivity("a1")).toBeUndefined();
   });
 
   it("remove propagates API errors and keeps the item", async () => {

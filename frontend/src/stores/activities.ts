@@ -39,10 +39,19 @@ export const useActivitiesStore = defineStore("activities", () => {
   const likedIds: Ref<Set<string>> = ref(new Set());
   const likingIds: Ref<Set<string>> = ref(new Set());
   const deletingIds: Ref<Set<string>> = ref(new Set());
+  // Latest PATCH result per activity id, so cards rendered from lists that
+  // are not backed by ``items`` (profile tabs, tag detail, notifications)
+  // still reflect edits immediately.
+  const updatedById: Ref<Map<string, ActivityResponse>> = ref(new Map());
+  const removedIds: Ref<Set<string>> = ref(new Set());
 
   const isLiked = computed(() => (id: string) => likedIds.value.has(id));
   const isLiking = computed(() => (id: string) => likingIds.value.has(id));
   const isDeleting = computed(() => (id: string) => deletingIds.value.has(id));
+  const updatedActivity = computed(
+    () => (id: string) => updatedById.value.get(id),
+  );
+  const isRemoved = computed(() => (id: string) => removedIds.value.has(id));
 
   async function fetchPage(
     cursor: string | null,
@@ -125,6 +134,8 @@ export const useActivitiesStore = defineStore("activities", () => {
       const index = items.value.findIndex((a) => a.id === activityId);
       if (index !== -1) items.value.splice(index, 1);
       likedIds.value.delete(activityId);
+      updatedById.value.delete(activityId);
+      removedIds.value.add(activityId);
     } finally {
       deletingIds.value.delete(activityId);
     }
@@ -135,9 +146,9 @@ export const useActivitiesStore = defineStore("activities", () => {
     body: ActivityUpdate,
   ): Promise<void> {
     const updated = await updateActivityApi(activityId, body);
+    updatedById.value.set(activityId, updated);
     const index = items.value.findIndex((a) => a.id === activityId);
-    if (index === -1) return;
-    items.value.splice(index, 1, updated);
+    if (index !== -1) items.value.splice(index, 1, updated);
   }
 
   function $resetFeed(): void {
@@ -164,6 +175,8 @@ export const useActivitiesStore = defineStore("activities", () => {
     isLiked,
     isLiking,
     isDeleting,
+    updatedActivity,
+    isRemoved,
     load,
     setFilter,
     loadMore,

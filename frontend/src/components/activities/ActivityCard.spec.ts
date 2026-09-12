@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import * as activitiesApi from "@/api/activities";
 import type { ActivityResponse } from "@/api/activities";
+import { useActivitiesStore } from "@/stores/activities";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
 import ActivityCard from "./ActivityCard.vue";
@@ -14,6 +15,7 @@ vi.mock("@/api/activities", () => ({
 }));
 
 const likeActivity = vi.mocked(activitiesApi.likeActivity);
+const updateActivity = vi.mocked(activitiesApi.updateActivity);
 const deleteActivity = vi.mocked(activitiesApi.deleteActivity);
 
 function createActivity(
@@ -236,6 +238,48 @@ describe("ActivityCard", () => {
     confirmStore.confirm();
     await flushPromises();
     expect(deleteActivity).toHaveBeenCalledWith("a1");
+  });
+
+  it("re-renders with the updated activity after an edit", async () => {
+    updateActivity.mockResolvedValue(
+      createActivity({
+        content: "<p>edited body</p>",
+        content_source: "edited body",
+        visibility: "followers",
+      }),
+    );
+    const store = useActivitiesStore();
+    const wrapper = mountCard();
+    expect(wrapper.find(".activity-card__content").text()).toContain(
+      "Hello @bob",
+    );
+    // The card's activity is not in store.items here (e.g. profile tabs);
+    // the update cache must still refresh what it renders.
+    await store.update("a1", {
+      content: "edited body",
+      visibility: "followers",
+    });
+    await flushPromises();
+    expect(wrapper.find(".activity-card__content").text()).toContain(
+      "edited body",
+    );
+    expect(wrapper.find(".activity-card__content").text()).not.toContain(
+      "Hello @bob",
+    );
+  });
+
+  it("hides the card after the activity is deleted", async () => {
+    setAuthenticated("user-1");
+    deleteActivity.mockResolvedValue({ status: "ok" });
+    const confirmStore = useConfirmStore();
+    const wrapper = mountCard();
+    const deleteButton = wrapper
+      .findAll(".activity-card__actions button")
+      .at(-2)!;
+    await deleteButton.trigger("click");
+    confirmStore.confirm();
+    await flushPromises();
+    expect(wrapper.find("article.activity-card").exists()).toBe(false);
   });
 
   it("does not delete when the confirmation is cancelled", async () => {

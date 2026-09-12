@@ -9,6 +9,18 @@ All notable changes to this project will be documented in this file.
 - `frontend`: Support for switching theme and accent colors from the
   `/settings` page.
 
+### Fixed
+
+- `frontend`: Editing an activity now refreshes its `ActivityCard`
+  immediately everywhere it appears. `store.update` previously only
+  patched `store.items`, which powers `ActivityFeed`; cards rendered from
+  the profile posts/activity tabs, tag detail activity lists, and
+  notifications kept showing the stale copy until reload. The activities
+  store now keeps a per-id cache of the latest PATCH result
+  (`updatedActivity`) plus a `removedIds` set (`isRemoved`), and
+  `ActivityCard` renders the cached copy when present and hides itself
+  after deletion.
+
 ## 0.1.1
 
 ### Added
