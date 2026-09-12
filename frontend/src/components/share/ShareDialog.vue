@@ -381,7 +381,7 @@ async function copyToClipboard(text: string) {
 }
 
 function onUserSelect(item: SearchResultItem) {
-  userId.value = item.id;
+  userId.value = item.id!;
 }
 
 async function onUserSearch(value: string) {
