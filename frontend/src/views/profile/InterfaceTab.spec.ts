@@ -46,7 +46,7 @@ describe("InterfaceTab", () => {
     );
     expect(checked).toHaveLength(1);
     expect(checked[0].attributes("aria-label")).toBe(
-      i18n.global.t("theme.accents.red"),
+      i18n.global.t("theme.accents.yellow"),
     );
   });
 
