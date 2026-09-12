@@ -9,6 +9,7 @@ import ChangePasswordTab from "./profile/ChangePasswordTab.vue";
 import ApiTokensTab from "./profile/ApiTokensTab.vue";
 import SessionsTab from "./profile/SessionsTab.vue";
 import NotificationSettings from "./profile/NotificationSettings.vue";
+import InterfaceTab from "./profile/InterfaceTab.vue";
 import ExternalLibrariesView from "@/views/ExternalLibrariesView.vue";
 
 const { t } = useI18n();
@@ -24,6 +25,7 @@ const tab = computed(() => {
       "apiTokens",
       "sessions",
       "notifications",
+      "interface",
       "externalLibraries",
     ].includes(value)
     ? value
@@ -39,6 +41,11 @@ const tabs = [
     key: "notifications",
     label: t("profile.tabs.notifications"),
     icon: "bell",
+  },
+  {
+    key: "interface",
+    label: t("profile.tabs.interface"),
+    icon: "palette",
   },
   {
     key: "externalLibraries",
@@ -57,6 +64,8 @@ const currentComponent = computed(() => {
       return SessionsTab;
     case "notifications":
       return NotificationSettings;
+    case "interface":
+      return InterfaceTab;
     case "externalLibraries":
       return ExternalLibrariesView;
     default:

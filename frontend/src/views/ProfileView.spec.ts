@@ -161,6 +161,21 @@ describe("ProfileView", () => {
     expect(router.currentRoute.value.query.tab).toBe("apiTokens");
   });
 
+  it("switches to the interface tab via query", async () => {
+    const router = createTestRouter();
+    await router.push("/settings?tab=interface");
+    await router.isReady();
+
+    const wrapper = mount(ProfileView, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(router.currentRoute.value.query.tab).toBe("interface");
+    expect(wrapper.text()).toContain(i18n.global.t("profile.tabs.interface"));
+    expect(wrapper.find("select").exists()).toBe(true);
+  });
+
   it("switches to the external libraries tab via query", async () => {
     const router = createTestRouter();
     await router.push("/settings?tab=externalLibraries");

@@ -671,7 +671,8 @@
       "albums": "Albums",
       "libraries": "Libraries",
       "playlists": "Playlists",
-      "notifications": "Notifications"
+      "notifications": "Notifications",
+      "interface": "Interface"
     },
     "copyHandle": "Copy fediverse handle",
     "displayName": "Display name",
@@ -746,6 +747,12 @@
       "revokeCurrentConfirm": "Are you sure you want to revoke your current session? You will be logged out.",
       "revokeSuccess": "Session revoked.",
       "revokeCurrentSuccess": "Session revoked. Logging out..."
+    },
+    "interface": {
+      "title": "Interface",
+      "hint": "Customize how Songhive looks on this device.",
+      "themeLabel": "Theme",
+      "themeHint": "\"System\" follows your device's appearance setting."
     }
   },
   "users": {
