@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { createPinia, setActivePinia } from "pinia";
@@ -167,12 +167,13 @@ function authenticateStore(store: ReturnType<typeof useAuthStore>) {
   store.status = "authenticated";
 }
 
-async function mountLayout() {
+async function mountLayout(options: { attachTo?: Element | string } = {}) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const router = createTestRouter();
   return {
     wrapper: mount(AppLayout, {
+      attachTo: options.attachTo,
       global: {
         plugins: [pinia, router],
         stubs: {
@@ -414,4 +415,134 @@ describe("AppLayout", () => {
       expect(home!.classes()).not.toContain("router-link-active");
     },
   );
+
+  describe("nav toggle", () => {
+    const originalWidth = window.innerWidth;
+
+    function setViewportWidth(width: number) {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        writable: true,
+        value: width,
+      });
+    }
+
+    afterEach(() => {
+      setViewportWidth(originalWidth);
+    });
+
+    it("starts expanded on desktop viewports and collapses via the sidebar button", async () => {
+      setViewportWidth(1024);
+      const { wrapper } = await mountLayout({ attachTo: document.body });
+      await flushPromises();
+
+      expect(wrapper.classes()).not.toContain("app-layout--nav-collapsed");
+      expect(wrapper.find(".app-layout__sidebar").classes()).toContain(
+        "app-layout__sidebar--open",
+      );
+
+      const sidebarToggle = wrapper.find(".app-layout__sidebar-toggle");
+      const topbarToggle = wrapper.find(".app-layout__menu-toggle");
+      expect(sidebarToggle.attributes("aria-expanded")).toBe("true");
+      expect(topbarToggle.attributes("aria-expanded")).toBe("true");
+
+      await sidebarToggle.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.classes()).toContain("app-layout--nav-collapsed");
+      expect(wrapper.find(".app-layout__sidebar").classes()).not.toContain(
+        "app-layout__sidebar--open",
+      );
+      expect(topbarToggle.attributes("aria-expanded")).toBe("false");
+      expect(topbarToggle.element).toBe(document.activeElement);
+
+      await topbarToggle.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.classes()).not.toContain("app-layout--nav-collapsed");
+      expect(wrapper.find(".app-layout__sidebar-toggle").element).toBe(
+        document.activeElement,
+      );
+
+      wrapper.unmount();
+    });
+
+    it("starts collapsed on mobile viewports and opens via the topbar button", async () => {
+      setViewportWidth(500);
+      const { wrapper } = await mountLayout();
+      await flushPromises();
+
+      expect(wrapper.classes()).toContain("app-layout--nav-collapsed");
+      expect(wrapper.find(".app-layout__sidebar").classes()).not.toContain(
+        "app-layout__sidebar--open",
+      );
+
+      await wrapper.find(".app-layout__menu-toggle").trigger("click");
+      await flushPromises();
+
+      expect(wrapper.classes()).not.toContain("app-layout--nav-collapsed");
+      expect(wrapper.find(".app-layout__sidebar").classes()).toContain(
+        "app-layout__sidebar--open",
+      );
+    });
+
+    it("closes the nav after navigation on mobile viewports", async () => {
+      setViewportWidth(500);
+      const { wrapper } = await mountLayout();
+      await flushPromises();
+
+      await wrapper.find(".app-layout__menu-toggle").trigger("click");
+      await flushPromises();
+
+      const link = wrapper
+        .findAll(".app-layout__nav li a")
+        .find((a) => a.text().trim() === "Search");
+      expect(link).toBeTruthy();
+      await link!.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.classes()).toContain("app-layout--nav-collapsed");
+    });
+
+    it("keeps the nav open after navigation on desktop viewports", async () => {
+      setViewportWidth(1024);
+      const { wrapper } = await mountLayout();
+      await flushPromises();
+
+      const link = wrapper
+        .findAll(".app-layout__nav li a")
+        .find((a) => a.text().trim() === "Search");
+      expect(link).toBeTruthy();
+      await link!.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.classes()).not.toContain("app-layout--nav-collapsed");
+    });
+  });
+
+  describe("topbar shortcuts", () => {
+    it("shows avatar and settings shortcuts for authenticated users", async () => {
+      const { wrapper, store } = await mountLayout();
+      authenticateStore(store);
+      await flushPromises();
+
+      const userLink = wrapper.find(".app-layout__topbar-user");
+      expect(userLink.exists()).toBe(true);
+      expect(userLink.attributes("href")).toBe("/@alice");
+      expect(userLink.attributes("aria-label")).toBe("Profile");
+      expect(userLink.findComponent({ name: "AppAvatar" }).exists()).toBe(true);
+
+      const settingsLink = wrapper.find(".app-layout__topbar-settings");
+      expect(settingsLink.exists()).toBe(true);
+      expect(settingsLink.attributes("href")).toBe("/settings");
+      expect(settingsLink.attributes("aria-label")).toBe("Settings");
+    });
+
+    it("hides the shortcuts for anonymous users", async () => {
+      const { wrapper } = await mountLayout();
+      await flushPromises();
+
+      expect(wrapper.find(".app-layout__topbar-actions").exists()).toBe(false);
+    });
+  });
 });

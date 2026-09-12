@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, useTemplateRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
@@ -17,7 +17,13 @@ const instanceStore = useInstanceStore();
 const notificationsStore = useNotificationsStore();
 const router = useRouter();
 const route = useRoute();
-const isMobileMenuOpen = ref(false);
+
+const MOBILE_BREAKPOINT = 768;
+const isNavOpen = ref(window.innerWidth >= MOBILE_BREAKPOINT);
+const sidebarToggle =
+  useTemplateRef<InstanceType<typeof AppButton>>("sidebarToggle");
+const topbarToggle =
+  useTemplateRef<InstanceType<typeof AppButton>>("topbarToggle");
 
 watch(
   () => authStore.isAuthenticated,
@@ -43,7 +49,13 @@ async function logout() {
 }
 
 function toggleMenu() {
-  isMobileMenuOpen.value = !isMobileMenuOpen.value;
+  isNavOpen.value = !isNavOpen.value;
+  const target = isNavOpen.value ? sidebarToggle : topbarToggle;
+  void nextTick(() => target.value?.$el?.focus());
+}
+
+function closeNavOnMobile() {
+  if (window.innerWidth < MOBILE_BREAKPOINT) isNavOpen.value = false;
 }
 
 type NavItem = {
@@ -178,34 +190,35 @@ const publicProfileLink = computed(() =>
 </script>
 
 <template>
-  <div class="app-layout">
+  <div class="app-layout" :class="{ 'app-layout--nav-collapsed': !isNavOpen }">
     <a href="#main" class="skip-link">Skip to main content</a>
-    <AppButton
-      variant="ghost"
-      size="sm"
-      class="app-layout__menu-toggle"
-      icon="bars"
-      :title="isMobileMenuOpen ? t('common.closeMenu') : t('common.openMenu')"
-      :aria-label="
-        isMobileMenuOpen ? t('common.closeMenu') : t('common.openMenu')
-      "
-      :aria-expanded="isMobileMenuOpen"
-      @click="toggleMenu"
-    />
     <aside
+      id="app-nav"
       class="app-layout__sidebar"
-      :class="{ 'app-layout__sidebar--open': isMobileMenuOpen }"
+      :class="{ 'app-layout__sidebar--open': isNavOpen }"
     >
       <header class="app-layout__brand">
         <RouterLink
           to="/"
           class="app-layout__brand-link"
           :aria-label="t('pages.goHome')"
-          @click="isMobileMenuOpen = false"
+          @click="closeNavOnMobile"
         >
           <img src="/logo.png" alt="" class="app-layout__logo" />
           <span class="app-layout__brand-name">{{ instanceStore.name }}</span>
         </RouterLink>
+        <AppButton
+          ref="sidebarToggle"
+          variant="ghost"
+          size="sm"
+          class="app-layout__sidebar-toggle"
+          icon="xmark"
+          :title="t('common.closeMenu')"
+          :aria-label="t('common.closeMenu')"
+          aria-controls="app-nav"
+          :aria-expanded="isNavOpen"
+          @click="toggleMenu"
+        />
       </header>
       <nav class="app-layout__nav" role="navigation" aria-label="Main">
         <ul>
@@ -218,7 +231,7 @@ const publicProfileLink = computed(() =>
               :exact-active-class="
                 item.to === '/' ? 'router-link-active' : undefined
               "
-              @click="isMobileMenuOpen = false"
+              @click="closeNavOnMobile"
             >
               <AppIcon :name="item.icon" />
               {{ item.name }}
@@ -241,7 +254,7 @@ const publicProfileLink = computed(() =>
             <RouterLink
               :to="adminItem.to"
               class="app-layout__nav-link"
-              @click="isMobileMenuOpen = false"
+              @click="closeNavOnMobile"
             >
               <AppIcon :name="adminItem.icon" />
               {{ adminItem.name }}
@@ -253,7 +266,7 @@ const publicProfileLink = computed(() =>
         <RouterLink
           :to="loginItem.to"
           class="app-layout__login"
-          @click="isMobileMenuOpen = false"
+          @click="closeNavOnMobile"
         >
           <AppIcon :name="loginItem.icon" spacing="right" />
           {{ loginItem.name }}
@@ -264,7 +277,7 @@ const publicProfileLink = computed(() =>
         <RouterLink
           :to="publicProfileLink"
           class="app-layout__user"
-          @click="isMobileMenuOpen = false"
+          @click="closeNavOnMobile"
         >
           <AppAvatar
             :src="authStore.user?.avatar_url || ''"
@@ -283,9 +296,58 @@ const publicProfileLink = computed(() =>
         />
       </footer>
     </aside>
-    <main id="main" class="app-layout__main" role="main">
-      <RouterView />
-    </main>
+    <div class="app-layout__body">
+      <header class="app-layout__topbar">
+        <AppButton
+          ref="topbarToggle"
+          variant="ghost"
+          size="sm"
+          class="app-layout__menu-toggle"
+          icon="bars"
+          :title="isNavOpen ? t('common.closeMenu') : t('common.openMenu')"
+          :aria-label="isNavOpen ? t('common.closeMenu') : t('common.openMenu')"
+          aria-controls="app-nav"
+          :aria-expanded="isNavOpen"
+          @click="toggleMenu"
+        />
+        <RouterLink
+          to="/"
+          class="app-layout__topbar-brand"
+          :aria-label="t('pages.goHome')"
+        >
+          <img src="/logo.png" alt="" class="app-layout__topbar-logo" />
+          <span class="app-layout__topbar-name">{{ instanceStore.name }}</span>
+        </RouterLink>
+        <div
+          v-if="authStore.isAuthenticated"
+          class="app-layout__topbar-actions"
+        >
+          <RouterLink
+            :to="publicProfileLink"
+            class="app-layout__topbar-user"
+            :title="displayName"
+            :aria-label="t('nav.profile')"
+          >
+            <AppAvatar
+              :src="authStore.user?.avatar_url || ''"
+              :name="displayName"
+              size="sm"
+            />
+          </RouterLink>
+          <RouterLink
+            to="/settings"
+            class="app-layout__topbar-settings"
+            :title="t('nav.settings')"
+            :aria-label="t('nav.settings')"
+          >
+            <AppIcon name="cog" />
+          </RouterLink>
+        </div>
+      </header>
+      <main id="main" class="app-layout__main" role="main">
+        <RouterView />
+      </main>
+    </div>
     <footer class="app-layout__player">
       <PlayerBarSlot />
     </footer>
@@ -319,12 +381,89 @@ const publicProfileLink = computed(() =>
   --footer-btn-width: 2.5rem;
 }
 
-.app-layout__menu-toggle {
+.app-layout__menu-toggle,
+.app-layout__sidebar-toggle {
+  color: var(--color-text-menu);
+  flex-shrink: 0;
+}
+
+.app-layout__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-layout__topbar {
   display: none;
-  position: fixed;
-  top: var(--space-3);
-  left: var(--space-3);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  padding-top: max(var(--space-2), env(safe-area-inset-top, 0px));
+  background-color: var(--color-bg-menu);
+  color: var(--color-text-menu);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
   z-index: 30;
+}
+
+.app-layout--nav-collapsed .app-layout__topbar {
+  display: flex;
+}
+
+.app-layout__topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--color-text-menu);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.app-layout__topbar-logo {
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+}
+
+.app-layout__topbar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-layout__topbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.app-layout__topbar-user,
+.app-layout__topbar-settings {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  color: var(--color-text-menu);
+  text-decoration: none;
+  transition: background-color var(--transition-fast);
+}
+
+.app-layout__topbar-user:hover,
+.app-layout__topbar-settings:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-hover);
+}
+
+.app-layout__topbar-user.router-link-active,
+.app-layout__topbar-settings.router-link-active {
+  background-color: var(--color-surface-raised);
+  color: var(--color-accent-contrast);
 }
 
 .app-layout__sidebar {
@@ -404,10 +543,15 @@ const publicProfileLink = computed(() =>
 }
 
 .app-layout__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin-bottom: var(--space-4);
 }
 
 .app-layout__brand-link {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -418,6 +562,12 @@ const publicProfileLink = computed(() =>
   font-size: 1.25rem;
   font-weight: 600;
   transition: background-color var(--transition-fast);
+}
+
+.app-layout__brand-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-layout__brand-link:hover {
@@ -522,10 +672,19 @@ const publicProfileLink = computed(() =>
   z-index: var(--z-player);
 }
 
+.app-layout--nav-collapsed .app-layout__player {
+  left: 0;
+}
+
+@media (min-width: 768px) {
+  .app-layout--nav-collapsed .app-layout__sidebar {
+    display: none;
+  }
+}
+
 @media (max-width: 767px) {
-  .app-layout__menu-toggle {
-    display: inline-flex;
-    top: max(var(--space-3), env(safe-area-inset-top, 0px));
+  .app-layout__topbar {
+    display: flex;
   }
 
   .app-layout__sidebar {
@@ -542,10 +701,6 @@ const publicProfileLink = computed(() =>
 
   .app-layout__sidebar--open {
     transform: translateX(0);
-  }
-
-  .app-layout__main {
-    left: 0;
   }
 
   .app-layout__player {
