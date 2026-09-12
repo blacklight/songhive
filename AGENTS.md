@@ -119,6 +119,15 @@
   Tornado process runs ``ws_event_subscriber`` to deliver envelopes from
   other processes (e.g. Celery workers creating notifications). Publishing
   uses a synchronous Redis client so it works from any loop or thread.
+- Read-only media endpoints (`/api/v1/files/{id}/download`,
+  `/api/v1/tracks/{id}/download`, `/api/v1/stream/{id}`) intentionally return
+  `Access-Control-Allow-Origin: *` so remote Fediverse clients can embed audio.
+  `MediaCorsMiddleware` (`api/middleware/media_cors.py`) is registered after
+  `CORSMiddleware` so it runs first and answers media-path preflights before
+  the allowlist middleware can reject them; requests from configured
+  `cors_origins` are passed through so credentialed CORS keeps working. The
+  Tornado `StreamHandler` sets the same headers itself via
+  `set_default_headers` (it bypasses FastAPI middleware entirely).
 - When type-checking the Tornado + FastAPI bootstrap in `songhive/app.py`, the
   bridge through `a2wsgi.ASGIMiddleware` and `tornado.wsgi.WSGIContainer` can
   trigger structural mismatches because `FastAPI.__call__` uses Starlette's

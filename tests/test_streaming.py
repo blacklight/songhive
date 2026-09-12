@@ -466,6 +466,40 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
 
         ws_client.close()
 
+    def test_stream_cors_wildcard_origin(self):
+        """Stream responses carry a wildcard allow-origin for embedded players."""
+        response = self.fetch(
+            f"/api/v1/stream/{self.public_track.id}",
+            headers={"Origin": "https://akkoma.example"},
+        )
+        assert response.code == 200
+        assert response.headers.get("Access-Control-Allow-Origin") == "*"
+        assert "Content-Range" in (response.headers.get("Access-Control-Expose-Headers") or "")
+
+    def test_stream_cors_preflight(self):
+        """OPTIONS preflights on the stream endpoint allow Range requests."""
+        response = self.fetch(
+            f"/api/v1/stream/{self.public_track.id}",
+            method="OPTIONS",
+            headers={
+                "Origin": "https://akkoma.example",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "Range",
+            },
+        )
+        assert response.code == 204
+        assert response.headers.get("Access-Control-Allow-Origin") == "*"
+        assert "Range" in (response.headers.get("Access-Control-Allow-Headers") or "")
+
+    def test_stream_cors_on_denied_response(self):
+        """A 403 on a private track still carries the wildcard origin."""
+        response = self.fetch(
+            f"/api/v1/stream/{self.private_track.id}",
+            headers={"Origin": "https://akkoma.example"},
+        )
+        assert response.code == 403
+        assert response.headers.get("Access-Control-Allow-Origin") == "*"
+
     def test_non_bearer_auth_returns_401(self):
         """An Authorization header that is not Bearer returns 401."""
         response = self.fetch(

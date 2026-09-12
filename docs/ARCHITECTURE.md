@@ -108,6 +108,7 @@ songhive/
 │   │   └── admin_external_libraries.py # Admin external library management
 │   └── middleware/
 │       ├── auth.py         # JWT decode middleware + access-token helpers
+│       ├── media_cors.py   # Wildcard CORS on read-only media endpoints (federation embeds)
 │       ├── rate_limit.py   # Redis sliding-window rate limiting (IP / user)
 │       └── proxy.py        # X-Forwarded-Proto scheme handling behind reverse proxies
 ├── migrations/             # Alembic database migrations
@@ -825,6 +826,16 @@ alembic revision --autogenerate -m "add example column"
   (authenticated users keyed by id), and `rate_limit_account` (always per-user)
   FastAPI dependencies. Media `DELETE` endpoints use `rate_limit_account` for
   per-user rate limiting on destructive operations. Fails open when Redis is unavailable.
+- **CORS** — the API uses the credentialed `CORSMiddleware` allowlist from
+  `server.cors_origins`. Read-only media endpoints
+  (`GET /api/v1/files/{id}/download`, `GET /api/v1/tracks/{id}/download`, and
+  `GET /api/v1/stream/{id}`) instead return `Access-Control-Allow-Origin: *`
+  via `api/middleware/media_cors.py` (and `set_default_headers` in the Tornado
+  `StreamHandler`) so remote Fediverse clients can embed audio directly — this
+  is safe because the wildcard can never be combined with credentials, and the
+  `access_token` cookie is `SameSite=Lax` so it is not sent cross-origin.
+  Preflights on those paths allow the `Range` header and expose
+  `Content-Range`/`Accept-Ranges`/`Content-Length` to fetch-based players.
 
 ### Owner exposure
 

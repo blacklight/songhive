@@ -61,7 +61,7 @@ class StreamHandler(tornado.web.RequestHandler):
     to common audio formats, a content-addressed transcode cache, and external
     library streams proxied through an adapter.
 
-    Authentication behaviour:
+    Authentication behavior:
     * No ``Authorization`` header is treated as an anonymous request; public
       tracks are streamable and private tracks are rejected with ``403``.
     * A malformed or non-Bearer header, an invalid/expired token, or an
@@ -80,6 +80,29 @@ class StreamHandler(tornado.web.RequestHandler):
     def _redis(self):
         """Return the shared Redis client from Tornado settings, if available."""
         return self.application.settings.get("redis")
+
+    def set_default_headers(self) -> None:
+        # Cross-origin media fetches (embedded players on remote Fediverse
+        # clients) need a wildcard allow-origin on this read-only endpoint.
+        # Safe without credentials: browsers never expose responses to
+        # credentialed requests when the allow-origin is "*", and the
+        # access_token cookie is SameSite=Lax so it is not attached to
+        # cross-origin requests anyway.
+        self.set_header("Access-Control-Allow-Origin", "*")
+        self.set_header(
+            "Access-Control-Expose-Headers",
+            "Accept-Ranges, Content-Range, Content-Length, Content-Type",
+        )
+        self.add_header("Vary", "Origin")
+
+    async def options(self, *_, **__) -> None:
+        """Answer CORS preflights so fetch-based players can send ``Range``."""
+        self.set_status(204)
+        self.set_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+        requested = self.request.headers.get("Access-Control-Request-Headers")
+        self.set_header("Access-Control-Allow-Headers", requested if requested else "Range")
+        self.set_header("Access-Control-Max-Age", "86400")
+        await self.finish()
 
     def _unauthorized(self):
         """Return a 401 Bearer challenge."""
@@ -113,8 +136,8 @@ class StreamHandler(tornado.web.RequestHandler):
         mimetype = content_type.split(";")[0].strip().lower()
         return self._FORMAT_BY_MIMETYPE.get(mimetype)
 
+    @staticmethod
     async def _load_user(
-        self,
         session,
         token: str,
         config: SonghiveConfig,
@@ -138,7 +161,6 @@ class StreamHandler(tornado.web.RequestHandler):
     async def _authenticate(self, session) -> Optional[User]:
         """Decode the Authorization header or access_token cookie and return the active user, if any."""
         auth_header = self.request.headers.get("Authorization", "")
-        token: Optional[str] = None
         if auth_header:
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:]
@@ -191,7 +213,8 @@ class StreamHandler(tornado.web.RequestHandler):
 
         return local_path
 
-    def _broadcast_now_playing(self, track_id: str, user: Optional[User]):
+    @staticmethod
+    def _broadcast_now_playing(track_id: str, user: Optional[User]):
         """Notify WebSocket subscribers that playback is starting."""
         EventWebSocket.broadcast(
             "now_playing",
@@ -225,9 +248,8 @@ class StreamHandler(tornado.web.RequestHandler):
         passthrough = fmt == source_format and bitrate is None
         return fmt, bitrate, passthrough
 
-    def _update_streamed_threshold(
-        self, bytes_served: int, track: Track, stream_size: Optional[int], state: _StreamState
-    ):
+    @staticmethod
+    def _update_streamed_threshold(bytes_served: int, track: Track, stream_size: Optional[int], state: _StreamState):
         """Mark the listen threshold as reached once ~30 seconds of audio have been served."""
         if state.threshold_reached or not track.duration or not stream_size:
             return
@@ -236,8 +258,8 @@ class StreamHandler(tornado.web.RequestHandler):
         if streamed_seconds >= 30:
             state.threshold_reached = True
 
+    @staticmethod
     async def _record_listen_if_needed(
-        self,
         session,
         track_id: str,
         user: Optional[User],
@@ -397,10 +419,11 @@ class StreamHandler(tornado.web.RequestHandler):
 
         mimetype = stream.content_type or "application/octet-stream"
         effective_range = range_header if (stream.supports_range and range_header) else ""
+        bytes_served = 0
         try:
             bytes_served = await self._serve_file(str(path), mimetype, range_header=effective_range)
         except tornado.iostream.StreamClosedError:
-            bytes_served = 0
+            pass
         finally:
             if stream.temporary:
                 try:
@@ -429,12 +452,14 @@ class StreamHandler(tornado.web.RequestHandler):
         if stream.size is not None and max_bytes is not None and stream.size > max_bytes:
             temp_path = await self._spill_iterator_to_temp(stream)
             effective_range = range_header if (stream.supports_range and range_header) else ""
+            bytes_served = 0
+
             try:
                 bytes_served = await self._serve_file(
                     str(temp_path), mimetype, range_header=effective_range, file_size=stream.size
                 )
             except tornado.iostream.StreamClosedError:
-                bytes_served = 0
+                pass
             finally:
                 try:
                     os.unlink(temp_path)
@@ -488,7 +513,7 @@ class StreamHandler(tornado.web.RequestHandler):
             self.set_header("Location", stream.url)
             if stream.content_type:
                 self.set_header("Content-Type", stream.content_type)
-            self.finish()
+            await self.finish()
             return 0
 
         if not stream.url:
@@ -677,8 +702,8 @@ class StreamHandler(tornado.web.RequestHandler):
                                 bytes(tee),
                                 fmt_mimetype,
                             )
-                    except Exception:
-                        logger.exception("Failed to cache transcode for track %s", track_id)
+                    except Exception as e:
+                        logger.exception("Failed to cache transcode for track %s: %s", track_id, e)
             else:
                 assert external_stream is not None
                 state = _StreamState()

@@ -20,6 +20,7 @@ from ..services.redis import close_redis_client, get_redis_client
 from ..services.settings import apply_settings_overrides
 from ..version import __version__
 from .errors import install_error_handlers
+from .middleware.media_cors import MediaCorsMiddleware
 from .middleware.proxy import ForwardedProtoMiddleware
 from .routes import (
     activities,
@@ -206,6 +207,11 @@ def create_app(config: SonghiveConfig) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Wildcard CORS on read-only media endpoints so federated web clients can
+    # embed audio cross-origin. Added last so it wraps CORSMiddleware and sees
+    # media-path preflights before the allowlist middleware can reject them.
+    app.add_middleware(MediaCorsMiddleware, allow_origins=config.server.cors_origins)
 
     # Register RFC 7807 problem detail exception handlers
     install_error_handlers(app)
