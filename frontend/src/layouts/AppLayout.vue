@@ -76,7 +76,7 @@ const navItems = computed<NavItem[]>(() => [
     name: t("nav.artists"),
     to: "/artists",
     requiresAuth: false,
-    icon: "users",
+    icon: "microphone",
   },
   {
     name: t("nav.albums"),
