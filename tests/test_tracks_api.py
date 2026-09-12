@@ -18,6 +18,7 @@ from songhive.models.external_library import ExternalLibrary
 from songhive.models.external_track import ExternalTrack
 from songhive.models.library import Library
 from songhive.models.library_track import LibraryTrack
+from songhive.models.notification import Notification
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 
@@ -177,6 +178,33 @@ def test_update_track(client, sample_tracks, regular_user, auth_headers):
     assert data["genre"] == "Rock"
     assert data["track_number"] == 3
     assert data["disc_number"] == 2
+
+
+@pytest.mark.asyncio
+async def test_update_track_title_refreshes_notifications(
+    client, sample_tracks, regular_user, db_session, auth_headers
+):
+    """Renaming a track rewrites the title snapshot on its notifications."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    note = Notification(
+        user_id=regular_user.id,
+        type="like",
+        source_url=f"/tracks/{track.id}",
+        payload={"track_title": track.title, "item_type": "track", "item_id": str(track.id)},
+    )
+    db_session.add(note)
+    await db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"title": "Renamed Track"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+
+    await db_session.refresh(note)
+    assert note.payload["track_title"] == "Renamed Track"
+    assert note.payload["item_title"] == "Renamed Track"
 
 
 @pytest.mark.asyncio

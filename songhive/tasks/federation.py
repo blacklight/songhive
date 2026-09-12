@@ -139,6 +139,17 @@ def process_incoming(
         )
         return None
 
+    if username is not None:
+        try:
+            _sync_inbox_notifications(config, activity, username, storage=storage)
+        except Exception as exc:
+            logger.warning(
+                "Failed to sync notifications for incoming %s from %s: %s",
+                activity.get("type", "activity"),
+                actor,
+                exc,
+            )
+
     logger.info(
         "Processed incoming %s from %s for actor %s",
         activity.get("type", "activity"),
@@ -146,6 +157,66 @@ def process_incoming(
         actor_id,
     )
     return result
+
+
+def _sync_inbox_notifications(config, activity: dict, username: str, storage=None) -> None:
+    """Sync user notifications for a processed inbox activity.
+
+    Creates notifications for new interactions, retracts notifications
+    whose source the incoming activity undoes or deletes (``Undo``,
+    ``Delete``), and refreshes notification snapshots when an ``Update``
+    revises a referenced object or the actor document.
+    """
+    from ..federation.notifications import (
+        create_inbox_notifications,
+        retract_inbox_notifications,
+        update_inbox_notifications,
+    )
+    from ..services.auth import get_user_by_username
+
+    init_db(config.database.url)
+
+    # The actor document is normally cached by the signature verification
+    # that just ran; it provides the display name and avatar for user cards.
+    actor_doc = None
+    actor_url = activity.get("actor")
+    if storage is not None and isinstance(actor_url, str):
+        try:
+            doc = storage.get_cached_actor(actor_url)
+            if isinstance(doc, dict):
+                actor_doc = doc
+        except Exception as exc:
+            logger.debug("Could not read cached actor %s: %s", actor_url, exc)
+
+    async def _run() -> None:
+        try:
+            async with get_session() as session:
+                user = await get_user_by_username(session, username)
+                if user is None:
+                    return
+                await create_inbox_notifications(
+                    session,
+                    activity=activity,
+                    recipient=user,
+                    actor_doc=actor_doc,
+                    instance_domain=config.federation.instance_domain,
+                )
+                await retract_inbox_notifications(
+                    session,
+                    activity=activity,
+                    recipient=user,
+                )
+                await update_inbox_notifications(
+                    session,
+                    activity=activity,
+                    recipient=user,
+                    instance_domain=config.federation.instance_domain,
+                )
+                await session.commit()
+        finally:
+            await dispose_and_reset()
+
+    asyncio.run(_run())
 
 
 @celery_app.task(

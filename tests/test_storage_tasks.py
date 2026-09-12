@@ -279,11 +279,13 @@ def test_load_celery_config_falls_back_to_defaults_on_error(monkeypatch, caplog)
     from songhive.tasks.celery import _load_celery_config
 
     with caplog.at_level("INFO", logger="songhive.tasks.celery"):
-        broker, backend, schedule = _load_celery_config()
+        broker, backend, schedule, digest_hour, purge_hour = _load_celery_config()
 
     assert broker == "redis://localhost:6379/1"
     assert backend == "redis://localhost:6379/2"
     assert schedule == "0 3 * * *"
+    assert digest_hour == 8
+    assert purge_hour == 3
     assert "Could not load Songhive config for Celery" in caplog.text
 
 

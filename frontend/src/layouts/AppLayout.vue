@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useInstanceStore } from "@/stores/instance";
+import { useNotificationsStore } from "@/stores/notifications";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppToast from "@/components/feedback/AppToast.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
@@ -13,9 +14,23 @@ import PlayerBarSlot from "@/components/player/PlayerBarSlot.vue";
 const { t } = useI18n();
 const authStore = useAuthStore();
 const instanceStore = useInstanceStore();
+const notificationsStore = useNotificationsStore();
 const router = useRouter();
 const route = useRoute();
 const isMobileMenuOpen = ref(false);
+
+watch(
+  () => authStore.isAuthenticated,
+  (authenticated) => {
+    if (authenticated) notificationsStore.connect();
+    else notificationsStore.disconnect();
+  },
+  { immediate: true },
+);
+
+const unreadBadge = computed(() =>
+  notificationsStore.unreadCount > 99 ? "99+" : notificationsStore.unreadCount,
+);
 
 const displayName = computed(() => {
   if (!authStore.user) return "";
@@ -65,6 +80,12 @@ const navItems = computed<NavItem[]>(() => [
     to: "/users",
     requiresAuth: false,
     icon: "users",
+  },
+  {
+    name: t("nav.notifications"),
+    to: "/notifications",
+    requiresAuth: true,
+    icon: "bell",
   },
   {
     name: t("nav.library"),
@@ -201,6 +222,19 @@ const publicProfileLink = computed(() =>
             >
               <AppIcon :name="item.icon" />
               {{ item.name }}
+              <span
+                v-if="
+                  item.to === '/notifications' &&
+                  notificationsStore.unreadCount > 0
+                "
+                class="app-layout__badge"
+                :aria-label="
+                  t('nav.unreadNotifications', {
+                    count: notificationsStore.unreadCount,
+                  })
+                "
+                >{{ unreadBadge }}</span
+              >
             </RouterLink>
           </li>
           <li v-if="authStore.isAdmin" class="app-layout__admin">
@@ -354,6 +388,19 @@ const publicProfileLink = computed(() =>
 .app-layout__nav a.router-link-active {
   background-color: var(--color-surface-raised);
   color: var(--color-accent-contrast);
+}
+
+.app-layout__badge {
+  margin-left: auto;
+  min-width: 1.25rem;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-full, 999px);
+  background-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  text-align: center;
 }
 
 .app-layout__brand {

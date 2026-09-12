@@ -95,6 +95,11 @@ async function performRefresh(): Promise<boolean> {
   return inFlightRefresh;
 }
 
+/** Ask the registered auth handler to refresh the access token. */
+export function requestTokenRefresh(): Promise<boolean> {
+  return performRefresh();
+}
+
 export function getAuthHeader(): string | null {
   if (!tokenProvider) return null;
   const token = tokenProvider();

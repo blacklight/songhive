@@ -15,6 +15,7 @@ Usage:
     songhive admin list-invites
     songhive admin provision-federation-keys
     songhive admin rehash-audio [--dry-run]
+    songhive admin purge-notifications
     songhive admin sync-tags \
         (--track-id <id> | --album-id <id> | --artist-id <id> | --library-id <id> | --all) [--dry-run]
     songhive admin enrich-images \
@@ -137,6 +138,13 @@ def _add_rehash_audio_command(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
+def _add_purge_notifications_command(subparsers: argparse._SubParsersAction) -> None:
+    subparsers.add_parser(
+        "purge-notifications",
+        help="Delete seen notifications older than the configured retention",
+    )
+
+
 def _add_sync_tags_command(subparsers: argparse._SubParsersAction) -> None:
     sync_tags_parser = subparsers.add_parser(
         "sync-tags",
@@ -193,6 +201,7 @@ def _create_admin_parser() -> argparse.ArgumentParser:
     _add_list_invites_command(subparsers)
     _add_provision_federation_keys_command(subparsers)
     _add_rehash_audio_command(subparsers)
+    _add_purge_notifications_command(subparsers)
     _add_sync_tags_command(subparsers)
     _add_enrich_image_parser(subparsers)
     return parser
@@ -471,6 +480,23 @@ async def _handle_rehash_audio(args):
         )
 
 
+async def _handle_purge_notifications(args):
+    """Delete seen notifications older than the configured retention."""
+    from ..services import notifications as notifications_service
+
+    config = load_config([])
+    init_db(config.database.url)
+
+    async with get_session() as session:
+        deleted = await notifications_service.purge_seen_notifications(
+            session,
+            older_than_days=config.notifications.retention_days,
+        )
+        await session.commit()
+
+    print(f"Deleted {deleted} notification(s)")
+
+
 async def _handle_sync_tags(args):
     """Enqueue tag sync for the requested scope of tracks."""
     from ..tasks.tags import sync_track_tags
@@ -595,6 +621,7 @@ def admin_main(argv=None):
         "list-invites": _handle_list_invites,
         "provision-federation-keys": _handle_provision_federation_keys,
         "rehash-audio": _handle_rehash_audio,
+        "purge-notifications": _handle_purge_notifications,
         "sync-tags": _handle_sync_tags,
         "enrich-images": _handle_enrich_images,
     }

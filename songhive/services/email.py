@@ -95,3 +95,62 @@ def send_password_reset_email(config: SonghiveConfig, to_address: str, username:
         "If you did not request this reset, you can ignore this email."
     )
     return send_email(config, to_address, subject, body)
+
+
+def send_notification_email(
+    config: SonghiveConfig,
+    to_address: str,
+    username: str,
+    notification: dict,
+) -> bool:
+    """Send a plain-text email for a single notification."""
+    payload = notification.get("payload") or {}
+    actor_name = payload.get("actor_name") or notification.get("actor_url") or "someone"
+    notification_type = notification.get("type") or "notification"
+    source_url = notification.get("source_url")
+
+    subject = f"[Songhive] New {notification_type} from {actor_name}"
+    lines = [
+        f"Hi {username},",
+        "",
+        f"You have a new {notification_type} notification from {actor_name}.",
+    ]
+    if source_url:
+        lines += ["", f"View it here: {source_url}"]
+    lines += ["", "You can manage your notification preferences in your profile settings."]
+    return send_email(config, to_address, subject, "\n".join(lines))
+
+
+def send_notification_digest_email(
+    config: SonghiveConfig,
+    to_address: str,
+    username: str,
+    notifications: list,
+) -> bool:
+    """Send a daily digest email listing the given notifications, grouped by type."""
+    subject = "[Songhive] Your daily notifications summary"
+    lines = [
+        f"Hi {username},",
+        "",
+        "Here is a summary of your recent Songhive notifications:",
+        "",
+    ]
+
+    grouped: dict = {}
+    for notification in notifications:
+        grouped.setdefault(notification.get("type") or "notification", []).append(notification)
+
+    for notification_type in sorted(grouped):
+        lines.append(f"{notification_type}:")
+        for notification in grouped[notification_type]:
+            payload = notification.get("payload") or {}
+            actor_name = payload.get("actor_name") or notification.get("actor_url") or "someone"
+            source_url = notification.get("source_url")
+            line = f"  - {actor_name}"
+            if source_url:
+                line += f" — {source_url}"
+            lines.append(line)
+        lines.append("")
+
+    lines.append("You can manage your notification preferences in your profile settings.")
+    return send_email(config, to_address, subject, "\n".join(lines))

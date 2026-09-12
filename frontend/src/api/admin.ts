@@ -24,6 +24,8 @@ export type ProvisionFederationKeysRequest =
 export type EnrichImagesRequest = components["schemas"]["EnrichImagesRequest"];
 export type EnrichImagesResponse =
   components["schemas"]["EnrichImagesResponse"];
+export type NotificationsPurgeResponse =
+  components["schemas"]["NotificationsPurgeResponse"];
 export type AdminTaskQueuedResponse =
   components["schemas"]["AdminTaskQueuedResponse"];
 export type CeleryTaskInfo = components["schemas"]["CeleryTaskInfo"];
@@ -261,5 +263,11 @@ export function enrichImages(
   return apiRequest<EnrichImagesResponse>("/admin/enrich-images", {
     method: "POST",
     body,
+  });
+}
+
+export function purgeNotifications(): Promise<NotificationsPurgeResponse> {
+  return apiRequest<NotificationsPurgeResponse>("/admin/notifications/purge", {
+    method: "POST",
   });
 }

@@ -143,3 +143,102 @@ async def test_favorite_list_isolated_per_user(client, db_session, regular_user,
     assert len(other_list.json()) == 1
     assert regular_list.json()[0]["track_id"] == str(track.id)
     assert regular_list.json()[0]["id"] != other_list.json()[0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_favorite_creates_like_notification(client, db_session, regular_user, other_user, auth_headers):
+    """Favoriting another user's track creates a like notification for the owner."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    track = await _make_track(db_session, owner=other_user, visibility=Visibility.PUBLIC.value)
+    response = client.post(f"/api/v1/favorites/{track.id}", headers=auth_headers(regular_user))
+    assert response.status_code == 201
+
+    result = await db_session.execute(
+        select(Notification).where(
+            Notification.user_id == other_user.id,
+            Notification.type == "like",
+        )
+    )
+    notification = result.scalar_one()
+    assert notification.actor_url == f"/users/{regular_user.username}"
+    assert notification.source_url == f"/tracks/{track.id}"
+    assert notification.payload["track_title"] == "Test Track"
+    assert notification.payload["actor_name"] == regular_user.username
+
+
+@pytest.mark.asyncio
+async def test_self_favorite_creates_no_notification(client, db_session, regular_user, auth_headers):
+    """Favoriting your own track does not create a notification."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    track = await _make_track(db_session, owner=regular_user)
+    response = client.post(f"/api/v1/favorites/{track.id}", headers=auth_headers(regular_user))
+    assert response.status_code == 201
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == regular_user.id))
+    assert result.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_favorite_creates_no_notification(client, db_session, regular_user, other_user, auth_headers):
+    """Re-favoriting (existing row) does not create a second notification."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    track = await _make_track(db_session, owner=other_user, visibility=Visibility.PUBLIC.value)
+    headers = auth_headers(regular_user)
+    client.post(f"/api/v1/favorites/{track.id}", headers=headers)
+    client.post(f"/api/v1/favorites/{track.id}", headers=headers)
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == other_user.id))
+    assert len(result.scalars().all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_remove_favorite_retracts_like_notification(client, db_session, regular_user, other_user, auth_headers):
+    """Unfavoriting removes the like notification it produced."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    track = await _make_track(db_session, owner=other_user, visibility=Visibility.PUBLIC.value)
+    headers = auth_headers(regular_user)
+    assert client.post(f"/api/v1/favorites/{track.id}", headers=headers).status_code == 201
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == other_user.id))
+    assert [n.type for n in result.scalars().all()] == ["like"]
+
+    assert client.delete(f"/api/v1/favorites/{track.id}", headers=headers).status_code == 204
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == other_user.id))
+    assert result.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_remove_favorite_keeps_other_actors_notifications(
+    client, db_session, regular_user, other_user, admin_user, auth_headers
+):
+    """Unfavoriting only retracts the like notification of that actor."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    track = await _make_track(db_session, owner=other_user, visibility=Visibility.PUBLIC.value)
+    client.post(f"/api/v1/favorites/{track.id}", headers=auth_headers(regular_user))
+    client.post(f"/api/v1/favorites/{track.id}", headers=auth_headers(admin_user))
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == other_user.id))
+    assert len(result.scalars().all()) == 2
+
+    client.delete(f"/api/v1/favorites/{track.id}", headers=auth_headers(regular_user))
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == other_user.id))
+    remaining = result.scalars().all()
+    assert len(remaining) == 1
+    assert remaining[0].actor_url == f"/users/{admin_user.username}"

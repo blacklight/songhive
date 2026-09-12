@@ -21,6 +21,7 @@ from songhive.models.audit_log import AuditLog  # noqa: F401
 from songhive.models.base import Base, init_db, reset_db
 from songhive.models.invite import Invite  # noqa: F401
 from songhive.models.library import Library  # noqa: F401
+from songhive.models.notification import Notification, NotificationPreference  # noqa: F401
 from songhive.models.oauth_client import OAuth2Client  # noqa: F401
 from songhive.models.playlist import Playlist  # noqa: F401
 from songhive.models.radio import Radio  # noqa: F401
@@ -77,6 +78,17 @@ def fake_redis(fake_redis_server):
     from fakeredis.aioredis import FakeRedis
 
     return FakeRedis(server=fake_redis_server, decode_responses=True)
+
+
+@pytest.fixture(autouse=True)
+def _fake_sync_redis(monkeypatch, fake_redis_server):
+    """Route the synchronous WS event publisher to the shared fake Redis."""
+    from fakeredis import FakeRedis
+
+    monkeypatch.setattr(
+        "songhive.services.redis.get_sync_redis_client",
+        lambda config=None: FakeRedis(server=fake_redis_server),
+    )
 
 
 @pytest.fixture

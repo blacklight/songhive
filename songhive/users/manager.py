@@ -23,6 +23,7 @@ from ..models.history import ListeningHistory
 from ..models.invite import Invite
 from ..models.library import Library
 from ..models.library_track import LibraryTrack
+from ..models.notification import Notification, NotificationPreference
 from ..models.oauth_client import OAuth2Client
 from ..models.playlist import Playlist
 from ..models.radio import Radio
@@ -35,6 +36,7 @@ from ..models.track import Track
 from ..models.user import User, UserRole
 from ..models.user_link import UserLink
 from ..services import deletion
+from ..services import notifications as notifications_service
 from ..services.auth import (
     get_user_by_email_verification_token,
     get_user_by_id,
@@ -390,6 +392,22 @@ async def _remove_user_references(session: AsyncSession, user: User) -> None:
     await session.execute(delete(ApiToken).where(ApiToken.user_id == user.id))
     await session.execute(delete(Favorite).where(Favorite.user_id == user.id))
     await session.execute(delete(ListeningHistory).where(ListeningHistory.user_id == user.id))
+    await session.execute(delete(Notification).where(Notification.user_id == user.id))
+    await session.execute(delete(NotificationPreference).where(NotificationPreference.user_id == user.id))
+    # Notifications the user produced on other accounts (likes, shares,
+    # follows) are no longer applicable once the actor is gone.
+    await notifications_service.retract_notifications(
+        session,
+        actor_urls=[  # type: ignore
+            u
+            for u in (
+                user.actor_url,
+                f"/users/{user.username}",
+                f"urn:songhive:user:{user.username}",
+            )
+            if u
+        ],
+    )
     await session.execute(delete(Invite).where(Invite.created_by == user.id))
     await session.execute(delete(Report).where(Report.reporter_id == user.id))
     await session.execute(delete(ShareGrant).where(ShareGrant.user_id == user.id))

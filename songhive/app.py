@@ -22,7 +22,12 @@ from typing import Any, Awaitable, Callable, Collection, Dict, Optional, cast
 from .config import SonghiveConfig, load_config
 from .migrations import ensure_migrated
 from .models.base import init_db
-from .services.redis import close_redis_client, create_redis_client, get_redis_client
+from .services.redis import (
+    close_redis_client,
+    create_redis_client,
+    get_redis_client,
+    get_sync_redis_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +94,10 @@ def _run_tornado(config: SonghiveConfig):
     # client to avoid "Future attached to a different loop" errors.
     tornado_redis = create_redis_client(config)
 
+    # Warm the synchronous publisher with this process's config so WS events
+    # emitted from here are published to the same Redis the tasks use.
+    get_sync_redis_client(config)
+
     tornado_app = _build_tornado_app(config, fastapi_app, tornado_redis=tornado_redis)
 
     server = HTTPServer(tornado_app)
@@ -111,6 +120,12 @@ def _run_tornado(config: SonghiveConfig):
 
     loop = asyncio.get_event_loop()
 
+    # Forward WS events published by other processes (e.g. Celery workers) to
+    # the connections held by this process.
+    from .ws.events import ws_event_subscriber
+
+    subscriber_task = loop.create_task(ws_event_subscriber(tornado_redis))
+
     def _shutdown():
         logger.info("Shutting down...")
         server.stop()
@@ -126,6 +141,9 @@ def _run_tornado(config: SonghiveConfig):
     try:
         loop.run_forever()
     finally:
+        subscriber_task.cancel()
+        loop.run_until_complete(asyncio.gather(subscriber_task, return_exceptions=True))
+
         # The Tornado-side Redis client is bound to this loop; close it here.
         loop.run_until_complete(close_redis_client(tornado_redis))
 

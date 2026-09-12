@@ -87,7 +87,14 @@
   Node 24+; undici 8 calls `worker_threads.markAsUncloneable`, which does not
   exist on Node 20. CI and the Dockerfile `NODE_VERSION` both pin Node 24.
 - Celery tasks are organized by domain: `tasks/import_.py`,
-  `tasks/federation.py`, `tasks/tags.py`, `tasks/transcoding.py`.
+  `tasks/federation.py`, `tasks/tags.py`, `tasks/transcoding.py`,
+  `tasks/notifications.py` (daily digest + seen-notification purge).
+- User notifications live in `models/notification.py` (`Notification`,
+  `NotificationPreference`), `services/notifications.py`, and
+  `api/routes/notifications.py`. `EventWebSocket.send_to_user`
+  (`ws/events.py`) delivers targeted `notification` events; the frontend
+  store is `frontend/src/stores/notifications.ts` on the shared `eventBus`
+  from `frontend/src/api/ws.ts`.
 - Audio file storage uses audio-only SHA-256 hashing (via ffmpeg `streamhash`)
   so that tags and cover art can be rewritten without changing the stored path
   or invalidating the content hash. Run `songhive admin rehash-audio` once to
@@ -106,6 +113,12 @@
   ``get_session()`` must therefore call ``await dispose_and_reset()`` in the
   same ``finally`` block that closes the session, so the next task starts with
   a fresh engine instead of reusing connections tied to a closed loop.
+- ``EventWebSocket._connections`` is process-local: ``broadcast`` and
+  ``send_to_user`` only reach sockets in their own process. Both also publish
+  an envelope to the Redis pub/sub channel ``songhive:ws-events``, and the
+  Tornado process runs ``ws_event_subscriber`` to deliver envelopes from
+  other processes (e.g. Celery workers creating notifications). Publishing
+  uses a synchronous Redis client so it works from any loop or thread.
 - When type-checking the Tornado + FastAPI bootstrap in `songhive/app.py`, the
   bridge through `a2wsgi.ASGIMiddleware` and `tornado.wsgi.WSGIContainer` can
   trigger structural mismatches because `FastAPI.__call__` uses Starlette's

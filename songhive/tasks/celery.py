@@ -28,7 +28,7 @@ def _parse_crontab(expr: str) -> crontab:
     )
 
 
-def _load_celery_config() -> tuple[str, str, str]:
+def _load_celery_config() -> tuple[str, str, str, int, int]:
     """Load Celery-relevant configuration, falling back to sensible defaults."""
     try:
         from ..config import load_config
@@ -38,6 +38,8 @@ def _load_celery_config() -> tuple[str, str, str]:
             config.celery.broker_url,
             config.celery.result_backend,
             config.celery.cleanup_orphaned_files_schedule,
+            config.notifications.digest_hour,
+            config.notifications.purge_hour,
         )
     except Exception as exc:
         logger.info("Could not load Songhive config for Celery, using defaults: %s", type(exc).__name__)
@@ -45,6 +47,8 @@ def _load_celery_config() -> tuple[str, str, str]:
             "redis://localhost:6379/1",
             "redis://localhost:6379/2",
             "0 3 * * *",
+            8,
+            3,
         )
 
 
@@ -52,6 +56,8 @@ def make_celery(
     broker_url: str = "redis://localhost:6379/1",
     result_backend: str = "redis://localhost:6379/2",
     cleanup_orphaned_files_schedule: Optional[str] = None,
+    notification_digest_hour: int = 8,
+    notification_purge_hour: int = 3,
 ) -> Celery:
     """Create and configure a Celery application."""
     if cleanup_orphaned_files_schedule is None:
@@ -80,15 +86,25 @@ def make_celery(
                 "task": "songhive.tasks.external_libraries.scan_scheduled_syncs",
                 "schedule": crontab(minute="*/5"),
             },
+            "send-notification-digests": {
+                "task": "songhive.tasks.notifications.send_notification_digests",
+                "schedule": _parse_crontab(f"0 {notification_digest_hour} * * *"),
+            },
+            "purge-old-notifications": {
+                "task": "songhive.tasks.notifications.purge_old_notifications",
+                "schedule": _parse_crontab(f"0 {notification_purge_hour} * * *"),
+            },
         },
     )
     app.autodiscover_tasks(["songhive.tasks"])
     return app
 
 
-_broker_url, _result_backend, _cleanup_schedule = _load_celery_config()
+_broker_url, _result_backend, _cleanup_schedule, _digest_hour, _purge_hour = _load_celery_config()
 celery_app = make_celery(
     broker_url=_broker_url,
     result_backend=_result_backend,
     cleanup_orphaned_files_schedule=_cleanup_schedule,
+    notification_digest_hour=_digest_hour,
+    notification_purge_hour=_purge_hour,
 )

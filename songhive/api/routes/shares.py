@@ -2,6 +2,7 @@
 Share-grant routes: owner/admin CRUD for giving specific users access to items.
 """
 
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -9,15 +10,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...models.notification import NotificationType
 from ...models.share_grant import ShareGrant
 from ...models.user import User
-from ...services import acl, sharing
+from ...services import acl
+from ...services import notifications as notifications_service
+from ...services import sharing
 from ...services.auth import get_user_by_id, get_user_by_username_or_email
 from .._common import Pagination, get_pagination
 from ..deps import get_current_user, get_db
 from ..middleware.rate_limit import rate_limit_account
 from ._common import load_and_authorize, validate_item_type
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/shares")
 
 
@@ -78,7 +83,7 @@ async def create_share_grant(
     await load_and_authorize(db, current_user, body.item_type, body.item_id)
 
     target_user = await _resolve_share_grant_user(db, body.user_id)
-    grant = await sharing.create_share_grant(
+    grant, created = await sharing.create_share_grant(
         db,
         body.item_type,
         body.item_id,
@@ -87,9 +92,48 @@ async def create_share_grant(
     )
     await db.commit()
 
+    if created:
+        await _notify_share_grant(db, grant, current_user)
+
     response = ShareGrantResponse.model_validate(grant)
     response.username = target_user.username
     return response
+
+
+async def _notify_share_grant(
+    db: AsyncSession,
+    grant: ShareGrant,
+    current_user: User,
+) -> None:
+    """Create a share notification for the grantee, never failing the route."""
+    try:
+        if grant.user_id == current_user.id:
+            return
+        item = await acl.get_item(db, grant.item_type, grant.item_id)
+        item_title = getattr(item, "title", None) or getattr(item, "name", None)
+        plural = acl.get_item_plural(grant.item_type) or grant.item_type
+        await notifications_service.create_notification(
+            db,
+            user_id=grant.user_id,
+            type=NotificationType.SHARE,
+            actor_url=current_user.actor_url or f"/users/{current_user.username}",
+            source_url=f"/{plural}/{grant.item_id}",
+            payload={
+                "item_type": grant.item_type,
+                "item_id": grant.item_id,
+                "item_title": item_title,
+                "actor_name": current_user.display_name or current_user.username,
+                "actor_avatar_url": current_user.avatar_url,
+            },
+        )
+        await db.commit()
+    except Exception as exc:
+        logger.warning(
+            "Failed to create share notification for %s %s: %s",
+            grant.item_type,
+            grant.item_id,
+            exc,
+        )
 
 
 @router.get("/", response_model=List[ShareGrantResponse])
@@ -134,6 +178,14 @@ async def delete_share_grant(
             detail="Not found",
         )
 
+    item_type, item_id, grantee_id = grant.item_type, grant.item_id, grant.user_id
     await sharing.revoke_share_grant_by_id(db, share_id)
+    plural = acl.get_item_plural(item_type) or item_type
+    await notifications_service.retract_notifications(
+        db,
+        user_id=grantee_id,
+        type=NotificationType.SHARE,
+        source_url=f"/{plural}/{item_id}",
+    )
     await db.commit()
     return None

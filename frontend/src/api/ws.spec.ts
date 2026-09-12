@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { setWsTokenProvider, EventBus } from "./ws";
+import { requestTokenRefresh } from "./client";
+
+vi.mock("./client", () => ({
+  requestTokenRefresh: vi.fn().mockResolvedValue(true),
+}));
 
 class FakeWebSocket {
   url = "";
@@ -40,6 +45,7 @@ class FakeWebSocket {
 describe("EventBus", () => {
   beforeEach(() => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.clearAllMocks();
     setWsTokenProvider(() => "token-123");
   });
 
@@ -83,6 +89,59 @@ describe("EventBus", () => {
 
     vi.advanceTimersByTime(1000);
     vi.advanceTimersByTime(1);
+    expect(bus.status.value).toBe("open");
+
+    bus.disconnect();
+    vi.useRealTimers();
+  });
+
+  it("refreshes the token once and backs off on auth-rejected closes", () => {
+    vi.useFakeTimers();
+    const bus = new EventBus();
+    bus.connect();
+    vi.advanceTimersByTime(1);
+    expect(bus.status.value).toBe("open");
+
+    let socket = (bus as unknown as { socket: FakeWebSocket }).socket;
+    socket.emit("close", { code: 4001 });
+    expect(requestTokenRefresh).toHaveBeenCalledTimes(1);
+    expect(bus.status.value).toBe("reconnecting");
+
+    vi.advanceTimersByTime(1001);
+    expect(bus.status.value).toBe("open");
+
+    // A second immediate auth failure does not trigger another refresh
+    // (30s throttle) and the backoff grows instead of staying at 1s.
+    socket = (bus as unknown as { socket: FakeWebSocket }).socket;
+    socket.emit("close", { code: 4001 });
+    expect(requestTokenRefresh).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1000);
+    expect(bus.status.value).toBe("reconnecting");
+    vi.advanceTimersByTime(1001);
+    expect(bus.status.value).toBe("open");
+
+    bus.disconnect();
+    vi.useRealTimers();
+  });
+
+  it("resets the backoff after a long-lived connection drops", () => {
+    vi.useFakeTimers();
+    const bus = new EventBus();
+    bus.connect();
+    vi.advanceTimersByTime(1);
+    expect(bus.status.value).toBe("open");
+
+    // First a quick drop: backoff grows to 2s.
+    let socket = (bus as unknown as { socket: FakeWebSocket }).socket;
+    socket.emit("close", {});
+    vi.advanceTimersByTime(1001);
+    expect(bus.status.value).toBe("open");
+
+    // Stay connected past the healthy threshold, then drop: next retry is 1s.
+    vi.advanceTimersByTime(11_000);
+    socket = (bus as unknown as { socket: FakeWebSocket }).socket;
+    socket.emit("close", {});
+    vi.advanceTimersByTime(1001);
     expect(bus.status.value).toBe("open");
 
     bus.disconnect();

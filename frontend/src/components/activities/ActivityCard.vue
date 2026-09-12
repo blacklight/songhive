@@ -13,14 +13,20 @@ import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import ActivityEditModal from "./ActivityEditModal.vue";
+import { useInstanceDomain } from "@/composables/useInstanceDomain";
+import { parseActivityContent } from "@/utils/activityContent";
 
-const props = defineProps<{ activity: ActivityResponse }>();
+const props = withDefaults(
+  defineProps<{ activity: ActivityResponse; readonly?: boolean }>(),
+  { readonly: false },
+);
 
 const { t } = useI18n();
 const store = useActivitiesStore();
 const authStore = useAuthStore();
 const confirmStore = useConfirmStore();
 const toast = useToastStore();
+const instanceDomain = useInstanceDomain();
 
 const editOpen = ref(false);
 
@@ -102,19 +108,17 @@ const visibilityLabel = computed(() =>
   t(`activities.visibility.${props.activity.visibility}`),
 );
 
-// ``content`` of local activities is sanitized HTML produced by the
-// server-side mention/markdown pipeline. Remote content is remote-supplied
-// HTML and is reduced to plain text instead of being trusted.
-const trustedHtml = computed(
-  () => props.activity.source_type === "local" && !!props.activity.content,
-);
-
-const plainContent = computed(() => {
-  if (trustedHtml.value) return "";
+// ``content`` is sanitized HTML for local activities (produced by the
+// server-side mention pipeline) and untrusted remote-supplied HTML otherwise.
+// Both are reduced to safe segments: text, line breaks, and linkified
+// mentions, hashtags, and URLs — remote HTML is never rendered verbatim.
+const contentSegments = computed(() => {
   const raw = props.activity.content ?? props.activity.content_source ?? "";
-  if (!raw) return "";
-  const doc = new DOMParser().parseFromString(raw, "text/html");
-  return doc.body.textContent ?? "";
+  if (!raw) return [];
+  return parseActivityContent(raw, {
+    instanceDomain: instanceDomain.value,
+    mentions: props.activity.mentions,
+  });
 });
 
 const canEdit = computed(
@@ -219,16 +223,41 @@ async function copyUrl() {
       </div>
     </header>
 
-    <div
-      v-if="trustedHtml"
-      class="activity-card__content"
-      v-html="activity.content"
-    />
-    <p v-else-if="plainContent" class="activity-card__content">
-      {{ plainContent }}
+    <p v-if="contentSegments.length" class="activity-card__content">
+      <template v-for="(segment, index) in contentSegments" :key="index">
+        <template v-if="segment.type === 'text'">{{ segment.value }}</template>
+        <RouterLink
+          v-else-if="segment.type === 'mention' && segment.username"
+          :to="{ name: 'userProfile', params: { username: segment.username } }"
+          class="activity-card__mention"
+          >{{ segment.handle }}</RouterLink
+        >
+        <a
+          v-else-if="segment.type === 'mention'"
+          :href="segment.url"
+          target="_blank"
+          rel="noopener"
+          class="activity-card__mention"
+          >{{ segment.handle }}</a
+        >
+        <RouterLink
+          v-else-if="segment.type === 'tag'"
+          :to="{ name: 'tag', params: { name: segment.name } }"
+          >{{ segment.display }}</RouterLink
+        >
+        <RouterLink v-else-if="segment.to" :to="segment.to">{{
+          segment.label
+        }}</RouterLink>
+        <a v-else :href="segment.url" target="_blank" rel="noopener">{{
+          segment.label
+        }}</a>
+      </template>
     </p>
 
-    <footer v-if="canLike || canEdit" class="activity-card__actions">
+    <footer
+      v-if="!props.readonly && (canLike || canEdit)"
+      class="activity-card__actions"
+    >
       <AppButton
         v-if="canLike"
         variant="ghost"
@@ -273,6 +302,7 @@ async function copyUrl() {
     </footer>
 
     <ActivityEditModal
+      v-if="!props.readonly"
       :open="editOpen"
       :activity="activity"
       @close="editOpen = false"
@@ -366,12 +396,16 @@ async function copyUrl() {
   gap: var(--space-2);
 }
 
-:deep(.activity-card__content a) {
+.activity-card__content a {
   color: var(--color-text-link);
 }
 
-:deep(.activity-card__content a:visited) {
+.activity-card__content a:visited {
   color: var(--color-text-link);
+}
+
+.activity-card__mention {
+  font-weight: 500;
 }
 
 a:hover {

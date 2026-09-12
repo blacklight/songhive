@@ -8,6 +8,7 @@ import ProfileTab from "./profile/ProfileTab.vue";
 import ChangePasswordTab from "./profile/ChangePasswordTab.vue";
 import ApiTokensTab from "./profile/ApiTokensTab.vue";
 import SessionsTab from "./profile/SessionsTab.vue";
+import NotificationSettings from "./profile/NotificationSettings.vue";
 import ExternalLibrariesView from "@/views/ExternalLibrariesView.vue";
 
 const { t } = useI18n();
@@ -22,6 +23,7 @@ const tab = computed(() => {
       "password",
       "apiTokens",
       "sessions",
+      "notifications",
       "externalLibraries",
     ].includes(value)
     ? value
@@ -33,6 +35,11 @@ const tabs = [
   { key: "password", label: t("profile.tabs.password"), icon: "lock" },
   { key: "apiTokens", label: t("profile.tabs.apiTokens"), icon: "key" },
   { key: "sessions", label: t("profile.tabs.sessions"), icon: "laptop" },
+  {
+    key: "notifications",
+    label: t("profile.tabs.notifications"),
+    icon: "bell",
+  },
   {
     key: "externalLibraries",
     label: t("profile.tabs.externalLibraries"),
@@ -48,6 +55,8 @@ const currentComponent = computed(() => {
       return ApiTokensTab;
     case "sessions":
       return SessionsTab;
+    case "notifications":
+      return NotificationSettings;
     case "externalLibraries":
       return ExternalLibrariesView;
     default:
@@ -101,6 +110,7 @@ const currentComponent = computed(() => {
   display: flex;
   gap: var(--space-1);
   border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
 }
 
 .profile-view__tab {

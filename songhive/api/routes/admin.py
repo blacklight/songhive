@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config.schema import SonghiveConfig
 from ...models.user import User, UserRole
 from ...services import audit, auth, deletion, music
+from ...services import notifications as notifications_service
 from ...services import settings as settings_service
 from ...services import stats as stats_service
 from ...services.admin_tasks import resolve_image_enrichment_targets
@@ -957,6 +958,7 @@ async def enrich_images(
     if not any((body.artist_id, body.album_id, body.all)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one scope is required")
 
+    result = None
     if not body.dry_run:
         try:
             result = bulk_enrich_images.delay(
@@ -1177,3 +1179,44 @@ async def terminate_celery_tasks_endpoint(
     await db.commit()
 
     return CeleryTerminateResponse(terminated=terminated)
+
+
+class NotificationsPurgeResponse(BaseModel):
+    """Result of a notification purge run."""
+
+    deleted: int
+
+
+@router.post(
+    "/notifications/purge",
+    response_model=NotificationsPurgeResponse,
+    dependencies=[Depends(rate_limit_account), Depends(require_admin)],
+)
+async def purge_notifications(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Delete seen notifications older than the configured retention (admin only)."""
+    deleted = await notifications_service.purge_seen_notifications(
+        db,
+        older_than_days=config.notifications.retention_days,
+    )
+    await db.commit()
+
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="notification.purge",
+        target_type=None,
+        target_id=None,
+        details={
+            "deleted": deleted,
+            "retention_days": config.notifications.retention_days,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return NotificationsPurgeResponse(deleted=deleted)

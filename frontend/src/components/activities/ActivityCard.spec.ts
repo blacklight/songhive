@@ -90,21 +90,107 @@ describe("ActivityCard", () => {
     expect(wrapper.text()).toContain("@alice");
   });
 
-  it("renders local content as trusted HTML", () => {
+  it("renders content links as anchors", () => {
     const wrapper = mountCard();
     const content = wrapper.find(".activity-card__content");
-    expect(content.element.innerHTML).toContain("<a");
+    const link = content.find("a");
+    expect(link.exists()).toBe(true);
+    expect(link.attributes("href")).toBe("https://example.com/users/bob");
+    expect(link.text()).toBe("@bob");
   });
 
-  it("strips remote HTML to plain text", () => {
+  it("routes local mention anchors to the profile route", () => {
+    const wrapper = mountCard({
+      content: 'Hello <a href="/users/bob">@bob</a>',
+    });
+    const links = wrapper.findAllComponents({ name: "RouterLink" });
+    const mention = links.find(
+      (link) => link.props("to")?.name === "userProfile",
+    );
+    expect(mention?.props("to")).toEqual({
+      name: "userProfile",
+      params: { username: "bob" },
+    });
+    expect(mention?.text()).toBe("@bob");
+  });
+
+  it("routes same-host actor URLs to the profile route", () => {
+    const wrapper = mountCard({
+      content: `Hello <a href="http://${window.location.host}/users/bob">@bob</a>`,
+    });
+    const links = wrapper.findAllComponents({ name: "RouterLink" });
+    expect(
+      links
+        .find((link) => link.props("to")?.name === "userProfile")
+        ?.props("to"),
+    ).toEqual({ name: "userProfile", params: { username: "bob" } });
+  });
+
+  it("renders remote mention anchors as external links", () => {
     const wrapper = mountCard({
       source_type: "remote",
-      content: "<p>hi <script>alert(1)</script></p>",
+      content:
+        '<p>hi <a href="https://remote.example/@bob" class="u-url mention">@bob</a></p>',
+      content_type: "text/html",
+    });
+    const link = wrapper.find(".activity-card__content a");
+    expect(link.attributes("href")).toBe("https://remote.example/@bob");
+    expect(link.attributes("target")).toBe("_blank");
+    expect(link.text()).toBe("@bob");
+  });
+
+  it("linkifies bare remote handles using the mentions list", () => {
+    const wrapper = mountCard({
+      source_type: "remote",
+      content: "hi @bob@remote.example",
+      mentions: [
+        {
+          handle: "@bob@remote.example",
+          actor_url: "https://remote.example/users/bob",
+        },
+      ],
+    });
+    const link = wrapper.find(".activity-card__content a");
+    expect(link.attributes("href")).toBe("https://remote.example/users/bob");
+    expect(link.text()).toBe("@bob@remote.example");
+  });
+
+  it("linkifies bare local handles to the profile route", () => {
+    const wrapper = mountCard({
+      source_type: "remote",
+      content: "hi @bob",
+      content_source: null,
+    });
+    const links = wrapper.findAllComponents({ name: "RouterLink" });
+    expect(
+      links
+        .find((link) => link.props("to")?.name === "userProfile")
+        ?.props("to"),
+    ).toEqual({ name: "userProfile", params: { username: "bob" } });
+  });
+
+  it("routes hashtag anchors to the tag route", () => {
+    const wrapper = mountCard({
+      content:
+        '<a href="https://remote.example/tags/music" rel="tag">#music</a>',
+    });
+    const links = wrapper.findAllComponents({ name: "RouterLink" });
+    expect(
+      links.find((link) => link.props("to")?.name === "tag")?.props("to"),
+    ).toEqual({ name: "tag", params: { name: "music" } });
+  });
+
+  it("never renders remote HTML verbatim", () => {
+    const wrapper = mountCard({
+      source_type: "remote",
+      content: "<p>hi <script>alert(1)</script><b>bold</b></p>",
       content_type: "text/html",
     });
     const content = wrapper.find(".activity-card__content");
     expect(content.element.innerHTML).not.toContain("<script");
+    expect(content.element.innerHTML).not.toContain("<b>");
     expect(content.text()).toContain("hi");
+    expect(content.text()).toContain("bold");
   });
 
   it("shows like edit and copy URL actions for the authenticated owner", () => {

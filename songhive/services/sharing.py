@@ -43,12 +43,13 @@ async def create_share_grant(
     item_id: str,
     user_id: str,
     created_by: str,
-) -> ShareGrant:
+) -> Tuple[ShareGrant, bool]:
     """
     Create a share grant for ``user_id`` on ``(item_type, item_id)``.
 
-    If an identical grant already exists, the existing row is returned instead
-    of raising a uniqueness error.
+    Returns ``(grant, created)``.  If an identical grant already exists, the
+    existing row is returned with ``created=False`` instead of raising a
+    uniqueness error.
     """
     grant = ShareGrant(
         item_type=item_type,
@@ -69,10 +70,10 @@ async def create_share_grant(
         # already been rolled back, leaving the outer transaction intact.
         existing = await _get_share_grant(session, item_type, item_id, user_id)
         if existing is not None:
-            return existing
+            return existing, False
         raise
 
-    return grant
+    return grant, True
 
 
 async def _get_share_grant(

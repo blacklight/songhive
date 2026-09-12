@@ -7,6 +7,7 @@ import { useToastStore } from "@/stores/toast";
 import {
   enrichImages,
   provisionFederationKeys,
+  purgeNotifications,
   rehashAudio,
   syncTags,
   triggerStorageCleanup,
@@ -30,6 +31,7 @@ type LoadingTask =
   | "rehashAudio"
   | "provisionFederationKeys"
   | "enrichImages"
+  | "purgeNotifications"
   | null;
 
 const loadingTask = ref<LoadingTask>(null);
@@ -254,6 +256,29 @@ async function onEnrichImages() {
     showError("pages.admin.tasks.enrichImages.triggerError", err);
   }
 }
+
+async function onPurgeNotifications() {
+  const ok = await confirm({
+    title: t("common.confirm"),
+    message: t("pages.admin.tasks.notificationPurge.description"),
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    await runWithLoading("purgeNotifications", async () => {
+      const result = await purgeNotifications();
+      toastStore.push({
+        type: "success",
+        message: t("pages.admin.tasks.notificationPurge.triggered", {
+          count: result.deleted,
+        }),
+      });
+    });
+  } catch (err) {
+    showError("pages.admin.tasks.notificationPurge.triggerError", err);
+  }
+}
 </script>
 
 <template>
@@ -408,6 +433,24 @@ async function onEnrichImages() {
         @click="onEnrichImages"
       >
         {{ t("pages.admin.tasks.enrichImages.trigger") }}
+      </AppButton>
+    </section>
+
+    <section class="tasks-view__card">
+      <h2 class="tasks-view__card-title">
+        <AppIcon name="bell-slash" spacing="right" />
+        {{ t("pages.admin.tasks.notificationPurge.title") }}
+      </h2>
+      <p class="tasks-view__description">
+        {{ t("pages.admin.tasks.notificationPurge.description") }}
+      </p>
+      <AppButton
+        :loading="loadingTask === 'purgeNotifications'"
+        :disabled="loadingTask !== null"
+        icon="bell-slash"
+        @click="onPurgeNotifications"
+      >
+        {{ t("pages.admin.tasks.notificationPurge.trigger") }}
       </AppButton>
     </section>
   </div>

@@ -19,8 +19,11 @@ from songhive.services import sharing
 async def test_create_share_grant(db_session, regular_user, make_user):
     """create_share_grant persists and returns a grant."""
     other_user = await make_user("other", email_verified=True)
-    grant = await sharing.create_share_grant(db_session, "track", "track-1", other_user.id, created_by=regular_user.id)
+    grant, created = await sharing.create_share_grant(
+        db_session, "track", "track-1", other_user.id, created_by=regular_user.id
+    )
 
+    assert created is True
     assert grant.item_type == "track"
     assert grant.item_id == "track-1"
     assert grant.user_id == other_user.id
@@ -32,9 +35,15 @@ async def test_create_share_grant_duplicate_returns_existing(db_session, regular
     """Creating the same grant twice returns the existing row."""
     other_user = await make_user("other", email_verified=True)
 
-    grant1 = await sharing.create_share_grant(db_session, "track", "track-1", other_user.id, created_by=regular_user.id)
-    grant2 = await sharing.create_share_grant(db_session, "track", "track-1", other_user.id, created_by=regular_user.id)
+    grant1, created1 = await sharing.create_share_grant(
+        db_session, "track", "track-1", other_user.id, created_by=regular_user.id
+    )
+    grant2, created2 = await sharing.create_share_grant(
+        db_session, "track", "track-1", other_user.id, created_by=regular_user.id
+    )
 
+    assert created1 is True
+    assert created2 is False
     assert grant1 is grant2
 
 
@@ -165,7 +174,7 @@ async def test_count_share_grants_and_tokens(db_session, regular_user, make_user
 async def test_revoke_share_grant_by_id(db_session, regular_user, make_user):
     """revoke_share_grant_by_id deletes an existing grant and returns False for missing."""
     other = await make_user("other", email_verified=True)
-    grant = await sharing.create_share_grant(
+    grant, _ = await sharing.create_share_grant(
         db_session,
         "track",
         "track-1",

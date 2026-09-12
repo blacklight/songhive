@@ -37,12 +37,13 @@ from ..models.activity import (
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
+from ..models.notification import NotificationType
 from ..models.playlist import Playlist
 from ..models.tag import Tag
 from ..models.track import Track
 from ..models.user import User
 from . import federation as federation_service
-from .acl import can_access, can_manage
+from .acl import can_access, can_manage, get_item_plural
 from .mentions import process_mentions, tag_url_factory
 from .tags import _entity_access_predicate, get_or_create_tag, validate_tag_name
 
@@ -896,11 +897,39 @@ async def update_activity(
             tags.extend(tag for tag in processed.tags if str(tag.get("name", "")).lower() not in seen)
         obj["updated"] = datetime.now(timezone.utc).isoformat()
         flag_modified(activity, "payload")
+        await _refresh_notifications_for_object(session, activity.source_id, obj)
 
     await _sync_activity_tags(session, activity, processed.tag_names)
     await session.flush()
     await session.refresh(activity, ["mentions"])
     return activity
+
+
+async def _refresh_notifications_for_object(
+    session: AsyncSession,
+    object_id: Optional[str],
+    object_doc: dict,
+) -> None:
+    """Rewrite notification snapshots of ``object_doc`` after an edit.
+
+    ``mention``/``reply``/``quote`` notifications denormalize the object's
+    renderable fields at creation (``object_*`` payload keys); when the
+    object is edited, rows sourced from it are patched so they keep
+    rendering current content. Flushes without committing; the caller owns
+    the transaction.
+    """
+    if not object_id:
+        return
+    from ..federation.notifications import _note_snapshot
+    from . import notifications as notifications_service
+
+    note = _note_snapshot(object_doc)
+    fields = {key: note.get(key) for key in notifications_service.OBJECT_SNAPSHOT_KEYS}
+    await notifications_service.update_notifications_referencing(
+        session,
+        [object_id],
+        fields_for=(lambda notification: dict(fields) if notification.type in ("mention", "reply", "quote") else None),
+    )
 
 
 async def like_activity(
@@ -969,7 +998,59 @@ async def like_activity(
         activity_id=like.source_id,
     )
     await session.flush()
+    await _notify_like(session, activity=activity, like=like, author=author)
     return like
+
+
+async def _notify_like(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    like: Activity,
+    author: User,
+) -> None:
+    """Notify the liked activity's local owner, never failing the like.
+
+    Mirrors the federated ``Like`` inbox path: ``source_url`` is the liked
+    object's id and ``payload.activity_id`` the like's own object id, so
+    ``retract_activity`` removes the row when the like is undone or the
+    liked activity is retracted. Remote-authored activities carry no
+    ``owner_user_id`` — their authors are reached through fan-out instead.
+    Self-likes and notification failures never produce or break anything.
+    """
+    if activity.owner_user_id is None or str(activity.owner_user_id) == str(author.id):
+        return
+    try:
+        from . import notifications as notifications_service
+
+        entity = await resolve_entity(session, activity.entity_type, activity.entity_id)
+        plural = get_item_plural(activity.entity_type) or f"{activity.entity_type}s"
+        payload: Dict[str, Any] = {
+            "activity_id": like.source_id,
+            "actor_name": author.display_name or author.username,
+            "actor_avatar_url": author.avatar_url,
+        }
+        if author.display_name:
+            payload["actor_display_name"] = author.display_name
+        if entity is not None:
+            payload.update(
+                {
+                    "item_type": activity.entity_type,
+                    "item_id": str(activity.entity_id),
+                    "item_title": getattr(entity, "title", None) or getattr(entity, "name", None),
+                    "local_url": f"/{plural}/{activity.entity_id}",
+                }
+            )
+        await notifications_service.create_notification(
+            session,
+            user_id=str(activity.owner_user_id),
+            type=NotificationType.LIKE,
+            actor_url=_local_actor_url(author),
+            source_url=activity.source_id,
+            payload=payload,
+        )
+    except Exception as exc:
+        logger.warning("Failed to create like notification for activity %s: %s", activity.id, exc)
 
 
 async def _remote_mention_actor_urls(
@@ -1635,6 +1716,7 @@ async def sync_track_publications(
         payload["object"] = rebuilt
         flag_modified(activity, "payload")
         activity.content = rebuilt.get("content")
+        await _refresh_notifications_for_object(session, activity.source_id, rebuilt)
 
         source_text = activity.content_source or getattr(track, "description", None) or ""
         if not source_text and rebuilt.get("content"):
@@ -1675,10 +1757,16 @@ async def retract_activity(session: AsyncSession, activity: Activity) -> None:
     committing; the caller owns the transaction.
     """
     from ..federation.activities import create_tombstone_delete_activity
+    from . import notifications as notifications_service
     from .deletion import enqueue_activity_delivery, get_activity_unpublish_info
 
     if activity.deleted_at is not None:
         return
+
+    # Notifications that point at this activity (likes/boosts on it,
+    # replies and quotes targeting it) are no longer applicable.
+    if activity.source_id:
+        await notifications_service.retract_notifications_referencing(session, [activity.source_id])
 
     if activity.source_type != "local":
         await session.delete(activity)

@@ -246,3 +246,139 @@ def test_shared_user_can_access_private_playlist(client, regular_user, other_use
     get_response = client.get(f"/api/v1/playlists/{private_playlist['id']}", headers=auth_headers(other_user))
     assert get_response.status_code == 200
     assert get_response.json()["id"] == private_playlist["id"]
+
+
+@pytest.mark.asyncio
+async def test_share_grant_creates_notification(
+    client, db_session, regular_user, other_user, auth_headers, private_library
+):
+    """Granting a share to another user creates a share notification."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    response = client.post(
+        "/api/v1/shares",
+        json={
+            "item_type": "library",
+            "item_id": private_library["id"],
+            "user_id": str(other_user.id),
+        },
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 201
+
+    result = await db_session.execute(
+        select(Notification).where(
+            Notification.user_id == other_user.id,
+            Notification.type == "share",
+        )
+    )
+    notification = result.scalar_one()
+    assert notification.source_url == f"/libraries/{private_library['id']}"
+    assert notification.payload["item_type"] == "library"
+    assert notification.payload["item_title"] == "Private Library"
+
+
+@pytest.mark.asyncio
+async def test_share_grant_to_self_creates_no_notification(
+    client, db_session, regular_user, auth_headers, private_library
+):
+    """Granting a share to yourself does not create a notification."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    response = client.post(
+        "/api/v1/shares",
+        json={
+            "item_type": "library",
+            "item_id": private_library["id"],
+            "user_id": str(regular_user.id),
+        },
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 201
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == regular_user.id))
+    assert result.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_share_grant_creates_no_notification(
+    client, db_session, regular_user, other_user, auth_headers, private_library
+):
+    """Re-granting an existing share does not create a second notification."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    payload = {
+        "item_type": "library",
+        "item_id": private_library["id"],
+        "user_id": str(other_user.id),
+    }
+    headers = auth_headers(regular_user)
+    client.post("/api/v1/shares", json=payload, headers=headers)
+    client.post("/api/v1/shares", json=payload, headers=headers)
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == other_user.id))
+    assert len(result.scalars().all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_revoke_share_grant_removes_notification(
+    client, db_session, regular_user, other_user, auth_headers, private_library
+):
+    """Revoking a share grant retracts the share notification it produced."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    created = client.post(
+        "/api/v1/shares",
+        json={
+            "item_type": "library",
+            "item_id": private_library["id"],
+            "user_id": str(other_user.id),
+        },
+        headers=auth_headers(regular_user),
+    ).json()
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == other_user.id))
+    assert [n.type for n in result.scalars().all()] == ["share"]
+
+    response = client.delete(f"/api/v1/shares/{created['id']}", headers=auth_headers(regular_user))
+    assert response.status_code == 204
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == other_user.id))
+    assert result.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_shared_item_removes_notification(
+    client, db_session, regular_user, other_user, auth_headers, private_library
+):
+    """Deleting a shared item removes the share notifications pointing at it."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    client.post(
+        "/api/v1/shares",
+        json={
+            "item_type": "library",
+            "item_id": private_library["id"],
+            "user_id": str(other_user.id),
+        },
+        headers=auth_headers(regular_user),
+    )
+
+    response = client.delete(
+        f"/api/v1/libraries/{private_library['id']}",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 204
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == other_user.id))
+    assert result.scalars().all() == []

@@ -25,6 +25,7 @@ import {
   provisionFederationKeys,
   listCeleryTasks,
   terminateCeleryTasks,
+  purgeNotifications,
   type AdminUserResponse,
   type AdminInviteResponse,
   type AdminInviteCreateRequest,
@@ -358,5 +359,14 @@ describe("admin endpoints", () => {
       body,
     });
     expect(result).toEqual({ terminated: 2 });
+  });
+
+  it("purgeNotifications sends POST to /admin/notifications/purge", async () => {
+    apiRequest.mockResolvedValueOnce({ deleted: 7 });
+    const result = await purgeNotifications();
+    expect(apiRequest).toHaveBeenCalledWith("/admin/notifications/purge", {
+      method: "POST",
+    });
+    expect(result).toEqual({ deleted: 7 });
   });
 });

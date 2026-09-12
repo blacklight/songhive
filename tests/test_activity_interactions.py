@@ -9,11 +9,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import requests
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from songhive.federation.activities import AS_PUBLIC, create_like_activity
 from songhive.models._enums import Visibility
 from songhive.models.activity import Activity, ActivityMention
 from songhive.models.artist import Artist
+from songhive.models.notification import Notification
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.services import activities as activity_service
@@ -304,6 +306,90 @@ async def test_like_activity_mentions_address_original_audience(db_session, regu
     like = await like_activity(db_session, activity=activity, author=regular_user)
 
     assert sorted(like.payload["to"]) == sorted([other_user.actor_url, "https://remote.example/users/bob"])
+
+
+# ---------------------------------------------------------------------------
+# like_activity notifications
+# ---------------------------------------------------------------------------
+
+
+async def _notifications_for(session, user_id) -> list[Notification]:
+    result = await session.execute(select(Notification).where(Notification.user_id == user_id))
+    return list(result.scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_like_activity_notifies_local_owner(db_session, regular_user, other_user):
+    """Liking another local user's activity creates a like notification."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    like = await like_activity(db_session, activity=activity, author=regular_user)
+
+    notifications = await _notifications_for(db_session, other_user.id)
+    assert len(notifications) == 1
+    notification = notifications[0]
+    assert notification.type == "like"
+    assert notification.actor_url == f"urn:songhive:user:{regular_user.username}"
+    assert notification.source_url == activity.source_id
+    payload = notification.payload
+    assert payload["activity_id"] == like.source_id
+    assert payload["actor_name"] == regular_user.username
+    assert payload["item_type"] == "track"
+    assert payload["item_id"] == str(track.id)
+    assert payload["item_title"] == track.title
+    assert payload["local_url"] == f"/tracks/{track.id}"
+
+
+@pytest.mark.asyncio
+async def test_like_activity_self_like_no_notification(db_session, regular_user):
+    """Liking one's own activity does not notify."""
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    await like_activity(db_session, activity=activity, author=regular_user)
+
+    assert await _notifications_for(db_session, regular_user.id) == []
+
+
+@pytest.mark.asyncio
+async def test_like_activity_remote_target_no_notification(db_session, regular_user, other_user):
+    """Liking a remote-authored activity (no local owner) does not notify."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=None,
+        source_type="remote",
+        source_actor="https://remote.example/users/bob",
+        source_id="https://remote.example/users/bob/objects/1",
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    await like_activity(db_session, activity=activity, author=regular_user)
+
+    assert await _notifications_for(db_session, other_user.id) == []
+
+
+@pytest.mark.asyncio
+async def test_like_activity_retract_removes_notification(db_session, regular_user, other_user):
+    """Retracting the like removes the notification it produced."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    like = await like_activity(db_session, activity=activity, author=regular_user)
+    assert await _notifications_for(db_session, other_user.id) != []
+
+    await activity_service.retract_activity(db_session, like)
+
+    assert await _notifications_for(db_session, other_user.id) == []
 
 
 # ---------------------------------------------------------------------------

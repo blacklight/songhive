@@ -199,7 +199,9 @@
     "users": "Users",
     "search": "Search",
     "externalLibraries": "External libraries",
-    "login": "Log in"
+    "login": "Log in",
+    "notifications": "Notifications",
+    "unreadNotifications": "{count} unread notifications"
   },
   "errors": {
     "unknown": "Something went wrong. Please try again.",
@@ -516,6 +518,13 @@
           "triggered": "Image enrichment queued for {artists} artist(s) and {albums} album(s).",
           "dryRunTriggered": "Dry run complete: {artists} artist(s) and {albums} album(s) would be enriched.",
           "triggerError": "Could not trigger image enrichment: {message}"
+        },
+        "notificationPurge": {
+          "title": "Purge notifications",
+          "description": "Delete seen notifications older than the configured retention period. This cannot be undone.",
+          "trigger": "Purge notifications",
+          "triggered": "Purged {count} notification(s).",
+          "triggerError": "Could not purge notifications: {message}"
         }
       },
       "celery": {
@@ -661,7 +670,8 @@
       "tracks": "Tracks",
       "albums": "Albums",
       "libraries": "Libraries",
-      "playlists": "Playlists"
+      "playlists": "Playlists",
+      "notifications": "Notifications"
     },
     "copyHandle": "Copy fediverse handle",
     "displayName": "Display name",
@@ -1071,5 +1081,69 @@
       "done": "Activity deleted.",
       "error": "Could not delete this activity."
     }
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "No notifications yet.",
+    "emptyUnread": "No unread notifications.",
+    "emptyFiltered": "No notifications match the selected types.",
+    "filters": {
+      "all": "All",
+      "unread": "Unread",
+      "types": "Filter by type"
+    },
+    "markAllRead": "Mark all as read",
+    "unreadCount": "{count} unread notification | {count} unread notifications",
+    "toast": "{actor} {action}",
+    "markRead": "Mark as read",
+    "markUnread": "Mark as unread",
+    "select": "Select",
+    "done": "Done",
+    "selectAll": "Select all",
+    "selectRow": "Select notification",
+    "dismiss": "Dismiss",
+    "deleteSelected": "Delete selected",
+    "clearAll": "Clear all",
+    "clearAllTitle": "Clear all notifications?",
+    "clearAllConfirm": "This permanently deletes every notification. This cannot be undone.",
+    "loadMore": "Load more",
+    "types": {
+      "follow": "started following you",
+      "like": "liked your post",
+      "boost": "boosted your post",
+      "quote": "quoted your post",
+      "reply": "replied to your post",
+      "mention": "mentioned you",
+      "share": "shared a track with you",
+      "unknown": "sent you a notification"
+    },
+    "someone": "Someone",
+    "errors": {
+      "updateFailed": "Could not update notifications: {message}",
+      "deleteFailed": "Could not delete notifications: {message}"
+    },
+    "settings": {
+      "title": "Notification settings",
+      "hint": "Choose how you want to be notified for each activity type.",
+      "type": "Type",
+      "inApp": "In-app",
+      "email": "Email",
+      "emailDigest": "Daily digest",
+      "save": "Save preferences",
+      "saved": "Notification preferences saved.",
+      "saveFailed": "Could not save notification preferences: {message}",
+      "loadFailed": "Could not load notification preferences: {message}",
+      "emailUnverified": "Email delivery requires a verified email address. Verify your email to enable email notifications.",
+      "typeNames": {
+        "follow": "Follows",
+        "like": "Likes",
+        "boost": "Boosts",
+        "quote": "Quotes",
+        "reply": "Replies",
+        "mention": "Mentions",
+        "share": "Shares"
+      }
+    },
+    "onItem": "on {title}"
   }
 }

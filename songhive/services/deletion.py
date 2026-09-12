@@ -36,7 +36,8 @@ from ..models.track import Track
 from ..models.transcoded_file import TranscodedFile
 from ..models.upload import Upload
 from ..models.user import User
-from ..services.acl import can_manage
+from ..services import notifications as notifications_service
+from ..services.acl import can_manage, get_item_plural
 from ..services.auth import get_user_by_id
 from ..services.storage import StorageService
 
@@ -325,6 +326,7 @@ async def delete_stored_file(
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "file", ShareGrant.item_id == file_id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "file", ShareToken.item_id == file_id))
     await session.execute(delete(Report).where(Report.target_type == "file", Report.target_id == file_id))
+    await _retract_entity_notifications(session, "file", file_id)
 
     await _maybe_delete_stored_file(session, storage, stored)
     return unpublish
@@ -764,4 +766,31 @@ async def cascade_delete_entity(
         else:
             await session.delete(activity)
 
+    await _retract_entity_notifications(
+        session,
+        entity_type,
+        entity_id,
+        extra_urls=[a.source_id for a in activities if a.source_id],
+    )
+
     return retracted
+
+
+async def _retract_entity_notifications(
+    session: AsyncSession,
+    entity_type: str,
+    entity_id: str,
+    *,
+    extra_urls: Optional[List[str]] = None,
+) -> None:
+    """Remove notifications that reference a deleted entity.
+
+    Covers share/like deep-links (``/{plural}/{entity_id}``) and any extra
+    URLs callers pass, such as the ``source_id`` of retracted activities.
+    """
+    urls = list(extra_urls or [])
+    plural = get_item_plural(entity_type)
+    if plural:
+        urls.append(f"/{plural}/{entity_id}")
+    if urls:
+        await notifications_service.retract_notifications_referencing(session, urls)

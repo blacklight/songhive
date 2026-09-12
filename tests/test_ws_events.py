@@ -6,6 +6,7 @@ import asyncio
 import json
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 import tornado.testing
@@ -14,6 +15,7 @@ from sqlalchemy.pool import NullPool
 from tornado.httpclient import HTTPError, HTTPRequest
 from tornado.websocket import websocket_connect
 
+import songhive.ws.events as ws_events
 from songhive.api.app import create_app
 from songhive.api.middleware.auth import create_access_token
 from songhive.app import _build_tornado_app
@@ -33,6 +35,7 @@ class TestEventWebSocket(tornado.testing.AsyncHTTPTestCase):
     async def _seed(self):
         async with get_session() as session:
             self.user = await create_user(session, "wsuser", "wsuser@example.com", "secret")
+            self.other = await create_user(session, "wsother", "wsother@example.com", "secret")
             self.inactive = await create_user(
                 session,
                 "wsinactive",
@@ -55,17 +58,25 @@ class TestEventWebSocket(tornado.testing.AsyncHTTPTestCase):
         self.io_loop.run_sync(self._create_tables)
         self.io_loop.run_sync(self._seed)
         self.token = create_access_token(str(self.user.id), self.config.auth.secret_key)
+        self.other_token = create_access_token(str(self.other.id), self.config.auth.secret_key)
         self.inactive_token = create_access_token(str(self.inactive.id), self.config.auth.secret_key)
         EventWebSocket._connections.clear()
         EventWebSocket._allowed_origins = None
+        EventWebSocket._auth_failures.clear()
+        # Capture pub/sub envelopes instead of publishing to a real Redis.
+        self._published: list[dict] = []
+        self._orig_publish = ws_events._publish_envelope
+        ws_events._publish_envelope = self._published.append
 
     def tearDown(self):
+        ws_events._publish_envelope = self._orig_publish
         self.io_loop.run_sync(self.engine.dispose)
         reset_db()
         super().tearDown()
         shutil.rmtree(self._tmp, ignore_errors=True)
         EventWebSocket._connections.clear()
         EventWebSocket._allowed_origins = None
+        EventWebSocket._auth_failures.clear()
 
     def get_app(self):
         from fakeredis.aioredis import FakeRedis
@@ -139,6 +150,18 @@ class TestEventWebSocket(tornado.testing.AsyncHTTPTestCase):
         self._read(client, timeout=1.0)
         assert client.close_code == 4001
 
+    def test_repeated_auth_failures_are_throttled(self):
+        """Consecutive rejected handshakes with the same token are delayed."""
+        first = time.monotonic()
+        client = self._ws_connect("/ws/", "throttle-me")
+        assert client.close_code == 4001
+        assert time.monotonic() - first < 0.9
+
+        second = time.monotonic()
+        client = self._ws_connect("/ws/", "throttle-me")
+        assert client.close_code == 4001
+        assert time.monotonic() - second >= 0.9
+
     def test_disallowed_origin_rejected(self):
         """A connection from a disallowed Origin is refused during the handshake."""
         with self.assertRaises(HTTPError) as ctx:
@@ -148,6 +171,22 @@ class TestEventWebSocket(tornado.testing.AsyncHTTPTestCase):
                 headers={"Origin": "http://evil.com"},
             )
         assert ctx.exception.code == 403
+
+    def test_same_host_origin_allowed(self):
+        """An Origin matching the request Host is accepted without config.
+
+        This mirrors the standard deployment: the SPA and /ws are same-origin
+        (nginx proxying both, or Vite forwarding /ws in dev), so no
+        cors_origins entry is required.
+        """
+        port = self.get_http_port()
+        client = self._ws_connect(
+            "/ws/",
+            self.token,
+            headers={"Origin": f"http://localhost:{port}"},
+        )
+        assert client is not None
+        client.close()
 
     def test_subscribe_and_receive_topic_broadcast(self):
         """A subscribed client receives only matching and untopiced broadcasts."""
@@ -241,4 +280,167 @@ class TestEventWebSocket(tornado.testing.AsyncHTTPTestCase):
         assert msg is not None
         payload = json.loads(msg)
         assert payload["type"] == "announcement"
+        client.close()
+
+    def test_send_to_user_only_reaches_target_user(self):
+        """send_to_user delivers only to connections of the addressed user."""
+        client = self._ws_connect(
+            "/ws/",
+            self.token,
+            headers={"Origin": "http://localhost:8080"},
+        )
+        other_client = self._ws_connect(
+            "/ws/",
+            self.other_token,
+            headers={"Origin": "http://localhost:8080"},
+        )
+
+        EventWebSocket.send_to_user(str(self.user.id), "notification", {"id": "n-1"})
+        msg = self._read(client)
+        assert msg is not None
+        payload = json.loads(msg)
+        assert payload["type"] == "notification"
+        assert payload["data"]["id"] == "n-1"
+
+        with self.assertRaises(asyncio.TimeoutError):
+            self._read(other_client, timeout=0.5)
+
+        # A user with no connections is a no-op (no exception).
+        EventWebSocket.send_to_user("no-such-user", "notification", {"id": "n-2"})
+        with self.assertRaises(asyncio.TimeoutError):
+            self._read(client, timeout=0.5)
+
+        client.close()
+        other_client.close()
+
+    def test_broadcast_publishes_envelope(self):
+        """broadcast() publishes a cross-process envelope to the bus."""
+        EventWebSocket.broadcast("import.completed", {"library_id": "lib-1"}, topic="import")
+        assert self._published == [
+            {
+                "src": ws_events._PROCESS_ID,
+                "kind": "broadcast",
+                "type": "import.completed",
+                "topic": "import",
+                "data": {"library_id": "lib-1"},
+            }
+        ]
+
+    def test_send_to_user_publishes_envelope(self):
+        """send_to_user() publishes a cross-process envelope to the bus."""
+        EventWebSocket.send_to_user("user-1", "notification", {"id": "n-1"})
+        assert self._published == [
+            {
+                "src": ws_events._PROCESS_ID,
+                "kind": "user",
+                "user_id": "user-1",
+                "type": "notification",
+                "data": {"id": "n-1"},
+            }
+        ]
+
+    def test_deliver_envelope_from_other_process(self):
+        """Envelopes from other processes reach the addressed local clients."""
+        client = self._ws_connect(
+            "/ws/",
+            self.token,
+            headers={"Origin": "http://localhost:8080"},
+        )
+
+        EventWebSocket.deliver_envelope(
+            {
+                "src": "other-process",
+                "kind": "user",
+                "user_id": str(self.user.id),
+                "type": "notification",
+                "data": {"id": "n-1"},
+            }
+        )
+        msg = self._read(client)
+        assert msg is not None
+        payload = json.loads(msg)
+        assert payload["type"] == "notification"
+        assert payload["data"]["id"] == "n-1"
+
+        client.close()
+
+    def test_deliver_envelope_skips_own_and_malformed(self):
+        """Own-process and malformed envelopes are not re-delivered."""
+        client = self._ws_connect(
+            "/ws/",
+            self.token,
+            headers={"Origin": "http://localhost:8080"},
+        )
+
+        # Own-process envelopes were already delivered locally by
+        # broadcast()/send_to_user(); delivering them again would duplicate.
+        EventWebSocket.deliver_envelope(
+            {
+                "src": ws_events._PROCESS_ID,
+                "kind": "broadcast",
+                "type": "announcement",
+                "topic": None,
+                "data": {"msg": "dup"},
+            }
+        )
+        for bad in (
+            "not-a-dict",
+            {"src": "other", "kind": "user"},  # no type/data
+            {"src": "other", "kind": "user", "type": "x", "data": {}},  # no user_id
+            {"src": "other", "kind": "unknown", "type": "x", "data": {}},
+        ):
+            EventWebSocket.deliver_envelope(bad)
+
+        with self.assertRaises(asyncio.TimeoutError):
+            self._read(client, timeout=0.5)
+
+        client.close()
+
+    def test_subscriber_forwards_remote_events(self):
+        """ws_event_subscriber delivers bus messages to local connections."""
+        from fakeredis import FakeRedis, FakeServer
+        from fakeredis.aioredis import FakeRedis as AioFakeRedis
+
+        client = self._ws_connect(
+            "/ws/",
+            self.token,
+            headers={"Origin": "http://localhost:8080"},
+        )
+
+        server = FakeServer()
+        publisher = FakeRedis(server=server)
+        subscriber = AioFakeRedis(server=server, decode_responses=True)
+
+        holder: dict = {}
+
+        async def _start():
+            holder["task"] = asyncio.ensure_future(ws_events.ws_event_subscriber(subscriber))
+
+        self.io_loop.run_sync(_start)
+        self._sleep(0.1)
+
+        publisher.publish(
+            ws_events.WS_EVENTS_CHANNEL,
+            json.dumps(
+                {
+                    "src": "celery-worker",
+                    "kind": "user",
+                    "user_id": str(self.user.id),
+                    "type": "notification",
+                    "data": {"id": "n-9"},
+                }
+            ),
+        )
+
+        msg = self._read(client)
+        assert msg is not None
+        payload = json.loads(msg)
+        assert payload["type"] == "notification"
+        assert payload["data"]["id"] == "n-9"
+
+        async def _stop():
+            holder["task"].cancel()
+            await asyncio.gather(holder["task"], return_exceptions=True)
+
+        self.io_loop.run_sync(_stop)
         client.close()

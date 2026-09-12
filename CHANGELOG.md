@@ -2,6 +2,69 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `notifications`: User notifications for follows, likes, boosts, quotes,
+  replies, mentions, and shares. `Notification` and
+  `NotificationPreference` models back per-type delivery targets (in-app,
+  individual email, daily email digest); `services/notifications.py`
+  resolves preferences, deduplicates unseen rows, pushes targeted
+  WebSocket events (`EventWebSocket.send_to_user`), and enqueues
+  notification emails for verified addresses. Authenticated routes under
+  `/api/v1/notifications/` provide the paginated list, unread count,
+  seen/unseen management, and the preference matrix; scheduled Celery
+  tasks send the daily digest and purge seen rows past
+  `notifications.retention_days`. Admins can purge manually via
+  `POST /api/v1/admin/notifications/purge` (audited), the
+  `/admin/tasks` page, or `songhive admin purge-notifications`.
+  The frontend gains a
+  `/notifications` page with a live unread nav badge, toast alerts for
+  incoming events, IntersectionObserver auto-seen, and a per-type
+  delivery matrix under `/settings?tab=notifications`.
+  Notifications are retracted when their event is undone: local
+  unfavorites and share-grant revocations, activity/entity deletion, user
+  deletion, and federated `Undo`/`Delete` activities all remove the
+  related rows and push a `notification_deleted` WebSocket event to the
+  recipient. Recipients can also dismiss notifications individually or in
+  bulk, mark selections read/unread, and clear everything via
+  `DELETE /notifications/{id}`, `POST /notifications/delete`, and
+  `POST /notifications/clear`. The list can be narrowed by type with a
+  multi-select pill filter (union semantics, empty = all types) backed by
+  the `type` CSV allowlist on `GET /api/v1/notifications/`; incoming
+  events of filtered-out types still bump the unread badge but stay off
+  the list.
+  Notification rows carry a denormalized payload — actor display
+  name/avatar, note content snapshots, and resolved local item references —
+  so `/notifications` renders rich context: a read-only activity card for
+  mentions/replies/quotes, a user card for follows and remote likes/boosts,
+  and a title-and-cover item card for shares and local likes/boosts.
+  Editing an activity propagates to its notifications: local activity and
+  track metadata edits, and incoming federated `Update` activities, refresh
+  the stored content/actor/item fields and push a `notification_updated`
+  WebSocket event; when an edit removes the notification's basis (an
+  unmentioned recipient, a retargeted reply/quote) the row is retracted
+  instead.
+
+### Fixed
+
+- `notifications`: Liking another local user's activity
+  (`POST /api/v1/activities/{id}/like`) now creates a `like` notification
+  for the activity's owner — the hook previously only notified remote
+  authors through federation fan-out. The row records the like's own
+  object id so retracting the like (unlike) removes it.
+- `websockets`: WebSocket events emitted outside the web process (e.g.
+  federated follow/like/boost/reply/mention notifications created by the
+  Celery worker, or `import.*` broadcasts) now reach connected clients.
+  `broadcast`/`send_to_user` publish an envelope to the Redis channel
+  `songhive:ws-events`, and the Tornado process fans it out to local
+  connections via `ws_event_subscriber`.
+- `websockets`: Repeated unauthenticated handshakes (e.g. stale frontend
+  builds retrying an expired token every second) are now throttled
+  server-side: consecutive auth failures per `(remote IP, token)` delay
+  the `4001` close exponentially, capped at 30s.
+
 ## 0.1.0
 
 ### Added

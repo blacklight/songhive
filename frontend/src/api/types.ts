@@ -1746,6 +1746,193 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/notifications/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Notifications
+     * @description List the current user's notifications, newest first.
+     */
+    get: operations["list_notifications_api_v1_notifications__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/notifications/unread-count": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Unread Count
+     * @description Return the number of unseen notifications for the current user.
+     */
+    get: operations["unread_count_api_v1_notifications_unread_count_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/notifications/seen": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mark Seen
+     * @description Mark the given notifications as seen.
+     */
+    post: operations["mark_seen_api_v1_notifications_seen_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/notifications/unseen": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mark Unseen
+     * @description Mark the given notifications as unseen.
+     */
+    post: operations["mark_unseen_api_v1_notifications_unseen_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/notifications/seen-all": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mark All Seen
+     * @description Mark all of the current user's notifications as seen.
+     */
+    post: operations["mark_all_seen_api_v1_notifications_seen_all_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/notifications/{notification_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete Notification
+     * @description Delete one of the current user's notifications.
+     *
+     *     Missing and other users' notifications both return 404 to avoid ID
+     *     enumeration.
+     */
+    delete: operations["delete_notification_api_v1_notifications__notification_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/notifications/delete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Delete Notifications Bulk
+     * @description Delete the given notifications of the current user.
+     */
+    post: operations["delete_notifications_bulk_api_v1_notifications_delete_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/notifications/clear": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Clear Notifications
+     * @description Delete all of the current user's notifications.
+     */
+    post: operations["clear_notifications_api_v1_notifications_clear_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/notifications/preferences": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Preferences
+     * @description Return the merged per-type delivery preference view.
+     */
+    get: operations["get_preferences_api_v1_notifications_preferences_get"];
+    /**
+     * Update Preferences
+     * @description Upsert per-type delivery preferences and return the merged view.
+     */
+    put: operations["update_preferences_api_v1_notifications_preferences_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/history/": {
     parameters: {
       query?: never;
@@ -2396,6 +2583,26 @@ export interface paths {
      * @description Terminate one or more running Celery tasks by id (admin only).
      */
     post: operations["terminate_celery_tasks_endpoint_api_v1_admin_celery_terminate_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/notifications/purge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Purge Notifications
+     * @description Delete seen notifications older than the configured retention (admin only).
+     */
+    post: operations["purge_notifications_api_v1_admin_notifications_purge_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -4256,6 +4463,14 @@ export interface components {
       recursive: boolean;
     };
     /**
+     * DeletedResponse
+     * @description Number of rows removed by a delete operation.
+     */
+    DeletedResponse: {
+      /** Deleted */
+      deleted: number;
+    };
+    /**
      * EnrichImagesRequest
      * @description Request body for bulk image enrichment triggers.
      */
@@ -4877,6 +5092,82 @@ export interface components {
        * @default true
        */
       success: boolean;
+    };
+    /**
+     * NotificationIdsDeleteRequest
+     * @description Payload for bulk deletion.
+     */
+    NotificationIdsDeleteRequest: {
+      /** Ids */
+      ids: string[];
+    };
+    /**
+     * NotificationIdsRequest
+     * @description Payload for bulk seen/unseen updates.
+     */
+    NotificationIdsRequest: {
+      /** Ids */
+      ids: string[];
+    };
+    /**
+     * NotificationPreferenceItem
+     * @description Delivery targets for one notification type.
+     */
+    NotificationPreferenceItem: {
+      /** Type */
+      type: string;
+      /** In App */
+      in_app: boolean;
+      /** Email */
+      email: boolean;
+      /** Email Digest */
+      email_digest: boolean;
+    };
+    /**
+     * NotificationPreferencesResponse
+     * @description Merged preference view: one item per notification type.
+     */
+    NotificationPreferencesResponse: {
+      /** Preferences */
+      preferences: components["schemas"]["NotificationPreferenceItem"][];
+    };
+    /**
+     * NotificationPreferencesUpdate
+     * @description Payload for updating notification preferences.
+     */
+    NotificationPreferencesUpdate: {
+      /** Preferences */
+      preferences: components["schemas"]["NotificationPreferenceItem"][];
+    };
+    /**
+     * NotificationResponse
+     * @description A single notification.
+     */
+    NotificationResponse: {
+      /** Id */
+      id: string;
+      /** Type */
+      type: string;
+      /** Actor Url */
+      actor_url?: string | null;
+      /** Source Url */
+      source_url?: string | null;
+      /** Payload */
+      payload?: {
+        [key: string]: unknown;
+      } | null;
+      /** Seen At */
+      seen_at?: string | null;
+      /** Created At */
+      created_at?: string | null;
+    };
+    /**
+     * NotificationsPurgeResponse
+     * @description Result of a notification purge run.
+     */
+    NotificationsPurgeResponse: {
+      /** Deleted */
+      deleted: number;
     };
     /**
      * OAuth2IntrospectionResponse
@@ -5781,6 +6072,22 @@ export interface components {
       filename?: string | null;
       /** Description */
       description?: string | null;
+    };
+    /**
+     * UnreadCountResponse
+     * @description Number of unseen notifications.
+     */
+    UnreadCountResponse: {
+      /** Count */
+      count: number;
+    };
+    /**
+     * UpdatedResponse
+     * @description Number of rows affected by a bulk update.
+     */
+    UpdatedResponse: {
+      /** Updated */
+      updated: number;
     };
     /**
      * UserLinkInput
@@ -9955,6 +10262,280 @@ export interface operations {
       };
     };
   };
+  list_notifications_api_v1_notifications__get: {
+    parameters: {
+      query?: {
+        seen?: boolean | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NotificationResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unread_count_api_v1_notifications_unread_count_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UnreadCountResponse"];
+        };
+      };
+    };
+  };
+  mark_seen_api_v1_notifications_seen_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NotificationIdsRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UpdatedResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mark_unseen_api_v1_notifications_unseen_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NotificationIdsRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UpdatedResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mark_all_seen_api_v1_notifications_seen_all_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UpdatedResponse"];
+        };
+      };
+    };
+  };
+  delete_notification_api_v1_notifications__notification_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        notification_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_notifications_bulk_api_v1_notifications_delete_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NotificationIdsDeleteRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeletedResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  clear_notifications_api_v1_notifications_clear_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeletedResponse"];
+        };
+      };
+    };
+  };
+  get_preferences_api_v1_notifications_preferences_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NotificationPreferencesResponse"];
+        };
+      };
+    };
+  };
+  update_preferences_api_v1_notifications_preferences_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NotificationPreferencesUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NotificationPreferencesResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_history_api_v1_history__get: {
     parameters: {
       query?: {
@@ -11063,6 +11644,26 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  purge_notifications_api_v1_admin_notifications_purge_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NotificationsPurgeResponse"];
         };
       };
     };

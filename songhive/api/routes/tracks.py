@@ -31,13 +31,12 @@ from ...config.schema import SonghiveConfig
 from ...external.errors import ExternalItemNotFound, ExternalLibraryError, UnsupportedExternalOperation
 from ...external.registry import get_external_adapter
 from ...external.types import ExternalItemRef
-from ...models import Track
-from ...models._enums import Visibility
+from ...models import Track, Visibility
 from ...models.album import Album
 from ...models.external_track import ExternalTrack
 from ...models.stored_file import StoredFile
 from ...models.user import User
-from ...services import acl, activities, audit, deletion, music
+from ...services import acl, activities, audit, deletion, music, notifications
 from ...services.auth import get_user_by_id, get_user_by_username
 from ...services.federation import ensure_user_actor, unpublish_track_activity
 from ...services.genres import (
@@ -231,7 +230,9 @@ async def _rename_track_file(db: AsyncSession, track: Track, new_filename: str) 
     if track.audio_file_id is not None:
         stored = await db.get(StoredFile, track.audio_file_id)
         if stored is not None:
-            filename = _prepare_track_filename(new_filename, str(stored.original_filename))
+            filename = _prepare_track_filename(
+                new_filename, str(stored.original_filename) if stored.original_filename else None
+            )
             stored.original_filename = filename
             track.audio_file = stored
             return filename
@@ -802,6 +803,14 @@ async def update_track(
     # public -> non-public change retracts the publications first.
     if _PUBLICATION_SYNC_FIELDS & body.model_fields_set:
         await activities.sync_track_publications(db, track, config=request.app.state.config)
+        await db.commit()
+
+    # A rename invalidates the ``item_title``/``target_item_title`` copies
+    # stored on notification payloads that reference the track.
+    if "title" in body.model_fields_set:
+        await notifications.refresh_notifications_for_item(
+            db, item_type="track", item_id=str(track.id), title=track.title
+        )
         await db.commit()
 
     if _should_sync_tags(body):

@@ -9,6 +9,7 @@ The client is created from `config.redis.url` and reused via a connection pool.
 import logging
 from typing import Optional
 
+import redis as sync_redis
 from redis.asyncio import Redis
 
 from ..config.schema import SonghiveConfig
@@ -16,6 +17,7 @@ from ..config.schema import SonghiveConfig
 logger = logging.getLogger(__name__)
 
 _redis_client: Optional[Redis] = None
+_sync_redis_client: Optional[sync_redis.Redis] = None
 
 
 def get_redis_client(config: SonghiveConfig) -> Redis:
@@ -36,6 +38,7 @@ def get_redis_client(config: SonghiveConfig) -> Redis:
     global _redis_client
     if _redis_client is None:
         _redis_client = create_redis_client(config)
+        assert _redis_client  # for mypy
         logger.info("Initialized shared Redis client")
     return _redis_client
 
@@ -55,6 +58,28 @@ def create_redis_client(config: SonghiveConfig) -> Redis:
         config.redis.url,
         decode_responses=True,
     )
+
+
+def get_sync_redis_client(config: Optional[SonghiveConfig] = None) -> sync_redis.Redis:
+    """
+    Return a shared synchronous Redis client for the process.
+
+    Used to publish WebSocket event envelopes from contexts where an async
+    client cannot run — Celery tasks execute each job in a fresh
+    ``asyncio.run`` loop, so a cached async client would break with
+    "Future attached to a different loop". A synchronous client is
+    thread-safe and works from any loop or thread. When ``config`` is omitted
+    it is derived from ``load_config([])``, matching the Celery tasks.
+    """
+    global _sync_redis_client
+    if _sync_redis_client is None:
+        if config is None:
+            from ..config import load_config
+
+            config = load_config([])
+        _sync_redis_client = sync_redis.Redis.from_url(config.redis.url)
+        assert _sync_redis_client  # for mypy
+    return _sync_redis_client
 
 
 async def close_redis_client(client: Optional[Redis] = None) -> None:

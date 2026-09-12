@@ -281,6 +281,7 @@ these subsections:
 | `auth`         | registration_mode, secret_key, token TTLs, rate_limit, trusted_proxy_hops |
 | `email`        | smtp_host, smtp_port, smtp_user, from_address, tls settings   |
 | `musicbrainz`  | enabled, user_agent, cover_art, artist_image settings       |
+| `notifications`| retention_days, purge_hour, digest_hour                     |
 | `imports`      | scan_roots, bulk_import_sync_threshold                        |
 | `streaming`    | max_bitrate, max_bitrate_by_role, default_bitrate, chunk_size, transcode_cache_enabled |
 
@@ -1073,6 +1074,150 @@ via the `require_access` FastAPI dependency used by resource routes.
 
 ---
 
+## Notifications
+
+`models/notification.py` defines `Notification` (recipient `user_id`,
+`type`, optional `actor_url`/`source_url`, JSON `payload`,
+`delivered_targets`, `seen_at`, `digest_sent_at`) and
+`NotificationPreference` (unique per `(user_id, type)` with `in_app`,
+`email`, and `email_digest` toggles). The seven notification types are
+`follow`, `like`, `boost`, `quote`, `reply`, `mention`, and `share`.
+
+`services/notifications.py` creates notifications: it resolves the
+recipient's per-type targets (defaults when no preference row exists are
+in-app on, email and digest off), skips creation entirely when all targets
+are disabled, and deduplicates on `(user, type, actor_url, source_url)`
+against existing unseen rows. When `in_app` is enabled it pushes a
+`notification` event over the WebSocket bus via
+`EventWebSocket.send_to_user`, delivered only to the recipient's
+connections. When `email` is enabled and the recipient has a verified email
+address it enqueues `tasks/email.py`'s `send_notification_email`. Rows with
+`email_digest` enabled are collected by the scheduled
+`send_notification_digest` task, which groups pending rows per user, sends
+one plain-text email, and stamps `digest_sent_at` only after a successful
+send. `purge_seen_notifications` deletes seen rows older than
+`notifications.retention_days` (default 90). Hook and email failures are
+logged and swallowed so they never break the originating operation.
+
+The same module also removes and rewrites notifications:
+`delete_notifications` and `clear_notifications` handle recipient-scoped
+manual deletion, while `retract_notifications` (filtering on recipient,
+type, actor URL variants, and `source_url`) and
+`retract_notifications_referencing` (matching `source_url`,
+`payload.target_url`, and `payload.activity_id`; dialect-aware for
+PostgreSQL vs SQLite/MySQL JSON extraction) clean up rows whose
+underlying event was undone or deleted. Every deletion path pushes a
+`notification_deleted` event (`{"ids": [...]}`) to each affected
+recipient over the WebSocket bus. `update_notifications_referencing`
+rewrites the managed snapshot fields of rows referencing a set of
+activity/object URLs, `update_notifications_from_actor` refreshes actor
+metadata (`actor_name`/`actor_display_name`/`actor_avatar_url`) on rows
+produced by a given actor, and `refresh_notifications_for_item` updates
+`item_title`/`target_item_title`/`track_title` on rows referencing a
+local item; each pushes
+a `notification_updated` event carrying the changed rows. Updates only
+touch managed fields — unrelated payload keys and read/unread state are
+preserved, and missing source fields remove stale keys. Service helpers
+flush but never commit.
+
+REST API (`api/routes/notifications.py`; every endpoint is authenticated
+and scoped to the current user):
+
+| Route | Description |
+|-------|-------------|
+| `GET /api/v1/notifications/` | Newest-first list, `seen` filter, `type` CSV allowlist, `limit`/`offset` + `X-Total-Count` |
+| `GET /api/v1/notifications/unread-count` | Unseen count for the nav badge |
+| `POST /api/v1/notifications/seen` | Mark ids seen |
+| `POST /api/v1/notifications/unseen` | Mark ids unseen |
+| `POST /api/v1/notifications/seen-all` | Mark all current-user rows seen |
+| `DELETE /api/v1/notifications/{id}` | Delete one owned notification |
+| `POST /api/v1/notifications/delete` | Bulk delete owned ids (max 500) |
+| `POST /api/v1/notifications/clear` | Delete all current-user rows |
+| `GET`/`PUT /api/v1/notifications/preferences` | Merged per-type delivery matrix |
+
+`POST /api/v1/admin/notifications/purge` performs a manual retention purge
+and records a `notification.purge` audit row with the deleted count and
+retention window; `songhive admin purge-notifications` runs the same service
+from the CLI, and the `/admin/tasks` page exposes the endpoint as a
+confirmation-protected action.
+
+Creation hooks: favoriting another user's track
+(`api/routes/favorites.py`) creates a `like`, and liking another local
+user's activity (`services/activities.py`'s `like_activity`, reached via
+`POST /activities/{id}/like`) notifies its `owner_user_id`; creating a new
+share grant (`api/routes/shares.py` via `services/sharing.py`'s
+`(grant, created)` return) creates a `share`. The federation inbox path
+(`tasks/federation.py` → `federation/notifications.py`) maps Follow/Like/
+Announce/Create activities for the addressed local user — `quote` wins over
+`reply` when a Create is both — and stamps matching
+`ActivityMention.notified_at` rows for `mention` notifications.
+
+Notification `payload`s are denormalized at creation so rows stay renderable
+after the source object disappears. Every hook records the actor's
+`actor_name`/`actor_display_name`/`actor_avatar_url` (the federated values
+come from pubby's cached actor document); likes, boosts, and shares record
+`item_type`/`item_id`/`item_title`/`local_url` when the object resolves to a
+local entity (`federation/notifications.py`'s `_resolve_local_object`
+matches `{actor}/objects/{id}` against `Track.federation_object_id` and
+`Activity.local_object_id`/`source_id`, and `/{plural}/{id}` URLs on the
+instance domain). `Create` payloads carry a `_note_snapshot` —
+`object_content` (capped raw HTML), `object_summary`, `object_name`,
+`object_url`, `published`, `object_mentions` — and replies/quotes add
+`target_url` plus `target_*` fields for a resolved local target.
+
+Retraction mirrors creation so notifications don't outlive their event:
+unfavoriting a track retracts the owner's `like` notification, retracting a
+`like` activity removes the notification it produced (matched via
+`payload.activity_id`), revoking a share grant retracts the grantee's
+`share`, `retract_activity` and `cascade_delete_entity` retract
+notifications referencing the removed activity/entity, and deleting a user
+retracts the notifications they produced elsewhere. On the inbox path, `federation/notifications.py`'s
+`retract_inbox_notifications` handles `Undo` (Follow/Like/Announce,
+including undo-by-activity-id via `payload.activity_id`) and `Delete`
+(object or actor) scoped to the addressed recipient.
+
+Edits propagate too: `update_activity` and `sync_track_publications`
+refresh the object snapshot on notifications referencing the rebuilt
+object (retracting rows whose mention/reply/quote basis no longer
+holds), and track renames refresh the stored item titles. On the
+inbox path `update_inbox_notifications` handles `Update` activities —
+a `Note` update refreshes the snapshot when the notification is still
+applicable and retracts it when the recipient is no longer mentioned or
+the reply/quote target changed away, while an actor `Update` refreshes
+the stored actor metadata.
+
+The frontend `stores/notifications.ts` owns the unread count, the paginated
+list, and optimistic seen/unseen and deletion updates (with rollback +
+toast on error). The list composes an `all`/`unread` read-state filter with a
+multi-select type allowlist (empty = all types) sent as the `type` CSV param;
+incoming events of filtered-out types still bump the badge but stay off the
+list.
+It registers `notification`, `notification_deleted`, and
+`notification_updated` handlers on the
+shared `eventBus` singleton
+(`api/ws.ts`), connected when the auth store reports authenticated and
+disconnected on logout; each received notification also raises an info
+toast naming the actor and action, while deletions prune matching rows
+and updates replace changed rows in place, both silently. `AppLayout` renders a `99+`-capped badge on the
+`/notifications` nav item; `views/NotificationsView.vue` auto-marks visible
+rows seen via a debounced `IntersectionObserver` batch that defers to rows
+the user just toggled back to unseen, and offers per-row dismissal plus a
+TrackList-style selection mode for bulk delete/read/unread and a
+confirmation-protected "Clear all". Rows render context cards from the
+payload: follows (and unresolved likes/boosts) show
+`components/notifications/NotificationActorCard.vue` (local actors route to
+`/@name`, remote actors link out), mentions/replies/quotes embed a
+read-only `ActivityCard` fed by the note snapshot (remote HTML reduced to
+plain text), and shares plus resolved likes/boosts show
+`NotificationItemCard.vue`, which fills in title and cover art through the
+deduplicating `composables/useItemSummary.ts` cache when the payload lacks
+them. The `/settings?tab=notifications`
+profile tab (`views/profile/NotificationSettings.vue`) edits the per-type
+in-app/email/digest matrix; the email columns are disabled until the
+account email is verified.
+
+---
+
 ## Task Queue (Celery)
 
 All background work is handled by Celery workers. Redis is the broker
@@ -1083,13 +1228,16 @@ All background work is handled by Celery workers. Redis is the broker
 | `tasks/import_.py`   | File processing, tag extraction, track/album/artist upsert|
 | `tasks/federation.py`| Activity delivery, inbox processing, key provisioning       |
 | `tasks/transcoding.py`| Pre-transcode to common formats, cache result            |
-| `tasks/email.py`     | Verification emails, password-reset emails                |
+| `tasks/email.py`     | Verification, password-reset, notification emails          |
+| `tasks/notifications.py`| Notification digest + seen-notification retention purge (scheduled) |
 | `tasks/musicbrainz.py`| MusicBrainz + Cover Art Archive metadata enrichment      |
 | `tasks/images.py`    | Artist image + Cover Art Archive cover enrichment         |
 | `tasks/storage.py`   | Orphaned `StoredFile` GC, audio-only hash rehash (scheduled) |
 
 The `cleanup_orphaned_files_schedule` config accepts any 5-field cron
-expression.
+expression. The notification digest and retention purge run on fixed daily
+crontabs at `notifications.digest_hour` (default 8 AM) and
+`notifications.purge_hour` (default 3 AM).
 
 Each task's async work is executed with ``asyncio.run(...)``. Because
 ``asyncpg`` connections are bound to the event loop that created them, every
@@ -1101,9 +1249,10 @@ before the loop closes, ensuring the next task gets a fresh pool.
 ## Email
 
 SMTP-based email is configured via the `email` config section. Celery tasks
-in `tasks/email.py` enqueue verification and password-reset messages
-asynchronously. `EmailNotConfiguredError` is raised when the SMTP host or
-`from_address` is missing.
+in `tasks/email.py` enqueue verification, password-reset, and individual
+notification messages asynchronously; `tasks/notifications.py` sends the
+per-user daily digest. `EmailNotConfiguredError` is raised when the SMTP
+host or `from_address` is missing.
 
 ---
 
@@ -1194,11 +1343,42 @@ is raised when an upload exceeds `storage.max_upload_size`.
 
 `ws/events.py` implements a Tornado `WebSocketHandler` that:
 
-- Validates the `Origin` header against `config.server.cors_origins`.
+- Validates the `Origin` header against `config.server.cors_origins`; origins
+  matching the request `Host` are always allowed since the SPA and `/ws` are
+  normally served same-origin (nginx proxies both, and Vite forwards `/ws` in
+  development).
 - Authenticates the connecting user via a JWT access token (passed as a query
   parameter or cookie on the initial handshake).
 - Broadcasts real-time events (import progress, federation notifications, etc.)
   to authenticated clients.
+- `EventWebSocket.send_to_user(user_id, event_type, data)` serializes events
+  the same way as `broadcast` but delivers them only to connections owned by
+  the given user; it is used for the targeted `notification` event pushed by
+  the notification service.
+
+`broadcast`/`send_to_user` can only see the connections living in their own
+process, so both also publish an envelope to the Redis pub/sub channel
+`songhive:ws-events` (via a synchronous client — Celery tasks run each job in
+a fresh `asyncio.run` loop). The Tornado process runs `ws_event_subscriber`
+on its IOLoop, which delivers envelopes from other processes through
+`EventWebSocket.deliver_envelope`; envelopes stamped with this process's id
+are skipped since they were already delivered locally. This is what makes
+notifications created in the Celery worker (federated follows, likes, etc.)
+reach connected clients live.
+
+The frontend `EventBus` (`frontend/src/api/ws.ts`) reconnects dropped sockets
+with exponential backoff (1s up to 30s). Since the server authenticates after
+the upgrade, the backoff only resets once a connection has stayed open for a
+while; a close with code `4001` (unauthenticated) additionally triggers an
+access-token refresh so the retry uses fresh credentials instead of looping
+on a stale token.
+
+Because authentication happens after the handshake, the browser sees an
+accepted socket that is then closed — which resets the reconnect backoff of
+older clients on every attempt. To bound that churn server-side, the handler
+tracks authentication failures per `(remote IP, token digest)`: the first
+failure still closes immediately with `4001`, but each consecutive failure
+delays the close exponentially (1s, 2s, …, capped at 30s).
 
 ---
 

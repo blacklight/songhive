@@ -189,6 +189,52 @@ async def test_update_activity_rebuilds_payload_object(db_session, regular_user,
 
 
 @pytest.mark.asyncio
+async def test_update_activity_refreshes_notification_snapshots(db_session, regular_user, config):
+    """Notifications sourced from the edited object get their payload rewritten."""
+    from songhive.models.notification import Notification
+
+    config.federation.instance_domain = "local.example"
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "object": {
+                "id": "https://local.example/users/alice/objects/1",
+                "content": "old",
+            },
+        },
+    )
+    db_session.add(activity)
+    note = Notification(
+        user_id=regular_user.id,
+        type="reply",
+        source_url=activity.source_id,
+        payload={"object_content": "old", "object_summary": "stale"},
+    )
+    # A like notification references the object id but renders no snapshot.
+    like = Notification(
+        user_id=regular_user.id,
+        type="like",
+        source_url=activity.source_id,
+        payload={"item_title": "Test Track"},
+    )
+    db_session.add_all([note, like])
+    await db_session.flush()
+
+    await update_activity(db_session, activity, content_source="new post", config=config)
+    await db_session.flush()
+
+    await db_session.refresh(note)
+    assert note.payload["object_content"].startswith("new post")
+    assert "object_summary" not in note.payload
+    await db_session.refresh(like)
+    assert "object_content" not in like.payload
+
+
+@pytest.mark.asyncio
 async def test_update_activity_normalizes_audio_payload(db_session, regular_user, config):
     """An edited ``Audio`` payload drops ``summary`` and keeps the track link in ``content``."""
     config.federation.instance_domain = "local.example"

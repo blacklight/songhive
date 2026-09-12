@@ -12,6 +12,7 @@ vi.mock("@/api/admin", () => ({
   rehashAudio: vi.fn(),
   provisionFederationKeys: vi.fn(),
   enrichImages: vi.fn(),
+  purgeNotifications: vi.fn(),
 }));
 
 vi.mock("@/composables/useConfirm", () => ({
@@ -118,6 +119,55 @@ describe("TasksView", () => {
         albums: 2,
       }),
     );
+  });
+
+  it("purges notifications after confirmation", async () => {
+    vi.mocked(adminApi.purgeNotifications).mockResolvedValue({ deleted: 4 });
+
+    wrapper = mount(TasksView, { global: { plugins: [i18n] } });
+    await flushPromises();
+
+    const buttons = wrapper.findAll("button");
+    const purgeButton = buttons.find(
+      (b) =>
+        b.text() ===
+        i18n.global.t("pages.admin.tasks.notificationPurge.trigger"),
+    );
+    await purgeButton?.trigger("click");
+    await flushPromises();
+
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ danger: true }),
+    );
+    expect(adminApi.purgeNotifications).toHaveBeenCalled();
+
+    const toastStore = useToastStore();
+    expect(toastStore.toasts).toHaveLength(1);
+    expect(toastStore.toasts[0].type).toBe("success");
+    expect(toastStore.toasts[0].message).toBe(
+      i18n.global.t("pages.admin.tasks.notificationPurge.triggered", {
+        count: 4,
+      }),
+    );
+  });
+
+  it("does not purge notifications when confirmation is declined", async () => {
+    confirm.mockResolvedValue(false);
+
+    wrapper = mount(TasksView, { global: { plugins: [i18n] } });
+    await flushPromises();
+
+    const buttons = wrapper.findAll("button");
+    const purgeButton = buttons.find(
+      (b) =>
+        b.text() ===
+        i18n.global.t("pages.admin.tasks.notificationPurge.trigger"),
+    );
+    await purgeButton?.trigger("click");
+    await flushPromises();
+
+    expect(adminApi.purgeNotifications).not.toHaveBeenCalled();
+    expect(useToastStore().toasts).toHaveLength(0);
   });
 
   it("shows an error toast on task failure", async () => {

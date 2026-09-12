@@ -241,6 +241,28 @@ class EmailConfig(BaseSettings):
     )
 
 
+class NotificationsConfig(BaseSettings):
+    """User notification delivery and retention configuration."""
+
+    retention_days: int = Field(
+        default=90,
+        ge=1,
+        description="Days to keep seen notifications before purging",
+    )
+    purge_hour: int = Field(
+        default=3,
+        ge=0,
+        le=23,
+        description="Hour of day (UTC) when seen notifications are purged",
+    )
+    digest_hour: int = Field(
+        default=8,
+        ge=0,
+        le=23,
+        description="Hour of day (UTC) when notification digest emails are sent",
+    )
+
+
 class ServerConfig(BaseSettings):
     """Server configuration."""
 
@@ -497,6 +519,7 @@ class SonghiveConfig(BaseSettings):
     federation: FederationConfig = Field(default_factory=FederationConfig)
     auth: AuthConfig = Field(default_factory=_require_auth_secret_key)
     email: EmailConfig = Field(default_factory=EmailConfig)
+    notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     musicbrainz: MusicBrainzConfig = Field(default_factory=MusicBrainzConfig)
     imports: ImportConfig = Field(default_factory=ImportConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)

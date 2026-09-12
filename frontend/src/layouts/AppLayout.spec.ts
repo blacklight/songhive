@@ -1,10 +1,30 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { createPinia, setActivePinia } from "pinia";
 import AppLayout from "./AppLayout.vue";
 import { useAuthStore } from "@/stores/auth";
+import { useNotificationsStore } from "@/stores/notifications";
 import type { UserResponse } from "@/api/users";
+
+vi.mock("@/api/ws", () => ({
+  eventBus: {
+    on: vi.fn(),
+    off: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  },
+}));
+
+vi.mock("@/api/notifications", () => ({
+  listNotifications: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+  getUnreadCount: vi.fn().mockResolvedValue(0),
+  markSeen: vi.fn(),
+  markUnseen: vi.fn(),
+  markAllSeen: vi.fn(),
+  getNotificationPreferences: vi.fn(),
+  updateNotificationPreferences: vi.fn(),
+}));
 
 function createTestRouter() {
   return createRouter({
@@ -219,6 +239,7 @@ describe("AppLayout", () => {
       "Home",
       "Search",
       "Users",
+      "Notifications",
       "Library",
       "Artists",
       "Albums",
@@ -239,6 +260,33 @@ describe("AppLayout", () => {
     expect(wrapper.find(".app-layout__logout").exists()).toBe(true);
     expect(wrapper.find(".app-layout__logout").attributes("aria-label")).toBe(
       "Log out",
+    );
+  });
+
+  it("shows the unread badge on the notifications nav item only when > 0", async () => {
+    const { wrapper, store } = await mountLayout();
+    authenticateStore(store);
+    const notifications = useNotificationsStore();
+    await flushPromises();
+
+    const link = wrapper
+      .findAll(".app-layout__nav li a")
+      .find((a) => a.text().includes("Notifications"));
+    expect(link).toBeTruthy();
+    expect(link!.find(".app-layout__badge").exists()).toBe(false);
+
+    notifications.unreadCount = 5;
+    await flushPromises();
+    const badge = link!.find(".app-layout__badge");
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toBe("5");
+    expect(badge.attributes("aria-label")).toBe("5 unread notifications");
+
+    notifications.unreadCount = 120;
+    await flushPromises();
+    expect(link!.find(".app-layout__badge").text()).toBe("99+");
+    expect(link!.find(".app-layout__badge").attributes("aria-label")).toBe(
+      "120 unread notifications",
     );
   });
 
