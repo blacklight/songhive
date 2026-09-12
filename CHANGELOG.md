@@ -153,6 +153,22 @@ All notable changes to this project will be documented in this file.
   returns the full `UserSummary` owner object, and backend detail responses
   expose `owner_id` for any ACL-authorized viewer and include a nested
   `owner` summary via `?include=owner`.
+- `pwa`: Add PWA support. ([`a662a0c`](https://git.platypush.tech/blacklight/songhive/commit/a662a0c013513419489910eb9f8b5bfe1d4e6f23))
+- Add systemd units and installer; extend config lookup. ([`832c3b8`](https://git.platypush.tech/blacklight/songhive/commit/832c3b8a39549915565657affd7975afc9b56a43))
+- `history`: Add card layout for narrow viewports. ([`8026188`](https://git.platypush.tech/blacklight/songhive/commit/80261888de01c0089a91622115d4ab66b1ac4b77))
+- `frontend`: Add bulk track metadata editor. ([`d9c6423`](https://git.platypush.tech/blacklight/songhive/commit/d9c6423993a03c88f403b67e9c9a3d5b4b0a00af))
+- `federation`: Fan out actor profile updates to followers. ([`3faf70b`](https://git.platypush.tech/blacklight/songhive/commit/3faf70bf1c1defcd618961ed104f5d3301c779aa))
+- `tracks`: Add descriptions and manual ActivityPub publish. ([`dd07a69`](https://git.platypush.tech/blacklight/songhive/commit/dd07a69079b04f7e62dc56f101a496ebb559571b))
+- Add federation activity models and migration. ([`f4a1dd7`](https://git.platypush.tech/blacklight/songhive/commit/f4a1dd70c76f28d55f8c2f6090dee78267f9f9bf))
+- Add activity service and cascade retraction on entity delete. ([`b934356`](https://git.platypush.tech/blacklight/songhive/commit/b934356391b176d913a5f969e6a3b54a7c26fa60))
+- `api`: Include source actor avatar URL in activity list responses. ([`0b31ace`](https://git.platypush.tech/blacklight/songhive/commit/0b31ace444dad9c61ef899d34296d56290581b9d))
+- `activities`: Add actor display name and visibility-aware audience. ([`675fe27`](https://git.platypush.tech/blacklight/songhive/commit/675fe27a190219f68cc15c11aac49bcfbf36c672))
+- `activity-card`: Add copy URL action button. ([`f8032c9`](https://git.platypush.tech/blacklight/songhive/commit/f8032c92c8780ce90f32af35f3f3bb84bbb4946e))
+- Add user profiles, user directory, and tag activity feeds. ([`a54df6a`](https://git.platypush.tech/blacklight/songhive/commit/a54df6a336b4d980cacd931b953e8acd6084b902))
+- `search`: Implemented general-purpose search. ([`e5028b6`](https://git.platypush.tech/blacklight/songhive/commit/e5028b685ff60951188ad462a7df739c00131690))
+- `frontend`: Replace static input text for user shares with SearchBar. ([`bbed416`](https://git.platypush.tech/blacklight/songhive/commit/bbed4160c4970abf4d8a08f36d9207d3418f510c))
+- Add bulk add-to-library/playlist for selected tracks. ([`b580f28`](https://git.platypush.tech/blacklight/songhive/commit/b580f2856dd8034b10a981d5052516e5a81797a8))
+- `frontend`: Added links to author and post on ActivityCard. ([`95d0fd4`](https://git.platypush.tech/blacklight/songhive/commit/95d0fd47901cbe746765af4208bb2abf368f4d3e))
 
 ### Changed
 
@@ -207,6 +223,11 @@ All notable changes to this project will be documented in this file.
   `PT2M` instead of `PT2M0S`).
 - `federation`: Outbound deliveries now send a `User-Agent: pubby/<version>`
   header and also sign `Content-Length`; `Accept` is no longer sent.
+- `requirements`: Security upgrade for cryptography. ([`e0b3b91`](https://git.platypush.tech/blacklight/songhive/commit/e0b3b917dd233532025d867e0fc92d355b5e6d9f))
+- Better dark theme colors and link color consistency. ([`a9ab660`](https://git.platypush.tech/blacklight/songhive/commit/a9ab660c29caa3e13e7299580c225af88f0947a6))
+- `activities`: Better responsive design for Activity cards. ([`e1986d0`](https://git.platypush.tech/blacklight/songhive/commit/e1986d0c24d490cf688e7da70ab5fcee0519a6b2))
+- `favicon`: More compact favicon, better transparency. ([`986b804`](https://git.platypush.tech/blacklight/songhive/commit/986b804f4367b2b41ac25dec7947f92710013de6))
+- `nav`: Keep footer at bottom, apply overflow only to nav content. ([`921bd3d`](https://git.platypush.tech/blacklight/songhive/commit/921bd3d292bfc44c6a39343304bc2c67d1093d4e))
 
 ### Fixed
 
@@ -245,6 +266,19 @@ All notable changes to this project will be documented in this file.
   non-dereferenceable artist page URL so remote importers resolve the
   author. `docker/nginx.conf` proxies AP `Accept` requests for
   `/tracks/<id>` to the backend while browsers keep getting the SPA.
+- `layout`: Respect safe-area insets and raise sidebar z-index. ([`dfb6d21`](https://git.platypush.tech/blacklight/songhive/commit/dfb6d2159f58ba56bce5fd996fe475a1c48a74f1))
+- `albums`: Propagate visibility changes to tracks. ([`3c64123`](https://git.platypush.tech/blacklight/songhive/commit/3c641237b6f7847603b0884e532e37255909e307))
+- `profile`: Always send updated links on profile save. ([`a89f830`](https://git.platypush.tech/blacklight/songhive/commit/a89f8304d375d8418c52d62bccac8dd229dab399))
+- `federation`: Sanitize and linkify actor profile links. ([`9b1e53f`](https://git.platypush.tech/blacklight/songhive/commit/9b1e53f7827e2cecc28475ab743207cb539f3e7c))
+- `federation`: Linkify bio URLs and simplify profile link text. ([`acf6be2`](https://git.platypush.tech/blacklight/songhive/commit/acf6be2bd37a5000a26995ac865d5d7ece4818c3))
+- `activities`: Return updated activity and audit mutations. ([`de708c2`](https://git.platypush.tech/blacklight/songhive/commit/de708c23b1a9b3ca2730065bf240026b7d039dd1))
+- `share`: Map user shares both to user_id and username. ([`1c8343a`](https://git.platypush.tech/blacklight/songhive/commit/1c8343ab759844f5598a45c791fe8d22d42e375b))
+- `search`: Increase autocompleteDelay: 300->750 ms. ([`2b199bc`](https://git.platypush.tech/blacklight/songhive/commit/2b199bcf1eeb35380c62950eacf8a3a308b3e1d4))
+- `frontend`: Include artist and album info on /@{user}/tracks. ([`5bc55a5`](https://git.platypush.tech/blacklight/songhive/commit/5bc55a5a967d5e7b520cd563e8a2744fc4e22cc4))
+- `frontend`: Pagination for /@{user}/(tracks|albums|playlists|libraries). ([`7af69ea`](https://git.platypush.tech/blacklight/songhive/commit/7af69eaf689d52ed6ccca1bb1095fec2ecad463f))
+- `share`: Tracks in an album should be shared when the album is shared. ([`380c970`](https://git.platypush.tech/blacklight/songhive/commit/380c970349da666c33c9257fea65fa9c6babf329))
+- `share`: Tracks in a playlist should be shared when the playlist is shared. ([`74a505b`](https://git.platypush.tech/blacklight/songhive/commit/74a505beff24eea49e6c04d61558e100df205587))
+- `share`: Tracks in a library should be shared when the library is shared. ([`95a3e60`](https://git.platypush.tech/blacklight/songhive/commit/95a3e601122008a16befc1dac365ac1866c02c9d))
 
 ## 0.0.15
 
