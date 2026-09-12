@@ -194,8 +194,13 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
                 pass
 
     async def open(self, *_: str, **__: str) -> None:
-        """Authenticate the connection and add it to the active set."""
-        token = self.get_argument("token", default=None)
+        """Authenticate the connection and add it to the active set.
+
+        The token comes from the ``?token=`` query parameter (API clients and
+        share flows) or the ``access_token`` cookie, which the browser sends
+        automatically on same-origin WebSocket handshakes.
+        """
+        token = self.get_argument("token", default=None) or self.get_cookie("access_token")
         auth_key = self._auth_key(token)
 
         config = self.application.settings.get("config")

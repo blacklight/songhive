@@ -346,9 +346,6 @@ describe("TagDetailView", () => {
   it("allows an admin to delete the tag and redirect", async () => {
     const authStore = useAuthStore();
     authStore.role = "admin";
-    authStore.accessToken = "token";
-    authStore.refreshToken = "refresh";
-    authStore.expiresAt = Date.now() + 10000;
     authStore.status = "authenticated";
 
     const confirm = useConfirmStore();

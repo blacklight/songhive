@@ -71,6 +71,18 @@ let tokenProvider: (() => string | null) | null = null;
 let refreshHandler: (() => Promise<boolean>) | null = null;
 let logoutHandler: (() => void) | null = null;
 
+// Browser sessions authenticate through the server-managed HttpOnly
+// access_token cookie. The double-submit csrf_token cookie must be echoed
+// back on unsafe methods.
+const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/** Read the non-HttpOnly double-submit CSRF cookie, if a session exists. */
+export function getCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 export function setTokenProvider(provider: () => string | null) {
   tokenProvider = provider;
 }
@@ -129,10 +141,19 @@ async function fetchRequest(
     }
   }
 
+  const method = options.method || "GET";
+  if (!CSRF_SAFE_METHODS.has(method)) {
+    const csrf = getCsrfToken();
+    if (csrf) {
+      (headers as Record<string, string>)["X-CSRF-Token"] = csrf;
+    }
+  }
+
   const init: RequestInit = {
-    method: options.method || "GET",
+    method,
     headers,
     signal: options.signal,
+    credentials: "same-origin",
   };
 
   if (options.body !== undefined) {
@@ -151,11 +172,18 @@ async function fetchRequest(
       throw await ApiError.fromResponse(response, body);
     }
 
-    // Retry once with the new token.
+    // Retry once. The refresh may have rotated the csrf_token cookie, so the
+    // double-submit header is re-read rather than reused.
     const newAuth = getAuthHeader();
     const retryHeaders: HeadersInit = { ...headers };
     if (newAuth) {
       (retryHeaders as Record<string, string>)["Authorization"] = newAuth;
+    }
+    if (!CSRF_SAFE_METHODS.has(method)) {
+      const newCsrf = getCsrfToken();
+      if (newCsrf) {
+        (retryHeaders as Record<string, string>)["X-CSRF-Token"] = newCsrf;
+      }
     }
 
     const retry = await fetch(url, {

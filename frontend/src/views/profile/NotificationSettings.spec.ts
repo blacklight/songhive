@@ -53,9 +53,6 @@ function defaultPrefs(
 
 function authenticate(emailVerified: boolean) {
   const store = useAuthStore();
-  store.accessToken = "token";
-  store.refreshToken = "refresh";
-  store.expiresAt = Date.now() + 10000;
   store.user = {
     id: "u1",
     username: "alice",

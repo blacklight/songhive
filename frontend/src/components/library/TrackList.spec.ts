@@ -134,8 +134,6 @@ describe("TrackList", () => {
     vi.clearAllMocks();
     const authStore = useAuthStore();
     authStore.$patch({
-      accessToken: "token",
-      expiresAt: Date.now() + 60000,
       user: { id: "user-1", username: "user" } as UserResponse,
     });
 

@@ -148,8 +148,6 @@ describe("downloadTrack", () => {
   let originalRevokeObjectURL: typeof URL.revokeObjectURL;
 
   beforeEach(() => {
-    client.setTokenProvider(() => null);
-
     originalFetch = globalThis.fetch;
     fetchMock = vi.fn();
     globalThis.fetch = fetchMock;
@@ -214,8 +212,7 @@ describe("downloadTrack", () => {
     };
   }
 
-  it("fetches the audio file with an auth header and triggers a download", async () => {
-    client.setTokenProvider(() => "token");
+  it("fetches the audio file with cookie credentials and triggers a download", async () => {
     fetchMock.mockResolvedValueOnce(
       makeResponse({
         contentDisposition: 'attachment; filename="song.mp3"',
@@ -226,7 +223,7 @@ describe("downloadTrack", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/files/f1/download?disposition=attachment",
-      { headers: { Authorization: "Bearer token" } },
+      { credentials: "same-origin" },
     );
     expect(createObjectURL).toHaveBeenCalled();
     expect(link.href).toBe("blob:mock");
@@ -243,15 +240,16 @@ describe("downloadTrack", () => {
     expect(link.download).toBe("My Song");
   });
 
-  it("omits the Authorization header when the user is not authenticated", async () => {
+  it("relies on cookie auth without an Authorization header", async () => {
     fetchMock.mockResolvedValueOnce(makeResponse({}));
 
     await downloadTrack("/api/v1/files/f1/download");
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/files/f1/download?disposition=attachment",
-      { headers: {} },
-    );
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.credentials).toBe("same-origin");
+    expect(
+      (init.headers as Record<string, string> | undefined)?.Authorization,
+    ).toBeUndefined();
   });
 
   it("throws an ApiError on a non-2xx response", async () => {

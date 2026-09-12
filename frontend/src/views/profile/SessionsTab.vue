@@ -1,12 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import {
-  listSessions,
-  revokeSession,
-  sha256Hex,
-  type SessionSummary,
-} from "@/api/auth";
+import { listSessions, revokeSession, type SessionSummary } from "@/api/auth";
 import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import { useConfirm } from "@/composables/useConfirm";
@@ -42,10 +37,9 @@ async function fetchSessions() {
   isLoading.value = true;
   error.value = null;
   try {
-    const currentId = authStore.refreshToken
-      ? await sha256Hex(authStore.refreshToken)
-      : "";
-    const response = await listSessions(currentId || undefined);
+    // The backend marks the current session by hashing the refresh_token
+    // cookie; the token itself is HttpOnly and invisible to JavaScript.
+    const response = await listSessions();
     sessions.value = response.items;
   } catch (err) {
     error.value = getApiErrorMessage(err, t("errors.unknown"));

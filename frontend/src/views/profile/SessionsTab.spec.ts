@@ -11,16 +11,12 @@ import SessionsTab from "./SessionsTab.vue";
 vi.mock("@/api/auth", () => ({
   listSessions: vi.fn(),
   revokeSession: vi.fn(),
-  sha256Hex: vi.fn().mockResolvedValue("current-hash"),
 }));
 
 describe("SessionsTab", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
-
-    const store = useAuthStore();
-    store.refreshToken = "my-refresh-token";
 
     vi.mocked(authApi.listSessions).mockResolvedValue({
       items: [
@@ -49,8 +45,8 @@ describe("SessionsTab", () => {
     const wrapper = mount(SessionsTab, { global: { plugins: [] } });
     await flushPromises();
 
-    expect(authApi.listSessions).toHaveBeenCalledWith("current-hash");
-    expect(authApi.sha256Hex).toHaveBeenCalledWith("my-refresh-token");
+    // The server derives the current session from the refresh_token cookie.
+    expect(authApi.listSessions).toHaveBeenCalledWith();
     expect(wrapper.text()).toContain("Mozilla/5.0");
     expect(wrapper.text()).toContain("SonghiveMobile/1.0");
     expect(wrapper.text()).toContain(i18n.global.t("profile.sessions.current"));

@@ -20,6 +20,7 @@ from ..services.redis import close_redis_client, get_redis_client
 from ..services.settings import apply_settings_overrides
 from ..version import __version__
 from .errors import install_error_handlers
+from .middleware.csrf import CsrfMiddleware
 from .middleware.media_cors import MediaCorsMiddleware
 from .middleware.proxy import ForwardedProtoMiddleware
 from .routes import (
@@ -212,6 +213,11 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     # embed audio cross-origin. Added last so it wraps CORSMiddleware and sees
     # media-path preflights before the allowlist middleware can reject them.
     app.add_middleware(MediaCorsMiddleware, allow_origins=config.server.cors_origins)
+
+    # Double-submit CSRF check for unsafe requests authenticated through the
+    # server-managed auth cookies; bearer-authenticated and safe requests pass
+    # through untouched.
+    app.add_middleware(CsrfMiddleware)
 
     # Register RFC 7807 problem detail exception handlers
     install_error_handlers(app)

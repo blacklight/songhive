@@ -2,23 +2,33 @@ import { computed, ref, type Ref } from "vue";
 import { defineStore } from "pinia";
 import * as authApi from "@/api/auth";
 import * as usersApi from "@/api/users";
-import {
-  ApiError,
-  setLogoutHandler,
-  setRefreshHandler,
-  setTokenProvider,
-} from "@/api/client";
+import { ApiError, setLogoutHandler, setRefreshHandler } from "@/api/client";
 import type { UserResponse } from "@/api/users";
-import { setStreamTokenProvider } from "@/api/stream";
-import { setWsTokenProvider } from "@/api/ws";
 
-// Tokens are persisted in localStorage for SPA convenience. This exposes them
-// to XSS; a future httpOnly-cookie migration is the safer path. Store only
-// short-lived access tokens and refresh tokens here.
-const STORAGE_ACCESS = "songhive.auth.access";
-const STORAGE_REFRESH = "songhive.auth.refresh";
-const STORAGE_EXPIRES = "songhive.auth.expiresAt";
+// Only non-sensitive session state is persisted. The access and refresh
+// tokens live in server-managed HttpOnly cookies, so JavaScript can never
+// read them; the API client authenticates requests with credentials:
+// "same-origin" plus the double-submit X-CSRF-Token header.
 const STORAGE_USER = "songhive.auth.user";
+
+// One-time cleanup for sessions upgrading from the localStorage token scheme:
+// drop the credentials older clients persisted.
+for (const key of [
+  "songhive.auth.access",
+  "songhive.auth.refresh",
+  "songhive.auth.expiresAt",
+]) {
+  localStorage.removeItem(key);
+}
+
+// Older builds also mirrored the access token into a JavaScript-readable
+// cookie. Delete it only when it is visible: an HttpOnly cookie of the same
+// name (the new server-managed session) never appears in document.cookie, so
+// this cannot clobber it.
+if (/(?:^|;\s*)access_token=/.test(document.cookie)) {
+  document.cookie =
+    "access_token=; Path=/; SameSite=Lax; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+}
 
 export type AuthStatus =
   "idle" | "loading" | "authenticated" | "unauthenticated" | "error";
@@ -29,67 +39,23 @@ type UserRole = "user" | "moderator" | "admin";
 let bootstrapped: Promise<void> | null = null;
 
 export const useAuthStore = defineStore("auth", () => {
-  const accessToken: Ref<string | null> = ref(
-    localStorage.getItem(STORAGE_ACCESS),
-  );
-  const refreshToken: Ref<string | null> = ref(
-    localStorage.getItem(STORAGE_REFRESH),
-  );
-  const expiresAt: Ref<number | null> = ref(readNumber(STORAGE_EXPIRES));
   const user: Ref<UserProfile | null> = ref(readJson(STORAGE_USER));
   const role: Ref<UserRole | null> = ref(
     (user.value?.role as UserRole) ?? null,
   );
   const status: Ref<AuthStatus> = ref("idle");
 
-  const isAuthenticated = computed(() => {
-    if (!accessToken.value) return false;
-    if (expiresAt.value && Date.now() >= expiresAt.value) return false;
-    return true;
-  });
+  // The persisted user profile mirrors the old "token in localStorage"
+  // behaviour: the UI renders as signed-in until bootstrap() confirms the
+  // cookie session or clears the stale profile.
+  const isAuthenticated = computed(() => user.value !== null);
 
   const isAdmin = computed(() => role.value === "admin");
 
   function persist() {
-    if (accessToken.value)
-      localStorage.setItem(STORAGE_ACCESS, accessToken.value);
-    else localStorage.removeItem(STORAGE_ACCESS);
-
-    if (refreshToken.value)
-      localStorage.setItem(STORAGE_REFRESH, refreshToken.value);
-    else localStorage.removeItem(STORAGE_REFRESH);
-
-    if (expiresAt.value)
-      localStorage.setItem(STORAGE_EXPIRES, String(expiresAt.value));
-    else localStorage.removeItem(STORAGE_EXPIRES);
-
     if (user.value)
       localStorage.setItem(STORAGE_USER, JSON.stringify(user.value));
     else localStorage.removeItem(STORAGE_USER);
-
-    syncAccessTokenCookie();
-  }
-
-  function syncAccessTokenCookie() {
-    if (typeof document === "undefined") return;
-
-    if (accessToken.value) {
-      let cookie = `access_token=${encodeURIComponent(accessToken.value)}; Path=/; SameSite=Lax`;
-      if (expiresAt.value) {
-        cookie += `; Expires=${new Date(expiresAt.value).toUTCString()}`;
-      }
-      document.cookie = cookie;
-    } else {
-      document.cookie =
-        "access_token=; Path=/; SameSite=Lax; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
-    }
-  }
-
-  function setTokens(access: string, refresh: string, expiresIn: number) {
-    accessToken.value = access;
-    refreshToken.value = refresh;
-    expiresAt.value = Date.now() + expiresIn * 1000;
-    persist();
   }
 
   async function fetchProfile() {
@@ -102,8 +68,9 @@ export const useAuthStore = defineStore("auth", () => {
   async function login(username: string, password: string) {
     status.value = "loading";
     try {
-      const data = await authApi.login({ username, password });
-      setTokens(data.access_token, data.refresh_token, data.expires_in);
+      // The response sets the HttpOnly auth cookies; the token pair in the
+      // body is intentionally unused by the SPA.
+      await authApi.login({ username, password });
       await fetchProfile();
       status.value = "authenticated";
     } catch (err) {
@@ -116,11 +83,9 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function refresh(): Promise<boolean> {
-    const current = refreshToken.value;
-    if (!current) return false;
     try {
-      const data = await authApi.refresh({ refresh_token: current });
-      setTokens(data.access_token, data.refresh_token, data.expires_in);
+      // Cookie-based refresh: no token in the request body.
+      await authApi.refresh();
       return true;
     } catch {
       await logout();
@@ -129,17 +94,12 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function logout() {
-    const current = refreshToken.value;
-    if (current) {
-      try {
-        await authApi.logout({ refresh_token: current });
-      } catch {
-        // Best effort.
-      }
+    try {
+      // Revokes the refresh session and clears the auth cookies server-side.
+      await authApi.logout();
+    } catch {
+      // Best effort.
     }
-    accessToken.value = null;
-    refreshToken.value = null;
-    expiresAt.value = null;
     user.value = null;
     role.value = null;
     persist();
@@ -149,26 +109,23 @@ export const useAuthStore = defineStore("auth", () => {
   function bootstrap(): Promise<void> {
     if (bootstrapped && status.value !== "idle") return bootstrapped;
 
-    // Ensure the browser cookie is in sync with the token loaded from
-    // localStorage on page reload, so <img> and <audio> requests are
-    // authenticated.
-    syncAccessTokenCookie();
-
     bootstrapped = (async () => {
-      if (accessToken.value && refreshToken.value) {
-        status.value = "loading";
-        try {
-          await fetchProfile();
-          status.value = "authenticated";
-        } catch {
-          // If profile fetch fails with 401, the client will try to refresh.
-          // If refresh is impossible, logout was already called by client.
-          if ((status.value as string) !== "unauthenticated") {
-            status.value = "error";
-          }
+      status.value = "loading";
+      try {
+        await fetchProfile();
+        status.value = "authenticated";
+      } catch (err) {
+        // The API client already tried a cookie refresh; when it cannot
+        // recover it invokes the logout handler, which clears the profile
+        // and flips the status to "unauthenticated". A bare 401 (e.g. no
+        // session at all) maps to the same state; anything else (network
+        // errors, 5xx) is surfaced as a generic error state.
+        if ((status.value as string) !== "unauthenticated") {
+          status.value =
+            err instanceof ApiError && err.status === 401
+              ? "unauthenticated"
+              : "error";
         }
-      } else {
-        status.value = "unauthenticated";
       }
     })();
 
@@ -182,17 +139,11 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   function registerClientProviders() {
-    setTokenProvider(() => accessToken.value);
     setRefreshHandler(() => refresh());
     setLogoutHandler(() => logout());
-    setWsTokenProvider(() => accessToken.value);
-    setStreamTokenProvider(() => accessToken.value);
   }
 
   return {
-    accessToken,
-    refreshToken,
-    expiresAt,
     user,
     role,
     status,
@@ -207,13 +158,6 @@ export const useAuthStore = defineStore("auth", () => {
     registerClientProviders,
   };
 });
-
-function readNumber(key: string): number | null {
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  const value = Number(raw);
-  return Number.isNaN(value) ? null : value;
-}
 
 function readJson<T>(key: string): T | null {
   const raw = localStorage.getItem(key);

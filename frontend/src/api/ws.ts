@@ -18,12 +18,6 @@ export interface WsMessage {
 
 type WsHandler = (event: WsEvent) => void;
 
-let tokenProvider: (() => string | null) | null = null;
-
-export function setWsTokenProvider(provider: () => string | null) {
-  tokenProvider = provider;
-}
-
 export class EventBus {
   private socket: WebSocket | null = null;
   private handlers: Map<string, Set<WsHandler>> = new Map();
@@ -38,8 +32,8 @@ export class EventBus {
   // A connection that stayed open this long counts as healthy: when it
   // drops, the next reconnect starts again from the shortest delay.
   private static readonly HEALTHY_MS = 10_000;
-  // The server closes with this code when the ?token JWT is missing,
-  // expired, or revoked. Refreshing the token at most this often.
+  // The server closes with this code when authentication is missing,
+  // expired, or revoked. Refreshing the session at most this often.
   private static readonly AUTH_CLOSE_CODE = 4001;
   private static readonly AUTH_REFRESH_MIN_MS = 30_000;
 
@@ -50,8 +44,8 @@ export class EventBus {
 
     this.closing = false;
     this.status.value = "connecting";
-    const token = tokenProvider ? tokenProvider() : "";
-    const url = buildUrl(WS_URL, token ? { token } : undefined);
+    // Same-origin handshakes carry the HttpOnly access_token cookie.
+    const url = buildUrl(WS_URL);
 
     const socket = new WebSocket(url);
     this.socket = socket;
@@ -98,8 +92,8 @@ export class EventBus {
         event.code === EventBus.AUTH_CLOSE_CODE &&
         Date.now() - this.lastAuthRefresh >= EventBus.AUTH_REFRESH_MIN_MS
       ) {
-        // The token was rejected (e.g. expired): refresh it so the next
-        // attempt uses fresh credentials. A failed refresh logs the user
+        // The session was rejected (e.g. expired cookie): refresh it so the
+        // next attempt uses fresh credentials. A failed refresh logs the user
         // out, which disconnects the bus and clears the pending retry.
         this.lastAuthRefresh = Date.now();
         void requestTokenRefresh();

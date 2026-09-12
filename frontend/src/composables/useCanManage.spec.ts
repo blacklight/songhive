@@ -28,8 +28,6 @@ describe("useCanManage", () => {
 
   it("returns true when the current user matches the owner id", () => {
     const authStore = useAuthStore();
-    authStore.accessToken = "token";
-    authStore.expiresAt = Date.now() + 10000;
     authStore.user = { id: "owner-1", username: "alice" } as never;
 
     const wrapper = createCanManage("owner-1");
@@ -38,8 +36,6 @@ describe("useCanManage", () => {
 
   it("returns false when the current user does not match the owner id", () => {
     const authStore = useAuthStore();
-    authStore.accessToken = "token";
-    authStore.expiresAt = Date.now() + 10000;
     authStore.user = { id: "owner-2", username: "bob" } as never;
 
     const wrapper = createCanManage("owner-1");
@@ -48,8 +44,6 @@ describe("useCanManage", () => {
 
   it("returns true for admins even when they are not the owner", () => {
     const authStore = useAuthStore();
-    authStore.accessToken = "token";
-    authStore.expiresAt = Date.now() + 10000;
     authStore.user = { id: "admin-1", username: "admin" } as never;
     authStore.role = "admin";
 
@@ -59,8 +53,6 @@ describe("useCanManage", () => {
 
   it("recomputes canManage when the owner id is a reactive ref", async () => {
     const authStore = useAuthStore();
-    authStore.accessToken = "token";
-    authStore.expiresAt = Date.now() + 10000;
     authStore.user = { id: "owner-1", username: "alice" } as never;
 
     const ownerId = ref<string | null>("owner-2");

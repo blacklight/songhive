@@ -128,6 +128,17 @@
   `cors_origins` are passed through so credentialed CORS keeps working. The
   Tornado `StreamHandler` sets the same headers itself via
   `set_default_headers` (it bypasses FastAPI middleware entirely).
+- Browser sessions use server-managed cookies, not JS-readable tokens:
+  login/refresh set `HttpOnly` `access_token` + `refresh_token` cookies
+  (refresh scoped to `Path=/api/v1/auth`) plus a readable `csrf_token`
+  cookie (`api/cookies.py`). `CsrfMiddleware` (`api/middleware/csrf.py`)
+  rejects unsafe requests that carry an auth cookie without a matching
+  `X-CSRF-Token` header; `Authorization` requests, safe methods, and the
+  session endpoints are exempt. The frontend (`api/client.ts`) sends
+  `credentials: "same-origin"` and the CSRF header automatically; stream and
+  WebSocket URLs carry no token — `StreamHandler` and `EventWebSocket` both
+  accept the `access_token` cookie. Bearer auth and JSON token responses are
+  kept for non-browser clients.
 - When type-checking the Tornado + FastAPI bootstrap in `songhive/app.py`, the
   bridge through `a2wsgi.ASGIMiddleware` and `tornado.wsgi.WSGIContainer` can
   trigger structural mismatches because `FastAPI.__call__` uses Starlette's

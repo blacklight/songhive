@@ -128,12 +128,21 @@ const sampleFile: StoredFileResponse = {
   url: "/api/v1/files/f1/download",
 };
 
+function setCsrfCookie(value: string) {
+  document.cookie = `csrf_token=${value}; path=/`;
+}
+
+function clearCsrfCookie() {
+  document.cookie =
+    "csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+}
+
 describe("uploadFile", () => {
   let mockXhr: MockXhr;
   let originalXHR: typeof XMLHttpRequest;
 
   beforeEach(() => {
-    client.setTokenProvider(() => "test-token");
+    setCsrfCookie("test-csrf");
     originalXHR = globalThis.XMLHttpRequest;
     mockXhr = createMockXHR({
       responseText: JSON.stringify(sampleFile),
@@ -145,7 +154,7 @@ describe("uploadFile", () => {
     vi.stubGlobal("XMLHttpRequest", originalXHR);
   });
 
-  it("posts a public multipart upload with the auth header", async () => {
+  it("posts a public multipart upload with the CSRF header", async () => {
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
     const result = await uploadFile(file, "public");
 
@@ -154,8 +163,8 @@ describe("uploadFile", () => {
       "/api/v1/files/upload?visibility=public",
     );
     expect(mockXhr.setRequestHeader).toHaveBeenCalledWith(
-      "Authorization",
-      "Bearer test-token",
+      "X-CSRF-Token",
+      "test-csrf",
     );
     expect(mockXhr.send).toHaveBeenCalledTimes(1);
 
@@ -245,7 +254,7 @@ describe("uploadFile", () => {
   });
 
   it("rejects with ApiError when not authenticated", async () => {
-    client.setTokenProvider(() => null);
+    clearCsrfCookie();
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
 
@@ -350,7 +359,7 @@ describe("bulkUploadFiles", () => {
   let originalXHR: typeof XMLHttpRequest;
 
   beforeEach(() => {
-    client.setTokenProvider(() => "test-token");
+    setCsrfCookie("test-csrf");
     originalXHR = globalThis.XMLHttpRequest;
     mockXhr = createMockXHR({
       responseText: JSON.stringify([sampleBulkResult]),
@@ -372,8 +381,8 @@ describe("bulkUploadFiles", () => {
       "/api/v1/files/upload/bulk?visibility=public",
     );
     expect(mockXhr.setRequestHeader).toHaveBeenCalledWith(
-      "Authorization",
-      "Bearer test-token",
+      "X-CSRF-Token",
+      "test-csrf",
     );
     expect(mockXhr.send).toHaveBeenCalledTimes(1);
 
@@ -453,7 +462,7 @@ describe("bulkUploadFiles", () => {
   });
 
   it("rejects with ApiError when not authenticated", async () => {
-    client.setTokenProvider(() => null);
+    clearCsrfCookie();
 
     const file = new File(["contents"], "avatar.png", { type: "image/png" });
 

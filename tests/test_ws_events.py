@@ -138,6 +138,34 @@ class TestEventWebSocket(tornado.testing.AsyncHTTPTestCase):
         assert client is not None
         client.close()
 
+    def test_access_token_cookie_connects(self):
+        """A same-origin handshake with only the access_token cookie is accepted."""
+        client = self._ws_connect(
+            "/ws/",
+            headers={
+                "Origin": "http://localhost:8080",
+                "Cookie": f"access_token={self.token}",
+            },
+        )
+        assert client is not None
+        assert client.close_code is None
+        client.close()
+
+    def test_query_token_wins_over_cookie(self):
+        """An explicit ?token= parameter takes precedence over the cookie."""
+        client = self._ws_connect(
+            "/ws/",
+            self.other_token,
+            headers={
+                "Origin": "http://localhost:8080",
+                "Cookie": f"access_token={self.token}",
+            },
+        )
+        assert client is not None
+        conn = next(iter(EventWebSocket._connections))
+        assert conn.user_id == str(self.other.id)
+        client.close()
+
     def test_invalid_token_rejected(self):
         """A missing or invalid token closes the connection with code 4001."""
         client = self._ws_connect("/ws/", "not-a-valid-token")

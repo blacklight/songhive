@@ -56,6 +56,10 @@ export interface paths {
     /**
      * Refresh
      * @description Refresh an access token using a valid refresh token.
+     *
+     *     The token may come from the JSON body (API clients) or the ``refresh_token``
+     *     cookie (browser clients). Failed refreshes clear the auth cookies so stale
+     *     browser sessions do not linger.
      */
     post: operations["refresh_api_v1_auth_refresh_post"];
     delete?: never;
@@ -75,7 +79,10 @@ export interface paths {
     put?: never;
     /**
      * Logout
-     * @description Revoke a refresh token.
+     * @description Revoke a refresh token and clear the auth cookies.
+     *
+     *     Logout is best-effort: the cookies are cleared even when no usable refresh
+     *     token is present, so a browser can always drop its session locally.
      */
     post: operations["logout_api_v1_auth_logout_post"];
     delete?: never;
@@ -258,6 +265,11 @@ export interface paths {
     /**
      * List Sessions
      * @description List the authenticated user's active refresh-token sessions.
+     *
+     *     The caller's own session is marked via ``current_session_id`` or, for
+     *     browser clients whose refresh token lives in an HttpOnly cookie, by hashing
+     *     the ``refresh_token`` cookie (sent here because the cookie is scoped to the
+     *     ``/api/v1/auth`` path).
      */
     get: operations["list_sessions_api_v1_auth_sessions_get"];
     put?: never;
@@ -5077,10 +5089,12 @@ export interface components {
     /**
      * LogoutRequest
      * @description Request body for revoking a refresh token.
+     *
+     *     Optional like ``RefreshRequest``: browser clients rely on the cookie.
      */
     LogoutRequest: {
       /** Refresh Token */
-      refresh_token: string;
+      refresh_token?: string | null;
     };
     /**
      * LogoutResponse
@@ -5114,8 +5128,7 @@ export interface components {
      * @description Delivery targets for one notification type.
      */
     NotificationPreferenceItem: {
-      /** Type */
-      type: string;
+      type: components["schemas"]["NotificationType"];
       /** In App */
       in_app: boolean;
       /** Email */
@@ -5146,8 +5159,7 @@ export interface components {
     NotificationResponse: {
       /** Id */
       id: string;
-      /** Type */
-      type: string;
+      type: components["schemas"]["NotificationType"];
       /** Actor Url */
       actor_url?: string | null;
       /** Source Url */
@@ -5161,6 +5173,13 @@ export interface components {
       /** Created At */
       created_at?: string | null;
     };
+    /**
+     * NotificationType
+     * @description Supported notification kinds.
+     * @enum {string}
+     */
+    NotificationType:
+      "follow" | "like" | "boost" | "quote" | "reply" | "mention" | "share";
     /**
      * NotificationsPurgeResponse
      * @description Result of a notification purge run.
@@ -5364,10 +5383,13 @@ export interface components {
     /**
      * RefreshRequest
      * @description Request body for refreshing an access token.
+     *
+     *     The field is optional: browser clients send the refresh token through the
+     *     ``refresh_token`` HttpOnly cookie instead of the JSON body.
      */
     RefreshRequest: {
       /** Refresh Token */
-      refresh_token: string;
+      refresh_token?: string | null;
     };
     /**
      * RegisterRequest
@@ -6494,9 +6516,9 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody: {
+    requestBody?: {
       content: {
-        "application/json": components["schemas"]["RefreshRequest"];
+        "application/json": components["schemas"]["RefreshRequest"] | null;
       };
     };
     responses: {
@@ -6527,9 +6549,9 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody: {
+    requestBody?: {
       content: {
-        "application/json": components["schemas"]["LogoutRequest"];
+        "application/json": components["schemas"]["LogoutRequest"] | null;
       };
     };
     responses: {
@@ -10266,6 +10288,8 @@ export interface operations {
     parameters: {
       query?: {
         seen?: boolean | null;
+        /** @description Comma-separated notification type allowlist */
+        type?: string | null;
         limit?: number;
         offset?: number;
       };

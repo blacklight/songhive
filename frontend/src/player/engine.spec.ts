@@ -4,7 +4,6 @@ import type { QueueTrack } from "./types";
 
 vi.mock("@/api/stream", () => ({
   streamUrl: (track: { id: string }) => `/stream/${track.id}`,
-  setStreamTokenProvider: vi.fn(),
 }));
 
 vi.mock("@/api/history", () => ({

@@ -17,8 +17,6 @@ function mountEntityDelete(
   const authStore = useAuthStore();
   if (auth.isAdmin || auth.userId) {
     authStore.$patch({
-      accessToken: "token",
-      expiresAt: Date.now() + 60000,
       user: {
         id: auth.userId ?? "user-1",
         username: "test",

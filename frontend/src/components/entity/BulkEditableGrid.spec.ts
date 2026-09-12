@@ -24,9 +24,6 @@ function createItem(
 function setAuthenticated(userId = "user-1", isAdmin = false) {
   const authStore = useAuthStore();
   authStore.$patch({
-    accessToken: "token",
-    refreshToken: "refresh",
-    expiresAt: Date.now() + 60000,
     user: { id: userId, username: "test" } as UserResponse,
     role: isAdmin ? "admin" : "user",
     status: "authenticated",

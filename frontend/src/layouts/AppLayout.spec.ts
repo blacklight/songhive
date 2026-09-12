@@ -152,9 +152,6 @@ function createTestRouter() {
 }
 
 function authenticateStore(store: ReturnType<typeof useAuthStore>) {
-  store.accessToken = "token";
-  store.refreshToken = "refresh";
-  store.expiresAt = Date.now() + 10000;
   store.user = {
     id: "u1",
     username: "alice",
@@ -217,9 +214,6 @@ describe("AppLayout", () => {
 
   it("shows logged-in nav items and hides the Login button for authenticated users", async () => {
     const { wrapper, store } = await mountLayout();
-    store.accessToken = "token";
-    store.refreshToken = "refresh";
-    store.expiresAt = Date.now() + 10000;
     store.user = {
       id: "u1",
       username: "alice",
@@ -293,9 +287,6 @@ describe("AppLayout", () => {
 
   it("shows the Admin link for logged-in admins", async () => {
     const { wrapper, store } = await mountLayout();
-    store.accessToken = "token";
-    store.refreshToken = "refresh";
-    store.expiresAt = Date.now() + 10000;
     store.user = { id: "u1", username: "admin" } as UserResponse;
     store.role = "admin";
     store.status = "authenticated";
@@ -309,9 +300,6 @@ describe("AppLayout", () => {
 
   it("logs the user out and navigates to /login", async () => {
     const { wrapper, store, router } = await mountLayout();
-    store.accessToken = "token";
-    store.refreshToken = "refresh";
-    store.expiresAt = Date.now() + 10000;
     store.user = {
       id: "u1",
       username: "alice",

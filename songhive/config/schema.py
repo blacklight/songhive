@@ -202,6 +202,21 @@ class AuthConfig(BaseSettings):
             "Number of trusted proxy hops for X-Forwarded-For and X-Forwarded-Proto " "parsing; 0 disables header trust"
         ),
     )
+    cookie_secure: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Whether auth cookies get the Secure flag. When None, it is "
+            "inferred from server.debug (Secure unless debug is enabled)."
+        ),
+    )
+    cookie_samesite: Literal["lax", "strict", "none"] = Field(
+        default="lax",
+        description="SameSite attribute for auth cookies",
+    )
+    cookie_domain: Optional[str] = Field(
+        default=None,
+        description="Domain attribute for auth cookies (e.g. cross-subdomain deployments)",
+    )
     secret_key: str = Field(
         description="Secret key for JWT signing",
         repr=False,

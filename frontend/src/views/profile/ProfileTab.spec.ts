@@ -47,9 +47,6 @@ describe("ProfileTab", () => {
 
     const store = useAuthStore();
     store.registerClientProviders();
-    store.accessToken = "token";
-    store.refreshToken = "refresh";
-    store.expiresAt = Date.now() + 10000;
     store.user = {
       id: "u1",
       username: "alice",

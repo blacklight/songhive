@@ -1,4 +1,4 @@
-import { getAuthHeader, ApiError, apiRequest } from "./client";
+import { getCsrfToken, ApiError, apiRequest } from "./client";
 import { buildUrl, API_PREFIX } from "./config";
 import { i18n } from "@/i18n";
 import type { components } from "./types";
@@ -54,8 +54,11 @@ export async function uploadFile(
   description?: string,
   publish?: boolean,
 ): Promise<FileUploadResult> {
-  const auth = getAuthHeader();
-  if (!auth) {
+  // XHR same-origin requests carry the HttpOnly auth cookies automatically;
+  // the readable csrf_token cookie doubles as the session indicator and the
+  // double-submit token required on unsafe methods.
+  const csrf = getCsrfToken();
+  if (!csrf) {
     throw new ApiError("Not authenticated", 401);
   }
 
@@ -73,7 +76,7 @@ export async function uploadFile(
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
-    xhr.setRequestHeader("Authorization", auth);
+    xhr.setRequestHeader("X-CSRF-Token", csrf);
 
     if (onProgress) {
       xhr.upload.onprogress = makeProgressHandler(onProgress, file.size);
@@ -159,8 +162,8 @@ export async function bulkUploadFiles(
   description?: string,
   publish?: boolean,
 ): Promise<BulkFileUploadResult[]> {
-  const auth = getAuthHeader();
-  if (!auth) {
+  const csrf = getCsrfToken();
+  if (!csrf) {
     throw new ApiError("Not authenticated", 401);
   }
 
@@ -180,7 +183,7 @@ export async function bulkUploadFiles(
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
-    xhr.setRequestHeader("Authorization", auth);
+    xhr.setRequestHeader("X-CSRF-Token", csrf);
 
     if (onProgress) {
       xhr.upload.onprogress = makeProgressHandler(onProgress, totalSize);

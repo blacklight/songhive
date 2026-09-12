@@ -79,6 +79,7 @@ songhive/
 ├── api/                    # FastAPI application
 │   ├── app.py              # FastAPI factory: middleware, route registration, federation setup
 │   ├── _common.py          # Shared helpers (pagination, client IP, etc.)
+│   ├── cookies.py          # Set/clear HttpOnly auth cookies + double-submit CSRF cookie
 │   ├── deps.py             # Dependency injection (DB session, current user, config, Redis, storage)
 │   ├── errors.py           # RFC 7807 problem-detail exception handlers
 │   ├── routes/             # Route modules (one file per resource)
@@ -108,6 +109,7 @@ songhive/
 │   │   └── admin_external_libraries.py # Admin external library management
 │   └── middleware/
 │       ├── auth.py         # JWT decode middleware + access-token helpers
+│       ├── csrf.py         # Double-submit CSRF check for cookie-authenticated unsafe requests
 │       ├── media_cors.py   # Wildcard CORS on read-only media endpoints (federation embeds)
 │       ├── rate_limit.py   # Redis sliding-window rate limiting (IP / user)
 │       └── proxy.py        # X-Forwarded-Proto scheme handling behind reverse proxies
@@ -279,7 +281,7 @@ these subsections:
 | `celery`       | broker_url, result_backend, cleanup_orphaned_files_schedule   |
 | `storage`      | backend (local/s3), local_path, s3_*, cdn_prefix, max_upload_size |
 | `federation`   | enabled, instance_domain, instance_name, private_key_path, allow/block lists |
-| `auth`         | registration_mode, secret_key, token TTLs, rate_limit, trusted_proxy_hops |
+| `auth`         | registration_mode, secret_key, token TTLs, rate_limit, trusted_proxy_hops, cookie_secure, cookie_samesite, cookie_domain |
 | `email`        | smtp_host, smtp_port, smtp_user, from_address, tls settings   |
 | `musicbrainz`  | enabled, user_agent, cover_art, artist_image settings       |
 | `notifications`| retention_days, purge_hour, digest_hour                     |
@@ -799,9 +801,17 @@ alembic revision --autogenerate -m "add example column"
 1. **Login** — username/password → bcrypt verify → issue `TokenPair`
    (short-lived JWT access token + long-lived opaque refresh token stored in
    Redis). Each refresh token also records IP, user agent, creation time and
-   expiry, forming a user session.
-2. **Refresh** — opaque refresh token → Redis lookup → rotate (revoke old,
-   issue new pair).
+   expiry, forming a user session. The JSON response still carries the token
+   pair, but the server also sets three cookies (`api/cookies.py`):
+   `access_token` and `refresh_token` are `HttpOnly` so browser JavaScript
+   never reads the credentials, while a readable `csrf_token` backs the
+   double-submit CSRF check. The refresh cookie is scoped to
+   `Path=/api/v1/auth`; cookie flags are controlled by `auth.cookie_secure`
+   (defaults to secure outside debug mode), `auth.cookie_samesite` (`lax`),
+   and `auth.cookie_domain`.
+2. **Refresh** — opaque refresh token from the JSON body (API clients) or the
+   `refresh_token` cookie (browsers) → Redis lookup → rotate (revoke old,
+   issue new pair) and re-set the cookies. Failed refreshes clear the cookies.
 3. **Revoke** — single token or all tokens for a user (Redis key deletion).
    Access tokens now carry a `jti` claim, and revocation also adds that JTI to
    a Redis deny-list. The JWT middleware checks the deny-list so revoked
@@ -815,8 +825,16 @@ alembic revision --autogenerate -m "add example column"
 
 ### Authorization
 
-- **JWT middleware** — `api/middleware/auth.py` decodes the bearer token and
-  injects the current `User` via FastAPI's dependency system.
+- **JWT middleware** — `api/middleware/auth.py` decodes the bearer token
+  (`Authorization: Bearer …` first, then the `access_token` cookie) and
+  injects the current `User` via FastAPI's dependency system. Cookie auth is
+  what lets `<img>`/`<audio>` elements, file downloads, and the WebSocket
+  handshake authenticate without JavaScript-accessible tokens.
+- **CSRF** — `api/middleware/csrf.py` enforces a double-submit check: unsafe
+  methods (POST/PUT/PATCH/DELETE) that carry an auth cookie and no
+  `Authorization` header must echo the readable `csrf_token` cookie in
+  `X-CSRF-Token`. Session endpoints (login/refresh/logout/registration, OAuth
+  token endpoints) are exempt; bearer clients and safe methods are unaffected.
 - **Role-based** — `UserRole.ADMIN` / `MODERATOR` / `USER`; `require_admin`
   dependency enforces admin-only routes.
 - **ACL service** (`services/acl.py`) — three-level visibility check augmented
@@ -1358,8 +1376,10 @@ is raised when an upload exceeds `storage.max_upload_size`.
   matching the request `Host` are always allowed since the SPA and `/ws` are
   normally served same-origin (nginx proxies both, and Vite forwards `/ws` in
   development).
-- Authenticates the connecting user via a JWT access token (passed as a query
-  parameter or cookie on the initial handshake).
+- Authenticates the connecting user via a JWT access token: the `?token=`
+  query parameter (API clients) takes precedence, then the `access_token`
+  `HttpOnly` cookie, which browsers send automatically on same-origin
+  handshakes.
 - Broadcasts real-time events (import progress, federation notifications, etc.)
   to authenticated clients.
 - `EventWebSocket.send_to_user(user_id, event_type, data)` serializes events
@@ -1415,6 +1435,18 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |
+
+Browser authentication is cookie-based: the SPA never stores JWTs. The
+`api/client.ts` fetch wrapper sends `credentials: "same-origin"` on every
+request, echoes the readable `csrf_token` cookie as `X-CSRF-Token` on unsafe
+methods, and retries once after a cookie refresh on 401. The auth store
+(`stores/auth.ts`) persists only the non-sensitive user profile and bootstraps
+by fetching `/users/me`; stream URLs (`api/stream.ts`) and the WebSocket
+handshake (`api/ws.ts`) carry no token because the same-origin requests
+authenticate through the `HttpOnly` cookies. This assumes same-origin
+SPA/API hosting — which the production static serving and the Vite dev
+proxy both provide — while non-browser clients keep using the token pair in
+login/refresh JSON responses with `Authorization: Bearer` headers.
 
 Entity detail pages expose an "Activities" action that navigates to
 `/{entity}/{id}/activities` (`EntityActivitiesView`, shared across `track`,

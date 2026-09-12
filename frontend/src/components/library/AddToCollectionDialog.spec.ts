@@ -75,8 +75,6 @@ describe("AddToCollectionDialog", () => {
     setActivePinia(createPinia());
     const authStore = useAuthStore();
     authStore.$patch({
-      accessToken: "token",
-      expiresAt: Date.now() + 60000,
       user: { id: "u1", username: "user" },
     });
     vi.mocked(librariesApi.listLibraries).mockReset();
@@ -300,7 +298,6 @@ describe("AddToCollectionDialog", () => {
 
     const authStore = useAuthStore();
     authStore.$patch({
-      accessToken: null,
       user: null,
     });
 

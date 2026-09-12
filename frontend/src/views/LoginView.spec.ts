@@ -130,10 +130,8 @@ describe("LoginView", () => {
     await router.isReady();
 
     const store = useAuthStore();
-    store.accessToken = "token";
-    store.refreshToken = "refresh";
-    store.expiresAt = Date.now() + 10000;
     store.status = "authenticated";
+    store.user = { id: "u1", username: "alice" } as never;
 
     mount(LoginView, {
       global: { plugins: [router] },

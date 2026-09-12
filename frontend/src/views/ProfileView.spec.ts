@@ -15,7 +15,6 @@ vi.mock("@/api/auth", () => ({
   revokeApiToken: vi.fn(),
   listSessions: vi.fn(),
   revokeSession: vi.fn(),
-  sha256Hex: vi.fn().mockResolvedValue("current-session-hash"),
 }));
 
 vi.mock("@/api/users", () => ({
@@ -69,9 +68,6 @@ describe("ProfileView", () => {
 
     const store = useAuthStore();
     store.registerClientProviders();
-    store.accessToken = "token";
-    store.refreshToken = "refresh";
-    store.expiresAt = Date.now() + 10000;
     store.user = {
       id: "u1",
       username: "alice",
@@ -126,7 +122,7 @@ describe("ProfileView", () => {
     await flushPromises();
 
     expect(router.currentRoute.value.query.tab).toBe("sessions");
-    expect(authApi.listSessions).toHaveBeenCalledWith("current-session-hash");
+    expect(authApi.listSessions).toHaveBeenCalledWith();
     expect(wrapper.text()).toContain(i18n.global.t("profile.sessions.empty"));
   });
 

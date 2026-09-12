@@ -72,9 +72,6 @@ function createToken(
 
 function setAuthenticated(userId = "user-1") {
   const authStore = useAuthStore();
-  authStore.accessToken = "token";
-  authStore.refreshToken = "refresh";
-  authStore.expiresAt = Date.now() + 10000;
   authStore.status = "authenticated";
   authStore.user = { id: userId, username: "alice" } as never;
 }

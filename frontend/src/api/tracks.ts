@@ -1,9 +1,4 @@
-import {
-  getAuthHeader,
-  ApiError,
-  apiRequest,
-  apiRequestWithHeaders,
-} from "./client";
+import { ApiError, apiRequest, apiRequestWithHeaders } from "./client";
 import type { ActivityVisibility } from "./activities";
 import { buildUrl } from "./config";
 import type { components } from "./types";
@@ -197,23 +192,19 @@ function parseContentDisposition(header: string): string | undefined {
 /**
  * Download a track's backing audio file as an attachment.
  *
- * The track ``audio_url`` already resolves to the file download endpoint, so
- * this helper only adds the bearer token (when one is available), requests the
- * file as an attachment, and triggers a browser save via a temporary object
+ * The track ``audio_url`` already resolves to the file download endpoint and
+ * the same-origin request carries the auth cookies, so this helper only
+ * requests the file as an attachment and triggers a browser save via a
+ * temporary object
  * URL.  It raises ``ApiError`` when the server rejects the request.
  */
 export async function downloadTrack(
   audioUrl: string,
   filename?: string,
 ): Promise<void> {
-  const auth = getAuthHeader();
   const url = buildUrl(audioUrl, { disposition: "attachment" });
-  const headers: Record<string, string> = {};
-  if (auth) {
-    headers.Authorization = auth;
-  }
-
-  const response = await fetch(url, { headers });
+  // Same-origin fetch sends the auth cookies automatically.
+  const response = await fetch(url, { credentials: "same-origin" });
   if (!response.ok) {
     const text = await response.text();
     let parsed: unknown = null;

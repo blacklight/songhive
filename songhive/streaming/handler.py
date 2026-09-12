@@ -160,6 +160,7 @@ class StreamHandler(tornado.web.RequestHandler):
 
     async def _authenticate(self, session) -> Optional[User]:
         """Decode the Authorization header or access_token cookie and return the active user, if any."""
+        token: Optional[str]
         auth_header = self.request.headers.get("Authorization", "")
         if auth_header:
             if auth_header.startswith("Bearer "):

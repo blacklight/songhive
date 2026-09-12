@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { setWsTokenProvider, EventBus } from "./ws";
+import { EventBus } from "./ws";
 import { requestTokenRefresh } from "./client";
 
 vi.mock("./client", () => ({
@@ -46,7 +46,6 @@ describe("EventBus", () => {
   beforeEach(() => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
     vi.clearAllMocks();
-    setWsTokenProvider(() => "token-123");
   });
 
   it("connects and subscribes", async () => {

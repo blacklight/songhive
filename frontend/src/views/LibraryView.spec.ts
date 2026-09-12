@@ -25,6 +25,11 @@ function createTestRouter() {
     routes: [
       { path: "/", component: { template: "<div/>" } },
       { path: "/libraries/:id", component: { template: "<div/>" } },
+      {
+        path: "/users/:username",
+        name: "userProfile",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -42,10 +47,8 @@ function createLibrary(id: string, name: string): LibraryResponse {
 
 function setAuthenticated() {
   const authStore = useAuthStore();
-  authStore.accessToken = "token";
-  authStore.refreshToken = "refresh";
-  authStore.expiresAt = Date.now() + 10000;
   authStore.status = "authenticated";
+  authStore.user = { id: "user-1", username: "alice" } as never;
 }
 
 describe("LibraryView", () => {

@@ -52,9 +52,8 @@ function createTrack(id: string, title: string): TrackResponse {
 }
 
 function setAuthenticated(auth: ReturnType<typeof useAuthStore>) {
-  auth.accessToken = "token";
-  auth.refreshToken = "refresh";
-  auth.expiresAt = Date.now() + 10000;
+  auth.status = "authenticated";
+  auth.user = { id: "user-1", username: "alice" } as never;
 }
 
 describe("RadioView", () => {

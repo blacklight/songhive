@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config.schema import SonghiveConfig
 from ...models.user import User
 from ...services import audit
-from ...users.tokens import list_user_sessions, revoke_session
+from ...users.tokens import _hash_token, list_user_sessions, revoke_session
 from .._common import client_ip
+from ..cookies import REFRESH_TOKEN_COOKIE
 from ..deps import get_config, get_current_user, get_db, get_redis
 
 router = APIRouter(prefix="/auth/sessions", tags=["Sessions"])
@@ -85,6 +86,7 @@ class RevokeSessionResponse(BaseModel):
     response_model=SessionListResponse,
 )
 async def list_sessions(
+    request: Request,
     current_session_id: Optional[str] = Query(
         None,
         description="Optional session id of the caller, used to mark the current session.",
@@ -92,8 +94,20 @@ async def list_sessions(
     redis: Redis = Depends(get_redis),
     user: User = Depends(get_current_user),
 ):
-    """List the authenticated user's active refresh-token sessions."""
+    """List the authenticated user's active refresh-token sessions.
+
+    The caller's own session is marked via ``current_session_id`` or, for
+    browser clients whose refresh token lives in an HttpOnly cookie, by hashing
+    the ``refresh_token`` cookie (sent here because the cookie is scoped to the
+    ``/api/v1/auth`` path).
+    """
     sessions = await list_user_sessions(redis, user.id)
+
+    current_id = current_session_id
+    if current_id is None:
+        refresh_cookie = request.cookies.get(REFRESH_TOKEN_COOKIE)
+        if refresh_cookie:
+            current_id = _hash_token(refresh_cookie)
 
     items = []
     for session in sessions:
@@ -104,7 +118,7 @@ async def list_sessions(
                 user_agent=session.user_agent,
                 created_at=session.created_at,
                 expires_at=session.expires_at,
-                is_current=session.id == current_session_id,
+                is_current=session.id == current_id,
             )
         )
 

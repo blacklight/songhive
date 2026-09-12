@@ -48,9 +48,7 @@ describe("auth endpoints", () => {
     setRefreshHandler(refresh);
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      authApi.logout({ refresh_token: "stale-refresh" }),
-    ).rejects.toBeInstanceOf(ApiError);
+    await expect(authApi.logout()).rejects.toBeInstanceOf(ApiError);
     expect(refresh).not.toHaveBeenCalled();
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -67,9 +65,7 @@ describe("auth endpoints", () => {
     setRefreshHandler(refresh);
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      authApi.refresh({ refresh_token: "stale-refresh" }),
-    ).rejects.toBeInstanceOf(ApiError);
+    await expect(authApi.refresh()).rejects.toBeInstanceOf(ApiError);
     expect(refresh).not.toHaveBeenCalled();
   });
 
@@ -87,7 +83,7 @@ describe("auth endpoints", () => {
 
     setRefreshHandler(async () => {
       try {
-        await authApi.refresh({ refresh_token: "stale-refresh" });
+        await authApi.refresh();
         return true;
       } catch {
         return false;

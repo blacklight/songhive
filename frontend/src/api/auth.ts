@@ -9,10 +9,6 @@ export type LoginRequest =
   paths["/api/v1/auth/login"]["post"]["requestBody"]["content"]["application/json"];
 export type TokenPairResponse =
   paths["/api/v1/auth/login"]["post"]["responses"]["200"]["content"]["application/json"];
-export type RefreshRequest =
-  paths["/api/v1/auth/refresh"]["post"]["requestBody"]["content"]["application/json"];
-export type LogoutRequest =
-  paths["/api/v1/auth/logout"]["post"]["requestBody"]["content"]["application/json"];
 export type LogoutResponse =
   paths["/api/v1/auth/logout"]["post"]["responses"]["200"]["content"]["application/json"];
 export type VerifyEmailRequest =
@@ -38,18 +34,18 @@ export function login(body: LoginRequest): Promise<TokenPairResponse> {
   });
 }
 
-export function refresh(body: RefreshRequest): Promise<TokenPairResponse> {
+// The refresh token travels in the HttpOnly cookie; browser clients send an
+// empty body and the server resolves the token from the cookie jar.
+export function refresh(): Promise<TokenPairResponse> {
   return apiRequest<TokenPairResponse>("/auth/refresh", {
     method: "POST",
-    body,
     skipAuth: true,
   });
 }
 
-export function logout(body: LogoutRequest): Promise<LogoutResponse> {
+export function logout(): Promise<LogoutResponse> {
   return apiRequest<LogoutResponse>("/auth/logout", {
     method: "POST",
-    body,
     skipAuth: true,
   });
 }
@@ -143,23 +139,10 @@ export function revokeApiToken(id: string): Promise<unknown> {
   return apiRequest<unknown>(`/auth/api-tokens/${id}`, { method: "DELETE" });
 }
 
-export async function sha256Hex(value: string): Promise<string> {
-  if (typeof crypto === "undefined" || !crypto.subtle) {
-    return "";
-  }
-  const data = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-export function listSessions(
-  currentSessionId?: string,
-): Promise<SessionListResponse> {
-  return apiRequest<SessionListResponse>("/auth/sessions", {
-    query: currentSessionId ? { current_session_id: currentSessionId } : {},
-  });
+// The server marks the current session by hashing the refresh_token cookie,
+// so no client-side session id is needed.
+export function listSessions(): Promise<SessionListResponse> {
+  return apiRequest<SessionListResponse>("/auth/sessions");
 }
 
 export function revokeSession(id: string): Promise<RevokeSessionResponse> {

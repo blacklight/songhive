@@ -4,7 +4,7 @@ Authentication routes: registration, login, token refresh, logout, and OAuth2.
 
 import base64
 from datetime import datetime, timezone
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
@@ -44,7 +44,9 @@ from ...users.tokens import (
     validate_refresh_token,
 )
 from .._common import client_ip
+from ..cookies import REFRESH_TOKEN_COOKIE, clear_auth_cookies, set_auth_cookies
 from ..deps import get_config, get_current_user, get_db, get_redis
+from ..errors import ProblemDetails, ProblemJSONResponse
 from ..middleware.rate_limit import check_rate_limit, rate_limit
 
 router = APIRouter(prefix="/auth")
@@ -91,15 +93,22 @@ class TokenPairResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    """Request body for refreshing an access token."""
+    """Request body for refreshing an access token.
 
-    refresh_token: str
+    The field is optional: browser clients send the refresh token through the
+    ``refresh_token`` HttpOnly cookie instead of the JSON body.
+    """
+
+    refresh_token: Optional[str] = None
 
 
 class LogoutRequest(BaseModel):
-    """Request body for revoking a refresh token."""
+    """Request body for revoking a refresh token.
 
-    refresh_token: str
+    Optional like ``RefreshRequest``: browser clients rely on the cookie.
+    """
+
+    refresh_token: Optional[str] = None
 
 
 class LogoutResponse(BaseModel):
@@ -223,6 +232,7 @@ async def register(
 async def login(
     body: LoginRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
     redis: Redis = Depends(get_redis),
@@ -258,7 +268,38 @@ async def login(
         ip_address=client_ip(request),
         user_agent=request.headers.get("User-Agent"),
     )
+    set_auth_cookies(response, config, token_pair)
     return _token_pair_response(token_pair)
+
+
+def _resolve_refresh_token(
+    request: Request,
+    body: Optional[Union[RefreshRequest, LogoutRequest]],
+) -> Optional[str]:
+    """Read the refresh token from the JSON body or the HttpOnly cookie."""
+    if body is not None and body.refresh_token:
+        return body.refresh_token
+    return request.cookies.get(REFRESH_TOKEN_COOKIE)
+
+
+def _refresh_error(request: Request, config: SonghiveConfig, detail: str) -> ProblemJSONResponse:
+    """Return a 401 problem response that also clears the auth cookies.
+
+    A raised ``HTTPException`` would bypass the injected ``response`` object,
+    so the cookies are cleared on a response built here instead.
+    """
+    problem = ProblemDetails(
+        status=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        instance=str(request.url.path),
+    )
+    resp = ProblemJSONResponse(
+        problem.model_dump(mode="json"),
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    clear_auth_cookies(resp, config)
+    return resp
 
 
 @router.post(
@@ -267,44 +308,47 @@ async def login(
     dependencies=[Depends(rate_limit)],
 )
 async def refresh(
-    body: RefreshRequest,
     request: Request,
+    response: Response,
+    body: Optional[RefreshRequest] = None,
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
     redis: Redis = Depends(get_redis),
 ):
-    """Refresh an access token using a valid refresh token."""
-    payload = await validate_refresh_token(body.refresh_token, redis)
-    if payload is None:
+    """Refresh an access token using a valid refresh token.
+
+    The token may come from the JSON body (API clients) or the ``refresh_token``
+    cookie (browser clients). Failed refreshes clear the auth cookies so stale
+    browser sessions do not linger.
+    """
+    refresh_token = _resolve_refresh_token(request, body)
+    if refresh_token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    payload = await validate_refresh_token(refresh_token, redis)
+    if payload is None:
+        return _refresh_error(request, config, "Invalid or expired refresh token")
+
     user = await get_user_by_id(db, payload.user_id)
     if user is None or not user.is_active:
         access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
-        await revoke_refresh_token(body.refresh_token, redis, access_token_ttl)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Account is inactive or deleted",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        await revoke_refresh_token(refresh_token, redis, access_token_ttl)
+        return _refresh_error(request, config, "Account is inactive or deleted")
 
     token_pair = await rotate_refresh_token(
-        body.refresh_token,
+        refresh_token,
         config,
         redis,
         ip_address=client_ip(request),
         user_agent=request.headers.get("User-Agent"),
     )
     if token_pair is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        return _refresh_error(request, config, "Invalid or expired refresh token")
+    set_auth_cookies(response, config, token_pair)
     return _token_pair_response(token_pair)
 
 
@@ -314,13 +358,22 @@ async def refresh(
     dependencies=[Depends(rate_limit)],
 )
 async def logout(
-    body: LogoutRequest,
+    request: Request,
+    response: Response,
+    body: Optional[LogoutRequest] = None,
     redis: Redis = Depends(get_redis),
     config: SonghiveConfig = Depends(get_config),
 ):
-    """Revoke a refresh token."""
-    access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
-    await revoke_refresh_token(body.refresh_token, redis, access_token_ttl)
+    """Revoke a refresh token and clear the auth cookies.
+
+    Logout is best-effort: the cookies are cleared even when no usable refresh
+    token is present, so a browser can always drop its session locally.
+    """
+    refresh_token = _resolve_refresh_token(request, body)
+    if refresh_token:
+        access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
+        await revoke_refresh_token(refresh_token, redis, access_token_ttl)
+    clear_auth_cookies(response, config)
     return LogoutResponse()
 
 

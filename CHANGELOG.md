@@ -6,6 +6,33 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `auth`: Browser sessions are now authenticated with server-managed
+  `HttpOnly` cookies instead of JavaScript-readable JWTs. Login and
+  refresh set `access_token` and `refresh_token` `HttpOnly` cookies
+  (the latter scoped to `Path=/api/v1/auth`) plus a readable
+  `csrf_token` cookie; logout clears them. `api/cookies.py` centralizes
+  cookie issuance with new `auth.cookie_secure` (Secure by default
+  outside debug mode), `auth.cookie_samesite` (default `lax`), and
+  `auth.cookie_domain` options. Refresh and logout accept the refresh
+  token from either the JSON body (API clients) or the cookie
+  (browsers), failed refreshes clear stale cookies, and
+  `GET /api/v1/auth/sessions` marks the caller's current session by
+  hashing the refresh cookie when `current_session_id` is omitted.
+- `security`: New `CsrfMiddleware` (`api/middleware/csrf.py`) enforces a
+  double-submit check: unsafe requests that carry an auth cookie and no
+  `Authorization` header must echo the `csrf_token` cookie in
+  `X-CSRF-Token`. Session-lifecycle endpoints (login, register, refresh,
+  logout, password reset, OAuth token endpoints) are exempt; bearer
+  clients and safe methods are unaffected.
+- `api`: Read-only media endpoints (`GET /api/v1/files/{id}/download`,
+  `GET /api/v1/tracks/{id}/download`, `GET /api/v1/stream/{id}`) now
+  return `Access-Control-Allow-Origin: *` so remote Fediverse web
+  clients (e.g. Akkoma/Mangane) can embed audio directly.
+  `MediaCorsMiddleware` answers preflights (allowing `Range`) and
+  exposes `Content-Range`/`Accept-Ranges`/`Content-Length`; `Vary:
+  Origin` plus pass-through for configured `cors_origins` keeps the
+  credentialed allowlist working, and the Tornado `StreamHandler` sets
+  the same headers itself since it bypasses FastAPI middleware.
 - `notifications`: User notifications for follows, likes, boosts, quotes,
   replies, mentions, and shares. `Notification` and
   `NotificationPreference` models back per-type delivery targets (in-app,
@@ -64,6 +91,22 @@ All notable changes to this project will be documented in this file.
   builds retrying an expired token every second) are now throttled
   server-side: consecutive auth failures per `(remote IP, token)` delay
   the `4001` close exponentially, capped at 30s.
+
+### Changed
+
+- `frontend`: The SPA no longer stores JWTs in `localStorage` or in a
+  JavaScript-readable cookie. `api/client.ts` sends `credentials:
+  "same-origin"` on every request and echoes `X-CSRF-Token` on unsafe
+  methods (re-reading the rotated cookie after a 401 refresh); the auth
+  store persists only the non-sensitive user profile and bootstraps via
+  `GET /api/v1/users/me`; stream URLs and the WebSocket handshake carry
+  no token — `StreamHandler` and `EventWebSocket` accept the
+  `access_token` cookie, with `?token=` still supported on the socket
+  for API clients. Bearer authentication and the JSON token pair in
+  login/refresh responses are unchanged for non-browser clients.
+  Same-origin SPA/API hosting is assumed (production static serving and
+  the Vite dev proxy both provide it); upgrading browsers drop the
+  legacy localStorage tokens and sign in once to get the new cookies.
 
 ## 0.1.0
 

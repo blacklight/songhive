@@ -8,11 +8,21 @@ import {
   getApiErrorMessage,
 } from "./client";
 
+function setCsrfCookie(value: string) {
+  document.cookie = `csrf_token=${value}; path=/`;
+}
+
+function clearCsrfCookie() {
+  document.cookie =
+    "csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+}
+
 describe("apiRequest", () => {
   beforeEach(() => {
     setTokenProvider(() => "initial");
     setRefreshHandler(() => Promise.resolve(true));
     setLogoutHandler(() => {});
+    clearCsrfCookie();
   });
 
   it("returns parsed JSON on 200", async () => {
@@ -198,6 +208,38 @@ describe("apiRequest", () => {
     const headers = new Headers(init.headers);
     expect(headers.has("Content-Type")).toBe(false);
     expect(headers.get("Authorization")).toBe("Bearer initial");
+  });
+
+  it("sends cookies same-origin and echoes the CSRF cookie on unsafe methods", async () => {
+    setCsrfCookie("csrf-123");
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: () => Promise.resolve("{}"),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await apiRequest("/test", { method: "POST", body: {} });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.credentials).toBe("same-origin");
+    const headers = new Headers(init.headers);
+    expect(headers.get("X-CSRF-Token")).toBe("csrf-123");
+  });
+
+  it("does not send a CSRF header on safe methods", async () => {
+    setCsrfCookie("csrf-123");
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: () => Promise.resolve("{}"),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await apiRequest("/test");
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).has("X-CSRF-Token")).toBe(false);
   });
 });
 

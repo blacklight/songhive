@@ -9,14 +9,9 @@ vi.mock("@/api/client", () => ({
   setTokenProvider: vi.fn(),
   setRefreshHandler: vi.fn(),
   setLogoutHandler: vi.fn(),
-}));
-
-vi.mock("@/api/stream", () => ({
-  setStreamTokenProvider: vi.fn(),
-}));
-
-vi.mock("@/api/ws", () => ({
-  setWsTokenProvider: vi.fn(),
+  ApiError: class ApiError extends Error {
+    status = 0;
+  },
 }));
 
 vi.mock("@/api/instance", () => ({
@@ -29,8 +24,6 @@ describe("router guard", () => {
     localStorage.clear();
     const authStore = useAuthStore();
     authStore.registerClientProviders();
-    authStore.accessToken = null;
-    authStore.refreshToken = null;
     authStore.user = null;
     authStore.role = null;
     authStore.status = "unauthenticated";
@@ -48,8 +41,6 @@ describe("router guard", () => {
   it("redirects unauthenticated admin visits to login", async () => {
     const store = useAuthStore();
     store.status = "unauthenticated";
-    store.accessToken = null;
-    store.refreshToken = null;
     store.user = null;
     store.role = null;
     await router.push("/admin");
@@ -59,8 +50,6 @@ describe("router guard", () => {
 
   it("redirects non-admin from admin to 403", async () => {
     const store = useAuthStore();
-    store.accessToken = "x";
-    store.refreshToken = "y";
     store.user = { id: "u1", username: "bob", links: [] } as UserResponse;
     store.status = "authenticated";
     await router.push("/admin");
@@ -141,9 +130,6 @@ describe("router guard", () => {
 
   it("redirects /register to / for authenticated users when public registration is closed", async () => {
     const store = useAuthStore();
-    store.accessToken = "token";
-    store.refreshToken = "refresh";
-    store.expiresAt = Date.now() + 10000;
     store.user = { id: "u1", username: "bob", links: [] } as UserResponse;
     store.status = "authenticated";
 

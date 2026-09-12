@@ -68,8 +68,8 @@ def extract_token(request: Request) -> Optional[str]:
     """Extract an access token from the Authorization header or access_token cookie.
 
     Cookies are supported because browser media tags (<img>, <audio>) cannot
-    send custom Authorization headers. The cookie is kept in sync by the SPA
-    auth store.
+    send custom Authorization headers. The HttpOnly cookie is set by the
+    login/refresh endpoints; JavaScript never sees the token value.
     """
     auth_header: str = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
