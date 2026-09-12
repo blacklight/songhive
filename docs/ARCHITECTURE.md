@@ -1044,6 +1044,17 @@ the HTTP routes.
   `Audio` object, with spaces converted to underscores. These tags include
   an `href` pointing at the instance's `/tags/{name}` page.
 - Per-actor follower isolation is delegated to pubby's `target_actor_id`.
+- Incoming `Follow`/`Undo(Follow)` activities persist or remove rows in
+  pubby's `federation_followers` storage; `process_incoming` additionally
+  retracts the stored follower when a remote actor's `Delete` targets the
+  sending actor itself. `services/federation.get_actor_followers` returns
+  an actor's followers newest-first by `followed_at` and
+  `count_followers_by_actor` provides per-actor counts, backing the
+  `followers_count` field on `GET /api/v1/users/{username}` and the
+  paginated `GET /api/v1/users/{username}/followers` JSON endpoint
+  (distinct from the ActivityPub `OrderedCollection` served at
+  `/users/{username}/followers`). The SPA shows the count on
+  `/@{username}` and renders follower details at `/@{username}/followers`.
 
 **Instance-level actor:**
 

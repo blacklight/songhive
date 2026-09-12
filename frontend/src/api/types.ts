@@ -472,6 +472,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/users/{username}/followers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List User Followers
+     * @description List a user's followers, newest first.
+     */
+    get: operations["list_user_followers_api_v1_users__username__followers_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/{username}": {
     parameters: {
       query?: never;
@@ -4892,6 +4912,20 @@ export interface components {
       created_at: string;
     };
     /**
+     * FollowerResponse
+     * @description A follower entry on a user's public followers page.
+     */
+    FollowerResponse: {
+      /** Actor Url */
+      actor_url: string;
+      /** Display Name */
+      display_name?: string | null;
+      /** Avatar Url */
+      avatar_url?: string | null;
+      /** Followed At */
+      followed_at?: string | null;
+    };
+    /**
      * GenreItemResponse
      * @description A single item associated with a genre.
      */
@@ -5348,6 +5382,11 @@ export interface components {
       created_at: string;
       /** Links */
       links?: components["schemas"]["UserLinkOutput"][];
+      /**
+       * Followers Count
+       * @default 0
+       */
+      followers_count: number;
     };
     /**
      * RadioCreate
@@ -7296,6 +7335,40 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ActivityListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_user_followers_api_v1_users__username__followers_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        username: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FollowerResponse"][];
         };
       };
       /** @description Validation Error */

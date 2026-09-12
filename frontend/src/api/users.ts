@@ -13,6 +13,8 @@ export type ChangePasswordResponse =
   paths["/api/v1/users/me/password"]["post"]["responses"]["200"]["content"]["application/json"];
 export type UserListResponse =
   paths["/api/v1/users"]["get"]["responses"]["200"]["content"]["application/json"];
+export type FollowerResponse =
+  paths["/api/v1/users/{username}/followers"]["get"]["responses"]["200"]["content"]["application/json"][number];
 
 export interface DeleteAccountRequest {
   confirmation: string;
@@ -29,6 +31,17 @@ export interface ListUsersParams {
 
 export interface ListUsersResult {
   users: PublicUserResponse[];
+  offset: number;
+  total: number;
+}
+
+export interface ListFollowersParams {
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListFollowersResult {
+  followers: FollowerResponse[];
   offset: number;
   total: number;
 }
@@ -65,6 +78,27 @@ export async function listPublicUsers(
   const total = response.headers.get("X-Total-Count");
   return {
     users: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
+    total: total ? parseInt(total, 10) : response.body.length,
+  };
+}
+
+export async function listFollowers(
+  username: string,
+  params?: ListFollowersParams,
+): Promise<ListFollowersResult> {
+  const response = await apiRequestWithHeaders<FollowerResponse[]>(
+    `/users/${username}/followers`,
+    {
+      query: params as
+        | Record<string, string | number | boolean | undefined | null>
+        | undefined,
+    },
+  );
+  const offsetHeader = response.headers.get("X-List-Offset");
+  const total = response.headers.get("X-Total-Count");
+  return {
+    followers: response.body,
     offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
     total: total ? parseInt(total, 10) : response.body.length,
   };

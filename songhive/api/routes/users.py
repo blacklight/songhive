@@ -2,6 +2,8 @@
 User profile routes.
 """
 
+import asyncio
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -11,11 +13,12 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
-from ...federation.actors import sync_user_actor
+from ...federation.actors import get_federation_storage, sync_user_actor
 from ...models.user import User, UserRole
 from ...models.user_link import UserLink
 from ...services import activities as activity_service
 from ...services import audit
+from ...services import federation as federation_service
 from ...services.auth import get_user_by_username, list_public_users
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
@@ -29,6 +32,8 @@ from ..deps import get_config, get_current_user, get_current_user_optional, get_
 from ..middleware.rate_limit import rate_limit_account
 from .activities import ActivityListResponse, _build_activity_response
 from .tags import TaggedItemResponse, TagSummaryResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users")
 
@@ -91,6 +96,75 @@ class PublicUserResponse(BaseModel):
     role: Optional[UserRole] = None
     created_at: datetime
     links: List[UserLinkOutput] = Field(default_factory=list)
+    followers_count: int = 0
+
+
+class FollowerResponse(BaseModel):
+    """A follower entry on a user's public followers page."""
+
+    actor_url: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    followed_at: Optional[datetime] = None
+
+
+def _follower_response(follower) -> FollowerResponse:
+    """Map a stored pubby ``Follower`` to its public representation."""
+    actor_data = follower.actor_data or {}
+    return FollowerResponse(
+        actor_url=follower.actor_id,
+        display_name=activity_service._actor_doc_display_name(actor_data),
+        avatar_url=activity_service._actor_doc_avatar_url(actor_data),
+        followed_at=follower.followed_at,
+    )
+
+
+async def _load_followers(user: User, config: SonghiveConfig) -> list:
+    """
+    Return the user's stored followers (newest first).
+
+    Followers live in pubby's ``federation_followers`` storage — populated by
+    incoming ``Follow`` activities and dropped by ``Undo(Follow)`` — so the
+    list is empty when federation is disabled or the user has no actor URL.
+    Blocking storage calls run in a thread.
+    """
+    if not config.federation.enabled or not config.federation.instance_domain or not user.actor_url:
+        return []
+    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    try:
+        return await asyncio.to_thread(federation_service.get_actor_followers, storage, user.actor_url)
+    except Exception:
+        # Broad catch is intentional: the public profile must not fail when
+        # the federation storage is unavailable or inconsistent.
+        logger.warning("Failed to load followers for %s", user.username, exc_info=True)
+        return []
+
+
+def _with_followers_count(
+    item: PublicUserResponse, counts: dict[str, int], actor_url: Optional[str]
+) -> PublicUserResponse:
+    """
+    Set ``followers_count`` on a serialized user from a count map.
+
+    Followers without a target actor (legacy unassigned rows) count toward
+    every actor, mirroring pubby's ``get_followers`` semantics.
+    """
+    unassigned = counts.get("", 0)
+    item.followers_count = counts.get(actor_url, 0) + unassigned if actor_url else unassigned
+    return item
+
+
+async def _followers_count_map(config: SonghiveConfig) -> dict[str, int]:
+    """Return per-actor follower counts (empty when federation is off)."""
+    if not config.federation.enabled or not config.federation.instance_domain:
+        return {}
+    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    try:
+        return await asyncio.to_thread(federation_service.count_followers_by_actor, storage)
+    except Exception:
+        # Broad catch is intentional: see _load_followers.
+        logger.warning("Failed to load follower counts", exc_info=True)
+        return {}
 
 
 class UserProfileUpdate(BaseModel):
@@ -277,6 +351,7 @@ async def list_public_users_route(
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"username", "created_at"}, "username")),
     db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
 ):
     """List active public users, optionally filtered and sorted."""
     users, total = await list_public_users(
@@ -288,7 +363,9 @@ async def list_public_users_route(
         sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
-    return [PublicUserResponse.model_validate(u) for u in users]
+
+    counts = await _followers_count_map(config)
+    return [_with_followers_count(PublicUserResponse.model_validate(u), counts, u.actor_url) for u in users]
 
 
 @router.get("/{user_id}/tags", response_model=List[TagSummaryResponse])
@@ -401,8 +478,34 @@ async def list_user_activities_route(
     )
 
 
+@router.get("/{username}/followers", response_model=List[FollowerResponse])
+async def list_user_followers(
+    response: Response,
+    username: str,
+    pagination: Pagination = Depends(get_pagination),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """List a user's followers, newest first."""
+    user = await get_user_by_username(db, username)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    followers = await _load_followers(user, config)
+    pagination.set_total(response, len(followers))
+    page = followers[pagination.offset : pagination.offset + pagination.limit]
+    return [_follower_response(f) for f in page]
+
+
 @router.get("/{username}", response_model=PublicUserResponse)
-async def get_user(username: str, db: AsyncSession = Depends(get_db)):
+async def get_user(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
     """Get a user profile by username."""
     user = await get_user_by_username(db, username)
     if user is None or not user.is_active:
@@ -410,4 +513,6 @@ async def get_user(username: str, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
-    return PublicUserResponse.model_validate(user)
+    result = PublicUserResponse.model_validate(user)
+    counts = await _followers_count_map(config)
+    return _with_followers_count(result, counts, user.actor_url)

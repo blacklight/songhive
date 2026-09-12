@@ -8,6 +8,18 @@ All notable changes to this project will be documented in this file.
 
 - `frontend`: Support for switching theme and accent colors from the
   `/settings` page.
+- `federation`: Local users' followers are now stored and surfaced.
+  Incoming `Follow` activities persist the remote actor (with its fetched
+  actor document) in pubby's `federation_followers` storage, and
+  `Undo(Follow)` or a `Delete` of the follower's actor removes the row.
+  `GET /api/v1/users/{username}` and the user listing report
+  `followers_count`, and a new paginated
+  `GET /api/v1/users/{username}/followers` endpoint returns follower
+  details (`actor_url`, `display_name`, `avatar_url`, `followed_at`)
+  sorted newest-first.
+- `frontend`: The user profile page (`/@{user}`) shows the follower count
+  as a link to the new `/@{user}/followers` page, which lists follower
+  details ordered by follow time.
 
 ### Fixed
 

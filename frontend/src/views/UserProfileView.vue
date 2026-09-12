@@ -6,6 +6,7 @@ import { getPublic, type PublicUserResponse } from "@/api/users";
 import { getApiErrorMessage } from "@/api/client";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import RichText from "@/components/RichText.vue";
 import { useInstanceStore } from "@/stores/instance";
@@ -117,6 +118,15 @@ watch(username, loadProfile);
             @click="copyHandle"
           />
         </p>
+
+        <RouterLink
+          :to="{ name: 'userFollowers', params: { username } }"
+          class="user-profile__followers"
+        >
+          <AppIcon name="users" />
+          {{ t("profile.followers", profile.followers_count ?? 0) }}
+        </RouterLink>
+
         <p v-if="profile.bio" class="user-profile__bio">
           <RichText
             :text="profile.bio ?? ''"
@@ -244,6 +254,18 @@ watch(username, loadProfile);
 
 .user-profile__joined {
   font-size: 0.9em;
+}
+
+.user-profile__followers {
+  color: var(--color-text-secondary);
+  font-size: 1.05em;
+  margin: var(--space-1) 0;
+  text-decoration: none;
+}
+
+.user-profile__followers:hover {
+  color: var(--color-text);
+  text-decoration: underline;
 }
 
 .user-profile__label {

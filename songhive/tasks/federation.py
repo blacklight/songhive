@@ -141,6 +141,15 @@ def process_incoming(
 
     if username is not None:
         try:
+            _retract_deleted_follower(storage, activity, actor_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to retract deleted follower %s for actor %s: %s",
+                actor,
+                actor_id,
+                exc,
+            )
+        try:
             _sync_inbox_notifications(config, activity, username, storage=storage)
         except Exception as exc:
             logger.warning(
@@ -157,6 +166,33 @@ def process_incoming(
         actor_id,
     )
     return result
+
+
+# ActivityStreams types that identify an actor document rather than content.
+_ACTOR_TYPES = {"Application", "Group", "Organization", "Person", "Service"}
+
+
+def _retract_deleted_follower(storage, activity: dict, local_actor_id: str) -> None:
+    """
+    Drop the stored follower record when a remote actor deletes itself.
+
+    pubby's ``InboxProcessor`` removes followers on ``Undo(Follow)`` but keeps
+    them when the follower's actor document is deleted; a deleted actor can no
+    longer be a follower, so the row is removed here.  Only applies when the
+    ``Delete`` targets the sending actor itself.
+    """
+    actor = activity.get("actor")
+    if activity.get("type") != "Delete" or not isinstance(actor, str) or not actor:
+        return
+
+    obj = activity.get("object")
+    target = obj.get("id") if isinstance(obj, dict) else obj if isinstance(obj, str) else None
+    obj_type = obj.get("type") if isinstance(obj, dict) else None
+    if target != actor and obj_type not in _ACTOR_TYPES:
+        return
+
+    storage.remove_follower(actor, local_actor_id)
+    logger.info("Removed follower %s for actor %s (actor deleted)", actor, local_actor_id)
 
 
 def _sync_inbox_notifications(config, activity: dict, username: str, storage=None) -> None:

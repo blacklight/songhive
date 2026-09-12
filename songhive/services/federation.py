@@ -8,9 +8,10 @@ thread when inside an async context.
 """
 
 import logging
+from datetime import timezone
 from typing import Optional
 
-from pubby import collect_inboxes
+from pubby import Follower, collect_inboxes
 from pubby import resolve_actor_inbox as _pubby_resolve_actor_inbox
 from pubby.crypto import (
     export_private_key_pem,
@@ -105,6 +106,42 @@ def get_follower_inboxes(actor_url: str, database_url: str) -> list[str]:
     """
     storage = create_activitypub_storage(database_url)
     return collect_inboxes(storage.get_followers(actor_id=actor_url))
+
+
+def _followed_at_key(follower: Follower) -> float:
+    """Return a sortable timestamp for a follower's ``followed_at`` stamp."""
+    followed_at = follower.followed_at
+    if followed_at is None:
+        return 0.0
+    if followed_at.tzinfo is None:
+        followed_at = followed_at.replace(tzinfo=timezone.utc)
+    return followed_at.timestamp()
+
+
+def get_actor_followers(storage, actor_url: str) -> list[Follower]:
+    """
+    Return the stored followers of ``actor_url``, newest first.
+
+    Reads pubby's follower storage; rows with an empty ``target_actor_id``
+    are included by ``get_followers`` for backward compatibility with
+    single-actor deployments.
+    """
+    followers = storage.get_followers(actor_id=actor_url)
+    return sorted(followers, key=_followed_at_key, reverse=True)
+
+
+def count_followers_by_actor(storage) -> dict[str, int]:
+    """
+    Return per-target-actor follower counts.
+
+    Unassigned followers (empty ``target_actor_id``, from single-actor
+    deployments) are tallied under the ``""`` key.
+    """
+    counts: dict[str, int] = {}
+    for follower in storage.get_followers():
+        key = follower.target_actor_id or ""
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def resolve_actor_inbox(

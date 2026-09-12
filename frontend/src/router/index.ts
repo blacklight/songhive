@@ -326,6 +326,11 @@ const routes: RouteRecordRaw[] = [
           },
         ],
       },
+      {
+        path: "@:username/followers",
+        name: "userFollowers",
+        component: () => import("@/views/UserFollowersView.vue"),
+      },
     ],
   },
   {

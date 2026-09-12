@@ -687,6 +687,12 @@
       "interface": "Interface"
     },
     "copyHandle": "Copy fediverse handle",
+    "followers": "No followers | {count} follower | {count} followers",
+    "followersPage": {
+      "title": "Followers",
+      "empty": "No followers yet.",
+      "since": "Following since"
+    },
     "displayName": "Display name",
     "bio": "Bio",
     "avatar": "Avatar",
