@@ -9,6 +9,8 @@ import { useConfirmStore } from "@/stores/confirm";
 import { useInstanceStore } from "@/stores/instance";
 import * as sharesApi from "@/api/shares";
 import * as tracksApi from "@/api/tracks";
+import * as usersApi from "@/api/users";
+import * as searchApi from "@/api/search";
 import ConfirmDialog from "@/components/feedback/ConfirmDialog.vue";
 import ShareDialog from "./ShareDialog.vue";
 
@@ -24,6 +26,22 @@ vi.mock("@/api/shares", () => ({
 vi.mock("@/api/tracks", () => ({
   publishTrack: vi.fn(),
 }));
+
+vi.mock("@/api/users", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/api/users")>();
+  return {
+    ...original,
+    listPublicUsers: vi.fn(),
+  };
+});
+
+vi.mock("@/api/search", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/api/search")>();
+  return {
+    ...original,
+    searchPreview: vi.fn(),
+  };
+});
 
 function createGrant(
   id: string,
@@ -87,6 +105,15 @@ describe("ShareDialog", () => {
     vi.clearAllMocks();
     vi.mocked(sharesApi.listShareGrants).mockResolvedValue([]);
     vi.mocked(sharesApi.listShareUrls).mockResolvedValue([]);
+    vi.mocked(usersApi.listPublicUsers).mockResolvedValue({
+      users: [],
+      offset: 0,
+      total: 0,
+    });
+    vi.mocked(searchApi.searchPreview).mockResolvedValue({
+      query: "",
+      sections: [],
+    });
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: vi.fn() },
       configurable: true,
@@ -94,6 +121,7 @@ describe("ShareDialog", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     wrapper?.unmount();
     document.body.innerHTML = "";
   });
@@ -151,11 +179,14 @@ describe("ShareDialog", () => {
     wrapper = mountOpen({ ownerId: "user-1" });
     await flushPromises();
 
+    vi.useFakeTimers();
     const input = document.body.querySelector(
-      'input[type="text"]',
+      'input[type="search"]',
     ) as HTMLInputElement;
+    expect(input).not.toBeNull();
     input.value = "user-2";
     input.dispatchEvent(new Event("input"));
+    vi.advanceTimersByTime(300);
     await flushPromises();
 
     const createButton = Array.from(
