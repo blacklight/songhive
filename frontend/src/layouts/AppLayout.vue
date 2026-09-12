@@ -481,10 +481,6 @@ const publicProfileLink = computed(() =>
     top: max(var(--space-3), env(safe-area-inset-top, 0px));
   }
 
-  .app-layout__brand {
-    margin-top: 2.75rem;
-  }
-
   .app-layout__sidebar {
     position: fixed;
     top: 0;
