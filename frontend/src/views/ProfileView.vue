@@ -58,8 +58,8 @@ const currentComponent = computed(() => {
 
 <template>
   <main class="profile-view">
-    <AppPageTitle class="profile-view__title" icon="user">{{
-      t("profile.title")
+    <AppPageTitle class="profile-view__title" icon="cog">{{
+      t("nav.settings")
     }}</AppPageTitle>
 
     <nav class="profile-view__tabs" aria-label="Profile tabs">
