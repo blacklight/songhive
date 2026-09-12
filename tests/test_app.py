@@ -56,11 +56,25 @@ class _FakeLoop:
         self.stopped = False
         self.closed = False
         self.ran_until_complete = []
+        self.tasks = []
+        self.scheduled = []
 
     def add_signal_handler(self, sig, callback):
         if self.raise_on_signal:
             raise RuntimeError("signal handlers not supported")
         self.signal_handlers[sig] = callback
+
+    def create_task(self, coro):
+        coro.close()
+        task = asyncio.Future(loop=self)
+        self.tasks.append(task)
+        return task
+
+    def call_soon(self, callback, *args, context=None):
+        self.scheduled.append((callback, args))
+
+    def get_debug(self):
+        return False
 
     def run_forever(self):
         self.run_forever_called = True
@@ -138,6 +152,8 @@ def test_run_tornado(monkeypatch, tmp_path, _minimal_config):
     assert fake_loop.run_forever_called
     assert signal.SIGINT in fake_loop.signal_handlers
     assert signal.SIGTERM in fake_loop.signal_handlers
+    assert len(fake_loop.tasks) == 1
+    assert fake_loop.tasks[0].cancelled()
 
     fake_loop.signal_handlers[signal.SIGINT]()
     assert fake_loop.stopped
