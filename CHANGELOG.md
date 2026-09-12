@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `frontend`: Support for switching theme and accent colors from the
+  `/settings` page.
+
 ## 0.1.1
 
 ### Added

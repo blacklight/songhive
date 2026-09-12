@@ -165,8 +165,7 @@ watch(username, loadProfile);
   gap: var(--space-4);
 }
 
-.user-profile__links a,
-.user-profile__links a:visited {
+.user-profile__links a {
   color: var(--color-text-link);
 }
 
@@ -230,6 +229,10 @@ watch(username, loadProfile);
 
 .user-profile__links > tr td {
   padding: var(--space-1) 0;
+}
+
+.user-profile__links > tr td:first-child {
+  font-weight: 500;
 }
 
 .user-profile__meta {

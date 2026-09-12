@@ -5,7 +5,27 @@ export type ThemeMode = "light" | "dark" | "system";
 
 const STORAGE_MODE_KEY = "songhive.theme.mode";
 const STORAGE_ACCENT_KEY = "songhive.theme.accent";
-const DEFAULT_ACCENT = "#fcd34d";
+
+// Preset accents offered in the interface settings. All values are light
+// pastels: --color-accent-contrast (the text/icon color drawn on accent fills)
+// is a fixed dark tone in both themes, and the accent must also stay visible
+// against the dark theme's gray surfaces.
+export const ACCENT_PRESETS: ReadonlyArray<{ value: string; name: string }> = [
+  { value: "#fca5a5", name: "red" },
+  { value: "#fdba74", name: "orange" },
+  { value: "#ecd34d", name: "yellow" },
+  { value: "#b4b465", name: "olive" },
+  { value: "#86efac", name: "green" },
+  { value: "#4ef0d8", name: "turquoise" },
+  { value: "#67e8f9", name: "cyan" },
+  { value: "#43c5fd", name: "blue" },
+  { value: "#d8b4fe", name: "purple" },
+  { value: "#acb3bf", name: "gray" },
+];
+
+const DEFAULT_ACCENT = ACCENT_PRESETS.filter(
+  (preset) => preset.name === "yellow",
+)[0].value;
 
 function readStoredMode(): ThemeMode {
   const raw = localStorage.getItem(STORAGE_MODE_KEY);

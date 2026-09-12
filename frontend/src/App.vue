@@ -30,6 +30,13 @@ body {
   margin: 0;
 }
 
+/* :where() keeps this at element-level specificity so any component rule
+   overrides it; :any-link covers both :link and :visited so visited links
+   never fall back to the UA purple. */
+a:where(:any-link) {
+  color: var(--color-text-link);
+}
+
 main section.boxed {
   border: 1px solid var(--color-border);
 }

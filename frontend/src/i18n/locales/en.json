@@ -120,7 +120,19 @@
     "light": "Light",
     "dark": "Dark",
     "system": "System",
-    "accent": "Accent color"
+    "accent": "Accent color",
+    "accents": {
+      "yellow": "Yellow",
+      "orange": "Orange",
+      "red": "Red",
+      "green": "Green",
+      "blue": "Blue",
+      "cyan": "Cyan",
+      "purple": "Purple",
+      "gray": "Gray",
+      "olive": "Olive",
+      "turquoise": "Turquoise"
+    }
   },
   "auth": {
     "login": "Log in",
@@ -752,7 +764,8 @@
       "title": "Interface",
       "hint": "Customize how Songhive looks on this device.",
       "themeLabel": "Theme",
-      "themeHint": "\"System\" follows your device's appearance setting."
+      "themeHint": "\"System\" follows your device's appearance setting.",
+      "accentHint": "Used for highlights, buttons and active states."
     }
   },
   "users": {

@@ -2,11 +2,11 @@
 
 :root {
   /* Color palette (light theme defaults) */
-  --accent: #fcd34d;
+  --accent: #fca5a5;
   --color-bg: #f9f8f7;
   --color-bg-menu: #1f2937;
   --color-surface: #ffffff;
-  --color-surface-raised: #fbc775;
+  --color-surface-raised: var(--accent);
   --color-surface-hover: #f0f0e6;
   --color-surface-active: #e5e7eb;
   --color-surface-secondary: #f3f4f6;
@@ -15,6 +15,7 @@
   --color-text-muted: #6b7280;
   --color-text-hover: #1f2937;
   --color-text-link: #a89038;
+  --color-text-link: color-mix(in srgb, var(--accent) 40%, var(--color-text));
   --color-text-menu: #f9fafb;
   --color-surface-media-backfill: #081227;
   --color-border: #d1d5db;
@@ -67,7 +68,7 @@
 }
 
 [data-theme="dark"] {
-  --accent: #fcd34d;
+  --accent: #fca5a5;
   --color-bg: #1f2927;
   --color-bg-menu: #2f3937;
   --color-surface: #374151;
@@ -81,6 +82,7 @@
   --color-text-muted: #9ca3af;
   --color-text-hover: #f3f4f6;
   --color-text-link: #bfbf53;
+  --color-text-link: color-mix(in srgb, var(--accent) 70%, var(--color-text));
   --color-text-menu: #f9fafb;
   --color-border: #4b5563;
   --color-accent: var(--accent);
