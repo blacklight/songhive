@@ -21,21 +21,17 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Normalize share grant user_id values that were stored as usernames or emails."""
     # Migrate share_grants where user_id is a username.
-    op.execute(
-        """
+    op.execute("""
         UPDATE share_grants
         SET user_id = (SELECT id FROM users WHERE users.username = share_grants.user_id)
         WHERE user_id IN (SELECT username FROM users)
-        """
-    )
+        """)
     # Migrate share_grants where user_id is an email address.
-    op.execute(
-        """
+    op.execute("""
         UPDATE share_grants
         SET user_id = (SELECT id FROM users WHERE users.email = share_grants.user_id)
         WHERE user_id IN (SELECT email FROM users)
-        """
-    )
+        """)
 
 
 def downgrade() -> None:
