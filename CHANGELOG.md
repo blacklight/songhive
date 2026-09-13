@@ -23,6 +23,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `notifications`: like/boost/quote/reply/share action text now names the
+  interacted entity — "liked your track", "boosted your album",
+  "replied to your playlist", "shared an album with you" — instead of
+  always saying "post" or "a track". `Audio` objects and resolved
+  `item_type`s map to their entity kind; `Note` objects and unresolved
+  remote objects keep the "post" wording.
 - `activities`: like/boost cards in feeds now embed the reacted content —
   the full `ActivityCard` for `Note` objects and the compact item card for
   `Audio` — fetched through a shared cache, with an "unavailable"
@@ -68,6 +74,21 @@ All notable changes to this project will be documented in this file.
   `/{id}/boost` retract the caller's reaction — the like/boost icons act
   as toggles — removing the produced notification and federating an
   `Undo(Like)`/`Undo(Announce)` to the inboxes the reaction reached.
+- `activities`: inbound remote replies are materialized as
+  `source_type="remote"` `Activity` rows (`federation/incoming.py`, wired
+  into `process_incoming`), so they render as full `ActivityCard`s with
+  the standard action bar instead of read-only compact entries. Only
+  publicly addressed `Create` replies to known activities are stored —
+  with `attributedTo`/host attribution checks — linked through
+  `in_reply_to_activity_id`, carrying the remote content, mentions,
+  hashtags and visibility clamped to the entity's; inbound `Update`
+  revises them (materializing replies whose `Create` was missed) and
+  `Delete` soft-deletes them for the recorded author only. Liking or
+  boosting one delivers the `Like`/`Announce` to the remote author's
+  inbox, and replying to one sets `inReplyTo` to its remote object id and
+  mentions the remote author. Reply counts and the replies listing
+  deduplicate rows against the stored Pubby interaction so nothing counts
+  or renders twice.
 - `users`: the profile posts timeline
   (`GET /api/v1/users/{username}/activities?mode=posts`) now folds the
   user's boosts in by default and offers Mastodon-style

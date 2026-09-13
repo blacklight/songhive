@@ -9,6 +9,7 @@ import { getApiErrorMessage } from "@/api/client";
 import { eventBus, type WsEvent } from "@/api/ws";
 import { useToastStore } from "@/stores/toast";
 import { i18n } from "@/i18n";
+import { notificationActionText } from "@/utils/notifications";
 
 export type NotificationFilter = "all" | "unread";
 
@@ -324,13 +325,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
       typeof name === "string" && name
         ? name
         : i18n.global.t("notifications.someone");
-    const key = `notifications.types.${notification.type}`;
-    const translated = i18n.global.t(key);
-    const action =
-      translated === key
-        ? i18n.global.t("notifications.types.unknown")
-        : translated;
-    return i18n.global.t("notifications.toast", { actor, action });
+    return i18n.global.t("notifications.toast", {
+      actor,
+      action: notificationActionText(notification),
+    });
   }
 
   function onWsEvent(event: WsEvent): void {

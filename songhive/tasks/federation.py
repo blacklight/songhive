@@ -139,6 +139,16 @@ def process_incoming(
         )
         return None
 
+    try:
+        _sync_remote_activities(config, activity)
+    except Exception as exc:
+        logger.warning(
+            "Failed to sync remote activity row for incoming %s from %s: %s",
+            activity.get("type", "activity"),
+            actor,
+            exc,
+        )
+
     if username is not None:
         try:
             _retract_deleted_follower(storage, activity, actor_id)
@@ -193,6 +203,33 @@ def _retract_deleted_follower(storage, activity: dict, local_actor_id: str) -> N
 
     storage.remove_follower(actor, local_actor_id)
     logger.info("Removed follower %s for actor %s (actor deleted)", actor, local_actor_id)
+
+
+def _sync_remote_activities(config, activity: dict) -> None:
+    """
+    Materialize inbound remote replies into ``Activity`` rows.
+
+    Public ``Create`` replies to known local activities become
+    ``source_type="remote"`` rows so they render as full cards and accept
+    interactions; ``Update``/``Delete`` revise or retract them. Non-reply
+    types are skipped — likes, boosts and quotes stay interaction-only.
+    """
+    if activity.get("type") not in ("Create", "Update", "Delete"):
+        return
+
+    from ..federation.incoming import sync_remote_activity
+
+    init_db(config.database.url)
+
+    async def _run() -> None:
+        try:
+            async with get_session() as session:
+                await sync_remote_activity(session, activity=activity)
+                await session.commit()
+        finally:
+            await dispose_and_reset()
+
+    asyncio.run(_run())
 
 
 def _sync_inbox_notifications(config, activity: dict, username: str, storage=None) -> None:

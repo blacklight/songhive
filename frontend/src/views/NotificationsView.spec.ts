@@ -391,6 +391,7 @@ describe("NotificationsView", () => {
     // The action line prefers the resolved local page over the remote object.
     const link = wrapper.find("a.notifications-view__action");
     expect(link.attributes("href")).toBe("/tracks/t-1");
+    expect(link.text()).toBe("liked your track");
   });
 
   it("falls back to an actor card for likes on remote objects", async () => {
@@ -501,6 +502,44 @@ describe("NotificationsView", () => {
     // The action line links to the activity's feed page.
     const actionLink = wrapper.find("a.notifications-view__action");
     expect(actionLink.attributes("href")).toBe("/tracks/t-9/activities");
+    expect(actionLink.text()).toBe("boosted your track");
+  });
+
+  it("names the reply target in the action text", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "reply",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/objects/note-2",
+          payload: {
+            actor_name: "bob",
+            object_content: "Nice track!",
+            target_url: "https://example.com/users/me/objects/t-1",
+            target_item_type: "track",
+            target_item_id: "t-1",
+            target_item_title: "My Song",
+            target_local_url: "/tracks/t-1",
+          },
+        }),
+        createNotification("n2", {
+          type: "reply",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/objects/note-3",
+          payload: {
+            actor_name: "bob",
+            object_content: "Nice post!",
+            target_object_type: "Note",
+            target_object_activity_id: "act-1",
+          },
+        }),
+      ],
+      total: 2,
+    });
+    const { wrapper } = await mountView();
+    const actions = wrapper.findAll(".notifications-view__action");
+    expect(actions[0].text()).toBe("replied to your track");
+    expect(actions[1].text()).toBe("replied to your post");
   });
 
   it("does not render a broken user item card for status likes", async () => {

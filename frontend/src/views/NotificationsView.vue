@@ -34,6 +34,7 @@ import NotificationActivityCard from "@/components/notifications/NotificationAct
 import NotificationItemCard from "@/components/notifications/NotificationItemCard.vue";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
 import { parseActorRef } from "@/utils/actorRef";
+import { notificationActionText } from "@/utils/notifications";
 
 const { t } = useI18n();
 const store = useNotificationsStore();
@@ -429,10 +430,7 @@ function targetContext(item: NotificationResponse):
 }
 
 function actionText(item: NotificationResponse): string {
-  const key = `notifications.types.${item.type}`;
-  const fallback = t("notifications.types.unknown");
-  const translated = t(key);
-  return translated === key ? fallback : translated;
+  return notificationActionText(item);
 }
 
 function relativeTime(value: string | null | undefined): string {

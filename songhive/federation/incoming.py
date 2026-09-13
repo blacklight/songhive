@@ -1,0 +1,352 @@
+"""
+Materialize inbound remote replies into local ``Activity`` rows.
+
+An inbound ``Create`` whose object replies to a known activity is stored
+as a ``source_type="remote"`` ``reply`` row — alongside the Pubby
+interaction record — so the reply can be listed, counted, and interacted
+with (liked, boosted, replied to) exactly like a local reply. Inbound
+``Update`` and ``Delete`` activities revise or retract materialized rows.
+
+Only publicly addressed replies are materialized, mirroring Pubby's
+interaction-storage policy: followers-only and direct replies keep
+reaching the addressed user through notifications only.
+"""
+
+import logging
+import re
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
+from sqlalchemy import delete, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models import User, Visibility
+from ..models.activity import _MENTION_HANDLE_RE, Activity, ActivityMention
+from ..services import federation as federation_service
+from ..services.activities import (
+    _entity_visibility,
+    _remote_actor_handle,
+    _sync_activity_tags,
+    resolve_entity,
+)
+
+logger = logging.getLogger(__name__)
+
+# ActivityStreams public-audience identifiers (mirrors pubby's check).
+_AS_PUBLIC_IDS = {"https://www.w3.org/ns/activitystreams#Public", "Public", "as:Public"}
+
+
+def _addressees(obj: dict) -> List[str]:
+    """Flatten an object's ``to``/``cc``/``bto``/``bcc`` fields into a list."""
+    out: List[str] = []
+    for key in ("to", "cc", "bto", "bcc"):
+        value = obj.get(key)
+        if isinstance(value, str):
+            out.append(value)
+        elif isinstance(value, list):
+            out.extend(v for v in value if isinstance(v, str))
+    return out
+
+
+def _is_publicly_addressed(obj: dict) -> bool:
+    """Return whether the object addresses the ActivityStreams Public collection."""
+    return bool(_AS_PUBLIC_IDS.intersection(_addressees(obj)))
+
+
+def _parse_published(value: Any) -> Optional[datetime]:
+    """Parse an ISO-8601 timestamp into an aware datetime, or ``None``."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _object_language(obj: dict) -> Optional[str]:
+    """Return the language declared by the object's ``contentMap``, if any."""
+    content_map = obj.get("contentMap")
+    if isinstance(content_map, dict) and content_map:
+        first = next(iter(content_map))
+        if isinstance(first, str):
+            return first
+    return None
+
+
+def _remote_hashtags(obj: dict) -> List[str]:
+    """Return hashtag names declared in the object's ``tag`` list."""
+    tags = obj.get("tag")
+    if not isinstance(tags, list):
+        return []
+    return [
+        name.lstrip("#")
+        for tag in tags
+        if isinstance(tag, dict) and tag.get("type") == "Hashtag" and isinstance((name := tag.get("name")), str)
+    ]
+
+
+async def _remote_mentions(session: AsyncSession, obj: dict) -> List[Dict[str, Any]]:
+    """
+    Build ``ActivityMention`` field dicts from the object's ``tag`` Mentions.
+
+    ``href`` values that match a local user's ``actor_url`` are linked to
+    that user (``user_id``); the rest stay remote-only so remote mentions
+    still render and federate correctly. Entries whose handle cannot be
+    derived or validated are dropped.
+    """
+    tags = obj.get("tag")
+    if not isinstance(tags, list):
+        return []
+    hrefs = [
+        tag["href"]
+        for tag in tags
+        if isinstance(tag, dict) and tag.get("type") == "Mention" and isinstance(tag.get("href"), str) and tag["href"]
+    ]
+    if not hrefs:
+        return []
+
+    rows = await session.execute(select(User.id, User.actor_url).where(User.actor_url.in_(hrefs)))
+    local_users = {actor_url: user_id for user_id, actor_url in rows.all() if actor_url}
+
+    mentions: List[Dict[str, Any]] = []
+    seen: set = set()
+    for tag in tags:
+        if not isinstance(tag, dict) or tag.get("type") != "Mention":
+            continue
+        href = tag.get("href")
+        if not isinstance(href, str) or not href or href in seen:
+            continue
+        handle = tag.get("name")
+        if not isinstance(handle, str) or not _MENTION_HANDLE_RE.match(handle):
+            handle = _remote_actor_handle(href)
+            if not _MENTION_HANDLE_RE.match(handle):
+                continue
+        seen.add(href)
+        mentions.append(
+            {
+                "handle": handle,
+                "actor_url": href,
+                "user_id": local_users.get(href),
+            }
+        )
+    return mentions
+
+
+async def _resolve_reply_parent(session: AsyncSession, in_reply_to: str) -> Optional[Activity]:
+    """
+    Resolve an ``inReplyTo`` URI to a known activity row.
+
+    Matches local and materialized-remote activities by ``source_id`` (the
+    object id) and, for the ``/objects/{id}`` permalink form, by
+    ``local_object_id``.
+    """
+    conditions = [Activity.source_id == in_reply_to]
+    objects_match = re.search(r"/objects/([^/?#]+)/?$", urlparse(in_reply_to).path or "")
+    if objects_match:
+        object_id = objects_match.group(1)
+        conditions += [
+            Activity.local_object_id == object_id,
+            Activity.source_id == object_id,
+        ]
+    return await session.scalar(select(Activity).where(or_(*conditions)))
+
+
+async def _find_remote_reply(session: AsyncSession, object_id: str, actor: str) -> Optional[Activity]:
+    """Return the materialized remote reply for ``object_id`` authored by ``actor``."""
+    return await session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == object_id,
+            Activity.source_actor == actor,
+        )
+    )
+
+
+def _clamp_visibility(entity: Any) -> Visibility:
+    """
+    Return the visibility a materialized public reply may carry.
+
+    Remote replies are only materialized when publicly addressed; the
+    stored visibility is clamped to the containing entity's so the row can
+    never outrank its container (and local replies to it stay legal).
+    """
+    entity_visibility = _entity_visibility(entity)
+    if Visibility.can_contain(Visibility.PUBLIC, entity_visibility):
+        return Visibility.PUBLIC
+    return entity_visibility
+
+
+async def materialize_remote_reply(session: AsyncSession, *, activity: dict) -> Optional[Activity]:
+    """
+    Store an inbound ``Create`` reply as a ``source_type="remote"`` activity.
+
+    The reply is attached to the replied-to activity's entity, linked
+    through ``in_reply_to_activity_id``, and inherits the entity-clamped
+    public visibility. Returns ``None`` — leaving the reply to the Pubby
+    interaction listing — when the object is not a public reply, the
+    signature-side attribution checks fail, or the parent cannot be
+    resolved to a known activity. Re-delivery is idempotent on
+    ``(source_type, source_id)``.
+    """
+    if activity.get("type") != "Create":
+        return None
+    obj = activity.get("object")
+    if not isinstance(obj, dict):
+        return None
+
+    actor = activity.get("actor")
+    object_id = obj.get("id")
+    in_reply_to = obj.get("inReplyTo")
+    if (
+        not isinstance(actor, str)
+        or not actor.startswith(("http://", "https://"))
+        or not isinstance(object_id, str)
+        or not object_id.startswith(("http://", "https://"))
+        or not isinstance(in_reply_to, str)
+        or not in_reply_to
+    ):
+        return None
+
+    # Attribution sanity: the delivering actor must own the object — a
+    # mismatched ``attributedTo`` or a foreign-hosted object id is dropped.
+    attributed_to = obj.get("attributedTo")
+    if isinstance(attributed_to, str) and attributed_to != actor:
+        return None
+    if federation_service.extract_domain(object_id) != federation_service.extract_domain(actor):
+        return None
+
+    if not _is_publicly_addressed(obj):
+        return None
+
+    existing = await session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == object_id,
+        )
+    )
+    if existing is not None:
+        return existing
+
+    parent = await _resolve_reply_parent(session, in_reply_to)
+    if parent is None:
+        return None
+    entity = await resolve_entity(session, parent.entity_type, parent.entity_id)
+    if entity is None:
+        return None
+
+    content = obj.get("content")
+    reply = Activity(
+        entity_type=parent.entity_type,
+        entity_id=parent.entity_id,
+        activity_type="reply",
+        source_type="remote",
+        source_actor=actor,
+        source_id=object_id,
+        owner_user_id=None,
+        visibility=_clamp_visibility(entity).value,
+        in_reply_to_activity_id=str(parent.id),
+        content=content if isinstance(content, str) and content else None,
+        content_type="text/html" if isinstance(content, str) and content else None,
+        language=_object_language(obj),
+        payload=activity,
+        published_at=_parse_published(obj.get("published")) or datetime.now(timezone.utc),
+    )
+    session.add(reply)
+    await session.flush()
+
+    for mention in await _remote_mentions(session, obj):
+        session.add(ActivityMention(activity_id=reply.id, **mention))
+    await session.flush()
+    await _sync_activity_tags(session, reply, _remote_hashtags(obj))
+    logger.info("Materialized remote reply %s from %s on %s", object_id, actor, in_reply_to)
+    return reply
+
+
+async def update_remote_reply(session: AsyncSession, *, activity: dict) -> None:
+    """
+    Apply an inbound ``Update`` to a materialized remote reply.
+
+    Content, language, payload, published timestamp, mention rows and
+    hashtags are refreshed from the updated object. An object that stops
+    being publicly addressed is retracted. Updates for objects that were
+    never materialized fall back to materialization when they carry an
+    ``inReplyTo`` — covering a missed ``Create``.
+    """
+    if activity.get("type") != "Update":
+        return
+    obj = activity.get("object")
+    actor = activity.get("actor")
+    if not isinstance(obj, dict) or not isinstance(actor, str):
+        return
+    object_id = obj.get("id")
+    if not isinstance(object_id, str) or not object_id:
+        return
+
+    row = await _find_remote_reply(session, object_id, actor)
+    if row is None:
+        if isinstance(obj.get("inReplyTo"), str) and obj["inReplyTo"]:
+            await materialize_remote_reply(session, activity={**activity, "type": "Create"})
+        return
+
+    if not _is_publicly_addressed(obj):
+        row.deleted_at = datetime.now(timezone.utc)
+        await session.flush()
+        return
+
+    content = obj.get("content")
+    row.content = content if isinstance(content, str) and content else None
+    row.language = _object_language(obj)
+    row.payload = activity
+    published = _parse_published(obj.get("published"))
+    if published is not None:
+        row.published_at = published
+
+    await session.execute(delete(ActivityMention).where(ActivityMention.activity_id == row.id))
+    for mention in await _remote_mentions(session, obj):
+        session.add(ActivityMention(activity_id=row.id, **mention))
+    await session.flush()
+    await _sync_activity_tags(session, row, _remote_hashtags(obj))
+
+
+async def retract_remote_reply(session: AsyncSession, *, activity: dict) -> None:
+    """
+    Apply an inbound ``Delete`` to a materialized remote reply.
+
+    The row is soft-deleted — like local retractions — so thread traversal
+    still crosses it and the stale Pubby interaction stays deduplicated.
+    Only the recorded ``source_actor`` may retract its own object.
+    """
+    if activity.get("type") != "Delete":
+        return
+    obj = activity.get("object")
+    actor = activity.get("actor")
+    target = obj.get("id") if isinstance(obj, dict) else obj if isinstance(obj, str) else None
+    if not isinstance(target, str) or not target or not isinstance(actor, str):
+        return
+
+    row = await _find_remote_reply(session, target, actor)
+    if row is not None and row.deleted_at is None:
+        row.deleted_at = datetime.now(timezone.utc)
+        await session.flush()
+        logger.info("Retracted remote reply %s from %s", target, actor)
+
+
+async def sync_remote_activity(session: AsyncSession, *, activity: dict) -> None:
+    """
+    Reflect an inbound remote activity onto materialized ``Activity`` rows.
+
+    ``Create`` materializes public replies to known activities; ``Update``
+    revises and ``Delete`` retracts materialized rows. Other activity
+    types are ignored — likes, boosts and quotes stay interaction-only.
+    """
+    activity_type = activity.get("type")
+    if activity_type == "Create":
+        await materialize_remote_reply(session, activity=activity)
+    elif activity_type == "Update":
+        await update_remote_reply(session, activity=activity)
+    elif activity_type == "Delete":
+        await retract_remote_reply(session, activity=activity)

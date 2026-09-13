@@ -1209,13 +1209,33 @@
     "loadMore": "Load more",
     "types": {
       "follow": "started following you",
-      "like": "liked your post",
-      "boost": "boosted your post",
-      "quote": "quoted your post",
-      "reply": "replied to your post",
+      "like": "liked your {object}",
+      "boost": "boosted your {object}",
+      "quote": "quoted your {object}",
+      "reply": "replied to your {object}",
       "mention": "mentioned you",
-      "share": "shared a track with you",
+      "share": "shared {object} with you",
       "unknown": "sent you a notification"
+    },
+    "objects": {
+      "post": "post",
+      "track": "track",
+      "album": "album",
+      "artist": "artist",
+      "playlist": "playlist",
+      "library": "library",
+      "radio": "radio",
+      "file": "file"
+    },
+    "objectsWithArticle": {
+      "post": "a post",
+      "track": "a track",
+      "album": "an album",
+      "artist": "an artist",
+      "playlist": "a playlist",
+      "library": "a library",
+      "radio": "a radio",
+      "file": "a file"
     },
     "someone": "Someone",
     "errors": {

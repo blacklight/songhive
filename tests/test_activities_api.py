@@ -483,8 +483,10 @@ async def test_delete_activity_forbidden_for_non_manager(client, db_session, reg
 
 
 @pytest.mark.asyncio
-async def test_delete_remote_activity_removes_local_copy(client, db_session, regular_user, auth_headers, monkeypatch):
-    """Remote activities are hard-deleted without any remote fan-out."""
+async def test_delete_remote_activity_soft_deletes_local_copy(
+    client, db_session, regular_user, auth_headers, monkeypatch
+):
+    """Remote activities are soft-deleted without any remote fan-out."""
     track = await _make_track(db_session, regular_user)
     activity = _make_activity(
         "track",
@@ -505,7 +507,8 @@ async def test_delete_remote_activity_removes_local_copy(client, db_session, reg
     assert resp.status_code == 200
     deliver_mock.delay.assert_not_called()
     remaining = await db_session.scalar(select(Activity).where(Activity.id == activity.id))
-    assert remaining is None
+    assert remaining is not None
+    assert remaining.deleted_at is not None
 
 
 @pytest.mark.asyncio

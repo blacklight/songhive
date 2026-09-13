@@ -326,6 +326,31 @@ describe("useNotificationsStore", () => {
     expect(last.message).toBe("Alice liked your post");
   });
 
+  it("ws toast names the interacted entity when the payload resolves one", async () => {
+    getUnreadCount.mockResolvedValueOnce(0);
+    const store = useNotificationsStore();
+    const toast = useToastStore();
+    store.connect();
+    await vi.waitFor(() => expect(getUnreadCount).toHaveBeenCalled());
+
+    emit(
+      "notification",
+      createNotification("n1", {
+        payload: {
+          actor_name: "Alice",
+          item_type: "track",
+          item_id: "t-1",
+          object_type: "Audio",
+          object_activity_id: "act-1",
+        },
+      }),
+    );
+
+    const last = toast.toasts[toast.toasts.length - 1];
+    expect(last.type).toBe("info");
+    expect(last.message).toBe("Alice liked your track");
+  });
+
   it("ws toast falls back for unknown types and missing actor names", async () => {
     getUnreadCount.mockResolvedValueOnce(0);
     const store = useNotificationsStore();

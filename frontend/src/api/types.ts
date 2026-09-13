@@ -583,7 +583,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /**
+     * Get Activity
+     * @description Fetch a single activity.
+     *
+     *     Anonymous requesters may read ``public`` activities on publicly
+     *     accessible entities; authenticated users get the wider visibilities
+     *     ``can_view_activity`` grants, and the response's interaction summary
+     *     reflects their own reactions.
+     */
+    get: operations["get_activity_api_v1_activities__activity_id__get"];
     put?: never;
     post?: never;
     /**
@@ -599,7 +608,15 @@ export interface paths {
     head?: never;
     /**
      * Update Activity
-     * @description Update an activity's content and/or visibility.
+     * @description Update an activity's content, format, language, attachments and/or
+     *     visibility.
+     *
+     *     Only the fields present in the request body are changed; ``language``
+     *     accepts ``null`` to clear it and ``media_ids``/``track_ids`` accept
+     *     empty lists to remove all user-managed attachments (entity-owned
+     *     attachments, like a shared track's own ``Audio`` doc, are preserved).
+     *     File attachments must be owned by the requester and tracks must be
+     *     accessible to them; each category is limited to four entries.
      *
      *     Content edits fan an ``Update`` carrying the rebuilt object out to the
      *     inboxes that already received the activity; visibility edits cascade an
@@ -623,6 +640,140 @@ export interface paths {
      * @description Like an activity.
      */
     post: operations["like_activity_api_v1_activities__activity_id__like_post"];
+    /**
+     * Unlike Activity
+     * @description Retract the current user's like of an activity.
+     *
+     *     The like is soft-deleted (the activity can be liked again) and, when
+     *     the like was federated, an ``Undo(Like)`` is delivered to the inboxes
+     *     it reached. Unliking an activity that was not liked returns 404.
+     */
+    delete: operations["unlike_activity_api_v1_activities__activity_id__like_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/activities/{activity_id}/boost": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Boost Activity
+     * @description Boost an activity as the current user (ActivityPub ``Announce``).
+     *
+     *     The boost is stored as an ``announce`` activity attached to the same
+     *     entity, federated to the boosted activity's audience plus — for remote
+     *     targets — the author's inbox. Boosting a deleted activity returns 404
+     *     and boosting it twice returns 400.
+     */
+    post: operations["boost_activity_api_v1_activities__activity_id__boost_post"];
+    /**
+     * Unboost Activity
+     * @description Retract the current user's boost of an activity.
+     *
+     *     The boost is soft-deleted (the activity can be boosted again) and, when
+     *     the boost was federated, an ``Undo(Announce)`` is delivered to the
+     *     inboxes it reached. Unboosting an activity that was not boosted
+     *     returns 404.
+     */
+    delete: operations["unboost_activity_api_v1_activities__activity_id__boost_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/activities/{activity_id}/reply": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Reply Activity
+     * @description Post a reply to an activity as the current user.
+     *
+     *     The reply is a ``Create(Note)`` whose object carries ``inReplyTo`` and
+     *     inherits — unless a narrower ``visibility`` is requested — the
+     *     replied-to activity's visibility. It is attached to the same entity,
+     *     federated to its audience, and notified to the replied-to author. A
+     *     reply to a deleted activity returns 404.
+     */
+    post: operations["reply_activity_api_v1_activities__activity_id__reply_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/activities/{activity_id}/likes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Activity Likes
+     * @description List the known accounts that liked an activity, newest first.
+     */
+    get: operations["list_activity_likes_api_v1_activities__activity_id__likes_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/activities/{activity_id}/boosts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Activity Boosts
+     * @description List the known accounts that boosted an activity, newest first.
+     */
+    get: operations["list_activity_boosts_api_v1_activities__activity_id__boosts_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/activities/{activity_id}/replies": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Activity Replies
+     * @description List the known replies in an activity's thread, oldest first.
+     *
+     *     Local replies are every visibility-filtered ``reply`` descendant —
+     *     replies to replies included — serialized as full activity cards;
+     *     federated replies come from Pubby's interaction storage as compact
+     *     ``raw_object``-backed records carrying ``in_reply_to`` so clients can
+     *     regroup them into threads.
+     */
+    get: operations["list_activity_replies_api_v1_activities__activity_id__replies_get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -3422,6 +3573,34 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     /**
+     * ActivityActorListResponse
+     * @description The known accounts that liked or boosted an activity.
+     */
+    ActivityActorListResponse: {
+      /** Actors */
+      actors: components["schemas"]["ActivityActorResponse"][];
+    };
+    /**
+     * ActivityActorResponse
+     * @description A known account that liked or boosted an activity.
+     */
+    ActivityActorResponse: {
+      /** Actor */
+      actor: string;
+      /** Handle */
+      handle: string;
+      /** Display Name */
+      display_name?: string | null;
+      /** Avatar Url */
+      avatar_url?: string | null;
+      /** Username */
+      username?: string | null;
+      /** Profile Url */
+      profile_url?: string | null;
+      /** Published At */
+      published_at?: string | null;
+    };
+    /**
      * ActivityListResponse
      * @description A page of activities.
      */
@@ -3444,6 +3623,26 @@ export interface components {
       user_id?: string | null;
     };
     /**
+     * ActivityReplyRequest
+     * @description Payload for posting a reply to an activity.
+     */
+    ActivityReplyRequest: {
+      /** Status */
+      status?: string | null;
+      /**
+       * Content Type
+       * @default text/markdown
+       */
+      content_type: string;
+      visibility?: components["schemas"]["Visibility"] | null;
+      /** Language */
+      language?: string | null;
+      /** Media Ids */
+      media_ids?: string[];
+      /** Track Ids */
+      track_ids?: string[];
+    };
+    /**
      * ActivityResponse
      * @description Serialized activity.
      */
@@ -3464,6 +3663,10 @@ export interface components {
       source_id: string;
       /** Local Object Id */
       local_object_id?: string | null;
+      /** Object Url */
+      object_url?: string | null;
+      /** Object Type */
+      object_type?: string | null;
       /** Owner User Id */
       owner_user_id?: string | null;
       /** Source Actor Avatar Url */
@@ -3498,6 +3701,36 @@ export interface components {
        * @default []
        */
       mentions: components["schemas"]["ActivityMentionResponse"][];
+      /**
+       * Like Count
+       * @default 0
+       */
+      like_count: number;
+      /**
+       * Boost Count
+       * @default 0
+       */
+      boost_count: number;
+      /**
+       * Reply Count
+       * @default 0
+       */
+      reply_count: number;
+      /**
+       * Liked
+       * @default false
+       */
+      liked: boolean;
+      /**
+       * Boosted
+       * @default false
+       */
+      boosted: boolean;
+      /**
+       * Can Interact
+       * @default true
+       */
+      can_interact: boolean;
     };
     /**
      * ActivityUpdate
@@ -5370,6 +5603,21 @@ export interface components {
       count: number;
     };
     /**
+     * ReplyActivityListResponse
+     * @description The known replies in an activity's thread, local and federated.
+     */
+    ReplyActivityListResponse: {
+      /** Activities */
+      activities: components["schemas"]["ActivityResponse"][];
+      /**
+       * Remote Replies
+       * @default []
+       */
+      remote_replies: {
+        [key: string]: unknown;
+      }[];
+    };
+    /**
      * ReportCreateRequest
      * @description Request body for submitting a report.
      */
@@ -7215,6 +7463,10 @@ export interface operations {
       query?: {
         /** @description Activity feed mode (posts or all) */
         mode?: string;
+        /** @description Include boosts in posts mode */
+        include_boosts?: boolean;
+        /** @description Include replies in posts mode */
+        include_replies?: boolean;
         /** @description Filter by source type */
         source_type?: string | null;
         cursor?: string | null;
@@ -7455,6 +7707,37 @@ export interface operations {
       };
     };
   };
+  get_activity_api_v1_activities__activity_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   delete_activity_api_v1_activities__activity_id__delete: {
     parameters: {
       query?: never;
@@ -7539,6 +7822,227 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unlike_activity_api_v1_activities__activity_id__like_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  boost_activity_api_v1_activities__activity_id__boost_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unboost_activity_api_v1_activities__activity_id__boost_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  reply_activity_api_v1_activities__activity_id__reply_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ActivityReplyRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_activity_likes_api_v1_activities__activity_id__likes_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityActorListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_activity_boosts_api_v1_activities__activity_id__boosts_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityActorListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_activity_replies_api_v1_activities__activity_id__replies_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        activity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReplyActivityListResponse"];
         };
       };
       /** @description Validation Error */

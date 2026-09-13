@@ -744,18 +744,23 @@ async def _remote_thread_interactions(
     the replies that target it.
     """
     collected: List[Any] = []
-    seen: Set[str] = set(target_ids)
-    frontier: Set[str] = set(target_ids)
+    seen: Set[str] = set()
+    frontier: List[str] = []
+    for target_id in target_ids:
+        if target_id and target_id not in seen:
+            seen.add(target_id)
+            frontier.append(target_id)
     while frontier:
         batch = await _remote_interactions(config, frontier, interaction_type)
-        frontier = set()
-        for interactions in batch.values():
-            for interaction in interactions:
+        next_frontier: List[str] = []
+        for source_id in frontier:
+            for interaction in batch.get(source_id, []):
                 collected.append(interaction)
                 object_id = getattr(interaction, "object_id", None)
                 if object_id and object_id not in seen:
-                    seen.add(object_id)
-                    frontier.add(object_id)
+                    seen.add(object_id or "")
+                    next_frontier.append(object_id or "")
+        frontier = next_frontier
     return collected
 
 
@@ -853,7 +858,9 @@ async def _add_threaded_reply_counts(
     ``reply_count`` covers every non-deleted ``reply`` descendant of an
     activity (replies to replies included) plus confirmed remote replies
     targeting any node in the sub-thread — replies to remote replies are
-    reached breadth-first through their ``object_id`` chains.
+    reached breadth-first through their ``object_id`` chains. Remote
+    replies already materialized into ``Activity`` rows are counted once,
+    by the row pass; their interaction records are skipped.
     """
     ids = [str(a.id) for a in activities]
     cte = _activity_descendants_cte(ids)
@@ -873,14 +880,18 @@ async def _add_threaded_reply_counts(
     # sub-thread contains it (a node always contains itself); ``scope``
     # does the same keyed by object id — local ``source_id``s plus the
     # ``object_id``s remote replies expose — so a remote reply is credited
-    # to every requested ancestor of its target.
+    # to every requested ancestor of its target. ``materialized`` tracks
+    # the object ids already backed by a row so their interaction records
+    # are not counted twice.
     membership: Dict[str, Set[str]] = {i: {i} for i in ids}
     source_node: Dict[str, str] = {a.source_id: str(a.id) for a in activities}
+    materialized: Set[str] = {a.source_id for a in activities}
     for root_id, node_id, activity_type, source_id, deleted_at in rows:
         if deleted_at is None and activity_type == "reply":
             counts[str(root_id)]["reply"] += 1
         membership.setdefault(str(node_id), set()).add(str(root_id))
         source_node[source_id] = str(node_id)
+        materialized.add(source_id)
 
     scope: Dict[str, Set[str]] = {}
     for source_id, node_id in source_node.items():
@@ -894,10 +905,12 @@ async def _add_threaded_reply_counts(
     replies = await _remote_thread_interactions(config, set(scope), InteractionType.REPLY)
     for interaction in replies:
         roots = scope.get(interaction.target_resource) or set()
-        for root_id in roots:
-            counts[root_id]["reply"] += 1
         if interaction.object_id and interaction.object_id not in scope:
             scope[interaction.object_id] = set(roots)
+        if interaction.object_id and interaction.object_id in materialized:
+            continue
+        for root_id in roots:
+            counts[root_id]["reply"] += 1
 
 
 class InteractionActor(NamedTuple):
@@ -1001,8 +1014,9 @@ async def list_activity_replies(
     children — filtered by the requester's visibility rules; remote replies
     are confirmed Pubby ``Interaction`` rows collected breadth-first across
     the thread (each carries its ``target_resource`` so clients can
-    re-attach it to its parent). The caller merges and serializes the two
-    lists; clients group them into threads by parent.
+    re-attach it to its parent), minus replies already materialized into
+    ``Activity`` rows. The caller merges and serializes the two lists;
+    clients group them into threads by parent.
     """
     cte = _activity_descendants_cte([str(activity.id)])
     rows = (await session.execute(select(cte.c.id, cte.c.activity_type, cte.c.source_id, cte.c.deleted_at))).all()
@@ -1025,9 +1039,13 @@ async def list_activity_replies(
             .all()
         )
 
-    source_ids = {activity.source_id} | {row.source_id for row in rows}
+    source_ids = [activity.source_id, *[row.source_id for row in rows]]
     remote = await _remote_thread_interactions(config, source_ids, InteractionType.REPLY)
-    remote_replies = sorted(remote, key=lambda i: _interaction_sort_key(i.published))
+    materialized = set(source_ids)
+    remote_replies = sorted(
+        (i for i in remote if getattr(i, "object_id", None) not in materialized),
+        key=lambda i: _interaction_sort_key(i.published),
+    )
     return local, remote_replies
 
 
@@ -3117,9 +3135,10 @@ async def retract_activity(session: AsyncSession, activity: Activity) -> None:
     reactions — ``Delete`` is not the ActivityPub way to retract them —
     and ``Delete(Tombstone)`` for everything else, mirroring
     :func:`deletion.cascade_delete_entity` for a single row. Remote
-    activities are hard-deleted without fan-out — the remote instance owns
-    retraction. Already-retracted activities are a no-op. Flushes without
-    committing; the caller owns the transaction.
+    activities are soft-deleted without fan-out — the remote instance owns
+    retraction, and keeping the row stops the stored Pubby interaction
+    from resurfacing the reply. Already-retracted activities are a no-op.
+    Flushes without committing; the caller owns the transaction.
     """
     from ..federation.activities import create_tombstone_delete_activity, create_undo_activity
     from . import notifications as notifications_service
@@ -3134,7 +3153,7 @@ async def retract_activity(session: AsyncSession, activity: Activity) -> None:
         await notifications_service.retract_notifications_referencing(session, [activity.source_id])
 
     if activity.source_type != "local":
-        await session.delete(activity)
+        activity.deleted_at = datetime.now(timezone.utc)
         await session.flush()
         return
 

@@ -281,7 +281,7 @@ these subsections:
 | `redis`        | url                                                           |
 | `celery`       | broker_url, result_backend, cleanup_orphaned_files_schedule   |
 | `storage`      | backend (local/s3), local_path, s3_*, cdn_prefix, max_upload_size |
-| `federation`   | enabled, instance_domain, instance_name, private_key_path, allow/block lists |
+| `federation`   | enabled, instance_domain, instance_name, contact_name/contact_email/contact_url, private_key_path, allow/block lists |
 | `auth`         | registration_mode, secret_key, token TTLs, rate_limit, trusted_proxy_hops, cookie_secure, cookie_samesite, cookie_domain |
 | `email`        | smtp_host, smtp_port, smtp_user, from_address, tls settings   |
 | `musicbrainz`  | enabled, user_agent, cover_art, artist_image settings       |
@@ -372,8 +372,11 @@ or Markdown), an optional BCP-47 `language` tag mirrored into the object's
 contains hashtags (`#tag`) in its `content_source`/`content`. They enable
 `GET /api/v1/tags/{tag}/activities`, which returns tag-matching activities
 subject to the same visibility and entity ACL rules as other activity feeds.
-Remote ActivityPub content is processed by Pubby and is not currently
-materialized as local `Activity` rows, so hashtags from remote posts cannot
+Remote ActivityPub content is processed by Pubby and is mostly not
+materialized as local `Activity` rows — the exception is inbound `Create`
+replies, which `federation/incoming.py` stores as `source_type="remote"`
+rows (see below) so their hashtags and mentions are associated too. Other
+remote content stays interaction-only, so hashtags from remote posts cannot
 be associated on the Songhive side unless Pubby stores or forwards them.
 `ActivityMention` rows capture `@handle` mentions embedded in content, with
 optional `actor_url` / `user_id` resolution and a `notified_at` marker.
@@ -471,7 +474,9 @@ non-deleted `reply` descendant reachable through the `in_reply_to` chain —
 computed with the `_activity_descendants_cte` recursive CTE — plus remote
 replies targeting any node in it, including remote replies to remote
 replies reached breadth-first through `object_id` chains
-(`_remote_thread_interactions`). `liked`/`boosted` report the requester's
+(`_remote_thread_interactions`). Remote replies already materialized into
+`Activity` rows are skipped so a reply backed by both a row and a stored
+interaction counts once. `liked`/`boosted` report the requester's
 own live like/announce rows, and `can_interact` is false for activity types
 that cannot themselves be reacted to (`like`, `announce`, `delete`).
 `ActivityResponse` also carries `object_url`/`object_type`, resolved from
@@ -490,6 +495,8 @@ every descendant in the thread, not just direct children — serialized as
 full `ActivityResponse`s plus remote replies rebuilt from the `raw_object`
 metadata the inbox processor stored, each carrying `in_reply_to` (the
 replied-to object id) so clients can regroup the flat list into threads.
+Replies already materialized into `Activity` rows are filtered out of the
+remote list so they render only as full cards.
 The frontend renders them Mastodon-style: every descendant of a direct
 reply is unfolded flat into that reply's thread, each thread marked by its
 own vertical line. All three listings gate on `can_view_activity` and allow
@@ -600,7 +607,10 @@ Single-activity retraction follows the same rules through
 except that retracting a `like`/`announce` enqueues an `Undo` wrapping the
 originally federated reaction payload (matching the `unreact_activity`
 path) instead of a `Delete(Tombstone)`, since `Delete` is not the
-ActivityPub way to retract a reaction.
+ActivityPub way to retract a reaction, and remote activities are
+soft-deleted rather than removed: the remote instance owns retraction, and
+the surviving row keeps the stored Pubby interaction deduplicated so the
+reply cannot resurface.
 
 Track fediverse publications are recorded as activities too: every publish
 path — the manual `POST /api/v1/tracks/{id}/publish`, uploads and imports
@@ -1175,6 +1185,29 @@ the HTTP routes.
   `/users/{username}/followers`). The SPA shows the count on
   `/@{username}` and renders follower details at `/@{username}/followers`.
 
+**Inbound remote replies** are materialized into `Activity` rows by
+`federation/incoming.py`, invoked from `tasks/federation.py`'s
+`process_incoming` for `Create`/`Update`/`Delete` activities after pubby's
+`InboxProcessor` has run. A publicly addressed `Create` whose object
+replies to a known activity — matched by `source_id` or the
+`/objects/{id}` permalink form — becomes a `source_type="remote"` `reply`
+row attached to the parent's entity, linked through
+`in_reply_to_activity_id`, carrying the raw activity as `payload`, the
+remote actor as `source_actor`, and visibility clamped to the entity's.
+Attribution is checked before storing: the delivering actor must match
+`attributedTo` and share the object's host. `Update` revises content,
+payload, mentions, and hashtags (materializing replies whose `Create` was
+missed, and retracting rows that stop being publicly addressed); `Delete`
+soft-deletes the row, but only for the recorded `source_actor`. Non-public
+replies are never materialized — they stay interaction-only, mirroring
+pubby's storage policy. Because the Pubby `federation_interactions` record
+is kept alongside the row, reply counts and listings deduplicate on
+`object_id`. Materialized replies render as regular activity cards and
+accept the same interactions as local replies: likes and boosts federate
+to the remote author's inbox through `fan_out_like_activity`/
+`fan_out_boost_activity`, and local replies address the remote author via
+a `Mention` tag with `inReplyTo` set to the remote `source_id`.
+
 **Instance-level actor:**
 
 - `_setup_federation()` in `api/app.py` configures an `Application`-type
@@ -1372,7 +1405,13 @@ TrackList-style selection mode for bulk delete/read/unread and a
 confirmation-protected "Clear all". Each row's header links the actor name
 to the actor's profile (or remote actor URL) and the action text separately
 to the referenced object — for likes/boosts the `object_page_url` of the
-reacted activity. Rows render context cards from the
+reacted activity. The action text names the interacted entity
+(`utils/notifications.ts`, shared with the WebSocket toast): likes/boosts
+on `Audio` objects or resolved `item_type`s render as "liked/boosted your
+track/album/…", replies/quotes do the same through their `target_*`
+fields, and shares name the granted item ("shared an album with you"),
+while `Note` objects and unresolved remote objects keep the
+generic "post" wording. Rows render context cards from the
 payload: follows (and unresolved likes/boosts) show
 `components/notifications/NotificationActorCard.vue` (local actors route to
 `/@name`, remote actors link out), mentions/replies/quotes embed a
@@ -1695,7 +1734,11 @@ REST API under `/api/v1/`:
 /@{username}                    # Mastodon-style profile: AP actor for AP clients, SPA shell for browsers with rel="me" links
 /tracks/{id}                    # Track page: Audio object for AP clients, SPA + rel=alternate hints for browsers
 /.well-known/webfinger          # WebFinger discovery
-/.well-known/nodeinfo           # NodeInfo (Mastodon compat)
+/.well-known/nodeinfo           # NodeInfo discovery document (pubby)
+/nodeinfo/2.{0,1}[.json]        # NodeInfo document (Songhive): pubby usage stats plus
+                                # metadata.nodeName/nodeDescription, metadata.maintainer
+                                # (configured contact person) and metadata.staffAccounts
+                                # (actor URLs of active admins)
 /ap/actor                       # Instance-level Application actor
 /ap/inbox                       # Instance inbox
 /api/v1/*/                      # Mastodon-compatible API (pubby adapter), except /api/v1/instance which is provided by Songhive and always available
