@@ -1136,6 +1136,7 @@
     "replyPlaceholder": "Write your reply…",
     "replySubmit": "Reply",
     "repliesError": "Could not load replies.",
+    "loginToInteract": "Log in to interact",
     "actors": {
       "likes": "Liked by",
       "boosts": "Boosted by",

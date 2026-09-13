@@ -224,6 +224,16 @@ const embedFailed = ref(false);
 const canInteract = computed(
   () => authStore.isAuthenticated && activity.value.can_interact !== false,
 );
+// The counters row renders for every viewer — anonymous ones included —
+// whenever the activity type supports interaction. Only the mutating
+// buttons are gated on authentication; the counters stay live since
+// listing replies and like/boost actors are public reads.
+const showInteractions = computed(
+  () => !props.readonly && activity.value.can_interact !== false,
+);
+const interactionHint = computed(() =>
+  authStore.isAuthenticated ? undefined : t("activities.loginToInteract"),
+);
 const liked = computed(
   () => activity.value.liked || store.isLiked(props.activity.id),
 );
@@ -681,16 +691,17 @@ async function copyUrl() {
     </div>
 
     <footer
-      v-if="copyTarget || (!props.readonly && (canInteract || canDelete))"
+      v-if="copyTarget || showInteractions || (!props.readonly && canDelete)"
       class="activity-card__actions"
     >
-      <template v-if="!props.readonly && canInteract">
+      <template v-if="showInteractions">
         <span class="activity-card__action">
           <AppButton
             variant="ghost"
             size="sm"
             icon="reply"
-            :title="t('activities.reply')"
+            :disabled="!canInteract"
+            :title="interactionHint ?? t('activities.reply')"
             :aria-label="t('activities.reply')"
             @click="replyComposerOpen = !replyComposerOpen"
           />
@@ -712,7 +723,11 @@ async function copyUrl() {
             icon="retweet"
             :class="{ 'activity-card__action-btn--active': boosted }"
             :loading="boosting"
-            :title="boosted ? t('activities.unboost') : t('activities.boost')"
+            :disabled="!canInteract"
+            :title="
+              interactionHint ??
+              (boosted ? t('activities.unboost') : t('activities.boost'))
+            "
             :aria-label="
               boosted ? t('activities.unboost') : t('activities.boost')
             "
@@ -737,7 +752,11 @@ async function copyUrl() {
             :icon-variant="liked ? 'solid' : 'regular'"
             :class="{ 'activity-card__action-btn--active': liked }"
             :loading="liking"
-            :title="liked ? t('activities.unlike') : t('activities.like')"
+            :disabled="!canInteract"
+            :title="
+              interactionHint ??
+              (liked ? t('activities.unlike') : t('activities.like'))
+            "
             :aria-label="liked ? t('activities.unlike') : t('activities.like')"
             :aria-pressed="liked"
             @click="toggleLike"

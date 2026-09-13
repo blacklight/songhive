@@ -274,11 +274,64 @@ describe("ActivityCard", () => {
     expect(wrapper.text()).toContain("2");
   });
 
-  it("shows only the copy URL action for anonymous users", () => {
-    const wrapper = mountCard();
+  it("shows counters and disabled action buttons for anonymous users", () => {
+    const wrapper = mountCard({
+      like_count: 2,
+      boost_count: 1,
+      reply_count: 3,
+    });
     const buttons = wrapper.findAll(".activity-card__actions button");
-    expect(buttons.length).toBe(1);
-    expect(buttons[0].attributes("aria-label")).toBe("Copy link");
+    // 3 interaction icons + 3 counters + copy URL
+    expect(buttons.length).toBe(7);
+    const counts = wrapper.findAll(".activity-card__count");
+    expect(counts.map((count) => count.text())).toEqual(["3", "1", "2"]);
+    const icons = wrapper.findAll(".activity-card__action .app-btn");
+    expect(icons.length).toBe(3);
+    for (const icon of icons) {
+      expect(icon.attributes("disabled")).toBeDefined();
+      expect(icon.attributes("title")).toBe("Log in to interact");
+    }
+  });
+
+  it("lets anonymous users expand replies via the counter", async () => {
+    listActivityReplies.mockResolvedValue({
+      activities: [
+        createActivity({
+          id: "r1",
+          activity_type: "reply",
+          in_reply_to_activity_id: "a1",
+          content: "<p>a reply</p>",
+          content_source: "a reply",
+          published_at: "2026-01-02T00:00:00Z",
+        }),
+      ],
+      remote_replies: [],
+    });
+    const wrapper = mountCard({ reply_count: 1 });
+    const counts = wrapper.findAll(".activity-card__count");
+    await counts[0].trigger("click");
+    await flushPromises();
+    expect(listActivityReplies).toHaveBeenCalledWith("a1");
+    expect(wrapper.find(".activity-card__replies").text()).toContain("a reply");
+  });
+
+  it("lets anonymous users open the actors modal via the counter", async () => {
+    listActivityLikes.mockResolvedValue({
+      actors: [
+        {
+          actor: "urn:songhive:user:bob",
+          handle: "@bob",
+          display_name: "Bob",
+          username: "bob",
+        },
+      ],
+    });
+    const wrapper = mountCard({ like_count: 1 });
+    const counts = wrapper.findAll(".activity-card__count");
+    await counts[2].trigger("click");
+    await flushPromises();
+    expect(listActivityLikes).toHaveBeenCalledWith("a1");
+    expect(document.body.textContent).toContain("Bob");
   });
 
   it("hides the edit action for non-owners", () => {
