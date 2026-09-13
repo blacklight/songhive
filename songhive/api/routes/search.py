@@ -372,5 +372,7 @@ async def search(
     selected = _parse_entities(entities)
     sections: List[SearchResultSection] = []
     for entity in selected:
-        sections.append(await _SECTION_FETCHERS[entity](db=db, storage=storage, term=term, limit=limit, user=user))
+        sections.append(
+            await _SECTION_FETCHERS[entity](db=db, storage=storage, term=term, limit=limit, user=user)  # type: ignore
+        )
     return SearchResponse(query=term, sections=sections)
