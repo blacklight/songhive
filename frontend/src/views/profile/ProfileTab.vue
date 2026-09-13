@@ -8,7 +8,13 @@ import { resendVerificationEmail } from "@/api/auth";
 import { uploadFile } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
 import { deleteMe, type UserProfileUpdate } from "@/api/users";
+import {
+  STATUS_CONTENT_TYPE_MARKDOWN,
+  STATUS_CONTENT_TYPES,
+  type StatusContentType,
+} from "@/api/statuses";
 import AppInput from "@/components/ui/AppInput.vue";
+import AppSelect from "@/components/ui/AppSelect.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
@@ -39,6 +45,10 @@ const links = ref<Link[]>(
     ? authStore.user.links.map((l) => ({ name: l.name, url: l.url }))
     : [],
 );
+const statusContentType = ref<StatusContentType>(
+  (authStore.user?.status_content_type as StatusContentType) ||
+    STATUS_CONTENT_TYPE_MARKDOWN,
+);
 const isLoading = ref(false);
 const error = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -62,8 +72,18 @@ watch(
     links.value = next.links
       ? next.links.map((l) => ({ name: l.name, url: l.url }))
       : [];
+    statusContentType.value =
+      (next.status_content_type as StatusContentType) ||
+      STATUS_CONTENT_TYPE_MARKDOWN;
   },
   { deep: true },
+);
+
+const statusContentTypeOptions = computed(() =>
+  STATUS_CONTENT_TYPES.map((value) => ({
+    value,
+    label: t(`statusComposer.contentTypes.${value}`),
+  })),
 );
 
 function isHttpUrl(value: string): boolean {
@@ -206,6 +226,7 @@ async function onSubmit() {
     display_name: displayName.value.trim() || null,
     bio: bio.value.trim() || null,
     avatar_url: trimmedAvatar || null,
+    status_content_type: statusContentType.value,
     links: validLinks.map((l) => ({
       name: l.name.trim(),
       url: l.url.trim(),
@@ -283,6 +304,13 @@ async function onSubmit() {
     />
 
     <AppInput v-model="bio" as="textarea" :label="t('profile.bio')" />
+
+    <AppSelect
+      v-model="statusContentType"
+      :options="statusContentTypeOptions"
+      :label="t('profile.statusContentType')"
+      :hint="t('profile.statusContentTypeHint')"
+    />
 
     <fieldset class="profile-tab__links">
       <legend>{{ t("profile.links") }}</legend>

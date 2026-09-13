@@ -11,6 +11,7 @@ transaction boundary.
 import asyncio
 import base64
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type, TypedDict
@@ -39,12 +40,19 @@ from ..models.artist import Artist
 from ..models.library import Library
 from ..models.notification import NotificationType
 from ..models.playlist import Playlist
+from ..models.stored_file import StoredFile
 from ..models.tag import Tag
 from ..models.track import Track
 from ..models.user import User
 from . import federation as federation_service
 from .acl import can_access, can_manage, get_item_plural
-from .mentions import process_mentions, tag_url_factory
+from .mentions import (
+    CONTENT_TYPE_MARKDOWN,
+    STATUS_CONTENT_TYPES,
+    process_mentions,
+    tag_url_factory,
+)
+from .sharing import create_share_grant
 from .tags import _entity_access_predicate, get_or_create_tag, validate_tag_name
 
 logger = logging.getLogger(__name__)
@@ -56,6 +64,7 @@ __all__ = [
     "VisibilityRules",
     "can_view_activity",
     "create_local_activity",
+    "create_status",
     "fan_out_activity",
     "fan_out_activity_update",
     "fan_out_like_activity",
@@ -76,6 +85,7 @@ _ENTITY_MODELS: Dict[str, Type[Any]] = {
     "artist": Artist,
     "playlist": Playlist,
     "library": Library,
+    "user": User,
 }
 
 
@@ -753,12 +763,15 @@ async def create_local_activity(
     visibility: Visibility | str,
     content: Optional[str] = None,
     content_source: Optional[str] = None,
+    content_type: Optional[str] = None,
+    language: Optional[str] = None,
     in_reply_to_activity_id: Optional[str] = None,
     mentions: Optional[List[dict]] = None,
     payload: Optional[dict] = None,
     require_manage: bool = True,
 ) -> Activity:
-    """Create a local activity attached to an entity.
+    """
+    Create a local activity attached to an entity.
 
     Raises ``HTTPException`` with status 404 when the entity does not exist,
     422 when the requested visibility exceeds the entity's visibility (or the
@@ -808,7 +821,8 @@ async def create_local_activity(
         in_reply_to_activity_id=in_reply_to_activity_id,
         content=rendered_content,
         content_source=content_source,
-        content_type="text/markdown" if content_source else "text/plain",
+        content_type=content_type or ("text/markdown" if content_source else "text/plain"),
+        language=language,
         payload=payload,
     )
     session.add(activity)
@@ -831,75 +845,215 @@ async def create_local_activity(
     return activity
 
 
+# Sentinel distinguishing "field not provided" (keep) from an explicit
+# ``None``/empty value (clear) in partial updates.
+_UNSET: Any = object()
+
+
+def _is_user_attachment(doc: Any) -> bool:
+    """Whether an attachment doc was user-added and is editable."""
+    from ..federation.serializers import ATTACHMENT_FILE_ID_KEY, ATTACHMENT_TRACK_ID_KEY
+
+    return isinstance(doc, dict) and (ATTACHMENT_FILE_ID_KEY in doc or ATTACHMENT_TRACK_ID_KEY in doc)
+
+
+def _attachment_source_ids(obj: dict) -> Tuple[List[str], List[str]]:
+    """Return ``(media_ids, track_ids)`` of an object's user attachments."""
+    from ..federation.serializers import ATTACHMENT_FILE_ID_KEY, ATTACHMENT_TRACK_ID_KEY
+
+    media_ids: List[str] = []
+    track_ids: List[str] = []
+    for doc in obj.get("attachment") or []:
+        if not isinstance(doc, dict):
+            continue
+        file_id = doc.get(ATTACHMENT_FILE_ID_KEY)
+        track_id = doc.get(ATTACHMENT_TRACK_ID_KEY)
+        if isinstance(file_id, str) and file_id:
+            media_ids.append(file_id)
+        if isinstance(track_id, str) and track_id:
+            track_ids.append(track_id)
+    return media_ids, track_ids
+
+
+async def _activity_mention_user_ids(session: AsyncSession, activity: Activity) -> List[str]:
+    """Return the local user ids currently mentioned by ``activity``."""
+    rows = await session.execute(
+        select(ActivityMention.user_id).where(
+            ActivityMention.activity_id == activity.id,
+            ActivityMention.user_id.is_not(None),
+        )
+    )
+    return [uid for (uid,) in rows.all()]
+
+
 async def update_activity(
     session: AsyncSession,
     activity: Activity,
     *,
-    content_source: str,
+    content_source: Optional[str] = None,
     config: SonghiveConfig,
+    content_type: Any = _UNSET,
+    language: Any = _UNSET,
+    media_ids: Any = _UNSET,
+    track_ids: Any = _UNSET,
+    editor: Optional[User] = None,
+    audience: Optional[Visibility] = None,
 ) -> Activity:
-    """Update an activity's content, re-running the mention pipeline.
+    """
+    Update an activity's content, format, language, and/or attachments.
 
     ``content_source`` is the new raw text: ``process_mentions`` re-resolves
     its ``@handle`` mentions and re-renders safe HTML, which replaces the
-    stored ``content``/``content_source``/``content_type`` columns and the
-    activity's ``activity_mentions`` rows.  When the stored ``payload``
-    embeds a dict ``object`` (e.g. a ``Create`` activity's object), its
-    ``content`` and ``tag`` are rebuilt too: ``pubby.set_object_content``
-    merges tag tags while preserving pre-existing tags, the
-    mention-aware pipeline rendering wins for ``content``, and the
-    pipeline's ``Mention`` tags are merged in. The object is also stamped
-    with ``updated`` so served documents and remote copies can surface the
-    edit. Remote propagation of the edit is layered on top by
-    :func:`fan_out_activity_update`, which the caller invokes separately so
-    a pending visibility change can be applied first.
+    stored ``content``/``content_source`` columns and the activity's
+    ``activity_mentions`` rows.  ``None`` leaves the text untouched;
+    ``content_type``/``language``/``media_ids``/``track_ids`` default to a
+    sentinel meaning "unchanged" — pass an explicit value (including
+    ``None`` for ``language`` or ``[]`` for the id lists) to overwrite.
 
-    Raises ``HTTPException`` 404 when the activity has been retracted.
-    Flushes without committing; the caller owns the transaction.
+    When the stored ``payload`` embeds a dict ``object`` (e.g. a ``Create``
+    activity's object), its ``content`` and ``tag`` are rebuilt too:
+    ``pubby.set_object_content`` merges tag tags while preserving
+    pre-existing tags, the mention-aware pipeline rendering wins for
+    ``content``, and the pipeline's ``Mention`` tags are merged in.
+    Attachment edits rebuild the object's ``attachment`` list from the
+    resolved files/tracks while preserving entity-owned docs (e.g. the
+    shared track itself, which carries no ``songhive:`` source marker);
+    ``_resolve_status_media`` re-applies ownership checks and escalates
+    file visibility to the ``audience`` (or the activity's current
+    visibility) requirement. ``language`` is mirrored into the object's
+    ``contentMap``. The object is also stamped with ``updated`` so served
+    documents and remote copies can surface the edit. Remote propagation
+    is layered on top by :func:`fan_out_activity_update`, which the caller
+    invokes separately so a pending visibility change can be applied first.
+
+    ``editor`` is the user performing the edit — file ownership and track
+    access are checked against it (falls back to the activity owner).
+
+    Raises ``HTTPException`` 404 when the activity has been retracted, 422
+    for an invalid ``content_type``/``language``, for edits that would
+    leave a ``user``-entity status with neither text nor attachments, for
+    over-limit attachment lists, or when attachment ids are supplied for an
+    activity without an embedded object. Flushes without committing; the
+    caller owns the transaction.
     """
     if activity.deleted_at is not None:
         raise HTTPException(404, detail="Activity not found")
 
-    processed = await process_mentions(session, content_source, config)
-
-    activity.content = processed.html or None
-    activity.content_source = content_source
-    activity.content_type = "text/markdown" if content_source else "text/plain"
-
-    await session.execute(delete(ActivityMention).where(ActivityMention.activity_id == activity.id))
-    for mention in processed.mentions:
-        session.add(ActivityMention(activity_id=activity.id, **mention.as_dict()))
-    session.expire(activity, ["mentions"])
+    from ..federation.serializers import (
+        normalize_post_content,
+        stored_file_to_attachment,
+        track_to_attachment,
+    )
 
     payload = activity.payload
-    if isinstance(payload, dict) and isinstance(payload.get("object"), dict):
-        obj = payload["object"]
-        domain = (config.federation.instance_domain or "").strip()
-        set_object_content(obj, content_source, tag_url_factory(domain))
-        if processed.html:
-            obj["content"] = processed.html
-        else:
-            obj.pop("content", None)
+    obj = payload.get("object") if isinstance(payload, dict) else None
+    if not isinstance(obj, dict):
+        obj = None
 
-        from ..federation.serializers import normalize_post_content
+    attachments_requested = media_ids is not _UNSET or track_ids is not _UNSET
 
-        # The appended page link targets the entity's frontend page — a
-        # share's object ``url`` is its own id, so the page cannot be
-        # derived from the stored object for ``Note`` shares.
-        link_href = (
-            get_track_url(activity.entity_id, domain=domain) if activity.entity_type == "track" and domain else None
+    # A status on the author's ``user`` entity must keep some text or at
+    # least one user-managed attachment.
+    if activity.entity_type == "user":
+        new_text = content_source if content_source is not None else (activity.content_source or "")
+        kept_media, kept_tracks = _attachment_source_ids(obj) if obj is not None else ([], [])
+        if media_ids is not _UNSET:
+            kept_media = list(dict.fromkeys(media_ids or ()))
+        if track_ids is not _UNSET:
+            kept_tracks = list(dict.fromkeys(track_ids or ()))
+        if not new_text.strip() and not kept_media and not kept_tracks:
+            raise HTTPException(422, detail="Status must not be empty")
+
+    if content_type is not _UNSET:
+        if content_type not in STATUS_CONTENT_TYPES:
+            raise HTTPException(422, detail=f"Invalid content_type: {content_type}")
+        activity.content_type = content_type
+
+    processed = None
+    if content_source is not None or content_type is not _UNSET:
+        # The stored ``content_type`` declares how ``content_source`` is
+        # interpreted; ``text/markdown`` sources re-render as Markdown while
+        # everything else uses the plain-text pipeline.
+        text = content_source if content_source is not None else (activity.content_source or "")
+        processed = await process_mentions(session, text, config, content_type=activity.content_type or "text/plain")
+        activity.content = processed.html or None
+        activity.content_source = text
+
+        await session.execute(delete(ActivityMention).where(ActivityMention.activity_id == activity.id))
+        for mention in processed.mentions:
+            session.add(ActivityMention(activity_id=activity.id, **mention.as_dict()))
+        session.expire(activity, ["mentions"])
+
+    if language is not _UNSET:
+        activity.language = _validate_status_language(language)
+
+    if attachments_requested:
+        if obj is None:
+            raise HTTPException(422, detail="Activity has no editable attachments")
+        new_media_ids, new_track_ids = _attachment_source_ids(obj)
+        if media_ids is not _UNSET:
+            new_media_ids = list(dict.fromkeys(media_ids or ()))
+        if track_ids is not _UNSET:
+            new_track_ids = list(dict.fromkeys(track_ids or ()))
+        if len(new_media_ids) > _MAX_STATUS_ATTACHMENTS or len(new_track_ids) > _MAX_STATUS_ATTACHMENTS:
+            raise HTTPException(422, detail="Too many attachments")
+
+        resolver = editor or (await session.get(User, activity.owner_user_id) if activity.owner_user_id else None)
+        if resolver is None:
+            raise HTTPException(422, detail="Cannot resolve attachments for this activity")
+
+        mention_user_ids = (
+            [m.user_id for m in processed.mentions if m.user_id]
+            if processed is not None
+            else await _activity_mention_user_ids(session, activity)
         )
-        normalize_post_content(obj, link_href=link_href)
-        activity.content = obj.get("content")
-        if processed.tags:
-            tags = obj.setdefault("tag", [])
-            seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
-            tags.extend(tag for tag in processed.tags if str(tag.get("name", "")).lower() not in seen)
+        required = audience or Visibility(activity.visibility)
+        files = await _resolve_status_media(session, resolver, new_media_ids, required, mention_user_ids)
+        tracks = await _resolve_status_tracks(session, resolver, new_track_ids)
+
+        domain = (config.federation.instance_domain or "").strip()
+        rebuilt = [stored_file_to_attachment(stored, domain) for stored in files]
+        for track in tracks:
+            artist = await session.get(Artist, track.artist_id) if track.artist_id else None
+            audio_object_id = (
+                f"{activity.source_actor}/objects/{track.federation_object_id}" if track.federation_object_id else None
+            )
+            rebuilt.append(track_to_attachment(track, artist, domain, audio_object_id=audio_object_id))
+        obj["attachment"] = [a for a in obj.get("attachment") or [] if not _is_user_attachment(a)] + rebuilt
+
+    if obj is not None and (processed is not None or attachments_requested or language is not _UNSET):
+        domain = (config.federation.instance_domain or "").strip()
+        if processed is not None:
+            set_object_content(obj, activity.content_source or "", tag_url_factory(domain))
+            if processed.html:
+                obj["content"] = processed.html
+            else:
+                obj.pop("content", None)
+
+            # The appended page link targets the entity's frontend page — a
+            # share's object ``url`` is its own id, so the page cannot be
+            # derived from the stored object for ``Note`` shares.
+            link_href = (
+                get_track_url(activity.entity_id, domain=domain) if activity.entity_type == "track" and domain else None
+            )
+            normalize_post_content(obj, link_href=link_href)
+            activity.content = obj.get("content")
+            if processed.tags:
+                tags = obj.setdefault("tag", [])
+                seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
+                tags.extend(tag for tag in processed.tags if str(tag.get("name", "")).lower() not in seen)
+
+        if activity.language and obj.get("content"):
+            obj["contentMap"] = {activity.language: obj["content"]}
+        else:
+            obj.pop("contentMap", None)
+
         obj["updated"] = datetime.now(timezone.utc).isoformat()
         flag_modified(activity, "payload")
         await _refresh_notifications_for_object(session, activity.source_id, obj)
 
-    await _sync_activity_tags(session, activity, processed.tag_names)
+    if processed is not None:
+        await _sync_activity_tags(session, activity, processed.tag_names)
     await session.flush()
     await session.refresh(activity, ["mentions"])
     return activity
@@ -1033,12 +1187,20 @@ async def _notify_like(
         if author.display_name:
             payload["actor_display_name"] = author.display_name
         if entity is not None:
+            # User-entity activities are statuses: they deep-link to the
+            # author's profile page rather than an entity detail route.
+            if activity.entity_type == "user":
+                item_title = getattr(entity, "display_name", None) or getattr(entity, "username", None)
+                local_url = f"/@{getattr(entity, 'username', activity.entity_id)}"
+            else:
+                item_title = getattr(entity, "title", None) or getattr(entity, "name", None)
+                local_url = f"/{plural}/{activity.entity_id}"
             payload.update(
                 {
                     "item_type": activity.entity_type,
                     "item_id": str(activity.entity_id),
-                    "item_title": getattr(entity, "title", None) or getattr(entity, "name", None),
-                    "local_url": f"/{plural}/{activity.entity_id}",
+                    "item_title": item_title,
+                    "local_url": local_url,
                 }
             )
         await notifications_service.create_notification(
@@ -1358,6 +1520,275 @@ async def fan_out_activity_update(
     return sent
 
 
+# Loose BCP-47 shape for status language tags (``en``, ``en-US``, ``zh-Hant``).
+_LANGUAGE_RE = re.compile(r"^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*$")
+
+# Per-category cap on status attachments, mirroring common fediverse limits.
+_MAX_STATUS_ATTACHMENTS = 4
+
+
+def _validate_status_language(language: Optional[str]) -> Optional[str]:
+    """Normalize and validate a status's BCP-47-ish language tag."""
+    if language is None:
+        return None
+    value = language.strip()
+    if not value:
+        return None
+    if len(value) > 35 or not _LANGUAGE_RE.match(value):
+        raise HTTPException(422, detail=f"Invalid language: {language}")
+    return value
+
+
+def _status_file_visibility(visibility: Visibility) -> Visibility:
+    """Return the visibility a status's file attachments must have.
+
+    Statuses federating to remote audiences (``public``/``followers``) need
+    publicly fetchable media, ``local`` statuses keep files instance-local,
+    and ``mentioned``/``private`` statuses keep them private — ``mentioned``
+    additionally grants each mentioned local user access to the file.
+    """
+    if visibility in (Visibility.PUBLIC, Visibility.FOLLOWERS):
+        return Visibility.PUBLIC
+    if visibility == Visibility.LOCAL:
+        return Visibility.LOCAL
+    return Visibility.PRIVATE
+
+
+async def _resolve_status_media(
+    session: AsyncSession,
+    author: User,
+    media_ids: Iterable[str],
+    visibility: Visibility,
+    mentioned_user_ids: Iterable[str],
+) -> List[StoredFile]:
+    """
+    Resolve status attachment files, enforcing ownership and visibility.
+
+    Files must be owned by ``author`` (unless they are an admin); unknown
+    ids raise ``HTTPException`` 404.  Each file's visibility is escalated —
+    never downgraded — to what the status's audience requires, and
+    ``mentioned``-visibility statuses additionally create ``file`` share
+    grants for every mentioned local user so they can fetch the media.
+    """
+    required = _status_file_visibility(visibility)
+    grantees = [uid for uid in dict.fromkeys(mentioned_user_ids) if uid != author.id]
+    files: List[StoredFile] = []
+    for file_id in dict.fromkeys(media_ids):
+        stored_file = await session.get(StoredFile, file_id)
+        if stored_file is None or (stored_file.owner_id != author.id and not author.is_admin):
+            raise HTTPException(404, detail="Attachment not found")
+        try:
+            current = Visibility(stored_file.visibility)
+        except ValueError:
+            current = Visibility.PRIVATE
+        if Visibility.rank(current) < Visibility.rank(required):
+            stored_file.visibility = required.value
+        if required == Visibility.PRIVATE and visibility == Visibility.MENTIONED:
+            for user_id in grantees:
+                await create_share_grant(
+                    session,
+                    "file",
+                    str(stored_file.id),
+                    user_id,
+                    created_by=str(author.id),
+                )
+        files.append(stored_file)
+    return files
+
+
+async def _resolve_status_tracks(
+    session: AsyncSession,
+    author: User,
+    track_ids: Iterable[str],
+) -> List[Track]:
+    """
+    Resolve status attachment tracks, enforcing view-level access.
+
+    Every id must point at a track ``author`` may access (``acl.can_access``)
+    — unknown or inaccessible ids both raise ``HTTPException`` 404 so track
+    existence is not leaked.
+    """
+    tracks: List[Track] = []
+    for track_id in dict.fromkeys(track_ids):
+        track = await session.get(Track, track_id)
+        if track is None or not await can_access(session, author, "track", track_id):
+            raise HTTPException(404, detail="Track not found")
+        tracks.append(track)
+    return tracks
+
+
+async def create_status(
+    session: AsyncSession,
+    *,
+    author: User,
+    config: SonghiveConfig,
+    status_text: Optional[str] = None,
+    content_type: str = CONTENT_TYPE_MARKDOWN,
+    visibility: "Visibility | str" = Visibility.PUBLIC,
+    language: Optional[str] = None,
+    media_ids: Optional[Iterable[str]] = None,
+    track_ids: Optional[Iterable[str]] = None,
+) -> Activity:
+    """
+    Create a standalone status as a ``create`` activity on the author's
+    ``user`` entity.
+
+    The status is recorded as a local ``Create(Note)`` activity attached to
+    ``(user, author.id)`` — it federates through :func:`fan_out_activity`
+    when federation is enabled and ``visibility`` federates, and stays
+    local otherwise. Unlike :func:`record_track_publication` it never
+    returns ``None`` and never requires federation to be configured.
+
+    ``status_text`` is the raw source text, interpreted as Markdown when
+    ``content_type`` is ``text/markdown`` (the default) and as escaped
+    plain text otherwise; the mention pipeline renders safe ``content``
+    HTML, resolves ``@handle`` mentions into ``activity_mentions`` rows,
+    and builds the object's ``Mention``/``Hashtag`` tags. ``language`` is a
+    BCP-47 tag persisted on the activity and mirrored into the object's
+    ``contentMap``.
+
+    ``media_ids`` attach uploaded files (see :func:`_resolve_status_media`
+    for ownership and visibility handling) and ``track_ids`` attach hosted
+    tracks the author may access — both are serialized into the object's
+    ``attachment`` list. Each category is capped at
+    ``_MAX_STATUS_ATTACHMENTS`` entries.
+
+    Raises ``HTTPException`` 422 for an empty status, an invalid
+    ``content_type``/``visibility``/``language``, or an over-limit
+    attachment list; 404 for unknown or inaccessible media/tracks. Flushes
+    without committing; the caller owns the transaction.
+    """
+    from ..federation.activities import create_status_activity
+    from ..federation.serializers import stored_file_to_attachment, track_to_attachment
+
+    text = (status_text or "").strip()
+    media_ids = list(media_ids or [])
+    track_ids = list(track_ids or [])
+    if not text and not media_ids and not track_ids:
+        raise HTTPException(422, detail="Status must not be empty")
+    if len(set(media_ids)) > _MAX_STATUS_ATTACHMENTS or len(set(track_ids)) > _MAX_STATUS_ATTACHMENTS:
+        raise HTTPException(422, detail="Too many attachments")
+    if content_type not in STATUS_CONTENT_TYPES:
+        raise HTTPException(422, detail=f"Invalid content_type: {content_type}")
+    try:
+        activity_visibility = Visibility(visibility)
+    except ValueError:
+        raise HTTPException(422, detail=f"Invalid visibility: {visibility}")
+    language = _validate_status_language(language)
+
+    processed = await process_mentions(session, text, config, content_type=content_type)
+    mentioned_user_ids = [m.user_id for m in processed.mentions if m.user_id]
+    files = await _resolve_status_media(session, author, media_ids, activity_visibility, mentioned_user_ids)
+    tracks = await _resolve_status_tracks(session, author, track_ids)
+
+    domain = (config.federation.instance_domain or "").strip()
+    actor_url = _local_actor_url(author)
+    attachments = [stored_file_to_attachment(stored, domain) for stored in files]
+    for track in tracks:
+        artist = await session.get(Artist, track.artist_id) if track.artist_id else None
+        audio_object_id = f"{actor_url}/objects/{track.federation_object_id}" if track.federation_object_id else None
+        attachments.append(track_to_attachment(track, artist, domain, audio_object_id=audio_object_id))
+
+    object_uuid = str(uuid.uuid4())
+    object_id = f"{actor_url}/objects/{object_uuid}"
+    note: dict = {
+        "type": "Note",
+        "id": object_id,
+        "url": object_id,
+        "attributedTo": actor_url,
+        "published": datetime.now(timezone.utc).isoformat(),
+    }
+    if processed.html:
+        note["content"] = processed.html
+        if language:
+            note["contentMap"] = {language: processed.html}
+    if attachments:
+        note["attachment"] = attachments
+    if processed.tags:
+        note["tag"] = processed.tags
+
+    mention_actor_urls: List[str] = [m.actor_url for m in processed.mentions if m.actor_url]  # type: ignore
+    payload = create_status_activity(
+        actor_url,
+        note,
+        activity_visibility,
+        mention_actor_urls=mention_actor_urls,
+    )
+
+    activity = Activity(
+        entity_type="user",
+        entity_id=str(author.id),
+        activity_type="create",
+        source_type="local",
+        source_actor=actor_url,
+        source_id=object_id,
+        local_object_id=object_uuid,
+        owner_user_id=author.id,
+        visibility=activity_visibility.value,
+        content=processed.html or None,
+        content_source=text or None,
+        content_type=content_type,
+        language=language,
+        payload=payload,
+    )
+    session.add(activity)
+    await session.flush()
+
+    for mention in processed.mentions:
+        session.add(ActivityMention(activity_id=activity.id, **mention.as_dict()))
+    await session.flush()
+
+    await _sync_activity_tags(session, activity, processed.tag_names)
+    await _notify_status_mentions(session, activity=activity, author=author, mentions=processed.mentions)
+
+    try:
+        await fan_out_activity(session, activity, config, owner=author)
+    except Exception as e:
+        # Fan-out is best-effort: a broker or resolution failure must not
+        # fail the post itself — the activity row still records it.
+        logger.exception("Failed to fan out status for user %s: %s: %s", author.id, type(e), e)
+    return activity
+
+
+async def _notify_status_mentions(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    author: User,
+    mentions: Iterable[Any],
+) -> None:
+    """Notify local users mentioned by a status, never failing the post.
+
+    Mirrors the federated mention inbox path: the notification payload
+    carries the author's identity plus a snapshot of the status object so
+    clients can render the mention without re-fetching it. Self-mentions
+    and notification failures produce nothing.
+    """
+    from ..federation.notifications import _note_snapshot
+    from . import notifications as notifications_service
+
+    note = activity.payload.get("object") if isinstance(activity.payload, dict) else {}
+    snapshot = _note_snapshot(note) if isinstance(note, dict) else {}
+    for mention in mentions:
+        if not mention.user_id or mention.user_id == author.id:
+            continue
+        try:
+            await notifications_service.create_notification(
+                session,
+                user_id=mention.user_id,
+                type=NotificationType.MENTION,
+                actor_url=activity.source_actor,
+                source_url=activity.source_id,
+                payload={
+                    "actor_name": author.display_name or author.username,
+                    "actor_avatar_url": author.avatar_url,
+                    **snapshot,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to create mention notification for activity %s: %s", activity.id, exc)
+
+
 class _TrackPublicationKwargs(TypedDict):
     """Keyword arguments shared by ``create_note_activity``/``create_audio_activity``."""
 
@@ -1381,6 +1812,9 @@ async def record_track_publication(
     status: Optional[str] = None,
     visibility: "Visibility | str" = Visibility.PUBLIC,
     object_type: str = "audio",
+    content_type: Optional[str] = None,
+    language: Optional[str] = None,
+    media_ids: Optional[Iterable[str]] = None,
 ) -> Optional[Activity]:
     """
     Record and fan out a ``create`` activity for a fediverse track share.
@@ -1412,7 +1846,12 @@ async def record_track_publication(
     resolved through the ``process_mentions`` pipeline: mention-aware HTML
     replaces the rendered content, ``Mention`` tags are merged into the
     object's ``tag`` list, and ``activity_mentions`` rows are persisted so
-    ``resolve_audience`` can reach remote mentioned actors.
+    ``resolve_audience`` can reach remote mentioned actors. ``content_type``
+    selects the source-text renderer (``text/markdown`` or the default
+    ``text/plain``) and ``language`` a BCP-47 tag mirrored into the object's
+    ``contentMap``; both are persisted on the activity. ``media_ids`` attach
+    uploaded files to the post object (see ``_resolve_status_media`` for
+    ownership and visibility handling).
 
     ``visibility`` selects the post's audience (``public`` by default):
     ``public`` and ``followers`` reach the owner's follower inboxes plus
@@ -1431,10 +1870,13 @@ async def record_track_publication(
     """
     from ..federation._common import get_track_url
     from ..federation.activities import create_audio_activity, create_note_activity
-    from ..federation.serializers import normalize_post_content
+    from ..federation.serializers import normalize_post_content, stored_file_to_attachment
 
     if object_type not in ("audio", "note"):
         raise HTTPException(422, detail=f'Invalid object_type: {object_type}. Valid types: "audio", "note"')
+    if content_type is not None and content_type not in STATUS_CONTENT_TYPES:
+        raise HTTPException(422, detail=f"Invalid content_type: {content_type}")
+    language = _validate_status_language(language)
     if not config.federation.enabled or not config.federation.instance_domain:
         return None
     if not track or track.visibility != Visibility.PUBLIC.value:
@@ -1450,9 +1892,18 @@ async def record_track_publication(
         raise HTTPException(422, detail=f"Invalid visibility: {visibility}")
     VisibilityRules.enforce_activity_visibility(activity_visibility, _entity_visibility(track))
 
-    processed = await process_mentions(session, status, config) if status else None
+    processed = (
+        await process_mentions(session, status, config, content_type=content_type or "text/plain") if status else None
+    )
     mention_actor_urls: List[str] = (  # type: ignore
         [m.actor_url for m in processed.mentions if m.actor_url] if processed else []
+    )
+    media_files = await _resolve_status_media(
+        session,
+        owner,
+        media_ids or [],
+        activity_visibility,
+        [m.user_id for m in processed.mentions if m.user_id] if processed else [],
     )
 
     if object_type == "audio":
@@ -1485,14 +1936,22 @@ async def record_track_publication(
         return None
 
     obj = payload.get("object")
-    if processed is not None and isinstance(obj, dict):
-        if processed.html:
-            obj["content"] = processed.html
-        normalize_post_content(obj, link_href=get_track_url(track, config.federation.instance_domain))
-        if processed.tags:
-            tags = obj.setdefault("tag", [])
-            seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
-            tags.extend(tag for tag in processed.tags if str(tag.get("name", "")).lower() not in seen)
+    if isinstance(obj, dict):
+        if processed is not None:
+            if processed.html:
+                obj["content"] = processed.html
+            normalize_post_content(obj, link_href=get_track_url(track, config.federation.instance_domain))
+            if processed.tags:
+                tags = obj.setdefault("tag", [])
+                seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
+                tags.extend(tag for tag in processed.tags if str(tag.get("name", "")).lower() not in seen)
+        if media_files:
+            attachments = obj.setdefault("attachment", [])
+            attachments.extend(
+                stored_file_to_attachment(stored, config.federation.instance_domain) for stored in media_files
+            )
+        if language and obj.get("content"):
+            obj["contentMap"] = {language: obj["content"]}
 
     activity = Activity(
         entity_type="track",
@@ -1506,7 +1965,8 @@ async def record_track_publication(
         visibility=activity_visibility.value,
         content=obj.get("content") if isinstance(obj, dict) else None,
         content_source=status,
-        content_type="text/markdown" if status else "text/plain",
+        content_type=content_type or "text/plain",
+        language=language,
         payload=payload,
     )
     session.add(activity)

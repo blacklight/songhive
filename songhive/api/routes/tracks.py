@@ -23,7 +23,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -139,6 +139,9 @@ class TrackPublishRequest(BaseModel):
     # whose post text is dropped. ``audio`` republishes the track's canonical
     # ``Audio`` object instead.
     object_type: Literal["note", "audio"] = "note"
+    content_type: Optional[str] = None
+    language: Optional[str] = None
+    media_ids: List[str] = Field(default_factory=list)
 
 
 class TrackPublishResponse(BaseModel):
@@ -1147,6 +1150,9 @@ async def publish_track(
         status=status_text,
         visibility=publish_visibility,
         object_type=object_type,
+        content_type=body.content_type,
+        language=body.language,
+        media_ids=body.media_ids,
     )
     await db.commit()
 

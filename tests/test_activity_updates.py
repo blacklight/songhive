@@ -129,7 +129,9 @@ async def test_update_activity_renders_content(db_session, regular_user, other_u
     )
 
     assert activity.content_source == "hi @other #rock"
-    assert activity.content_type == "text/markdown"
+    # The stored content type is preserved and drives the re-render — this
+    # activity was created without one, so it stays the plain-text default.
+    assert activity.content_type == "text/plain"
     assert 'href="https://local.example/users/other"' in activity.content
     assert 'href="https://local.example/tags/rock"' in activity.content
 

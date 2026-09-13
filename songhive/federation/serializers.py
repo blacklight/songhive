@@ -16,9 +16,17 @@ from pubby.content import (
 )
 from sqlalchemy import inspect as sa_inspect
 
-from ..models import Artist, Track, Visibility
+from ..models import Artist, StoredFile, Track, Visibility
 from ..services.genres import extract_genres_from_track, genres_to_tags
 from ._common import get_stream_url, get_tag_url, get_track_url
+
+# Namespaced keys stamped on attachment docs produced by
+# ``stored_file_to_attachment``/``track_to_attachment`` so edits can tell
+# user-managed attachments (replaced through ``media_ids``/``track_ids``)
+# from entity-owned ones (e.g. the published track's own ``Audio`` doc,
+# which must survive an attachment edit). Remote servers ignore them.
+ATTACHMENT_FILE_ID_KEY = "songhive:fileId"
+ATTACHMENT_TRACK_ID_KEY = "songhive:trackId"
 
 
 def set_post_content(
@@ -386,3 +394,69 @@ def track_to_note_object(
         obj["attachment"] = [attachment]
 
     return obj
+
+
+def stored_file_to_attachment(stored_file: StoredFile, domain: str = "") -> dict:
+    """
+    Serialize a stored file to an ActivityPub ``Document`` attachment.
+
+    ``url`` is the file's public download endpoint — absolute when the
+    instance ``domain`` is configured, relative otherwise (a relative URL is
+    still usable by local API consumers). ``name`` carries the original
+    filename for remote renderers that surface it as alt text.
+    """
+    path = f"/api/v1/files/{stored_file.id}/download"
+    attachment: dict = {
+        "type": "Document",
+        "mediaType": stored_file.content_type,
+        "url": f"https://{domain}{path}" if domain else path,
+        ATTACHMENT_FILE_ID_KEY: str(stored_file.id),
+    }
+    if stored_file.original_filename:
+        attachment["name"] = stored_file.original_filename
+    return attachment
+
+
+def track_to_attachment(
+    track: Track,
+    artist: Optional[Artist],
+    domain: str = "",
+    audio_object_id: Optional[str] = None,
+) -> dict:
+    """
+    Serialize a hosted track as a status attachment.
+
+    Tracks with an audio file become an ``Audio``-typed media object
+    embedding the stream URL so remote servers render an inline player;
+    ``audio_object_id`` links the attachment to the track's published
+    ``Audio`` object when one exists. Tracks without audio degrade to a
+    ``Document`` link to the track page. Unlike ``track_to_*_object`` this
+    serializes non-public tracks too — the attachment points at
+    access-controlled local endpoints and the author chose to reference it.
+    """
+    name = f"{artist.name} - {track.title}" if artist is not None else track.title
+    if track.audio_file_id:
+        stream_url = (
+            get_stream_url(track=track, domain=domain) if domain else f"/api/v1/files/{track.audio_file_id}/download"
+        )
+        attachment: dict = {
+            "type": "Audio",
+            "mediaType": _track_media_type(track, _unloaded_attrs(track)),
+            "url": stream_url,
+            "name": name,
+            ATTACHMENT_TRACK_ID_KEY: str(track.id),
+        }
+        if audio_object_id:
+            attachment["id"] = audio_object_id
+        if track.duration:
+            attachment["duration"] = format_duration(track.duration)
+        return attachment
+
+    track_url = get_track_url(track=track, domain=domain) if domain else f"/tracks/{track.id}"
+    return {
+        "type": "Document",
+        "mediaType": "text/html",
+        "url": track_url,
+        "name": name,
+        ATTACHMENT_TRACK_ID_KEY: str(track.id),
+    }

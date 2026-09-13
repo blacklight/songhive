@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import type { ActivityResponse, ActivityVisibility } from "@/api/activities";
-import { getApiErrorMessage } from "@/api/client";
+import type { ActivityAttachment, ActivityResponse } from "@/api/activities";
 import { useActivitiesStore } from "@/stores/activities";
 import AppModal from "@/components/feedback/AppModal.vue";
-import AppButton from "@/components/ui/AppButton.vue";
-import AppSelect from "@/components/ui/AppSelect.vue";
+import StatusComposer, {
+  type StatusComposerPayload,
+} from "@/components/statuses/StatusComposer.vue";
 
 const props = defineProps<{ open: boolean; activity: ActivityResponse }>();
 const emit = defineEmits<{ close: [] }>();
@@ -14,48 +14,38 @@ const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 const store = useActivitiesStore();
 
-const content = ref("");
-const visibility = ref<ActivityVisibility>("public");
-const saving = ref(false);
-const error = ref("");
+// User-managed attachments carry a ``songhive:`` source id in the AP doc
+// (see ATTACHMENT_*_ID_KEY in songhive/federation/serializers.py); docs
+// without one belong to the entity itself (e.g. a shared track's own
+// Audio attachment) and are not editable through the composer.
+const FILE_ID_KEY = "songhive:fileId";
+const TRACK_ID_KEY = "songhive:trackId";
 
-const VISIBILITY_VALUES: ActivityVisibility[] = [
-  "public",
-  "followers",
-  "mentioned",
-  "local",
-  "private",
-];
+function attachmentName(attachment: ActivityAttachment): string {
+  return typeof attachment.name === "string" ? attachment.name : "";
+}
 
-const visibilityOptions = VISIBILITY_VALUES.map((value) => ({
-  value,
-  label: t(`activities.visibility.${value}`),
-}));
-
-watch(
-  () => props.open,
-  (open) => {
-    if (!open) return;
-    content.value = props.activity.content_source ?? "";
-    visibility.value = props.activity.visibility;
-    error.value = "";
-  },
+const initialMedia = computed(() =>
+  (props.activity.attachments ?? [])
+    .filter((a) => typeof a[FILE_ID_KEY] === "string")
+    .map((a) => ({ id: a[FILE_ID_KEY] as string, name: attachmentName(a) })),
 );
 
-async function save() {
-  saving.value = true;
-  error.value = "";
-  try {
-    await store.update(props.activity.id, {
-      content: content.value,
-      visibility: visibility.value,
-    });
-    emit("close");
-  } catch (err) {
-    error.value = getApiErrorMessage(err) || t("activities.edit.error");
-  } finally {
-    saving.value = false;
-  }
+const initialTracks = computed(() =>
+  (props.activity.attachments ?? [])
+    .filter((a) => typeof a[TRACK_ID_KEY] === "string")
+    .map((a) => ({ id: a[TRACK_ID_KEY] as string, title: attachmentName(a) })),
+);
+
+async function save(payload: StatusComposerPayload) {
+  await store.update(props.activity.id, {
+    content: payload.status,
+    visibility: payload.visibility,
+    content_type: payload.content_type,
+    language: payload.language,
+    media_ids: payload.media_ids,
+    track_ids: payload.track_ids,
+  });
 }
 </script>
 
@@ -65,75 +55,21 @@ async function save() {
     :title="t('activities.edit.title')"
     @close="emit('close')"
   >
-    <form class="activity-edit" @submit.prevent="save">
-      <label class="activity-edit__label" for="activity-edit-content">
-        {{ t("activities.edit.content") }}
-      </label>
-      <textarea
-        id="activity-edit-content"
-        v-model="content"
-        class="activity-edit__textarea"
-        rows="6"
-        :disabled="saving"
-      />
-
-      <AppSelect
-        v-model="visibility"
-        :options="visibilityOptions"
-        :label="t('activities.edit.visibility')"
-        :disabled="saving"
-      />
-
-      <p v-if="error" class="activity-edit__error" role="alert">{{ error }}</p>
-
-      <div class="activity-edit__actions">
-        <AppButton
-          variant="secondary"
-          :disabled="saving"
-          @click="emit('close')"
-        >
-          {{ t("common.cancel") }}
-        </AppButton>
-        <AppButton type="submit" :loading="saving">
-          {{ t("common.save") }}
-        </AppButton>
-      </div>
-    </form>
+    <!-- ``v-if`` remounts the composer on each open so initial values are
+         re-seeded from the activity. -->
+    <StatusComposer
+      v-if="open"
+      :submit="save"
+      :submit-label="t('common.save')"
+      :initial-status="activity.content_source ?? ''"
+      :initial-content-type="activity.content_type"
+      :initial-visibility="activity.visibility"
+      :initial-language="activity.language"
+      :initial-media="initialMedia"
+      :initial-tracks="initialTracks"
+      :allow-empty="activity.entity_type !== 'user'"
+      autofocus
+      @submitted="emit('close')"
+    />
   </AppModal>
 </template>
-
-<style scoped>
-.activity-edit {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-width: min(28rem, 80vw);
-}
-
-.activity-edit__label {
-  font-weight: 600;
-}
-
-.activity-edit__textarea {
-  width: calc(100% - var(--space-5));
-  padding: var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background-color: var(--color-background);
-  color: var(--color-text);
-  font-family: inherit;
-  font-size: 1rem;
-  resize: vertical;
-}
-
-.activity-edit__error {
-  margin: 0;
-  color: var(--color-danger);
-}
-
-.activity-edit__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-</style>

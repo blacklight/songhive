@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
+import mistune
 from pubby import resolve_actor_url
 from pubby.content import (
     RenderedContent,
@@ -32,16 +33,26 @@ from ..models.user import User
 from .federation import is_domain_blocked, normalize_instance_domain
 
 __all__ = [
+    "CONTENT_TYPE_MARKDOWN",
+    "CONTENT_TYPE_PLAIN",
     "MENTION_REGEX",
+    "STATUS_CONTENT_TYPES",
     "ProcessedMentions",
     "ResolvedMention",
     "extract_mentions",
     "tag_url_factory",
     "process_mentions",
     "render_mentions",
+    "render_mentions_markdown",
     "resolve_mention",
     "resolve_mentions",
 ]
+
+# Content types accepted for status bodies: ``text/plain`` renders through the
+# escaped/linkified plain-text pipeline, ``text/markdown`` through mistune.
+CONTENT_TYPE_PLAIN = "text/plain"
+CONTENT_TYPE_MARKDOWN = "text/markdown"
+STATUS_CONTENT_TYPES = (CONTENT_TYPE_PLAIN, CONTENT_TYPE_MARKDOWN)
 
 # Matches ``@user`` and ``@user@domain`` handles in free text.  The
 # username charset mirrors the local ``USERNAME_PATTERN`` plus ``.`` for
@@ -294,11 +305,103 @@ def render_mentions(
     return RenderedContent("".join(parts), tags)
 
 
+# Inline token patterns for the Markdown pipeline.  They mirror the
+# free-text matchers used by ``render_mentions`` — code spans are consumed by
+# mistune's ``codespan`` rule first, so ``@handles`` and ``#tags`` inside
+# backticks are never linkified.
+_MD_MENTION_PATTERN = r"(?<![\w@/])@[a-zA-Z0-9_.-]+(?:@[a-zA-Z0-9.\-]+)?\b"
+_MD_HASHTAG_PATTERN = r"(?<![\w&#])#[A-Za-z0-9_]+"
+
+
+class _StatusHtmlRenderer(mistune.HTMLRenderer):
+    """HTML renderer emitting mention and hashtag anchors for status bodies.
+
+    The anchor shapes mirror the plain-text pipeline: mentions render like
+    ``pubby.render_link_anchor`` and hashtags like ``render_post_html``.
+    """
+
+    def mention(self, text: str, url: str) -> str:
+        return f'<a href="{html.escape(url, quote=True)}">{html.escape(text)}</a>'
+
+    def hashtag(self, text: str, url: str) -> str:
+        return f'<a href="{html.escape(url, quote=True)}" rel="tag">{html.escape(text)}</a>'
+
+
+def _hashtag_tag_url(name: str, tag_url: Callable[[str], str]) -> Optional[str]:
+    """Return the hashtag link target for ``name``, or None when not a tag."""
+    normalized = name.lower()
+    if not any(c.isalpha() for c in normalized):
+        return None
+    return tag_url(normalized)
+
+
+def render_mentions_markdown(
+    text: str,
+    mentions: Iterable[ResolvedMention],
+    *,
+    domain: str = "",
+) -> RenderedContent:
+    """
+    Render Markdown ``text`` as safe HTML with mention handles linked.
+
+    The source is rendered by mistune with raw HTML escaped; ``@handle``
+    mentions and ``#tags`` are linkified through custom inline rules so
+    handles inside code spans, links, or email addresses are left alone.
+    Bare URLs are linkified by mistune's ``url`` plugin.  Resolved mentions
+    without an actor URL — and unresolved handles — render as literal text.
+    ``domain`` is the instance domain used to build tag links.
+    """
+    by_handle = {mention.handle.lower(): mention for mention in mentions}
+    tag_url = tag_url_factory(domain)
+    hashtags: List[str] = []
+    seen: set[str] = set()
+
+    def _register_hashtag(raw: str) -> Optional[str]:
+        url = _hashtag_tag_url(raw[1:], tag_url)
+        if url is None:
+            return None
+        name = raw[1:].lower()
+        if name not in seen:
+            seen.add(name)
+            hashtags.append(name)
+        return url
+
+    def _plugin(md) -> None:
+        def _parse_mention(inline, m, state):
+            handle = m.group(0)
+            mention = by_handle.get(handle.lower())
+            if mention is not None and mention.actor_url:
+                state.append_token({"type": "mention", "raw": handle, "attrs": {"url": mention.actor_url}})
+            else:
+                state.append_token({"type": "text", "raw": handle})
+            return m.end()
+
+        def _parse_hashtag(inline, m, state):
+            url = _register_hashtag(m.group(0))
+            if url is None:
+                state.append_token({"type": "text", "raw": m.group(0)})
+            else:
+                state.append_token({"type": "hashtag", "raw": m.group(0), "attrs": {"url": url}})
+            return m.end()
+
+        md.inline.register("mention", _MD_MENTION_PATTERN, _parse_mention, before="link")
+        md.inline.register("hashtag", _MD_HASHTAG_PATTERN, _parse_hashtag, before="link")
+
+    md = mistune.create_markdown(
+        renderer=_StatusHtmlRenderer(escape=True),
+        plugins=["url", "strikethrough"],
+    )
+    _plugin(md)
+    rendered_html = md(text or "")
+    return RenderedContent(rendered_html, hashtags)
+
+
 async def process_mentions(
     session: AsyncSession,
     text: str,
     config: SonghiveConfig,
     *,
+    content_type: str = CONTENT_TYPE_PLAIN,
     timeout: int = 10,
 ) -> ProcessedMentions:
     """
@@ -309,10 +412,16 @@ async def process_mentions(
     ``activity_mentions`` rows), the rendered ``html`` (for ``content``), the
     extracted ``tag_names``, and the ActivityPub ``tags`` (``Mention`` tags for
     resolved actors plus ``Hashtag`` tags for linkified tags).
+
+    ``content_type`` selects the renderer: ``text/markdown`` parses ``text``
+    as Markdown, any other value uses the escaped plain-text pipeline.
     """
     mentions = await resolve_mentions(session, text, config, timeout=timeout)
     domain = (config.federation.instance_domain or "").strip()
-    rendered = render_mentions(text, mentions, domain=domain)
+    if content_type == CONTENT_TYPE_MARKDOWN:
+        rendered = render_mentions_markdown(text, mentions, domain=domain)
+    else:
+        rendered = render_mentions(text, mentions, domain=domain)
 
     tags = [tag for mention in mentions if (tag := mention.to_tag()) is not None]
     tags.extend(build_hashtag_tags(rendered.hashtags, tag_url_factory(domain)))

@@ -25,6 +25,20 @@ export interface ActivityMentionResponse {
   user_id?: string | null;
 }
 
+/**
+ * ActivityPub ``attachment`` entry of an activity's embedded object — a
+ * ``Document``/``Image`` for uploaded files and ``Audio`` for hosted tracks.
+ */
+export interface ActivityAttachment {
+  type?: string;
+  mediaType?: string;
+  url?: string;
+  name?: string;
+  id?: string;
+  duration?: string;
+  [key: string]: unknown;
+}
+
 export interface ActivityResponse {
   id: string;
   entity_type: string;
@@ -42,6 +56,8 @@ export interface ActivityResponse {
   content?: string | null;
   content_source?: string | null;
   content_type?: string | null;
+  language?: string | null;
+  attachments?: ActivityAttachment[];
   published_at: string;
   mentions: ActivityMentionResponse[];
 }
@@ -54,6 +70,10 @@ export interface ActivityListResponse {
 export interface ActivityUpdate {
   content?: string | null;
   visibility?: ActivityVisibility | null;
+  content_type?: string | null;
+  language?: string | null;
+  media_ids?: string[];
+  track_ids?: string[];
 }
 
 export type ListActivitiesParams = {

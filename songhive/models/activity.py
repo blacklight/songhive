@@ -31,7 +31,7 @@ from .base import Base, TZDateTime
 if TYPE_CHECKING:
     from .tag import Tag
 
-ACTIVITY_ENTITY_TYPES = ("track", "album", "artist", "playlist", "library")
+ACTIVITY_ENTITY_TYPES = ("track", "album", "artist", "playlist", "library", "user")
 ACTIVITY_TYPES = (
     "create",
     "announce",
@@ -88,6 +88,7 @@ class Activity(Base):
         insert_default="text/plain",
         server_default="text/plain",
     )
+    language: Mapped[Optional[str]] = mapped_column(String(35), nullable=True)
     payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     published_at: Mapped[datetime] = mapped_column(
         TZDateTime(),

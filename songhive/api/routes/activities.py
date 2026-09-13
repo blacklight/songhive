@@ -32,6 +32,10 @@ class ActivityUpdate(BaseModel):
 
     content: Optional[str] = None
     visibility: Optional[Visibility] = None
+    content_type: Optional[str] = None
+    language: Optional[str] = None
+    media_ids: Optional[List[str]] = None
+    track_ids: Optional[List[str]] = None
 
 
 class ActivityMentionResponse(BaseModel):
@@ -65,6 +69,8 @@ class ActivityResponse(BaseModel):
     content: Optional[str] = None
     content_source: Optional[str] = None
     content_type: Optional[str] = None
+    language: Optional[str] = None
+    attachments: List[dict] = []
     published_at: datetime
     mentions: List[ActivityMentionResponse] = []
 
@@ -129,11 +135,23 @@ async def list_entity_activities(
     )
 
 
+def _activity_attachments(activity: Activity) -> List[dict]:
+    """Return the ActivityPub attachment docs of an activity's embedded object."""
+    payload = activity.payload
+    if not isinstance(payload, dict):
+        return []
+    obj = payload.get("object")
+    if not isinstance(obj, dict):
+        return []
+    return [a for a in obj.get("attachment") or [] if isinstance(a, dict)]
+
+
 def _build_activity_response(activity: Activity, profile: Optional[activity_service.ActorProfile]) -> ActivityResponse:
     """Build an ``ActivityResponse`` with the resolved source actor profile."""
     response = ActivityResponse.model_validate(activity)
     response.source_actor_avatar_url = profile.avatar_url if profile else None
     response.source_actor_display_name = profile.display_name if profile else None
+    response.attachments = _activity_attachments(activity)
     return response
 
 
@@ -146,7 +164,15 @@ async def update_activity(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Update an activity's content and/or visibility.
+    Update an activity's content, format, language, attachments and/or
+    visibility.
+
+    Only the fields present in the request body are changed; ``language``
+    accepts ``null`` to clear it and ``media_ids``/``track_ids`` accept
+    empty lists to remove all user-managed attachments (entity-owned
+    attachments, like a shared track's own ``Audio`` doc, are preserved).
+    File attachments must be owned by the requester and tracks must be
+    accessible to them; each category is limited to four entries.
 
     Content edits fan an ``Update`` carrying the rebuilt object out to the
     inboxes that already received the activity; visibility edits cascade an
@@ -165,13 +191,30 @@ async def update_activity(
 
     config = get_config(request)
     old_visibility = activity.visibility
-    if body.content is not None:
-        await activity_service.update_activity(db, activity, content_source=body.content, config=config)
+    fields = body.model_fields_set
+    content_fields = {"content", "content_type", "language", "media_ids", "track_ids"}
+    if fields & content_fields:
+        update_kwargs: dict = {
+            "config": config,
+            "editor": current_user,
+            "audience": body.visibility,
+        }
+        if "content" in fields:
+            update_kwargs["content_source"] = body.content
+        if "content_type" in fields:
+            update_kwargs["content_type"] = body.content_type
+        if "language" in fields:
+            update_kwargs["language"] = body.language
+        if "media_ids" in fields:
+            update_kwargs["media_ids"] = body.media_ids
+        if "track_ids" in fields:
+            update_kwargs["track_ids"] = body.track_ids
+        await activity_service.update_activity(db, activity, **update_kwargs)
     if body.visibility is not None:
         # cascade_visibility_update resolves the entity and enforces
         # containment internally (404 missing entity, 422 violation).
         await activity_service.VisibilityRules.cascade_visibility_update(db, activity, body.visibility)
-    if body.content is not None:
+    if fields & content_fields:
         # Fan out after the visibility edit so the Update carries the final
         # audience; it no-ops when the (new) visibility does not federate.
         try:
@@ -184,8 +227,14 @@ async def update_activity(
     details: dict = {"entity_type": activity.entity_type, "entity_id": activity.entity_id}
     if body.visibility is not None:
         details["visibility"] = {"old": old_visibility, "new": activity.visibility}
-    if body.content is not None:
+    if "content" in fields:
         details["content_changed"] = True
+    if "content_type" in fields:
+        details["content_type"] = activity.content_type
+    if "language" in fields:
+        details["language"] = activity.language
+    if fields & {"media_ids", "track_ids"}:
+        details["attachments_changed"] = True
 
     await audit.log_action(
         db,

@@ -116,6 +116,23 @@
       "genres": "Genres"
     }
   },
+  "statusComposer": {
+    "title": "New post",
+    "placeholder": "What's on your mind?",
+    "publish": "Post",
+    "published": "Post published.",
+    "contentType": "Format",
+    "contentTypes": {
+      "text/markdown": "Markdown",
+      "text/plain": "Plain text"
+    },
+    "visibility": "Visibility",
+    "language": "Language",
+    "attachFile": "Attach a file",
+    "attachTrack": "Attach a track",
+    "trackSearchPlaceholder": "Search tracks to attach…",
+    "uploadError": "Could not upload attachment: {message}"
+  },
   "theme": {
     "light": "Light",
     "dark": "Dark",
@@ -687,6 +704,9 @@
       "interface": "Interface"
     },
     "copyHandle": "Copy fediverse handle",
+    "compose": "Compose",
+    "statusContentType": "Default post format",
+    "statusContentTypeHint": "Format used by default when writing posts.",
     "followers": "No followers | {count} follower | {count} followers",
     "followersPage": {
       "title": "Followers",
@@ -922,10 +942,6 @@
       "preview": "Preview",
       "fediverse": "Fediverse",
       "fediverseHint": "Publish this track as an ActivityPub post.",
-      "fediverseStatus": "Post text",
-      "fediverseStatusHint": "Optional. Used as the post content instead of the track description — URLs, #tags and {'@'}mentions become links. It is not stored on the track.",
-      "fediverseVisibility": "Visibility",
-      "fediverseVisibilityHint": "Who the post reaches. \"Followers\" and \"mentioned\" posts federate to that audience only; \"local\" and \"private\" posts stay on this instance.",
       "fediverseType": "Post type",
       "fediverseTypeNote": "Post (Note)",
       "fediverseTypeAudio": "Track (Audio)",
@@ -933,7 +949,6 @@
       "fediverseTypeAudioHint": "Publishes the track as a federated audio object. Some servers (e.g. Mastodon) only show the track title and link — the post text is not displayed.",
       "fediversePublish": "Publish",
       "fediversePublished": "Track published to the fediverse.",
-      "fediversePublishError": "Could not publish: {message}",
       "fediverseNotPublic": "Only public tracks can be published to the fediverse. Change the track's visibility to public first."
     },
     "contextMenu": {

@@ -81,6 +81,7 @@ class UserResponse(BaseModel):
     avatar_url: Optional[str] = None
     email_verified: Optional[bool] = None
     role: Optional[UserRole] = None
+    status_content_type: str = "text/markdown"
     links: List[UserLinkOutput] = Field(default_factory=list)
 
 
@@ -171,7 +172,17 @@ class UserProfileUpdate(BaseModel):
     display_name: Optional[str] = Field(None, max_length=128)
     bio: Optional[str] = None
     avatar_url: Optional[str] = Field(None, max_length=512)
+    status_content_type: Optional[str] = None
     links: Optional[List[UserLinkInput]] = None
+
+    @field_validator("status_content_type")
+    @classmethod
+    def _validate_status_content_type(cls, value: Optional[str]) -> Optional[str]:
+        from ...services.mentions import STATUS_CONTENT_TYPES
+
+        if value is not None and value not in STATUS_CONTENT_TYPES:
+            raise ValueError(f"Invalid status_content_type: {value}")
+        return value
 
     @field_validator("avatar_url", mode="before")
     @classmethod

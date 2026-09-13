@@ -50,6 +50,12 @@ class User(Base):
     password_reset_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     password_reset_expires_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     last_login: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    status_content_type: Mapped[str] = mapped_column(
+        String(64),
+        insert_default="text/markdown",
+        default="text/markdown",
+        server_default="text/markdown",
+    )
     links: Mapped[List["UserLink"]] = relationship(
         "UserLink",
         back_populates="user",

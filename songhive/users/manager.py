@@ -264,6 +264,11 @@ async def update_profile(session: AsyncSession, user: User, updates: Dict[str, A
         avatar_url = updates["avatar_url"]
         user.avatar_url = (avatar_url or "").strip() or None
 
+    if "status_content_type" in updates:
+        status_content_type = updates["status_content_type"]
+        if status_content_type:
+            user.status_content_type = status_content_type
+
     if "links" in updates:
         links = updates["links"] or []
         await session.execute(delete(UserLink).where(UserLink.user_id == user.id))

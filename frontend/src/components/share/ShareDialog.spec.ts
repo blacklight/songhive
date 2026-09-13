@@ -495,6 +495,9 @@ describe("ShareDialog", () => {
       status: "Now playing #demo",
       visibility: "public",
       object_type: "note",
+      content_type: "text/markdown",
+      language: navigator.language,
+      media_ids: [],
     });
     expect(textarea.value).toBe("");
   });
@@ -545,6 +548,9 @@ describe("ShareDialog", () => {
       status: null,
       visibility: "public",
       object_type: "audio",
+      content_type: "text/markdown",
+      language: navigator.language,
+      media_ids: [],
     });
   });
 
@@ -571,10 +577,10 @@ describe("ShareDialog", () => {
     await fediverseTab?.click();
     await flushPromises();
 
-    // The second select is the visibility picker.
+    // Selects are post type, then the composer's format and visibility.
     const select = document.body.querySelectorAll(
       "select",
-    )[1] as HTMLSelectElement;
+    )[2] as HTMLSelectElement;
     expect(select).toBeDefined();
     select.value = "followers";
     select.dispatchEvent(new Event("change"));
@@ -592,6 +598,9 @@ describe("ShareDialog", () => {
       status: null,
       visibility: "followers",
       object_type: "note",
+      content_type: "text/markdown",
+      language: navigator.language,
+      media_ids: [],
     });
   });
 
@@ -630,6 +639,9 @@ describe("ShareDialog", () => {
       status: null,
       visibility: "public",
       object_type: "note",
+      content_type: "text/markdown",
+      language: navigator.language,
+      media_ids: [],
     });
   });
 

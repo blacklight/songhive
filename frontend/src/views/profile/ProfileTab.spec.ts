@@ -100,6 +100,7 @@ describe("ProfileTab", () => {
       display_name: "Alice U.",
       bio: "New bio",
       avatar_url: "https://example.com/avatar.png",
+      status_content_type: "text/markdown",
       links: [{ name: "Home", url: "https://example.com" }],
     });
   });
@@ -128,6 +129,7 @@ describe("ProfileTab", () => {
       display_name: "Alice",
       bio: "Hello",
       avatar_url: null,
+      status_content_type: "text/markdown",
       links: [],
     });
   });
@@ -153,6 +155,7 @@ describe("ProfileTab", () => {
       display_name: null,
       bio: null,
       avatar_url: null,
+      status_content_type: "text/markdown",
       links: [{ name: "Home", url: "https://example.com" }],
     });
   });

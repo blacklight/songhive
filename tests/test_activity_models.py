@@ -87,7 +87,7 @@ def test_activity_invalid_activity_type():
 
 def test_activity_entity_types_contract():
     """The allowed entity and activity types match the contract."""
-    assert ACTIVITY_ENTITY_TYPES == ("track", "album", "artist", "playlist", "library")
+    assert ACTIVITY_ENTITY_TYPES == ("track", "album", "artist", "playlist", "library", "user")
     assert ACTIVITY_TYPES == (
         "create",
         "announce",

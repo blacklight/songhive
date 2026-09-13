@@ -94,7 +94,7 @@ _METADATA_TAG_KEYS = {
     "----:com.apple.iTunes:KEYWORDS",
 }
 
-_TAG_SPLIT_RE = re.compile(r"[;,\/\\]")
+_TAG_SPLIT_RE = re.compile(r"[;,/\\]")
 
 _TAG_RE = re.compile(r"^(?=.*[a-z])[a-z0-9_]+$")
 
@@ -184,6 +184,9 @@ def _entity_access_predicate(
     if item_type == "artist":
         # Artists have no visibility/owner fields and are treated as public.
         return true()
+    if item_type == "user":
+        # Active user profiles are public containers for standalone statuses.
+        return model.is_active
     return _list_access_predicate(model, user, item_type)
 
 

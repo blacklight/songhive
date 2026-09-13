@@ -21,7 +21,7 @@ from ...federation.activities import (
 )
 from ...federation.actors import get_federation_storage
 from ...federation.serializers import track_to_audio_object
-from ...models import Activity, Track, Visibility
+from ...models import Activity, Track, User, Visibility
 from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor, extract_domain, is_domain_allowed
 from ...tasks.federation import process_incoming
@@ -59,8 +59,17 @@ def _ordered_collection(collection_id: str, items: list[str]) -> dict[str, Any]:
 _ENTITY_ROUTE_PLURALS = {"library": "libraries"}
 
 
-def _entity_activities_url(entity_type: str, entity_id: str) -> str:
-    """Return the SPA route listing an entity's activities."""
+def _entity_activities_url(entity_type: str, entity_id: str, entity: Any = None) -> str:
+    """
+    Return the SPA route listing an entity's activities.
+
+    User-entity objects (standalone statuses) point at the author's profile
+    page — pass the resolved ``User`` row as ``entity`` so the username is
+    available; the user id falls back into the path when it is not.
+    """
+    if entity_type == "user":
+        username = getattr(entity, "username", None) or entity_id
+        return f"/@{username}"
     plural = _ENTITY_ROUTE_PLURALS.get(entity_type, f"{entity_type}s")
     return f"/{plural}/{entity_id}/activities"
 
@@ -194,8 +203,9 @@ async def get_object(
         # Shares carry their own object id as ``url``; redirect browsers to
         # the activity feed of the entity the object is attached to instead
         # of serving raw JSON.
+        entity = await db.get(User, activity.entity_id) if activity.entity_type == "user" else None
         return RedirectResponse(
-            url=_entity_activities_url(activity.entity_type, activity.entity_id),
+            url=_entity_activities_url(activity.entity_type, activity.entity_id, entity),
             status_code=status.HTTP_307_TEMPORARY_REDIRECT,
         )
 

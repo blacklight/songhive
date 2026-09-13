@@ -192,6 +192,38 @@ describe("ActivityCard", () => {
     expect(content.text()).toContain("bold");
   });
 
+  it("renders inline font formatting as styled spans", () => {
+    const wrapper = mountCard({
+      content:
+        "<p>plain <strong>bold</strong> <em>italic</em> <code>mono</code></p>",
+      content_type: "text/markdown",
+    });
+    const content = wrapper.find(".activity-card__content");
+    const bold = content.find(".activity-card__mark--bold");
+    const italic = content.find(".activity-card__mark--italic");
+    const code = content.find(".activity-card__mark--code");
+    expect(bold.text()).toBe("bold");
+    expect(italic.text()).toBe("italic");
+    expect(code.text()).toBe("mono");
+    // Marks never surface as real markup — remote HTML is not rendered
+    // verbatim.
+    expect(content.element.innerHTML).not.toContain("<strong>");
+  });
+
+  it("applies marks to mention and link segments", () => {
+    const wrapper = mountCard({
+      content:
+        '<p><strong><a href="/users/bob">@bob</a> ' +
+        '<a href="https://remote.example/p">link</a></strong></p>',
+      content_type: "text/markdown",
+    });
+    const content = wrapper.find(".activity-card__content");
+    const mention = content.find(".activity-card__mention");
+    const link = content.find('a[href="https://remote.example/p"]');
+    expect(mention.classes()).toContain("activity-card__mark--bold");
+    expect(link.classes()).toContain("activity-card__mark--bold");
+  });
+
   it("shows like edit and copy URL actions for the authenticated owner", () => {
     setAuthenticated("user-1");
     const wrapper = mountCard();

@@ -132,6 +132,30 @@ def index_exists(index_name: str, table_name: str) -> bool:
         return False
 
 
+def check_constraint_exists(table_name: str, constraint_name: str) -> bool:
+    """
+    Return True if the named CHECK constraint exists on the specified table.
+
+    Useful for idempotent batch alterations that rebuild a table's check
+    constraints — e.g. widening an ``IN (...)`` set — where a baseline
+    database created before the constraint existed would not have it to drop.
+
+    Example:
+        >>> if check_constraint_exists("activities", "ck_activities_entity_type"):
+        ...     batch_op.drop_constraint("ck_activities_entity_type", type_="check")
+    """
+    try:
+        bind = op.get_bind()
+        inspector = sa.inspect(bind)
+        if not inspector.has_table(table_name):
+            return False
+        constraints = inspector.get_check_constraints(table_name)
+        return any(con.get("name") == constraint_name for con in constraints)
+    except Exception:
+        # Offline mode or otherwise no real connection; assume not present.
+        return False
+
+
 # 64-bit key derived from a stable string so all Songhive processes agree on the
 # same advisory lock.  The key is kept positive to fit PostgreSQL's ``bigint``.
 _MIGRATION_LOCK_KEY = int(hashlib.sha256(b"songhive:migrations:baseline").hexdigest()[:16], 16) & 0x7FFFFFFFFFFFFFFF

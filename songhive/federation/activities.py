@@ -159,6 +159,24 @@ def create_note_activity(
     return _create_object_activity(actor_url, note_object, visibility, mention_actor_urls)
 
 
+def create_status_activity(
+    actor_url: str,
+    note_object: dict,
+    visibility: "Visibility | str" = Visibility.PUBLIC,
+    mention_actor_urls: Iterable[str] = (),
+) -> dict:
+    """
+    Create a ``Create(Note)`` activity for a standalone status.
+
+    ``note_object`` is a complete ``Note`` document — ``id``, ``url``,
+    ``attributedTo``, ``published``, ``content``/``contentMap``,
+    ``attachment`` and ``tag`` are all caller-supplied; this wraps it in the
+    ``Create`` envelope and applies the ``to``/``cc`` audience derived from
+    ``visibility`` to both (see :func:`_create_object_activity`).
+    """
+    return _create_object_activity(actor_url, note_object, visibility, mention_actor_urls)
+
+
 def activity_audience(
     visibility: "Visibility | str",
     actor_url: str,

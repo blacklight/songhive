@@ -655,6 +655,33 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/statuses/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Status
+     * @description Post a standalone status.
+     *
+     *     ``status`` is the raw source text — Markdown when ``content_type`` is
+     *     ``text/markdown`` (the default), escaped plain text otherwise. ``media_ids``
+     *     attach previously uploaded files and ``track_ids`` attach hosted tracks;
+     *     a status may carry attachments without text. The status is recorded as a
+     *     ``create`` activity on the author's profile and federated to the
+     *     ``visibility`` audience when federation is enabled.
+     */
+    post: operations["create_status_api_v1_statuses__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/artists/": {
     parameters: {
       query?: never;
@@ -3708,6 +3735,15 @@ export interface components {
       content_source?: string | null;
       /** Content Type */
       content_type?: string | null;
+      /** Language */
+      language?: string | null;
+      /**
+       * Attachments
+       * @default []
+       */
+      attachments: {
+        [key: string]: unknown;
+      }[];
       /**
        * Published At
        * Format: date-time
@@ -3727,6 +3763,14 @@ export interface components {
       /** Content */
       content?: string | null;
       visibility?: components["schemas"]["Visibility"] | null;
+      /** Content Type */
+      content_type?: string | null;
+      /** Language */
+      language?: string | null;
+      /** Media Ids */
+      media_ids?: string[] | null;
+      /** Track Ids */
+      track_ids?: string[] | null;
     };
     /**
      * AddLibraryTracksRequest
@@ -5851,6 +5895,27 @@ export interface components {
       created_at: string;
     };
     /**
+     * StatusCreateRequest
+     * @description Payload for posting a standalone status.
+     */
+    StatusCreateRequest: {
+      /** Status */
+      status?: string | null;
+      /**
+       * Content Type
+       * @default text/markdown
+       */
+      content_type: string;
+      /** @default public */
+      visibility: components["schemas"]["Visibility"];
+      /** Language */
+      language?: string | null;
+      /** Media Ids */
+      media_ids?: string[];
+      /** Track Ids */
+      track_ids?: string[];
+    };
+    /**
      * StoredFileResponse
      * @description Public metadata for a stored file.
      */
@@ -5984,6 +6049,12 @@ export interface components {
        * @enum {string}
        */
       object_type: "note" | "audio";
+      /** Content Type */
+      content_type?: string | null;
+      /** Language */
+      language?: string | null;
+      /** Media Ids */
+      media_ids?: string[];
     };
     /**
      * TrackPublishResponse
@@ -6178,6 +6249,8 @@ export interface components {
       bio?: string | null;
       /** Avatar Url */
       avatar_url?: string | null;
+      /** Status Content Type */
+      status_content_type?: string | null;
       /** Links */
       links?: components["schemas"]["UserLinkInput"][] | null;
     };
@@ -6199,6 +6272,11 @@ export interface components {
       /** Email Verified */
       email_verified?: boolean | null;
       role?: components["schemas"]["UserRole"] | null;
+      /**
+       * Status Content Type
+       * @default text/markdown
+       */
+      status_content_type: string;
       /** Links */
       links?: components["schemas"]["UserLinkOutput"][];
     };
@@ -7676,6 +7754,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ActivityListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_status_api_v1_statuses__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["StatusCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityResponse"];
         };
       };
       /** @description Validation Error */

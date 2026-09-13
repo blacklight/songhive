@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `statuses`: Standalone status posts. `POST /api/v1/statuses/` creates a
+  `create` activity on the author's `user` entity that federates as a
+  `Create(Note)` when federation is enabled and the visibility federates
+  (`public`, `followers`, `mentioned`), and stays local otherwise
+  (`local`, `private`, or federation disabled). Statuses support
+  `text/markdown` (default) and `text/plain` source (`content_type`), an
+  optional BCP-47 `language` mirrored into the object's `contentMap`,
+  `@handle` mentions, `#hashtags`, up to four uploaded file attachments
+  (`media_ids`, backed by the existing static storage) and up to four
+  hosted-track attachments (`track_ids`, serialized as `Audio`
+  attachments). `ActivityResponse` now reports `language` and the object's
+  `attachments`. `PATCH /api/v1/activities/{id}` additionally accepts
+  `content_type`, `language`, `media_ids` and `track_ids`, rebuilding the
+  object's user-managed attachments (marked `songhive:fileId`/
+  `songhive:trackId` in the AP document) while preserving entity-owned
+  ones. Users can pick their default post format via the new
+  `status_content_type` profile field (`PATCH /api/v1/users/me`).
+- `tracks`: `POST /api/v1/tracks/{id}/publish` accepts `content_type`,
+  `language`, and `media_ids` so track publications share the same
+  composition options as standalone statuses.
+- `frontend`: A shared `StatusComposer` component drives both surfaces —
+  a Compose button on the own profile page (`/@{user}`) and the share
+  dialog's Fediverse tab for tracks. It offers a format picker defaulting
+  to the user's preference, a visibility picker, a language field
+  defaulting to the browser locale, `@` mention autocomplete over local
+  users, a track-only attach search based on `SearchBar`, and file
+  attachments. `ActivityCard` renders activity attachments (images
+  inline, audio in a player, other files as links), and the activity edit
+  modal is the same composer pre-filled with the existing post.
+- `shares`: `GET /api/v1/shares/mine` lists the share grants and share
+  URL tokens created by the current user, and creators can revoke their
+  own grants and tokens; the SPA exposes the list at `/shares`.
+
 ## 0.1.2
 
 ### Added

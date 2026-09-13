@@ -14,7 +14,11 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import ActivityEditModal from "./ActivityEditModal.vue";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
-import { parseActivityContent } from "@/utils/activityContent";
+import {
+  parseActivityContent,
+  type ContentMark,
+  type ContentSegment,
+} from "@/utils/activityContent";
 
 const props = withDefaults(
   defineProps<{ activity: ActivityResponse; readonly?: boolean }>(),
@@ -129,6 +133,44 @@ const contentSegments = computed(() => {
   });
 });
 
+// ``attachments`` carries the ActivityPub attachment documents of the
+// activity's embedded object — ``Image``/image ``Document`` entries render
+// inline, ``Audio`` entries get a player, and anything else becomes a link.
+const attachments = computed(() => activity.value.attachments ?? []);
+const imageAttachments = computed(() =>
+  attachments.value.filter(
+    (a) => a.url && (a.mediaType ?? "").startsWith("image/"),
+  ),
+);
+const audioAttachments = computed(() =>
+  attachments.value.filter(
+    (a) =>
+      a.url && (a.type === "Audio" || (a.mediaType ?? "").startsWith("audio/")),
+  ),
+);
+const fileAttachments = computed(() =>
+  attachments.value.filter(
+    (a) =>
+      a.url &&
+      !imageAttachments.value.includes(a) &&
+      !audioAttachments.value.includes(a),
+  ),
+);
+
+// Inline font formatting survived from the source markup — rendered as
+// classes rather than real tags so links/mentions keep their own elements.
+const MARK_CLASSES: Record<ContentMark, string> = {
+  bold: "activity-card__mark--bold",
+  italic: "activity-card__mark--italic",
+  strikethrough: "activity-card__mark--strikethrough",
+  underline: "activity-card__mark--underline",
+  code: "activity-card__mark--code",
+};
+
+function markClasses(segment: ContentSegment): string[] {
+  return (segment.marks ?? []).map((mark) => MARK_CLASSES[mark]);
+}
+
 const canEdit = computed(
   () =>
     authStore.isAuthenticated &&
@@ -231,13 +273,22 @@ async function copyUrl() {
       </div>
     </header>
 
-    <p v-if="contentSegments.length" class="activity-card__content">
+    <p
+      v-if="contentSegments.length"
+      class="activity-card__content"
+      :lang="activity.language || undefined"
+    >
       <template v-for="(segment, index) in contentSegments" :key="index">
-        <template v-if="segment.type === 'text'">{{ segment.value }}</template>
+        <template v-if="segment.type === 'text'">
+          <span v-if="segment.marks" :class="markClasses(segment)">{{
+            segment.value
+          }}</span>
+          <template v-else>{{ segment.value }}</template>
+        </template>
         <RouterLink
           v-else-if="segment.type === 'mention' && segment.username"
           :to="{ name: 'userProfile', params: { username: segment.username } }"
-          class="activity-card__mention"
+          :class="['activity-card__mention', ...markClasses(segment)]"
           >{{ segment.handle }}</RouterLink
         >
         <a
@@ -245,22 +296,75 @@ async function copyUrl() {
           :href="segment.url"
           target="_blank"
           rel="noopener"
-          class="activity-card__mention"
+          :class="['activity-card__mention', ...markClasses(segment)]"
           >{{ segment.handle }}</a
         >
         <RouterLink
           v-else-if="segment.type === 'tag'"
           :to="{ name: 'tag', params: { name: segment.name } }"
+          :class="markClasses(segment)"
           >{{ segment.display }}</RouterLink
         >
-        <RouterLink v-else-if="segment.to" :to="segment.to">{{
-          segment.label
-        }}</RouterLink>
-        <a v-else :href="segment.url" target="_blank" rel="noopener">{{
-          segment.label
-        }}</a>
+        <RouterLink
+          v-else-if="segment.to"
+          :to="segment.to"
+          :class="markClasses(segment)"
+          >{{ segment.label }}</RouterLink
+        >
+        <a
+          v-else
+          :href="segment.url"
+          target="_blank"
+          rel="noopener"
+          :class="markClasses(segment)"
+          >{{ segment.label }}</a
+        >
       </template>
     </p>
+
+    <div v-if="attachments.length" class="activity-card__attachments">
+      <a
+        v-for="(attachment, index) in imageAttachments"
+        :key="`image-${index}`"
+        :href="attachment.url"
+        target="_blank"
+        rel="noopener"
+        class="activity-card__attachment-image-link"
+      >
+        <img
+          :src="attachment.url"
+          :alt="attachment.name ?? ''"
+          class="activity-card__attachment-image"
+          loading="lazy"
+        />
+      </a>
+      <div
+        v-for="(attachment, index) in audioAttachments"
+        :key="`audio-${index}`"
+        class="activity-card__attachment-audio"
+      >
+        <span v-if="attachment.name" class="activity-card__attachment-name">
+          <AppIcon name="music" spacing="right" />{{ attachment.name }}
+        </span>
+        <audio
+          :src="attachment.url"
+          controls
+          preload="none"
+          class="activity-card__attachment-player"
+        />
+      </div>
+      <ul v-if="fileAttachments.length" class="activity-card__attachment-list">
+        <li
+          v-for="(attachment, index) in fileAttachments"
+          :key="`file-${index}`"
+        >
+          <AppIcon name="paperclip" spacing="right" />
+          <a :href="attachment.url" target="_blank" rel="noopener">{{
+            attachment.name || attachment.url
+          }}</a>
+        </li>
+      </ul>
+    </div>
 
     <footer
       v-if="!props.readonly && (canLike || canEdit)"
@@ -408,8 +512,80 @@ async function copyUrl() {
   color: var(--color-text-link);
 }
 
+.activity-card__attachments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.activity-card__attachment-image {
+  max-width: 100%;
+  max-height: 24rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  object-fit: contain;
+}
+
+.activity-card__attachment-audio {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.activity-card__attachment-name {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.activity-card__attachment-player {
+  width: 100%;
+  max-width: 30rem;
+}
+
+.activity-card__attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-card__attachment-list a {
+  color: var(--color-text-link);
+  word-break: break-all;
+}
+
 .activity-card__mention {
   font-weight: 500;
+}
+
+.activity-card__mark--bold {
+  font-weight: 700;
+}
+
+.activity-card__mark--italic {
+  font-style: italic;
+}
+
+.activity-card__mark--strikethrough {
+  text-decoration: line-through;
+}
+
+.activity-card__mark--underline {
+  text-decoration: underline;
+}
+
+.activity-card__mark--strikethrough.activity-card__mark--underline {
+  text-decoration: underline line-through;
+}
+
+.activity-card__mark--code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  padding: 0 0.2em;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-secondary);
 }
 
 a:hover {

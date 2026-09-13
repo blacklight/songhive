@@ -201,6 +201,113 @@ describe("parseActivityContent", () => {
     ]);
   });
 
+  it("carries inline font formatting as marks on text segments", () => {
+    const segments = parseActivityContent(
+      "<p>plain <strong>bold</strong> and <em>italic</em> " +
+        "with <code>code</code> and <del>struck</del> and <u>under</u></p>",
+    );
+    expect(segments).toEqual([
+      { type: "text", value: "plain " },
+      { type: "text", value: "bold", marks: ["bold"] },
+      { type: "text", value: " and " },
+      { type: "text", value: "italic", marks: ["italic"] },
+      { type: "text", value: " with " },
+      { type: "text", value: "code", marks: ["code"] },
+      { type: "text", value: " and " },
+      { type: "text", value: "struck", marks: ["strikethrough"] },
+      { type: "text", value: " and " },
+      { type: "text", value: "under", marks: ["underline"] },
+    ]);
+  });
+
+  it("stacks nested marks and applies them to links and mentions", () => {
+    const segments = parseActivityContent(
+      '<p><strong><em>both</em> <a href="https://x.example/p">link</a>' +
+        ' <a href="/users/alice">@alice</a></strong></p>',
+      { instanceDomain: DOMAIN },
+    );
+    expect(segments).toEqual([
+      { type: "text", value: "both", marks: ["bold", "italic"] },
+      { type: "text", value: " ", marks: ["bold"] },
+      {
+        type: "link",
+        label: "link",
+        url: "https://x.example/p",
+        marks: ["bold"],
+      },
+      { type: "text", value: " ", marks: ["bold"] },
+      {
+        type: "mention",
+        handle: "@alice",
+        username: "alice",
+        marks: ["bold"],
+      },
+    ]);
+  });
+
+  it("merges adjacent text with the same marks across nesting order", () => {
+    const segments = parseActivityContent(
+      "<p><strong>a<em>b</em></strong><em><strong>c</strong></em></p>",
+    );
+    // ``a`` is bold, ``b`` is bold+italic, ``c`` is bold+italic too — the
+    // different nesting order must not split ``b`` and ``c``.
+    expect(segments).toEqual([
+      { type: "text", value: "a", marks: ["bold"] },
+      { type: "text", value: "bc", marks: ["bold", "italic"] },
+    ]);
+  });
+
+  it("keeps block newlines but marks heading text as bold", () => {
+    const segments = parseActivityContent("<h2>Title</h2><p>body</p>");
+    expect(segments).toEqual([
+      { type: "text", value: "Title", marks: ["bold"] },
+      { type: "text", value: "\nbody" },
+    ]);
+  });
+
+  it("renders unordered list items as bullet-prefixed lines", () => {
+    const segments = parseActivityContent(
+      "<p>intro</p><ul><li>one</li><li>two</li></ul><p>outro</p>",
+    );
+    expect(segments).toEqual([
+      { type: "text", value: "intro\n• one\n• two\noutro" },
+    ]);
+  });
+
+  it("renders ordered list items as numbered lines, honoring start", () => {
+    const segments = parseActivityContent(
+      '<ol><li>first</li><li>second</li></ol><ol start="4"><li>fourth</li></ol>',
+    );
+    expect(segments).toEqual([
+      { type: "text", value: "1. first\n2. second\n4. fourth" },
+    ]);
+  });
+
+  it("indents nested lists two spaces per level", () => {
+    const segments = parseActivityContent(
+      "<ul><li>a<ul><li>nested</li></ul></li><li>b</li></ul>",
+    );
+    expect(segments).toEqual([{ type: "text", value: "• a\n  • nested\n• b" }]);
+  });
+
+  it("keeps the marker on the same line as block children", () => {
+    const segments = parseActivityContent(
+      "<ul><li><p>wrapped</p></li><li>plain</li></ul>",
+    );
+    expect(segments).toEqual([{ type: "text", value: "• wrapped\n• plain" }]);
+  });
+
+  it("preserves marks inside list items", () => {
+    const segments = parseActivityContent(
+      "<ul><li><strong>bold</strong> item</li></ul>",
+    );
+    expect(segments).toEqual([
+      { type: "text", value: "• " },
+      { type: "text", value: "bold", marks: ["bold"] },
+      { type: "text", value: " item" },
+    ]);
+  });
+
   it("omits Mastodon invisible link chrome and marks ellipsis", () => {
     const segments = parseActivityContent(
       '<a href="https://remote.example/very/long/url">' +

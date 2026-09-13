@@ -117,6 +117,15 @@ export interface TrackPublishRequest {
    * render without the post text.
    */
   object_type?: "note" | "audio" | null;
+  /**
+   * Source format of ``status``: ``text/markdown`` (default) or
+   * ``text/plain``.
+   */
+  content_type?: string | null;
+  /** BCP-47 language tag of the post, mirrored into the object's contentMap. */
+  language?: string | null;
+  /** Previously uploaded file ids to attach to the post. */
+  media_ids?: string[];
 }
 
 export interface TrackPublishResponse {

@@ -18,7 +18,7 @@ import {
   type ShareTokenResponse,
 } from "@/api/shares";
 import { publishTrack } from "@/api/tracks";
-import type { ActivityVisibility } from "@/api/activities";
+import type { StatusComposerPayload } from "@/components/statuses/StatusComposer.vue";
 import { getApiErrorMessage, ApiError } from "@/api/client";
 import { useOwnership } from "@/composables/useOwnership";
 import { useConfirmStore } from "@/stores/confirm";
@@ -33,6 +33,7 @@ import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import AppTable from "@/components/ui/AppTable.vue";
 import SearchBar from "@/components/ui/SearchBar.vue";
+import StatusComposer from "@/components/statuses/StatusComposer.vue";
 
 export interface Props {
   open: boolean;
@@ -120,26 +121,7 @@ const expiresAt = ref("");
 const isCreatingGrant = ref(false);
 const isCreatingUrl = ref(false);
 
-const statusText = ref("");
-const publishVisibility = ref<ActivityVisibility>("public");
 const publishObjectType = ref<"note" | "audio">("note");
-const isPublishing = ref(false);
-const publishError = ref<string | null>(null);
-
-const PUBLISH_VISIBILITIES: ActivityVisibility[] = [
-  "public",
-  "followers",
-  "mentioned",
-  "local",
-  "private",
-];
-
-const publishVisibilityOptions = computed(() =>
-  PUBLISH_VISIBILITIES.map((value) => ({
-    value,
-    label: t(`activities.visibility.${value}`),
-  })),
-);
 
 const publishObjectTypeOptions = computed(() => [
   { value: "note", label: t("browse.share.fediverseTypeNote") },
@@ -348,27 +330,24 @@ async function revokeUrl(tokenId: string) {
   }
 }
 
-async function publish() {
-  isPublishing.value = true;
-  publishError.value = null;
-  try {
-    await publishTrack(props.itemId, {
-      status: statusText.value.trim() || null,
-      visibility: publishVisibility.value,
-      object_type: publishObjectType.value,
-    });
-    statusText.value = "";
-    toast.push({
-      type: "success",
-      message: t("browse.share.fediversePublished"),
-    });
-  } catch (err) {
-    publishError.value = t("browse.share.fediversePublishError", {
-      message: getErrorMessage(err),
-    });
-  } finally {
-    isPublishing.value = false;
-  }
+// The composer collects status text, format, audience, language and extra
+// file attachments; the shared track itself is attached by ``publishTrack``.
+async function submitFediverse(payload: StatusComposerPayload) {
+  await publishTrack(props.itemId, {
+    status: payload.status || null,
+    visibility: payload.visibility,
+    object_type: publishObjectType.value,
+    content_type: payload.content_type,
+    language: payload.language,
+    media_ids: payload.media_ids,
+  });
+}
+
+function onFediversePublished() {
+  toast.push({
+    type: "success",
+    message: t("browse.share.fediversePublished"),
+  });
 }
 
 async function copyToClipboard(text: string) {
@@ -424,10 +403,7 @@ watch(
       newToken.value = null;
       grantsError.value = null;
       urlsError.value = null;
-      statusText.value = "";
-      publishVisibility.value = "public";
       publishObjectType.value = "note";
-      publishError.value = null;
     }
   },
 );
@@ -582,41 +558,19 @@ watch(
       <p class="share-dialog__hint">{{ t("browse.share.fediverseHint") }}</p>
 
       <template v-if="isPublic">
-        <div class="share-dialog__form">
-          <AppInput
-            v-model="statusText"
-            as="textarea"
-            :label="t('browse.share.fediverseStatus')"
-            :hint="t('browse.share.fediverseStatusHint')"
-            :disabled="isPublishing"
-          />
-          <AppSelect
-            v-model="publishObjectType"
-            :options="publishObjectTypeOptions"
-            :label="t('browse.share.fediverseType')"
-            :hint="publishObjectTypeHint"
-            :disabled="isPublishing"
-          />
-          <AppSelect
-            v-model="publishVisibility"
-            :options="publishVisibilityOptions"
-            :label="t('browse.share.fediverseVisibility')"
-            :hint="t('browse.share.fediverseVisibilityHint')"
-            :disabled="isPublishing"
-          />
-          <AppButton
-            size="sm"
-            icon="paper-plane"
-            :loading="isPublishing"
-            @click="publish"
-          >
-            {{ t("browse.share.fediversePublish") }}
-          </AppButton>
-        </div>
-
-        <div v-if="publishError" class="share-dialog__error" role="alert">
-          {{ publishError }}
-        </div>
+        <AppSelect
+          v-model="publishObjectType"
+          :options="publishObjectTypeOptions"
+          :label="t('browse.share.fediverseType')"
+          :hint="publishObjectTypeHint"
+        />
+        <StatusComposer
+          :submit="submitFediverse"
+          :submit-label="t('browse.share.fediversePublish')"
+          :allow-track-attachments="false"
+          allow-empty
+          @submitted="onFediversePublished"
+        />
       </template>
 
       <p v-else class="share-dialog__hint">

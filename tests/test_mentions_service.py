@@ -300,3 +300,92 @@ def test_resolved_mention_as_dict_matches_create_local_activity():
         "actor_url": "https://x.example/u/bob",
         "user_id": "u1",
     }
+
+
+# ---------------------------------------------------------------------------
+# Markdown rendering
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_process_mentions_markdown_renders_formatting(db_session, config, other_user):
+    """Markdown statuses render formatting, mentions, and hashtags."""
+    other_user.actor_url = "https://local.example/users/other"
+    processed = await process_mentions(
+        db_session,
+        "hi **@other** #music\n\n- a\n- b",
+        config,
+        content_type="text/markdown",
+    )
+
+    assert "<strong>" in processed.html
+    assert '<a href="https://local.example/users/other">@other</a>' in processed.html
+    assert 'rel="tag">#music</a>' in processed.html
+    assert "<ul>" in processed.html
+    assert processed.tag_names == ["music"]
+    assert processed.mentions[0].user_id == other_user.id
+    assert processed.tags[0]["type"] == "Mention"
+
+
+@pytest.mark.asyncio
+async def test_process_mentions_markdown_escapes_inline_html(db_session, config):
+    """Raw HTML in a Markdown status is escaped, not emitted verbatim."""
+    processed = await process_mentions(
+        db_session,
+        'text <script>alert(1)</script> and <a href="javascript:x">click</a> and [x](javascript:y)',
+        config,
+        content_type="text/markdown",
+    )
+
+    assert "<script>" not in processed.html
+    assert 'href="javascript:' not in processed.html
+    assert "&lt;script&gt;" in processed.html
+    assert "#harmful-link" in processed.html
+
+
+@pytest.mark.asyncio
+async def test_process_mentions_markdown_skips_code_spans(db_session, config, other_user):
+    """Handles and tags inside code spans are not linkified or extracted."""
+    other_user.actor_url = "https://local.example/users/other"
+    processed = await process_mentions(
+        db_session,
+        "`@other #code`",
+        config,
+        content_type="text/markdown",
+    )
+
+    assert "<code>" in processed.html
+    assert "<a" not in processed.html
+    assert processed.tag_names == []
+    # The handle still resolves (the source text mentions it), it just does
+    # not render as a link inside the code span.
+    assert [m.handle for m in processed.mentions] == ["@other"]
+
+
+@pytest.mark.asyncio
+async def test_process_mentions_markdown_links_and_urls(db_session, config):
+    """Bare URLs and Markdown links render as anchors; link text is safe."""
+    processed = await process_mentions(
+        db_session,
+        "see https://example.com/x and [a link](https://example.com)",
+        config,
+        content_type="text/markdown",
+    )
+
+    assert 'href="https://example.com/x"' in processed.html
+    assert '<a href="https://example.com">a link</a>' in processed.html
+
+
+@pytest.mark.asyncio
+async def test_process_mentions_markdown_unresolved_handle_inert(db_session, config):
+    """Unresolved handles in Markdown render as plain text."""
+    processed = await process_mentions(
+        db_session,
+        "hi @ghost",
+        config,
+        content_type="text/markdown",
+    )
+
+    assert "@ghost" in processed.html
+    assert "<a" not in processed.html
+    assert processed.mentions == []

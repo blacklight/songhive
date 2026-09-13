@@ -87,7 +87,8 @@ songhive/
 │   │   ├── sessions.py     # List and revoke active refresh-token sessions
 │   │   ├── users.py        # Public user profiles, directory, per-user activity feed; authenticated profile updates
 │   │   ├── profile_pages.py # Browser SPA profile routes, rel="me" link injection, ActivityPub negotiation
-│   │   ├── activities.py   # Activity interactions (like, …)
+│   │   ├── activities.py   # Activity interactions (like, edit, delete, …)
+│   │   ├── statuses.py     # Standalone status composer endpoint (POST /statuses)
 │   │   ├── artists.py
 │   │   ├── albums.py
 │   │   ├── tracks.py
@@ -387,7 +388,13 @@ text is escaped and linkified by `pubby.render_post_html` (which also
 converts newlines to `<br>`, since remote servers render `content`/`summary`
 as HTML and would collapse literal newlines) — and
 `process_mentions` is the single entry point returning resolved mentions,
-rendered HTML, tags, and ActivityPub `Mention`/`Hashtag` tags.
+rendered HTML, tags, and ActivityPub `Mention`/`Hashtag` tags. It accepts a
+`content_type`: `text/plain` uses the escaped plain-text renderer described
+above, while `text/markdown` (`render_mentions_markdown`, the default for new
+statuses) runs the source through `mistune` — with raw HTML escaped, bare
+URLs linkified, `javascript:`-style link targets neutralized — before the
+same mention/hashtag linkification applies; handles inside code spans are
+left untouched.
 `ActivityTarget` rows track per-inbox outbound delivery state (`pending`,
 `sent`, `failed`, `skipped`) with `attempts` / `last_error` /
 `last_attempt_at` bookkeeping. Tracks already published to the fediverse
@@ -466,15 +473,25 @@ the activity owner's key through `deletion.enqueue_activity_delivery`.
 
 `PATCH /api/v1/activities/{id}` handles author edits behind an
 `acl.can_manage` check on the containing entity (owner or admin — the same
-gate `create_local_activity` applies to content-producing types). A
-`content` edit goes through `services.activities.update_activity`, which
-re-runs the `process_mentions` pipeline on the new `content_source`:
-`content` is re-rendered as mention-aware safe HTML, the
-`activity_mentions` rows are replaced with the newly resolved set, and —
-when the stored `payload` embeds a dict `object` — the object's `content`
-and `tag` are rebuilt (`pubby.set_object_content` merges tags while
-preserving pre-existing tags, then the pipeline's `Mention` tags and HTML
-are layered on) and it is stamped with `updated`. A `visibility` edit
+gate `create_local_activity` applies to content-producing types). Only
+fields present in the request body change: a `content` edit goes through
+`services.activities.update_activity`, which re-runs the
+`process_mentions` pipeline on the new `content_source` (honoring the
+stored or newly supplied `content_type`): `content` is re-rendered as
+mention-aware safe HTML, the `activity_mentions` rows are replaced with
+the newly resolved set, and — when the stored `payload` embeds a dict
+`object` — the object's `content` and `tag` are rebuilt
+(`pubby.set_object_content` merges tags while preserving pre-existing
+tags, then the pipeline's `Mention` tags and HTML are layered on) and it
+is stamped with `updated`. `language` replaces the activity's BCP-47 tag
+(`null` clears it) and rewrites or drops the object's `contentMap`.
+`media_ids`/`track_ids` rebuild the object's `attachment` list: docs
+stamped with `songhive:fileId`/`songhive:trackId` (emitted by
+`stored_file_to_attachment`/`track_to_attachment`) are user-managed and
+replaced wholesale, while unmarked entity-owned docs — e.g. a shared
+track's own `Audio` attachment — are preserved; the same ownership,
+access, visibility-escalation and share-grant rules as status creation
+apply, evaluated against the post-edit visibility. A `visibility` edit
 goes through `cascade_visibility_update` so already-delivered inboxes
 receive an `Update` or a `Delete(Tombstone)`. Content edits then federate
 through `services.activities.fan_out_activity_update` — invoked after both
@@ -559,6 +576,35 @@ result fans out via `fan_out_activity_update` so delivered inboxes get an
 delivery, and `federation/activities.py` builds the `Delete(Tombstone)`
 payload via `create_tombstone_delete_activity` — a thin adapter around
 `pubby.build_delete_activity` (0.3.2) that keeps a plain string `@context`.
+
+Standalone statuses — posts not attached to any media entity — are created
+through `POST /api/v1/statuses/`, which calls
+`services/activities.create_status` after provisioning the author's actor
+(`ensure_user_actor`). The service records a `create` activity on the
+author's `user` entity, so statuses show up in the author's profile posts
+feed (`GET /api/v1/users/{username}/activities?mode=posts`) and can be
+edited/retracted through the regular activity endpoints. The request
+carries the raw `status` source text (rendered through `process_mentions`
+as `text/markdown` — the default — or `text/plain`), a `visibility`, an
+optional BCP-47 `language` (validated, stored on the activity, mirrored
+into the Note's `contentMap`), and two attachment sets: `media_ids`
+reference previously uploaded `StoredFile`s (serialized by
+`federation/serializers.stored_file_to_attachment`; the service escalates
+each file's visibility to what the status audience requires — never
+downgrades — and grants `file` shares to mentioned local users on
+`mentioned`-visibility posts) and `track_ids` reference hosted tracks the
+author may access (serialized by `track_to_attachment` as `Audio`
+attachments embedding the stream URL, or `Document` links for tracks
+without audio). Each category is capped at four attachments, and a status
+may be attachments-only. The resulting `Create(Note)` is built by
+`federation/activities.create_status_activity` and fanned out through
+`fan_out_activity` exactly like entity activities: it federates to the
+visibility audience when federation is enabled, and stays local otherwise.
+The manual track publish endpoint accepts the same `content_type`,
+`language`, and `media_ids` fields, so the composer can also drive
+`POST /api/v1/tracks/{id}/publish`. Users pick their default post format
+through the `status_content_type` profile field (`PATCH
+/api/v1/users/me`), defaulting to `text/markdown`.
 
 `GET /users/{username}/objects/{object_id}` in `api/routes/federation.py`
 is the dereference endpoint for federated objects. Public tracks still
@@ -1438,6 +1484,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
 | `frontend/src/components/entity/` | Reusable entity grid/list components (e.g. `BulkEditableGrid` for bulk selection and deletion) |
 | `frontend/src/components/activities/` | Activity feed components (`ActivityFeed` filter tabs + cursor pagination, `ActivityCard`, `ActivityEditModal`) backed by `stores/activities.ts` and `api/activities.ts` |
+| `frontend/src/components/statuses/` | `StatusComposer` — shared status editor (plain text or Markdown, visibility, BCP-47 language defaulting to the browser locale, `@` mention autocomplete and track-only attach search via `SearchBar`/`SearchSuggestions`, file uploads through `api/files.ts`). Posts through `api/statuses.ts` (`POST /statuses/`) by default; the share dialog's Fediverse tab injects a custom submit that calls `tracks.publishTrack` instead, and `ActivityEditModal` reuses it for edits (`initial*` props seed the existing text/format/language/attachments; attachment chips map to `songhive:fileId`/`songhive:trackId`-marked docs). |
 | `frontend/src/components/user/` | Reusable user display components (`UserLink`) used across activity cards, resource owner metadata, file details, audit logs, and admin lists. `UserLink` renders local users as `RouterLink`s to `/@{username}`, remote users as external links to `actor_url`, and accepts either a full `UserSummary` owner or legacy `username`/`displayName`/`avatarUrl`/`remoteUrl` props |
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
 | `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
@@ -1466,9 +1513,21 @@ Entity detail pages expose an "Activities" action that navigates to
 `source_type` filters and keyset `cursor` pagination; liking an activity calls
 `POST /api/v1/activities/{id}/like` and editing one calls
 `PATCH /api/v1/activities/{id}` (shown to the activity owner and admins). Card
-content is rendered as HTML only for `local` activities — their `content` is
-sanitized server-side by the mention pipeline — while remote `content` is
-stripped to plain text to avoid trusting remote-supplied markup.
+content is never rendered as raw HTML — `ActivityCard` reduces it to safe
+segments (text, line breaks, linkified mentions/hashtags/URLs) via
+`utils/activityContent.parseActivityContent`; inline formatting elements
+(`<strong>`, `<em>`, `<code>`, `<del>`, `<u>`, headings) are preserved as
+`marks` on the segments and rendered through CSS classes rather than real
+markup. `ActivityCard` also renders
+the activity's `attachments` (the AP `attachment` documents of the embedded
+object): image media types inline, `Audio`/audio media types in an
+`<audio>` player, everything else as a link.
+
+`UserProfileView` (`/@{username}`) shows a Compose button to the profile
+owner that opens `components/statuses/StatusComposer.vue` in a modal; the
+share dialog's Fediverse tab reuses the same component for track
+publication, and the default post format is configurable from
+`/settings` (`profile.status_content_type`).
 
 The frontend is also a Progressive Web App. `/manifest.webmanifest` is served
 from the backend so the PWA name follows the configured instance name and the
@@ -1505,7 +1564,8 @@ REST API under `/api/v1/`:
 ├── history/        # Listening history
 ├── radios/         # Dynamic radio generation
 ├── instance/       # Public instance metadata (Mastodon-compatible)
-├── shares/         # Share grants (owner → specific user)
+├── statuses/       # Standalone status posts (user-entity `create` activities with
+│                   #   content type, language, file/track attachments, and mentions)
 ├── share-urls/     # Share URL tokens (revocable short links)
 ├── share/{token}   # Public short-URL resolver
 ├── reports/        # Content moderation reports (submit)

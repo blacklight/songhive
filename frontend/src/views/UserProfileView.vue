@@ -7,14 +7,20 @@ import { getApiErrorMessage } from "@/api/client";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
+import AppModal from "@/components/feedback/AppModal.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import RichText from "@/components/RichText.vue";
+import StatusComposer from "@/components/statuses/StatusComposer.vue";
+import { useAuthStore } from "@/stores/auth";
 import { useInstanceStore } from "@/stores/instance";
+import { useToastStore } from "@/stores/toast";
 import { formatDate } from "@/i18n";
 
 const { t } = useI18n();
 const route = useRoute();
 const instanceStore = useInstanceStore();
+const authStore = useAuthStore();
+const toast = useToastStore();
 
 const instanceDomain = computed(() => {
   if (instanceStore.instance?.uri) {
@@ -29,6 +35,24 @@ const instanceDomain = computed(() => {
 
 const username = computed(() => String(route.params.username));
 const profile = computed<PublicUserResponse | null>(() => data.value);
+
+// The compose button only makes sense on one's own profile — statuses are
+// recorded on the author's ``user`` entity and listed in the posts tab.
+const isOwnProfile = computed(
+  () => authStore.user?.username === username.value,
+);
+const composerOpen = ref(false);
+// Bump to remount the active tab after posting so the new status shows up.
+const tabVersion = ref(0);
+
+function onStatusSubmitted() {
+  composerOpen.value = false;
+  tabVersion.value++;
+  toast.push({
+    type: "success",
+    message: t("statusComposer.published"),
+  });
+}
 
 const fqn = computed(() => {
   let instance: string | undefined = undefined;
@@ -174,7 +198,25 @@ watch(username, loadProfile);
       </RouterLink>
     </nav>
 
-    <RouterView :key="username" />
+    <AppButton
+      v-if="isOwnProfile"
+      size="sm"
+      icon="pen-to-square"
+      class="user-profile__compose"
+      @click="composerOpen = true"
+    >
+      {{ t("profile.compose") }}
+    </AppButton>
+
+    <RouterView :key="`${username}:${tabVersion}`" />
+
+    <AppModal
+      :open="composerOpen"
+      :title="t('statusComposer.title')"
+      @close="composerOpen = false"
+    >
+      <StatusComposer autofocus @submitted="onStatusSubmitted" />
+    </AppModal>
   </div>
 </template>
 
@@ -297,6 +339,12 @@ watch(username, loadProfile);
   gap: var(--space-1);
   border-bottom: 1px solid var(--color-border);
   overflow-x: auto;
+}
+
+.user-profile__compose {
+  margin-right: auto;
+  align-self: center;
+  flex-shrink: 0;
 }
 
 .user-profile__tab {
