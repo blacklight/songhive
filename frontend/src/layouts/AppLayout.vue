@@ -60,12 +60,16 @@ function closeNavOnMobile() {
 
 type NavItem = {
   name: string;
-  to: string;
+  to?: string;
+  href?: string;
   requiresAuth: boolean;
   icon: string;
 };
 
 function isNavItemActive(item: NavItem): boolean {
+  if (!item.to) {
+    return false;
+  }
   if (item.to === "/") {
     return route.path === "/";
   }
@@ -168,6 +172,12 @@ const navItems = computed<NavItem[]>(() => [
     icon: "circle-info",
   },
   {
+    name: t("nav.api"),
+    href: "/swagger-ui/",
+    requiresAuth: false,
+    icon: "code",
+  },
+  {
     name: t("nav.settings"),
     to: "/settings",
     requiresAuth: true,
@@ -228,8 +238,20 @@ const publicProfileLink = computed(() =>
       </header>
       <nav class="app-layout__nav" role="navigation" aria-label="Main">
         <ul>
-          <li v-for="item in visibleNavItems" :key="item.to">
+          <li v-for="item in visibleNavItems" :key="item.to ?? item.href">
+            <a
+              v-if="item.href"
+              :href="item.href"
+              class="app-layout__nav-link"
+              target="_blank"
+              rel="noopener noreferrer"
+              @click="closeNavOnMobile"
+            >
+              <AppIcon :name="item.icon" />
+              {{ item.name }}
+            </a>
             <RouterLink
+              v-else-if="item.to"
               :to="item.to"
               class="app-layout__nav-link"
               :class="{ 'router-link-active': isNavItemActive(item) }"

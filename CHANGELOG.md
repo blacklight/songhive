@@ -88,6 +88,8 @@ All notable changes to this project will be documented in this file.
 - `shares`: `GET /api/v1/shares/mine` lists the share grants and share
   URL tokens created by the current user, and creators can revoke their
   own grants and tokens; the SPA exposes the list at `/shares`.
+- `swagger-ui`: Replace the separate swagger-ui container (only available in
+  the docker-compose setup) with a bundled Swagger UI built in the frontend.
 
 ## 0.1.2
 

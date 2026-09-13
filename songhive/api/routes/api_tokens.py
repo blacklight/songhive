@@ -24,7 +24,7 @@ from .._common import client_ip
 from ..deps import get_config, get_current_user, get_db, get_redis
 from ..middleware.rate_limit import rate_limit
 
-router = APIRouter(prefix="/auth/api-tokens", tags=["API Tokens"])
+router = APIRouter(prefix="/auth/api-tokens")
 
 
 class ApiTokenCreateRequest(BaseModel):

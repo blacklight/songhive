@@ -8,9 +8,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator, MutableMapping
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.types import Receive, Send
 
 from ..config import SonghiveConfig, get_default_user_agent
@@ -105,16 +106,31 @@ def _sync_settings_overlay(config: SonghiveConfig) -> tuple[SonghiveConfig, bool
             loop.close()
 
 
-def _setup_static_routes(app: FastAPI):
+def _setup_swagger_ui_routes(app: FastAPI, static_dir: Path):
+    """
+    Swagger UI assets are bundled into the frontend build output by the
+    Vite config (static/swagger-ui/); serve them when the bundle exists.
+    The mount only matches /swagger-ui/<path>, so the bare path needs an
+    explicit redirect for relative asset URLs to resolve correctly.
+    """
+    swagger_ui_dir = static_dir / "swagger-ui"
+    if swagger_ui_dir.is_dir():
+
+        async def _swagger_ui_redirect(request: Request) -> RedirectResponse:
+            return RedirectResponse("/swagger-ui/")
+
+        app.add_route("/swagger-ui", _swagger_ui_redirect, include_in_schema=False)
+        app.mount(
+            "/swagger-ui",
+            StaticFiles(directory=swagger_ui_dir, html=True),
+            name="swagger-ui",
+        )
+
+
+def _setup_spa_routes(app: FastAPI, static_dir: Path):
     """
     Serve the built frontend SPA as the default handler.
-
-    API/WebSocket/stream paths are excluded so unknown /api/... /ws/...
-    /stream/... routes still 404. The default is only reached when no API route
-    (or redirect-slashes partial match) matches, so it never shadows API
-    endpoints.
     """
-    static_dir = Path(__file__).resolve().parent.parent / "static"
     if (static_dir / "index.html").is_file():
 
         async def _serve_static(scope: MutableMapping[str, Any], receive: Receive, send: Send) -> None:
@@ -139,6 +155,20 @@ def _setup_static_routes(app: FastAPI):
                 await FileResponse(static_dir / "index.html")(scope, receive, send)
 
         app.router.default = _serve_static
+
+
+def _setup_static_routes(app: FastAPI):
+    """
+    Serve the built frontend SPA and the Swagger-UI.
+
+    API/WebSocket/stream paths are excluded so unknown /api/... /ws/...
+    /stream/... routes still 404. The default is only reached when no API route
+    (or redirect-slashes partial match) matches, so it never shadows API
+    endpoints.
+    """
+    static_dir = Path(__file__).resolve().parent.parent / "static"
+    _setup_swagger_ui_routes(app, static_dir=static_dir)
+    _setup_spa_routes(app, static_dir=static_dir)
 
 
 def create_app(config: SonghiveConfig) -> FastAPI:

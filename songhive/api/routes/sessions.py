@@ -18,7 +18,7 @@ from .._common import client_ip
 from ..cookies import REFRESH_TOKEN_COOKIE
 from ..deps import get_config, get_current_user, get_db, get_redis
 
-router = APIRouter(prefix="/auth/sessions", tags=["Sessions"])
+router = APIRouter(prefix="/auth/sessions")
 
 
 class SessionSummary(BaseModel):

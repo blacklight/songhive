@@ -36,6 +36,7 @@
     "jsdom": "^30.0.1",
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.9.6",
+    "swagger-ui-dist": "^5.32.15",
     "typescript": "^5.9.3",
     "vite": "^8.2.2",
     "vitest": "^5.0.0",

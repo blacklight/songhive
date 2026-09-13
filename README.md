@@ -348,7 +348,7 @@ songhive -c "$SONGHIVE_CONFIG" admin create-user \
 Open:
 
 - **Web UI**: http://localhost:8000/
-- **Swagger UI** (only for the Docker setup): http://localhost:8000/swagger-ui/
+- **Swagger UI**: http://localhost:8000/swagger-ui/
 - **OpenAPI spec**: http://localhost:8000/openapi.json
 
 ## Development

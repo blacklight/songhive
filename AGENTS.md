@@ -82,7 +82,10 @@
 - The `pubby` library provides ActivityPub federation (FastAPI adapter).
 - Tests use `pytest-asyncio` for async tests and `TestClient` for API tests.
 - Frontend is a Vue.js 3 + TypeScript SPA in `frontend/`; builds to
-  `songhive/static/`.
+  `songhive/static/`. The Vite build also copies `swagger-ui-dist` into
+  `songhive/static/swagger-ui/` (rewriting `swagger-initializer.js` to point
+  at the app's `/openapi.json`); FastAPI mounts it at `/swagger-ui/` so no
+  separate swagger-ui container is needed.
 - The frontend toolchain (vite 8, vitest 5, jsdom 30 via undici 8) requires
   Node 24+; undici 8 calls `worker_threads.markAsUncloneable`, which does not
   exist on Node 20. CI and the Dockerfile `NODE_VERSION` both pin Node 24.

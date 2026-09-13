@@ -1636,6 +1636,12 @@ app sets `router.default` to an ASGI handler that serves files directly from
 `songhive/static/` and falls back to `index.html` for unhandled non-API paths,
 so the Vue Router handles deep links such as `/verify-email?token=...`.
 
+The Vite build also copies the `swagger-ui-dist` bundle into
+`songhive/static/swagger-ui/` and rewrites `swagger-initializer.js` to point
+at the instance's own `/openapi.json`. FastAPI mounts those assets at
+`/swagger-ui/` (with a redirect from `/swagger-ui`), so interactive API docs
+are available on every deployment without a separate container.
+
 ---
 
 ## API Design

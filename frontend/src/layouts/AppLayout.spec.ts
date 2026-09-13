@@ -207,6 +207,7 @@ describe("AppLayout", () => {
       "Tags",
       "Genres",
       "About",
+      "API",
     ]);
     expect(wrapper.find(".app-layout__login").exists()).toBe(true);
     expect(wrapper.find(".app-layout__login").text()).toBe("Log in");
@@ -248,6 +249,7 @@ describe("AppLayout", () => {
       "Shares",
       "Radio",
       "About",
+      "API",
       "Settings",
     ]);
     expect(wrapper.find(".app-layout__login").exists()).toBe(false);
@@ -257,6 +259,18 @@ describe("AppLayout", () => {
     expect(wrapper.find(".app-layout__logout").attributes("aria-label")).toBe(
       "Log out",
     );
+  });
+
+  it("links the API nav item to the Swagger UI docs in a new tab", async () => {
+    const { wrapper } = await mountLayout();
+    await flushPromises();
+
+    const link = wrapper
+      .findAll(".app-layout__nav li a")
+      .find((a) => a.text().trim() === "API");
+    expect(link).toBeTruthy();
+    expect(link!.attributes("href")).toBe("/swagger-ui/");
+    expect(link!.attributes("target")).toBe("_blank");
   });
 
   it("shows the unread badge on the notifications nav item only when > 0", async () => {

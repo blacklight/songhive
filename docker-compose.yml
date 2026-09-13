@@ -123,16 +123,6 @@ services:
       - ./volumes/static:/usr/share/nginx/html:ro
     depends_on:
       - songhive
-      - swagger-ui
-    restart: unless-stopped
-
-  swagger-ui:
-    image: swaggerapi/swagger-ui:v5.17.14
-    container_name: songhive-swagger-ui
-    environment:
-      URL: "../openapi.json"
-      BASE_URL: /swagger-ui
-      PERSIST_AUTHORIZATION: "true"
     restart: unless-stopped
 
   postgres:

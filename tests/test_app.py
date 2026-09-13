@@ -298,6 +298,43 @@ def test_static_assets_served(client):
     assert response.status_code == 200
 
 
+def test_swagger_ui_served(client):
+    """Swagger UI assets bundled with the frontend build are served by FastAPI."""
+    response = client.get("/swagger-ui/")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert 'id="swagger-ui"' in response.text
+
+    # The bundled initializer points at this instance's OpenAPI document.
+    response = client.get("/swagger-ui/swagger-initializer.js")
+    assert response.status_code == 200
+    assert '"/openapi.json"' in response.text
+
+
+def test_swagger_ui_bare_path_redirects(client):
+    """/swagger-ui redirects to the trailing-slash URL so relative assets resolve."""
+    response = client.get("/swagger-ui", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/swagger-ui/"
+
+
+def test_openapi_has_no_duplicate_tag_groups(client):
+    """
+    No operation carries tags that collapse to the same Swagger UI section.
+
+    Tags assigned both on the router and via ``include_router`` would produce
+    duplicate groups (e.g. "sessions" + "Sessions") in the Swagger UI.
+    """
+    import re
+
+    spec = client.get("/openapi.json").json()
+    for path, ops in spec["paths"].items():
+        for method, op in ops.items():
+            tags = op.get("tags") or []
+            normalized = [re.sub(r"[^a-z0-9]", "", t.lower()) for t in tags]
+            assert len(normalized) == len(set(normalized)), f"{method.upper()} {path} has duplicate tag groups: {tags}"
+
+
 def test_unknown_api_route_is_404(client):
     """Unknown /api/... paths still produce a 404 problem detail."""
     response = client.get("/api/v1/does-not-exist")
