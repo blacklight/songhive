@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - `frontend`: Support for switching theme and accent colors from the
   `/settings` page.
+  ([`c2f4d2f`](https://git.platypush.tech/blacklight/songhive/commit/c2f4d2fe4a47bf658b66be7ffba24e313a651c18),
+   [`9554846`](https://git.platypush.tech/blacklight/songhive/commit/9554846655fb5de873502ae6501680bf3df2b79b))
 - `federation`: Local users' followers are now stored and surfaced.
   Incoming `Follow` activities persist the remote actor (with its fetched
   actor document) in pubby's `federation_followers` storage, and
@@ -17,9 +19,11 @@ All notable changes to this project will be documented in this file.
   `GET /api/v1/users/{username}/followers` endpoint returns follower
   details (`actor_url`, `display_name`, `avatar_url`, `followed_at`)
   sorted newest-first.
+  ([`478086b`](https://git.platypush.tech/blacklight/songhive/commit/478086bb25ab23beeff8ac6c0d4cf92f1c088496))
 - `frontend`: The user profile page (`/@{user}`) shows the follower count
   as a link to the new `/@{user}/followers` page, which lists follower
   details ordered by follow time.
+  ([`478086b`](https://git.platypush.tech/blacklight/songhive/commit/478086bb25ab23beeff8ac6c0d4cf92f1c088496))
 
 ### Fixed
 
@@ -32,6 +36,11 @@ All notable changes to this project will be documented in this file.
   (`updatedActivity`) plus a `removedIds` set (`isRemoved`), and
   `ActivityCard` renders the cached copy when present and hides itself
   after deletion.
+  ([`911ddc7`](https://git.platypush.tech/blacklight/songhive/commit/911ddc73740988f2176ddf11acb6f879091294e4))
+- `profile`: The profile page now displays and copies the fully
+  qualified handle (`@user@instance`, derived from the instance URI)
+  instead of the bare `@username`.
+  ([`44033aa`](https://git.platypush.tech/blacklight/songhive/commit/44033aa7f60d2286224dd7a0b1e36deea670c3b1))
 
 ## 0.1.1
 
