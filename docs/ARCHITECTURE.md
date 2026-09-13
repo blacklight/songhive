@@ -461,14 +461,19 @@ then delivers an `Undo` wrapping the originally federated `Like`/`Announce`
 reaction. Unreacting a target without a live reaction returns 404.
 
 Every `ActivityResponse` carries interaction state resolved by
-`resolve_interaction_summaries`: `like_count`, `boost_count` and
-`reply_count` combine local `Activity` rows (interactions stored with
+`resolve_interaction_summaries`: `like_count` and `boost_count` combine
+direct local `Activity` rows (interactions stored with
 `in_reply_to_activity_id` pointing at the target) with confirmed remote
 interactions recorded in Pubby's `federation_interactions` storage against
 the activity's `source_id` (`_remote_interactions`, thread-offloaded and
-best-effort); `liked`/`boosted` report the requester's own live
-like/announce rows, and `can_interact` is false for activity types that
-cannot themselves be reacted to (`like`, `announce`, `delete`).
+best-effort). `reply_count` instead covers the whole sub-thread: every
+non-deleted `reply` descendant reachable through the `in_reply_to` chain —
+computed with the `_activity_descendants_cte` recursive CTE — plus remote
+replies targeting any node in it, including remote replies to remote
+replies reached breadth-first through `object_id` chains
+(`_remote_thread_interactions`). `liked`/`boosted` report the requester's
+own live like/announce rows, and `can_interact` is false for activity types
+that cannot themselves be reacted to (`like`, `announce`, `delete`).
 `ActivityResponse` also carries `object_url`/`object_type`, resolved from
 the payload's `object`: `Create`-style activities expose the embedded
 document's `id`/`type`, while `Like`/`Announce` payloads reference the
@@ -480,10 +485,15 @@ its visibility is inherited, so there is nothing editable. `GET
 known interactors — local users resolved to profiles, remote actors from
 Pubby's interaction records — via `list_activity_interactors`, and
 `GET /api/v1/activities/{id}/replies` returns the known replies via
-`list_activity_replies`: visibility-filtered local `reply` activities
-serialized as full `ActivityResponse`s plus remote replies rebuilt from
-the `raw_object` metadata the inbox processor stored. All three listings
-gate on `can_view_activity` and allow anonymous reads of public targets.
+`list_activity_replies`: visibility-filtered local `reply` activities —
+every descendant in the thread, not just direct children — serialized as
+full `ActivityResponse`s plus remote replies rebuilt from the `raw_object`
+metadata the inbox processor stored, each carrying `in_reply_to` (the
+replied-to object id) so clients can regroup the flat list into threads.
+The frontend renders them Mastodon-style: every descendant of a direct
+reply is unfolded flat into that reply's thread, each thread marked by its
+own vertical line. All three listings gate on `can_view_activity` and allow
+anonymous reads of public targets.
 `GET /api/v1/activities/{id}` returns a single activity under the same
 rules — it backs the notification UI's embedded activity cards.
 

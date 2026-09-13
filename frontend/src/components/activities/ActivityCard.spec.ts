@@ -541,6 +541,99 @@ describe("ActivityCard", () => {
     expect(replies.text()).toContain("Carol");
   });
 
+  it("flattens nested replies into one thread per root reply", async () => {
+    setAuthenticated("user-1");
+    listActivityReplies.mockResolvedValue({
+      activities: [
+        createActivity({
+          id: "b1",
+          activity_type: "reply",
+          in_reply_to_activity_id: "a1",
+          content: "<p>reply b</p>",
+          content_source: "reply b",
+          published_at: "2026-01-02T00:00:00Z",
+        }),
+        createActivity({
+          id: "c1",
+          activity_type: "reply",
+          in_reply_to_activity_id: "b1",
+          content: "<p>reply c</p>",
+          content_source: "reply c",
+          published_at: "2026-01-03T00:00:00Z",
+        }),
+        createActivity({
+          id: "d1",
+          activity_type: "reply",
+          in_reply_to_activity_id: "a1",
+          content: "<p>reply d</p>",
+          content_source: "reply d",
+          published_at: "2026-01-04T00:00:00Z",
+        }),
+      ],
+      remote_replies: [],
+    });
+    const wrapper = mountCard({ reply_count: 3 });
+    await wrapper.findAll(".activity-card__count")[0].trigger("click");
+    await flushPromises();
+
+    const threads = wrapper.findAll(".activity-card__thread");
+    expect(threads.length).toBe(2);
+    // b's thread unfolds c flat as a sibling — not nested inside b's card.
+    const bThread = threads[0].findAll(".activity-card__reply");
+    expect(bThread.length).toBe(2);
+    expect(threads[0].text()).toContain("reply b");
+    expect(threads[0].text()).toContain("reply c");
+    expect(bThread[0].find(".activity-card__replies").exists()).toBe(false);
+    expect(threads[1].text()).toContain("reply d");
+    expect(threads[1].findAll(".activity-card__reply").length).toBe(1);
+  });
+
+  it("threads remote replies under their replied-to node", async () => {
+    setAuthenticated("user-1");
+    listActivityReplies.mockResolvedValue({
+      activities: [
+        createActivity({
+          id: "b1",
+          activity_type: "reply",
+          in_reply_to_activity_id: "a1",
+          source_id: "https://example.com/users/alice/objects/b1",
+          content: "<p>reply b</p>",
+          content_source: "reply b",
+          published_at: "2026-01-02T00:00:00Z",
+        }),
+      ],
+      remote_replies: [
+        {
+          id: "rr1",
+          object_id: "https://remote.example/objects/rr1",
+          in_reply_to: "https://example.com/users/alice/objects/o1",
+          source_actor: "https://remote.example/users/carol",
+          content: "<p>remote on root</p>",
+          attachments: [],
+          published_at: "2026-01-03T00:00:00Z",
+        },
+        {
+          id: "rr2",
+          object_id: "https://remote.example/objects/rr2",
+          in_reply_to: "https://example.com/users/alice/objects/b1",
+          source_actor: "https://remote.example/users/dan",
+          content: "<p>remote on b</p>",
+          attachments: [],
+          published_at: "2026-01-04T00:00:00Z",
+        },
+      ],
+    });
+    const wrapper = mountCard({ reply_count: 3 });
+    await wrapper.findAll(".activity-card__count")[0].trigger("click");
+    await flushPromises();
+
+    const threads = wrapper.findAll(".activity-card__thread");
+    expect(threads.length).toBe(2);
+    expect(threads[0].text()).toContain("reply b");
+    expect(threads[0].text()).toContain("remote on b");
+    expect(threads[1].text()).toContain("remote on root");
+  });
+
   it("shows an empty state when there are no replies", async () => {
     setAuthenticated("user-1");
     listActivityReplies.mockResolvedValue({

@@ -100,6 +100,12 @@ export interface ActivityActorListResponse {
 export interface RemoteReply {
   id: string;
   object_id?: string | null;
+  /**
+   * Object id of the replied-to node — a local activity's ``source_id`` or
+   * another remote reply's ``object_id`` — used to regroup the flat reply
+   * list into threads.
+   */
+  in_reply_to?: string | null;
   source_actor: string;
   source_actor_name?: string | null;
   source_actor_url?: string | null;

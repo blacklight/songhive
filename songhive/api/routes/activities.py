@@ -759,7 +759,7 @@ async def list_activity_boosts(
 
 
 class ReplyActivityListResponse(BaseModel):
-    """The known replies to an activity, local and federated, oldest first."""
+    """The known replies in an activity's thread, local and federated."""
 
     activities: List[ActivityResponse]
     remote_replies: List[dict] = []
@@ -782,6 +782,7 @@ def _remote_reply_payload(interaction: Any) -> dict:
     return {
         "id": interaction.object_id or interaction.activity_id,
         "object_id": interaction.object_id or raw.get("id"),
+        "in_reply_to": interaction.target_resource or raw.get("inReplyTo"),
         "source_actor": interaction.source_actor_id,
         "source_actor_name": interaction.author_name or None,
         "source_actor_url": interaction.author_url or None,
@@ -802,11 +803,14 @@ async def list_activity_replies(
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """List the known replies to an activity, oldest first.
+    """
+    List the known replies in an activity's thread, oldest first.
 
-    Local replies are visibility-filtered ``Activity`` rows serialized as
-    full activity cards; federated replies come from Pubby's interaction
-    storage as compact ``raw_object``-backed records.
+    Local replies are every visibility-filtered ``reply`` descendant —
+    replies to replies included — serialized as full activity cards;
+    federated replies come from Pubby's interaction storage as compact
+    ``raw_object``-backed records carrying ``in_reply_to`` so clients can
+    regroup them into threads.
     """
     activity = await db.get(Activity, activity_id)
     if activity is None or activity.deleted_at is not None:

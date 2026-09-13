@@ -304,7 +304,19 @@ type ReplyEntry =
     }
   | { kind: "remote"; key: string; publishedAt: string; reply: RemoteReply };
 
-const replyEntries = computed<ReplyEntry[]>(() => {
+interface ReplyThread {
+  /** Key of the thread's head — the entry replying directly to this card. */
+  key: string;
+  entries: ReplyEntry[];
+}
+
+// The replies listing returns the whole sub-thread (replies to replies
+// included). Mastodon-style single threading: every descendant is unfolded
+// flat into the thread rooted at its ``root reply`` ancestor — the entry
+// replying directly to this card — and each thread gets its own vertical
+// line. Entries whose parent is missing from the listing (visibility-
+// filtered or deleted) become heads of their own thread.
+const replyThreads = computed<ReplyThread[]>(() => {
   const entries: ReplyEntry[] = [
     ...localReplies.value.map((a) => ({
       kind: "local" as const,
@@ -319,8 +331,73 @@ const replyEntries = computed<ReplyEntry[]>(() => {
       reply: r,
     })),
   ];
-  entries.sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
-  return entries;
+
+  // Every key a child may use to reference a node: local replies point at
+  // the parent's activity id, remote replies at its object id.
+  const nodeKeys = (entry: ReplyEntry): (string | null | undefined)[] =>
+    entry.kind === "local"
+      ? [entry.activity.id, entry.activity.source_id, entry.activity.object_url]
+      : [entry.reply.id, entry.reply.object_id, entry.reply.url];
+  const parentKey = (entry: ReplyEntry): string | null | undefined =>
+    entry.kind === "local"
+      ? entry.activity.in_reply_to_activity_id
+      : entry.reply.in_reply_to;
+
+  const byKey = new Map<string, ReplyEntry>();
+  for (const entry of entries) {
+    for (const key of nodeKeys(entry)) {
+      if (key && !byKey.has(key)) byKey.set(key, entry);
+    }
+  }
+  const rootKeys = new Set(
+    [
+      props.activity.id,
+      activity.value.source_id,
+      activity.value.object_url,
+    ].filter((key): key is string => !!key),
+  );
+
+  const headOf = (entry: ReplyEntry): ReplyEntry => {
+    let current = entry;
+    const seen = new Set<string>([current.key]);
+    for (;;) {
+      const parent = parentKey(current);
+      if (!parent || rootKeys.has(parent)) return current;
+      const next = byKey.get(parent);
+      if (!next || seen.has(next.key)) return current;
+      seen.add(next.key);
+      current = next;
+    }
+  };
+
+  const threads = new Map<string, ReplyThread>();
+  for (const entry of entries) {
+    const head = headOf(entry);
+    let thread = threads.get(head.key);
+    if (!thread) {
+      thread = { key: head.key, entries: [] };
+      threads.set(head.key, thread);
+    }
+    thread.entries.push(entry);
+  }
+
+  const ordered = [...threads.values()];
+  for (const thread of ordered) {
+    // The head opens the thread; the rest unfolds chronologically.
+    thread.entries.sort((a, b) =>
+      a.key === thread.key
+        ? -1
+        : b.key === thread.key
+          ? 1
+          : a.publishedAt.localeCompare(b.publishedAt),
+    );
+  }
+  ordered.sort((a, b) =>
+    (a.entries[0]?.publishedAt ?? "").localeCompare(
+      b.entries[0]?.publishedAt ?? "",
+    ),
+  );
+  return ordered;
 });
 
 async function submitReply(payload: StatusComposerPayload) {
@@ -660,23 +737,29 @@ async function copyUrl() {
         <AppSpinner />
       </div>
       <p
-        v-else-if="repliesLoaded && !replyEntries.length"
+        v-else-if="repliesLoaded && !replyThreads.length"
         class="activity-card__replies-empty"
       >
         {{ t("activities.noReplies") }}
       </p>
-      <template v-for="entry in replyEntries" :key="entry.key">
-        <ActivityCard
-          v-if="entry.kind === 'local'"
-          :activity="entry.activity"
-          class="activity-card__reply"
-        />
-        <ActivityRemoteReply
-          v-else
-          :reply="entry.reply"
-          class="activity-card__reply"
-        />
-      </template>
+      <div
+        v-for="thread in replyThreads"
+        :key="thread.key"
+        class="activity-card__thread"
+      >
+        <template v-for="entry in thread.entries" :key="entry.key">
+          <ActivityCard
+            v-if="entry.kind === 'local'"
+            :activity="entry.activity"
+            class="activity-card__reply"
+          />
+          <ActivityRemoteReply
+            v-else
+            :reply="entry.reply"
+            class="activity-card__reply"
+          />
+        </template>
+      </div>
     </div>
 
     <ActivityActorsModal
@@ -819,6 +902,12 @@ async function copyUrl() {
 }
 
 .activity-card__replies {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.activity-card__thread {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);

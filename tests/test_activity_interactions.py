@@ -1385,7 +1385,7 @@ async def test_summaries_count_remote_interactions(db_session, regular_user, con
             sid: [
                 i
                 for i in (remote_like, remote_reply)
-                if interaction_type is None or i.interaction_type == interaction_type
+                if i.target_resource == sid and (interaction_type is None or i.interaction_type == interaction_type)
             ]
             for sid in ids
         },
@@ -1516,6 +1516,170 @@ async def test_list_replies_returns_local_replies(db_session, regular_user, othe
     await activity_service.retract_activity(db_session, reply)
     local, _ = await list_activity_replies(db_session, activity=activity, user=other_user, config=config)
     assert local == []
+
+
+@pytest.mark.asyncio
+async def test_list_replies_returns_thread_descendants(db_session, regular_user, other_user, config):
+    """Replies to replies are part of the root's thread listing."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    reply = await reply_to_activity(
+        db_session, activity=activity, author=regular_user, config=config, status_text="first!"
+    )
+    nested = await reply_to_activity(db_session, activity=reply, author=other_user, config=config, status_text="nested")
+    sibling = await reply_to_activity(
+        db_session, activity=activity, author=regular_user, config=config, status_text="second!"
+    )
+
+    local, remote = await list_activity_replies(db_session, activity=activity, user=other_user, config=config)
+    assert {r.id for r in local} == {reply.id, nested.id, sibling.id}
+    assert remote == []
+
+    # A reply's own listing returns just its sub-thread.
+    local, _ = await list_activity_replies(db_session, activity=reply, user=other_user, config=config)
+    assert [r.id for r in local] == [nested.id]
+
+
+@pytest.mark.asyncio
+async def test_list_replies_includes_remote_thread_replies(db_session, regular_user, config, monkeypatch):
+    """Remote replies to any thread node surface, including remote-to-remote."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    reply = await reply_to_activity(
+        db_session, activity=activity, author=regular_user, config=config, status_text="local reply"
+    )
+
+    direct = Interaction(
+        source_actor_id="https://remote.example/users/bob",
+        target_resource=activity.source_id,
+        interaction_type=InteractionType.REPLY,
+        object_id="https://remote.example/objects/r1",
+        content="<p>on the root</p>",
+    )
+    on_local_reply = Interaction(
+        source_actor_id="https://remote.example/users/carol",
+        target_resource=reply.source_id,
+        interaction_type=InteractionType.REPLY,
+        object_id="https://remote.example/objects/r2",
+        content="<p>on the reply</p>",
+    )
+    on_remote_reply = Interaction(
+        source_actor_id="https://remote.example/users/dan",
+        target_resource="https://remote.example/objects/r2",
+        interaction_type=InteractionType.REPLY,
+        object_id="https://remote.example/objects/r3",
+        content="<p>on the remote reply</p>",
+    )
+    interactions = (direct, on_local_reply, on_remote_reply)
+    monkeypatch.setattr(
+        activity_service,
+        "_fetch_remote_interactions",
+        lambda cfg, ids, interaction_type=None: {
+            sid: [
+                i
+                for i in interactions
+                if i.target_resource == sid and (interaction_type is None or i.interaction_type == interaction_type)
+            ]
+            for sid in ids
+        },
+    )
+
+    local, remote = await list_activity_replies(db_session, activity=activity, user=regular_user, config=config)
+    assert [r.id for r in local] == [reply.id]
+    assert [i.object_id for i in remote] == [
+        "https://remote.example/objects/r1",
+        "https://remote.example/objects/r2",
+        "https://remote.example/objects/r3",
+    ]
+    assert [i.target_resource for i in remote] == [
+        activity.source_id,
+        reply.source_id,
+        "https://remote.example/objects/r2",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_summaries_count_nested_replies(db_session, regular_user, other_user, config):
+    """``reply_count`` covers the whole sub-thread, not just direct replies."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    reply_b = await reply_to_activity(
+        db_session, activity=activity, author=regular_user, config=config, status_text="b"
+    )
+    reply_c = await reply_to_activity(db_session, activity=reply_b, author=other_user, config=config, status_text="c")
+    reply_d = await reply_to_activity(
+        db_session, activity=activity, author=regular_user, config=config, status_text="d"
+    )
+
+    summaries = await resolve_interaction_summaries(
+        db_session, [activity, reply_b, reply_c, reply_d], regular_user, config
+    )
+    assert summaries[str(activity.id)].reply_count == 3
+    assert summaries[str(reply_b.id)].reply_count == 1
+    assert summaries[str(reply_c.id)].reply_count == 0
+    assert summaries[str(reply_d.id)].reply_count == 0
+
+
+@pytest.mark.asyncio
+async def test_summaries_count_remote_thread_replies(db_session, regular_user, config, monkeypatch):
+    """Remote replies anywhere in the sub-thread count toward every ancestor."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    reply = await reply_to_activity(
+        db_session, activity=activity, author=regular_user, config=config, status_text="local reply"
+    )
+
+    direct = Interaction(
+        source_actor_id="https://remote.example/users/bob",
+        target_resource=activity.source_id,
+        interaction_type=InteractionType.REPLY,
+        object_id="https://remote.example/objects/r1",
+    )
+    on_local_reply = Interaction(
+        source_actor_id="https://remote.example/users/carol",
+        target_resource=reply.source_id,
+        interaction_type=InteractionType.REPLY,
+        object_id="https://remote.example/objects/r2",
+    )
+    on_remote_reply = Interaction(
+        source_actor_id="https://remote.example/users/dan",
+        target_resource="https://remote.example/objects/r2",
+        interaction_type=InteractionType.REPLY,
+        object_id="https://remote.example/objects/r3",
+    )
+    interactions = (direct, on_local_reply, on_remote_reply)
+    monkeypatch.setattr(
+        activity_service,
+        "_fetch_remote_interactions",
+        lambda cfg, ids, interaction_type=None: {
+            sid: [
+                i
+                for i in interactions
+                if i.target_resource == sid and (interaction_type is None or i.interaction_type == interaction_type)
+            ]
+            for sid in ids
+        },
+    )
+
+    summaries = await resolve_interaction_summaries(db_session, [activity, reply], regular_user, config)
+    # All three remote replies plus the local reply belong to the root thread.
+    assert summaries[str(activity.id)].reply_count == 4
+    # The local reply's own sub-thread holds the two chained remote replies.
+    assert summaries[str(reply.id)].reply_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1731,6 +1895,45 @@ async def test_replies_endpoint_lists_replies(client, db_session, regular_user, 
     assert body["activities"][0]["activity_type"] == "reply"
     assert "a reply" in body["activities"][0]["content"]
     assert body["remote_replies"] == []
+
+
+@pytest.mark.asyncio
+async def test_replies_endpoint_lists_thread_descendants(client, db_session, regular_user, other_user, auth_headers):
+    """The replies listing returns nested replies and transitive counts."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.post(
+        f"/api/v1/activities/{activity.id}/reply",
+        headers=auth_headers(regular_user),
+        json={"status": "a reply"},
+    )
+    assert resp.status_code == 201
+    reply_id = resp.json()["id"]
+
+    resp = client.post(
+        f"/api/v1/activities/{reply_id}/reply",
+        headers=auth_headers(other_user),
+        json={"status": "nested reply"},
+    )
+    assert resp.status_code == 201
+    nested_id = resp.json()["id"]
+
+    resp = client.get(f"/api/v1/activities/{activity.id}/replies")
+    assert resp.status_code == 200
+    body = resp.json()
+    by_id = {a["id"]: a for a in body["activities"]}
+    assert set(by_id) == {reply_id, nested_id}
+    assert by_id[reply_id]["in_reply_to_activity_id"] == str(activity.id)
+    assert by_id[nested_id]["in_reply_to_activity_id"] == reply_id
+
+    # The root card and the intermediate reply report transitive counts.
+    resp = client.get(f"/api/v1/activities/{activity.id}")
+    assert resp.json()["reply_count"] == 2
+    resp = client.get(f"/api/v1/activities/{reply_id}")
+    assert resp.json()["reply_count"] == 1
 
 
 @pytest.mark.asyncio

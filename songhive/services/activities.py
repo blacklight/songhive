@@ -694,6 +694,71 @@ def _interaction_sort_key(published: Optional[datetime]) -> datetime:
     return published
 
 
+def _activity_descendants_cte(root_ids: Iterable[str]) -> Any:
+    """
+    Build a recursive CTE over the ``in_reply_to`` graph.
+
+    Returns a ``(root_id, id, activity_type, source_id, deleted_at)`` CTE
+    with one row per activity reachable from ``root_ids`` by following
+    ``in_reply_to_activity_id``, each tagged with the root it descends
+    from. Traversal crosses activity types and soft-deleted rows — a
+    deleted or non-reply node still anchors its own replies to the thread;
+    callers filter by ``activity_type``/``deleted_at`` for display and
+    counting. ``UNION`` dedup keeps the walk finite even if the graph ever
+    contained a cycle.
+    """
+    seed = (
+        select(
+            Activity.in_reply_to_activity_id.label("root_id"),
+            Activity.id.label("id"),
+            Activity.activity_type.label("activity_type"),
+            Activity.source_id.label("source_id"),
+            Activity.deleted_at.label("deleted_at"),
+        )
+        .where(Activity.in_reply_to_activity_id.in_(list(root_ids)))
+        .cte("activity_descendants", recursive=True)
+    )
+    return seed.union(
+        select(
+            seed.c.root_id,
+            Activity.id,
+            Activity.activity_type,
+            Activity.source_id,
+            Activity.deleted_at,
+        ).join(seed, Activity.in_reply_to_activity_id == seed.c.id)
+    )
+
+
+async def _remote_thread_interactions(
+    config: SonghiveConfig,
+    target_ids: Iterable[str],
+    interaction_type: InteractionType,
+) -> List[Any]:
+    """
+    Collect confirmed remote interactions across whole reply threads.
+
+    ``get_interactions`` is keyed by the target object id, so this performs
+    a breadth-first walk seeded with ``target_ids``: interactions targeting
+    a collected reply's own ``object_id`` (replies to remote replies) are
+    gathered too. Results are in discovery order — a reply always precedes
+    the replies that target it.
+    """
+    collected: List[Any] = []
+    seen: Set[str] = set(target_ids)
+    frontier: Set[str] = set(target_ids)
+    while frontier:
+        batch = await _remote_interactions(config, frontier, interaction_type)
+        frontier = set()
+        for interactions in batch.values():
+            for interaction in interactions:
+                collected.append(interaction)
+                object_id = getattr(interaction, "object_id", None)
+                if object_id and object_id not in seen:
+                    seen.add(object_id)
+                    frontier.add(object_id)
+    return collected
+
+
 class InteractionSummary(NamedTuple):
     """Interaction counters and the requester's own state for an activity."""
 
@@ -716,8 +781,12 @@ async def resolve_interaction_summaries(
     Counts combine local ``Activity`` rows (likes, boosts and replies stored
     with ``in_reply_to_activity_id``) and confirmed remote interactions
     recorded in Pubby's ``federation_interactions`` storage against the
-    activity's ``source_id``. ``liked``/``boosted`` reflect whether ``user``
-    already has a live like/announce row targeting the activity.
+    activity's ``source_id``. Likes and boosts count direct interactions
+    only; ``reply_count`` covers the whole sub-thread — every ``reply``
+    descendant reachable through the ``in_reply_to`` chain, plus remote
+    replies targeting any node in it (remote replies to remote replies
+    included). ``liked``/``boosted`` reflect whether ``user`` already has a
+    live like/announce row targeting the activity.
     """
     if not activities:
         return {}
@@ -728,7 +797,7 @@ async def resolve_interaction_summaries(
         select(Activity.in_reply_to_activity_id, Activity.activity_type, func.count())
         .where(
             Activity.in_reply_to_activity_id.in_(ids),
-            Activity.activity_type.in_(tuple(_REMOTE_INTERACTION_TYPES)),
+            Activity.activity_type.in_(("like", "announce")),
             Activity.deleted_at.is_(None),
         )
         .group_by(Activity.in_reply_to_activity_id, Activity.activity_type)
@@ -753,8 +822,12 @@ async def resolve_interaction_summaries(
     for activity in activities:
         for interaction in remote.get(activity.source_id, []):
             for activity_type, interaction_type in _REMOTE_INTERACTION_TYPES.items():
+                if activity_type == "reply":
+                    continue
                 if interaction.interaction_type == interaction_type:
                     counts[str(activity.id)][activity_type] += 1
+
+    await _add_threaded_reply_counts(session, activities, counts, config)
 
     return {
         str(a.id): InteractionSummary(
@@ -766,6 +839,65 @@ async def resolve_interaction_summaries(
         )
         for a in activities
     }
+
+
+async def _add_threaded_reply_counts(
+    session: AsyncSession,
+    activities: List[Activity],
+    counts: Dict[str, Dict[str, int]],
+    config: SonghiveConfig,
+) -> None:
+    """
+    Fold whole-thread reply counts into ``counts`` in place.
+
+    ``reply_count`` covers every non-deleted ``reply`` descendant of an
+    activity (replies to replies included) plus confirmed remote replies
+    targeting any node in the sub-thread — replies to remote replies are
+    reached breadth-first through their ``object_id`` chains.
+    """
+    ids = [str(a.id) for a in activities]
+    cte = _activity_descendants_cte(ids)
+    rows = (
+        await session.execute(
+            select(
+                cte.c.root_id,
+                cte.c.id,
+                cte.c.activity_type,
+                cte.c.source_id,
+                cte.c.deleted_at,
+            )
+        )
+    ).all()
+
+    # ``membership`` maps a node id to the requested activities whose
+    # sub-thread contains it (a node always contains itself); ``scope``
+    # does the same keyed by object id — local ``source_id``s plus the
+    # ``object_id``s remote replies expose — so a remote reply is credited
+    # to every requested ancestor of its target.
+    membership: Dict[str, Set[str]] = {i: {i} for i in ids}
+    source_node: Dict[str, str] = {a.source_id: str(a.id) for a in activities}
+    for root_id, node_id, activity_type, source_id, deleted_at in rows:
+        if deleted_at is None and activity_type == "reply":
+            counts[str(root_id)]["reply"] += 1
+        membership.setdefault(str(node_id), set()).add(str(root_id))
+        source_node[source_id] = str(node_id)
+
+    scope: Dict[str, Set[str]] = {}
+    for source_id, node_id in source_node.items():
+        roots = membership.get(node_id)
+        if roots:
+            scope.setdefault(source_id, set()).update(roots)
+
+    if not scope:
+        return
+
+    replies = await _remote_thread_interactions(config, set(scope), InteractionType.REPLY)
+    for interaction in replies:
+        roots = scope.get(interaction.target_resource) or set()
+        for root_id in roots:
+            counts[root_id]["reply"] += 1
+        if interaction.object_id and interaction.object_id not in scope:
+            scope[interaction.object_id] = set(roots)
 
 
 class InteractionActor(NamedTuple):
@@ -861,37 +993,42 @@ async def list_activity_replies(
     user: Optional[User],
     config: SonghiveConfig,
 ) -> Tuple[List[Activity], List[Any]]:
-    """List the known replies to ``activity``, oldest first.
-
-    Returns ``(local, remote)``: local replies are ``reply``-type
-    ``Activity`` rows filtered by the requester's visibility rules; remote
-    replies are confirmed Pubby ``Interaction`` rows whose ``raw_object``
-    metadata carries the federated note for display. The caller merges and
-    serializes the two lists.
     """
-    local = (
-        (
-            await session.execute(
-                select(Activity)
-                .where(
-                    Activity.in_reply_to_activity_id == str(activity.id),
-                    Activity.activity_type == "reply",
-                    Activity.deleted_at.is_(None),
-                    _activity_visibility_filter(user),
-                )
-                .order_by(Activity.published_at.asc(), Activity.id.asc())
-            )
-        )
-        .scalars()
-        .all()
-    )
+    List the known replies in ``activity``'s thread, oldest first.
 
-    remote = await _remote_interactions(config, [activity.source_id], InteractionType.REPLY)
-    remote_replies = sorted(
-        remote.get(activity.source_id, []),
-        key=lambda i: _interaction_sort_key(i.published),
-    )
-    return list(local), remote_replies
+    Returns ``(local, remote)``: local replies are every ``reply``-type
+    descendant of ``activity`` — the whole sub-thread, not just direct
+    children — filtered by the requester's visibility rules; remote replies
+    are confirmed Pubby ``Interaction`` rows collected breadth-first across
+    the thread (each carries its ``target_resource`` so clients can
+    re-attach it to its parent). The caller merges and serializes the two
+    lists; clients group them into threads by parent.
+    """
+    cte = _activity_descendants_cte([str(activity.id)])
+    rows = (await session.execute(select(cte.c.id, cte.c.activity_type, cte.c.source_id, cte.c.deleted_at))).all()
+
+    reply_ids = [row.id for row in rows if row.activity_type == "reply" and row.deleted_at is None]
+    local: List[Activity] = []
+    if reply_ids:
+        local = list(
+            (
+                await session.execute(
+                    select(Activity)
+                    .where(
+                        Activity.id.in_(reply_ids),
+                        _activity_visibility_filter(user),
+                    )
+                    .order_by(Activity.published_at.asc(), Activity.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    source_ids = {activity.source_id} | {row.source_id for row in rows}
+    remote = await _remote_thread_interactions(config, source_ids, InteractionType.REPLY)
+    remote_replies = sorted(remote, key=lambda i: _interaction_sort_key(i.published))
+    return local, remote_replies
 
 
 async def _fan_out_visibility_update(
