@@ -7,7 +7,7 @@ designed to be used by the FastAPI route layer and by federation serializers.
 """
 
 import logging
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Type
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type
 
 from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -131,6 +131,36 @@ async def get_item(
     if entry is None:
         raise ValueError(f"Unknown item type: {item_type!r}")
     return await session.get(entry.model, item_id)
+
+
+def get_item_title(item: Any) -> Optional[str]:
+    """Return a human-readable title for a shareable item, or ``None``."""
+    return getattr(item, "title", None) or getattr(item, "name", None) or getattr(item, "original_filename", None)
+
+
+async def resolve_item_titles(
+    session: AsyncSession,
+    items: Iterable[Tuple[str, str]],
+) -> Dict[Tuple[str, str], Optional[str]]:
+    """Batch-resolve display titles for ``(item_type, item_id)`` pairs.
+
+    Returns a mapping keyed by ``(item_type, item_id)``; pairs whose item no
+    longer exists are absent from the result so callers can distinguish a
+    missing resource from one without a title.
+    """
+    ids_by_type: Dict[str, Set[str]] = {}
+    for item_type, item_id in items:
+        ids_by_type.setdefault(item_type, set()).add(item_id)
+
+    titles: Dict[Tuple[str, str], Optional[str]] = {}
+    for item_type, ids in ids_by_type.items():
+        entry = _ITEM_REGISTRY.get(item_type)
+        if entry is None:
+            continue
+        result = await session.execute(select(entry.model).where(entry.model.id.in_(ids)))
+        for row in result.scalars().all():
+            titles[(item_type, row.id)] = get_item_title(row)
+    return titles
 
 
 async def _can_access(  # pylint: disable=too-many-return-statements,too-many-branches
@@ -283,6 +313,21 @@ async def _can_access(  # pylint: disable=too-many-return-statements,too-many-br
     return False
 
 
+async def _can_access_user(session: AsyncSession, user: Optional[User], item_id: str) -> bool:
+    """Return whether ``user`` may access the ``user`` entity ``item_id``.
+
+    User profiles are the containing entity for standalone statuses: an
+    active profile is visible to everyone (including anonymous viewers),
+    while an inactive one is only reachable by its owner or an admin.
+    """
+    item = await session.get(User, item_id)
+    if item is None:
+        return False
+    if item.is_active:
+        return True
+    return user is not None and (user.is_admin or str(item.id) == str(user.id))
+
+
 async def can_access(
     session: AsyncSession,
     user: Optional[User],
@@ -297,6 +342,8 @@ async def can_access(
     Anonymous requesters (``user is None``) only match public items, valid
     share tokens, and derived file access through visible tracks/albums.
     """
+    if item_type == "user":
+        return await _can_access_user(session, user, item_id)
     return await _can_access(session, user, item_type, item_id, share_token=share_token)
 
 
@@ -346,6 +393,10 @@ async def can_manage(
     """
     if user is None:
         return False
+
+    if item_type == "user":
+        item = await session.get(User, item_id)
+        return item is not None and (user.is_admin or str(item.id) == str(user.id))
 
     entry = _ITEM_REGISTRY.get(item_type)
     if entry is None:

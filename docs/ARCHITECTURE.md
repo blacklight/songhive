@@ -100,7 +100,7 @@ songhive/
 │   │   ├── history.py      # Listening history
 │   │   ├── radios.py       # Dynamic radio generation
 │   │   ├── files.py        # Generic file upload/download (StoredFile)
-│   │   ├── shares.py       # Share grants (owner→specific user)
+│   │   ├── shares.py       # Share grants (owner→specific user) + /shares/mine listing
 │   │   ├── share_urls.py   # Share URL tokens (revocable short links)
 │   │   ├── share.py        # Public token resolver (redirects + sets cookie)
 │   │   ├── reports.py      # Content moderation reports + admin review
@@ -356,14 +356,17 @@ The `mentioned` and `followers` levels exist for the activities layer
 `Activity` records federation-relevant events (`create`, `announce`, `like`,
 `reply`, `quote`, `mention`, `update`, `delete`, `webmention`) attached to an
 entity through `(entity_type, entity_id)` — where `entity_type` is one of
-`track`, `album`, `artist`, `playlist`, `library`. Each row tracks its origin
-via `source_type` (`local` or a remote source), `source_actor`, and
-`source_id` (unique per source), with `local_object_id` as an optional
-canonical local identifier. Activities support threading through
-`in_reply_to_activity_id`, arbitrary JSON `payload`s, Markdown source vs
-rendered content (`content_source` / `content` / `content_type`), and soft
-deletion (`deleted_at`, `retracted`). An activity's `visibility` must not
-exceed its parent entity's visibility (`Visibility.can_contain`).
+`track`, `album`, `artist`, `playlist`, `library`, `user` (the `user` entity
+hosts standalone statuses posted through `POST /api/v1/statuses`). Each row
+tracks its origin via `source_type` (`local` or a remote source),
+`source_actor`, and `source_id` (unique per source), with `local_object_id`
+as an optional canonical local identifier. Activities support threading
+through `in_reply_to_activity_id`, arbitrary JSON `payload`s, source text vs
+rendered content (`content_source` / `content` / `content_type` — plain text
+or Markdown), an optional BCP-47 `language` tag mirrored into the object's
+`contentMap`, and soft deletion (`deleted_at`, `retracted`). An activity's
+`visibility` must not exceed its parent entity's visibility
+(`Visibility.can_contain`).
 
 `ActivityTag` rows link `Activity` and `Tag`, populated whenever an activity
 contains hashtags (`#tag`) in its `content_source`/`content`. They enable
@@ -1518,7 +1521,8 @@ segments (text, line breaks, linkified mentions/hashtags/URLs) via
 `utils/activityContent.parseActivityContent`; inline formatting elements
 (`<strong>`, `<em>`, `<code>`, `<del>`, `<u>`, headings) are preserved as
 `marks` on the segments and rendered through CSS classes rather than real
-markup. `ActivityCard` also renders
+markup, and `<ul>`/`<ol>` items flatten to bullet/numbered lines with
+indentation per nesting level. `ActivityCard` also renders
 the activity's `attachments` (the AP `attachment` documents of the embedded
 object): image media types inline, `Audio`/audio media types in an
 `<audio>` player, everything else as a link.
@@ -1566,6 +1570,9 @@ REST API under `/api/v1/`:
 ├── instance/       # Public instance metadata (Mastodon-compatible)
 ├── statuses/       # Standalone status posts (user-entity `create` activities with
 │                   #   content type, language, file/track attachments, and mentions)
+├── shares/         # Share grants (owner → specific user); /shares/mine lists the
+│                   #   grants + tokens created by the current user (revoked
+│                   #   tokens only with ?include_revoked=true)
 ├── share-urls/     # Share URL tokens (revocable short links)
 ├── share/{token}   # Public short-URL resolver
 ├── reports/        # Content moderation reports (submit)

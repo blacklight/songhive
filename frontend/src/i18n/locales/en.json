@@ -218,6 +218,7 @@
     "history": "History",
     "favorites": "Favorites",
     "files": "Files",
+    "shares": "Shares",
     "tags": "Tags",
     "genres": "Genres",
     "radio": "Radio",
@@ -265,6 +266,29 @@
       "entityTypesGated": "Favoriting albums, artists, and playlists is not available yet.",
       "empty": "You have no favorite tracks yet.",
       "emptyWithFavorites": "Could not load your favorite tracks."
+    },
+    "shares": {
+      "title": "Shares",
+      "empty": "You haven't shared anything yet.",
+      "includeRevoked": "Include revoked",
+      "unknownItem": "Untitled item",
+      "anyoneWithLink": "Anyone with the link",
+      "expiresAt": "Expires {date}",
+      "columns": {
+        "type": "Type",
+        "resource": "Resource",
+        "sharedWith": "Shared with",
+        "status": "Status"
+      },
+      "types": {
+        "grant": "User share",
+        "url": "Public link"
+      },
+      "status": {
+        "active": "Active",
+        "expired": "Expired",
+        "revoked": "Revoked"
+      }
     },
     "files": {
       "title": "Files",
@@ -820,7 +844,10 @@
       "playlist": "Playlist",
       "library": "Library",
       "file": "File",
-      "item": "Item"
+      "radio": "Radio",
+      "item": "Item",
+      "share": "Share",
+      "shares": "Shares"
     },
     "list": {
       "searchPlaceholder": "Search {entity}…",

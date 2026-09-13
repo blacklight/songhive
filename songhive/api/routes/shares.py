@@ -4,7 +4,7 @@ Share-grant routes: owner/admin CRUD for giving specific users access to items.
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Literal, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -50,6 +50,22 @@ class ShareGrantResponse(BaseModel):
     user_id: str
     username: Optional[str] = None
     created_at: datetime
+
+
+class CreatedShareResponse(BaseModel):
+    """A share grant or share URL token created by the current user."""
+
+    id: str
+    kind: Literal["grant", "url"]
+    item_type: str
+    item_id: str
+    item_title: Optional[str] = None
+    item_url: Optional[str] = None
+    user_id: Optional[str] = None
+    username: Optional[str] = None
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
 
 
 async def _resolve_share_grant_user(session: AsyncSession, value: str) -> User:
@@ -110,7 +126,7 @@ async def _notify_share_grant(
         if grant.user_id == current_user.id:
             return
         item = await acl.get_item(db, grant.item_type, grant.item_id)
-        item_title = getattr(item, "title", None) or getattr(item, "name", None)
+        item_title = acl.get_item_title(item)
         plural = acl.get_item_plural(grant.item_type) or grant.item_type
         await notifications_service.create_notification(
             db,
@@ -160,6 +176,90 @@ async def list_share_grants(
     return responses
 
 
+def _created_share_entry(
+    *,
+    share_id: str,
+    kind: Literal["grant", "url"],
+    item_type: str,
+    item_id: str,
+    created_at: datetime,
+    titles: Dict[Tuple[str, str], Optional[str]],
+    user_id: Optional[str] = None,
+    username: Optional[str] = None,
+    expires_at: Optional[datetime] = None,
+    revoked_at: Optional[datetime] = None,
+) -> CreatedShareResponse:
+    """Build a ``CreatedShareResponse``, resolving the item title and page URL."""
+    item_key = (item_type, item_id)
+    plural = acl.get_item_plural(item_type)
+    item_url = f"/{plural}/{item_id}" if plural is not None and item_key in titles else None
+    return CreatedShareResponse(
+        id=share_id,
+        kind=kind,
+        item_type=item_type,
+        item_id=item_id,
+        item_title=titles.get(item_key),
+        item_url=item_url,
+        user_id=user_id,
+        username=username,
+        created_at=created_at,
+        expires_at=expires_at,
+        revoked_at=revoked_at,
+    )
+
+
+@router.get("/mine", response_model=List[CreatedShareResponse])
+async def list_created_shares(
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    pagination: Pagination = Depends(get_pagination),
+    include_revoked: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+):
+    """List every share grant and share URL token created by the current user.
+
+    Revoked share tokens are hidden unless ``include_revoked`` is set.
+    """
+    grants = await sharing.list_share_grants_created_by(db, current_user.id)
+    tokens = await sharing.list_share_tokens_created_by(db, current_user.id, include_revoked=include_revoked)
+
+    titles = await acl.resolve_item_titles(
+        db,
+        [(g.item_type, g.item_id) for g in grants] + [(t.item_type, t.item_id) for t in tokens],
+    )
+
+    entries = [
+        _created_share_entry(
+            share_id=grant.id,
+            kind="grant",
+            item_type=grant.item_type,
+            item_id=grant.item_id,
+            created_at=grant.created_at,
+            titles=titles,
+            user_id=grant.user_id,
+            username=grant.user.username if grant.user is not None else None,
+        )
+        for grant in grants
+    ]
+    entries += [
+        _created_share_entry(
+            share_id=token.id,
+            kind="url",
+            item_type=token.item_type,
+            item_id=token.item_id,
+            created_at=token.created_at,
+            titles=titles,
+            expires_at=token.expires_at,
+            revoked_at=token.revoked_at,
+        )
+        for token in tokens
+    ]
+    entries.sort(key=lambda entry: entry.created_at, reverse=True)
+
+    pagination.set_total(response, len(entries))
+    return entries[pagination.offset : pagination.offset + pagination.limit]
+
+
 @router.delete("/{share_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_share_grant(
     share_id: str,
@@ -169,10 +269,14 @@ async def delete_share_grant(
     """
     Revoke a share grant by id.
 
+    The item owner, an admin, or the user who created the grant may revoke it.
     Missing and unauthorized requests both return 404 to avoid ID enumeration.
     """
     grant = await db.get(ShareGrant, share_id)
-    if grant is None or not await acl.can_manage(db, current_user, grant.item_type, grant.item_id):
+    if grant is None or (
+        grant.created_by != current_user.id
+        and not await acl.can_manage(db, current_user, grant.item_type, grant.item_id)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Not found",

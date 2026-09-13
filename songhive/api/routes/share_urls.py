@@ -125,10 +125,14 @@ async def delete_share_url(
     """
     Revoke a share URL token by id.
 
+    The item owner, an admin, or the user who created the token may revoke it.
     Missing and unauthorized requests both return 404 to avoid ID enumeration.
     """
     token = await db.get(ShareToken, token_id)
-    if token is None or not await acl.can_manage(db, current_user, token.item_type, token.item_id):
+    if token is None or (
+        token.created_by != current_user.id
+        and not await acl.can_manage(db, current_user, token.item_type, token.item_id)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Not found",

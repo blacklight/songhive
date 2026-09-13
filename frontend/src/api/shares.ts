@@ -6,9 +6,19 @@ export type ShareGrantResponse = components["schemas"]["ShareGrantResponse"];
 export type ShareTokenCreate = components["schemas"]["ShareTokenCreate"];
 export type ShareTokenCreated = components["schemas"]["ShareTokenCreated"];
 export type ShareTokenResponse = components["schemas"]["ShareTokenResponse"];
+export type CreatedShareResponse =
+  components["schemas"]["CreatedShareResponse"];
 
 export type ShareItemType =
   "track" | "album" | "artist" | "playlist" | "library";
+
+export function listMyShares(params?: {
+  limit?: number;
+  offset?: number;
+  include_revoked?: boolean;
+}): Promise<CreatedShareResponse[]> {
+  return apiRequest<CreatedShareResponse[]>("/shares/mine", { query: params });
+}
 
 export function listShareGrants(params: {
   item_type: string;

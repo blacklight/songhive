@@ -245,6 +245,7 @@ describe("AppLayout", () => {
       "History",
       "Favorites",
       "Files",
+      "Shares",
       "Radio",
       "About",
       "Settings",

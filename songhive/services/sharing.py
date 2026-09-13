@@ -157,6 +157,17 @@ async def count_share_grants(
     return result.scalar() or 0
 
 
+async def list_share_grants_created_by(
+    session: AsyncSession,
+    user_id: str,
+) -> List[ShareGrant]:
+    """List all share grants created by ``user_id``, newest first."""
+    result = await session.execute(
+        select(ShareGrant).where(ShareGrant.created_by == user_id).order_by(ShareGrant.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
 async def create_share_token(
     session: AsyncSession,
     item_type: str,
@@ -232,6 +243,23 @@ async def count_share_tokens(
         select(func.count(ShareToken.id)).where(*_share_tokens_where(item_type, item_id, now))
     )
     return result.scalar() or 0
+
+
+async def list_share_tokens_created_by(
+    session: AsyncSession,
+    user_id: str,
+    include_revoked: bool = False,
+) -> List[ShareToken]:
+    """List all share tokens created by ``user_id``, newest first.
+
+    Revoked tokens are excluded unless ``include_revoked`` is set; the
+    ``revoked_at``/``expires_at`` fields carry that state for the caller.
+    """
+    query = select(ShareToken).where(ShareToken.created_by == user_id)
+    if not include_revoked:
+        query = query.where(ShareToken.revoked_at.is_(None))
+    result = await session.execute(query.order_by(ShareToken.created_at.desc()))
+    return list(result.scalars().all())
 
 
 async def get_valid_share_token(

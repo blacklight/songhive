@@ -3200,6 +3200,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/shares/mine": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Created Shares
+     * @description List every share grant and share URL token created by the current user.
+     *
+     *     Revoked share tokens are hidden unless ``include_revoked`` is set.
+     */
+    get: operations["list_created_shares_api_v1_shares_mine_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/shares/{share_id}": {
     parameters: {
       query?: never;
@@ -3214,6 +3236,7 @@ export interface paths {
      * Delete Share Grant
      * @description Revoke a share grant by id.
      *
+     *     The item owner, an admin, or the user who created the grant may revoke it.
      *     Missing and unauthorized requests both return 404 to avoid ID enumeration.
      */
     delete: operations["delete_share_grant_api_v1_shares__share_id__delete"];
@@ -3260,6 +3283,7 @@ export interface paths {
      * Delete Share Url
      * @description Revoke a share URL token by id.
      *
+     *     The item owner, an admin, or the user who created the token may revoke it.
      *     Missing and unauthorized requests both return 404 to avoid ID enumeration.
      */
     delete: operations["delete_share_url_api_v1_share_urls__token_id__delete"];
@@ -4524,6 +4548,40 @@ export interface components {
        * @default true
        */
       success: boolean;
+    };
+    /**
+     * CreatedShareResponse
+     * @description A share grant or share URL token created by the current user.
+     */
+    CreatedShareResponse: {
+      /** Id */
+      id: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "grant" | "url";
+      /** Item Type */
+      item_type: string;
+      /** Item Id */
+      item_id: string;
+      /** Item Title */
+      item_title?: string | null;
+      /** Item Url */
+      item_url?: string | null;
+      /** User Id */
+      user_id?: string | null;
+      /** Username */
+      username?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Expires At */
+      expires_at?: string | null;
+      /** Revoked At */
+      revoked_at?: string | null;
     };
     /**
      * DeleteAccountRequest
@@ -12904,6 +12962,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ShareGrantResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_created_shares_api_v1_shares_mine_get: {
+    parameters: {
+      query?: {
+        include_revoked?: boolean;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CreatedShareResponse"][];
         };
       };
       /** @description Validation Error */

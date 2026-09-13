@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as client from "./client";
 import {
+  listMyShares,
   listShareGrants,
   createShareGrant,
   deleteShareGrant,
@@ -8,6 +9,7 @@ import {
   createShareUrl,
   deleteShareUrl,
   resolveShareUrl,
+  type CreatedShareResponse,
   type ShareGrantCreate,
   type ShareGrantResponse,
   type ShareTokenCreate,
@@ -43,9 +45,48 @@ const sampleCreated: ShareTokenCreated = {
   expires_at: null,
 };
 
+const sampleMine: CreatedShareResponse = {
+  id: "sg1",
+  kind: "grant",
+  item_type: "track",
+  item_id: "t1",
+  item_title: "Song One",
+  item_url: "/tracks/t1",
+  user_id: "u2",
+  username: "other",
+  created_at: "2026-01-01T00:00:00Z",
+  expires_at: null,
+  revoked_at: null,
+};
+
 describe("shares api", () => {
   beforeEach(() => {
     apiRequest.mockReset();
+  });
+
+  it("listMyShares hits the combined shares endpoint", async () => {
+    apiRequest.mockResolvedValueOnce([sampleMine]);
+    const result = await listMyShares({ limit: 25, offset: 50 });
+    expect(apiRequest).toHaveBeenCalledWith("/shares/mine", {
+      query: { limit: 25, offset: 50 },
+    });
+    expect(result).toEqual([sampleMine]);
+  });
+
+  it("listMyShares works without params", async () => {
+    apiRequest.mockResolvedValueOnce([]);
+    await listMyShares();
+    expect(apiRequest).toHaveBeenCalledWith("/shares/mine", {
+      query: undefined,
+    });
+  });
+
+  it("listMyShares forwards the include_revoked flag", async () => {
+    apiRequest.mockResolvedValueOnce([]);
+    await listMyShares({ include_revoked: true });
+    expect(apiRequest).toHaveBeenCalledWith("/shares/mine", {
+      query: { include_revoked: true },
+    });
   });
 
   it("listShareGrants requires item_type and item_id", async () => {

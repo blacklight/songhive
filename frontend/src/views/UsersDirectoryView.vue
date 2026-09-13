@@ -5,6 +5,7 @@ import { listPublicUsers, type PublicUserResponse } from "@/api/users";
 import { getApiErrorMessage } from "@/api/client";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppSelect from "@/components/ui/AppSelect.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import UserLink from "@/components/user/UserLink.vue";
 

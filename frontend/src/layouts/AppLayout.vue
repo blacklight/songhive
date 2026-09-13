@@ -150,6 +150,12 @@ const navItems = computed<NavItem[]>(() => [
   },
   { name: t("nav.files"), to: "/files", requiresAuth: true, icon: "file" },
   {
+    name: t("nav.shares"),
+    to: "/shares",
+    requiresAuth: true,
+    icon: "share-nodes",
+  },
+  {
     name: t("nav.radio"),
     to: "/radio",
     requiresAuth: true,

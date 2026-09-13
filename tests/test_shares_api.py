@@ -248,6 +248,215 @@ def test_shared_user_can_access_private_playlist(client, regular_user, other_use
     assert get_response.json()["id"] == private_playlist["id"]
 
 
+def test_list_created_shares_unauthenticated(client):
+    """Listing created shares requires authentication."""
+    response = client.get("/api/v1/shares/mine")
+    assert response.status_code == 401
+
+
+def test_list_created_shares_empty(client, regular_user, auth_headers):
+    """A user with no shares gets an empty list."""
+    response = client.get("/api/v1/shares/mine", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    assert response.json() == []
+    assert response.headers["X-Total-Count"] == "0"
+
+
+def test_list_created_shares_returns_grants_and_tokens(client, regular_user, other_user, auth_headers, private_file):
+    """The endpoint returns both share grants and share URL tokens with metadata."""
+    client.post(
+        "/api/v1/shares",
+        json={"item_type": "file", "item_id": private_file["id"], "user_id": str(other_user.id)},
+        headers=auth_headers(regular_user),
+    )
+    client.post(
+        "/api/v1/share-urls",
+        json={"item_type": "file", "item_id": private_file["id"]},
+        headers=auth_headers(regular_user),
+    )
+
+    response = client.get("/api/v1/shares/mine", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    assert response.headers["X-Total-Count"] == "2"
+    data = response.json()
+    assert len(data) == 2
+
+    by_kind = {entry["kind"]: entry for entry in data}
+    grant = by_kind["grant"]
+    assert grant["item_type"] == "file"
+    assert grant["item_id"] == private_file["id"]
+    assert grant["item_title"] == "private.txt"
+    assert grant["item_url"] == f"/files/{private_file['id']}"
+    assert grant["user_id"] == str(other_user.id)
+    assert grant["username"] == other_user.username
+    assert grant["created_at"]
+    assert grant["expires_at"] is None
+    assert grant["revoked_at"] is None
+
+    token = by_kind["url"]
+    assert token["item_type"] == "file"
+    assert token["item_id"] == private_file["id"]
+    assert token["item_title"] == "private.txt"
+    assert token["user_id"] is None
+    assert token["username"] is None
+    assert token["expires_at"] is None
+    assert token["revoked_at"] is None
+
+
+def test_list_created_shares_scoped_to_creator(client, regular_user, other_user, auth_headers, private_file):
+    """Each user only sees the shares they created themselves."""
+    client.post(
+        "/api/v1/shares",
+        json={"item_type": "file", "item_id": private_file["id"], "user_id": str(other_user.id)},
+        headers=auth_headers(regular_user),
+    )
+
+    other_library = client.post(
+        "/api/v1/libraries/?visibility=private",
+        json={"name": "Other Library"},
+        headers=auth_headers(other_user),
+    ).json()
+    client.post(
+        "/api/v1/shares",
+        json={"item_type": "library", "item_id": other_library["id"], "user_id": str(regular_user.id)},
+        headers=auth_headers(other_user),
+    )
+
+    mine = client.get("/api/v1/shares/mine", headers=auth_headers(regular_user)).json()
+    assert len(mine) == 1
+    assert mine[0]["item_type"] == "file"
+    assert mine[0]["item_id"] == private_file["id"]
+
+    theirs = client.get("/api/v1/shares/mine", headers=auth_headers(other_user)).json()
+    assert len(theirs) == 1
+    assert theirs[0]["item_type"] == "library"
+    assert theirs[0]["item_id"] == other_library["id"]
+    assert theirs[0]["item_title"] == "Other Library"
+
+
+def test_list_created_shares_hides_revoked_tokens_by_default(client, regular_user, auth_headers, private_file):
+    """Revoked share URL tokens are hidden unless include_revoked is set."""
+    active = client.post(
+        "/api/v1/share-urls",
+        json={"item_type": "file", "item_id": private_file["id"]},
+        headers=auth_headers(regular_user),
+    ).json()
+    revoked = client.post(
+        "/api/v1/share-urls",
+        json={"item_type": "file", "item_id": private_file["id"]},
+        headers=auth_headers(regular_user),
+    ).json()
+    client.delete(f"/api/v1/share-urls/{revoked['id']}", headers=auth_headers(regular_user))
+
+    mine = client.get("/api/v1/shares/mine", headers=auth_headers(regular_user)).json()
+    assert [entry["id"] for entry in mine] == [active["id"]]
+
+    mine_all = client.get("/api/v1/shares/mine?include_revoked=true", headers=auth_headers(regular_user)).json()
+    assert len(mine_all) == 2
+    by_id = {entry["id"]: entry for entry in mine_all}
+    assert by_id[revoked["id"]]["revoked_at"] is not None
+    assert by_id[active["id"]]["revoked_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_created_shares_missing_item(
+    client, db_session, regular_user, other_user, auth_headers, private_library
+):
+    """Shares pointing at deleted items are listed without a title or URL."""
+    from songhive.models.library import Library
+
+    client.post(
+        "/api/v1/shares",
+        json={"item_type": "library", "item_id": private_library["id"], "user_id": str(other_user.id)},
+        headers=auth_headers(regular_user),
+    )
+    # Delete the row directly: the API-level delete cascades share rows, so a
+    # dangling grant can only arise when the cleanup did not run.
+    library = await db_session.get(Library, private_library["id"])
+    await db_session.delete(library)
+    await db_session.flush()
+
+    mine = client.get("/api/v1/shares/mine", headers=auth_headers(regular_user)).json()
+    assert len(mine) == 1
+    assert mine[0]["item_id"] == private_library["id"]
+    assert mine[0]["item_title"] is None
+    assert mine[0]["item_url"] is None
+
+
+def test_list_created_shares_pagination(client, regular_user, other_user, auth_headers, private_file):
+    """Limit and offset paginate the merged grant/token list."""
+    for _ in range(2):
+        client.post(
+            "/api/v1/share-urls",
+            json={"item_type": "file", "item_id": private_file["id"]},
+            headers=auth_headers(regular_user),
+        )
+    client.post(
+        "/api/v1/shares",
+        json={"item_type": "file", "item_id": private_file["id"], "user_id": str(other_user.id)},
+        headers=auth_headers(regular_user),
+    )
+
+    page = client.get("/api/v1/shares/mine?limit=2", headers=auth_headers(regular_user))
+    assert page.status_code == 200
+    assert page.headers["X-Total-Count"] == "3"
+    assert len(page.json()) == 2
+
+    rest = client.get("/api/v1/shares/mine?limit=2&offset=2", headers=auth_headers(regular_user)).json()
+    assert len(rest) == 1
+
+
+@pytest.mark.asyncio
+async def test_creator_can_delete_grant_without_manage_rights(
+    client, db_session, regular_user, other_user, admin_user, auth_headers, private_file
+):
+    """The user who created a grant can revoke it even after losing admin rights."""
+    created = client.post(
+        "/api/v1/shares",
+        json={"item_type": "file", "item_id": private_file["id"], "user_id": str(other_user.id)},
+        headers=auth_headers(admin_user),
+    ).json()
+
+    admin_user.role = "user"
+    await db_session.flush()
+
+    response = client.delete(f"/api/v1/shares/{created['id']}", headers=auth_headers(admin_user))
+    assert response.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_creator_can_delete_share_url_without_manage_rights(
+    client, db_session, regular_user, admin_user, auth_headers, private_file
+):
+    """The user who created a share token can revoke it even after losing admin rights."""
+    created = client.post(
+        "/api/v1/share-urls",
+        json={"item_type": "file", "item_id": private_file["id"]},
+        headers=auth_headers(admin_user),
+    ).json()
+
+    admin_user.role = "user"
+    await db_session.flush()
+
+    response = client.delete(f"/api/v1/share-urls/{created['id']}", headers=auth_headers(admin_user))
+    assert response.status_code == 204
+
+    mine = client.get("/api/v1/shares/mine?include_revoked=true", headers=auth_headers(admin_user)).json()
+    assert mine[0]["revoked_at"] is not None
+
+
+def test_non_creator_cannot_delete_grant(client, regular_user, other_user, auth_headers, private_file):
+    """A third party who neither owns the item nor created the grant gets a 404."""
+    created = client.post(
+        "/api/v1/shares",
+        json={"item_type": "file", "item_id": private_file["id"], "user_id": str(other_user.id)},
+        headers=auth_headers(regular_user),
+    ).json()
+
+    response = client.delete(f"/api/v1/shares/{created['id']}", headers=auth_headers(other_user))
+    assert response.status_code == 404
+
+
 @pytest.mark.asyncio
 async def test_share_grant_creates_notification(
     client, db_session, regular_user, other_user, auth_headers, private_library
