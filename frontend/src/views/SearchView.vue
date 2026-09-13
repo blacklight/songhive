@@ -265,11 +265,28 @@ const showStart = computed(() => !hasSearched.value || !query.value.trim());
                 v-if="track.artist || track.album"
                 class="search-view__meta"
               >
-                {{
-                  [track.artist?.name, track.album?.title]
-                    .filter(Boolean)
-                    .join(" · ")
-                }}
+                <RouterLink
+                  v-if="track.artist?.name?.length"
+                  :to="`/artists/${track.artist.id}`"
+                  class="search-view__meta-link"
+                >
+                  {{ track.artist.name }}
+                </RouterLink>
+                <span
+                  v-if="
+                    track.artist?.name?.length && track.album?.title?.length
+                  "
+                  class="search-view__meta-separator"
+                >
+                  &nbsp;·&nbsp;
+                </span>
+                <RouterLink
+                  v-if="track.album?.title?.length"
+                  :to="`/albums/${track.album.id}`"
+                  class="search-view__meta-link"
+                >
+                  {{ track.album.title }}
+                </RouterLink>
               </span>
             </li>
           </ul>
@@ -491,6 +508,12 @@ const showStart = computed(() => !hasSearched.value || !query.value.trim());
   background-color: var(--color-surface);
 }
 
+.search-view__item--track {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
 .search-view__thumb {
   width: 2.5rem;
   height: 2.5rem;
@@ -504,7 +527,8 @@ const showStart = computed(() => !hasSearched.value || !query.value.trim());
 }
 
 .search-view__link,
-.search-view__tag-link {
+.search-view__tag-link,
+.search-view__meta-link {
   color: var(--color-text);
   text-decoration: none;
   font-weight: 500;
@@ -515,8 +539,14 @@ const showStart = computed(() => !hasSearched.value || !query.value.trim());
 }
 
 .search-view__link:hover,
-.search-view__tag-link:hover {
+.search-view__tag-link:hover,
+.search-view__meta-link:hover {
   text-decoration: underline;
+}
+
+.search-view__meta-link {
+  color: var(--color-text-muted);
+  font-weight: normal;
 }
 
 .search-view__meta {
