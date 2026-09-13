@@ -179,6 +179,13 @@ const routes: RouteRecordRaw[] = [
           entityId: String(route.params.id),
         }),
       },
+      // Single-activity permalinks are public reads too: the endpoint
+      // applies the same visibility rules as the entity feeds.
+      {
+        path: "activities/:id",
+        name: "activity",
+        component: () => import("@/views/ActivityView.vue"),
+      },
       // History and favorites are Phase 5 views that require authentication.
       {
         path: "history",

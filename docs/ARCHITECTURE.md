@@ -517,7 +517,20 @@ reply is unfolded flat into that reply's thread, each thread marked by its
 own vertical line. All three listings gate on `can_view_activity` and allow
 anonymous reads of public targets.
 `GET /api/v1/activities/{id}` returns a single activity under the same
-rules — it backs the notification UI's embedded activity cards.
+rules — it backs the notification UI's embedded activity cards and the
+SPA's `/activities/:id` permalink page (`views/ActivityView.vue`).
+`GET /api/v1/activities/lookup?url=...` resolves an ActivityPub object URL
+to the same `ActivityResponse`: it matches `Activity.source_id` directly
+(covering materialized remote replies whose object ids live on remote
+paths) and, for `{actor}/objects/{uuid}` shapes, `local_object_id`. Browser
+requests to a local `/users/{name}/objects/{id}` that map to a stored
+activity are redirected by `federation.py` to the `/activities/{id}`
+permalink, while ActivityPub `Accept` headers still get the object JSON.
+Notification payloads denormalize `object_activity_id`/`object_type`/
+`object_page_url` for the note itself and `target_object_*` for the
+replied-to/quoted activity, so clients can render real activity cards and
+link replies to their parent instead of a remote object id that does not
+dereference to a page.
 
 `resolve_audience` maps an activity's visibility to the set of remote
 **inbox URLs** it should reach: `public` and `followers` activities go to

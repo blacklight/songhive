@@ -584,3 +584,104 @@ async def test_list_endpoint_resolves_remote_actor_display_name(
     (item,) = resp.json()["activities"]
     assert item["source_actor_display_name"] == "Carol Remote"
     assert item["source_actor_avatar_url"] == "https://remote.example/carol.png"
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/activities/lookup
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_lookup_resolves_object_url(client, db_session, regular_user):
+    """An object permalink resolves to its activity row."""
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.get("/api/v1/activities/lookup", params={"url": activity.source_id})
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == activity.id
+
+
+@pytest.mark.asyncio
+async def test_lookup_resolves_bare_object_id(client, db_session, regular_user):
+    """The ``/objects/{id}`` permalink form matches ``local_object_id``."""
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.get(
+        "/api/v1/activities/lookup",
+        params={"url": f"/users/alice/objects/{activity.local_object_id}"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == activity.id
+
+
+@pytest.mark.asyncio
+async def test_lookup_resolves_materialized_remote_reply(client, db_session, regular_user):
+    """A remote note stored as a reply resolves by its own remote id."""
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        source_type="remote",
+        source_actor="https://remote.example/users/bob",
+        source_id="https://remote.example/objects/e149e610",
+        local_object_id=None,
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.get(
+        "/api/v1/activities/lookup",
+        params={"url": "https://remote.example/objects/e149e610"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == activity.id
+
+
+@pytest.mark.asyncio
+async def test_lookup_unknown_url_404(client):
+    """Object URLs with no stored activity answer 404."""
+    resp = client.get(
+        "/api/v1/activities/lookup",
+        params={"url": "https://remote.example/objects/none"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_lookup_enforces_visibility(client, db_session, regular_user, other_user, auth_headers):
+    """A private activity resolves 404/403 like the primary fetch does."""
+    track = await _make_track(db_session, other_user, visibility=Visibility.PRIVATE.value)
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=other_user.id,
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.get("/api/v1/activities/lookup", params={"url": activity.source_id})
+    assert resp.status_code == 403
+
+    resp = client.get(
+        "/api/v1/activities/lookup",
+        params={"url": activity.source_id},
+        headers=auth_headers(regular_user),
+    )
+    assert resp.status_code == 403
+
+    resp = client.get(
+        "/api/v1/activities/lookup",
+        params={"url": activity.source_id},
+        headers=auth_headers(other_user),
+    )
+    assert resp.status_code == 200

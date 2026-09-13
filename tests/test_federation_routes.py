@@ -449,14 +449,15 @@ async def test_get_object_redirects_browsers_to_track_page(fed_client, db_sessio
     assert response.headers["location"] == f"/tracks/{track.id}"
 
 
-async def test_get_object_redirects_browsers_to_entity_feed(fed_client, db_session, regular_user):
-    """A browser opening a share's object URL lands on the entity's feed."""
-    db_session.add(_make_activity(regular_user, object_id="share-1"))
+async def test_get_object_redirects_browsers_to_activity_page(fed_client, db_session, regular_user):
+    """A browser opening a share's object URL lands on the activity's page."""
+    activity = _make_activity(regular_user, object_id="share-1")
+    db_session.add(activity)
     await db_session.commit()
 
     response = fed_client.get("/users/regular/objects/share-1", follow_redirects=False)
     assert response.status_code == status.HTTP_307_TEMPORARY_REDIRECT
-    assert response.headers["location"] == "/tracks/track-1/activities"
+    assert response.headers["location"] == f"/activities/{activity.id}"
 
 
 async def test_get_object_synthesizes_note_for_content_activity(fed_client, db_session, regular_user):

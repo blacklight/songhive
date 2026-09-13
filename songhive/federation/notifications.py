@@ -50,7 +50,6 @@ from ..services.activities import (
     _activity_object_type,
     _actor_doc_avatar_url,
     _actor_doc_display_name,
-    activity_page_url,
     resolve_entity,
 )
 from ..services.notifications import (
@@ -170,18 +169,23 @@ async def _resolve_local_object(
     """
     Resolve a federated object URL to a local item for display.
 
-    Handles the ``{actor_url}/objects/{id}`` form used by this instance's
-    ``Audio``/``Note`` objects (``Track.federation_object_id`` first, then
-    ``Activity.local_object_id``/``source_id``) and ``/{plural}/{id}`` page
-    URLs on the instance domain. Returns ``{item_type, item_id, item_title,
+    A ``source_id`` match resolves any stored activity — local
+    ``{actor_url}/objects/{id}`` permalinks and materialized remote
+    objects (e.g. replies stored under the remote object's own id)
+    regardless of the URL's path form. Otherwise the
+    ``{actor_url}/objects/{id}`` form is matched against
+    ``Track.federation_object_id`` and ``Activity.local_object_id``/
+    ``source_id``, and ``/{plural}/{id}`` page URLs on the instance domain
+    resolve to their entity. Returns ``{item_type, item_id, item_title,
     local_url}`` so the client can render the referenced track or entity
     with its own link; ``None`` when the object is not local.
 
-    Objects that resolve to a local ``Activity`` additionally carry
+    Objects that resolve to an ``Activity`` additionally carry
     ``object_activity_id``/``object_type``/``object_page_url`` so clients
-    can render the reacted activity itself; ``user`` entities (standalone
-    statuses) have no item page, so ``item_type``/``item_id`` are omitted
-    and ``local_url`` is the author's profile.
+    can render the activity card itself and link to its
+    ``/activities/{id}`` page; ``user`` entities (standalone statuses)
+    have no item page, so ``item_type``/``item_id`` are omitted and
+    ``local_url`` is the author's profile.
     """
     if not isinstance(url, str) or not url:
         return None
@@ -191,9 +195,12 @@ async def _resolve_local_object(
 
     item = None
     item_type: Optional[str] = None
-    activity: Optional[Activity] = None
+    # A stored ``source_id`` covers every activity permalink form —
+    # including remote object ids materialized into local reply rows,
+    # whose path shape is the remote server's own.
+    activity = await session.scalar(select(Activity).where(Activity.source_id == url).limit(1))
     objects_match = re.search(r"/objects/([^/?#]+)/?$", path)
-    if objects_match:
+    if activity is None and objects_match:
         object_id = objects_match.group(1)
         track = await session.scalar(select(Track).where(Track.federation_object_id == object_id))
         if track is not None:
@@ -204,19 +211,19 @@ async def _resolve_local_object(
                     or_(
                         Activity.local_object_id == object_id,
                         Activity.source_id == object_id,
-                        Activity.source_id == url,
                     )
                 )
             )
-            if activity is not None:
-                item = await resolve_entity(session, activity.entity_type, activity.entity_id)
-                item_type = activity.entity_type
-    elif instance_domain and parsed.netloc == instance_domain:
+    elif activity is None and instance_domain and parsed.netloc == instance_domain:
         parts = [p for p in path.split("/") if p]
         candidate_type = _PLURAL_TO_ITEM_TYPE.get(parts[0]) if len(parts) == 2 else None
         if candidate_type is not None:
             item_type = candidate_type
             item = await acl.get_item(session, candidate_type, parts[1])
+
+    if activity is not None:
+        item = await resolve_entity(session, activity.entity_type, activity.entity_id)
+        item_type = activity.entity_type
 
     if item is None or item_type is None:
         return None
@@ -235,7 +242,7 @@ async def _resolve_local_object(
         }
     if activity is not None:
         resolved["object_activity_id"] = str(activity.id)
-        resolved["object_page_url"] = activity_page_url(item_type, str(activity.entity_id), item)
+        resolved["object_page_url"] = f"/activities/{activity.id}"
         object_type = _activity_object_type(activity)
         if object_type:
             resolved["object_type"] = object_type
@@ -451,6 +458,11 @@ async def create_inbox_notifications(
     quote_target = _extract_quote_target(obj)
     in_reply_to = obj.get("inReplyTo")
     note = _note_snapshot(obj)
+    # The note itself may map to a stored activity — remote replies are
+    # materialized as rows — so clients can render its real card and link
+    # to its ``/activities/{id}`` page rather than a remote object id that
+    # may not dereference to a browser page (e.g. private Akkoma notes).
+    self_fields = await _resolve_local_object(session, source_url, instance_domain) or {}
 
     if quote_target:
         resolved = await _resolve_local_object(session, quote_target, instance_domain)
@@ -461,7 +473,13 @@ async def create_inbox_notifications(
             type=NotificationType.QUOTE,
             actor_url=actor_url,
             source_url=source_url,
-            payload={**payload, **note, "target_url": quote_target, **target_fields},
+            payload={
+                **payload,
+                **note,
+                **self_fields,
+                "target_url": quote_target,
+                **target_fields,
+            },
         )
     elif isinstance(in_reply_to, str) and in_reply_to:
         resolved = await _resolve_local_object(session, in_reply_to, instance_domain)
@@ -472,7 +490,13 @@ async def create_inbox_notifications(
             type=NotificationType.REPLY,
             actor_url=actor_url,
             source_url=source_url,
-            payload={**payload, **note, "target_url": in_reply_to, **target_fields},
+            payload={
+                **payload,
+                **note,
+                **self_fields,
+                "target_url": in_reply_to,
+                **target_fields,
+            },
         )
 
     if _mentions_recipient(obj, recipient.actor_url):
@@ -482,7 +506,7 @@ async def create_inbox_notifications(
             type=NotificationType.MENTION,
             actor_url=actor_url,
             source_url=source_url,
-            payload={**payload, **note},
+            payload={**payload, **note, **self_fields},
         )
         if mention is not None:
             await _stamp_mention_rows(session, recipient)
@@ -672,8 +696,10 @@ async def _update_object_notifications(
     in_reply_to = obj.get("inReplyTo")
     reply_target = in_reply_to if isinstance(in_reply_to, str) and in_reply_to else None
     quote_target = _extract_quote_target(obj)
+    resolved_self = await _resolve_local_object(session, obj_id, instance_domain)
     resolved_reply = await _resolve_local_object(session, reply_target, instance_domain) if reply_target else None
     resolved_quote = await _resolve_local_object(session, quote_target, instance_domain) if quote_target else None
+    self_fields = resolved_self or {}
 
     def _target_fields(url: str, resolved: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         resolved = resolved or {}
@@ -683,6 +709,9 @@ async def _update_object_notifications(
             "target_item_id": resolved.get("item_id"),
             "target_item_title": resolved.get("item_title"),
             "target_local_url": resolved.get("local_url"),
+            "target_object_activity_id": resolved.get("object_activity_id"),
+            "target_object_page_url": resolved.get("object_page_url"),
+            "target_object_type": resolved.get("object_type"),
         }
 
     retract_ids: List[str] = []
@@ -692,7 +721,7 @@ async def _update_object_notifications(
             if not _mentions_recipient(obj, recipient.actor_url):
                 retract_ids.append(str(notification.id))
                 return None
-            return dict(base)
+            return {**base, **self_fields}
         # Only note notifications carry an object snapshot; likes/boosts
         # reference the object id without rendering it.
         if notification.type not in (NotificationType.REPLY, NotificationType.QUOTE):
@@ -706,7 +735,7 @@ async def _update_object_notifications(
         if target is None or (isinstance(stored, str) and stored and stored != target):
             retract_ids.append(str(notification.id))
             return None
-        return {**base, **_target_fields(target, resolved)}
+        return {**base, **self_fields, **_target_fields(target, resolved)}
 
     updated = await update_notifications_referencing(
         session,

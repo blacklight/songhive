@@ -4,6 +4,7 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
+  watch,
   type ComponentPublicInstance,
 } from "vue";
 import { useI18n } from "vue-i18n";
@@ -13,9 +14,10 @@ import {
   NOTIFICATION_TYPES,
   type NotificationResponse,
 } from "@/api/notifications";
-import type {
-  ActivityMentionResponse,
-  ActivityResponse,
+import {
+  lookupActivity,
+  type ActivityMentionResponse,
+  type ActivityResponse,
 } from "@/api/activities";
 import { useDebounce } from "@/composables/useDebounce";
 import { formatDateTime, formatRelativeTime } from "@/i18n";
@@ -64,6 +66,41 @@ const pendingSeen = new Set<string>();
 // Ids the user just toggled back to unseen stay excluded from the observer
 // batch until they scroll out of the viewport and back in.
 const manualUnseen = new Set<string>();
+
+// Activity ids resolved lazily from note object URLs. Older notification
+// payloads predate ``object_activity_id`` — when the note was materialized
+// locally (remote replies) or authored here, the lookup returns its row so
+// the card and the link point at ``/activities/{id}`` instead of a remote
+// object id that may not dereference to a page.
+const noteActivityIds = ref<Record<string, string | null>>({});
+const noteLookups = new Map<string, Promise<ActivityResponse | null>>();
+
+function lookupNoteActivity(url: string): Promise<ActivityResponse | null> {
+  let pending = noteLookups.get(url);
+  if (!pending) {
+    pending = lookupActivity(url).catch(() => null);
+    noteLookups.set(url, pending);
+  }
+  return pending;
+}
+
+async function resolveNoteActivities() {
+  for (const item of store.items) {
+    if (!NOTE_TYPES.has(item.type)) continue;
+    if (item.id in noteActivityIds.value) continue;
+    if (str(item.payload?.object_activity_id)) continue;
+    const url = str(item.payload?.object_url) ?? item.source_url ?? undefined;
+    if (!url || !/^https?:\/\//.test(url)) continue;
+    noteActivityIds.value[item.id] = null;
+    noteActivityIds.value[item.id] =
+      (await lookupNoteActivity(url))?.id ?? null;
+  }
+}
+
+watch(
+  () => store.items.length,
+  () => void resolveNoteActivities(),
+);
 
 const flushSeen = useDebounce(() => {
   const ids = [...pendingSeen];
@@ -216,6 +253,10 @@ function actorName(item: NotificationResponse): string {
 
 const URN_PREFIX = "urn:songhive:user:";
 const NOTE_TYPES = new Set(["mention", "reply", "quote"]);
+// ``/users/{name}/objects/{id}`` permalinks are backend endpoints that
+// redirect browsers to the right page — they must reach the server rather
+// than the SPA router, which has no such route.
+const OBJECT_PERMALINK_RE = /^\/users\/[^/]+\/objects\/[^/?#]+\/?$/;
 const PLURAL_TO_ITEM_TYPE: Record<string, string> = {
   tracks: "track",
   albums: "album",
@@ -263,7 +304,24 @@ function rawLinkFor(item: NotificationResponse): string | undefined {
       undefined
     );
   }
-  if (NOTE_TYPES.has(item.type)) {
+  if (item.type === "reply" || item.type === "quote") {
+    // "replied to your post" links to the *replied-to* activity — not to
+    // the reply's own object id.
+    const targetActivityId = str(payload.target_object_activity_id);
+    if (targetActivityId) return `/activities/${targetActivityId}`;
+    return (
+      str(payload.target_object_page_url) ??
+      str(payload.target_local_url) ??
+      str(payload.target_url) ??
+      str(payload.object_url) ??
+      item.source_url ??
+      undefined
+    );
+  }
+  if (item.type === "mention") {
+    const activityId =
+      str(payload.object_activity_id) ?? noteActivityIds.value[item.id];
+    if (activityId) return `/activities/${activityId}`;
     return str(payload.object_url) ?? item.source_url ?? undefined;
   }
   return item.source_url ?? undefined;
@@ -276,6 +334,7 @@ function linkFor(item: NotificationResponse): NotificationLink | undefined {
   try {
     const url = new URL(raw);
     if (url.host === window.location.host) {
+      if (OBJECT_PERMALINK_RE.test(url.pathname)) return { href: raw };
       return { to: url.pathname + url.search + url.hash };
     }
     return { href: raw };
@@ -329,6 +388,7 @@ function noteActivity(item: NotificationResponse): ActivityResponse | null {
     source_actor: item.actor_url ?? "",
     source_id: sourceId,
     local_object_id: null,
+    object_url: str(payload.object_url) ?? null,
     owner_user_id: null,
     source_actor_avatar_url: str(payload.actor_avatar_url) ?? null,
     source_actor_display_name:
@@ -388,12 +448,20 @@ function itemContext(item: NotificationResponse): ItemContext | null {
 }
 
 function activityRefFor(item: NotificationResponse): string | null {
+  if (failedActivityIds.value.has(item.id)) return null;
+  const payload = item.payload ?? {};
+  if (NOTE_TYPES.has(item.type)) {
+    // A note materialized locally — a remote reply stored as an activity
+    // row, or a local status — renders its real card; unresolved remote
+    // notes stay snapshot-only.
+    return (
+      str(payload.object_activity_id) ?? noteActivityIds.value[item.id] ?? null
+    );
+  }
   // Like/boost notifications carry the reacted activity's local id so the
   // row can render the real activity card. ``Audio`` objects (canonical
   // track shares) render as the track item card instead.
   if (item.type !== "like" && item.type !== "boost") return null;
-  if (failedActivityIds.value.has(item.id)) return null;
-  const payload = item.payload ?? {};
   if (str(payload.object_type) === "Audio") return null;
   return str(payload.object_activity_id) ?? null;
 }
@@ -442,7 +510,7 @@ onMounted(() => {
   for (const [id, el] of rowEls) {
     if (!isSeen(id)) observer.observe(el);
   }
-  void store.load();
+  void store.load().finally(() => void resolveNoteActivities());
 });
 
 onBeforeUnmount(() => {
@@ -630,17 +698,17 @@ onBeforeUnmount(() => {
             </span>
           </div>
 
-          <ActivityCard
-            v-if="noteActivity(item)"
-            :activity="noteActivity(item)!"
-            readonly
-            class="notifications-view__card"
-          />
           <NotificationActivityCard
-            v-else-if="activityRefFor(item)"
+            v-if="activityRefFor(item)"
             :activity-id="activityRefFor(item)!"
             class="notifications-view__card"
             @error="onActivityCardError(item.id)"
+          />
+          <ActivityCard
+            v-else-if="noteActivity(item)"
+            :activity="noteActivity(item)!"
+            readonly
+            class="notifications-view__card"
           />
           <NotificationItemCard
             v-else-if="itemCardFor(item)"

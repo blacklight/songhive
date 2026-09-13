@@ -360,7 +360,7 @@ async def test_like_activity_notifies_local_owner(db_session, regular_user, othe
     assert payload["local_url"] == f"/tracks/{track.id}"
     # The reacted activity's own identity lets the client render the card.
     assert payload["object_activity_id"] == str(activity.id)
-    assert payload["object_page_url"] == f"/tracks/{track.id}/activities"
+    assert payload["object_page_url"] == f"/activities/{activity.id}"
     assert "object_type" not in payload  # the activity carries no payload object
 
 
@@ -410,7 +410,7 @@ async def test_like_activity_on_status_has_no_item_fields(db_session, regular_us
     assert "item_id" not in payload
     assert payload["item_title"] == (other_user.display_name or other_user.username)
     assert payload["local_url"] == f"/@{other_user.username}"
-    assert payload["object_page_url"] == f"/@{other_user.username}"
+    assert payload["object_page_url"] == f"/activities/{activity.id}"
     assert payload["object_activity_id"] == str(activity.id)
     assert payload["object_type"] == "Note"
 

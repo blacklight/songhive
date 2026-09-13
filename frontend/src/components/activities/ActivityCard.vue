@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { RouterLink } from "vue-router";
-import { computed, ref } from "vue";
+import { RouterLink, useRouter } from "vue-router";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   listActivityReplies,
@@ -32,11 +32,16 @@ import {
 } from "@/utils/activityContent";
 
 const props = withDefaults(
-  defineProps<{ activity: ActivityResponse; readonly?: boolean }>(),
-  { readonly: false },
+  defineProps<{
+    activity: ActivityResponse;
+    readonly?: boolean;
+    expandReplies?: boolean;
+  }>(),
+  { readonly: false, expandReplies: false },
 );
 
 const { t } = useI18n();
+const router = useRouter();
 const store = useActivitiesStore();
 const authStore = useAuthStore();
 const confirmStore = useConfirmStore();
@@ -229,6 +234,39 @@ const boosted = computed(
 const boosting = computed(() => store.isBoosting(props.activity.id));
 const deleting = computed(() => store.isDeleting(props.activity.id));
 
+// Cards backed by a stored activity row navigate to their
+// ``/activities/{id}`` permalink — the whole card is the link target,
+// Mastodon-style. Snapshot cards (notification payloads with no local
+// row) carry no entity and stay inert.
+const canNavigate = computed(
+  () => !!activity.value.entity_type && !!activity.value.id,
+);
+const activityPageUrl = computed(() => `/activities/${activity.value.id}`);
+// The object id stays the external link for snapshot cards only.
+const objectLink = computed(
+  () => activity.value.object_url || activity.value.source_id || null,
+);
+const copyTarget = computed(() =>
+  canNavigate.value
+    ? `${window.location.origin}${activityPageUrl.value}`
+    : objectLink.value,
+);
+
+function onCardClick(event: MouseEvent) {
+  if (!canNavigate.value) return;
+  const target = event.target as HTMLElement | null;
+  if (
+    target?.closest(
+      "a, button, input, textarea, select, label, audio, video, .activity-card__reply-composer",
+    )
+  ) {
+    return;
+  }
+  if (window.getSelection()?.toString()) return;
+  event.stopPropagation();
+  void router?.push(activityPageUrl.value);
+}
+
 const actorsOpen = ref(false);
 const actorsKind = ref<"likes" | "boosts">("likes");
 const repliesOpen = ref(false);
@@ -237,6 +275,13 @@ const repliesLoading = ref(false);
 const localReplies = ref<ActivityResponse[]>([]);
 const remoteReplies = ref<RemoteReply[]>([]);
 const replyComposerOpen = ref(false);
+
+onMounted(() => {
+  if (props.expandReplies && canNavigate.value) {
+    repliesOpen.value = true;
+    void loadReplies();
+  }
+});
 
 async function toggleLike() {
   const undoing = liked.value;
@@ -454,10 +499,9 @@ async function remove() {
 }
 
 async function copyUrl() {
+  if (!copyTarget.value) return;
   try {
-    await navigator.clipboard.writeText(
-      activity.value.object_url || activity.value.source_id,
-    );
+    await navigator.clipboard.writeText(copyTarget.value);
     toast.push({ type: "success", message: t("activities.copyUrl.done") });
   } catch (err) {
     toast.push({
@@ -469,7 +513,12 @@ async function copyUrl() {
 </script>
 
 <template>
-  <article v-if="!removed" class="activity-card">
+  <article
+    v-if="!removed"
+    class="activity-card"
+    :class="{ 'activity-card--link': canNavigate }"
+    @click="onCardClick"
+  >
     <header class="activity-card__header">
       <AppAvatar :src="actorAvatar" :name="actorDisplayName" size="sm" />
       <div class="activity-card__meta">
@@ -494,11 +543,23 @@ async function copyUrl() {
           }}</span>
           <span class="activity-card__handle">{{ actorName }}</span>
         </RouterLink>
+        <RouterLink
+          v-if="canNavigate"
+          :to="activityPageUrl"
+          class="activity-card__time"
+          >{{ formatDateTime(activity.published_at) }}</RouterLink
+        >
         <a
-          :href="activity.object_url || activity.source_id"
+          v-else-if="objectLink"
+          :href="objectLink"
+          target="_blank"
+          rel="noopener"
           class="activity-card__time"
           >{{ formatDateTime(activity.published_at) }}</a
         >
+        <span v-else class="activity-card__time">{{
+          formatDateTime(activity.published_at)
+        }}</span>
       </div>
       <div class="activity-card__badges">
         <span v-if="typeLabel" class="activity-card__type" :title="typeLabel">
@@ -620,10 +681,10 @@ async function copyUrl() {
     </div>
 
     <footer
-      v-if="!props.readonly && (canInteract || canDelete)"
+      v-if="copyTarget || (!props.readonly && (canInteract || canDelete))"
       class="activity-card__actions"
     >
-      <template v-if="canInteract">
+      <template v-if="!props.readonly && canInteract">
         <span class="activity-card__action">
           <AppButton
             variant="ghost"
@@ -694,7 +755,7 @@ async function copyUrl() {
       </template>
       <span class="activity-card__actions-spacer" />
       <AppButton
-        v-if="canEdit"
+        v-if="!props.readonly && canEdit"
         variant="ghost"
         size="sm"
         icon="pen-to-square"
@@ -703,7 +764,7 @@ async function copyUrl() {
         @click="editOpen = true"
       />
       <AppButton
-        v-if="canDelete"
+        v-if="!props.readonly && canDelete"
         variant="ghost"
         size="sm"
         icon="trash"
@@ -713,6 +774,7 @@ async function copyUrl() {
         @click="remove"
       />
       <AppButton
+        v-if="copyTarget"
         variant="ghost"
         size="sm"
         icon="clipboard"
@@ -794,6 +856,10 @@ async function copyUrl() {
   .activity-card {
     width: calc(70rem - var(--sidebar-width));
   }
+}
+
+.activity-card--link {
+  cursor: pointer;
 }
 
 .activity-card__header {

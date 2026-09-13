@@ -274,9 +274,11 @@ describe("ActivityCard", () => {
     expect(wrapper.text()).toContain("2");
   });
 
-  it("hides actions for anonymous users", () => {
+  it("shows only the copy URL action for anonymous users", () => {
     const wrapper = mountCard();
-    expect(wrapper.find(".activity-card__actions").exists()).toBe(false);
+    const buttons = wrapper.findAll(".activity-card__actions button");
+    expect(buttons.length).toBe(1);
+    expect(buttons[0].attributes("aria-label")).toBe("Copy link");
   });
 
   it("hides the edit action for non-owners", () => {
@@ -318,10 +320,11 @@ describe("ActivityCard", () => {
     await flushPromises();
     expect(getActivity).toHaveBeenCalledWith("target-1");
     expect(wrapper.text()).toContain("the liked post");
-    // The timestamp links to the liked object, not the like itself.
-    expect(wrapper.find(".activity-card__time").attributes("href")).toBe(
-      "https://example.com/users/bob/objects/target-1",
-    );
+    // The timestamp links to the like's own permalink page.
+    const timeLink = wrapper
+      .findAllComponents({ name: "RouterLink" })
+      .find((link) => link.classes().includes("activity-card__time"));
+    expect(timeLink?.props("to")).toBe("/activities/a1");
     // No edit button on a reaction; the only interaction groups are the
     // embedded card's own action bar.
     expect(wrapper.find('button[aria-label="Edit"]').exists()).toBe(false);

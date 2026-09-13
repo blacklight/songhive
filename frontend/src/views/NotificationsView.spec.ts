@@ -47,10 +47,12 @@ vi.mock("@/composables/useItemSummary", () => ({
 vi.mock("@/api/activities", () => ({
   getActivity: vi.fn(),
   listActivityReplies: vi.fn(),
+  lookupActivity: vi.fn().mockRejectedValue(new Error("not found")),
 }));
 
 const listNotifications = vi.mocked(notificationsApi.listNotifications);
 const getActivity = vi.mocked(activitiesApi.getActivity);
+const lookupActivity = vi.mocked(activitiesApi.lookupActivity);
 const markSeenApi = vi.mocked(notificationsApi.markSeen);
 const markUnseenApi = vi.mocked(notificationsApi.markUnseen);
 const markAllSeenApi = vi.mocked(notificationsApi.markAllSeen);
@@ -281,8 +283,9 @@ describe("NotificationsView", () => {
     expect(
       card.find(".activity-card__content").element.innerHTML,
     ).not.toContain("<b>");
-    // Read-only: no like/edit actions.
-    expect(card.find(".activity-card__actions").exists()).toBe(false);
+    // Read-only: no like/edit actions, but the copy-URL button stays.
+    expect(card.find(".activity-card__action").exists()).toBe(false);
+    expect(card.find('button[aria-label="Copy link"]').exists()).toBe(true);
     // Timestamp links to the original remote object.
     expect(card.find("a.activity-card__time").attributes("href")).toBe(
       "https://remote.example/objects/note-1",
@@ -317,6 +320,156 @@ describe("NotificationsView", () => {
       "https://elsewhere.example/users/carol",
     );
     expect(link.text()).toBe("@carol@elsewhere.example");
+  });
+
+  it("links replies to the replied-to activity page", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "reply",
+          actor_url: "urn:songhive:user:bob",
+          source_url: "https://example.com/users/bob/objects/r1",
+          payload: {
+            actor_name: "bob",
+            object_activity_id: "act-reply-1",
+            object_type: "Note",
+            target_url: "https://example.com/users/me/objects/t-1",
+            target_object_activity_id: "act-target-1",
+            target_object_type: "Note",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    getActivity.mockResolvedValueOnce(createActivity({ id: "act-reply-1" }));
+    const { wrapper } = await mountView();
+    await flushPromises();
+    // "replied to your post" opens the replied-to activity's page.
+    const action = wrapper.find("a.notifications-view__action");
+    expect(action.attributes("href")).toBe("/activities/act-target-1");
+    expect(action.text()).toBe("replied to your post");
+  });
+
+  it("renders a real card for mentions that resolve to a stored activity", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "mention",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/objects/note-9",
+          payload: {
+            actor_name: "bob",
+            object_url: "https://remote.example/objects/note-9",
+            object_activity_id: "act-note-9",
+            object_type: "Note",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    getActivity.mockResolvedValueOnce(
+      createActivity({
+        id: "act-note-9",
+        source_type: "remote",
+        source_actor: "https://remote.example/users/bob",
+        content: "<p>the mention</p>",
+        content_source: null,
+      }),
+    );
+    const { wrapper } = await mountView();
+    await flushPromises();
+    expect(getActivity).toHaveBeenCalledWith("act-note-9");
+    const card = wrapper.find(".activity-card");
+    expect(card.exists()).toBe(true);
+    expect(card.text()).toContain("the mention");
+    // The action links to the note's permalink page, not its object id.
+    expect(
+      wrapper.find("a.notifications-view__action").attributes("href"),
+    ).toBe("/activities/act-note-9");
+  });
+
+  it("resolves legacy note notifications through the lookup endpoint", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "reply",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/objects/note-8",
+          payload: {
+            actor_name: "bob",
+            object_url: "https://remote.example/objects/note-8",
+            object_content: "<p>a reply</p>",
+            target_url: "https://example.com/users/me/objects/t-1",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    lookupActivity.mockResolvedValueOnce(
+      createActivity({
+        id: "act-note-8",
+        source_type: "remote",
+        source_actor: "https://remote.example/users/bob",
+        source_id: "https://remote.example/objects/note-8",
+      }),
+    );
+    getActivity.mockResolvedValueOnce(
+      createActivity({ id: "act-note-8", content: "<p>a reply</p>" }),
+    );
+    const { wrapper } = await mountView();
+    await flushPromises();
+    expect(lookupActivity).toHaveBeenCalledWith(
+      "https://remote.example/objects/note-8",
+    );
+    expect(getActivity).toHaveBeenCalledWith("act-note-8");
+    const card = wrapper.find(".activity-card");
+    expect(card.exists()).toBe(true);
+    expect(card.text()).toContain("a reply");
+  });
+
+  it("keeps same-host object permalinks as backend redirects", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "mention",
+          actor_url: "urn:songhive:user:bob",
+          source_url: `${window.location.origin}/users/bob/objects/n-1`,
+          payload: {
+            actor_name: "bob",
+            object_url: `${window.location.origin}/users/bob/objects/n-1`,
+            object_content: "<p>hi</p>",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    const { wrapper } = await mountView();
+    const action = wrapper.find("a.notifications-view__action");
+    expect(action.attributes("href")).toBe(
+      `${window.location.origin}/users/bob/objects/n-1`,
+    );
+    expect(action.attributes("target")).toBe("_blank");
+  });
+
+  it("shows a copy URL button on snapshot note cards", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "mention",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/objects/note-1",
+          payload: {
+            actor_name: "bob",
+            object_url: "https://remote.example/objects/note-1",
+            object_content: "<p>hey</p>",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    const { wrapper } = await mountView();
+    const copy = wrapper.find('button[aria-label="Copy link"]');
+    expect(copy.exists()).toBe(true);
   });
 
   it("renders a target link for replies that reference a local item", async () => {

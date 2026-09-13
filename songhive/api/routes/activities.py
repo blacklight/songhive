@@ -3,11 +3,14 @@ Activity interaction routes.
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import Any, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
@@ -237,22 +240,13 @@ def _build_activity_response(
     return response
 
 
-@router.get("/{activity_id}", response_model=ActivityResponse)
-async def get_activity(
-    activity_id: str,
+async def _viewable_activity_response(
+    activity: Optional[Activity],
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user_optional),
-):
-    """
-    Fetch a single activity.
-
-    Anonymous requesters may read ``public`` activities on publicly
-    accessible entities; authenticated users get the wider visibilities
-    ``can_view_activity`` grants, and the response's interaction summary
-    reflects their own reactions.
-    """
-    activity = await db.get(Activity, activity_id)
+    db: AsyncSession,
+    user: Optional[User],
+) -> ActivityResponse:
+    """Serialize ``activity`` after enforcing view permissions."""
     if activity is None or activity.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
 
@@ -271,6 +265,63 @@ async def get_activity(
         profile_map.get(str(activity.id), activity_service.ActorProfile()),
         summary_map.get(str(activity.id)),
     )
+
+
+async def _resolve_activity_by_object_url(db: AsyncSession, url: str) -> Optional[Activity]:
+    """
+    Resolve an object URL or id to a known activity row.
+
+    ``source_id`` is matched directly, which covers local object URLs and
+    materialized remote objects alike; the ``/objects/{id}`` permalink form
+    additionally matches ``local_object_id`` (and a bare ``source_id``).
+    """
+    conditions = [Activity.source_id == url]
+    match = re.search(r"/objects/([^/?#]+)/?$", urlparse(url).path or "")
+    if match:
+        object_id = match.group(1)
+        conditions += [
+            Activity.local_object_id == object_id,
+            Activity.source_id == object_id,
+        ]
+    return await db.scalar(select(Activity).where(or_(*conditions)).limit(1))
+
+
+@router.get("/lookup", response_model=ActivityResponse)
+async def lookup_activity(
+    request: Request,
+    url: str = Query(..., max_length=2048),
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    Resolve an object URL to a stored activity.
+
+    Lets clients map a federated object id — a remote note materialized as
+    a reply, a local ``{actor}/objects/{id}`` permalink — to the activity
+    row the SPA can render, instead of treating opaque remote ids as
+    human-facing URLs.
+    """
+    activity = await _resolve_activity_by_object_url(db, url)
+    return await _viewable_activity_response(activity, request, db, user)
+
+
+@router.get("/{activity_id}", response_model=ActivityResponse)
+async def get_activity(
+    activity_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    Fetch a single activity.
+
+    Anonymous requesters may read ``public`` activities on publicly
+    accessible entities; authenticated users get the wider visibilities
+    ``can_view_activity`` grants, and the response's interaction summary
+    reflects their own reactions.
+    """
+    activity = await db.get(Activity, activity_id)
+    return await _viewable_activity_response(activity, request, db, user)
 
 
 @router.patch("/{activity_id}", response_model=ActivityResponse)

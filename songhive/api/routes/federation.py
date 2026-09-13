@@ -21,7 +21,7 @@ from ...federation.activities import (
 )
 from ...federation.actors import get_federation_storage
 from ...federation.serializers import track_to_audio_object
-from ...models import Activity, Track, User, Visibility
+from ...models import Activity, Track, Visibility
 from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor, extract_domain, is_domain_allowed
 from ...tasks.federation import process_incoming
@@ -53,18 +53,6 @@ def _ordered_collection(collection_id: str, items: list[str]) -> dict[str, Any]:
         "totalItems": len(items),
         "orderedItems": items,
     }
-
-
-def _entity_activities_url(entity_type: str, entity_id: str, entity: Any = None) -> str:
-    """
-    Return the SPA route listing an entity's activities.
-
-    Thin wrapper over ``services.activities.activity_page_url`` — kept under
-    the historical name used by this module's object-permalink redirects.
-    """
-    from ...services.activities import activity_page_url
-
-    return activity_page_url(entity_type, entity_id, entity)
 
 
 _FEDERATING_VISIBILITIES = [v.value for v in Visibility if Visibility.federates(v)]
@@ -152,7 +140,7 @@ async def get_object(
     permalink on remote servers), so clients not accepting an
     ActivityStreams media type are redirected to the SPA: a track-resolved
     object goes to the track page, an activity-resolved object to the
-    entity's activity feed.
+    activity's own ``/activities/{id}`` page.
     """
     config = _federation_config(request)
     user = await _get_active_user(db, username)
@@ -194,11 +182,9 @@ async def get_object(
 
     if not _accepts_activitypub(request):
         # Shares carry their own object id as ``url``; redirect browsers to
-        # the activity feed of the entity the object is attached to instead
-        # of serving raw JSON.
-        entity = await db.get(User, activity.entity_id) if activity.entity_type == "user" else None
+        # the activity's own page instead of serving raw JSON.
         return RedirectResponse(
-            url=_entity_activities_url(activity.entity_type, activity.entity_id, entity),
+            url=f"/activities/{activity.id}",
             status_code=status.HTTP_307_TEMPORARY_REDIRECT,
         )
 

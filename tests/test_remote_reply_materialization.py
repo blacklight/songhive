@@ -921,14 +921,25 @@ def test_process_incoming_shared_inbox_notifies_and_materializes(engine, tmp_pat
             notifications = (
                 (await session.execute(select(Notification).where(Notification.user_id == user_id))).scalars().all()
             )
-            return row, [n.type for n in notifications]
+            return row, notifications
 
-    row, types = asyncio.run(_check())
+    row, notifications = asyncio.run(_check())
     reset_db()
 
     assert row is not None
     assert row.visibility == Visibility.MENTIONED.value
-    assert sorted(types) == ["mention", "reply"]
+    assert sorted(n.type for n in notifications) == ["mention", "reply"]
+
+    # The materialized reply's own identity lets clients render its card
+    # and link to its ``/activities/{id}`` page instead of a remote object
+    # id that does not dereference to a browser page.
+    for notification in notifications:
+        payload = notification.payload
+        assert payload["object_activity_id"] == str(row.id)
+        assert payload["object_page_url"] == f"/activities/{row.id}"
+        assert payload["object_type"] == "Note"
+    reply = next(n for n in notifications if n.type == "reply")
+    assert reply.payload["target_object_activity_id"] is not None
 
 
 # ---------------------------------------------------------------------------

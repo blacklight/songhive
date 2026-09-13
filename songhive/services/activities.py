@@ -21,7 +21,7 @@ from fastapi import HTTPException
 from pubby import InteractionType
 from pubby.content import render_post_html, set_object_content
 from pydantic import BaseModel, field_validator
-from sqlalchemy import and_, delete, exists, func, or_, select, union_all
+from sqlalchemy import and_, delete, func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -47,7 +47,7 @@ from ..models.tag import Tag
 from ..models.track import Track
 from ..models.user import User
 from . import federation as federation_service
-from .acl import can_access, can_manage, get_item_plural
+from .acl import _activity_visibility_filter, can_access, can_manage, get_item_plural
 from .mentions import (
     CONTENT_TYPE_MARKDOWN,
     STATUS_CONTENT_TYPES,
@@ -266,33 +266,6 @@ async def can_view_activity(
         return result.scalar_one_or_none() is not None
 
     return False
-
-
-def _activity_visibility_filter(user: Optional[User]):
-    """
-    Return a WHERE clause applying per-activity visibility for list queries.
-
-    Mirrors ``can_view_activity`` minus the entity-access check — the caller
-    authorizes the containing entity once for the whole page: ``public``
-    activities are visible to everyone, ``local`` and ``followers`` to
-    authenticated users, ``mentioned`` to the users they name, and every
-    visibility to the activity's owner. Admins get no extra reach —
-    ``mentioned`` and ``private`` replies stay confined to their audience.
-    """
-    conditions = [Activity.visibility == Visibility.PUBLIC.value]
-    if user is not None:
-        conditions.append(Activity.owner_user_id == user.id)
-        conditions.append(Activity.visibility.in_([Visibility.LOCAL.value, Visibility.FOLLOWERS.value]))
-        conditions.append(
-            and_(
-                Activity.visibility == Visibility.MENTIONED.value,
-                exists().where(
-                    ActivityMention.activity_id == Activity.id,
-                    ActivityMention.user_id == user.id,
-                ),
-            )
-        )
-    return or_(*conditions)
 
 
 def _encode_activity_cursor(activity: Activity) -> str:
@@ -1788,19 +1761,17 @@ async def _entity_link_fields(session: AsyncSession, activity: Activity) -> Dict
     rendering (``item_type``/``item_id`` are omitted for ``user`` entities —
     statuses have no item page); ``object_activity_id``/``object_type``/
     ``object_page_url`` identify the activity itself so clients can render
-    its card and link to its page (the entity's activity feed, or the
-    author's profile for statuses).
+    its card and link to its ``/activities/{id}`` page.
     """
     entity = await resolve_entity(session, activity.entity_type, activity.entity_id)
     if entity is None:
         return {}
-    page_url = activity_page_url(activity.entity_type, activity.entity_id, entity)
     fields: Dict[str, Any] = {
         "item_title": getattr(entity, "title", None)
         or getattr(entity, "name", None)
         or getattr(entity, "display_name", None)
         or getattr(entity, "username", None),
-        "object_page_url": page_url,
+        "object_page_url": f"/activities/{activity.id}",
         "object_activity_id": str(activity.id),
     }
     object_type = _activity_object_type(activity)
@@ -1808,7 +1779,7 @@ async def _entity_link_fields(session: AsyncSession, activity: Activity) -> Dict
         fields["object_type"] = object_type
     if activity.entity_type == "user":
         # Statuses have no item page — the author's profile is the link.
-        fields["local_url"] = page_url
+        fields["local_url"] = activity_page_url(activity.entity_type, activity.entity_id, entity)
     else:
         plural = get_item_plural(activity.entity_type) or f"{activity.entity_type}s"
         fields["item_type"] = activity.entity_type
@@ -2071,6 +2042,9 @@ async def _notify_reply(
 
         note = reply.payload.get("object") if isinstance(reply.payload, dict) else {}
         snapshot = _note_snapshot(note) if isinstance(note, dict) else {}
+        # The reply's own link fields let clients render its real card and
+        # link to its page; ``target_*`` resolves the replied-to activity.
+        object_fields = await _entity_link_fields(session, reply)
         target_fields = {
             f"target_{key}": value for key, value in (await _entity_link_fields(session, activity)).items()
         }
@@ -2079,6 +2053,7 @@ async def _notify_reply(
             "actor_name": author.display_name or author.username,
             "actor_avatar_url": author.avatar_url,
             **snapshot,
+            **object_fields,
             "target_url": activity.source_id,
             **target_fields,
         }
@@ -2734,6 +2709,9 @@ async def _notify_status_mentions(
     skipped = {str(uid) for uid in skip_user_ids}
     note = activity.payload.get("object") if isinstance(activity.payload, dict) else {}
     snapshot = _note_snapshot(note) if isinstance(note, dict) else {}
+    # The status's own link fields let clients render its real card and
+    # link to its page rather than its object URL.
+    object_fields = await _entity_link_fields(session, activity)
     for mention in mentions:
         if not mention.user_id or mention.user_id == author.id or str(mention.user_id) in skipped:
             continue
@@ -2748,6 +2726,7 @@ async def _notify_status_mentions(
                     "actor_name": author.display_name or author.username,
                     "actor_avatar_url": author.avatar_url,
                     **snapshot,
+                    **object_fields,
                 },
             )
         except Exception as exc:

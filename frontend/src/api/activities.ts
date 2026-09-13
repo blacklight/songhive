@@ -176,6 +176,17 @@ export function getActivity(activityId: string): Promise<ActivityResponse> {
   return apiRequest<ActivityResponse>(`/activities/${activityId}`);
 }
 
+/**
+ * Resolve an object URL/id — a local ``{actor}/objects/{id}`` permalink or
+ * a remote object materialized as a reply — to the stored activity row.
+ * 404s for objects the instance does not store.
+ */
+export function lookupActivity(url: string): Promise<ActivityResponse> {
+  return apiRequest<ActivityResponse>(`/activities/lookup`, {
+    query: { url },
+  });
+}
+
 export function updateActivity(
   activityId: string,
   body: ActivityUpdate,

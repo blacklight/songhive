@@ -821,7 +821,7 @@ def test_process_incoming_like_resolves_local_activity(engine, tmp_path, monkeyp
     payload = rows[0].payload
     assert payload["object_activity_id"] == activity_id
     assert payload["object_type"] == "Note"
-    assert payload["object_page_url"] == "/@alice"
+    assert payload["object_page_url"] == f"/activities/{activity_id}"
     assert payload["local_url"] == "/@alice"
     assert "item_type" not in payload
 
