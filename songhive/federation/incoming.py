@@ -7,9 +7,12 @@ interaction record — so the reply can be listed, counted, and interacted
 with (liked, boosted, replied to) exactly like a local reply. Inbound
 ``Update`` and ``Delete`` activities revise or retract materialized rows.
 
-Only publicly addressed replies are materialized, mirroring Pubby's
-interaction-storage policy: followers-only and direct replies keep
-reaching the addressed user through notifications only.
+Publicly addressed replies are stored with the entity-clamped ``public``
+visibility. Non-public replies (direct messages, followers-only) are
+stored with ``mentioned`` visibility when they address at least one
+local user — through ``to``/``cc``/``bto``/``bcc`` addressees or
+``Mention`` tags — so only the addressed audience can see them in the
+thread. Non-public replies addressing no local user are not materialized.
 """
 
 import logging
@@ -18,12 +21,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from pubby import AttributionMismatch, validate_attribution
+from pubby.audience import addressees, is_public, mentioned_actors
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import User, Visibility
 from ..models.activity import _MENTION_HANDLE_RE, Activity, ActivityMention
-from ..services import federation as federation_service
 from ..services.activities import (
     _entity_visibility,
     _remote_actor_handle,
@@ -32,26 +36,6 @@ from ..services.activities import (
 )
 
 logger = logging.getLogger(__name__)
-
-# ActivityStreams public-audience identifiers (mirrors pubby's check).
-_AS_PUBLIC_IDS = {"https://www.w3.org/ns/activitystreams#Public", "Public", "as:Public"}
-
-
-def _addressees(obj: dict) -> List[str]:
-    """Flatten an object's ``to``/``cc``/``bto``/``bcc`` fields into a list."""
-    out: List[str] = []
-    for key in ("to", "cc", "bto", "bcc"):
-        value = obj.get(key)
-        if isinstance(value, str):
-            out.append(value)
-        elif isinstance(value, list):
-            out.extend(v for v in value if isinstance(v, str))
-    return out
-
-
-def _is_publicly_addressed(obj: dict) -> bool:
-    """Return whether the object addresses the ActivityStreams Public collection."""
-    return bool(_AS_PUBLIC_IDS.intersection(_addressees(obj)))
 
 
 def _parse_published(value: Any) -> Optional[datetime]:
@@ -89,23 +73,47 @@ def _remote_hashtags(obj: dict) -> List[str]:
     ]
 
 
+async def _local_addressee_users(session: AsyncSession, obj: dict) -> Dict[str, User]:
+    """
+    Resolve the object's local audience to ``User`` rows.
+
+    Covers ``to``/``cc``/``bto``/``bcc`` addressees and ``Mention`` tag
+    ``href``s matching a local ``User.actor_url`` — a direct reply may
+    address the recipient without carrying an explicit ``Mention`` tag.
+    Returns a map keyed by actor URL.
+    """
+    urls = addressees(obj) | set(mentioned_actors(obj))
+    if not urls:
+        return {}
+    rows = await session.execute(select(User).where(User.actor_url.in_(urls)))
+    return {user.actor_url: user for user in rows.scalars().all() if user.actor_url}
+
+
 async def _remote_mentions(session: AsyncSession, obj: dict) -> List[Dict[str, Any]]:
     """
-    Build ``ActivityMention`` field dicts from the object's ``tag`` Mentions.
+    Build ``ActivityMention`` field dicts for the object's audience.
 
-    ``href`` values that match a local user's ``actor_url`` are linked to
-    that user (``user_id``); the rest stay remote-only so remote mentions
-    still render and federate correctly. Entries whose handle cannot be
-    derived or validated are dropped.
+    Combines ``tag`` Mentions — whose ``href`` values matching a local
+    user's ``actor_url`` are linked to that user (``user_id``), the rest
+    staying remote-only — with local users found in the object's
+    addressees, so a non-public reply stays viewable to the local users it
+    addresses even without an explicit ``Mention`` tag. Entries whose
+    handle cannot be derived or validated are dropped.
     """
+    mentions = await _tag_mentions(session, obj)
+    covered = {m["actor_url"] for m in mentions}
+    for actor_url, user in (await _local_addressee_users(session, obj)).items():
+        if actor_url not in covered:
+            mentions.append({"handle": f"@{user.username}", "actor_url": actor_url, "user_id": user.id})
+    return mentions
+
+
+async def _tag_mentions(session: AsyncSession, obj: dict) -> List[Dict[str, Any]]:
+    """Build ``ActivityMention`` field dicts from the object's ``tag`` Mentions."""
     tags = obj.get("tag")
     if not isinstance(tags, list):
         return []
-    hrefs = [
-        tag["href"]
-        for tag in tags
-        if isinstance(tag, dict) and tag.get("type") == "Mention" and isinstance(tag.get("href"), str) and tag["href"]
-    ]
+    hrefs = mentioned_actors(obj)
     if not hrefs:
         return []
 
@@ -170,14 +178,28 @@ def _clamp_visibility(entity: Any) -> Visibility:
     """
     Return the visibility a materialized public reply may carry.
 
-    Remote replies are only materialized when publicly addressed; the
-    stored visibility is clamped to the containing entity's so the row can
-    never outrank its container (and local replies to it stay legal).
+    The stored visibility is clamped to the containing entity's so the row
+    can never outrank its container (and local replies to it stay legal).
     """
     entity_visibility = _entity_visibility(entity)
     if Visibility.can_contain(Visibility.PUBLIC, entity_visibility):
         return Visibility.PUBLIC
     return entity_visibility
+
+
+def _reply_visibility(obj: dict, entity: Any) -> Visibility:
+    """
+    Return the visibility a materialized reply should carry.
+
+    Publicly addressed objects keep the entity-clamped ``public``
+    visibility; everything else (direct messages, followers-only replies)
+    degrades to ``mentioned`` — the addressed audience is already
+    constrained by the row's ``ActivityMention`` entries, and entity
+    access is enforced separately when its activities are listed.
+    """
+    if is_public(obj):
+        return _clamp_visibility(entity)
+    return Visibility.MENTIONED
 
 
 async def materialize_remote_reply(session: AsyncSession, *, activity: dict) -> Optional[Activity]:
@@ -186,11 +208,12 @@ async def materialize_remote_reply(session: AsyncSession, *, activity: dict) -> 
 
     The reply is attached to the replied-to activity's entity, linked
     through ``in_reply_to_activity_id``, and inherits the entity-clamped
-    public visibility. Returns ``None`` — leaving the reply to the Pubby
-    interaction listing — when the object is not a public reply, the
-    signature-side attribution checks fail, or the parent cannot be
-    resolved to a known activity. Re-delivery is idempotent on
-    ``(source_type, source_id)``.
+    public visibility — or ``mentioned`` when the object is not publicly
+    addressed. Returns ``None`` — leaving the reply to the Pubby
+    interaction listing — when the object is not a reply, the
+    signature-side attribution checks fail, the parent cannot be resolved
+    to a known activity, or a non-public reply addresses no local user.
+    Re-delivery is idempotent on ``(source_type, source_id)``.
     """
     if activity.get("type") != "Create":
         return None
@@ -211,15 +234,13 @@ async def materialize_remote_reply(session: AsyncSession, *, activity: dict) -> 
     ):
         return None
 
-    # Attribution sanity: the delivering actor must own the object — a
-    # mismatched ``attributedTo`` or a foreign-hosted object id is dropped.
-    attributed_to = obj.get("attributedTo")
-    if isinstance(attributed_to, str) and attributed_to != actor:
-        return None
-    if federation_service.extract_domain(object_id) != federation_service.extract_domain(actor):
-        return None
-
-    if not _is_publicly_addressed(obj):
+    # Attribution sanity is owned by pubby (``strict_attribution`` on the
+    # inbox processor) — but this sync runs on the raw activity even when
+    # the processor dropped it, so the same guard is applied here via the
+    # pubby validator.
+    try:
+        validate_attribution(actor, obj)
+    except AttributionMismatch:
         return None
 
     existing = await session.scalar(
@@ -230,6 +251,12 @@ async def materialize_remote_reply(session: AsyncSession, *, activity: dict) -> 
     )
     if existing is not None:
         return existing
+
+    public = is_public(obj)
+    mentions = await _remote_mentions(session, obj)
+    if not public and not any(m["user_id"] for m in mentions):
+        # A non-public reply addressing no local user has no audience here.
+        return None
 
     parent = await _resolve_reply_parent(session, in_reply_to)
     if parent is None:
@@ -247,7 +274,7 @@ async def materialize_remote_reply(session: AsyncSession, *, activity: dict) -> 
         source_actor=actor,
         source_id=object_id,
         owner_user_id=None,
-        visibility=_clamp_visibility(entity).value,
+        visibility=_reply_visibility(obj, entity).value,
         in_reply_to_activity_id=str(parent.id),
         content=content if isinstance(content, str) and content else None,
         content_type="text/html" if isinstance(content, str) and content else None,
@@ -258,7 +285,7 @@ async def materialize_remote_reply(session: AsyncSession, *, activity: dict) -> 
     session.add(reply)
     await session.flush()
 
-    for mention in await _remote_mentions(session, obj):
+    for mention in mentions:
         session.add(ActivityMention(activity_id=reply.id, **mention))
     await session.flush()
     await _sync_activity_tags(session, reply, _remote_hashtags(obj))
@@ -271,10 +298,12 @@ async def update_remote_reply(session: AsyncSession, *, activity: dict) -> None:
     Apply an inbound ``Update`` to a materialized remote reply.
 
     Content, language, payload, published timestamp, mention rows and
-    hashtags are refreshed from the updated object. An object that stops
-    being publicly addressed is retracted. Updates for objects that were
-    never materialized fall back to materialization when they carry an
-    ``inReplyTo`` — covering a missed ``Create``.
+    hashtags are refreshed from the updated object, and the stored
+    visibility is recomputed from the object's addressing — an edit that
+    drops the public audience degrades the row to ``mentioned`` rather
+    than retracting it. Updates for objects that were never materialized
+    fall back to materialization when they carry an ``inReplyTo`` —
+    covering a missed ``Create``.
     """
     if activity.get("type") != "Update":
         return
@@ -286,16 +315,20 @@ async def update_remote_reply(session: AsyncSession, *, activity: dict) -> None:
     if not isinstance(object_id, str) or not object_id:
         return
 
+    try:
+        validate_attribution(actor, obj)
+    except AttributionMismatch:
+        return
+
     row = await _find_remote_reply(session, object_id, actor)
     if row is None:
         if isinstance(obj.get("inReplyTo"), str) and obj["inReplyTo"]:
             await materialize_remote_reply(session, activity={**activity, "type": "Create"})
         return
 
-    if not _is_publicly_addressed(obj):
-        row.deleted_at = datetime.now(timezone.utc)
-        await session.flush()
-        return
+    entity = await resolve_entity(session, row.entity_type, row.entity_id)
+    if entity is not None:
+        row.visibility = _reply_visibility(obj, entity).value
 
     content = obj.get("content")
     row.content = content if isinstance(content, str) and content else None
@@ -339,7 +372,7 @@ async def sync_remote_activity(session: AsyncSession, *, activity: dict) -> None
     """
     Reflect an inbound remote activity onto materialized ``Activity`` rows.
 
-    ``Create`` materializes public replies to known activities; ``Update``
+    ``Create`` materializes replies to known activities; ``Update``
     revises and ``Delete`` retracts materialized rows. Other activity
     types are ignored — likes, boosts and quotes stay interaction-only.
     """

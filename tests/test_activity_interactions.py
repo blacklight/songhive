@@ -171,7 +171,7 @@ async def test_can_view_activity_mentioned(db_session, regular_user, other_user,
 
 @pytest.mark.asyncio
 async def test_can_view_activity_private_owner_only(db_session, regular_user, other_user, admin_user):
-    """A private activity is limited to its owner and admins."""
+    """A private activity is limited to its owner; admins get no bypass."""
     track = await _make_track(db_session, other_user)
     activity = _make_activity(
         "track",
@@ -183,7 +183,7 @@ async def test_can_view_activity_private_owner_only(db_session, regular_user, ot
     await db_session.flush()
 
     assert await can_view_activity(db_session, other_user, activity)
-    assert await can_view_activity(db_session, admin_user, activity)
+    assert not await can_view_activity(db_session, admin_user, activity)
     assert not await can_view_activity(db_session, regular_user, activity)
 
 

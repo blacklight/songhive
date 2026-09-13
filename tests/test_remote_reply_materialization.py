@@ -181,8 +181,8 @@ async def test_materialize_resolves_mentions_and_tags(db_session, regular_user):
 
 
 @pytest.mark.asyncio
-async def test_materialize_skips_non_public_reply(db_session, regular_user):
-    """Followers-only replies stay interaction-only, like pubby's storage."""
+async def test_materialize_skips_non_public_reply_without_local_audience(db_session, regular_user):
+    """A non-public reply addressing no local user is not materialized."""
     track = await _make_track(db_session, regular_user)
     parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
     db_session.add(parent)
@@ -195,6 +195,81 @@ async def test_materialize_skips_non_public_reply(db_session, regular_user):
 
     assert reply is None
     assert (await db_session.scalar(select(func.count(Activity.id)).where(Activity.source_type == "remote"))) == 0
+
+
+@pytest.mark.asyncio
+async def test_materialize_mentioned_reply_visible_to_addressee(db_session, regular_user, config, monkeypatch):
+    """A direct remote reply materializes as ``mentioned`` for its audience."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    activity = _create_activity(parent, public=False)
+    activity["object"]["to"] = [regular_user.actor_url]
+    reply = await materialize_remote_reply(db_session, activity=activity)
+
+    assert reply is not None
+    assert reply.visibility == Visibility.MENTIONED.value
+    rows = (
+        (await db_session.execute(select(ActivityMention).where(ActivityMention.activity_id == reply.id)))
+        .scalars()
+        .all()
+    )
+    assert [(m.actor_url, m.user_id) for m in rows] == [(regular_user.actor_url, regular_user.id)]
+
+    _patch_interactions(monkeypatch, [])
+    local, _ = await list_activity_replies(db_session, activity=parent, user=regular_user, config=config)
+    assert [a.id for a in local] == [reply.id]
+
+
+@pytest.mark.asyncio
+async def test_materialize_mentioned_reply_via_tag_only(db_session, regular_user):
+    """A non-public reply mentioning a local user via tag materializes too."""
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    activity = _create_activity(parent, public=False)
+    activity["object"]["tag"] = [
+        {
+            "type": "Mention",
+            "href": regular_user.actor_url,
+            "name": "@regular@local.example",
+        }
+    ]
+    reply = await materialize_remote_reply(db_session, activity=activity)
+
+    assert reply is not None
+    assert reply.visibility == Visibility.MENTIONED.value
+
+
+@pytest.mark.asyncio
+async def test_mentioned_reply_hidden_from_others(
+    db_session, regular_user, other_user, admin_user, config, monkeypatch
+):
+    """Non-mentioned users — including admins and anonymous viewers — cannot see it."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    activity = _create_activity(parent, public=False)
+    activity["object"]["to"] = [regular_user.actor_url]
+    reply = await materialize_remote_reply(db_session, activity=activity)
+    assert reply is not None
+
+    _patch_interactions(monkeypatch, [])
+    for viewer in (other_user, admin_user, None):
+        local, _ = await list_activity_replies(db_session, activity=parent, user=viewer, config=config)
+        assert local == []
+        assert await activity_service.can_view_activity(db_session, viewer, reply) is False
 
 
 @pytest.mark.asyncio
@@ -310,8 +385,9 @@ async def test_update_remote_reply_revises_content(db_session, regular_user):
 
 
 @pytest.mark.asyncio
-async def test_update_remote_reply_retracts_non_public(db_session, regular_user):
-    """An Update that drops public addressing retracts the row."""
+async def test_update_remote_reply_degrades_to_mentioned(db_session, regular_user):
+    """An Update that drops public addressing degrades the row to ``mentioned``."""
+    regular_user.actor_url = "https://local.example/users/regular"
     track = await _make_track(db_session, regular_user)
     parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
     db_session.add(parent)
@@ -320,11 +396,19 @@ async def test_update_remote_reply_retracts_non_public(db_session, regular_user)
     assert reply is not None
 
     update = _create_activity(parent, public=False)
+    update["object"]["to"] = [regular_user.actor_url]
     update["type"] = "Update"
     await sync_remote_activity(db_session, activity=update)
     await db_session.flush()
 
-    assert reply.deleted_at is not None
+    assert reply.deleted_at is None
+    assert reply.visibility == Visibility.MENTIONED.value
+    rows = (
+        (await db_session.execute(select(ActivityMention).where(ActivityMention.activity_id == reply.id)))
+        .scalars()
+        .all()
+    )
+    assert [(m.actor_url, m.user_id) for m in rows] == [(regular_user.actor_url, regular_user.id)]
 
 
 @pytest.mark.asyncio
@@ -728,3 +812,200 @@ def test_process_incoming_materializes_remote_reply(engine, tmp_path, monkeypatc
     assert row is not None
     assert row.activity_type == "reply"
     assert row.in_reply_to_activity_id is not None
+
+
+@pytest.mark.asyncio
+async def test_reply_count_respects_mentioned_visibility(db_session, regular_user, admin_user, config, monkeypatch):
+    """A ``mentioned`` remote reply counts only for its audience."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    activity = _create_activity(parent, public=False)
+    activity["object"]["to"] = [regular_user.actor_url]
+    reply = await materialize_remote_reply(db_session, activity=activity)
+    assert reply is not None
+
+    _patch_interactions(monkeypatch, [])
+
+    assert (await resolve_interaction_summaries(db_session, [parent], regular_user, config))[
+        str(parent.id)
+    ].reply_count == 1
+    assert (await resolve_interaction_summaries(db_session, [parent], admin_user, config))[
+        str(parent.id)
+    ].reply_count == 0
+    assert (await resolve_interaction_summaries(db_session, [parent], None, config))[str(parent.id)].reply_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Shared-inbox delivery
+# ---------------------------------------------------------------------------
+
+
+def test_process_incoming_shared_inbox_notifies_and_materializes(engine, tmp_path, monkeypatch):
+    """A private reply delivered to ``/ap/inbox`` notifies the addressee."""
+    from songhive.models.notification import Notification
+
+    config = _task_config(tmp_path)
+    init_db(engine=engine, force=True)
+
+    async def _seed():
+        async with get_session() as session:
+            user = await create_user(
+                session,
+                username="alice",
+                email="alice@example.com",
+                password="secret",
+                config=config,
+            )
+            artist = Artist(name="Test Artist")
+            session.add(artist)
+            await session.flush()
+            track = Track(title="Test Track", artist_id=artist.id, owner_id=user.id, visibility="public")
+            session.add(track)
+            await session.flush()
+            parent = Activity(
+                entity_type="track",
+                entity_id=str(track.id),
+                activity_type="create",
+                source_type="local",
+                source_actor=user.actor_url,
+                source_id=f"{user.actor_url}/objects/1",
+                visibility="public",
+            )
+            session.add(parent)
+            await session.commit()
+            return user.id, user.actor_url, parent.source_id
+
+    user_id, actor_url, parent_source_id = asyncio.run(_seed())
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    actor = "https://remote.example/users/bob"
+    activity = {
+        "type": "Create",
+        "id": "https://remote.example/notes/priv1#create",
+        "actor": actor,
+        "to": [actor_url],
+        "object": {
+            "type": "Note",
+            "id": "https://remote.example/notes/priv1",
+            "attributedTo": actor,
+            "content": "<p>private reply</p>",
+            "inReplyTo": parent_source_id,
+            "to": [actor_url],
+            "tag": [{"type": "Mention", "href": actor_url, "name": "@alice@local.example"}],
+        },
+    }
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = None
+        process_incoming(activity, username=None)
+
+    init_db(engine=engine, force=True)
+
+    async def _check():
+        async with get_session() as session:
+            row = await session.scalar(
+                select(Activity).where(
+                    Activity.source_type == "remote",
+                    Activity.source_id == "https://remote.example/notes/priv1",
+                )
+            )
+            notifications = (
+                (await session.execute(select(Notification).where(Notification.user_id == user_id))).scalars().all()
+            )
+            return row, [n.type for n in notifications]
+
+    row, types = asyncio.run(_check())
+    reset_db()
+
+    assert row is not None
+    assert row.visibility == Visibility.MENTIONED.value
+    assert sorted(types) == ["mention", "reply"]
+
+
+# ---------------------------------------------------------------------------
+# Shared-inbox recipient resolution
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_inbox_recipients_reply_owner(db_session, regular_user):
+    """A public reply notifies the parent owner even when not addressed."""
+    from songhive.federation.notifications import resolve_inbox_recipients
+
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    activity = _create_activity(parent)
+    recipients = await resolve_inbox_recipients(db_session, activity=activity)
+    assert [user.id for user in recipients] == [regular_user.id]
+
+
+@pytest.mark.asyncio
+async def test_resolve_inbox_recipients_restricted_reply_no_audience(db_session, regular_user):
+    """A non-public reply that addresses nobody local notifies nobody."""
+    from songhive.federation.notifications import resolve_inbox_recipients
+
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    activity = _create_activity(parent, public=False)
+    recipients = await resolve_inbox_recipients(db_session, activity=activity)
+    assert recipients == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_inbox_recipients_restricted_reply_addressee(db_session, regular_user):
+    """A non-public reply notifies its local addressees and mention targets."""
+    from songhive.federation.notifications import resolve_inbox_recipients
+
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    activity = _create_activity(parent, public=False)
+    activity["object"]["to"] = [regular_user.actor_url]
+    recipients = await resolve_inbox_recipients(db_session, activity=activity)
+    assert [user.id for user in recipients] == [regular_user.id]
+
+    activity = _create_activity(parent, public=False, object_id="https://remote.example/notes/r2")
+    activity["object"]["tag"] = [{"type": "Mention", "href": regular_user.actor_url, "name": "@regular"}]
+    recipients = await resolve_inbox_recipients(db_session, activity=activity)
+    assert [user.id for user in recipients] == [regular_user.id]
+
+
+@pytest.mark.asyncio
+async def test_resolve_inbox_recipients_like_target_owner(db_session, regular_user):
+    """A ``Like`` on a local object resolves its owner for notification."""
+    from songhive.federation.notifications import resolve_inbox_recipients
+
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    activity = {
+        "type": "Like",
+        "id": "https://remote.example/likes/1",
+        "actor": "https://remote.example/users/bob",
+        "object": parent.source_id,
+    }
+    recipients = await resolve_inbox_recipients(db_session, activity=activity)
+    assert [user.id for user in recipients] == [regular_user.id]

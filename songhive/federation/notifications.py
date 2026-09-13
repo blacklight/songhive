@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from pubby.audience import addressees, is_public, mentioned_actors
 from pubby.moderation import extract_domain
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -257,14 +258,7 @@ def _extract_quote_target(obj: dict) -> Optional[str]:
 
 def _mentions_recipient(obj: dict, actor_url: Optional[str]) -> bool:
     """Return True when the object's Mention tags address ``actor_url``."""
-    if not actor_url:
-        return False
-    tags = obj.get("tag")
-    if not isinstance(tags, list):
-        return False
-    return any(
-        isinstance(tag, dict) and tag.get("type") == "Mention" and (tag.get("href") == actor_url) for tag in tags
-    )
+    return bool(actor_url) and actor_url in mentioned_actors(obj)
 
 
 async def _stamp_mention_rows(session: AsyncSession, recipient: User) -> None:
@@ -280,6 +274,108 @@ async def _stamp_mention_rows(session: AsyncSession, recipient: User) -> None:
         )
         .values(notified_at=datetime.now(timezone.utc))
     )
+
+
+def _activity_audience_urls(activity: dict) -> set:
+    """
+    Collect the URLs an inbound activity addresses or targets.
+
+    Covers ``to``/``cc``/``bto``/``bcc`` on the activity and its object,
+    ``Mention`` tag ``href``s, a string ``object`` (Follow/Like/Announce
+    target), the object's ``inReplyTo``/quote targets, and an ``Undo``'s
+    inner object. Only HTTP(S) URLs are returned.
+    """
+    candidates = set()
+
+    def _add(container: Any) -> None:
+        candidates.update(addressees(container))
+
+    _add(activity)
+    obj = activity.get("object")
+    if isinstance(obj, str):
+        candidates.add(obj)
+    elif isinstance(obj, dict):
+        _add(obj)
+        candidates.update(mentioned_actors(obj))
+        for key in ("inReplyTo", "quote", "quoteUrl", "_misskey_quote"):
+            target = obj.get(key)
+            if isinstance(target, str) and target:
+                candidates.add(target)
+        inner = obj.get("object")
+        if isinstance(inner, str):
+            candidates.add(inner)
+        elif isinstance(inner, dict):
+            inner_id = inner.get("id")
+            if isinstance(inner_id, str) and inner_id:
+                candidates.add(inner_id)
+    return {url for url in candidates if isinstance(url, str) and url.startswith(("http://", "https://"))}
+
+
+async def _target_owner_users(session: AsyncSession, urls: set) -> List[User]:
+    """
+    Resolve object URLs to the local users owning them.
+
+    Activity targets are matched by ``source_id`` (or ``local_object_id``
+    for the ``/objects/{id}`` permalink form); track ``Audio`` objects are
+    matched by ``federation_object_id``. Each distinct owner is returned
+    once.
+    """
+    users: List[User] = []
+    seen = set()
+    for url in urls:
+        conditions = [Activity.source_id == url]
+        match = re.search(r"/objects/([^/?#]+)/?$", urlparse(url).path or "")
+        if match:
+            object_id = match.group(1)
+            conditions += [Activity.local_object_id == object_id, Activity.source_id == object_id]
+        owner_id = await session.scalar(select(Activity.owner_user_id).where(or_(*conditions)).limit(1))
+        if owner_id is None and match:
+            track = await session.scalar(
+                select(Track.owner_id).where(Track.federation_object_id == match.group(1)).limit(1)
+            )
+            owner_id = track
+        if owner_id and str(owner_id) not in seen:
+            user = await session.get(User, owner_id)
+            if user is not None:
+                seen.add(str(owner_id))
+                users.append(user)
+    return users
+
+
+def _object_is_public(obj: Any) -> bool:
+    """Return whether an embedded object addresses the public collection."""
+    if not isinstance(obj, dict):
+        return True
+    return is_public(obj)
+
+
+async def resolve_inbox_recipients(session: AsyncSession, *, activity: dict) -> List[User]:
+    """
+    Return the local users an inbound activity addresses or targets.
+
+    Used for shared-inbox deliveries (``/ap/inbox``), where no single
+    recipient username is known: recipients are the local users found in
+    the activity's audience fields — ``to``/``cc`` addressees, ``Mention``
+    tag targets, a string ``object`` such as a Follow target — plus the
+    local owners of the objects it targets (``inReplyTo``, quote, or
+    Like/Announce object). Owner-via-target resolution is skipped for
+    non-public ``Create`` objects so a restricted reply cannot notify a
+    user outside its audience.
+    """
+    candidates = _activity_audience_urls(activity)
+    if not candidates:
+        return []
+    rows = await session.execute(select(User).where(User.actor_url.in_(candidates)))
+    recipients = list(rows.scalars().all())
+    seen = {str(user.id) for user in recipients}
+    obj = activity.get("object")
+    resolve_target_owners = activity.get("type") != "Create" or _object_is_public(obj)
+    if resolve_target_owners:
+        for user in await _target_owner_users(session, candidates):
+            if str(user.id) not in seen:
+                seen.add(str(user.id))
+                recipients.append(user)
+    return recipients
 
 
 async def create_inbox_notifications(

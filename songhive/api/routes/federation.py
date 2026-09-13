@@ -272,18 +272,16 @@ async def get_track_page(
     return _spa_response(alternate_url)
 
 
-@router.post("/users/{username}/inbox")
-async def post_inbox(
-    username: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Accept and queue a per-user inbox ActivityPub activity."""
-    config = _federation_config(request)
-    user = await get_user_by_username(db, username)
-    if user is None or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+async def _enqueue_incoming(request: Request, username: Optional[str]) -> JSONResponse:
+    """
+    Validate and queue an inbound ActivityPub activity for processing.
 
+    Shared by the per-user and shared inbox endpoints: rejects malformed
+    JSON and senders from blocked/non-allowed instances, then hands the
+    activity (with the raw request for signature verification) to the
+    ``process_incoming`` task. Returns the 202 acknowledgement.
+    """
+    config = _federation_config(request)
     try:
         body = await request.body()
         activity = await request.json()
@@ -309,6 +307,34 @@ async def post_inbox(
         body_b64=base64.b64encode(body).decode("ascii"),
     )  # type: ignore
     return JSONResponse(content={"status": "ok"}, status_code=status.HTTP_202_ACCEPTED)
+
+
+@router.post("/ap/inbox")
+async def post_shared_inbox(request: Request):
+    """
+    Accept and queue a shared-inbox ActivityPub activity.
+
+    Takes precedence over pubby's own ``/ap/inbox`` route so deliveries
+    addressed to local users still flow through ``process_incoming`` —
+    reply materialization and per-recipient notifications — instead of
+    ending at interaction storage.
+    """
+    return await _enqueue_incoming(request, username=None)
+
+
+@router.post("/users/{username}/inbox")
+async def post_inbox(
+    username: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Accept and queue a per-user inbox ActivityPub activity."""
+    _federation_config(request)
+    user = await get_user_by_username(db, username)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    return await _enqueue_incoming(request, username=username)
 
 
 @router.get("/users/{username}/outbox")

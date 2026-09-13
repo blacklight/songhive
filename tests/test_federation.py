@@ -552,8 +552,10 @@ def test_federation_app_setup(tmp_path):
         assert key_path.stat().st_size > 0
 
 
-def test_federation_app_inbox_drops_blocked_domain(tmp_path):
-    """The instance /ap/inbox silently drops activities from blocked domains."""
+def test_federation_app_inbox_rejects_blocked_domain(tmp_path, monkeypatch):
+    """The instance /ap/inbox rejects blocked senders and queues allowed ones."""
+    from unittest.mock import MagicMock
+
     from fastapi.testclient import TestClient
 
     from songhive.api.app import create_app
@@ -571,9 +573,11 @@ def test_federation_app_inbox_drops_blocked_domain(tmp_path):
     )
 
     app = create_app(config)
+    mock_task = MagicMock()
+    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
 
     with TestClient(app) as client:
-        # Blocked actors are dropped before signature verification.
+        # Blocked actors are rejected before the activity is queued.
         blocked = client.post(
             "/ap/inbox",
             json={
@@ -582,10 +586,11 @@ def test_federation_app_inbox_drops_blocked_domain(tmp_path):
                 "object": "https://music.example.com/ap/actor",
             },
         )
-        assert blocked.status_code == 202
+        assert blocked.status_code == 403
+        mock_task.delay.assert_not_called()
 
-        # Non-blocked actors reach signature verification and are rejected
-        # for the missing Signature header instead.
+        # Allowed senders are queued for asynchronous processing; signature
+        # verification happens inside the task.
         allowed = client.post(
             "/ap/inbox",
             json={
@@ -594,7 +599,9 @@ def test_federation_app_inbox_drops_blocked_domain(tmp_path):
                 "object": "https://music.example.com/ap/actor",
             },
         )
-        assert allowed.status_code == 401
+        assert allowed.status_code == 202
+        assert mock_task.delay.call_args.kwargs["username"] is None
+        assert mock_task.delay.call_args.kwargs["path"] == "/ap/inbox"
 
 
 def test_user_to_actor_document_includes_avatar_and_links():

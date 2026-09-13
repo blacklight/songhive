@@ -104,6 +104,7 @@ def process_incoming(
         key_id=key_id,
         allowed_instances=config.federation.allowed_instances,
         blocked_instances=config.federation.blocked_instances,
+        strict_attribution=True,
     )
 
     body: Optional[bytes] = None
@@ -140,6 +141,15 @@ def process_incoming(
         return None
 
     try:
+        _retract_shared_inbox_follows(config, storage, activity, actor, username)
+    except Exception as exc:
+        logger.warning(
+            "Failed to retract followers for deleted actor %s: %s",
+            actor,
+            exc,
+        )
+
+    try:
         _sync_remote_activities(config, activity)
     except Exception as exc:
         logger.warning(
@@ -149,25 +159,15 @@ def process_incoming(
             exc,
         )
 
-    if username is not None:
-        try:
-            _retract_deleted_follower(storage, activity, actor_id)
-        except Exception as exc:
-            logger.warning(
-                "Failed to retract deleted follower %s for actor %s: %s",
-                actor,
-                actor_id,
-                exc,
-            )
-        try:
-            _sync_inbox_notifications(config, activity, username, storage=storage)
-        except Exception as exc:
-            logger.warning(
-                "Failed to sync notifications for incoming %s from %s: %s",
-                activity.get("type", "activity"),
-                actor,
-                exc,
-            )
+    try:
+        _sync_inbox_notifications(config, activity, username, storage=storage)
+    except Exception as exc:
+        logger.warning(
+            "Failed to sync notifications for incoming %s from %s: %s",
+            activity.get("type", "activity"),
+            actor,
+            exc,
+        )
 
     logger.info(
         "Processed incoming %s from %s for actor %s",
@@ -178,41 +178,56 @@ def process_incoming(
     return result
 
 
-# ActivityStreams types that identify an actor document rather than content.
-_ACTOR_TYPES = {"Application", "Group", "Organization", "Person", "Service"}
-
-
-def _retract_deleted_follower(storage, activity: dict, local_actor_id: str) -> None:
+def _retract_shared_inbox_follows(
+    config,
+    storage,
+    activity: dict,
+    actor: str,
+    username: Optional[str],
+) -> None:
     """
-    Drop the stored follower record when a remote actor deletes itself.
+    Wipe every follow record left by a remote actor that deleted itself.
 
-    pubby's ``InboxProcessor`` removes followers on ``Undo(Follow)`` but keeps
-    them when the follower's actor document is deleted; a deleted actor can no
-    longer be a follower, so the row is removed here.  Only applies when the
-    ``Delete`` targets the sending actor itself.
+    Pubby's ``InboxProcessor`` retracts ``(activity.actor, actor_id)`` on a
+    self-``Delete``; for shared-inbox deliveries ``actor_id`` is the
+    instance actor, so follows of local users would survive. A verified
+    self-``Delete`` is authoritative — the processor binds the HTTP signer
+    to ``activity.actor`` — so all of the actor's follow records on this
+    instance are removed. Per-user deliveries keep pubby's scoping: only
+    the addressed actor's follow record is retracted.
+
+    The domain check mirrors the processor's ordering: activities from
+    blocked or non-allowed instances return before signature verification,
+    so their ``actor`` is unauthenticated and must not drive the wipe.
     """
-    actor = activity.get("actor")
-    if activity.get("type") != "Delete" or not isinstance(actor, str) or not actor:
+    if username is not None or activity.get("type") != "Delete":
         return
 
     obj = activity.get("object")
-    target = obj.get("id") if isinstance(obj, dict) else obj if isinstance(obj, str) else None
-    obj_type = obj.get("type") if isinstance(obj, dict) else None
-    if target != actor and obj_type not in _ACTOR_TYPES:
+    if isinstance(obj, dict):
+        target = obj.get("id", "")
+    elif isinstance(obj, str):
+        target = obj
+    else:
         return
 
-    storage.remove_follower(actor, local_actor_id)
-    logger.info("Removed follower %s for actor %s (actor deleted)", actor, local_actor_id)
+    if target != actor or is_domain_blocked(extract_domain(actor), config):
+        return
+
+    storage.remove_follower(actor, "")
+    logger.info("Removed all follower records for deleted remote actor %s", actor)
 
 
 def _sync_remote_activities(config, activity: dict) -> None:
     """
     Materialize inbound remote replies into ``Activity`` rows.
 
-    Public ``Create`` replies to known local activities become
-    ``source_type="remote"`` rows so they render as full cards and accept
-    interactions; ``Update``/``Delete`` revise or retract them. Non-reply
-    types are skipped — likes, boosts and quotes stay interaction-only.
+    ``Create`` replies to known local activities become
+    ``source_type="remote"`` rows — public ones outright, non-public ones
+    when they address a local user — so they render as full cards and
+    accept interactions; ``Update``/``Delete`` revise or retract them.
+    Non-reply types are skipped — likes, boosts and quotes stay
+    interaction-only.
     """
     if activity.get("type") not in ("Create", "Update", "Delete"):
         return
@@ -232,16 +247,21 @@ def _sync_remote_activities(config, activity: dict) -> None:
     asyncio.run(_run())
 
 
-def _sync_inbox_notifications(config, activity: dict, username: str, storage=None) -> None:
+def _sync_inbox_notifications(config, activity: dict, username: Optional[str], storage=None) -> None:
     """Sync user notifications for a processed inbox activity.
 
     Creates notifications for new interactions, retracts notifications
     whose source the incoming activity undoes or deletes (``Undo``,
     ``Delete``), and refreshes notification snapshots when an ``Update``
     revises a referenced object or the actor document.
+
+    ``username`` is the local user whose inbox was addressed; for
+    shared-inbox deliveries (``username=None``) the recipients are the
+    local users the activity addresses or targets.
     """
     from ..federation.notifications import (
         create_inbox_notifications,
+        resolve_inbox_recipients,
         retract_inbox_notifications,
         update_inbox_notifications,
     )
@@ -264,27 +284,30 @@ def _sync_inbox_notifications(config, activity: dict, username: str, storage=Non
     async def _run() -> None:
         try:
             async with get_session() as session:
-                user = await get_user_by_username(session, username)
-                if user is None:
-                    return
-                await create_inbox_notifications(
-                    session,
-                    activity=activity,
-                    recipient=user,
-                    actor_doc=actor_doc,
-                    instance_domain=config.federation.instance_domain,
-                )
-                await retract_inbox_notifications(
-                    session,
-                    activity=activity,
-                    recipient=user,
-                )
-                await update_inbox_notifications(
-                    session,
-                    activity=activity,
-                    recipient=user,
-                    instance_domain=config.federation.instance_domain,
-                )
+                if username is not None:
+                    user = await get_user_by_username(session, username)
+                    recipients = [user] if user is not None else []
+                else:
+                    recipients = await resolve_inbox_recipients(session, activity=activity)
+                for recipient in recipients:
+                    await create_inbox_notifications(
+                        session,
+                        activity=activity,
+                        recipient=recipient,
+                        actor_doc=actor_doc,
+                        instance_domain=config.federation.instance_domain,
+                    )
+                    await retract_inbox_notifications(
+                        session,
+                        activity=activity,
+                        recipient=recipient,
+                    )
+                    await update_inbox_notifications(
+                        session,
+                        activity=activity,
+                        recipient=recipient,
+                        instance_domain=config.federation.instance_domain,
+                    )
                 await session.commit()
         finally:
             await dispose_and_reset()

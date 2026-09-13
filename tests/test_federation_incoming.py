@@ -65,6 +65,21 @@ def test_process_incoming_skips_blocked_domain(tmp_path):
     assert call_kwargs["blocked_instances"] == []
 
 
+def test_process_incoming_enables_strict_attribution(tmp_path):
+    """The task constructs InboxProcessor with pubby's strict attribution guard."""
+    config = _make_config(tmp_path)
+    activity = {"actor": "https://remote.example/users/bob", "type": "Follow"}
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.load_config", return_value=config),
+        patch("songhive.tasks.federation.get_federation_storage"),
+    ):
+        process_incoming(activity)
+
+    assert mock_processor.call_args.kwargs["strict_attribution"] is True
+
+
 def test_process_incoming_instance_actor(tmp_path):
     """Instance-targeted activities use the instance actor and key, with signatures enabled."""
     config = _make_config(tmp_path)
@@ -267,6 +282,114 @@ def test_process_incoming_no_username_creates_nothing(engine, tmp_path, monkeypa
         process_incoming(activity, username=None)
 
     assert _notifications_for(engine, user.id) == []
+
+
+def test_process_incoming_shared_inbox_actor_delete_retracts_followers(tmp_path):
+    """A verified self-Delete on the shared inbox wipes all of the actor's follows.
+
+    Pubby only retracts the follow of the bound actor — the instance actor
+    for shared-inbox deliveries — so Songhive removes the rest.
+    """
+    config = _make_config(tmp_path)
+    actor = "https://remote.example/users/bob"
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.load_config", return_value=config),
+        patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        for obj in ({"type": "Person", "id": actor}, actor):
+            activity = {
+                "type": "Delete",
+                "id": "https://remote.example/activities/d1",
+                "actor": actor,
+                "object": obj,
+            }
+            process_incoming(
+                activity,
+                username=None,
+                headers={"signature": "sig"},
+            )
+
+    storage = mock_storage.return_value
+    assert storage.remove_follower.call_count == 2
+    storage.remove_follower.assert_called_with(actor, "")
+
+
+def test_process_incoming_shared_inbox_delete_object_keeps_followers(tmp_path):
+    """A shared-inbox Delete of a regular object does not touch follow records."""
+    config = _make_config(tmp_path)
+    actor = "https://remote.example/users/bob"
+    activity = {
+        "type": "Delete",
+        "id": "https://remote.example/activities/d1",
+        "actor": actor,
+        "object": {"type": "Tombstone", "id": "https://remote.example/notes/1"},
+    }
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.load_config", return_value=config),
+        patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        process_incoming(activity, username=None, headers={"signature": "sig"})
+
+    mock_storage.return_value.remove_follower.assert_not_called()
+
+
+def test_process_incoming_shared_inbox_actor_delete_blocked_domain(tmp_path):
+    """A self-Delete from a blocked domain cannot wipe follows.
+
+    The processor drops blocked-domain activities before signature
+    verification, so their ``actor`` is unauthenticated.
+    """
+    config = _make_config(tmp_path, blocked_instances=["remote.example"])
+    actor = "https://remote.example/users/bob"
+    activity = {
+        "type": "Delete",
+        "id": "https://remote.example/activities/d1",
+        "actor": actor,
+        "object": {"type": "Person", "id": actor},
+    }
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.load_config", return_value=config),
+        patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
+    ):
+        mock_processor.return_value.process.return_value = None
+        process_incoming(activity, username=None, headers={"signature": "sig"})
+
+    mock_storage.return_value.remove_follower.assert_not_called()
+
+
+def test_process_incoming_user_inbox_actor_delete_keeps_scoped_retraction(engine, tmp_path, monkeypatch):
+    """A per-user self-Delete keeps pubby's scoped retraction — no blanket wipe."""
+    config = _make_config(tmp_path)
+    _seed_alice(engine, config)
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    actor = "https://remote.example/users/bob"
+    activity = {
+        "type": "Delete",
+        "id": "https://remote.example/activities/d1",
+        "actor": actor,
+        "object": {"type": "Person", "id": actor},
+    }
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        process_incoming(activity, username="alice", headers={"signature": "sig"})
+
+    # Pubby's processor owns the per-user retraction; Songhive must not
+    # re-apply it as a wipe.
+    mock_storage.return_value.remove_follower.assert_not_called()
 
 
 def test_process_incoming_reply_and_quote_prefers_quote(engine, tmp_path, monkeypatch):

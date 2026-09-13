@@ -197,10 +197,14 @@ async def test_list_endpoint_visibility_filtering(
     seen = {a["id"] for a in resp.json()["activities"]}
     assert seen == {a.id for a in by_visibility.values()}
 
-    # Admins see every visibility.
+    # Admins get no bypass: they see the same visibilities as regular users.
     resp = client.get(f"/api/v1/track/{track.id}/activities", headers=auth_headers(admin_user))
     seen = {a["id"] for a in resp.json()["activities"]}
-    assert seen == {a.id for a in by_visibility.values()}
+    assert seen == {
+        by_visibility[Visibility.PUBLIC].id,
+        by_visibility[Visibility.FOLLOWERS].id,
+        by_visibility[Visibility.LOCAL].id,
+    }
 
     # A user named in the mentions sees the mentioned activity.
     mentioned = by_visibility[Visibility.MENTIONED]

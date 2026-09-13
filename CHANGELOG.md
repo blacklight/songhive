@@ -51,6 +51,25 @@ All notable changes to this project will be documented in this file.
   reactions on standalone statuses no longer produce broken `/users/{id}`
   card links. Failed activity fetches fall back to the item card or the
   actor card.
+- `federation`: deliveries to the shared inbox (`POST /ap/inbox`, the
+  `sharedInbox` endpoint advertised by the instance actor) now flow
+  through the same asynchronous `process_incoming` pipeline as per-user
+  inboxes instead of ending at Pubby's synchronous interaction storage —
+  which silently dropped non-public `Create`s. Local recipients are
+  resolved from the activity's audience (`to`/`cc`/`bto`/`bcc`, `Mention`
+  tags, string `object` targets, `inReplyTo`/quote targets and the owners
+  of targeted local objects), so a remote mentioned-only reply now
+  produces the same reply/mention notifications and thread entries as a
+  local one. Signature verification and domain allow/block checks are
+  preserved. A verified `Delete` of the remote actor itself received on
+  the shared inbox now also retracts every follow record the actor left
+  on local users — Pubby's built-in retraction only covers the actor the
+  processor is bound to (the instance actor for shared-inbox traffic).
+- `activities`: admin accounts no longer bypass `mentioned` and
+  `private` activity visibility — in `can_view_activity`, the activity
+  list filter and `reply_count` alike, restricted replies stay confined
+  to their owner and named audience for every viewer, authenticated or
+  not.
 
 ### Added
 
@@ -77,13 +96,19 @@ All notable changes to this project will be documented in this file.
 - `activities`: inbound remote replies are materialized as
   `source_type="remote"` `Activity` rows (`federation/incoming.py`, wired
   into `process_incoming`), so they render as full `ActivityCard`s with
-  the standard action bar instead of read-only compact entries. Only
-  publicly addressed `Create` replies to known activities are stored —
-  with `attributedTo`/host attribution checks — linked through
-  `in_reply_to_activity_id`, carrying the remote content, mentions,
-  hashtags and visibility clamped to the entity's; inbound `Update`
-  revises them (materializing replies whose `Create` was missed) and
-  `Delete` soft-deletes them for the recorded author only. Liking or
+  the standard action bar instead of read-only compact entries.
+  `Create` replies to known activities are stored — guarded by pubby's
+  `strict_attribution`/`validate_attribution` `attributedTo`/host checks
+  — linked through
+  `in_reply_to_activity_id`, carrying the remote content, mentions and
+  hashtags. Publicly addressed replies keep the entity-clamped `public`
+  visibility; non-public replies (direct messages, followers-only) are
+  stored with `mentioned` visibility when they address a known local
+  user — through `to`/`cc` addressees or `Mention` tags — so only the
+  addressed audience sees them in the thread. Inbound `Update` revises
+  them (materializing replies whose `Create` was missed, degrading
+  replies that lose their public audience to `mentioned`) and `Delete`
+  soft-deletes them for the recorded author only. Liking or
   boosting one delivers the `Like`/`Announce` to the remote author's
   inbox, and replying to one sets `inReplyTo` to its remote object id and
   mentions the remote author. Reply counts and the replies listing

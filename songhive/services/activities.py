@@ -21,7 +21,7 @@ from fastapi import HTTPException
 from pubby import InteractionType
 from pubby.content import render_post_html, set_object_content
 from pydantic import BaseModel, field_validator
-from sqlalchemy import and_, delete, exists, func, or_, select, true, union_all
+from sqlalchemy import and_, delete, exists, func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -225,9 +225,11 @@ async def can_view_activity(
     check; ``local`` and ``followers`` require an authenticated user (the
     instance has no local follow graph, so followers-visible content is
     treated like local content for viewing); ``mentioned`` additionally
-    requires the activity owner, an admin, or a user named in the activity's
-    mentions; ``private`` is limited to the owner and admins.  Retracted
-    (soft-deleted) activities are never viewable.
+    requires the activity owner or a user named in the activity's
+    mentions; ``private`` is limited to the owner. Admins get no extra
+    reach over other authenticated users — ``mentioned`` and ``private``
+    replies stay confined to their audience. Retracted (soft-deleted)
+    activities are never viewable.
     """
     if activity.deleted_at is not None:
         return False
@@ -246,12 +248,9 @@ async def can_view_activity(
     if user is None:
         return False
 
-    if user.is_admin or (activity.owner_user_id is not None and str(activity.owner_user_id) == str(user.id)):
+    if activity.owner_user_id is not None and str(activity.owner_user_id) == str(user.id):
         return True
 
-    # TODO: Once support for remote users is added, Visibility.LOCAL access should imply user.is_local.
-    # TODO: Once proper storage for the followers graph is implemented ,that should be checked against
-    #  Visibility.FOLLOWERS access
     if visibility in (Visibility.LOCAL, Visibility.FOLLOWERS):
         return True
 
@@ -277,11 +276,9 @@ def _activity_visibility_filter(user: Optional[User]):
     authorizes the containing entity once for the whole page: ``public``
     activities are visible to everyone, ``local`` and ``followers`` to
     authenticated users, ``mentioned`` to the users they name, and every
-    visibility to the activity's owner and to admins.
+    visibility to the activity's owner. Admins get no extra reach —
+    ``mentioned`` and ``private`` replies stay confined to their audience.
     """
-    if user is not None and user.is_admin:
-        return true()
-
     conditions = [Activity.visibility == Visibility.PUBLIC.value]
     if user is not None:
         conditions.append(Activity.owner_user_id == user.id)
@@ -698,14 +695,14 @@ def _activity_descendants_cte(root_ids: Iterable[str]) -> Any:
     """
     Build a recursive CTE over the ``in_reply_to`` graph.
 
-    Returns a ``(root_id, id, activity_type, source_id, deleted_at)`` CTE
-    with one row per activity reachable from ``root_ids`` by following
-    ``in_reply_to_activity_id``, each tagged with the root it descends
-    from. Traversal crosses activity types and soft-deleted rows — a
-    deleted or non-reply node still anchors its own replies to the thread;
-    callers filter by ``activity_type``/``deleted_at`` for display and
-    counting. ``UNION`` dedup keeps the walk finite even if the graph ever
-    contained a cycle.
+    Returns a ``(root_id, id, activity_type, source_id, deleted_at,
+    visibility, owner_user_id)`` CTE with one row per activity reachable
+    from ``root_ids`` by following ``in_reply_to_activity_id``, each
+    tagged with the root it descends from. Traversal crosses activity
+    types and soft-deleted rows — a deleted or non-reply node still
+    anchors its own replies to the thread; callers filter by
+    ``activity_type``/``deleted_at`` for display and counting. ``UNION``
+    dedup keeps the walk finite even if the graph ever contained a cycle.
     """
     seed = (
         select(
@@ -714,6 +711,8 @@ def _activity_descendants_cte(root_ids: Iterable[str]) -> Any:
             Activity.activity_type.label("activity_type"),
             Activity.source_id.label("source_id"),
             Activity.deleted_at.label("deleted_at"),
+            Activity.visibility.label("visibility"),
+            Activity.owner_user_id.label("owner_user_id"),
         )
         .where(Activity.in_reply_to_activity_id.in_(list(root_ids)))
         .cte("activity_descendants", recursive=True)
@@ -725,6 +724,8 @@ def _activity_descendants_cte(root_ids: Iterable[str]) -> Any:
             Activity.activity_type,
             Activity.source_id,
             Activity.deleted_at,
+            Activity.visibility,
+            Activity.owner_user_id,
         ).join(seed, Activity.in_reply_to_activity_id == seed.c.id)
     )
 
@@ -832,7 +833,7 @@ async def resolve_interaction_summaries(
                 if interaction.interaction_type == interaction_type:
                     counts[str(activity.id)][activity_type] += 1
 
-    await _add_threaded_reply_counts(session, activities, counts, config)
+    await _add_threaded_reply_counts(session, activities, counts, config, user)
 
     return {
         str(a.id): InteractionSummary(
@@ -851,6 +852,7 @@ async def _add_threaded_reply_counts(
     activities: List[Activity],
     counts: Dict[str, Dict[str, int]],
     config: SonghiveConfig,
+    user: Optional[User],
 ) -> None:
     """
     Fold whole-thread reply counts into ``counts`` in place.
@@ -860,7 +862,11 @@ async def _add_threaded_reply_counts(
     targeting any node in the sub-thread — replies to remote replies are
     reached breadth-first through their ``object_id`` chains. Remote
     replies already materialized into ``Activity`` rows are counted once,
-    by the row pass; their interaction records are skipped.
+    by the row pass; their interaction records are skipped. Descendants
+    the viewer may not see (``mentioned`` replies naming someone else,
+    ``private`` rows owned by another user) are not counted, so restricted
+    replies don't leak through the counter — traversal still crosses them
+    to reach their public children.
     """
     ids = [str(a.id) for a in activities]
     cte = _activity_descendants_cte(ids)
@@ -872,9 +878,48 @@ async def _add_threaded_reply_counts(
                 cte.c.activity_type,
                 cte.c.source_id,
                 cte.c.deleted_at,
+                cte.c.visibility,
+                cte.c.owner_user_id,
             )
         )
     ).all()
+
+    mentioned_ids: Set[str] = set()
+    if user is not None:
+        restricted = [
+            row.id
+            for row in rows
+            if row.deleted_at is None and row.activity_type == "reply" and row.visibility == Visibility.MENTIONED.value
+        ]
+        if restricted:
+            mentioned_ids = {
+                str(row[0])
+                for row in (
+                    await session.execute(
+                        select(ActivityMention.activity_id).where(
+                            ActivityMention.activity_id.in_(restricted),
+                            ActivityMention.user_id == user.id,
+                        )
+                    )
+                ).all()
+            }
+
+    def _countable(row: Any) -> bool:
+        if row.deleted_at is not None or row.activity_type != "reply":
+            return False
+        try:
+            visibility = Visibility(row.visibility)
+        except ValueError:
+            return False
+        if visibility == Visibility.PUBLIC:
+            return True
+        if user is None:
+            return False
+        if row.owner_user_id is not None and str(row.owner_user_id) == str(user.id):
+            return True
+        if visibility in (Visibility.LOCAL, Visibility.FOLLOWERS):
+            return True
+        return visibility == Visibility.MENTIONED and str(row.id) in mentioned_ids
 
     # ``membership`` maps a node id to the requested activities whose
     # sub-thread contains it (a node always contains itself); ``scope``
@@ -886,12 +931,12 @@ async def _add_threaded_reply_counts(
     membership: Dict[str, Set[str]] = {i: {i} for i in ids}
     source_node: Dict[str, str] = {a.source_id: str(a.id) for a in activities}
     materialized: Set[str] = {a.source_id for a in activities}
-    for root_id, node_id, activity_type, source_id, deleted_at in rows:
-        if deleted_at is None and activity_type == "reply":
-            counts[str(root_id)]["reply"] += 1
-        membership.setdefault(str(node_id), set()).add(str(root_id))
-        source_node[source_id] = str(node_id)
-        materialized.add(source_id)
+    for row in rows:
+        if _countable(row):
+            counts[str(row.root_id)]["reply"] += 1
+        membership.setdefault(str(row.id), set()).add(str(row.root_id))
+        source_node[row.source_id] = str(row.id)
+        materialized.add(row.source_id)
 
     scope: Dict[str, Set[str]] = {}
     for source_id, node_id in source_node.items():

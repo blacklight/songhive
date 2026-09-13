@@ -180,6 +180,8 @@ songhive/
 │   ├── _common.py          # URL builders
 │   ├── actors.py           # Actor document generation, federation storage helpers
 │   ├── activities.py       # Activity creation (Create, Update, Delete, etc.)
+│   ├── incoming.py         # Materialize inbound remote replies into Activity rows
+│   ├── notifications.py    # Inbox recipient resolution + notification hooks
 │   ├── serializers.py      # Track → ActivityPub Audio object mapping
 │   └── storage.py          # pubby storage adapter (SQLAlchemy-backed)
 ├── users/                  # User management
@@ -422,9 +424,13 @@ routes can resolve it.
 `can_view_activity` decides who may see an activity: the containing entity
 must pass `acl.can_access`, and the activity's own `visibility` applies on
 top (`public` follows the entity check; `local`/`followers` require an
-authenticated user; `mentioned` requires the owner, an admin, or a mentioned
-user; `private` is owner/admin-only; retracted activities are never
-viewable). Interactions are layered on top of `create_local_activity`:
+authenticated user; `mentioned` requires the owner or a mentioned user;
+`private` is owner-only; retracted activities are never viewable). Admins
+get no bypass — `mentioned` and `private` activities stay confined to
+their audience for every viewer. The same rules are enforced in SQL by
+`_activity_visibility_filter` (feed/tag/reply listings) and in
+`reply_count` computation, so restricted replies neither render nor leak
+through counters for viewers outside their audience. Interactions are layered on top of `create_local_activity`:
 `like_activity` records an idempotent `like` (400 on a duplicate, 404 on a
 retracted target) that inherits the target's visibility and stores a
 `federation/activities.create_like_activity` `Like` payload whose `to`/`cc`
@@ -476,7 +482,10 @@ replies targeting any node in it, including remote replies to remote
 replies reached breadth-first through `object_id` chains
 (`_remote_thread_interactions`). Remote replies already materialized into
 `Activity` rows are skipped so a reply backed by both a row and a stored
-interaction counts once. `liked`/`boosted` report the requester's
+interaction counts once. Descendants the requester may not see
+(`mentioned` replies naming someone else, `private` rows owned by another
+user) are not counted, though traversal still crosses them to reach their
+visible children. `liked`/`boosted` report the requester's
 own live like/announce rows, and `can_interact` is false for activity types
 that cannot themselves be reacted to (`like`, `announce`, `delete`).
 `ActivityResponse` also carries `object_url`/`object_type`, resolved from
@@ -1174,9 +1183,16 @@ the HTTP routes.
   an `href` pointing at the instance's `/tags/{name}` page.
 - Per-actor follower isolation is delegated to pubby's `target_actor_id`.
 - Incoming `Follow`/`Undo(Follow)` activities persist or remove rows in
-  pubby's `federation_followers` storage; `process_incoming` additionally
-  retracts the stored follower when a remote actor's `Delete` targets the
-  sending actor itself. `services/federation.get_actor_followers` returns
+  pubby's `federation_followers` storage; pubby's `InboxProcessor` also
+  retracts the follower when a remote actor's `Delete` targets the
+  sending actor itself — scoped to the actor the processor is bound to.
+  For shared-inbox deliveries that binding is the instance actor, so
+  `process_incoming` extends the retraction: a verified self-`Delete`
+  removes all of the actor's follow records
+  (`_retract_shared_inbox_follows`). The sweep only runs after pubby's
+  signature verification bound the signer to `activity.actor`, and is
+  skipped for blocked/non-allowed domains, which the processor drops
+  before verifying. `services/federation.get_actor_followers` returns
   an actor's followers newest-first by `followed_at` and
   `count_followers_by_actor` provides per-actor counts, backing the
   `followers_count` field on `GET /api/v1/users/{username}` and the
@@ -1188,19 +1204,27 @@ the HTTP routes.
 **Inbound remote replies** are materialized into `Activity` rows by
 `federation/incoming.py`, invoked from `tasks/federation.py`'s
 `process_incoming` for `Create`/`Update`/`Delete` activities after pubby's
-`InboxProcessor` has run. A publicly addressed `Create` whose object
-replies to a known activity — matched by `source_id` or the
-`/objects/{id}` permalink form — becomes a `source_type="remote"` `reply`
-row attached to the parent's entity, linked through
-`in_reply_to_activity_id`, carrying the raw activity as `payload`, the
-remote actor as `source_actor`, and visibility clamped to the entity's.
-Attribution is checked before storing: the delivering actor must match
-`attributedTo` and share the object's host. `Update` revises content,
-payload, mentions, and hashtags (materializing replies whose `Create` was
-missed, and retracting rows that stop being publicly addressed); `Delete`
-soft-deletes the row, but only for the recorded `source_actor`. Non-public
-replies are never materialized — they stay interaction-only, mirroring
-pubby's storage policy. Because the Pubby `federation_interactions` record
+`InboxProcessor` has run. A `Create` whose object replies to a known
+activity — matched by `source_id` or the `/objects/{id}` permalink form —
+becomes a `source_type="remote"` `reply` row attached to the parent's
+entity, linked through `in_reply_to_activity_id`, carrying the raw
+activity as `payload` and the remote actor as `source_actor`. Publicly
+addressed replies keep the entity-clamped `public` visibility; non-public
+replies (direct messages, followers-only) are stored with `mentioned`
+visibility when they address at least one local user — through
+`to`/`cc`/`bto`/`bcc` addressees or `Mention` tags — each resolved local
+addressee getting an `ActivityMention` row so only that audience sees the
+reply in the thread. Non-public replies addressing no local user are not
+materialized. Attribution is enforced by pubby's `attribution.validate`:
+`process_incoming` enables `strict_attribution` on the `InboxProcessor`,
+and materialization/update re-apply `pubby.validate_attribution` to the
+raw activity since the sync runs regardless of the processor's verdict —
+the delivering actor must match `attributedTo` and share the object's
+host. `Update` revises
+content, payload, mentions, hashtags and visibility (materializing
+replies whose `Create` was missed, and degrading rows that lose their
+public audience to `mentioned`); `Delete` soft-deletes the row, but only
+for the recorded `source_actor`. Because the Pubby `federation_interactions` record
 is kept alongside the row, reply counts and listings deduplicate on
 `object_id`. Materialized replies render as regular activity cards and
 accept the same interactions as local replies: likes and boosts federate
@@ -1217,13 +1241,24 @@ a `Mention` tag with `inReplyTo` set to the remote `source_id`.
 **Domain allow/block lists** (`federation.allowed_instances` /
 `federation.blocked_instances`) are enforced at several seams:
 
-- `POST /users/{username}/inbox` in `api/routes/federation.py` rejects with
-  403 before queueing (`is_domain_allowed`).
+- `POST /users/{username}/inbox` and `POST /ap/inbox` in
+  `api/routes/federation.py` reject with 403 before queueing
+  (`is_domain_allowed`). The shared-inbox route is Songhive's own — it
+  shadows pubby's synchronous handler so deliveries queue onto
+  `process_incoming` (with `username=None`) like per-user inboxes: reply
+  materialization and notifications apply there too, whereas pubby's
+  handler stopped at interaction storage and dropped non-public `Create`s
+  entirely. For shared-inbox deliveries the notification recipients are
+  resolved from the activity's audience
+  (`federation/notifications.resolve_inbox_recipients`): local actor URLs
+  in `to`/`cc`/`bto`/`bcc`, `Mention` tag targets, string `object`
+  targets, and the local owners of objects referenced through
+  `inReplyTo`, quote fields, or Like/Announce targets.
 - `tasks/federation.py`'s `process_incoming` passes the lists to pubby's
   `InboxProcessor`, which drops the activity before signature verification.
-- The instance-level `/ap/inbox` and pubby's outbound fan-out get the same
-  filtering via `allowed_instances`/`blocked_instances` on
-  `ActivityPubHandler` (`_setup_federation` in `api/app.py`).
+- Pubby's outbound fan-out gets the same filtering via
+  `allowed_instances`/`blocked_instances` on `ActivityPubHandler`
+  (`_setup_federation` in `api/app.py`).
 - `tasks/federation.py`'s `deliver_activity` drops outbound deliveries to
   blocked domains before signing.
 
@@ -1340,7 +1375,9 @@ user's activity (`services/activities.py`'s `like_activity`, reached via
 share grant (`api/routes/shares.py` via `services/sharing.py`'s
 `(grant, created)` return) creates a `share`. The federation inbox path
 (`tasks/federation.py` → `federation/notifications.py`) maps Follow/Like/
-Announce/Create activities for the addressed local user — `quote` wins over
+Announce/Create activities for each resolved local recipient — the
+addressed user for per-user inboxes, `resolve_inbox_recipients`' audience
+resolution for shared-inbox deliveries — `quote` wins over
 `reply` when a Create is both — and stamps matching
 `ActivityMention.notified_at` rows for `mention` notifications.
 
@@ -1740,7 +1777,7 @@ REST API under `/api/v1/`:
                                 # (configured contact person) and metadata.staffAccounts
                                 # (actor URLs of active admins)
 /ap/actor                       # Instance-level Application actor
-/ap/inbox                       # Instance inbox
+/ap/inbox                       # Shared inbox (Songhive route; queues process_incoming)
 /api/v1/*/                      # Mastodon-compatible API (pubby adapter), except /api/v1/instance which is provided by Songhive and always available
 ```
 
