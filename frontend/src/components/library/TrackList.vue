@@ -738,6 +738,7 @@ function canManageTrack(track: QueueTrack): boolean {
 }
 
 const bulkActions = computed(() => {
+  if (!bulkMode.value) return [];
   const actions: ActionItem[] = [
     {
       key: "edit-metadata",
