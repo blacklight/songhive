@@ -1,10 +1,15 @@
 import { computed, ref, type Ref } from "vue";
 import { defineStore } from "pinia";
 import {
+  boostActivity as boostActivityApi,
   deleteActivity as deleteActivityApi,
   listEntityActivities,
   likeActivity as likeActivityApi,
+  replyToActivity as replyToActivityApi,
+  unboostActivity as unboostActivityApi,
+  unlikeActivity as unlikeActivityApi,
   updateActivity as updateActivityApi,
+  type ActivityReplyRequest,
   type ActivityResponse,
   type ActivityUpdate,
   type ListActivitiesParams,
@@ -38,6 +43,8 @@ export const useActivitiesStore = defineStore("activities", () => {
   const error: Ref<string | null> = ref(null);
   const likedIds: Ref<Set<string>> = ref(new Set());
   const likingIds: Ref<Set<string>> = ref(new Set());
+  const boostedIds: Ref<Set<string>> = ref(new Set());
+  const boostingIds: Ref<Set<string>> = ref(new Set());
   const deletingIds: Ref<Set<string>> = ref(new Set());
   // Latest PATCH result per activity id, so cards rendered from lists that
   // are not backed by ``items`` (profile tabs, tag detail, notifications)
@@ -47,6 +54,8 @@ export const useActivitiesStore = defineStore("activities", () => {
 
   const isLiked = computed(() => (id: string) => likedIds.value.has(id));
   const isLiking = computed(() => (id: string) => likingIds.value.has(id));
+  const isBoosted = computed(() => (id: string) => boostedIds.value.has(id));
+  const isBoosting = computed(() => (id: string) => boostingIds.value.has(id));
   const isDeleting = computed(() => (id: string) => deletingIds.value.has(id));
   const updatedActivity = computed(
     () => (id: string) => updatedById.value.get(id),
@@ -114,6 +123,31 @@ export const useActivitiesStore = defineStore("activities", () => {
     }
   }
 
+  /**
+   * Merge interaction fields (counters and liked/boosted flags) into every
+   * cached copy of ``activity`` — ``items``, ``updatedById``, or the card's
+   * own copy seeded into ``updatedById`` when the activity is not tracked —
+   * so cards update immediately wherever they render from.
+   */
+  function patchInteraction(
+    activity: ActivityResponse,
+    patch: Partial<
+      Pick<
+        ActivityResponse,
+        "like_count" | "boost_count" | "reply_count" | "liked" | "boosted"
+      >
+    >,
+  ): void {
+    const base =
+      updatedById.value.get(activity.id) ??
+      items.value.find((a) => a.id === activity.id) ??
+      activity;
+    const merged = { ...base, ...patch };
+    updatedById.value.set(activity.id, merged);
+    const index = items.value.findIndex((a) => a.id === activity.id);
+    if (index !== -1) items.value.splice(index, 1, merged);
+  }
+
   async function like(activity: ActivityResponse): Promise<void> {
     if (likedIds.value.has(activity.id) || likingIds.value.has(activity.id))
       return;
@@ -121,9 +155,75 @@ export const useActivitiesStore = defineStore("activities", () => {
     try {
       await likeActivityApi(activity.id);
       likedIds.value.add(activity.id);
+      const current = updatedById.value.get(activity.id) ?? activity;
+      patchInteraction(current, {
+        liked: true,
+        like_count: current.like_count + (current.liked ? 0 : 1),
+      });
     } finally {
       likingIds.value.delete(activity.id);
     }
+  }
+
+  async function unlike(activity: ActivityResponse): Promise<void> {
+    if (likingIds.value.has(activity.id)) return;
+    likingIds.value.add(activity.id);
+    try {
+      await unlikeActivityApi(activity.id);
+      const current = updatedById.value.get(activity.id) ?? activity;
+      const wasLiked = current.liked || likedIds.value.has(activity.id);
+      likedIds.value.delete(activity.id);
+      patchInteraction(current, {
+        liked: false,
+        like_count: Math.max(0, current.like_count - (wasLiked ? 1 : 0)),
+      });
+    } finally {
+      likingIds.value.delete(activity.id);
+    }
+  }
+
+  async function boost(activity: ActivityResponse): Promise<void> {
+    if (boostedIds.value.has(activity.id) || boostingIds.value.has(activity.id))
+      return;
+    boostingIds.value.add(activity.id);
+    try {
+      await boostActivityApi(activity.id);
+      boostedIds.value.add(activity.id);
+      const current = updatedById.value.get(activity.id) ?? activity;
+      patchInteraction(current, {
+        boosted: true,
+        boost_count: current.boost_count + (current.boosted ? 0 : 1),
+      });
+    } finally {
+      boostingIds.value.delete(activity.id);
+    }
+  }
+
+  async function unboost(activity: ActivityResponse): Promise<void> {
+    if (boostingIds.value.has(activity.id)) return;
+    boostingIds.value.add(activity.id);
+    try {
+      await unboostActivityApi(activity.id);
+      const current = updatedById.value.get(activity.id) ?? activity;
+      const wasBoosted = current.boosted || boostedIds.value.has(activity.id);
+      boostedIds.value.delete(activity.id);
+      patchInteraction(current, {
+        boosted: false,
+        boost_count: Math.max(0, current.boost_count - (wasBoosted ? 1 : 0)),
+      });
+    } finally {
+      boostingIds.value.delete(activity.id);
+    }
+  }
+
+  async function reply(
+    activity: ActivityResponse,
+    body: ActivityReplyRequest,
+  ): Promise<ActivityResponse> {
+    const created = await replyToActivityApi(activity.id, body);
+    const current = updatedById.value.get(activity.id) ?? activity;
+    patchInteraction(current, { reply_count: current.reply_count + 1 });
+    return created;
   }
 
   async function remove(activityId: string): Promise<void> {
@@ -134,6 +234,7 @@ export const useActivitiesStore = defineStore("activities", () => {
       const index = items.value.findIndex((a) => a.id === activityId);
       if (index !== -1) items.value.splice(index, 1);
       likedIds.value.delete(activityId);
+      boostedIds.value.delete(activityId);
       updatedById.value.delete(activityId);
       removedIds.value.add(activityId);
     } finally {
@@ -174,6 +275,9 @@ export const useActivitiesStore = defineStore("activities", () => {
     likedIds,
     isLiked,
     isLiking,
+    boostedIds,
+    isBoosted,
+    isBoosting,
     isDeleting,
     updatedActivity,
     isRemoved,
@@ -181,6 +285,10 @@ export const useActivitiesStore = defineStore("activities", () => {
     setFilter,
     loadMore,
     like,
+    unlike,
+    boost,
+    unboost,
+    reply,
     remove,
     update,
     $resetFeed,

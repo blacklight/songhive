@@ -649,6 +649,60 @@ def test_process_incoming_like_resolves_local_track(engine, tmp_path, monkeypatc
     assert payload["local_url"] == f"/tracks/{track_id}"
 
 
+def test_process_incoming_like_resolves_local_activity(engine, tmp_path, monkeypatch):
+    """A Like on a local activity object carries the activity's identity.
+
+    The frontend uses ``object_activity_id``/``object_type`` to render the
+    reacted activity card instead of a generic item card, and
+    ``object_page_url``/``local_url`` for the "your post" link.
+    """
+    from songhive.models.activity import Activity
+
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+    init_db(engine=engine, force=True)
+
+    async def _seed_activity() -> str:
+        async with get_session() as session:
+            activity_row = Activity(
+                entity_type="user",
+                entity_id=str(user.id),
+                activity_type="create",
+                source_type="local",
+                source_actor=user.actor_url,
+                source_id="https://music.example.com/users/alice/objects/n1",
+                local_object_id="n1",
+                owner_user_id=str(user.id),
+                visibility="public",
+                payload={"type": "Create", "object": {"type": "Note"}},
+            )
+            session.add(activity_row)
+            await session.commit()
+            return str(activity_row.id)
+
+    activity_id = asyncio.run(_seed_activity())
+
+    _process(
+        engine,
+        {
+            "type": "Like",
+            "id": "https://remote.example/activities/l9",
+            "actor": "https://remote.example/users/bob",
+            "object": "https://music.example.com/users/alice/objects/n1",
+        },
+    )
+
+    rows = _notifications_for(engine, user.id)
+    assert [r.type for r in rows] == ["like"]
+    payload = rows[0].payload
+    assert payload["object_activity_id"] == activity_id
+    assert payload["object_type"] == "Note"
+    assert payload["object_page_url"] == "/@alice"
+    assert payload["local_url"] == "/@alice"
+    assert "item_type" not in payload
+
+
 def test_process_incoming_announce_resolves_page_url(engine, tmp_path, monkeypatch):
     """An Announce of a local ``/tracks/{id}`` page URL resolves to the track."""
     config = _make_config(tmp_path)

@@ -6,7 +6,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Iterable, List, Optional, Tuple
 
-from pubby import build_delete_activity, build_like_activity, build_update_activity
+from pubby import (
+    build_announce_activity,
+    build_delete_activity,
+    build_like_activity,
+    build_undo_activity,
+    build_update_activity,
+)
 from pubby.content import format_duration
 
 from ..models import Visibility
@@ -289,6 +295,74 @@ def create_like_activity(
         object_id=object_id,
         to=to,
         cc=cc,
+        activity_id=activity_id,
+        published=published,
+        context="https://www.w3.org/ns/activitystreams",
+    )
+
+
+def create_announce_activity(
+    actor_url: str,
+    object_id: str,
+    visibility: "Visibility | str",
+    mention_actor_urls: Iterable[str] = (),
+    activity_id: Optional[str] = None,
+    published: Optional[datetime] = None,
+) -> dict:
+    """
+    Create an ``Announce`` (boost) activity targeting ``object_id``.
+
+    The ``to``/``cc`` audience is derived from ``visibility`` via
+    :func:`activity_audience`; ``mention_actor_urls`` should carry the
+    boosted object's author (and any other directly addressed actors) so
+    ``mentioned``-visibility boosts are addressed to them. ``activity_id``
+    may be supplied to reuse the stored activity's ``source_id`` as the
+    ActivityPub ``id``, making the boost dereferenceable via the federation
+    object route.
+
+    This is a thin Songhive adapter around ``pubby.build_announce_activity``:
+    it keeps the ``Visibility``-to-audience mapping local and delegates the
+    generic payload construction to Pubby.
+    """
+    to, cc = activity_audience(visibility, actor_url, mention_actor_urls)
+    if published is None:
+        published = datetime.now(timezone.utc)
+
+    return build_announce_activity(
+        actor_id=actor_url,
+        object_id=object_id,
+        to=to,
+        cc=cc,
+        activity_id=activity_id,
+        published=published,
+        context="https://www.w3.org/ns/activitystreams",
+    )
+
+
+def create_undo_activity(
+    actor_url: str,
+    inner_activity: dict,
+    activity_id: Optional[str] = None,
+    published: Optional[datetime] = None,
+) -> dict:
+    """
+    Create an ``Undo`` activity wrapping ``inner_activity``.
+
+    Used to retract ``Like`` and ``Announce`` activities: the wrapped
+    payload is the originally federated reaction and the ``to``/``cc``
+    addressing is inherited from it, so the ``Undo`` reaches the same
+    audience the reaction did.
+
+    This is a thin Songhive adapter around ``pubby.build_undo_activity``:
+    it pins the JSON-LD context and delegates the generic payload
+    construction to Pubby.
+    """
+    if published is None:
+        published = datetime.now(timezone.utc)
+
+    return build_undo_activity(
+        inner_activity,
+        actor_url,
         activity_id=activity_id,
         published=published,
         context="https://www.w3.org/ns/activitystreams",

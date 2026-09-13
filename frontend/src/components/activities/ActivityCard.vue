@@ -2,7 +2,11 @@
 import { RouterLink } from "vue-router";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import type { ActivityResponse } from "@/api/activities";
+import {
+  listActivityReplies,
+  type ActivityResponse,
+  type RemoteReply,
+} from "@/api/activities";
 import { getApiErrorMessage } from "@/api/client";
 import { useActivitiesStore } from "@/stores/activities";
 import { useAuthStore } from "@/stores/auth";
@@ -12,7 +16,13 @@ import { formatDateTime } from "@/i18n";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
+import AppSpinner from "@/components/feedback/AppSpinner.vue";
+import StatusComposer, {
+  type StatusComposerPayload,
+} from "@/components/statuses/StatusComposer.vue";
+import ActivityActorsModal from "./ActivityActorsModal.vue";
 import ActivityEditModal from "./ActivityEditModal.vue";
+import ActivityRemoteReply from "./ActivityRemoteReply.vue";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
 import {
   parseActivityContent,
@@ -176,25 +186,131 @@ const canEdit = computed(
     authStore.isAuthenticated &&
     (authStore.isAdmin || authStore.user?.id === activity.value.owner_user_id),
 );
-const canLike = computed(
-  () =>
-    authStore.isAuthenticated &&
-    activity.value.activity_type !== "like" &&
-    activity.value.activity_type !== "delete",
+// ``can_interact`` is the server-computed gate: interaction types that make
+// no sense to interact with (likes, tombstones) opt out; everything else is
+// left to the backend's view checks, which stay authoritative.
+const canInteract = computed(
+  () => authStore.isAuthenticated && activity.value.can_interact !== false,
 );
-const liked = computed(() => store.isLiked(props.activity.id));
+const liked = computed(
+  () => activity.value.liked || store.isLiked(props.activity.id),
+);
 const liking = computed(() => store.isLiking(props.activity.id));
+const boosted = computed(
+  () => activity.value.boosted || store.isBoosted(props.activity.id),
+);
+const boosting = computed(() => store.isBoosting(props.activity.id));
 const deleting = computed(() => store.isDeleting(props.activity.id));
 
-async function like() {
+const actorsOpen = ref(false);
+const actorsKind = ref<"likes" | "boosts">("likes");
+const repliesOpen = ref(false);
+const repliesLoaded = ref(false);
+const repliesLoading = ref(false);
+const localReplies = ref<ActivityResponse[]>([]);
+const remoteReplies = ref<RemoteReply[]>([]);
+const replyComposerOpen = ref(false);
+
+async function toggleLike() {
+  const undoing = liked.value;
   try {
-    await store.like(activity.value);
+    if (undoing) await store.unlike(activity.value);
+    else await store.like(activity.value);
   } catch (err) {
     toast.push({
       type: "error",
-      message: getApiErrorMessage(err) || t("activities.likeError"),
+      message:
+        getApiErrorMessage(err) ||
+        t(undoing ? "activities.unlikeError" : "activities.likeError"),
     });
   }
+}
+
+async function toggleBoost() {
+  const undoing = boosted.value;
+  try {
+    if (undoing) await store.unboost(activity.value);
+    else await store.boost(activity.value);
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message:
+        getApiErrorMessage(err) ||
+        t(undoing ? "activities.unboostError" : "activities.boostError"),
+    });
+  }
+}
+
+function openActors(kind: "likes" | "boosts") {
+  actorsKind.value = kind;
+  actorsOpen.value = true;
+}
+
+async function loadReplies() {
+  repliesLoading.value = true;
+  try {
+    const response = await listActivityReplies(props.activity.id);
+    localReplies.value = response.activities;
+    remoteReplies.value = response.remote_replies;
+    repliesLoaded.value = true;
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: getApiErrorMessage(err) || t("activities.repliesError"),
+    });
+  } finally {
+    repliesLoading.value = false;
+  }
+}
+
+async function toggleReplies() {
+  repliesOpen.value = !repliesOpen.value;
+  if (repliesOpen.value && !repliesLoaded.value) await loadReplies();
+}
+
+type ReplyEntry =
+  | {
+      kind: "local";
+      key: string;
+      publishedAt: string;
+      activity: ActivityResponse;
+    }
+  | { kind: "remote"; key: string; publishedAt: string; reply: RemoteReply };
+
+const replyEntries = computed<ReplyEntry[]>(() => {
+  const entries: ReplyEntry[] = [
+    ...localReplies.value.map((a) => ({
+      kind: "local" as const,
+      key: a.id,
+      publishedAt: a.published_at,
+      activity: a,
+    })),
+    ...remoteReplies.value.map((r) => ({
+      kind: "remote" as const,
+      key: r.id,
+      publishedAt: r.published_at ?? "",
+      reply: r,
+    })),
+  ];
+  entries.sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
+  return entries;
+});
+
+async function submitReply(payload: StatusComposerPayload) {
+  const created = await store.reply(activity.value, {
+    status: payload.status,
+    content_type: payload.content_type,
+    visibility: payload.visibility,
+    language: payload.language,
+    media_ids: payload.media_ids,
+    track_ids: payload.track_ids,
+  });
+  if (repliesLoaded.value) {
+    localReplies.value = [...localReplies.value, created];
+  } else {
+    await loadReplies();
+  }
+  repliesOpen.value = true;
 }
 
 async function remove() {
@@ -367,23 +483,79 @@ async function copyUrl() {
     </div>
 
     <footer
-      v-if="!props.readonly && (canLike || canEdit)"
+      v-if="!props.readonly && (canInteract || canEdit)"
       class="activity-card__actions"
     >
-      <AppButton
-        v-if="canLike"
-        variant="ghost"
-        size="sm"
-        icon="heart"
-        :icon-variant="liked ? 'solid' : 'regular'"
-        :disabled="liked"
-        :loading="liking"
-        :title="liked ? t('activities.liked') : t('activities.like')"
-        :aria-label="liked ? t('activities.liked') : t('activities.like')"
-        @click="like"
-      >
-        {{ liked ? t("activities.liked") : t("activities.like") }}
-      </AppButton>
+      <template v-if="canInteract">
+        <span class="activity-card__action">
+          <AppButton
+            variant="ghost"
+            size="sm"
+            icon="reply"
+            :title="t('activities.reply')"
+            :aria-label="t('activities.reply')"
+            @click="replyComposerOpen = !replyComposerOpen"
+          />
+          <button
+            type="button"
+            class="activity-card__count"
+            :title="t('activities.replies')"
+            :aria-label="t('activities.replies')"
+            :aria-expanded="repliesOpen"
+            @click="toggleReplies"
+          >
+            {{ activity.reply_count }}
+          </button>
+        </span>
+        <span class="activity-card__action">
+          <AppButton
+            variant="ghost"
+            size="sm"
+            icon="retweet"
+            :class="{ 'activity-card__action-btn--active': boosted }"
+            :loading="boosting"
+            :title="boosted ? t('activities.unboost') : t('activities.boost')"
+            :aria-label="
+              boosted ? t('activities.unboost') : t('activities.boost')
+            "
+            :aria-pressed="boosted"
+            @click="toggleBoost"
+          />
+          <button
+            type="button"
+            class="activity-card__count"
+            :title="t('activities.actors.boosts')"
+            :aria-label="t('activities.actors.boosts')"
+            @click="openActors('boosts')"
+          >
+            {{ activity.boost_count }}
+          </button>
+        </span>
+        <span class="activity-card__action">
+          <AppButton
+            variant="ghost"
+            size="sm"
+            icon="heart"
+            :icon-variant="liked ? 'solid' : 'regular'"
+            :class="{ 'activity-card__action-btn--active': liked }"
+            :loading="liking"
+            :title="liked ? t('activities.unlike') : t('activities.like')"
+            :aria-label="liked ? t('activities.unlike') : t('activities.like')"
+            :aria-pressed="liked"
+            @click="toggleLike"
+          />
+          <button
+            type="button"
+            class="activity-card__count"
+            :title="t('activities.actors.likes')"
+            :aria-label="t('activities.actors.likes')"
+            @click="openActors('likes')"
+          >
+            {{ activity.like_count }}
+          </button>
+        </span>
+      </template>
+      <span class="activity-card__actions-spacer" />
       <AppButton
         v-if="canEdit"
         variant="ghost"
@@ -412,6 +584,48 @@ async function copyUrl() {
         @click="copyUrl"
       />
     </footer>
+
+    <div v-if="replyComposerOpen" class="activity-card__reply-composer">
+      <StatusComposer
+        :submit="submitReply"
+        :submit-label="t('activities.replySubmit')"
+        :placeholder="t('activities.replyPlaceholder')"
+        :initial-visibility="activity.visibility"
+        @submitted="replyComposerOpen = false"
+      />
+    </div>
+
+    <div v-if="repliesOpen" class="activity-card__replies">
+      <div v-if="repliesLoading" class="activity-card__replies-loading">
+        <AppSpinner />
+      </div>
+      <p
+        v-else-if="repliesLoaded && !replyEntries.length"
+        class="activity-card__replies-empty"
+      >
+        {{ t("activities.noReplies") }}
+      </p>
+      <template v-for="entry in replyEntries" :key="entry.key">
+        <ActivityCard
+          v-if="entry.kind === 'local'"
+          :activity="entry.activity"
+          class="activity-card__reply"
+        />
+        <ActivityRemoteReply
+          v-else
+          :reply="entry.reply"
+          class="activity-card__reply"
+        />
+      </template>
+    </div>
+
+    <ActivityActorsModal
+      v-if="!props.readonly"
+      :open="actorsOpen"
+      :activity-id="activity.id"
+      :kind="actorsKind"
+      @close="actorsOpen = false"
+    />
 
     <ActivityEditModal
       v-if="!props.readonly"
@@ -505,7 +719,66 @@ async function copyUrl() {
 
 .activity-card__actions {
   display: flex;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.activity-card__action {
+  display: inline-flex;
+  align-items: center;
+}
+
+.activity-card__action-btn--active {
+  color: var(--color-accent);
+}
+
+.activity-card__count {
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.activity-card__count:hover {
+  color: var(--color-text-hover);
+  text-decoration: underline;
+}
+
+.activity-card__actions-spacer {
+  flex: 1;
+}
+
+.activity-card__reply-composer {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-secondary);
+}
+
+.activity-card__replies {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-border);
+}
+
+.activity-card__replies :deep(.activity-card) {
+  width: auto;
+}
+
+.activity-card__replies-loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3);
+}
+
+.activity-card__replies-empty {
+  margin: 0;
+  color: var(--color-text-muted);
 }
 
 .activity-card__content a {

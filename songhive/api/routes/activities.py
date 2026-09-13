@@ -4,10 +4,10 @@ Activity interaction routes.
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
@@ -18,8 +18,10 @@ from ...services import acl
 from ...services import activities as activity_service
 from ...services import audit
 from ...services.federation import ensure_user_actor
+from ...services.mentions import CONTENT_TYPE_MARKDOWN
 from .._common import client_ip
 from ..deps import get_config, get_current_user, get_current_user_optional, get_db
+from ..middleware.rate_limit import rate_limit_account
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,17 @@ class ActivityUpdate(BaseModel):
     language: Optional[str] = None
     media_ids: Optional[List[str]] = None
     track_ids: Optional[List[str]] = None
+
+
+class ActivityReplyRequest(BaseModel):
+    """Payload for posting a reply to an activity."""
+
+    status: Optional[str] = Field(None, max_length=10_000)
+    content_type: str = CONTENT_TYPE_MARKDOWN
+    visibility: Optional[Visibility] = None
+    language: Optional[str] = Field(None, max_length=35)
+    media_ids: List[str] = Field(default_factory=list)
+    track_ids: List[str] = Field(default_factory=list)
 
 
 class ActivityMentionResponse(BaseModel):
@@ -73,6 +86,12 @@ class ActivityResponse(BaseModel):
     attachments: List[dict] = []
     published_at: datetime
     mentions: List[ActivityMentionResponse] = []
+    like_count: int = 0
+    boost_count: int = 0
+    reply_count: int = 0
+    liked: bool = False
+    boosted: bool = False
+    can_interact: bool = True
 
 
 class ActivityListResponse(BaseModel):
@@ -80,6 +99,24 @@ class ActivityListResponse(BaseModel):
 
     activities: List[ActivityResponse]
     next_cursor: Optional[str] = None
+
+
+class ActivityActorResponse(BaseModel):
+    """A known account that liked or boosted an activity."""
+
+    actor: str
+    handle: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    username: Optional[str] = None
+    profile_url: Optional[str] = None
+    published_at: Optional[datetime] = None
+
+
+class ActivityActorListResponse(BaseModel):
+    """The known accounts that liked or boosted an activity."""
+
+    actors: List[ActivityActorResponse]
 
 
 @entity_router.get("/{entity_type}/{entity_id}/activities", response_model=ActivityListResponse)
@@ -127,9 +164,15 @@ async def list_entity_activities(
         limit=limit,
     )
     profile_map = await activity_service.resolve_source_actor_profiles(db, activities, config)
+    summary_map = await activity_service.resolve_interaction_summaries(db, activities, user, config)
     return ActivityListResponse(
         activities=[
-            _build_activity_response(a, profile_map.get(str(a.id), activity_service.ActorProfile())) for a in activities
+            _build_activity_response(
+                a,
+                profile_map.get(str(a.id), activity_service.ActorProfile()),
+                summary_map.get(str(a.id)),
+            )
+            for a in activities
         ],
         next_cursor=next_cursor,
     )
@@ -146,13 +189,60 @@ def _activity_attachments(activity: Activity) -> List[dict]:
     return [a for a in obj.get("attachment") or [] if isinstance(a, dict)]
 
 
-def _build_activity_response(activity: Activity, profile: Optional[activity_service.ActorProfile]) -> ActivityResponse:
-    """Build an ``ActivityResponse`` with the resolved source actor profile."""
+def _build_activity_response(
+    activity: Activity,
+    profile: Optional[activity_service.ActorProfile],
+    summary: Optional[activity_service.InteractionSummary] = None,
+) -> ActivityResponse:
+    """Build an ``ActivityResponse`` with profile and interaction summary."""
     response = ActivityResponse.model_validate(activity)
     response.source_actor_avatar_url = profile.avatar_url if profile else None
     response.source_actor_display_name = profile.display_name if profile else None
     response.attachments = _activity_attachments(activity)
+    if summary is not None:
+        response.like_count = summary.like_count
+        response.boost_count = summary.boost_count
+        response.reply_count = summary.reply_count
+        response.liked = summary.liked
+        response.boosted = summary.boosted
+    response.can_interact = activity.activity_type not in ("like", "delete")
     return response
+
+
+@router.get("/{activity_id}", response_model=ActivityResponse)
+async def get_activity(
+    activity_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    Fetch a single activity.
+
+    Anonymous requesters may read ``public`` activities on publicly
+    accessible entities; authenticated users get the wider visibilities
+    ``can_view_activity`` grants, and the response's interaction summary
+    reflects their own reactions.
+    """
+    activity = await db.get(Activity, activity_id)
+    if activity is None or activity.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+
+    if not await activity_service.can_view_activity(db, user, activity):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this activity",
+        )
+
+    await db.refresh(activity, ["mentions"])
+    config = get_config(request)
+    profile_map = await activity_service.resolve_source_actor_profiles(db, [activity], config)
+    summary_map = await activity_service.resolve_interaction_summaries(db, [activity], user, config)
+    return _build_activity_response(
+        activity,
+        profile_map.get(str(activity.id), activity_service.ActorProfile()),
+        summary_map.get(str(activity.id)),
+    )
 
 
 @router.patch("/{activity_id}", response_model=ActivityResponse)
@@ -248,8 +338,13 @@ async def update_activity(
 
     await db.refresh(activity, ["mentions"])
     profile_map = await activity_service.resolve_source_actor_profiles(db, [activity], config)
+    summary_map = await activity_service.resolve_interaction_summaries(db, [activity], current_user, config)
     await db.commit()
-    return _build_activity_response(activity, profile_map.get(str(activity.id), activity_service.ActorProfile()))
+    return _build_activity_response(
+        activity,
+        profile_map.get(str(activity.id), activity_service.ActorProfile()),
+        summary_map.get(str(activity.id)),
+    )
 
 
 @router.delete("/{activity_id}")
@@ -341,3 +436,364 @@ async def like_activity(
             logger.exception("Failed to fan out like for activity %s: %s: %s", activity_id, type(e), e)
 
     return {"status": "ok", "activity_id": str(like.id)}
+
+
+@router.post("/{activity_id}/boost", status_code=status.HTTP_201_CREATED)
+async def boost_activity(
+    activity_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Boost an activity as the current user (ActivityPub ``Announce``).
+
+    The boost is stored as an ``announce`` activity attached to the same
+    entity, federated to the boosted activity's audience plus — for remote
+    targets — the author's inbox. Boosting a deleted activity returns 404
+    and boosting it twice returns 400.
+    """
+    activity = await db.get(Activity, activity_id)
+    if activity is None or activity.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+
+    if not await activity_service.can_view_activity(db, current_user, activity):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this activity",
+        )
+
+    config = get_config(request)
+    ensure_user_actor(current_user, config)
+    boost = await activity_service.boost_activity(db, activity=activity, author=current_user)
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="activity.boost",
+        target_type="activity",
+        target_id=str(activity.id),
+        details={
+            "entity_type": activity.entity_type,
+            "entity_id": activity.entity_id,
+            "visibility": activity.visibility,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    if config.federation.enabled and current_user.private_key_pem:
+        try:
+            await activity_service.fan_out_boost_activity(
+                db, boost=boost, target=activity, author=current_user, config=config
+            )
+            await db.commit()
+        except Exception as e:
+            # Fan-out is best-effort: a broker or resolution failure must not
+            # fail the boost itself.
+            logger.exception("Failed to fan out boost for activity %s: %s: %s", activity_id, type(e), e)
+
+    return {"status": "ok", "activity_id": str(boost.id)}
+
+
+async def _unreact(
+    activity_id: str,
+    interaction_type: str,
+    audit_action: str,
+    request: Request,
+    current_user: User,
+    db: AsyncSession,
+) -> dict:
+    """Shared ``DELETE /{id}/like`` + ``DELETE /{id}/boost`` handler."""
+    activity = await db.get(Activity, activity_id)
+    if activity is None or activity.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+
+    if not await activity_service.can_view_activity(db, current_user, activity):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this activity",
+        )
+
+    config = get_config(request)
+    ensure_user_actor(current_user, config)
+    reaction = await activity_service.unreact_activity(
+        db, activity=activity, author=current_user, interaction_type=interaction_type
+    )
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action=audit_action,
+        target_type="activity",
+        target_id=str(activity.id),
+        details={
+            "entity_type": activity.entity_type,
+            "entity_id": activity.entity_id,
+            "interaction_id": str(reaction.id),
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    if config.federation.enabled and current_user.private_key_pem:
+        try:
+            await activity_service.fan_out_unreaction_activity(
+                db, reaction=reaction, author=current_user, config=config
+            )
+            await db.commit()
+        except Exception as e:
+            # Fan-out is best-effort: a broker or resolution failure must not
+            # fail the retraction itself.
+            logger.exception(
+                "Failed to fan out %s undo for activity %s: %s: %s",
+                interaction_type,
+                activity_id,
+                type(e),
+                e,
+            )
+
+    return {"status": "ok"}
+
+
+@router.delete("/{activity_id}/like")
+async def unlike_activity(
+    activity_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retract the current user's like of an activity.
+
+    The like is soft-deleted (the activity can be liked again) and, when
+    the like was federated, an ``Undo(Like)`` is delivered to the inboxes
+    it reached. Unliking an activity that was not liked returns 404.
+    """
+    return await _unreact(activity_id, "like", "activity.unlike", request, current_user, db)
+
+
+@router.delete("/{activity_id}/boost")
+async def unboost_activity(
+    activity_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retract the current user's boost of an activity.
+
+    The boost is soft-deleted (the activity can be boosted again) and, when
+    the boost was federated, an ``Undo(Announce)`` is delivered to the
+    inboxes it reached. Unboosting an activity that was not boosted
+    returns 404.
+    """
+    return await _unreact(activity_id, "announce", "activity.unboost", request, current_user, db)
+
+
+@router.post(
+    "/{activity_id}/reply",
+    response_model=ActivityResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def reply_activity(
+    activity_id: str,
+    body: ActivityReplyRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Post a reply to an activity as the current user.
+
+    The reply is a ``Create(Note)`` whose object carries ``inReplyTo`` and
+    inherits — unless a narrower ``visibility`` is requested — the
+    replied-to activity's visibility. It is attached to the same entity,
+    federated to its audience, and notified to the replied-to author. A
+    reply to a deleted activity returns 404.
+    """
+    activity = await db.get(Activity, activity_id)
+    if activity is None or activity.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+
+    if not await activity_service.can_view_activity(db, current_user, activity):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this activity",
+        )
+
+    config = get_config(request)
+    ensure_user_actor(current_user, config)
+    reply = await activity_service.reply_to_activity(
+        db,
+        activity=activity,
+        author=current_user,
+        config=config,
+        status_text=body.status,
+        content_type=body.content_type,
+        visibility=body.visibility,
+        language=body.language,
+        media_ids=body.media_ids,
+        track_ids=body.track_ids,
+    )
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="activity.reply",
+        target_type="activity",
+        target_id=str(activity.id),
+        details={
+            "entity_type": activity.entity_type,
+            "entity_id": activity.entity_id,
+            "reply_id": str(reply.id),
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+    await db.refresh(reply, ["mentions"])
+
+    profile_map = await activity_service.resolve_source_actor_profiles(db, [reply], config)
+    summary_map = await activity_service.resolve_interaction_summaries(db, [reply], current_user, config)
+    return _build_activity_response(
+        reply,
+        profile_map.get(str(reply.id), activity_service.ActorProfile()),
+        summary_map.get(str(reply.id)),
+    )
+
+
+def _actor_handle(actor: activity_service.InteractionActor) -> str:
+    """Derive a display handle: ``@username`` for locals, ``@name@host`` remote."""
+    if actor.username:
+        return f"@{actor.username}"
+    return activity_service._remote_actor_handle(actor.actor)
+
+
+async def _list_interactors(
+    activity_id: str,
+    interaction_type: str,
+    db: AsyncSession,
+    config: SonghiveConfig,
+    user: Optional[User],
+) -> "ActivityActorListResponse":
+    """Shared ``/{id}/likes`` + ``/{id}/boosts`` handler."""
+    activity = await db.get(Activity, activity_id)
+    if activity is None or activity.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    if not await activity_service.can_view_activity(db, user, activity):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this activity",
+        )
+
+    actors = await activity_service.list_activity_interactors(
+        db, activity=activity, interaction_type=interaction_type, config=config
+    )
+    return ActivityActorListResponse(
+        actors=[
+            ActivityActorResponse(
+                actor=a.actor,
+                handle=_actor_handle(a),
+                display_name=a.display_name,
+                avatar_url=a.avatar_url,
+                username=a.username,
+                profile_url=a.profile_url,
+                published_at=a.published_at,
+            )
+            for a in actors
+        ]
+    )
+
+
+@router.get("/{activity_id}/likes", response_model=ActivityActorListResponse)
+async def list_activity_likes(
+    activity_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """List the known accounts that liked an activity, newest first."""
+    return await _list_interactors(activity_id, "like", db, get_config(request), user)
+
+
+@router.get("/{activity_id}/boosts", response_model=ActivityActorListResponse)
+async def list_activity_boosts(
+    activity_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """List the known accounts that boosted an activity, newest first."""
+    return await _list_interactors(activity_id, "announce", db, get_config(request), user)
+
+
+class ReplyActivityListResponse(BaseModel):
+    """The known replies to an activity, local and federated, oldest first."""
+
+    activities: List[ActivityResponse]
+    remote_replies: List[dict] = []
+
+
+def _remote_reply_payload(interaction: Any) -> dict:
+    """Serialize a Pubby reply ``Interaction`` for the reply list."""
+    meta = interaction.metadata or {}
+    raw = meta.get("raw_object") if isinstance(meta, dict) else None
+    raw = raw if isinstance(raw, dict) else {}
+    attachments = [a for a in raw.get("attachment") or [] if isinstance(a, dict)]
+    published = interaction.published or raw.get("published")
+    if isinstance(published, str):
+        try:
+            published = datetime.fromisoformat(published)
+        except ValueError:
+            published = None
+    content_map = raw.get("contentMap")
+    language = next(iter(content_map)) if isinstance(content_map, dict) and content_map else None
+    return {
+        "id": interaction.object_id or interaction.activity_id,
+        "object_id": interaction.object_id or raw.get("id"),
+        "source_actor": interaction.source_actor_id,
+        "source_actor_name": interaction.author_name or None,
+        "source_actor_url": interaction.author_url or None,
+        "source_actor_avatar_url": interaction.author_photo or None,
+        "content": interaction.content or raw.get("content") or None,
+        "content_type": None,
+        "language": language,
+        "attachments": attachments,
+        "url": raw.get("url"),
+        "published_at": published,
+    }
+
+
+@router.get("/{activity_id}/replies", response_model=ReplyActivityListResponse)
+async def list_activity_replies(
+    activity_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """List the known replies to an activity, oldest first.
+
+    Local replies are visibility-filtered ``Activity`` rows serialized as
+    full activity cards; federated replies come from Pubby's interaction
+    storage as compact ``raw_object``-backed records.
+    """
+    activity = await db.get(Activity, activity_id)
+    if activity is None or activity.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    if not await activity_service.can_view_activity(db, user, activity):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this activity",
+        )
+
+    local, remote = await activity_service.list_activity_replies(
+        db, activity=activity, user=user, config=get_config(request)
+    )
+    profile_map = await activity_service.resolve_source_actor_profiles(db, local, get_config(request))
+    summary_map = await activity_service.resolve_interaction_summaries(db, local, user, get_config(request))
+    return ReplyActivityListResponse(
+        activities=[
+            _build_activity_response(
+                a,
+                profile_map.get(str(a.id), activity_service.ActorProfile()),
+                summary_map.get(str(a.id)),
+            )
+            for a in local
+        ],
+        remote_replies=[_remote_reply_payload(i) for i in remote],
+    )

@@ -30,7 +30,10 @@ import EntityActions, {
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ActivityCard from "@/components/activities/ActivityCard.vue";
 import NotificationActorCard from "@/components/notifications/NotificationActorCard.vue";
+import NotificationActivityCard from "@/components/notifications/NotificationActivityCard.vue";
 import NotificationItemCard from "@/components/notifications/NotificationItemCard.vue";
+import { useInstanceDomain } from "@/composables/useInstanceDomain";
+import { parseActorRef } from "@/utils/actorRef";
 
 const { t } = useI18n();
 const store = useNotificationsStore();
@@ -227,6 +230,19 @@ interface NotificationLink {
   href?: string;
 }
 
+const instanceDomain = useInstanceDomain();
+
+// Activity ids whose fetch failed (deleted/unviewable): the row falls back
+// to the entity item card or the actor card instead of retrying.
+const failedActivityIds = ref<Set<string>>(new Set());
+
+function onActivityCardError(notificationId: string) {
+  failedActivityIds.value = new Set([
+    ...failedActivityIds.value,
+    notificationId,
+  ]);
+}
+
 function rawLinkFor(item: NotificationResponse): string | undefined {
   const payload = item.payload ?? {};
   if (item.type === "follow") {
@@ -237,8 +253,14 @@ function rawLinkFor(item: NotificationResponse): string | undefined {
     return actor || undefined;
   }
   if (item.type === "like" || item.type === "boost") {
-    // Prefer the resolved local page; fall back to the remote object URL.
-    return str(payload.local_url) ?? item.source_url ?? undefined;
+    // Prefer the reacted activity's own page, then the resolved entity
+    // page, and finally the remote object URL.
+    return (
+      str(payload.object_page_url) ??
+      str(payload.local_url) ??
+      item.source_url ??
+      undefined
+    );
   }
   if (NOTE_TYPES.has(item.type)) {
     return str(payload.object_url) ?? item.source_url ?? undefined;
@@ -259,6 +281,15 @@ function linkFor(item: NotificationResponse): NotificationLink | undefined {
   } catch {
     return undefined;
   }
+}
+
+function actorLinkFor(
+  item: NotificationResponse,
+): NotificationLink | undefined {
+  const parsed = parseActorRef(item.actor_url ?? "", instanceDomain.value);
+  if (parsed.username) return { to: `/@${parsed.username}` };
+  if (parsed.remoteUrl) return { href: parsed.remoteUrl };
+  return undefined;
 }
 
 function noteMentions(payload: Record<string, unknown>) {
@@ -309,6 +340,12 @@ function noteActivity(item: NotificationResponse): ActivityResponse | null {
     published_at:
       str(payload.published) ?? item.created_at ?? new Date(0).toISOString(),
     mentions: noteMentions(payload),
+    like_count: 0,
+    boost_count: 0,
+    reply_count: 0,
+    liked: false,
+    boosted: false,
+    can_interact: false,
   };
 }
 
@@ -323,6 +360,12 @@ function itemContext(item: NotificationResponse): ItemContext | null {
   const payload = item.payload ?? {};
   let itemType = str(payload.item_type);
   let itemId = str(payload.item_id);
+  // ``user`` has no item page — legacy payloads may still carry it, and
+  // rendering it would link to a non-existent ``/users/{id}`` route.
+  if (itemType === "user") {
+    itemType = undefined;
+    itemId = undefined;
+  }
   if (!itemType || !itemId) {
     const candidate = str(payload.local_url) ?? item.source_url ?? "";
     const match = candidate.match(
@@ -343,6 +386,17 @@ function itemContext(item: NotificationResponse): ItemContext | null {
   };
 }
 
+function activityRefFor(item: NotificationResponse): string | null {
+  // Like/boost notifications carry the reacted activity's local id so the
+  // row can render the real activity card. ``Audio`` objects (canonical
+  // track shares) render as the track item card instead.
+  if (item.type !== "like" && item.type !== "boost") return null;
+  if (failedActivityIds.value.has(item.id)) return null;
+  const payload = item.payload ?? {};
+  if (str(payload.object_type) === "Audio") return null;
+  return str(payload.object_activity_id) ?? null;
+}
+
 function itemCardFor(item: NotificationResponse): ItemContext | null {
   if (item.type === "share" || item.type === "like" || item.type === "boost") {
     return itemContext(item);
@@ -352,10 +406,11 @@ function itemCardFor(item: NotificationResponse): ItemContext | null {
 
 function actorCardFor(item: NotificationResponse): boolean {
   // Follows always surface the actor; likes/boosts fall back to the actor
-  // card when the referenced object is not a local item.
+  // card when neither the reacted activity nor a local item resolves.
   if (item.type === "follow") return true;
   return (
     (item.type === "like" || item.type === "boost") &&
+    activityRefFor(item) === null &&
     itemContext(item) === null
   );
 }
@@ -542,27 +597,38 @@ onBeforeUnmount(() => {
               class="notifications-view__icon"
               :title="item.type"
             />
-            <RouterLink
-              v-if="linkFor(item)?.to"
-              :to="linkFor(item)!.to!"
-              class="notifications-view__text"
-            >
-              <strong>{{ actorName(item) }}</strong>
-              {{ actionText(item) }}
-            </RouterLink>
-            <a
-              v-else-if="linkFor(item)?.href"
-              :href="linkFor(item)!.href"
-              target="_blank"
-              rel="noopener"
-              class="notifications-view__text"
-            >
-              <strong>{{ actorName(item) }}</strong>
-              {{ actionText(item) }}
-            </a>
-            <span v-else class="notifications-view__text">
-              <strong>{{ actorName(item) }}</strong>
-              {{ actionText(item) }}
+            <span class="notifications-view__text">
+              <RouterLink
+                v-if="actorLinkFor(item)?.to"
+                :to="actorLinkFor(item)!.to!"
+                class="notifications-view__actor"
+                ><strong>{{ actorName(item) }}</strong></RouterLink
+              >
+              <a
+                v-else-if="actorLinkFor(item)?.href"
+                :href="actorLinkFor(item)!.href"
+                target="_blank"
+                rel="noopener"
+                class="notifications-view__actor"
+                ><strong>{{ actorName(item) }}</strong></a
+              >
+              <strong v-else>{{ actorName(item) }}</strong>
+              {{ " " }}
+              <RouterLink
+                v-if="linkFor(item)?.to"
+                :to="linkFor(item)!.to!"
+                class="notifications-view__action"
+                >{{ actionText(item) }}</RouterLink
+              >
+              <a
+                v-else-if="linkFor(item)?.href"
+                :href="linkFor(item)!.href"
+                target="_blank"
+                rel="noopener"
+                class="notifications-view__action"
+                >{{ actionText(item) }}</a
+              >
+              <template v-else>{{ actionText(item) }}</template>
             </span>
           </div>
 
@@ -571,6 +637,12 @@ onBeforeUnmount(() => {
             :activity="noteActivity(item)!"
             readonly
             class="notifications-view__card"
+          />
+          <NotificationActivityCard
+            v-else-if="activityRefFor(item)"
+            :activity-id="activityRefFor(item)!"
+            class="notifications-view__card"
+            @error="onActivityCardError(item.id)"
           />
           <NotificationItemCard
             v-else-if="itemCardFor(item)"
@@ -795,7 +867,14 @@ onBeforeUnmount(() => {
   text-decoration: none;
 }
 
-.notifications-view__text:is(a):hover {
+.notifications-view__actor,
+.notifications-view__action {
+  color: inherit;
+  text-decoration: none;
+}
+
+.notifications-view__actor:hover,
+.notifications-view__action:hover {
   color: var(--color-text-hover);
   text-decoration: underline;
 }

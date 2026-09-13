@@ -7,7 +7,23 @@ import ActivityFeed from "./ActivityFeed.vue";
 vi.mock("@/api/activities", () => ({
   listEntityActivities: vi.fn(),
   likeActivity: vi.fn(),
+  unlikeActivity: vi.fn(),
+  boostActivity: vi.fn(),
+  unboostActivity: vi.fn(),
+  replyToActivity: vi.fn(),
+  listActivityLikes: vi.fn(),
+  listActivityBoosts: vi.fn(),
+  listActivityReplies: vi.fn(),
   updateActivity: vi.fn(),
+  deleteActivity: vi.fn(),
+}));
+
+vi.mock("@/api/search", () => ({
+  searchPreview: vi.fn().mockResolvedValue({ query: "", sections: [] }),
+}));
+
+vi.mock("@/api/files", () => ({
+  uploadFile: vi.fn(),
 }));
 
 const listEntityActivities = vi.mocked(activitiesApi.listEntityActivities);
@@ -24,6 +40,12 @@ function createActivity(id: string): ActivityResponse {
     visibility: "public",
     published_at: "2026-01-01T00:00:00Z",
     mentions: [],
+    like_count: 0,
+    boost_count: 0,
+    reply_count: 0,
+    liked: false,
+    boosted: false,
+    can_interact: true,
   };
 }
 

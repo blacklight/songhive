@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import * as activitiesApi from "@/api/activities";
 import type { ActivityResponse } from "@/api/activities";
@@ -10,11 +10,33 @@ import ActivityCard from "./ActivityCard.vue";
 vi.mock("@/api/activities", () => ({
   listEntityActivities: vi.fn(),
   likeActivity: vi.fn(),
+  unlikeActivity: vi.fn(),
+  boostActivity: vi.fn(),
+  unboostActivity: vi.fn(),
+  replyToActivity: vi.fn(),
+  listActivityLikes: vi.fn(),
+  listActivityBoosts: vi.fn(),
+  listActivityReplies: vi.fn(),
   updateActivity: vi.fn(),
   deleteActivity: vi.fn(),
 }));
 
+vi.mock("@/api/search", () => ({
+  searchPreview: vi.fn().mockResolvedValue({ query: "", sections: [] }),
+}));
+
+vi.mock("@/api/files", () => ({
+  uploadFile: vi.fn(),
+}));
+
 const likeActivity = vi.mocked(activitiesApi.likeActivity);
+const unlikeActivity = vi.mocked(activitiesApi.unlikeActivity);
+const boostActivity = vi.mocked(activitiesApi.boostActivity);
+const unboostActivity = vi.mocked(activitiesApi.unboostActivity);
+const replyToActivity = vi.mocked(activitiesApi.replyToActivity);
+const listActivityLikes = vi.mocked(activitiesApi.listActivityLikes);
+const listActivityBoosts = vi.mocked(activitiesApi.listActivityBoosts);
+const listActivityReplies = vi.mocked(activitiesApi.listActivityReplies);
 const updateActivity = vi.mocked(activitiesApi.updateActivity);
 const deleteActivity = vi.mocked(activitiesApi.deleteActivity);
 
@@ -36,6 +58,12 @@ function createActivity(
     content_type: "text/markdown",
     published_at: "2026-01-01T00:00:00Z",
     mentions: [],
+    like_count: 0,
+    boost_count: 0,
+    reply_count: 0,
+    liked: false,
+    boosted: false,
+    can_interact: true,
     ...overrides,
   };
 }
@@ -60,6 +88,11 @@ function mountCard(overrides: Partial<ActivityResponse> = {}) {
 describe("ActivityCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    // The actors modal teleports to <body>; drop leftovers between tests.
+    document.body.innerHTML = "";
   });
 
   it("renders the actor handle derived from the source actor", () => {
@@ -224,11 +257,17 @@ describe("ActivityCard", () => {
     expect(link.classes()).toContain("activity-card__mark--bold");
   });
 
-  it("shows like edit and copy URL actions for the authenticated owner", () => {
+  it("shows reply boost like edit and copy URL actions for the authenticated owner", () => {
     setAuthenticated("user-1");
-    const wrapper = mountCard();
+    const wrapper = mountCard({
+      like_count: 2,
+      boost_count: 1,
+      reply_count: 3,
+    });
     const buttons = wrapper.findAll(".activity-card__actions button");
-    expect(buttons.length).toBe(4);
+    // 3 interaction icons + 3 counters + edit + delete + copy URL
+    expect(buttons.length).toBe(9);
+    expect(wrapper.text()).toContain("2");
   });
 
   it("hides actions for anonymous users", () => {
@@ -240,21 +279,196 @@ describe("ActivityCard", () => {
     setAuthenticated("user-2");
     const wrapper = mountCard();
     const buttons = wrapper.findAll(".activity-card__actions button");
-    expect(buttons.length).toBe(2);
-    expect(buttons[0].text()).toContain("Like");
+    // 3 interaction icons + 3 counters + copy URL
+    expect(buttons.length).toBe(7);
   });
 
-  it("likes the activity once and disables the button", async () => {
+  it("hides interaction buttons when the activity cannot be interacted with", () => {
+    setAuthenticated("user-1");
+    const wrapper = mountCard({ activity_type: "like", can_interact: false });
+    const buttons = wrapper.findAll(".activity-card__actions button");
+    // edit + delete + copy URL only
+    expect(buttons.length).toBe(3);
+  });
+
+  it("likes the activity once and bumps the counter", async () => {
     setAuthenticated("user-1");
     likeActivity.mockResolvedValue({ status: "ok", activity_id: "l1" });
     const wrapper = mountCard();
-    const likeButton = wrapper.find(".activity-card__actions button");
+    const likeButton = wrapper.find('button[aria-label="Like"]');
     await likeButton.trigger("click");
     await flushPromises();
     expect(likeActivity).toHaveBeenCalledWith("a1");
-    expect(wrapper.text()).toContain("Liked");
-    await likeButton.trigger("click");
-    expect(likeActivity).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('button[aria-label="Unlike"]').exists()).toBe(true);
+    // The counter next to the icon reflects the new like.
+    const counts = wrapper.findAll(".activity-card__count");
+    expect(counts[2].text()).toBe("1");
+  });
+
+  it("unlikes a liked activity and drops the counter", async () => {
+    setAuthenticated("user-1");
+    unlikeActivity.mockResolvedValue({ status: "ok" });
+    const wrapper = mountCard({ liked: true, like_count: 1 });
+    const unlikeButton = wrapper.find('button[aria-label="Unlike"]');
+    expect(unlikeButton.exists()).toBe(true);
+    await unlikeButton.trigger("click");
+    await flushPromises();
+    expect(unlikeActivity).toHaveBeenCalledWith("a1");
+    expect(likeActivity).not.toHaveBeenCalled();
+    expect(wrapper.find('button[aria-label="Like"]').exists()).toBe(true);
+    const counts = wrapper.findAll(".activity-card__count");
+    expect(counts[2].text()).toBe("0");
+  });
+
+  it("boosts the activity once and bumps the counter", async () => {
+    setAuthenticated("user-1");
+    boostActivity.mockResolvedValue({ status: "ok", activity_id: "b1" });
+    const wrapper = mountCard();
+    const boostButton = wrapper.find('button[aria-label="Boost"]');
+    await boostButton.trigger("click");
+    await flushPromises();
+    expect(boostActivity).toHaveBeenCalledWith("a1");
+    expect(wrapper.find('button[aria-label="Unboost"]').exists()).toBe(true);
+    const counts = wrapper.findAll(".activity-card__count");
+    expect(counts[1].text()).toBe("1");
+  });
+
+  it("unboosts a boosted activity and drops the counter", async () => {
+    setAuthenticated("user-1");
+    unboostActivity.mockResolvedValue({ status: "ok" });
+    const wrapper = mountCard({ boosted: true, boost_count: 1 });
+    const unboostButton = wrapper.find('button[aria-label="Unboost"]');
+    expect(unboostButton.exists()).toBe(true);
+    await unboostButton.trigger("click");
+    await flushPromises();
+    expect(unboostActivity).toHaveBeenCalledWith("a1");
+    expect(boostActivity).not.toHaveBeenCalled();
+    expect(wrapper.find('button[aria-label="Boost"]').exists()).toBe(true);
+    const counts = wrapper.findAll(".activity-card__count");
+    expect(counts[1].text()).toBe("0");
+  });
+
+  it("opens the actors modal when the like counter is clicked", async () => {
+    setAuthenticated("user-1");
+    listActivityLikes.mockResolvedValue({
+      actors: [
+        {
+          actor: "urn:songhive:user:bob",
+          handle: "@bob",
+          display_name: "Bob",
+          username: "bob",
+        },
+      ],
+    });
+    const wrapper = mountCard({ like_count: 1 });
+    const counts = wrapper.findAll(".activity-card__count");
+    await counts[2].trigger("click");
+    await flushPromises();
+    expect(listActivityLikes).toHaveBeenCalledWith("a1");
+    expect(document.body.textContent).toContain("Liked by");
+    expect(document.body.textContent).toContain("Bob");
+  });
+
+  it("opens the actors modal when the boost counter is clicked", async () => {
+    setAuthenticated("user-1");
+    listActivityBoosts.mockResolvedValue({ actors: [] });
+    const wrapper = mountCard({ boost_count: 1 });
+    const counts = wrapper.findAll(".activity-card__count");
+    await counts[1].trigger("click");
+    await flushPromises();
+    expect(listActivityBoosts).toHaveBeenCalledWith("a1");
+    expect(document.body.textContent).toContain("Boosted by");
+  });
+
+  it("expands replies when the reply counter is clicked", async () => {
+    setAuthenticated("user-1");
+    listActivityReplies.mockResolvedValue({
+      activities: [
+        createActivity({
+          id: "r1",
+          activity_type: "reply",
+          in_reply_to_activity_id: "a1",
+          content: "<p>a reply</p>",
+          content_source: "a reply",
+          published_at: "2026-01-02T00:00:00Z",
+        }),
+      ],
+      remote_replies: [
+        {
+          id: "rr1",
+          source_actor: "https://remote.example/users/carol",
+          source_actor_name: "Carol",
+          content: "<p>remote reply</p>",
+          attachments: [],
+          published_at: "2026-01-03T00:00:00Z",
+        },
+      ],
+    });
+    const wrapper = mountCard({ reply_count: 2 });
+    const counts = wrapper.findAll(".activity-card__count");
+    await counts[0].trigger("click");
+    await flushPromises();
+    expect(listActivityReplies).toHaveBeenCalledWith("a1");
+    const replies = wrapper.find(".activity-card__replies");
+    expect(replies.exists()).toBe(true);
+    expect(replies.text()).toContain("a reply");
+    expect(replies.text()).toContain("remote reply");
+    expect(replies.text()).toContain("Carol");
+  });
+
+  it("shows an empty state when there are no replies", async () => {
+    setAuthenticated("user-1");
+    listActivityReplies.mockResolvedValue({
+      activities: [],
+      remote_replies: [],
+    });
+    const wrapper = mountCard();
+    const counts = wrapper.findAll(".activity-card__count");
+    await counts[0].trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("No replies yet.");
+  });
+
+  it("toggles the reply composer when the reply icon is clicked", async () => {
+    setAuthenticated("user-1");
+    const wrapper = mountCard();
+    expect(wrapper.find(".activity-card__reply-composer").exists()).toBe(false);
+    await wrapper.find('button[aria-label="Reply"]').trigger("click");
+    expect(wrapper.find(".activity-card__reply-composer").exists()).toBe(true);
+    expect(wrapper.find("textarea").exists()).toBe(true);
+  });
+
+  it("posts a reply through the composer and bumps the counter", async () => {
+    setAuthenticated("user-1");
+    const created = createActivity({
+      id: "r2",
+      activity_type: "reply",
+      in_reply_to_activity_id: "a1",
+      content: "<p>nice track</p>",
+      content_source: "nice track",
+    });
+    replyToActivity.mockResolvedValue(created);
+    listActivityReplies.mockResolvedValue({
+      activities: [created],
+      remote_replies: [],
+    });
+    const wrapper = mountCard();
+    await wrapper.find('button[aria-label="Reply"]').trigger("click");
+    const textarea = wrapper.find("textarea");
+    await textarea.setValue("nice track");
+    await wrapper.find("form.status-composer").trigger("submit");
+    await flushPromises();
+    expect(replyToActivity).toHaveBeenCalledWith(
+      "a1",
+      expect.objectContaining({ status: "nice track" }),
+    );
+    // The composer closes, the reply list opens and the counter bumps.
+    expect(wrapper.find(".activity-card__reply-composer").exists()).toBe(false);
+    expect(wrapper.find(".activity-card__replies").exists()).toBe(true);
+    expect(wrapper.find(".activity-card__replies").text()).toContain(
+      "nice track",
+    );
+    expect(wrapper.findAll(".activity-card__count")[0].text()).toBe("1");
   });
 
   it("deletes the activity after confirmation", async () => {

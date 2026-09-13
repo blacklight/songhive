@@ -54,24 +54,16 @@ def _ordered_collection(collection_id: str, items: list[str]) -> dict[str, Any]:
     }
 
 
-# Frontend route collections per activity entity type (the SPA only
-# pluralizes ``library`` irregularly).
-_ENTITY_ROUTE_PLURALS = {"library": "libraries"}
-
-
 def _entity_activities_url(entity_type: str, entity_id: str, entity: Any = None) -> str:
     """
     Return the SPA route listing an entity's activities.
 
-    User-entity objects (standalone statuses) point at the author's profile
-    page — pass the resolved ``User`` row as ``entity`` so the username is
-    available; the user id falls back into the path when it is not.
+    Thin wrapper over ``services.activities.activity_page_url`` — kept under
+    the historical name used by this module's object-permalink redirects.
     """
-    if entity_type == "user":
-        username = getattr(entity, "username", None) or entity_id
-        return f"/@{username}"
-    plural = _ENTITY_ROUTE_PLURALS.get(entity_type, f"{entity_type}s")
-    return f"/{plural}/{entity_id}/activities"
+    from ...services.activities import activity_page_url
+
+    return activity_page_url(entity_type, entity_id, entity)
 
 
 _FEDERATING_VISIBILITIES = [v.value for v in Visibility if Visibility.federates(v)]

@@ -4,8 +4,42 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- `notifications`: like/boost notifications now link the actor name to the
+  actor's profile (or remote actor URL) and the "liked/boosted your post"
+  text separately to the reacted activity's page, instead of linking the
+  whole line to the containing entity. Notifications carry the reacted
+  activity's `object_activity_id`, ActivityStreams `object_type`, and
+  `object_page_url`: likes/boosts on `Note` objects embed the real
+  `ActivityCard` (fetched via the new `GET /api/v1/activities/{id}`)
+  rather than a track card, `Audio` objects keep the track card, and
+  reactions on standalone statuses no longer produce broken `/users/{id}`
+  card links. Failed activity fetches fall back to the item card or the
+  actor card.
+
 ### Added
 
+- `activities`: Mastodon-style activity interactions. `POST
+  /api/v1/activities/{id}/boost` records an `Announce` and `POST
+  /api/v1/activities/{id}/reply` a `Create(Note)` carrying `inReplyTo`,
+  both attached to the target's entity, inheriting (or narrowing) its
+  visibility, notifying the target's owner, and federating best-effort —
+  likes and boosts additionally resolve the remote target author's inbox.
+  `GET /api/v1/activities/{id}/likes`, `/{id}/boosts` and `/{id}/replies`
+  list the known interactors and replies, merging local `Activity` rows
+  with confirmed remote interactions from Pubby's
+  `federation_interactions` storage. `ActivityResponse` now reports
+  `like_count`, `boost_count`, `reply_count`, the requester's `liked` /
+  `boosted` state, and a `can_interact` flag. `ActivityCard` exposes a
+  reply/boost/like action bar with counters to authenticated users: the
+  icons perform the action, the like/boost counters open a modal listing
+  the known interactors, and the reply counter expands the known replies
+  (local ones as nested cards, remote ones from their federated objects)
+  plus a reply composer. `DELETE /api/v1/activities/{id}/like` and
+  `/{id}/boost` retract the caller's reaction — the like/boost icons act
+  as toggles — removing the produced notification and federating an
+  `Undo(Like)`/`Undo(Announce)` to the inboxes the reaction reached.
 - `statuses`: Standalone status posts. `POST /api/v1/statuses/` creates a
   `create` activity on the author's `user` entity that federates as a
   `Create(Note)` when federation is enabled and the visibility federates

@@ -7,7 +7,23 @@ import EntityActivitiesView from "./EntityActivitiesView.vue";
 vi.mock("@/api/activities", () => ({
   listEntityActivities: vi.fn(),
   likeActivity: vi.fn(),
+  unlikeActivity: vi.fn(),
+  boostActivity: vi.fn(),
+  unboostActivity: vi.fn(),
+  replyToActivity: vi.fn(),
+  listActivityLikes: vi.fn(),
+  listActivityBoosts: vi.fn(),
+  listActivityReplies: vi.fn(),
   updateActivity: vi.fn(),
+  deleteActivity: vi.fn(),
+}));
+
+vi.mock("@/api/search", () => ({
+  searchPreview: vi.fn().mockResolvedValue({ query: "", sections: [] }),
+}));
+
+vi.mock("@/api/files", () => ({
+  uploadFile: vi.fn(),
 }));
 
 const listEntityActivities = vi.mocked(activitiesApi.listEntityActivities);

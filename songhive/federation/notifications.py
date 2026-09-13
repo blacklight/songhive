@@ -46,8 +46,10 @@ from ..models.track import Track
 from ..models.user import User
 from ..services import acl
 from ..services.activities import (
+    _activity_object_type,
     _actor_doc_avatar_url,
     _actor_doc_display_name,
+    activity_page_url,
     resolve_entity,
 )
 from ..services.notifications import (
@@ -173,6 +175,12 @@ async def _resolve_local_object(
     URLs on the instance domain. Returns ``{item_type, item_id, item_title,
     local_url}`` so the client can render the referenced track or entity
     with its own link; ``None`` when the object is not local.
+
+    Objects that resolve to a local ``Activity`` additionally carry
+    ``object_activity_id``/``object_type``/``object_page_url`` so clients
+    can render the reacted activity itself; ``user`` entities (standalone
+    statuses) have no item page, so ``item_type``/``item_id`` are omitted
+    and ``local_url`` is the author's profile.
     """
     if not isinstance(url, str) or not url:
         return None
@@ -182,6 +190,7 @@ async def _resolve_local_object(
 
     item = None
     item_type: Optional[str] = None
+    activity: Optional[Activity] = None
     objects_match = re.search(r"/objects/([^/?#]+)/?$", path)
     if objects_match:
         object_id = objects_match.group(1)
@@ -210,13 +219,26 @@ async def _resolve_local_object(
 
     if item is None or item_type is None:
         return None
-    plural = acl.get_item_plural(item_type) or item_type
-    return {
-        "item_type": item_type,
-        "item_id": str(item.id),
-        "item_title": getattr(item, "title", None) or getattr(item, "name", None),
-        "local_url": f"/{plural}/{item.id}",
-    }
+    if item_type == "user":
+        resolved: Dict[str, Any] = {
+            "item_title": getattr(item, "display_name", None) or getattr(item, "username", None),
+            "local_url": f"/@{getattr(item, 'username', item.id)}",
+        }
+    else:
+        plural = acl.get_item_plural(item_type) or item_type
+        resolved = {
+            "item_type": item_type,
+            "item_id": str(item.id),
+            "item_title": getattr(item, "title", None) or getattr(item, "name", None),
+            "local_url": f"/{plural}/{item.id}",
+        }
+    if activity is not None:
+        resolved["object_activity_id"] = str(activity.id)
+        resolved["object_page_url"] = activity_page_url(item_type, str(activity.entity_id), item)
+        object_type = _activity_object_type(activity)
+        if object_type:
+            resolved["object_type"] = object_type
+    return resolved
 
 
 def _extract_quote_target(obj: dict) -> Optional[str]:
@@ -501,9 +523,9 @@ async def update_inbox_notifications(
     if obj_id == actor_url or (isinstance(obj_type, str) and obj_type in _ACTOR_TYPES):
         # An actor document may only be revised by an actor on its own
         # instance; anything else is a spoofed cross-domain update.
-        if extract_domain(obj_id) != extract_domain(actor_url):
+        if extract_domain(obj_id or "") != extract_domain(actor_url):
             return 0
-        return await _update_actor_notifications(session, obj=obj, recipient=recipient, actor_url=obj_id)
+        return await _update_actor_notifications(session, obj=obj, recipient=recipient, actor_url=obj_id or "")
     return await _update_object_notifications(
         session,
         obj=obj,

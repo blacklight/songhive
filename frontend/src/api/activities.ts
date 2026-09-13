@@ -60,11 +60,62 @@ export interface ActivityResponse {
   attachments?: ActivityAttachment[];
   published_at: string;
   mentions: ActivityMentionResponse[];
+  like_count: number;
+  boost_count: number;
+  reply_count: number;
+  liked: boolean;
+  boosted: boolean;
+  can_interact: boolean;
 }
 
 export interface ActivityListResponse {
   activities: ActivityResponse[];
   next_cursor?: string | null;
+}
+
+/** A known account that liked or boosted an activity. */
+export interface ActivityActorResponse {
+  actor: string;
+  handle: string;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  username?: string | null;
+  profile_url?: string | null;
+  published_at?: string | null;
+}
+
+export interface ActivityActorListResponse {
+  actors: ActivityActorResponse[];
+}
+
+/** A federated reply to an activity, serialized from the pubby raw object. */
+export interface RemoteReply {
+  id: string;
+  object_id?: string | null;
+  source_actor: string;
+  source_actor_name?: string | null;
+  source_actor_url?: string | null;
+  source_actor_avatar_url?: string | null;
+  content?: string | null;
+  content_type?: string | null;
+  language?: string | null;
+  attachments: ActivityAttachment[];
+  url?: string | null;
+  published_at?: string | null;
+}
+
+export interface ReplyActivityListResponse {
+  activities: ActivityResponse[];
+  remote_replies: RemoteReply[];
+}
+
+export interface ActivityReplyRequest {
+  status?: string | null;
+  content_type?: string;
+  visibility?: ActivityVisibility | null;
+  language?: string | null;
+  media_ids?: string[];
+  track_ids?: string[];
 }
 
 export interface ActivityUpdate {
@@ -103,6 +154,10 @@ export function listUserActivities(
   });
 }
 
+export function getActivity(activityId: string): Promise<ActivityResponse> {
+  return apiRequest<ActivityResponse>(`/activities/${activityId}`);
+}
+
 export function updateActivity(
   activityId: string,
   body: ActivityUpdate,
@@ -127,5 +182,64 @@ export function likeActivity(
   return apiRequest<{ status: string; activity_id: string }>(
     `/activities/${activityId}/like`,
     { method: "POST" },
+  );
+}
+
+export function boostActivity(
+  activityId: string,
+): Promise<{ status: string; activity_id: string }> {
+  return apiRequest<{ status: string; activity_id: string }>(
+    `/activities/${activityId}/boost`,
+    { method: "POST" },
+  );
+}
+
+export function unlikeActivity(
+  activityId: string,
+): Promise<{ status: string }> {
+  return apiRequest<{ status: string }>(`/activities/${activityId}/like`, {
+    method: "DELETE",
+  });
+}
+
+export function unboostActivity(
+  activityId: string,
+): Promise<{ status: string }> {
+  return apiRequest<{ status: string }>(`/activities/${activityId}/boost`, {
+    method: "DELETE",
+  });
+}
+
+export function replyToActivity(
+  activityId: string,
+  body: ActivityReplyRequest,
+): Promise<ActivityResponse> {
+  return apiRequest<ActivityResponse>(`/activities/${activityId}/reply`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function listActivityLikes(
+  activityId: string,
+): Promise<ActivityActorListResponse> {
+  return apiRequest<ActivityActorListResponse>(
+    `/activities/${activityId}/likes`,
+  );
+}
+
+export function listActivityBoosts(
+  activityId: string,
+): Promise<ActivityActorListResponse> {
+  return apiRequest<ActivityActorListResponse>(
+    `/activities/${activityId}/boosts`,
+  );
+}
+
+export function listActivityReplies(
+  activityId: string,
+): Promise<ReplyActivityListResponse> {
+  return apiRequest<ReplyActivityListResponse>(
+    `/activities/${activityId}/replies`,
   );
 }

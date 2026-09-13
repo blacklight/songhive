@@ -86,4 +86,9 @@ async def create_status(
     await db.commit()
     await db.refresh(activity, ["mentions"])
     profile_map = await activity_service.resolve_source_actor_profiles(db, [activity], config)
-    return _build_activity_response(activity, profile_map.get(str(activity.id), activity_service.ActorProfile()))
+    summary_map = await activity_service.resolve_interaction_summaries(db, [activity], current_user, config)
+    return _build_activity_response(
+        activity,
+        profile_map.get(str(activity.id), activity_service.ActorProfile()),
+        summary_map.get(str(activity.id)),
+    )

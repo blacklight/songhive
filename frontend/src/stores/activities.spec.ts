@@ -7,12 +7,23 @@ import { useActivitiesStore } from "./activities";
 vi.mock("@/api/activities", () => ({
   listEntityActivities: vi.fn(),
   likeActivity: vi.fn(),
+  unlikeActivity: vi.fn(),
+  boostActivity: vi.fn(),
+  unboostActivity: vi.fn(),
+  replyToActivity: vi.fn(),
+  listActivityLikes: vi.fn(),
+  listActivityBoosts: vi.fn(),
+  listActivityReplies: vi.fn(),
   updateActivity: vi.fn(),
   deleteActivity: vi.fn(),
 }));
 
 const listEntityActivities = vi.mocked(activitiesApi.listEntityActivities);
 const likeActivity = vi.mocked(activitiesApi.likeActivity);
+const unlikeActivity = vi.mocked(activitiesApi.unlikeActivity);
+const boostActivity = vi.mocked(activitiesApi.boostActivity);
+const unboostActivity = vi.mocked(activitiesApi.unboostActivity);
+const replyToActivity = vi.mocked(activitiesApi.replyToActivity);
 const updateActivity = vi.mocked(activitiesApi.updateActivity);
 const deleteActivity = vi.mocked(activitiesApi.deleteActivity);
 
@@ -28,6 +39,12 @@ function createActivity(id: string): ActivityResponse {
     visibility: "public",
     published_at: "2026-01-01T00:00:00Z",
     mentions: [],
+    like_count: 0,
+    boost_count: 0,
+    reply_count: 0,
+    liked: false,
+    boosted: false,
+    can_interact: true,
   };
 }
 
@@ -98,6 +115,83 @@ describe("useActivitiesStore", () => {
     await store.like(activity);
     expect(likeActivity).toHaveBeenCalledTimes(1);
     expect(store.isLiked("a1")).toBe(true);
+  });
+
+  it("like bumps the like counter on the cached activity", async () => {
+    likeActivity.mockResolvedValue({ status: "ok", activity_id: "l1" });
+    const store = useActivitiesStore();
+    const activity = createActivity("a1");
+    await store.like(activity);
+    expect(store.updatedActivity("a1")?.liked).toBe(true);
+    expect(store.updatedActivity("a1")?.like_count).toBe(1);
+  });
+
+  it("unlike clears the liked flag and drops the counter", async () => {
+    likeActivity.mockResolvedValue({ status: "ok", activity_id: "l1" });
+    unlikeActivity.mockResolvedValue({ status: "ok" });
+    const store = useActivitiesStore();
+    const activity = createActivity("a1");
+    await store.like(activity);
+    await store.unlike(activity);
+    expect(unlikeActivity).toHaveBeenCalledWith("a1");
+    expect(store.isLiked("a1")).toBe(false);
+    expect(store.updatedActivity("a1")?.liked).toBe(false);
+    expect(store.updatedActivity("a1")?.like_count).toBe(0);
+    // The activity can be liked again.
+    await store.like(activity);
+    expect(likeActivity).toHaveBeenCalledTimes(2);
+    expect(store.updatedActivity("a1")?.like_count).toBe(1);
+  });
+
+  it("unlike honours a server-reported liked flag", async () => {
+    unlikeActivity.mockResolvedValue({ status: "ok" });
+    const store = useActivitiesStore();
+    const activity = { ...createActivity("a1"), liked: true, like_count: 3 };
+    await store.unlike(activity);
+    expect(store.updatedActivity("a1")?.liked).toBe(false);
+    expect(store.updatedActivity("a1")?.like_count).toBe(2);
+  });
+
+  it("boost marks the activity as boosted exactly once", async () => {
+    boostActivity.mockResolvedValue({ status: "ok", activity_id: "b1" });
+    const store = useActivitiesStore();
+    const activity = createActivity("a1");
+    await store.boost(activity);
+    await store.boost(activity);
+    expect(boostActivity).toHaveBeenCalledTimes(1);
+    expect(store.isBoosted("a1")).toBe(true);
+    expect(store.updatedActivity("a1")?.boost_count).toBe(1);
+  });
+
+  it("unboost clears the boosted flag and drops the counter", async () => {
+    boostActivity.mockResolvedValue({ status: "ok", activity_id: "b1" });
+    unboostActivity.mockResolvedValue({ status: "ok" });
+    const store = useActivitiesStore();
+    const activity = createActivity("a1");
+    await store.boost(activity);
+    await store.unboost(activity);
+    expect(unboostActivity).toHaveBeenCalledWith("a1");
+    expect(store.isBoosted("a1")).toBe(false);
+    expect(store.updatedActivity("a1")?.boosted).toBe(false);
+    expect(store.updatedActivity("a1")?.boost_count).toBe(0);
+    // The activity can be boosted again.
+    await store.boost(activity);
+    expect(boostActivity).toHaveBeenCalledTimes(2);
+    expect(store.updatedActivity("a1")?.boost_count).toBe(1);
+  });
+
+  it("reply posts the reply and bumps the reply counter", async () => {
+    replyToActivity.mockResolvedValue({
+      ...createActivity("r1"),
+      activity_type: "reply",
+      in_reply_to_activity_id: "a1",
+    });
+    const store = useActivitiesStore();
+    const activity = createActivity("a1");
+    const created = await store.reply(activity, { status: "hi" });
+    expect(replyToActivity).toHaveBeenCalledWith("a1", { status: "hi" });
+    expect(created.id).toBe("r1");
+    expect(store.updatedActivity("a1")?.reply_count).toBe(1);
   });
 
   it("update patches the activity and updates the cached item", async () => {

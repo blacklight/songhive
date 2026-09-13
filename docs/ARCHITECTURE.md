@@ -425,16 +425,60 @@ viewable). Interactions are layered on top of `create_local_activity`:
 `like_activity` records an idempotent `like` (400 on a duplicate, 404 on a
 retracted target) that inherits the target's visibility and stores a
 `federation/activities.create_like_activity` `Like` payload whose `to`/`cc`
-come from `activity_audience`. Interactions skip the `can_manage` gate
+come from `activity_audience`. `boost_activity` mirrors it as an
+`announce` activity carrying an `Announce` payload
+(`federation/activities.create_announce_activity`, a thin wrapper over
+pubby's `build_announce_activity`) whose `object` is the target's
+`source_id`; duplicates are rejected the same way. `reply_to_activity`
+stores a `reply` activity whose payload is a `Create(Note)` with
+`inReplyTo` set to the target's `source_id` — the reply reuses the status
+composition pipeline (`process_mentions`, media/track attachment
+resolution, `contentMap` language tagging) and its requested visibility
+may never exceed the target's (`Visibility.can_contain`) or the entity's.
+The replied-to author is always addressed: a local owner gets an
+`ActivityMention` row plus a `reply` notification (`_notify_reply`), a
+remote author gets a `Mention` tag so `resolve_audience` delivers the
+reply to their inbox. Interactions skip the `can_manage` gate
 (`require_manage=False`) — view access on the target is enough — while
 content-producing activity types still require manage rights. The
-`POST /api/v1/activities/{id}/like` endpoint performs the 404/403/400
-checks, provisions the liker's actor keys (`ensure_user_actor`), commits,
-then calls `services/activities.fan_out_like_activity`: for remote targets
-it resolves the liked author's inbox via
+`POST /api/v1/activities/{id}/like`, `/{id}/boost` and `/{id}/reply`
+endpoints perform the 404/403/400 (or 422 for invalid replies) checks,
+provision the author's actor keys (`ensure_user_actor`), commit, then fan
+out: likes and boosts share `_fan_out_reaction_activity` (exposed as
+`fan_out_like_activity`/`fan_out_boost_activity`), which — for remote
+targets — resolves the reacted author's inbox via
 `services/federation.resolve_actor_inbox` (the `federation_actor_cache`
 table first, then a signed actor-document fetch, preferring `sharedInbox`)
-and hands it to `fan_out_activity` alongside the like's own audience.
+and hands it to `fan_out_activity` alongside the reaction's own audience;
+replies fan out inline through `fan_out_activity`, best-effort.
+`DELETE /api/v1/activities/{id}/like` and `/{id}/boost` retract the
+caller's reaction: `unreact_activity` soft-deletes the like/announce row
+(so the target can be reacted to again), removes the notification it
+produced, and returns the retracted activity; `fan_out_unreaction_activity`
+then delivers an `Undo` wrapping the originally federated `Like`/`Announce`
+(`federation/activities.create_undo_activity`, over pubby's
+`build_undo_activity`) to exactly the inboxes recorded as `sent` for the
+reaction. Unreacting a target without a live reaction returns 404.
+
+Every `ActivityResponse` carries interaction state resolved by
+`resolve_interaction_summaries`: `like_count`, `boost_count` and
+`reply_count` combine local `Activity` rows (interactions stored with
+`in_reply_to_activity_id` pointing at the target) with confirmed remote
+interactions recorded in Pubby's `federation_interactions` storage against
+the activity's `source_id` (`_remote_interactions`, thread-offloaded and
+best-effort); `liked`/`boosted` report the requester's own live
+like/announce rows, and `can_interact` is false for activity types that
+cannot themselves be reacted to (`like`, `delete`). `GET
+/api/v1/activities/{id}/likes` and `/{id}/boosts` return the
+known interactors — local users resolved to profiles, remote actors from
+Pubby's interaction records — via `list_activity_interactors`, and
+`GET /api/v1/activities/{id}/replies` returns the known replies via
+`list_activity_replies`: visibility-filtered local `reply` activities
+serialized as full `ActivityResponse`s plus remote replies rebuilt from
+the `raw_object` metadata the inbox processor stored. All three listings
+gate on `can_view_activity` and allow anonymous reads of public targets.
+`GET /api/v1/activities/{id}` returns a single activity under the same
+rules — it backs the notification UI's embedded activity cards.
 
 `resolve_audience` maps an activity's visibility to the set of remote
 **inbox URLs** it should reach: `public` and `followers` activities go to
@@ -1249,7 +1293,14 @@ come from pubby's cached actor document); likes, boosts, and shares record
 local entity (`federation/notifications.py`'s `_resolve_local_object`
 matches `{actor}/objects/{id}` against `Track.federation_object_id` and
 `Activity.local_object_id`/`source_id`, and `/{plural}/{id}` URLs on the
-instance domain). `Create` payloads carry a `_note_snapshot` —
+instance domain). Objects resolving to a local `Activity` additionally
+record `object_activity_id`, the ActivityStreams `object_type` (`Note`,
+`Audio`, …) and `object_page_url` — the activity's own page, i.e. the
+entity's activity feed or the author's profile for `user` entities
+(`services/activities.py`'s `activity_page_url`, shared by
+`_entity_link_fields` and the object-permalink browser redirects). `user`
+entities have no item page, so `item_type`/`item_id` are omitted there and
+`local_url` points at the author's `/@username` profile. `Create` payloads carry a `_note_snapshot` —
 `object_content` (capped raw HTML), `object_summary`, `object_name`,
 `object_url`, `published`, `object_mentions` — and replies/quotes add
 `target_url` plus `target_*` fields for a resolved local target.
@@ -1292,12 +1343,18 @@ and updates replace changed rows in place, both silently. `AppLayout` renders a 
 rows seen via a debounced `IntersectionObserver` batch that defers to rows
 the user just toggled back to unseen, and offers per-row dismissal plus a
 TrackList-style selection mode for bulk delete/read/unread and a
-confirmation-protected "Clear all". Rows render context cards from the
+confirmation-protected "Clear all". Each row's header links the actor name
+to the actor's profile (or remote actor URL) and the action text separately
+to the referenced object — for likes/boosts the `object_page_url` of the
+reacted activity. Rows render context cards from the
 payload: follows (and unresolved likes/boosts) show
 `components/notifications/NotificationActorCard.vue` (local actors route to
 `/@name`, remote actors link out), mentions/replies/quotes embed a
 read-only `ActivityCard` fed by the note snapshot (remote HTML reduced to
-plain text), and shares plus resolved likes/boosts show
+plain text), likes/boosts on `Note` objects fetch and embed the real
+`ActivityCard` through `NotificationActivityCard.vue` (`GET
+/api/v1/activities/{id}`), and shares plus likes/boosts on `Audio` objects
+(or failed activity fetches) show
 `NotificationItemCard.vue`, which fills in title and cover art through the
 deduplicating `composables/useItemSummary.ts` cache when the payload lacks
 them. The `/settings?tab=notifications`
@@ -1513,9 +1570,20 @@ Entity detail pages expose an "Activities" action that navigates to
 `/{entity}/{id}/activities` (`EntityActivitiesView`, shared across `track`,
 `album`, `artist`, `playlist`, and `library`). The feed reads
 `GET /api/v1/{entity_type}/{entity_id}/activities` with `activity_type` /
-`source_type` filters and keyset `cursor` pagination; liking an activity calls
-`POST /api/v1/activities/{id}/like` and editing one calls
-`PATCH /api/v1/activities/{id}` (shown to the activity owner and admins). Card
+`source_type` filters and keyset `cursor` pagination; liking or boosting an activity
+calls `POST /api/v1/activities/{id}/like` / `/{id}/boost`, replying calls
+`POST /api/v1/activities/{id}/reply`, and editing one calls
+`PATCH /api/v1/activities/{id}` (shown to the activity owner and admins).
+`ActivityCard` renders a Mastodon-style action bar — reply, boost and like
+icons with their counters — for authenticated users when the activity's
+`can_interact` flag allows it (the icons act as toggles — liking/boosting
+a reacted activity retracts it via `DELETE /{id}/like` / `/{id}/boost`;
+clicking the like/boost
+count opens `ActivityActorsModal` listing the known interactors from
+`GET /{id}/likes` / `/{id}/boosts`, and clicking the reply count expands
+the known replies from `GET /{id}/replies` — local replies rendered as
+nested `ActivityCard`s, remote ones as `ActivityRemoteReply` rows —
+together with a `StatusComposer` wired to the reply endpoint). Card
 content is never rendered as raw HTML — `ActivityCard` reduces it to safe
 segments (text, line breaks, linkified mentions/hashtags/URLs) via
 `utils/activityContent.parseActivityContent`; inline formatting elements

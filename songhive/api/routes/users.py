@@ -477,11 +477,13 @@ async def list_user_activities_route(
         limit=limit,
     )
     profile_map = await activity_service.resolve_source_actor_profiles(db, activities, config)
+    summary_map = await activity_service.resolve_interaction_summaries(db, activities, user, config)
     return ActivityListResponse(
         activities=[
             _build_activity_response(
                 a,
                 profile_map.get(str(a.id), activity_service.ActorProfile()),
+                summary_map.get(str(a.id)),
             )
             for a in activities
         ],

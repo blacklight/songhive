@@ -15,11 +15,13 @@ import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type, TypedDict
+from urllib.parse import urlparse
 
 from fastapi import HTTPException
+from pubby import InteractionType
 from pubby.content import render_post_html, set_object_content
 from pydantic import BaseModel, field_validator
-from sqlalchemy import and_, delete, exists, or_, select, true, union_all
+from sqlalchemy import and_, delete, exists, func, or_, select, true, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -62,20 +64,29 @@ __all__ = [
     "ACTIVITY_TYPES",
     "ActivityCreateParams",
     "VisibilityRules",
+    "activity_page_url",
+    "boost_activity",
     "can_view_activity",
     "create_local_activity",
     "create_status",
     "fan_out_activity",
     "fan_out_activity_update",
+    "fan_out_boost_activity",
     "fan_out_like_activity",
+    "fan_out_unreaction_activity",
     "like_activity",
     "list_activities",
     "list_activities_for_tag",
+    "list_activity_interactors",
+    "list_activity_replies",
     "list_user_activities",
+    "reply_to_activity",
+    "resolve_interaction_summaries",
     "resolve_audience",
     "resolve_entity",
     "resolve_source_actor_profiles",
     "sync_track_publications",
+    "unreact_activity",
     "update_activity",
 ]
 
@@ -608,6 +619,270 @@ async def resolve_source_actor_profiles(
     return result
 
 
+# Mapping between ``activities.activity_type`` values and the pubby
+# ``InteractionType`` stored for remote actors in ``federation_interactions``.
+_REMOTE_INTERACTION_TYPES = {
+    "like": InteractionType.LIKE,
+    "announce": InteractionType.BOOST,
+    "reply": InteractionType.REPLY,
+}
+
+
+def _fetch_remote_interactions(
+    config: SonghiveConfig,
+    source_ids: Iterable[str],
+    interaction_type: Optional[InteractionType] = None,
+) -> Dict[str, List[Any]]:
+    """
+    Fetch confirmed remote interactions for each object id in ``source_ids``.
+
+    Reads Pubby's ``federation_interactions`` storage — remote likes, boosts
+    and replies targeting a local object are recorded there by the inbox
+    processor, keyed by the object's ActivityPub id (``Activity.source_id``).
+    Synchronous and session-per-call; must be invoked through
+    ``asyncio.to_thread`` from async code. Failures (e.g. the table not
+    existing yet) surface as exceptions for the caller to swallow.
+    """
+    storage = create_activitypub_storage(config.database.url)
+    result: Dict[str, List[Any]] = {}
+    for source_id in source_ids:
+        try:
+            result[source_id] = list(storage.get_interactions(source_id, interaction_type=interaction_type))
+        except Exception:
+            result[source_id] = []
+    return result
+
+
+async def _remote_interactions(
+    config: SonghiveConfig,
+    source_ids: Iterable[str],
+    interaction_type: Optional[InteractionType] = None,
+) -> Dict[str, List[Any]]:
+    """
+    ``_fetch_remote_interactions`` wrapper: thread offloaded, best-effort.
+
+    Returns an empty mapping when federation is disabled or unconfigured and
+    swallows storage errors — remote interactions are additive context and
+    must never break the surrounding request.
+    """
+    if not config.federation.enabled or not config.federation.instance_domain:
+        return {}
+    try:
+        return await asyncio.to_thread(_fetch_remote_interactions, config, source_ids, interaction_type)
+    except Exception:
+        logger.exception("Failed to fetch remote interactions")
+        return {}
+
+
+def _interaction_sort_key(published: Optional[datetime]) -> datetime:
+    """Normalize possibly-naive interaction timestamps for sorting."""
+    if published is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if published.tzinfo is None:
+        return published.replace(tzinfo=timezone.utc)
+    return published
+
+
+class InteractionSummary(NamedTuple):
+    """Interaction counters and the requester's own state for an activity."""
+
+    like_count: int = 0
+    boost_count: int = 0
+    reply_count: int = 0
+    liked: bool = False
+    boosted: bool = False
+
+
+async def resolve_interaction_summaries(
+    session: AsyncSession,
+    activities: List[Activity],
+    user: Optional[User],
+    config: SonghiveConfig,
+) -> Dict[str, InteractionSummary]:
+    """
+    Map each activity id to its like/boost/reply counters and viewer state.
+
+    Counts combine local ``Activity`` rows (likes, boosts and replies stored
+    with ``in_reply_to_activity_id``) and confirmed remote interactions
+    recorded in Pubby's ``federation_interactions`` storage against the
+    activity's ``source_id``. ``liked``/``boosted`` reflect whether ``user``
+    already has a live like/announce row targeting the activity.
+    """
+    if not activities:
+        return {}
+
+    ids = [str(a.id) for a in activities]
+    counts: Dict[str, Dict[str, int]] = {i: {"like": 0, "announce": 0, "reply": 0} for i in ids}
+    rows = await session.execute(
+        select(Activity.in_reply_to_activity_id, Activity.activity_type, func.count())
+        .where(
+            Activity.in_reply_to_activity_id.in_(ids),
+            Activity.activity_type.in_(tuple(_REMOTE_INTERACTION_TYPES)),
+            Activity.deleted_at.is_(None),
+        )
+        .group_by(Activity.in_reply_to_activity_id, Activity.activity_type)
+    )
+    for target_id, activity_type, count in rows.all():
+        counts[str(target_id)][activity_type] += count
+
+    reacted: Dict[str, Set[str]] = {"like": set(), "announce": set()}
+    if user is not None:
+        rows = await session.execute(
+            select(Activity.in_reply_to_activity_id, Activity.activity_type).where(
+                Activity.in_reply_to_activity_id.in_(ids),
+                Activity.activity_type.in_(("like", "announce")),
+                Activity.owner_user_id == user.id,
+                Activity.deleted_at.is_(None),
+            )
+        )
+        for target_id, activity_type in rows.all():
+            reacted[activity_type].add(str(target_id))
+
+    remote = await _remote_interactions(config, {a.source_id for a in activities})
+    for activity in activities:
+        for interaction in remote.get(activity.source_id, []):
+            for activity_type, interaction_type in _REMOTE_INTERACTION_TYPES.items():
+                if interaction.interaction_type == interaction_type:
+                    counts[str(activity.id)][activity_type] += 1
+
+    return {
+        str(a.id): InteractionSummary(
+            like_count=counts[str(a.id)]["like"],
+            boost_count=counts[str(a.id)]["announce"],
+            reply_count=counts[str(a.id)]["reply"],
+            liked=str(a.id) in reacted["like"],
+            boosted=str(a.id) in reacted["announce"],
+        )
+        for a in activities
+    }
+
+
+class InteractionActor(NamedTuple):
+    """A known account that liked or boosted an activity."""
+
+    actor: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    username: Optional[str] = None
+    profile_url: Optional[str] = None
+    published_at: Optional[datetime] = None
+
+
+async def list_activity_interactors(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    interaction_type: str,
+    config: SonghiveConfig,
+) -> List[InteractionActor]:
+    """
+    List the known accounts that liked or boosted ``activity``.
+
+    ``interaction_type`` is ``"like"`` or ``"announce"``. Local interactions
+    resolve to user profiles (``username`` set → the actor can be linked to
+    its local profile page); remote ones come from Pubby's interaction
+    storage and carry whatever identity the remote activity exposed
+    (``author_name``/``author_url``/``author_photo``). Results are merged
+    newest-first.
+    """
+    if interaction_type not in ("like", "announce"):
+        raise HTTPException(400, detail=f"Invalid interaction_type: {interaction_type}")
+
+    rows = (
+        (
+            await session.execute(
+                select(Activity)
+                .where(
+                    Activity.in_reply_to_activity_id == str(activity.id),
+                    Activity.activity_type == interaction_type,
+                    Activity.deleted_at.is_(None),
+                )
+                .order_by(Activity.published_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    profiles = await resolve_source_actor_profiles(session, list(rows), config)
+    owner_ids = {a.owner_user_id for a in rows if a.owner_user_id}
+    usernames: Dict[str, str] = {}
+    if owner_ids:
+        user_rows = await session.execute(select(User.id, User.username).where(User.id.in_(owner_ids)))
+        usernames = {str(row[0]): row[1] for row in user_rows}
+
+    actors: List[InteractionActor] = []
+    for row in rows:
+        profile = profiles.get(str(row.id), ActorProfile())
+        username = usernames.get(str(row.owner_user_id)) if row.owner_user_id else None
+        if username is None and row.source_actor.startswith("urn:songhive:user:"):
+            username = row.source_actor[len("urn:songhive:user:") :]
+        actors.append(
+            InteractionActor(
+                actor=row.source_actor,
+                display_name=profile.display_name,
+                avatar_url=profile.avatar_url,
+                username=username,
+                published_at=row.published_at,
+            )
+        )
+
+    remote = await _remote_interactions(config, [activity.source_id], _REMOTE_INTERACTION_TYPES[interaction_type])
+    for interaction in remote.get(activity.source_id, []):
+        actors.append(
+            InteractionActor(
+                actor=interaction.source_actor_id,
+                display_name=interaction.author_name or None,
+                avatar_url=interaction.author_photo or None,
+                profile_url=interaction.author_url or interaction.source_actor_id,
+                published_at=interaction.published,
+            )
+        )
+
+    actors.sort(key=lambda a: _interaction_sort_key(a.published_at), reverse=True)
+    return actors
+
+
+async def list_activity_replies(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    user: Optional[User],
+    config: SonghiveConfig,
+) -> Tuple[List[Activity], List[Any]]:
+    """List the known replies to ``activity``, oldest first.
+
+    Returns ``(local, remote)``: local replies are ``reply``-type
+    ``Activity`` rows filtered by the requester's visibility rules; remote
+    replies are confirmed Pubby ``Interaction`` rows whose ``raw_object``
+    metadata carries the federated note for display. The caller merges and
+    serializes the two lists.
+    """
+    local = (
+        (
+            await session.execute(
+                select(Activity)
+                .where(
+                    Activity.in_reply_to_activity_id == str(activity.id),
+                    Activity.activity_type == "reply",
+                    Activity.deleted_at.is_(None),
+                    _activity_visibility_filter(user),
+                )
+                .order_by(Activity.published_at.asc(), Activity.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    remote = await _remote_interactions(config, [activity.source_id], InteractionType.REPLY)
+    remote_replies = sorted(
+        remote.get(activity.source_id, []),
+        key=lambda i: _interaction_sort_key(i.published),
+    )
+    return list(local), remote_replies
+
+
 async def _fan_out_visibility_update(
     session: AsyncSession,
     activity: Activity,
@@ -1086,13 +1361,38 @@ async def _refresh_notifications_for_object(
     )
 
 
+async def _find_live_reaction(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    author: User,
+    activity_type: str,
+) -> Optional[Activity]:
+    """Return ``author``'s live ``activity_type`` reaction to ``activity``."""
+    return (
+        await session.execute(
+            select(Activity)
+            .where(
+                Activity.entity_type == activity.entity_type,
+                Activity.entity_id == activity.entity_id,
+                Activity.activity_type == activity_type,
+                Activity.source_actor == _local_actor_url(author),
+                Activity.in_reply_to_activity_id == activity.id,
+                Activity.deleted_at.is_(None),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 async def like_activity(
     session: AsyncSession,
     *,
     activity: Activity,
     author: User,
 ) -> Activity:
-    """Record ``author``'s like of ``activity``.
+    """
+    Record ``author``'s like of ``activity``.
 
     The like inherits the target activity's visibility and is attached to the
     same entity.  Raises ``HTTPException`` 404 when the target activity has
@@ -1106,19 +1406,7 @@ async def like_activity(
         raise HTTPException(404, detail="Activity not found")
 
     source_actor = _local_actor_url(author)
-    existing = await session.execute(
-        select(Activity.id)
-        .where(
-            Activity.entity_type == activity.entity_type,
-            Activity.entity_id == activity.entity_id,
-            Activity.activity_type == "like",
-            Activity.source_actor == source_actor,
-            Activity.in_reply_to_activity_id == activity.id,
-            Activity.deleted_at.is_(None),
-        )
-        .limit(1)
-    )
-    if existing.scalar_one_or_none() is not None:
+    if await _find_live_reaction(session, activity=activity, author=author, activity_type="like") is not None:
         raise HTTPException(400, detail="Already liked")
 
     like = await create_local_activity(
@@ -1152,67 +1440,449 @@ async def like_activity(
         activity_id=like.source_id,
     )
     await session.flush()
-    await _notify_like(session, activity=activity, like=like, author=author)
+    await _notify_reaction(session, activity=activity, interaction=like, author=author, type=NotificationType.LIKE)
     return like
 
 
-async def _notify_like(
+async def boost_activity(
     session: AsyncSession,
     *,
     activity: Activity,
-    like: Activity,
     author: User,
-) -> None:
-    """Notify the liked activity's local owner, never failing the like.
+) -> Activity:
+    """Record ``author``'s boost (``Announce``) of ``activity``.
 
-    Mirrors the federated ``Like`` inbox path: ``source_url`` is the liked
-    object's id and ``payload.activity_id`` the like's own object id, so
-    ``retract_activity`` removes the row when the like is undone or the
-    liked activity is retracted. Remote-authored activities carry no
-    ``owner_user_id`` — their authors are reached through fan-out instead.
-    Self-likes and notification failures never produce or break anything.
+    Mirrors :func:`like_activity`: the boost inherits the target activity's
+    visibility and is attached to the same entity. Raises ``HTTPException``
+    404 when the target activity has been retracted and 400 when the author
+    already boosted it. The stored ``payload`` is the ActivityPub
+    ``Announce`` activity, addressed — for ``mentioned`` visibility — to the
+    target's author and mentioned actors. Flushes without committing; the
+    caller owns the transaction.
+    """
+    if activity.deleted_at is not None:
+        raise HTTPException(404, detail="Activity not found")
+
+    source_actor = _local_actor_url(author)
+    if await _find_live_reaction(session, activity=activity, author=author, activity_type="announce") is not None:
+        raise HTTPException(400, detail="Already boosted")
+
+    boost = await create_local_activity(
+        session,
+        entity_type=activity.entity_type,
+        entity_id=activity.entity_id,
+        activity_type="announce",
+        author=author,
+        visibility=activity.visibility,
+        in_reply_to_activity_id=str(activity.id),
+        require_manage=False,
+    )
+
+    from ..federation.activities import create_announce_activity
+
+    mention_rows = await session.execute(
+        select(ActivityMention.actor_url).where(
+            ActivityMention.activity_id == activity.id,
+            ActivityMention.actor_url.is_not(None),
+        )
+    )
+    addressed: Set[str] = {url for url in mention_rows.scalars().all() if url}  # type: ignore
+    addressed.add(activity.source_actor)
+    addressed.discard(source_actor)
+
+    boost.payload = create_announce_activity(
+        source_actor,
+        activity.source_id,
+        activity.visibility,
+        mention_actor_urls=sorted(addressed),
+        activity_id=boost.source_id,
+    )
+    await session.flush()
+    await _notify_reaction(session, activity=activity, interaction=boost, author=author, type=NotificationType.BOOST)
+    return boost
+
+
+async def unreact_activity(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    author: User,
+    interaction_type: str,
+) -> Activity:
+    """
+    Retract ``author``'s ``interaction_type`` reaction to ``activity``.
+
+    ``interaction_type`` is ``"like"`` or ``"announce"``. The reaction row
+    is soft-deleted so a later like/boost of the same target creates a
+    fresh activity, and the notification the reaction produced on the
+    target's owner is retracted (it references the reaction's ``source_id``
+    through ``payload.activity_id``). Raises ``HTTPException`` 400 for an
+    invalid ``interaction_type``, 404 when the target has been retracted or
+    no live reaction exists. Flushes without committing; the caller owns
+    the transaction.
+    """
+    if interaction_type not in ("like", "announce"):
+        raise HTTPException(400, detail=f"Invalid interaction_type: {interaction_type}")
+    if activity.deleted_at is not None:
+        raise HTTPException(404, detail="Activity not found")
+
+    reaction = await _find_live_reaction(session, activity=activity, author=author, activity_type=interaction_type)
+    if reaction is None:
+        raise HTTPException(404, detail="Interaction not found")
+
+    reaction.deleted_at = datetime.now(timezone.utc)
+    await session.flush()
+
+    if reaction.source_id:
+        from . import notifications as notifications_service
+
+        await notifications_service.retract_notifications_referencing(session, [reaction.source_id])
+    return reaction
+
+
+def activity_page_url(entity_type: str, entity_id: str, entity: Any = None) -> str:
+    """
+    Return the SPA route listing an entity's activities.
+
+    This is the closest thing to an activity's own page: user-entity
+    objects (standalone statuses) point at the author's profile page —
+    pass the resolved ``User`` row as ``entity`` so the username is
+    available; the user id falls back into the path when it is not — and
+    other entities point at their activity feed.
+    """
+    if entity_type == "user":
+        username = getattr(entity, "username", None) or entity_id
+        return f"/@{username}"
+    plural = get_item_plural(entity_type) or f"{entity_type}s"
+    return f"/{plural}/{entity_id}/activities"
+
+
+def _activity_object_type(activity: Activity) -> Optional[str]:
+    """Return the ActivityStreams type of an activity's embedded object."""
+    payload = activity.payload
+    if not isinstance(payload, dict):
+        return None
+    obj = payload.get("object")
+    if not isinstance(obj, dict):
+        return None
+    object_type = obj.get("type")
+    return object_type if isinstance(object_type, str) and object_type else None
+
+
+async def _entity_link_fields(session: AsyncSession, activity: Activity) -> Dict[str, Any]:
+    """
+    Return the link fields describing an activity's entity and page.
+
+    ``item_*``/``local_url`` identify the containing entity for item-card
+    rendering (``item_type``/``item_id`` are omitted for ``user`` entities —
+    statuses have no item page); ``object_activity_id``/``object_type``/
+    ``object_page_url`` identify the activity itself so clients can render
+    its card and link to its page (the entity's activity feed, or the
+    author's profile for statuses).
+    """
+    entity = await resolve_entity(session, activity.entity_type, activity.entity_id)
+    if entity is None:
+        return {}
+    page_url = activity_page_url(activity.entity_type, activity.entity_id, entity)
+    fields: Dict[str, Any] = {
+        "item_title": getattr(entity, "title", None)
+        or getattr(entity, "name", None)
+        or getattr(entity, "display_name", None)
+        or getattr(entity, "username", None),
+        "object_page_url": page_url,
+        "object_activity_id": str(activity.id),
+    }
+    object_type = _activity_object_type(activity)
+    if object_type:
+        fields["object_type"] = object_type
+    if activity.entity_type == "user":
+        # Statuses have no item page — the author's profile is the link.
+        fields["local_url"] = page_url
+    else:
+        plural = get_item_plural(activity.entity_type) or f"{activity.entity_type}s"
+        fields["item_type"] = activity.entity_type
+        fields["item_id"] = str(activity.entity_id)
+        fields["local_url"] = f"/{plural}/{activity.entity_id}"
+    return fields
+
+
+async def _notify_reaction(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    interaction: Activity,
+    author: User,
+    type: NotificationType,
+) -> None:
+    """Notify the reacted activity's local owner, never failing the reaction.
+
+    Mirrors the federated ``Like``/``Announce`` inbox path: ``source_url``
+    is the reacted object's id and ``payload.activity_id`` the reaction's own
+    object id, so ``retract_activity`` removes the row when the reaction is
+    undone or the reacted activity is retracted. Remote-authored activities
+    carry no ``owner_user_id`` — their authors are reached through fan-out
+    instead. Self-reactions and notification failures never produce or break
+    anything.
     """
     if activity.owner_user_id is None or str(activity.owner_user_id) == str(author.id):
         return
     try:
         from . import notifications as notifications_service
 
-        entity = await resolve_entity(session, activity.entity_type, activity.entity_id)
-        plural = get_item_plural(activity.entity_type) or f"{activity.entity_type}s"
         payload: Dict[str, Any] = {
-            "activity_id": like.source_id,
+            "activity_id": interaction.source_id,
             "actor_name": author.display_name or author.username,
             "actor_avatar_url": author.avatar_url,
         }
         if author.display_name:
             payload["actor_display_name"] = author.display_name
-        if entity is not None:
-            # User-entity activities are statuses: they deep-link to the
-            # author's profile page rather than an entity detail route.
-            if activity.entity_type == "user":
-                item_title = getattr(entity, "display_name", None) or getattr(entity, "username", None)
-                local_url = f"/@{getattr(entity, 'username', activity.entity_id)}"
-            else:
-                item_title = getattr(entity, "title", None) or getattr(entity, "name", None)
-                local_url = f"/{plural}/{activity.entity_id}"
-            payload.update(
-                {
-                    "item_type": activity.entity_type,
-                    "item_id": str(activity.entity_id),
-                    "item_title": item_title,
-                    "local_url": local_url,
-                }
-            )
+        # ``object_*`` fields identify the reacted activity itself so clients
+        # can render it and link the action text to it; ``item_*``/
+        # ``local_url`` keep the containing entity as a card fallback.
+        payload.update(await _entity_link_fields(session, activity))
         await notifications_service.create_notification(
             session,
             user_id=str(activity.owner_user_id),
-            type=NotificationType.LIKE,
+            type=type,
             actor_url=_local_actor_url(author),
             source_url=activity.source_id,
             payload=payload,
         )
     except Exception as exc:
-        logger.warning("Failed to create like notification for activity %s: %s", activity.id, exc)
+        logger.warning("Failed to create %s notification for activity %s: %s", type, activity.id, exc)
+
+
+def _remote_actor_handle(actor_url: str) -> str:
+    """Derive a ``@name@host`` handle from a remote actor URL."""
+    parsed = urlparse(actor_url)
+    name = parsed.path.rstrip("/").rsplit("/", 1)[-1] or parsed.netloc
+    return f"@{name}@{parsed.netloc}" if parsed.netloc else f"@{name}"
+
+
+async def reply_to_activity(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    author: User,
+    config: SonghiveConfig,
+    status_text: Optional[str] = None,
+    content_type: str = CONTENT_TYPE_MARKDOWN,
+    visibility: "Visibility | str | None" = None,
+    language: Optional[str] = None,
+    media_ids: Optional[Iterable[str]] = None,
+    track_ids: Optional[Iterable[str]] = None,
+) -> Activity:
+    """Record ``author``'s reply to ``activity`` as a ``reply`` activity.
+
+    The reply is a ``Create(Note)`` whose object carries
+    ``inReplyTo: activity.source_id`` and is attached to the same entity —
+    it shows up in the entity's feed and in the target's reply list. The
+    requested ``visibility`` defaults to the target's own and may never
+    exceed it (``Visibility.can_contain``) nor the containing entity's.
+
+    The replied-to author is always addressed: a local owner gets an
+    ``ActivityMention`` row (so ``mentioned``-visibility replies stay
+    viewable to them) plus a ``reply`` notification; a remote author gets an
+    ``ActivityMention`` row and a ``Mention`` tag so ``resolve_audience``
+    delivers the reply to their inbox.
+
+    Raises ``HTTPException`` 404 when the target activity has been retracted
+    or its entity is gone, and 422 for an empty reply, an invalid
+    ``content_type``/``visibility``/``language``, an over-limit attachment
+    list, or a visibility exceeding the target's. Flushes without
+    committing; the caller owns the transaction.
+    """
+    from ..federation.activities import create_status_activity
+    from ..federation.serializers import stored_file_to_attachment, track_to_attachment
+
+    if activity.deleted_at is not None:
+        raise HTTPException(404, detail="Activity not found")
+
+    text = (status_text or "").strip()
+    media_ids = list(media_ids or [])
+    track_ids = list(track_ids or [])
+    if not text and not media_ids and not track_ids:
+        raise HTTPException(422, detail="Reply must not be empty")
+    if len(set(media_ids)) > _MAX_STATUS_ATTACHMENTS or len(set(track_ids)) > _MAX_STATUS_ATTACHMENTS:
+        raise HTTPException(422, detail="Too many attachments")
+    if content_type not in STATUS_CONTENT_TYPES:
+        raise HTTPException(422, detail=f"Invalid content_type: {content_type}")
+    language = _validate_status_language(language)
+
+    try:
+        target_visibility = Visibility(activity.visibility)
+    except ValueError:
+        raise HTTPException(422, detail=f"Invalid target visibility: {activity.visibility}")
+    if visibility is None:
+        reply_visibility = target_visibility
+    else:
+        try:
+            reply_visibility = Visibility(visibility)
+        except ValueError:
+            raise HTTPException(422, detail=f"Invalid visibility: {visibility}")
+    if not Visibility.can_contain(reply_visibility, target_visibility):
+        raise HTTPException(422, detail="Reply visibility exceeds the replied-to activity's visibility")
+
+    entity = await resolve_entity(session, activity.entity_type, activity.entity_id)
+    if entity is None:
+        raise HTTPException(404, detail="Entity not found")
+    VisibilityRules.enforce_activity_visibility(reply_visibility, _entity_visibility(entity))
+
+    processed = await process_mentions(session, text, config, content_type=content_type)
+    mentioned_user_ids = [m.user_id for m in processed.mentions if m.user_id]
+    files = await _resolve_status_media(session, author, media_ids, reply_visibility, mentioned_user_ids)
+    tracks = await _resolve_status_tracks(session, author, track_ids)
+
+    domain = (config.federation.instance_domain or "").strip()
+    actor_url = _local_actor_url(author)
+    attachments = [stored_file_to_attachment(stored, domain) for stored in files]
+    for track in tracks:
+        artist = await session.get(Artist, track.artist_id) if track.artist_id else None
+        audio_object_id = f"{actor_url}/objects/{track.federation_object_id}" if track.federation_object_id else None
+        attachments.append(track_to_attachment(track, artist, domain, audio_object_id=audio_object_id))
+
+    # The replied-to author is always addressed — locally through a mention
+    # row (which keeps ``mentioned``-visibility replies viewable to them) and
+    # a ``reply`` notification, remotely through a mention row + ``Mention``
+    # tag so ``resolve_audience`` reaches their inbox.
+    mention_dicts = [m.as_dict() for m in processed.mentions]
+    mention_actor_urls: List[str] = [m.actor_url for m in processed.mentions if m.actor_url]  # type: ignore
+    extra_tags: List[dict] = []
+    target_owner = await session.get(User, activity.owner_user_id) if activity.owner_user_id else None
+    if target_owner is not None:
+        if all(m.user_id != target_owner.id for m in processed.mentions):
+            handle = f"@{target_owner.username}"
+            mention_dicts.append({"handle": handle, "actor_url": target_owner.actor_url, "user_id": target_owner.id})
+            if target_owner.actor_url:
+                mention_actor_urls.append(target_owner.actor_url)
+                extra_tags.append({"type": "Mention", "href": target_owner.actor_url, "name": handle})
+    elif activity.source_actor.startswith(("http://", "https://")) and all(
+        m.actor_url != activity.source_actor for m in processed.mentions
+    ):
+        handle = _remote_actor_handle(activity.source_actor)
+        mention_dicts.append({"handle": handle, "actor_url": activity.source_actor, "user_id": None})
+        mention_actor_urls.append(activity.source_actor)
+        extra_tags.append({"type": "Mention", "href": activity.source_actor, "name": handle})
+
+    object_uuid = str(uuid.uuid4())
+    object_id = f"{actor_url}/objects/{object_uuid}"
+    note: dict = {
+        "type": "Note",
+        "id": object_id,
+        "url": object_id,
+        "attributedTo": actor_url,
+        "published": datetime.now(timezone.utc).isoformat(),
+        "inReplyTo": activity.source_id,
+    }
+    if processed.html:
+        note["content"] = processed.html
+        if language:
+            note["contentMap"] = {language: processed.html}
+    if attachments:
+        note["attachment"] = attachments
+    if processed.tags or extra_tags:
+        tags = list(processed.tags)
+        seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
+        tags.extend(tag for tag in extra_tags if tag["name"].lower() not in seen)
+        note["tag"] = tags
+
+    payload = create_status_activity(
+        actor_url,
+        note,
+        reply_visibility,
+        mention_actor_urls=mention_actor_urls,
+    )
+
+    reply = Activity(
+        entity_type=activity.entity_type,
+        entity_id=activity.entity_id,
+        activity_type="reply",
+        source_type="local",
+        source_actor=actor_url,
+        source_id=object_id,
+        local_object_id=object_uuid,
+        owner_user_id=author.id,
+        visibility=reply_visibility.value,
+        in_reply_to_activity_id=str(activity.id),
+        content=processed.html or None,
+        content_source=text or None,
+        content_type=content_type,
+        language=language,
+        payload=payload,
+    )
+    session.add(reply)
+    await session.flush()
+
+    for mention in mention_dicts:
+        session.add(ActivityMention(activity_id=reply.id, **mention))
+    await session.flush()
+
+    await _sync_activity_tags(session, reply, processed.tag_names)
+    await _notify_reply(session, activity=activity, reply=reply, author=author)
+    await _notify_status_mentions(
+        session,
+        activity=reply,
+        author=author,
+        mentions=processed.mentions,
+        skip_user_ids={str(activity.owner_user_id)} if activity.owner_user_id else set(),
+    )
+
+    try:
+        await fan_out_activity(session, reply, config, owner=author)
+    except Exception as e:
+        # Fan-out is best-effort: a broker or resolution failure must not
+        # fail the reply itself — the activity row still records it.
+        logger.exception("Failed to fan out reply for activity %s: %s: %s", activity.id, type(e), e)
+    return reply
+
+
+async def _notify_reply(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    reply: Activity,
+    author: User,
+) -> None:
+    """Notify the replied-to activity's local owner, never failing the reply.
+
+    Mirrors the federated reply inbox path: the payload carries a snapshot
+    of the reply note (``object_*`` fields) plus the ``target_*`` fields
+    resolving the replied-to entity, and ``source_url``/``payload.
+    activity_id`` point at the reply's own object id so ``retract_activity``
+    removes the row when the reply is deleted. Self-replies and remote
+    targets (no ``owner_user_id``) produce nothing.
+    """
+    if activity.owner_user_id is None or str(activity.owner_user_id) == str(author.id):
+        return
+    try:
+        from ..federation.notifications import _note_snapshot
+        from . import notifications as notifications_service
+
+        note = reply.payload.get("object") if isinstance(reply.payload, dict) else {}
+        snapshot = _note_snapshot(note) if isinstance(note, dict) else {}
+        target_fields = {
+            f"target_{key}": value for key, value in (await _entity_link_fields(session, activity)).items()
+        }
+        payload: Dict[str, Any] = {
+            "activity_id": reply.source_id,
+            "actor_name": author.display_name or author.username,
+            "actor_avatar_url": author.avatar_url,
+            **snapshot,
+            "target_url": activity.source_id,
+            **target_fields,
+        }
+        if author.display_name:
+            payload["actor_display_name"] = author.display_name
+        await notifications_service.create_notification(
+            session,
+            user_id=str(activity.owner_user_id),
+            type=NotificationType.REPLY,
+            actor_url=_local_actor_url(author),
+            source_url=reply.source_id,
+            payload=payload,
+        )
+    except Exception as exc:
+        logger.warning("Failed to create reply notification for activity %s: %s", activity.id, exc)
 
 
 async def _remote_mention_actor_urls(
@@ -1394,28 +2064,30 @@ async def fan_out_activity(
     return sent
 
 
-async def fan_out_like_activity(
+async def _fan_out_reaction_activity(
     session: AsyncSession,
     *,
-    like: Activity,
+    reaction: Activity,
     target: Activity,
     author: User,
     config: SonghiveConfig,
     timeout: float = 10.0,
 ) -> int:
-    """Fan ``like`` out to the liked activity's author and its own audience.
-
-    Liking a remote activity additionally targets the remote author's inbox —
-    resolved via ``services.federation.resolve_actor_inbox`` — on top of the
-    like's own visibility audience. The resolution is skipped (and the like
-    may still fan out to its own audience when it has one) when the target is
-    local, federation is disabled, or the author has no signing key.
-    Flushes without committing; the caller owns the transaction.
     """
-    if not like.payload:
+    Fan a ``Like``/``Announce`` out to its target's author and audience.
+
+    Reacting to a remote activity additionally targets the remote author's
+    inbox — resolved via ``services.federation.resolve_actor_inbox`` — on top
+    of the reaction's own visibility audience. The resolution is skipped
+    (and the reaction may still fan out to its own audience when it has one)
+    when the target is local, federation is disabled, or the author has no
+    signing key. Flushes without committing; the caller owns the
+    transaction.
+    """
+    if not reaction.payload:
         return 0
     try:
-        if not Visibility.federates(Visibility(like.visibility)):
+        if not Visibility.federates(Visibility(reaction.visibility)):
             return 0
     except ValueError:
         return 0
@@ -1439,7 +2111,86 @@ async def fan_out_like_activity(
         if inbox:
             extra_inboxes.add(inbox)
 
-    return await fan_out_activity(session, like, config, owner=author, extra_inboxes=extra_inboxes)
+    return await fan_out_activity(session, reaction, config, owner=author, extra_inboxes=extra_inboxes)
+
+
+async def fan_out_like_activity(
+    session: AsyncSession,
+    *,
+    like: Activity,
+    target: Activity,
+    author: User,
+    config: SonghiveConfig,
+    timeout: float = 10.0,
+) -> int:
+    """
+    Fan ``like`` out to the liked activity's author and its own audience.
+
+    Liking a remote activity additionally targets the remote author's inbox —
+    resolved via ``services.federation.resolve_actor_inbox`` — on top of the
+    like's own visibility audience. The resolution is skipped (and the like
+    may still fan out to its own audience when it has one) when the target is
+    local, federation is disabled, or the author has no signing key.
+    Flushes without committing; the caller owns the transaction.
+    """
+    return await _fan_out_reaction_activity(
+        session, reaction=like, target=target, author=author, config=config, timeout=timeout
+    )
+
+
+async def fan_out_boost_activity(
+    session: AsyncSession,
+    *,
+    boost: Activity,
+    target: Activity,
+    author: User,
+    config: SonghiveConfig,
+    timeout: float = 10.0,
+) -> int:
+    """
+    Fan ``boost`` out to the boosted activity's author and its own audience.
+
+    Behaves exactly like :func:`fan_out_like_activity` for ``Announce``
+    payloads. Flushes without committing; the caller owns the transaction.
+    """
+    return await _fan_out_reaction_activity(
+        session, reaction=boost, target=target, author=author, config=config, timeout=timeout
+    )
+
+
+async def fan_out_unreaction_activity(
+    session: AsyncSession,
+    *,
+    reaction: Activity,
+    author: User,
+    config: SonghiveConfig,
+) -> None:
+    """
+    Fan an ``Undo`` of a ``Like``/``Announce`` out to its delivered inboxes.
+
+    The ``Undo`` wraps the originally federated reaction payload, so its
+    ``to``/``cc`` audience is inherited from the reaction itself, and is
+    delivered to exactly the inboxes recorded as ``sent`` for the reaction
+    — including the remote target author's inbox when the reaction was
+    federated to it. No-ops when federation is disabled, the reaction is
+    remote, its payload is missing, or it never reached any inbox.
+    Enqueues delivery tasks; the caller owns the transaction.
+    """
+    if not config.federation.enabled or reaction.source_type != "local" or not isinstance(reaction.payload, dict):
+        return
+
+    from ..federation.activities import create_undo_activity
+    from .deletion import enqueue_activity_delivery, get_activity_unpublish_info
+
+    info = await get_activity_unpublish_info(session, reaction)
+    if not info.inboxes:
+        return
+    payload = create_undo_activity(
+        info.actor_url,
+        reaction.payload,
+        activity_id=f"{reaction.source_id}#undo",
+    )
+    enqueue_activity_delivery(info, author, payload)
 
 
 async def fan_out_activity_update(
@@ -1756,21 +2507,24 @@ async def _notify_status_mentions(
     activity: Activity,
     author: User,
     mentions: Iterable[Any],
+    skip_user_ids: Iterable[str] = (),
 ) -> None:
     """Notify local users mentioned by a status, never failing the post.
 
     Mirrors the federated mention inbox path: the notification payload
     carries the author's identity plus a snapshot of the status object so
-    clients can render the mention without re-fetching it. Self-mentions
-    and notification failures produce nothing.
+    clients can render the mention without re-fetching it. Self-mentions,
+    ``skip_user_ids`` (e.g. a reply's already-notified target owner), and
+    notification failures produce nothing.
     """
     from ..federation.notifications import _note_snapshot
     from . import notifications as notifications_service
 
+    skipped = {str(uid) for uid in skip_user_ids}
     note = activity.payload.get("object") if isinstance(activity.payload, dict) else {}
     snapshot = _note_snapshot(note) if isinstance(note, dict) else {}
     for mention in mentions:
-        if not mention.user_id or mention.user_id == author.id:
+        if not mention.user_id or mention.user_id == author.id or str(mention.user_id) in skipped:
             continue
         try:
             await notifications_service.create_notification(

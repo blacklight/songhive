@@ -4,6 +4,8 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import * as notificationsApi from "@/api/notifications";
 import type { NotificationResponse } from "@/api/notifications";
+import * as activitiesApi from "@/api/activities";
+import type { ActivityResponse } from "@/api/activities";
 import { useNotificationsStore } from "@/stores/notifications";
 import NotificationsView from "./NotificationsView.vue";
 
@@ -42,7 +44,13 @@ vi.mock("@/composables/useItemSummary", () => ({
   getItemSummary: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("@/api/activities", () => ({
+  getActivity: vi.fn(),
+  listActivityReplies: vi.fn(),
+}));
+
 const listNotifications = vi.mocked(notificationsApi.listNotifications);
+const getActivity = vi.mocked(activitiesApi.getActivity);
 const markSeenApi = vi.mocked(notificationsApi.markSeen);
 const markUnseenApi = vi.mocked(notificationsApi.markUnseen);
 const markAllSeenApi = vi.mocked(notificationsApi.markAllSeen);
@@ -87,6 +95,32 @@ function createNotification(
     payload: { actor_name: "alice" },
     seen_at: null,
     created_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function createActivity(
+  overrides: Partial<ActivityResponse> = {},
+): ActivityResponse {
+  return {
+    id: "act-1",
+    entity_type: "user",
+    entity_id: "u-1",
+    activity_type: "create",
+    source_type: "local",
+    source_actor: "urn:songhive:user:me",
+    source_id: "https://example.com/users/me/objects/o1",
+    owner_user_id: "u-1",
+    visibility: "public",
+    content: "<p>my post</p>",
+    published_at: "2026-01-01T00:00:00Z",
+    mentions: [],
+    like_count: 0,
+    boost_count: 0,
+    reply_count: 0,
+    liked: false,
+    boosted: false,
+    can_interact: true,
     ...overrides,
   };
 }
@@ -171,7 +205,7 @@ describe("NotificationsView", () => {
       total: 1,
     });
     const { wrapper } = await mountView();
-    const link = wrapper.find("a.notifications-view__text");
+    const link = wrapper.find("a.notifications-view__actor");
     expect(link.attributes("href")).toBe("https://remote.example/users/bob");
     expect(link.attributes("target")).toBe("_blank");
   });
@@ -355,7 +389,7 @@ describe("NotificationsView", () => {
     expect(card.exists()).toBe(true);
     expect(card.attributes("href")).toBe("/tracks/t-1");
     // The action line prefers the resolved local page over the remote object.
-    const link = wrapper.find("a.notifications-view__text");
+    const link = wrapper.find("a.notifications-view__action");
     expect(link.attributes("href")).toBe("/tracks/t-1");
   });
 
@@ -376,6 +410,153 @@ describe("NotificationsView", () => {
     const card = wrapper.find(".actor-card");
     expect(card.exists()).toBe(true);
     expect(card.attributes("href")).toBe("https://remote.example/users/bob");
+  });
+
+  it("links the actor name and the action text separately for likes", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "like",
+          actor_url: "urn:songhive:user:testuser",
+          source_url: "https://example.com/users/me/objects/o1",
+          payload: {
+            actor_name: "testuser",
+            object_activity_id: "act-note-1",
+            object_type: "Note",
+            object_page_url: "/@me",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    getActivity.mockResolvedValueOnce(createActivity({ id: "act-note-1" }));
+    const { wrapper } = await mountView();
+    await flushPromises();
+    const actorLink = wrapper.find("a.notifications-view__actor");
+    expect(actorLink.attributes("href")).toBe("/@testuser");
+    const actionLink = wrapper.find("a.notifications-view__action");
+    expect(actionLink.attributes("href")).toBe("/@me");
+    expect(actionLink.text()).toBe("liked your post");
+  });
+
+  it("renders the reacted activity card for likes on Note objects", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "like",
+          actor_url: "urn:songhive:user:testuser",
+          source_url: "https://example.com/users/me/objects/o2",
+          payload: {
+            actor_name: "testuser",
+            object_activity_id: "act-note-2",
+            object_type: "Note",
+            object_page_url: "/@me",
+            item_title: "me",
+            local_url: "/@me",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    getActivity.mockResolvedValueOnce(
+      createActivity({ id: "act-note-2", content: "<p>liked post body</p>" }),
+    );
+    const { wrapper } = await mountView();
+    await flushPromises();
+    expect(getActivity).toHaveBeenCalledWith("act-note-2");
+    const card = wrapper.find(".activity-card");
+    expect(card.exists()).toBe(true);
+    expect(card.text()).toContain("liked post body");
+    // The entity card is not rendered on top of the activity card.
+    expect(wrapper.find(".item-card").exists()).toBe(false);
+  });
+
+  it("renders the track item card for likes on Audio objects", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "boost",
+          actor_url: "urn:songhive:user:testuser",
+          source_url: "https://example.com/users/me/objects/t-9",
+          payload: {
+            actor_name: "testuser",
+            object_activity_id: "act-audio-1",
+            object_type: "Audio",
+            object_page_url: "/tracks/t-9/activities",
+            item_type: "track",
+            item_id: "t-9",
+            item_title: "Enigma",
+            local_url: "/tracks/t-9",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    const { wrapper } = await mountView();
+    await flushPromises();
+    expect(getActivity).not.toHaveBeenCalled();
+    const card = wrapper.find(".item-card");
+    expect(card.exists()).toBe(true);
+    expect(card.attributes("href")).toBe("/tracks/t-9");
+    // The action line links to the activity's feed page.
+    const actionLink = wrapper.find("a.notifications-view__action");
+    expect(actionLink.attributes("href")).toBe("/tracks/t-9/activities");
+  });
+
+  it("does not render a broken user item card for status likes", async () => {
+    // Legacy payloads recorded item_type "user" for reactions on
+    // user-entity statuses; there is no /users/{id} page to link to.
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "boost",
+          actor_url: "urn:songhive:user:testuser",
+          source_url: "https://example.com/users/me/objects/o4",
+          payload: {
+            actor_name: "testuser",
+            item_type: "user",
+            item_id: "status-1",
+            item_title: "me",
+            local_url: "/@me",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    const { wrapper } = await mountView();
+    await flushPromises();
+    expect(wrapper.find(".item-card").exists()).toBe(false);
+    // Falls back to the actor card.
+    expect(wrapper.find(".actor-card").exists()).toBe(true);
+  });
+
+  it("falls back to the item card when the activity fetch fails", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "like",
+          actor_url: "urn:songhive:user:testuser",
+          source_url: "https://example.com/users/me/objects/o3",
+          payload: {
+            actor_name: "testuser",
+            object_activity_id: "act-gone-1",
+            object_type: "Note",
+            item_type: "track",
+            item_id: "t-1",
+            item_title: "My Song",
+            local_url: "/tracks/t-1",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    getActivity.mockRejectedValueOnce(new Error("not found"));
+    const { wrapper } = await mountView();
+    await flushPromises();
+    expect(getActivity).toHaveBeenCalledWith("act-gone-1");
+    const card = wrapper.find(".item-card");
+    expect(card.exists()).toBe(true);
+    expect(card.attributes("href")).toBe("/tracks/t-1");
   });
 
   it("shows the unread count when there are unseen notifications", async () => {
