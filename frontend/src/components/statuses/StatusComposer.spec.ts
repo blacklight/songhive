@@ -90,6 +90,43 @@ describe("StatusComposer", () => {
     expect(wrapper.find("textarea").element).toHaveProperty("value", "");
   });
 
+  it("submits the status with Ctrl+Enter from the textarea", async () => {
+    const wrapper = mountComposer();
+    await typeText(wrapper, "keyboard submit");
+    await wrapper
+      .find("textarea")
+      .trigger("keydown", { key: "Enter", ctrlKey: true });
+    await flushPromises();
+
+    expect(createStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "keyboard submit" }),
+    );
+    expect(wrapper.emitted("submitted")).toHaveLength(1);
+  });
+
+  it("submits the status with Cmd+Enter from the textarea", async () => {
+    const wrapper = mountComposer();
+    await typeText(wrapper, "meta submit");
+    await wrapper
+      .find("textarea")
+      .trigger("keydown", { key: "Enter", metaKey: true });
+    await flushPromises();
+
+    expect(createStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "meta submit" }),
+    );
+    expect(wrapper.emitted("submitted")).toHaveLength(1);
+  });
+
+  it("does not submit on a plain Enter keypress", async () => {
+    const wrapper = mountComposer();
+    await typeText(wrapper, "no submit");
+    await wrapper.find("textarea").trigger("keydown", { key: "Enter" });
+    await flushPromises();
+
+    expect(createStatus).not.toHaveBeenCalled();
+  });
+
   it("defaults the format to the user's stored preference", () => {
     const authStore = useAuthStore();
     authStore.user = {

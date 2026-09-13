@@ -284,6 +284,9 @@ function onEditorKeydown(event: KeyboardEvent) {
     mentionSeq++;
     debouncedMentionFetch.cancel();
     closeMention();
+  } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    void onSubmit();
   }
 }
 
