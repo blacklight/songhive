@@ -80,7 +80,7 @@ function onKeyDown(event: KeyboardEvent) {
 }
 
 function playAtIndex(index: number) {
-  store.playAll(store.queue, index);
+  store.playAt(index);
 }
 
 function removeAt(event: MouseEvent, index: number) {
@@ -149,7 +149,7 @@ function clearQueue() {
         role="option"
         :aria-selected="i === store.index"
         tabindex="0"
-        @dblclick="playAtIndex(i)"
+        @click="playAtIndex(i)"
         @keydown.enter.prevent="playAtIndex(i)"
       >
         <span class="queue-panel__index" aria-hidden="true">{{ i + 1 }}</span>

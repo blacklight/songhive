@@ -58,4 +58,52 @@ describe("QueuePanel", () => {
       block: "nearest",
     });
   });
+
+  it("plays the clicked track", async () => {
+    const tracks = [
+      makeTrack({ id: "track-1", title: "Song One" }),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+      makeTrack({ id: "track-3", title: "Song Three" }),
+    ].map((t) => toQueueTrack(t, { artist_name: "Artist" }));
+
+    const player = usePlayerStore();
+    player.queue = tracks;
+    player.index = 0;
+
+    const wrapper = mount(QueuePanel, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const items = wrapper.findAll(".queue-panel__item");
+    await items[2].trigger("click");
+
+    expect(player.index).toBe(2);
+    expect(player.currentTrack?.id).toBe("track-3");
+    expect(player.isPlaying).toBe(true);
+  });
+
+  it("does not play a track when its remove button is clicked", async () => {
+    const tracks = [
+      makeTrack({ id: "track-1", title: "Song One" }),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+    ].map((t) => toQueueTrack(t, { artist_name: "Artist" }));
+
+    const player = usePlayerStore();
+    player.queue = tracks;
+    player.index = 0;
+
+    const wrapper = mount(QueuePanel, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const items = wrapper.findAll(".queue-panel__item");
+    await items[1].find(".queue-panel__remove").trigger("click");
+
+    expect(player.queue.map((t) => t.id)).toEqual(["track-1"]);
+    expect(player.index).toBe(0);
+  });
 });

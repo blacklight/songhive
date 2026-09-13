@@ -84,6 +84,62 @@ describe("usePlayerStore", () => {
     expect(engine.play).toHaveBeenCalled();
   });
 
+  it("playAt jumps to the given index and starts playback", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [makeTrack("a"), makeTrack("b"), makeTrack("c")];
+    store.playAll(tracks, 0);
+
+    engine.load.mockClear();
+    engine.play.mockClear();
+    store.playAt(2);
+
+    expect(store.index).toBe(2);
+    expect(store.currentTrack).toEqual(tracks[2]);
+    expect(store.isPlaying).toBe(true);
+    expect(engine.load).toHaveBeenCalledWith(tracks[2], 0);
+    expect(engine.play).toHaveBeenCalled();
+  });
+
+  it("playAt ignores out-of-range indexes", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [makeTrack("a"), makeTrack("b")];
+    store.playAll(tracks, 0);
+
+    engine.load.mockClear();
+    store.playAt(5);
+    store.playAt(-1);
+
+    expect(store.index).toBe(0);
+    expect(engine.load).not.toHaveBeenCalled();
+  });
+
+  it("playAt keeps originalQueue when shuffle is active", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [
+      makeTrack("a"),
+      makeTrack("b"),
+      makeTrack("c"),
+      makeTrack("d"),
+      makeTrack("e"),
+    ];
+    store.playAll(tracks, 0);
+    store.toggleShuffle();
+    const original = [...store.originalQueue];
+
+    store.playAt(2);
+    store.toggleShuffle();
+
+    expect(store.shuffle).toBe(false);
+    expect(store.queue).toEqual(original);
+    expect(store.currentTrack).toEqual(store.queue[store.index]);
+  });
+
   it("next advances to the next track", () => {
     const store = usePlayerStore();
     const engine = createMockEngine();

@@ -194,6 +194,28 @@ export const usePlayerStore = defineStore("player", () => {
     persistNow();
   }
 
+  function playAt(i: number) {
+    if (i < 0 || i >= queue.value.length) return;
+    const previousTrackId = currentTrack.value?.id;
+    index.value = i;
+
+    const track = currentTrack.value;
+    if (!track) return;
+    const startAt =
+      restoredPosition.value !== null && previousTrackId === track.id
+        ? restoredPosition.value
+        : 0;
+    restoredPosition.value = null;
+
+    currentTime.value = 0;
+    duration.value = 0;
+    playbackState.value = "loading";
+    isPlaying.value = true;
+    engine?.load(track, startAt);
+    engine?.play();
+    persistNow();
+  }
+
   function enqueue(track: QueueTrack) {
     queue.value.push(track);
     if (originalQueue.value.length > 0) originalQueue.value.push(track);
@@ -456,6 +478,7 @@ export const usePlayerStore = defineStore("player", () => {
     registerEngine,
     playTrack,
     playAll,
+    playAt,
     enqueue,
     enqueueNext,
     removeAt,
