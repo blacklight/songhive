@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from ..models.activity import Activity, ActivityTag
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
@@ -40,7 +41,7 @@ from ..models.user import User
 from ..services.metadata import AudioMetadata
 from ..services.storage import is_unique_constraint_error
 from ._common import ilike_contains
-from .acl import _list_access_predicate
+from .acl import _activity_visibility_filter, _list_access_predicate
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +83,20 @@ _ENTITY_REGISTRY: dict[str, _EntityInfo] = {
     "library": (Library, TagLibrary, "library_id", "library"),
 }
 
+# Models for the entity types an ``Activity`` can be attached to
+# (``ACTIVITY_ENTITY_TYPES``); hashtags in activity content are stored as
+# ``ActivityTag`` rows rather than per-entity association tables.
+_ACTIVITY_ENTITY_MODELS: dict[str, Type] = {
+    "track": Track,
+    "album": Album,
+    "artist": Artist,
+    "playlist": Playlist,
+    "library": Library,
+    "user": User,
+}
+
 # Public set of item types returned by the tag listing APIs.
-TAG_ITEM_TYPES: set[str] = set(_ENTITY_REGISTRY.keys())
+TAG_ITEM_TYPES: set[str] = set(_ENTITY_REGISTRY.keys()) | {"activity"}
 
 _METADATA_TAG_KEYS = {
     "TAGS",
@@ -199,7 +212,7 @@ def _accessible_associations_cte(
     associations.
 
     When ``target_user_id`` is provided, only associations on entities owned by
-    that user are included.
+    that user are included, plus hashtags on activities they authored.
     """
     subqueries: List[Any] = []
     for model, assoc_class, entity_col, acl_type in _ENTITY_REGISTRY.values():
@@ -218,9 +231,88 @@ def _accessible_associations_cte(
         )
         subqueries.append(subq)
 
+    subqueries.extend(_activity_tag_subqueries(user, target_user_id))
+
     if not subqueries:
         return None
     return union_all(*subqueries).cte("accessible_associations")
+
+
+def _activity_entity_conditions(
+    model: Type,
+    entity_type: str,
+    user: Optional[User],
+    target_user_id: Optional[str],
+) -> List[Any]:
+    """
+    Return the WHERE conditions for a visible ``ActivityTag`` union arm.
+
+    Applies the same rules as ``list_activities_for_tag``: the activity must
+    not be deleted, must pass the per-activity visibility filter, and its
+    containing entity must be accessible to ``user``. When
+    ``target_user_id`` is set, only activities authored by that user match.
+    """
+    conditions = [
+        Activity.deleted_at.is_(None),
+        _activity_visibility_filter(user),
+        _entity_access_predicate(model, user, entity_type),
+    ]
+    if target_user_id is not None:
+        conditions.append(Activity.owner_user_id == target_user_id)
+    return conditions
+
+
+def _activity_tag_subqueries(
+    user: Optional[User],
+    target_user_id: Optional[str] = None,
+) -> List[Any]:
+    """
+    Build ``(tag_id, created_at)`` union arms over ``ActivityTag``.
+
+    ``created_at`` is the activity's ``published_at`` so ``first_used`` and
+    ``last_used`` treat activity hashtags like entity associations.
+    """
+    subqueries: List[Any] = []
+    for entity_type, model in _ACTIVITY_ENTITY_MODELS.items():
+        subq = (
+            select(ActivityTag.tag_id, Activity.published_at.label("created_at"))
+            .select_from(ActivityTag)
+            .join(Activity, ActivityTag.activity_id == Activity.id)
+            .join(model, and_(Activity.entity_type == entity_type, Activity.entity_id == model.id))
+            .where(*_activity_entity_conditions(model, entity_type, user, target_user_id))
+        )
+        subqueries.append(subq)
+    return subqueries
+
+
+def _activity_item_subqueries(
+    tag_id: str,
+    user: Optional[User],
+    target_user_id: Optional[str] = None,
+) -> List[Any]:
+    """
+    Build ``(item_type, item_id, created_at)`` union arms over
+    ``ActivityTag`` for a single tag, with ``item_id`` set to the activity
+    id and ``created_at`` to the activity's ``published_at``.
+    """
+    subqueries: List[Any] = []
+    for entity_type, model in _ACTIVITY_ENTITY_MODELS.items():
+        subq = (
+            select(
+                literal("activity").label("item_type"),
+                ActivityTag.activity_id.label("item_id"),
+                Activity.published_at.label("created_at"),
+            )
+            .select_from(ActivityTag)
+            .join(Activity, ActivityTag.activity_id == Activity.id)
+            .join(model, and_(Activity.entity_type == entity_type, Activity.entity_id == model.id))
+            .where(
+                ActivityTag.tag_id == tag_id,
+                *_activity_entity_conditions(model, entity_type, user, target_user_id),
+            )
+        )
+        subqueries.append(subq)
+    return subqueries
 
 
 def _accessible_items_cte(
@@ -255,6 +347,9 @@ def _accessible_items_cte(
             .where(assoc_class.tag_id == tag_id, pred)
         )
         subqueries.append(subq)
+
+    if item_type in (None, "activity"):
+        subqueries.extend(_activity_item_subqueries(tag_id, user, target_user_id))
 
     if not subqueries:
         return None
@@ -409,7 +504,9 @@ async def list_tags(
     """
     List tags visible to ``user``, optionally scoped to a single owner.
 
-    Returns ``(summaries, total_count)``.
+    Entity associations and hashtags found in visible activities both count
+    towards ``item_count``/``first_used``/``last_used`` — the latter use each
+    activity's ``published_at``. Returns ``(summaries, total_count)``.
     """
     cte = _accessible_associations_cte(user, target_user_id)
     if cte is None:
@@ -468,7 +565,9 @@ async def get_items_for_tag(
     Return the visible items for a tag, optionally scoped to an owner or
     a single entity type.
 
-    Returns ``(items, total_count)``.
+    Activities carrying the hashtag are returned as items of type
+    ``"activity"``; ``item_type="activity"`` selects only them. Returns
+    ``(items, total_count)``.
     """
     tag = await _get_tag_by_name(session, tag_name)
     if tag is None:

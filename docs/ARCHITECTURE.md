@@ -374,6 +374,11 @@ or Markdown), an optional BCP-47 `language` tag mirrored into the object's
 contains hashtags (`#tag`) in its `content_source`/`content`. They enable
 `GET /api/v1/tags/{tag}/activities`, which returns tag-matching activities
 subject to the same visibility and entity ACL rules as other activity feeds.
+The same rows are folded into the tag listing queries in
+`services/tags.py`, so `GET /api/v1/tags/` and `GET /api/v1/tags/{tag}`
+also surface hashtags that appear only on activities (as `activity` items),
+counted by `published_at` and filtered by activity visibility plus the
+containing entity's ACL.
 Remote ActivityPub content is processed by Pubby and is mostly not
 materialized as local `Activity` rows — the exception is inbound `Create`
 replies, which `federation/incoming.py` stores as `source_type="remote"`
@@ -428,7 +433,8 @@ authenticated user; `mentioned` requires the owner or a mentioned user;
 `private` is owner-only; retracted activities are never viewable). Admins
 get no bypass — `mentioned` and `private` activities stay confined to
 their audience for every viewer. The same rules are enforced in SQL by
-`_activity_visibility_filter` (feed/tag/reply listings) and in
+`_activity_visibility_filter` in `services/acl.py` (feed/tag/reply
+listings) and in
 `reply_count` computation, so restricted replies neither render nor leak
 through counters for viewers outside their audience. Interactions are layered on top of `create_local_activity`:
 `like_activity` records an idempotent `like` (400 on a duplicate, 404 on a

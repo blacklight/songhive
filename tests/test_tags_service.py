@@ -5,12 +5,14 @@ Tests for the tag service.
 import pytest
 
 from songhive.models._enums import Visibility
+from songhive.models.activity import Activity
 from songhive.models.album import Album
 from songhive.models.artist import Artist
 from songhive.models.library import Library
 from songhive.models.playlist import Playlist
 from songhive.models.track import Track
 from songhive.models.user import User
+from songhive.services.activities import create_local_activity
 from songhive.services.metadata import AudioMetadata
 from songhive.services.tags import (
     add_tags_to_entity,
@@ -97,6 +99,26 @@ async def _make_library(
     session.add(library)
     await session.flush()
     return library
+
+
+async def _make_activity(
+    session,
+    entity_type: str,
+    entity_id: str,
+    author: User,
+    content: str = "#rock",
+    visibility: Visibility = Visibility.PUBLIC,
+) -> Activity:
+    """Create a local activity whose content carries ``content``'s hashtags."""
+    return await create_local_activity(
+        session,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        activity_type="create",
+        author=author,
+        visibility=visibility,
+        content_source=content,
+    )
 
 
 class TestValidation:
@@ -270,6 +292,97 @@ class TestListingAndVisibility:
         unknown_items, total = await get_items_for_tag(db_session, "rock", item_type="library")
         assert total == 0
         assert unknown_items == []
+
+    async def test_list_tags_includes_activity_only_tags(self, db_session, regular_user):
+        """Tags used only in activity content appear in the listing."""
+        await _make_activity(db_session, "user", regular_user.id, regular_user, content="#rock")
+
+        summaries, total = await list_tags(db_session)
+        assert total == 1
+        assert summaries[0].name == "rock"
+        assert summaries[0].item_count == 1
+
+    async def test_list_tags_counts_entities_and_activities(self, db_session, regular_user):
+        """A tag on a track and in an activity counts both usages."""
+        artist = await _make_artist(db_session)
+        track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+        await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        await _make_activity(db_session, "track", track.id, regular_user, content="#rock")
+
+        summaries, total = await list_tags(db_session)
+        assert total == 1
+        assert summaries[0].item_count == 2
+
+    async def test_list_tags_hides_restricted_activities(self, db_session, regular_user, other_user):
+        """Local-visibility activity hashtags are hidden from anonymous users."""
+        artist = await _make_artist(db_session)
+        track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+        await _make_activity(db_session, "track", track.id, regular_user, content="#rock", visibility=Visibility.LOCAL)
+
+        _, total = await list_tags(db_session)
+        assert total == 0
+
+        _, total = await list_tags(db_session, user=other_user)
+        assert total == 1
+
+    async def test_list_tags_hides_activities_on_inaccessible_entities(self, db_session, regular_user):
+        """Hashtags on activities attached to private entities stay hidden."""
+        artist = await _make_artist(db_session)
+        track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PRIVATE.value)
+        await _make_activity(
+            db_session, "track", track.id, regular_user, content="#rock", visibility=Visibility.PRIVATE
+        )
+
+        _, total = await list_tags(db_session)
+        assert total == 0
+
+        _, total = await list_tags(db_session, user=regular_user)
+        assert total == 1
+
+    async def test_user_scoped_listing_includes_owned_activities(self, db_session, regular_user, other_user):
+        """User tag pages count hashtags on the user's own activities."""
+        await _make_activity(db_session, "user", regular_user.id, regular_user, content="#rock")
+
+        summaries, total = await list_tags(db_session, user=other_user, target_user_id=regular_user.id)
+        assert total == 1
+        assert summaries[0].name == "rock"
+
+        _, total = await list_tags(db_session, user=other_user, target_user_id=other_user.id)
+        assert total == 0
+
+    async def test_get_items_for_tag_includes_activities(self, db_session, regular_user):
+        """Activities carrying the hashtag appear as ``activity`` items."""
+        artist = await _make_artist(db_session)
+        track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PUBLIC.value)
+        await add_tags_to_entity(db_session, "track", track.id, ["rock"], user_id=regular_user.id)
+        activity = await _make_activity(db_session, "user", regular_user.id, regular_user, content="#rock")
+
+        items, total = await get_items_for_tag(db_session, "rock")
+        assert total == 2
+        assert sorted((i.type, i.id) for i in items) == [
+            ("activity", str(activity.id)),
+            ("track", str(track.id)),
+        ]
+
+        activity_items, total = await get_items_for_tag(db_session, "rock", item_type="activity")
+        assert total == 1
+        assert [(i.type, i.id) for i in activity_items] == [("activity", str(activity.id))]
+
+    async def test_get_items_for_tag_hides_inaccessible_activities(self, db_session, regular_user):
+        """Activity items respect entity and activity visibility."""
+        artist = await _make_artist(db_session)
+        track = await _make_track(db_session, artist, owner=regular_user, visibility=Visibility.PRIVATE.value)
+        await _make_activity(
+            db_session, "track", track.id, regular_user, content="#rock", visibility=Visibility.PRIVATE
+        )
+
+        items, total = await get_items_for_tag(db_session, "rock")
+        assert total == 0
+        assert items == []
+
+        items, total = await get_items_for_tag(db_session, "rock", user=regular_user)
+        assert total == 1
+        assert items[0].type == "activity"
 
 
 class TestDelete:

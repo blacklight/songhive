@@ -167,3 +167,23 @@ def test_list_tag_activities_empty_for_missing_tag(client):
     assert response.status_code == 200
     body = response.json()
     assert body["activities"] == []
+
+
+def test_list_tags_includes_activity_only_tag(tagged_activity, client):
+    """Tags used only in activity content appear in the global tag list."""
+    response = client.get("/api/v1/tags/")
+    assert response.status_code == 200
+    body = response.json()
+    assert [t["name"] for t in body] == ["rock"]
+    assert body[0]["item_count"] == 1
+
+
+def test_list_tag_items_includes_activities(tagged_activity, client):
+    """Activities carrying the hashtag are returned as activity items."""
+    response = client.get("/api/v1/tags/rock?type=activity")
+    assert response.status_code == 200
+    assert response.json() == [{"type": "activity", "id": str(tagged_activity.id)}]
+
+    response = client.get("/api/v1/tags/rock")
+    assert response.status_code == 200
+    assert response.json() == [{"type": "activity", "id": str(tagged_activity.id)}]

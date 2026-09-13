@@ -9,10 +9,11 @@ designed to be used by the FastAPI route layer and by federation serializers.
 import logging
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models._enums import Visibility
+from ..models.activity import Activity, ActivityMention
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
@@ -102,6 +103,33 @@ def _list_access_predicate(model, user: Optional[User], item_type: str):
         )
         predicate = or_(predicate, album_share, playlist_share, library_share)
     return predicate
+
+
+def _activity_visibility_filter(user: Optional[User]):
+    """
+    Return a WHERE clause applying per-activity visibility for list queries.
+
+    Mirrors ``can_view_activity`` minus the entity-access check — the caller
+    authorizes the containing entity once for the whole page: ``public``
+    activities are visible to everyone, ``local`` and ``followers`` to
+    authenticated users, ``mentioned`` to the users they name, and every
+    visibility to the activity's owner. Admins get no extra reach —
+    ``mentioned`` and ``private`` replies stay confined to their audience.
+    """
+    conditions = [Activity.visibility == Visibility.PUBLIC.value]
+    if user is not None:
+        conditions.append(Activity.owner_user_id == user.id)
+        conditions.append(Activity.visibility.in_([Visibility.LOCAL.value, Visibility.FOLLOWERS.value]))
+        conditions.append(
+            and_(
+                Activity.visibility == Visibility.MENTIONED.value,
+                exists().where(
+                    ActivityMention.activity_id == Activity.id,
+                    ActivityMention.user_id == user.id,
+                ),
+            )
+        )
+    return or_(*conditions)
 
 
 def apply_access_filter(

@@ -39,7 +39,7 @@ export interface ListTagItemsResult {
 export type EntityType =
   "tracks" | "albums" | "artists" | "playlists" | "libraries";
 export type TaggedItemType =
-  "artist" | "album" | "track" | "playlist" | "library";
+  "artist" | "album" | "track" | "playlist" | "library" | "activity";
 
 export async function listTags(
   params?: ListTagsParams,
