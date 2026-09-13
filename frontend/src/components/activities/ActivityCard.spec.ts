@@ -71,10 +71,14 @@ function createActivity(
   };
 }
 
-function setAuthenticated(userId = "user-1", role: "user" | "admin" = "user") {
+function setAuthenticated(
+  userId = "user-1",
+  role: "user" | "admin" = "user",
+  username = "alice",
+) {
   const authStore = useAuthStore();
   authStore.status = "authenticated";
-  authStore.user = { id: userId, username: "alice" } as never;
+  authStore.user = { id: userId, username } as never;
   authStore.role = role;
 }
 
@@ -743,6 +747,113 @@ describe("ActivityCard", () => {
       "nice track",
     );
     expect(wrapper.findAll(".activity-card__count")[0].text()).toBe("1");
+  });
+
+  it("prefills the reply composer with the author and the mentioned actors", async () => {
+    setAuthenticated("user-9", "user", "dave");
+    const wrapper = mountCard({
+      mentions: [
+        {
+          handle: "@bob",
+          actor_url: "https://example.com/users/bob",
+          user_id: "user-2",
+        },
+        {
+          handle: "@carol@remote.example",
+          actor_url: "https://remote.example/users/carol",
+        },
+      ],
+    });
+    await wrapper.find('button[aria-label="Reply"]').trigger("click");
+    const textarea = wrapper.find("textarea");
+    expect((textarea.element as HTMLTextAreaElement).value).toBe(
+      "@alice @bob @carol@remote.example ",
+    );
+  });
+
+  it("prefills a remote author with their full handle", async () => {
+    setAuthenticated("user-9", "user", "dave");
+    const wrapper = mountCard({
+      source_type: "remote",
+      source_actor: "https://remote.example/users/carol",
+      owner_user_id: null,
+      mentions: [
+        {
+          handle: "@dan@other.example",
+          actor_url: "https://other.example/users/dan",
+        },
+      ],
+    });
+    await wrapper.find('button[aria-label="Reply"]').trigger("click");
+    const textarea = wrapper.find("textarea");
+    expect((textarea.element as HTMLTextAreaElement).value).toBe(
+      "@carol@remote.example @dan@other.example ",
+    );
+  });
+
+  it("does not repeat actors already covered by the author or earlier mentions", async () => {
+    setAuthenticated("user-9", "user", "dave");
+    const wrapper = mountCard({
+      mentions: [
+        // The author, already first.
+        { handle: "@alice", user_id: "user-1" },
+        {
+          handle: "@bob",
+          actor_url: "https://example.com/users/bob",
+          user_id: "user-2",
+        },
+        // Case-insensitive handle duplicate.
+        { handle: "@BOB", user_id: "user-2" },
+        // Same actor behind a different handle spelling.
+        {
+          handle: "@bob@elsewhere.example",
+          actor_url: "https://example.com/users/bob",
+        },
+      ],
+    });
+    await wrapper.find('button[aria-label="Reply"]').trigger("click");
+    const textarea = wrapper.find("textarea");
+    expect((textarea.element as HTMLTextAreaElement).value).toBe(
+      "@alice @bob ",
+    );
+  });
+
+  it("excludes the replying user from the prefill", async () => {
+    setAuthenticated("user-2", "user", "bob");
+    const wrapper = mountCard({
+      mentions: [
+        {
+          handle: "@bob",
+          actor_url: "https://example.com/users/bob",
+          user_id: "user-2",
+        },
+        {
+          handle: "@carol@remote.example",
+          actor_url: "https://remote.example/users/carol",
+        },
+      ],
+    });
+    await wrapper.find('button[aria-label="Reply"]').trigger("click");
+    const textarea = wrapper.find("textarea");
+    expect((textarea.element as HTMLTextAreaElement).value).toBe(
+      "@alice @carol@remote.example ",
+    );
+  });
+
+  it("does not tag oneself when replying to one's own activity", async () => {
+    setAuthenticated("user-1");
+    const wrapper = mountCard({
+      mentions: [
+        {
+          handle: "@bob",
+          actor_url: "https://example.com/users/bob",
+          user_id: "user-2",
+        },
+      ],
+    });
+    await wrapper.find('button[aria-label="Reply"]').trigger("click");
+    const textarea = wrapper.find("textarea");
+    expect((textarea.element as HTMLTextAreaElement).value).toBe("@bob ");
   });
 
   it("deletes the activity after confirmation", async () => {

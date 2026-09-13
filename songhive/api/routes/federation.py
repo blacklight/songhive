@@ -22,7 +22,7 @@ from ...federation.activities import (
 from ...federation.actors import get_federation_storage
 from ...federation.serializers import track_to_audio_object
 from ...models import Activity, Track, Visibility
-from ...services.auth import get_user_by_username
+from ...services.auth import get_user_by_id, get_user_by_username
 from ...services.federation import ensure_user_actor, extract_domain, is_domain_allowed
 from ...tasks.federation import process_incoming
 from ..deps import get_db
@@ -56,6 +56,34 @@ def _ordered_collection(collection_id: str, items: list[str]) -> dict[str, Any]:
 
 
 _FEDERATING_VISIBILITIES = [v.value for v in Visibility if Visibility.federates(v)]
+
+
+def _visibility_federates(visibility: str) -> bool:
+    try:
+        return Visibility.federates(Visibility(visibility))
+    except ValueError:
+        return False
+
+
+def _activity_object_response(activity: Activity) -> JSONResponse:
+    """
+    Serve the ActivityPub document for a stored local activity.
+
+    Soft-deleted activities answer with a ``Tombstone`` object matching the
+    shape embedded in ``Delete(Tombstone)`` deliveries. Activities whose
+    visibility does not federate never left the instance and answer 404.
+    Everything else is served through ``build_activity_object`` — the
+    stored payload (or the ``Create`` envelope's embedded object), or a
+    synthesized ``Note`` when no payload was recorded.
+    """
+    if activity.deleted_at is not None:
+        tombstone = {"@context": AP_CONTEXT, **build_tombstone_object(activity.source_id)}
+        return JSONResponse(content=tombstone, media_type=ACTIVITY_JSON)
+
+    if not _visibility_federates(activity.visibility):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    return JSONResponse(content=build_activity_object(activity), media_type=ACTIVITY_JSON)
 
 
 async def _earliest_track_post(db: AsyncSession, track_id: str) -> Optional[Activity]:
@@ -188,18 +216,55 @@ async def get_object(
             status_code=status.HTTP_307_TEMPORARY_REDIRECT,
         )
 
-    if activity.deleted_at is not None:
-        tombstone = {"@context": AP_CONTEXT, **build_tombstone_object(activity.source_id)}
-        return JSONResponse(content=tombstone, media_type=ACTIVITY_JSON)
+    return _activity_object_response(activity)
 
-    try:
-        federates = Visibility.federates(Visibility(activity.visibility))
-    except ValueError:
-        federates = False
-    if not federates:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
-    return JSONResponse(content=build_activity_object(activity), media_type=ACTIVITY_JSON)
+@router.get("/activities/{activity_id}")
+async def get_activity_page(
+    activity_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Dereference the activity permalink URL.
+
+    ``/activities/{id}`` is primarily a Vue SPA route, but it is also the
+    URL the frontend offers for copying (``ActivityCard``'s permalink), so
+    remote servers fetch it when a user pastes the link into a remote
+    search box (e.g. Mastodon's URL lookup). Clients accepting an
+    ActivityStreams media type receive the same document the canonical
+    ``/users/{username}/objects/{id}`` route serves for local activities;
+    remote-sourced activities redirect (303 See Other) to their origin's
+    object id, which stays authoritative. Browsers receive the SPA shell
+    annotated with a ``Link``/``<link rel="alternate">`` discovery hint
+    pointing at the canonical object URL.
+
+    Like the object route, a local activity is only dereferenceable while
+    its owner is an active local user. Browser requests always receive the
+    SPA shell — including for unknown or non-dereferenceable ids, since the
+    SPA renders its own not-found state.
+    """
+    _federation_config(request)
+    result = await db.execute(select(Activity).where(Activity.id == activity_id))
+    activity = result.scalar_one_or_none()
+
+    remote = activity is not None and activity.source_type != "local"
+    owner = None
+    if activity is not None and not remote and activity.owner_user_id:
+        owner = await get_user_by_id(db, activity.owner_user_id)
+    dereferenceable = remote or (owner is not None and owner.is_active)
+    federates = remote or (activity is not None and _visibility_federates(activity.visibility))
+
+    if _accepts_activitypub(request):
+        if activity is None or not dereferenceable:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        if remote:
+            # Remote objects are authoritative on their origin instance.
+            return RedirectResponse(url=activity.source_id, status_code=status.HTTP_303_SEE_OTHER)
+        return _activity_object_response(activity)
+
+    alternate_url = activity.source_id if activity is not None and dereferenceable and federates else None
+    return _spa_response(alternate_url)
 
 
 @router.get("/tracks/{track_id}")

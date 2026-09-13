@@ -889,6 +889,164 @@ async def test_track_page_returns_404_for_inactive_owner(fed_client, db_session,
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
+async def test_activity_page_serves_object_for_activitypub_accept(fed_client, db_session, regular_user):
+    """GET /activities/{id} serves the AP object for ActivityPub clients."""
+    actor_url = "https://music.example.com/users/regular"
+    activity = _make_activity(regular_user, object_id="page-1", content="<p>hello</p>")
+    db_session.add(activity)
+    await db_session.commit()
+
+    response = fed_client.get(f"/activities/{activity.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    assert ACTIVITY_JSON in response.headers["content-type"]
+
+    data = response.json()
+    assert data["type"] == "Note"
+    assert data["id"] == f"{actor_url}/objects/page-1"
+    assert data["content"].startswith("<p>hello")
+    assert data["to"] == ["https://www.w3.org/ns/activitystreams#Public"]
+
+
+async def test_activity_page_serves_stored_payload(fed_client, db_session, regular_user):
+    """A payload-bearing activity is served with its stored AP document."""
+    actor_url = "https://music.example.com/users/regular"
+    payload = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": f"{actor_url}/objects/like-1",
+        "type": "Like",
+        "actor": actor_url,
+        "object": "https://remote.example/objects/9",
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [f"{actor_url}/followers"],
+    }
+    activity = _make_activity(regular_user, object_id="like-1", activity_type="like", payload=payload)
+    db_session.add(activity)
+    await db_session.commit()
+
+    response = fed_client.get(f"/activities/{activity.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == payload
+
+
+async def test_activity_page_serves_tombstone_for_deleted_activity(fed_client, db_session, regular_user):
+    """A soft-deleted activity answers its page URL with a Tombstone."""
+    activity = _make_activity(
+        regular_user,
+        object_id="gone-1",
+        deleted_at=datetime.now(timezone.utc),
+    )
+    db_session.add(activity)
+    await db_session.commit()
+
+    response = fed_client.get(f"/activities/{activity.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+    assert data["type"] == "Tombstone"
+    assert data["id"] == "https://music.example.com/users/regular/objects/gone-1"
+
+
+@pytest.mark.parametrize("visibility", [Visibility.PRIVATE.value, Visibility.LOCAL.value])
+async def test_activity_page_returns_404_for_non_federated_activity(fed_client, db_session, regular_user, visibility):
+    """private/local activities are not dereferenceable via the page URL."""
+    activity = _make_activity(regular_user, object_id="hidden-1", visibility=visibility)
+    db_session.add(activity)
+    await db_session.commit()
+
+    response = fed_client.get(f"/activities/{activity.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_activity_page_returns_404_for_unknown_activity(fed_client):
+    """AP requests for unknown activity ids return 404."""
+    response = fed_client.get("/activities/nope", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_activity_page_returns_404_for_inactive_owner(fed_client, db_session, regular_user):
+    """AP requests return 404 when the activity owner is deactivated."""
+    activity = _make_activity(regular_user, object_id="inactive-1")
+    db_session.add(activity)
+    regular_user.is_active = False
+    await db_session.commit()
+
+    response = fed_client.get(f"/activities/{activity.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_activity_page_redirects_remote_activity_to_origin(fed_client, db_session, regular_user):
+    """Remote-sourced activities redirect AP fetches to their origin object id."""
+    remote = _make_activity(
+        regular_user,
+        activity_type="reply",
+        source_type="remote",
+        source_actor="https://remote.example/users/bob",
+        source_id="https://remote.example/objects/r1",
+        local_object_id=None,
+        owner_user_id=None,
+    )
+    db_session.add(remote)
+    await db_session.commit()
+
+    response = fed_client.get(
+        f"/activities/{remote.id}",
+        headers={"Accept": ACTIVITY_JSON},
+        follow_redirects=False,
+    )
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert response.headers["location"] == "https://remote.example/objects/r1"
+
+
+async def test_activity_page_serves_spa_with_discovery_hints_for_browsers(
+    fed_client, db_session, regular_user, tmp_path, monkeypatch
+):
+    """GET /activities/{id} serves the SPA shell + rel=alternate hints for HTML clients."""
+    activity = _make_activity(regular_user, object_id="page-1")
+    db_session.add(activity)
+    await db_session.commit()
+
+    index = tmp_path / "index.html"
+    index.write_text("<html><head><title>songhive</title></head><body></body></html>", encoding="utf-8")
+    monkeypatch.setattr("songhive.api.routes.profile_pages._spa_index_path", lambda: index)
+
+    response = fed_client.get(f"/activities/{activity.id}", headers={"Accept": "text/html"})
+    assert response.status_code == status.HTTP_200_OK
+    assert "text/html" in response.headers["content-type"]
+
+    object_url = "https://music.example.com/users/regular/objects/page-1"
+    assert response.headers["Link"] == f'<{object_url}>; rel="alternate"; type="{ACTIVITY_JSON}"'
+    assert f'<link rel="alternate" type="{ACTIVITY_JSON}" href="{object_url}"></head>' in response.text
+
+
+async def test_activity_page_serves_plain_spa_for_non_federated_activity(
+    fed_client, db_session, regular_user, tmp_path, monkeypatch
+):
+    """HTML requests for non-federating activities get the SPA shell without AP hints."""
+    activity = _make_activity(regular_user, object_id="local-1", visibility=Visibility.LOCAL.value)
+    db_session.add(activity)
+    await db_session.commit()
+
+    index = tmp_path / "index.html"
+    index.write_text("<html><head></head><body></body></html>", encoding="utf-8")
+    monkeypatch.setattr("songhive.api.routes.profile_pages._spa_index_path", lambda: index)
+
+    response = fed_client.get(f"/activities/{activity.id}", headers={"Accept": "text/html"})
+    assert response.status_code == status.HTTP_200_OK
+    assert "Link" not in response.headers
+    assert 'rel="alternate"' not in response.text
+
+
+async def test_activity_page_serves_spa_for_unknown_activity(fed_client, tmp_path, monkeypatch):
+    """Browser requests for unknown activity ids still get the SPA shell."""
+    index = tmp_path / "index.html"
+    index.write_text("<html><head></head><body></body></html>", encoding="utf-8")
+    monkeypatch.setattr("songhive.api.routes.profile_pages._spa_index_path", lambda: index)
+
+    response = fed_client.get("/activities/nope", headers={"Accept": "text/html"})
+    assert response.status_code == status.HTTP_200_OK
+    assert "text/html" in response.headers["content-type"]
+
+
 async def test_inbox_rejects_invalid_json(fed_client, regular_user, monkeypatch):
     """POST /users/{username}/inbox rejects non-JSON bodies."""
     mock_task = _MockCeleryTask()

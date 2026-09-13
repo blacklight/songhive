@@ -766,6 +766,17 @@ redirected object under its own `id`). Tracks with neither a published
 object nor live shares answer 404 so a remote fetch cannot resurrect a
 retracted post under a different id.
 
+`GET /activities/{activity_id}` applies the same content negotiation to
+the SPA's activity permalink — the URL `ActivityCard` offers for copying —
+so pasting it into a remote search box resolves too. ActivityPub fetches
+of a local activity receive the same document the canonical object route
+serves (`_activity_object_response`, shared with `get_object`), gated on
+the owner being an active local user; remote-sourced activities redirect
+(303 See Other) to their origin's object id, which stays authoritative.
+Browsers receive the SPA shell annotated with the `Link`/
+`<link rel="alternate">` discovery hints pointing at `source_id`, the
+canonical object URL.
+
 ### Genres
 
 Genres are stored in a dedicated `Genre` table and linked to `Track` and

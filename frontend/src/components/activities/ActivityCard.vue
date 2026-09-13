@@ -25,6 +25,7 @@ import ActivityEditModal from "./ActivityEditModal.vue";
 import ActivityObjectEmbed from "./ActivityObjectEmbed.vue";
 import ActivityRemoteReply from "./ActivityRemoteReply.vue";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
+import { parseActorRef } from "@/utils/actorRef";
 import {
   parseActivityContent,
   type ContentMark,
@@ -455,6 +456,57 @@ const replyThreads = computed<ReplyThread[]>(() => {
   return ordered;
 });
 
+// Mirrors ``_MENTION_HANDLE_RE`` in songhive/models/activity.py — only
+// handle-shaped mention names are taggable in the reply prefill.
+const MENTION_HANDLE_RE = /^@?[a-zA-Z0-9_.-]+(@[a-zA-Z0-9.-]+)?$/;
+
+// Mastodon-style reply prefill: the replied-to author first, then every
+// actor the activity already mentions — deduplicated (handles compare
+// case-insensitively, actor URLs catch the same actor behind a different
+// handle spelling) and skipping the replying user, who never tags
+// themselves.
+const replyInitialStatus = computed(() => {
+  const self = authStore.user;
+  const selfName = self?.username?.toLowerCase();
+  const selfHandle = selfName ? `@${selfName}` : null;
+  const seenHandles = new Set<string>();
+  const seenActors = new Set<string>();
+  const handles: string[] = [];
+
+  const push = (
+    handle: string,
+    actorUrl?: string | null,
+    userId?: string | null,
+  ) => {
+    if (!MENTION_HANDLE_RE.test(handle)) return;
+    const normalized = handle.startsWith("@") ? handle : `@${handle}`;
+    const key = normalized.toLowerCase();
+    if (
+      seenHandles.has(key) ||
+      (actorUrl != null && seenActors.has(actorUrl)) ||
+      (self?.id != null && userId === self.id) ||
+      key === selfHandle
+    ) {
+      return;
+    }
+    seenHandles.add(key);
+    if (actorUrl) seenActors.add(actorUrl);
+    handles.push(normalized);
+  };
+
+  const author = parseActorRef(
+    activity.value.source_actor,
+    instanceDomain.value,
+  );
+  if (!isOwner.value && author.username?.toLowerCase() !== selfName) {
+    push(author.handle, activity.value.source_actor);
+  }
+  for (const mention of activity.value.mentions ?? []) {
+    push(mention.handle, mention.actor_url, mention.user_id);
+  }
+  return handles.length ? `${handles.join(" ")} ` : "";
+});
+
 async function submitReply(payload: StatusComposerPayload) {
   const created = await store.reply(activity.value, {
     status: payload.status,
@@ -808,6 +860,7 @@ async function copyUrl() {
         :submit="submitReply"
         :submit-label="t('activities.replySubmit')"
         :placeholder="t('activities.replyPlaceholder')"
+        :initial-status="replyInitialStatus"
         :initial-visibility="activity.visibility"
         @submitted="replyComposerOpen = false"
       />
