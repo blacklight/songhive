@@ -969,3 +969,56 @@ async def test_webfinger_accepts_leading_at_symbol(fed_client, regular_user):
     response = fed_client.get("/.well-known/webfinger?resource=acct:@regular@music.example.com")
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["subject"] == "acct:regular@music.example.com"
+
+
+async def test_nodeinfo_document_includes_staff_accounts(fed_client, admin_user):
+    """GET /nodeinfo/2.1 advertises the active admin accounts in metadata."""
+    response = fed_client.get("/nodeinfo/2.1")
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+    assert data["version"] == "2.1"
+    metadata = data["metadata"]
+    assert metadata["nodeName"] == "Songhive"
+    assert metadata["nodeDescription"] == "A federated music instance"
+    assert "https://music.example.com/users/admin" in metadata["staffAccounts"]
+
+
+async def test_nodeinfo_document_includes_maintainer(fed_app, db_session, fake_redis_server, monkeypatch, admin_user):
+    """GET /nodeinfo/2.1 advertises the configured contact person."""
+    from fakeredis.aioredis import FakeRedis
+
+    fed_app.state.config.federation.contact_name = "Jane Admin"
+    fed_app.state.config.federation.contact_email = "jane@example.com"
+    fed_app.state.config.federation.contact_url = "https://example.com/jane"
+
+    monkeypatch.setattr(
+        "songhive.api.app.get_redis_client",
+        lambda _: FakeRedis(server=fake_redis_server, decode_responses=True),
+    )
+
+    async def _db():
+        yield db_session
+
+    with TestClient(fed_app) as client:
+        client.app.dependency_overrides[get_db] = _db  # type: ignore
+        response = client.get("/nodeinfo/2.0")
+        client.app.dependency_overrides.pop(get_db, None)  # type: ignore
+
+    assert response.status_code == status.HTTP_200_OK
+    maintainer = response.json()["metadata"]["maintainer"]
+    assert maintainer == {
+        "name": "Jane Admin",
+        "email": "jane@example.com",
+        "url": "https://example.com/jane",
+    }
+
+
+async def test_nodeinfo_document_omits_inactive_admins(fed_client, make_user):
+    """GET /nodeinfo/2.1 skips inactive admin accounts in staffAccounts."""
+    await make_user("gone", role="admin", is_active=False)
+
+    response = fed_client.get("/nodeinfo/2.1")
+    assert response.status_code == status.HTTP_200_OK
+    staff = response.json()["metadata"]["staffAccounts"]
+    assert all("gone" not in account for account in staff)

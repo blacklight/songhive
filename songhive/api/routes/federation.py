@@ -26,6 +26,7 @@ from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor, extract_domain, is_domain_allowed
 from ...tasks.federation import process_incoming
 from ..deps import get_db
+from .instance import _admin_users
 from .profile_pages import _accepts_activitypub, _get_active_user, _spa_response
 
 router = APIRouter(include_in_schema=False)
@@ -361,6 +362,56 @@ async def get_following(
         content=_ordered_collection(f"{actor_url}/following", []),
         media_type=ACTIVITY_JSON,
     )
+
+
+@router.get("/nodeinfo/2.1")
+@router.get("/nodeinfo/2.0")
+@router.get("/nodeinfo/2.1.json")
+@router.get("/nodeinfo/2.0.json")
+async def nodeinfo_document(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return the NodeInfo document enriched with instance contact metadata.
+
+    Songhive's router is mounted before pubby's bindings, so these routes
+    take precedence over the plain documents registered by the pubby
+    adapters. The base document still comes from the federation handler
+    (usage stats, software name/version); ``metadata`` additionally carries
+    the node name/description, the configured contact person
+    (``maintainer``) and the actor URLs of the active admin accounts
+    (``staffAccounts``), matching the conventions used by PeerTube and
+    Friendica.
+    """
+    config = _federation_config(request)
+    handler = getattr(request.app.state, "federation_handler", None)
+    if handler is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    # ``get_nodeinfo_document`` performs synchronous storage calls.
+    document = await asyncio.to_thread(handler.get_nodeinfo_document)
+    metadata = document.setdefault("metadata", {})
+    metadata["nodeName"] = config.federation.instance_name
+    metadata["nodeDescription"] = config.federation.instance_description
+
+    maintainer = {
+        key: value
+        for key, value in (
+            ("name", config.federation.contact_name),
+            ("email", config.federation.contact_email),
+            ("url", config.federation.contact_url),
+        )
+        if value
+    }
+    if maintainer:
+        metadata["maintainer"] = maintainer
+
+    domain = config.federation.instance_domain
+    admins = await _admin_users(db)
+    metadata["staffAccounts"] = [admin.actor_url or get_actor_url(domain, admin.username) for admin in admins]
+
+    return JSONResponse(content=document)
 
 
 @router.get("/.well-known/webfinger")

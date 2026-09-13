@@ -23,6 +23,9 @@ SETTINGS_CACHE_TTL = 300
 ALLOWED_SETTINGS: dict[str, dict[str, Any]] = {
     "instance_name": {"type": "str", "default": "Songhive"},
     "instance_description": {"type": "str", "default": "A federated music sharing service"},
+    "instance_contact_name": {"type": "str", "default": ""},
+    "instance_contact_email": {"type": "str", "default": ""},
+    "instance_contact_url": {"type": "str", "default": ""},
     "registration_mode": {
         "type": "enum",
         "choices": ["open", "invite-only", "approval-required", "closed"],
@@ -177,6 +180,12 @@ async def apply_settings_overrides(
         fed_overrides["instance_name"] = settings["instance_name"]
     if "instance_description" in settings:
         fed_overrides["instance_description"] = settings["instance_description"]
+    if "instance_contact_name" in settings:
+        fed_overrides["contact_name"] = settings["instance_contact_name"]
+    if "instance_contact_email" in settings:
+        fed_overrides["contact_email"] = settings["instance_contact_email"]
+    if "instance_contact_url" in settings:
+        fed_overrides["contact_url"] = settings["instance_contact_url"]
     if "federation_enabled" in settings:
         fed_overrides["enabled"] = settings["federation_enabled"]
 

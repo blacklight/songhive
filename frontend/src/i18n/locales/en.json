@@ -355,7 +355,14 @@
       "defaultDescription": "A federated music sharing service.",
       "projectUrl": "Project URL",
       "githubUrl": "GitHub mirror",
-      "issueTracker": "Issue tracker"
+      "issueTracker": "Issue tracker",
+      "administrators": "Administrators",
+      "contact": "Contact",
+      "contactPerson": "Contact person",
+      "contactName": "Name",
+      "contactEmail": "Email",
+      "contactUrl": "Website",
+      "revealEmail": "Click to reveal the email address"
     },
     "admin": {
       "dashboard": {
@@ -418,6 +425,9 @@
         "saveError": "Could not save settings: {message}",
         "instanceName": "Instance name",
         "instanceDescription": "Instance description",
+        "instanceContactName": "Contact name",
+        "instanceContactEmail": "Contact email",
+        "instanceContactUrl": "Contact URL",
         "registrationMode": "Registration mode",
         "federationEnabled": "Federation enabled",
         "typeString": "Text",

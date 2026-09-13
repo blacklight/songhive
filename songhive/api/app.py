@@ -215,6 +215,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.state._sync_overlay_applied = sync_overlay_applied
     app.state.storage_service = None
     app.state.storage_service_config = None
+    app.state.federation_handler = None
 
     # Trust X-Forwarded-Proto from trusted reverse proxies so that
     # request.url / request.base_url use the public scheme (e.g. https).
@@ -337,6 +338,7 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
             blocked_instances=config.federation.blocked_instances,
             user_agent=get_default_user_agent(),
         )
+        app.state.federation_handler = handler
         bind_activitypub(app, handler, prefix="/ap")
         bind_mastodon_api(
             app,

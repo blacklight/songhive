@@ -73,6 +73,19 @@ async def test_mastodon_instance_v2(fed_client):
     assert data["domain"] == "music.example.com"
 
 
+async def test_mastodon_instance_v1_staff_accounts_federated(fed_client, admin_user):
+    """Federated staff accounts carry the fully-qualified handle."""
+    response = fed_client.get("/api/v1/instance")
+    assert response.status_code == status.HTTP_200_OK
+
+    staff = response.json()["staff_accounts"]
+    assert len(staff) == 1
+    assert staff[0]["username"] == "admin"
+    assert staff[0]["acct"] == "admin@music.example.com"
+    assert staff[0]["url"] == "https://music.example.com/@admin"
+    assert staff[0]["actor_url"] == "https://music.example.com/users/admin"
+
+
 async def test_mastodon_instance_peers(fed_client):
     """GET /api/v1/instance/peers returns a list of known peer domains."""
     response = fed_client.get("/api/v1/instance/peers")

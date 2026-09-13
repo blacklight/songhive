@@ -83,6 +83,12 @@ function getLabel(setting: SettingResponse): string {
     return t("pages.admin.settings.instanceName");
   if (setting.key === "instance_description")
     return t("pages.admin.settings.instanceDescription");
+  if (setting.key === "instance_contact_name")
+    return t("pages.admin.settings.instanceContactName");
+  if (setting.key === "instance_contact_email")
+    return t("pages.admin.settings.instanceContactEmail");
+  if (setting.key === "instance_contact_url")
+    return t("pages.admin.settings.instanceContactUrl");
   if (setting.key === "registration_mode")
     return t("pages.admin.settings.registrationMode");
   if (setting.key === "federation_enabled")

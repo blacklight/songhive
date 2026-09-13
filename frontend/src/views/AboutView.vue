@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useInstanceStore } from "@/stores/instance";
+import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 
 const { t } = useI18n();
@@ -27,6 +28,21 @@ const docsUrl = computed(() => import.meta.env.VITE_DOCS_URL);
 const supportUrl = computed(() => import.meta.env.VITE_SUPPORT_URL);
 const hasLinks = computed(() => Boolean(docsUrl.value || supportUrl.value));
 const errorMessage = computed(() => instanceStore.error || t("errors.unknown"));
+
+const staffAccounts = computed(
+  () => instanceStore.instance?.staff_accounts ?? [],
+);
+const contact = computed(() => instanceStore.instance?.contact ?? null);
+const hasContactSection = computed(
+  () => staffAccounts.value.length > 0 || contact.value !== null,
+);
+
+const emailRevealed = ref(false);
+const maskedEmail = computed(() =>
+  (contact.value?.email ?? "")
+    .replace("@", " [at] ")
+    .replaceAll(".", " [dot] "),
+);
 
 onMounted(() => void instanceStore.load());
 </script>
@@ -112,6 +128,78 @@ onMounted(() => void instanceStore.load());
         </div>
       </template>
     </section>
+
+    <section
+      v-if="hasContactSection && !instanceStore.loading"
+      class="about-view__card"
+      :aria-label="t('pages.about.contact')"
+    >
+      <h2 class="about-view__section-title">
+        {{ t("pages.about.contact") }}
+      </h2>
+
+      <div v-if="staffAccounts.length" class="about-view__staff">
+        <h3 class="about-view__subtitle">
+          {{ t("pages.about.administrators") }}
+        </h3>
+        <ul class="about-view__staff-list">
+          <li v-for="account in staffAccounts" :key="account.username">
+            <a :href="account.url" class="about-view__staff-link">
+              <AppAvatar
+                :src="account.avatar_url ?? undefined"
+                :name="account.display_name || account.username"
+                size="md"
+              />
+              <span class="about-view__staff-info">
+                <span class="about-view__staff-name">
+                  {{ account.display_name || account.username }}
+                </span>
+                <span class="about-view__staff-handle">
+                  @{{ account.acct }}
+                </span>
+              </span>
+            </a>
+          </li>
+        </ul>
+      </div>
+
+      <div v-if="contact" class="about-view__contact-person">
+        <h3 class="about-view__subtitle">
+          {{ t("pages.about.contactPerson") }}
+        </h3>
+        <dl class="about-view__list">
+          <div v-if="contact.name" class="about-view__row">
+            <dt>{{ t("pages.about.contactName") }}</dt>
+            <dd>{{ contact.name }}</dd>
+          </div>
+          <div v-if="contact.email" class="about-view__row">
+            <dt>{{ t("pages.about.contactEmail") }}</dt>
+            <dd>
+              <a v-if="emailRevealed" :href="`mailto:${contact.email}`">
+                {{ contact.email }}
+              </a>
+              <button
+                v-else
+                type="button"
+                class="about-view__masked-email"
+                :title="t('pages.about.revealEmail')"
+                @click="emailRevealed = true"
+              >
+                {{ maskedEmail }}
+              </button>
+            </dd>
+          </div>
+          <div v-if="contact.url" class="about-view__row">
+            <dt>{{ t("pages.about.contactUrl") }}</dt>
+            <dd>
+              <a :href="contact.url" target="_blank" rel="noopener noreferrer">
+                {{ contact.url }}
+              </a>
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </section>
   </main>
 </template>
 
@@ -187,6 +275,61 @@ onMounted(() => void instanceStore.load());
 
 .about-view__error {
   color: var(--color-error);
+}
+
+.about-view__section-title {
+  margin: 0 0 var(--space-4);
+  font-size: 1.125rem;
+}
+
+.about-view__subtitle {
+  margin: 0 0 var(--space-3);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.about-view__staff-list {
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.about-view__staff-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  border-bottom: none;
+}
+
+.about-view__staff-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.about-view__staff-name {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.about-view__staff-handle {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.about-view__masked-email {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--color-text-muted);
 }
 
 @media (max-width: 767px) {

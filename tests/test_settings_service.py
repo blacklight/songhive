@@ -169,6 +169,9 @@ async def test_apply_settings_overrides(db_session):
     """apply_settings_overlays DB settings onto config."""
     db_session.add(Setting(key="instance_name", value=json.dumps("Override Name")))
     db_session.add(Setting(key="instance_description", value=json.dumps("Override Desc")))
+    db_session.add(Setting(key="instance_contact_name", value=json.dumps("Jane Admin")))
+    db_session.add(Setting(key="instance_contact_email", value=json.dumps("jane@example.com")))
+    db_session.add(Setting(key="instance_contact_url", value=json.dumps("https://example.com/jane")))
     db_session.add(Setting(key="federation_enabled", value=json.dumps(False)))
     db_session.add(Setting(key="registration_mode", value=json.dumps("closed")))
     await db_session.flush()
@@ -180,6 +183,9 @@ async def test_apply_settings_overrides(db_session):
     updated = await settings_service.apply_settings_overrides(db_session, base)
     assert updated.federation.instance_name == "Override Name"
     assert updated.federation.instance_description == "Override Desc"
+    assert updated.federation.contact_name == "Jane Admin"
+    assert updated.federation.contact_email == "jane@example.com"
+    assert updated.federation.contact_url == "https://example.com/jane"
     assert updated.federation.enabled is False
     assert updated.auth.registration_mode == RegistrationMode.CLOSED
 

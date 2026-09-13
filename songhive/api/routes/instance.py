@@ -15,7 +15,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import RegistrationMode, SonghiveConfig
-from ...models.user import User
+from ...federation import get_actor_url
+from ...models.user import User, UserRole
 from ...version import __version__
 from ..deps import get_config, get_db
 
@@ -71,6 +72,25 @@ class _V1Configuration(BaseModel):
     polls: _V1PollConfig = Field(default_factory=_V1PollConfig)
 
 
+class StaffAccount(BaseModel):
+    """A staff (admin) account advertised by the instance."""
+
+    username: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    acct: str
+    url: str
+    actor_url: Optional[str] = None
+
+
+class InstanceContact(BaseModel):
+    """Configured contact person for the instance."""
+
+    name: str = ""
+    email: str = ""
+    url: str = ""
+
+
 class InstanceV1(BaseModel):
     """Mastodon-compatible ``/api/v1/instance`` response."""
 
@@ -91,6 +111,8 @@ class InstanceV1(BaseModel):
     invites_enabled: bool
     configuration: _V1Configuration = Field(default_factory=_V1Configuration)
     contact_account: Any = None
+    contact: Optional[InstanceContact] = None
+    staff_accounts: List[StaffAccount] = Field(default_factory=list)
     rules: List[Any] = Field(default_factory=list)
 
 
@@ -181,6 +203,7 @@ class InstanceV2(BaseModel):
     configuration: _V2Configuration = Field(default_factory=_V2Configuration)
     registrations: _V2Registrations
     contact: _V2Contact = Field(default_factory=_V2Contact)
+    staff_accounts: List[StaffAccount] = Field(default_factory=list)
     rules: List[Any] = Field(default_factory=list)
 
 
@@ -208,6 +231,97 @@ async def _user_count(db: AsyncSession) -> int:
     return result.scalar() or 0
 
 
+async def _admin_users(db: AsyncSession) -> List[User]:
+    """Return the active admin users, oldest first."""
+    result = await db.execute(
+        select(User)
+        .where(User.role == UserRole.ADMIN.value, User.is_active.is_(True))
+        .order_by(User.created_at.asc(), User.username.asc())
+    )
+    return list(result.scalars().all())
+
+
+def _base_url(request: Request, config: SonghiveConfig) -> str:
+    """Return the public base URL (https) for links advertised by the instance."""
+    if config.federation.instance_domain:
+        return f"https://{config.federation.instance_domain}"
+    return str(request.base_url).rstrip("/")
+
+
+def _user_to_staff_account(user: User, request: Request, config: SonghiveConfig) -> StaffAccount:
+    """
+    Map a local admin user to its public staff representation.
+
+    ``acct`` carries the fully-qualified ``user@domain`` handle when
+    federation is available and falls back to the bare username otherwise.
+    ``url`` points at the user's ``/@{username}`` profile page.
+    """
+    federated = config.federation.enabled and bool(config.federation.instance_domain)
+    domain = config.federation.instance_domain
+    actor_url = (user.actor_url or get_actor_url(domain, user.username)) if federated else None
+    return StaffAccount(
+        username=user.username,
+        display_name=user.display_name or user.username,
+        avatar_url=user.avatar_url,
+        acct=f"{user.username}@{domain}" if federated else user.username,
+        url=f"{_base_url(request, config)}/@{user.username}",
+        actor_url=actor_url,
+    )
+
+
+def _user_to_mastodon_account(user: User, request: Request, config: SonghiveConfig) -> dict[str, Any]:
+    """
+    Map a local user to a minimal Mastodon Account entity.
+
+    Used for the ``contact_account``/``contact.account`` fields of the
+    instance responses, which Mastodon-compatible clients expect to hold a
+    full Account shape.
+    """
+    federated = config.federation.enabled and bool(config.federation.instance_domain)
+    domain = config.federation.instance_domain
+    profile_url = f"{_base_url(request, config)}/@{user.username}"
+    uri = (user.actor_url or get_actor_url(domain, user.username)) if federated else profile_url
+    avatar = user.avatar_url or ""
+    created = user.created_at.isoformat() if user.created_at else None
+    return {
+        "id": str(user.id),
+        "username": user.username,
+        "acct": f"{user.username}@{domain}" if federated else user.username,
+        "display_name": user.display_name or user.username,
+        "note": user.bio or "",
+        "url": profile_url,
+        "uri": uri,
+        "avatar": avatar,
+        "avatar_static": avatar,
+        "header": "",
+        "header_static": "",
+        "locked": False,
+        "created_at": created,
+        "last_status_at": None,
+        "followers_count": 0,
+        "following_count": 0,
+        "statuses_count": 0,
+        "fields": [],
+        "emojis": [],
+        "bot": False,
+        "group": False,
+        "discoverable": True,
+        "noindex": False,
+    }
+
+
+def _instance_contact(config: SonghiveConfig) -> Optional[InstanceContact]:
+    """Return the configured contact person, or None when nothing is set."""
+    contact = InstanceContact(
+        name=config.federation.contact_name,
+        email=config.federation.contact_email,
+        url=config.federation.contact_url,
+    )
+    if not (contact.name or contact.email or contact.url):
+        return None
+    return contact
+
+
 @v1_router.get("", response_model=InstanceV1)
 async def get_instance_v1(
     request: Request,
@@ -218,6 +332,7 @@ async def get_instance_v1(
     domain = _instance_domain(request, config)
     registrations, approval_required, invites_enabled = _registration_flags(config.auth.registration_mode)
     user_count = await _user_count(db)
+    admins = await _admin_users(db)
     version = f"Songhive {__version__} (Mastodon-compatible)"
 
     return InstanceV1(
@@ -225,6 +340,7 @@ async def get_instance_v1(
         title=config.federation.instance_name,
         description=config.federation.instance_description,
         short_description=config.federation.instance_description,
+        email=config.federation.contact_email,
         version=version,
         songhive_version=__version__,
         federation_enabled=config.federation.enabled and bool(config.federation.instance_domain),
@@ -236,6 +352,9 @@ async def get_instance_v1(
         registrations=registrations,
         approval_required=approval_required,
         invites_enabled=invites_enabled,
+        contact_account=_user_to_mastodon_account(admins[0], request, config) if admins else None,
+        contact=_instance_contact(config),
+        staff_accounts=[_user_to_staff_account(admin, request, config) for admin in admins],
     )
 
 
@@ -249,6 +368,7 @@ async def get_instance_v2(
     domain = _instance_domain(request, config)
     registrations, approval_required, _ = _registration_flags(config.auth.registration_mode)
     user_count = await _user_count(db)
+    admins = await _admin_users(db)
     version = f"Songhive {__version__} (Mastodon-compatible)"
 
     return InstanceV2(
@@ -262,6 +382,11 @@ async def get_instance_v2(
             enabled=registrations,
             approval_required=approval_required,
         ),
+        contact=_V2Contact(
+            email=config.federation.contact_email,
+            account=_user_to_mastodon_account(admins[0], request, config) if admins else None,
+        ),
+        staff_accounts=[_user_to_staff_account(admin, request, config) for admin in admins],
     )
 
 

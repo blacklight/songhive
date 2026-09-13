@@ -135,6 +135,18 @@ class FederationConfig(BaseSettings):
         default="A federated music sharing service",
         description="Instance description",
     )
+    contact_name: str = Field(
+        default="",
+        description="Display name of the contact person for this instance",
+    )
+    contact_email: str = Field(
+        default="",
+        description="Contact email address for this instance",
+    )
+    contact_url: str = Field(
+        default="",
+        description="Contact/profile URL of the contact person for this instance",
+    )
     private_key_path: Optional[Path] = Field(
         default=None,
         description="Path to the ActivityPub actor private key PEM file; a key is generated here if missing",

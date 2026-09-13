@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `instance`: contact and staff discovery. The `/about` page now lists the
+  instance's active admin accounts (avatar, display name and
+  `@user@domain` handle when federation is enabled, linked to their
+  `/@{username}` profile page) plus an optional configured contact person
+  (name, JS-masked email revealed on click, and URL). The contact is set
+  via `federation.contact_name` / `contact_email` / `contact_url` in
+  config.toml (or the `SONGHIVE_FEDERATION__CONTACT_*` env vars), and is
+  also editable at runtime through the `instance_contact_*` admin
+  settings. `GET /api/v1/instance` and `/api/v2/instance` now expose
+  `staff_accounts`, the configured `contact` details, `email`, and a
+  Mastodon-shaped `contact_account` for the first admin; the NodeInfo
+  documents (`/nodeinfo/2.0`, `/nodeinfo/2.1`, `*.json` aliases) carry the
+  same information in `metadata` (`nodeName`, `nodeDescription`,
+  `maintainer`, `staffAccounts`) following PeerTube/Friendica conventions.
+
 ### Fixed
 
 - `activities`: like/boost cards in feeds now embed the reacted content —
