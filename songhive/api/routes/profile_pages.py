@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...federation import get_actor_url
+from ...federation import get_actor_url, get_mastodon_actor_url
 from ...federation.actors import user_to_actor_document
 from ...models.user import User
 from ...services.auth import get_user_by_username
@@ -85,11 +85,13 @@ def _spa_response(
     return HTMLResponse(content=body, headers=headers)
 
 
-def _user_spa_response(user: User, alternate_url: Optional[str] = None) -> HTMLResponse:
+def _user_spa_response(user: User, alternate_url: Optional[str] = None, domain: Optional[str] = None) -> HTMLResponse:
     """Return the SPA shell annotated with the user's ``rel="me"`` links."""
     me_urls: list[str] = [link.url for link in user.links or [] if link.url]
     if alternate_url:
         me_urls.append(alternate_url)
+        if domain:
+            me_urls.append(get_mastodon_actor_url(domain, user.username))
     return _spa_response(alternate_url=alternate_url, me_urls=me_urls)
 
 
@@ -141,4 +143,4 @@ async def get_user_profile_page(
         return JSONResponse(content=actor, media_type=ACTIVITY_JSON)
 
     alternate_url = get_actor_url(domain, user.username) if ap_enabled and domain else None
-    return _user_spa_response(user, alternate_url=alternate_url)
+    return _user_spa_response(user, alternate_url=alternate_url, domain=domain)

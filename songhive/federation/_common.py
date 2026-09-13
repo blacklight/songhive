@@ -8,14 +8,22 @@ def get_actor_url(domain: str, username: str) -> str:
     return f"https://{domain}/users/{username}"
 
 
+def get_mastodon_actor_url(domain: str, username: str) -> str:
+    """
+    Get the ActivityPub actor URL for a local user, in the
+    https://mastodon.social/@username common with Mastodon instances.
+    """
+    return f"https://{domain}/@{username}"
+
+
 def get_inbox_url(domain: str, username: str) -> str:
     """Get the ActivityPub inbox URL for a local user."""
-    return f"https://{domain}/users/{username}/inbox"
+    return f"{get_actor_url(domain, username)}/inbox"
 
 
 def get_outbox_url(domain: str, username: str) -> str:
     """Get the ActivityPub outbox URL for a local user."""
-    return f"https://{domain}/users/{username}/outbox"
+    return f"{get_actor_url(domain, username)}/outbox"
 
 
 def get_tag_url(domain: str, name: str) -> str:
