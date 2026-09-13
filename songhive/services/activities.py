@@ -447,16 +447,22 @@ async def list_user_activities(
     owner_user_id: str,
     user: Optional[User] = None,
     mode: str = "posts",
+    include_boosts: bool = True,
+    include_replies: bool = False,
     source_type: Optional[str] = None,
     cursor: Optional[str] = None,
     limit: int = 20,
 ) -> Tuple[List[Activity], Optional[str]]:
-    """List activities by a user, newest first.
+    """
+    List activities by a user, newest first.
 
-    ``mode="posts"`` returns only the user's published local ``create``
-    activities (Note posts and published-track shares). ``mode="all"`` returns
-    every visible activity they authored or relayed (create, announce, like,
-    reply, ...). Visibility is applied through ``_activity_visibility_filter``.
+    ``mode="posts"`` returns the user's published local ``create``
+    activities (Note posts and published-track shares); ``include_boosts``
+    folds their ``announce`` activities into the timeline (the Mastodon
+    default) and ``include_replies`` their ``reply`` activities (hidden by
+    default). ``mode="all"`` returns every visible activity they authored
+    or relayed (create, announce, like, reply, ...) and ignores the include
+    flags. Visibility is applied through ``_activity_visibility_filter``.
     """
     if mode not in ("posts", "all"):
         raise HTTPException(status_code=400, detail="Invalid mode")
@@ -472,8 +478,13 @@ async def list_user_activities(
     )
 
     if mode == "posts":
+        activity_types = ["create"]
+        if include_boosts:
+            activity_types.append("announce")
+        if include_replies:
+            activity_types.append("reply")
         stmt = stmt.where(
-            Activity.activity_type == "create",
+            Activity.activity_type.in_(activity_types),
             Activity.source_type == "local",
         )
 
@@ -2960,17 +2971,20 @@ async def sync_track_publications(
 
 
 async def retract_activity(session: AsyncSession, activity: Activity) -> None:
-    """Retract a single activity.
+    """
+    Retract a single activity.
 
-    Local activities are soft-deleted (``deleted_at``) and a
-    ``Delete(Tombstone)`` is enqueued for every inbox the activity was
-    previously delivered to (``sent`` targets only), mirroring
+    Local activities are soft-deleted (``deleted_at``) and a retraction is
+    enqueued for every inbox the activity was previously delivered to
+    (``sent`` targets only): ``Undo(Like)``/``Undo(Announce)`` for
+    reactions — ``Delete`` is not the ActivityPub way to retract them —
+    and ``Delete(Tombstone)`` for everything else, mirroring
     :func:`deletion.cascade_delete_entity` for a single row. Remote
     activities are hard-deleted without fan-out — the remote instance owns
     retraction. Already-retracted activities are a no-op. Flushes without
     committing; the caller owns the transaction.
     """
-    from ..federation.activities import create_tombstone_delete_activity
+    from ..federation.activities import create_tombstone_delete_activity, create_undo_activity
     from . import notifications as notifications_service
     from .deletion import enqueue_activity_delivery, get_activity_unpublish_info
 
@@ -2991,6 +3005,13 @@ async def retract_activity(session: AsyncSession, activity: Activity) -> None:
     activity.deleted_at = datetime.now(timezone.utc)
     if info.inboxes:
         owner = await session.get(User, activity.owner_user_id) if activity.owner_user_id else None
-        payload = create_tombstone_delete_activity(info.actor_url, info.source_id)
+        if activity.activity_type in ("like", "announce") and isinstance(activity.payload, dict):
+            payload = create_undo_activity(
+                info.actor_url,
+                activity.payload,
+                activity_id=f"{info.source_id}#undo",
+            )
+        else:
+            payload = create_tombstone_delete_activity(info.actor_url, info.source_id)
         enqueue_activity_delivery(info, owner, payload)
     await session.flush()

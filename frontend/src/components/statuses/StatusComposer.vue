@@ -592,6 +592,7 @@ useOnClickOutside(() => editorEl.value, closeMention);
 
 .status-composer__textarea {
   width: 100%;
+  min-height: 40vh;
   box-sizing: border-box;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);

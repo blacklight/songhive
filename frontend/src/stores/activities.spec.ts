@@ -180,6 +180,62 @@ describe("useActivitiesStore", () => {
     expect(store.updatedActivity("a1")?.boost_count).toBe(1);
   });
 
+  it("retractReaction unlikes the target and removes the like card", async () => {
+    unlikeActivity.mockResolvedValue({ status: "ok" });
+    listEntityActivities.mockResolvedValueOnce({
+      activities: [
+        {
+          ...createActivity("l1"),
+          activity_type: "like",
+          can_interact: false,
+          in_reply_to_activity_id: "a1",
+        },
+      ],
+      next_cursor: null,
+    });
+    const store = useActivitiesStore();
+    await store.load("track", "t1");
+    const reaction = store.items[0];
+    const target = { ...createActivity("a1"), liked: true, like_count: 1 };
+    await store.retractReaction(reaction, target);
+    expect(unlikeActivity).toHaveBeenCalledWith("a1");
+    expect(store.items).toEqual([]);
+    expect(store.isRemoved("l1")).toBe(true);
+    expect(store.updatedActivity("a1")?.liked).toBe(false);
+    expect(store.updatedActivity("a1")?.like_count).toBe(0);
+  });
+
+  it("retractReaction unboosts the target and removes the boost card", async () => {
+    unboostActivity.mockResolvedValue({ status: "ok" });
+    const store = useActivitiesStore();
+    const reaction = {
+      ...createActivity("b1"),
+      activity_type: "announce" as const,
+      can_interact: false,
+      in_reply_to_activity_id: "a1",
+    };
+    const target = { ...createActivity("a1"), boosted: true, boost_count: 1 };
+    await store.retractReaction(reaction, target);
+    expect(unboostActivity).toHaveBeenCalledWith("a1");
+    expect(store.isRemoved("b1")).toBe(true);
+    expect(store.updatedActivity("a1")?.boosted).toBe(false);
+    expect(store.updatedActivity("a1")?.boost_count).toBe(0);
+  });
+
+  it("retractReaction falls back to the bare endpoint without a target", async () => {
+    unlikeActivity.mockResolvedValue({ status: "ok" });
+    const store = useActivitiesStore();
+    const reaction = {
+      ...createActivity("l2"),
+      activity_type: "like" as const,
+      can_interact: false,
+      in_reply_to_activity_id: "a9",
+    };
+    await store.retractReaction(reaction);
+    expect(unlikeActivity).toHaveBeenCalledWith("a9");
+    expect(store.isRemoved("l2")).toBe(true);
+  });
+
   it("reply posts the reply and bumps the reply counter", async () => {
     replyToActivity.mockResolvedValue({
       ...createActivity("r1"),

@@ -74,6 +74,8 @@ class ActivityResponse(BaseModel):
     source_actor: str
     source_id: str
     local_object_id: Optional[str] = None
+    object_url: Optional[str] = None
+    object_type: Optional[str] = None
     owner_user_id: Optional[str] = None
     source_actor_avatar_url: Optional[str] = None
     source_actor_display_name: Optional[str] = None
@@ -189,6 +191,27 @@ def _activity_attachments(activity: Activity) -> List[dict]:
     return [a for a in obj.get("attachment") or [] if isinstance(a, dict)]
 
 
+def _activity_object_url(activity: Activity) -> Optional[str]:
+    """
+    Return the dereferenceable id of an activity's object.
+
+    ``Create``-style payloads embed the object document — its ``id`` is the
+    activity's own object id. ``Like``/``Announce`` payloads reference the
+    reacted object as a bare id, which is exactly the link a reaction card
+    should point at.
+    """
+    payload = activity.payload
+    if not isinstance(payload, dict):
+        return None
+    obj = payload.get("object")
+    if isinstance(obj, str):
+        return obj
+    if isinstance(obj, dict):
+        obj_id = obj.get("id")
+        return obj_id if isinstance(obj_id, str) and obj_id else None
+    return None
+
+
 def _build_activity_response(
     activity: Activity,
     profile: Optional[activity_service.ActorProfile],
@@ -205,7 +228,12 @@ def _build_activity_response(
         response.reply_count = summary.reply_count
         response.liked = summary.liked
         response.boosted = summary.boosted
-    response.can_interact = activity.activity_type not in ("like", "delete")
+    response.object_url = _activity_object_url(activity)
+    response.object_type = activity_service._activity_object_type(activity)
+    # Interactions target content activities — reacting to a reaction (or a
+    # tombstone) is meaningless, so cards for those types render no action
+    # bar; the embedded object's card carries its own.
+    response.can_interact = activity.activity_type not in ("like", "announce", "delete")
     return response
 
 
@@ -272,6 +300,14 @@ async def update_activity(
     activity = await db.get(Activity, activity_id)
     if activity is None or activity.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+
+    # Reactions carry no editable content — the object is a bare reference
+    # and the visibility is inherited from the reacted activity.
+    if activity.activity_type in ("like", "announce"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Reaction activities are not editable",
+        )
 
     if not await acl.can_manage(db, current_user, activity.entity_type, activity.entity_id):
         raise HTTPException(

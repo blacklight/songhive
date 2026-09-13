@@ -453,6 +453,8 @@ async def list_user_tag_items(
 async def list_user_activities_route(
     username: str,
     mode: str = Query("posts", description="Activity feed mode (posts or all)"),
+    include_boosts: bool = Query(True, description="Include boosts in posts mode"),
+    include_replies: bool = Query(False, description="Include replies in posts mode"),
     source_type: Optional[str] = Query(None, description="Filter by source type"),
     cursor: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=100),
@@ -472,6 +474,8 @@ async def list_user_activities_route(
         owner_user_id=str(target.id),
         user=user,
         mode=mode,
+        include_boosts=include_boosts,
+        include_replies=include_replies,
         source_type=source_type,
         cursor=cursor,
         limit=limit,

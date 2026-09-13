@@ -5,10 +5,12 @@ import type { ActivityResponse } from "@/api/activities";
 import { useActivitiesStore } from "@/stores/activities";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
+import { clearActivityCache } from "@/utils/activityFetch";
 import ActivityCard from "./ActivityCard.vue";
 
 vi.mock("@/api/activities", () => ({
   listEntityActivities: vi.fn(),
+  getActivity: vi.fn(),
   likeActivity: vi.fn(),
   unlikeActivity: vi.fn(),
   boostActivity: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock("@/api/files", () => ({
   uploadFile: vi.fn(),
 }));
 
+const getActivity = vi.mocked(activitiesApi.getActivity);
 const likeActivity = vi.mocked(activitiesApi.likeActivity);
 const unlikeActivity = vi.mocked(activitiesApi.unlikeActivity);
 const boostActivity = vi.mocked(activitiesApi.boostActivity);
@@ -87,6 +90,7 @@ function mountCard(overrides: Partial<ActivityResponse> = {}) {
 
 describe("ActivityCard", () => {
   beforeEach(() => {
+    clearActivityCache();
     vi.clearAllMocks();
   });
 
@@ -287,8 +291,129 @@ describe("ActivityCard", () => {
     setAuthenticated("user-1");
     const wrapper = mountCard({ activity_type: "like", can_interact: false });
     const buttons = wrapper.findAll(".activity-card__actions button");
-    // edit + delete + copy URL only
-    expect(buttons.length).toBe(3);
+    // Reactions are not editable: delete + copy URL only
+    expect(buttons.length).toBe(2);
+  });
+
+  it("renders the reacted activity inside a like card", async () => {
+    setAuthenticated("user-1");
+    // The target belongs to someone else so the only editable card is the
+    // reaction itself — and reactions render no edit button.
+    getActivity.mockResolvedValue(
+      createActivity({
+        id: "target-1",
+        owner_user_id: "user-2",
+        content: "<p>the liked post</p>",
+        content_source: "the liked post",
+      }),
+    );
+    const wrapper = mountCard({
+      activity_type: "like",
+      can_interact: false,
+      content: null,
+      content_source: null,
+      in_reply_to_activity_id: "target-1",
+      object_url: "https://example.com/users/bob/objects/target-1",
+    });
+    await flushPromises();
+    expect(getActivity).toHaveBeenCalledWith("target-1");
+    expect(wrapper.text()).toContain("the liked post");
+    // The timestamp links to the liked object, not the like itself.
+    expect(wrapper.find(".activity-card__time").attributes("href")).toBe(
+      "https://example.com/users/bob/objects/target-1",
+    );
+    // No edit button on a reaction; the only interaction groups are the
+    // embedded card's own action bar.
+    expect(wrapper.find('button[aria-label="Edit"]').exists()).toBe(false);
+    expect(wrapper.findAll(".activity-card__action").length).toBe(3);
+  });
+
+  it("renders the reacted activity inside a boost card", async () => {
+    setAuthenticated("user-1");
+    getActivity.mockResolvedValue(
+      createActivity({
+        id: "target-2",
+        content: "<p>the boosted post</p>",
+        content_source: "the boosted post",
+      }),
+    );
+    const wrapper = mountCard({
+      activity_type: "announce",
+      can_interact: false,
+      content: null,
+      content_source: null,
+      in_reply_to_activity_id: "target-2",
+    });
+    await flushPromises();
+    expect(getActivity).toHaveBeenCalledWith("target-2");
+    expect(wrapper.text()).toContain("the boosted post");
+  });
+
+  it("shows an unavailable placeholder when the reacted activity cannot be loaded", async () => {
+    setAuthenticated("user-1");
+    getActivity.mockRejectedValue(new Error("gone"));
+    const wrapper = mountCard({
+      activity_type: "announce",
+      can_interact: false,
+      content: null,
+      in_reply_to_activity_id: "target-gone",
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain("This content is not available.");
+  });
+
+  it("retracts one's own like instead of deleting the liked activity", async () => {
+    setAuthenticated("user-1");
+    const target = createActivity({
+      id: "target-3",
+      owner_user_id: "user-2",
+      liked: true,
+      like_count: 1,
+    });
+    getActivity.mockResolvedValue(target);
+    unlikeActivity.mockResolvedValue({ status: "ok" });
+    const confirmStore = useConfirmStore();
+    const wrapper = mountCard({
+      activity_type: "like",
+      can_interact: false,
+      content: null,
+      in_reply_to_activity_id: "target-3",
+    });
+    await flushPromises();
+    await wrapper.find('button[aria-label="Delete"]').trigger("click");
+    expect(confirmStore.state?.open).toBe(true);
+    confirmStore.confirm();
+    await flushPromises();
+    expect(unlikeActivity).toHaveBeenCalledWith("target-3");
+    expect(deleteActivity).not.toHaveBeenCalled();
+    expect(wrapper.find("article.activity-card").exists()).toBe(false);
+  });
+
+  it("retracts one's own boost instead of deleting the boosted activity", async () => {
+    setAuthenticated("user-1");
+    getActivity.mockResolvedValue(
+      createActivity({
+        id: "target-4",
+        owner_user_id: "user-2",
+        boosted: true,
+        boost_count: 1,
+      }),
+    );
+    unboostActivity.mockResolvedValue({ status: "ok" });
+    const confirmStore = useConfirmStore();
+    const wrapper = mountCard({
+      activity_type: "announce",
+      can_interact: false,
+      content: null,
+      in_reply_to_activity_id: "target-4",
+    });
+    await flushPromises();
+    await wrapper.find('button[aria-label="Delete"]').trigger("click");
+    confirmStore.confirm();
+    await flushPromises();
+    expect(unboostActivity).toHaveBeenCalledWith("target-4");
+    expect(deleteActivity).not.toHaveBeenCalled();
+    expect(wrapper.find("article.activity-card").exists()).toBe(false);
   });
 
   it("likes the activity once and bumps the counter", async () => {

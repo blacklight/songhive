@@ -22,6 +22,7 @@ import StatusComposer, {
 } from "@/components/statuses/StatusComposer.vue";
 import ActivityActorsModal from "./ActivityActorsModal.vue";
 import ActivityEditModal from "./ActivityEditModal.vue";
+import ActivityObjectEmbed from "./ActivityObjectEmbed.vue";
 import ActivityRemoteReply from "./ActivityRemoteReply.vue";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
 import {
@@ -181,11 +182,37 @@ function markClasses(segment: ContentSegment): string[] {
   return (segment.marks ?? []).map((mark) => MARK_CLASSES[mark]);
 }
 
+// ``like``/``announce`` cards are reaction wrappers: their object is a bare
+// reference rendered through ``ActivityObjectEmbed``, they carry no
+// editable content, and deleting one means retracting the reaction.
+const isReaction = computed(
+  () =>
+    activity.value.activity_type === "like" ||
+    activity.value.activity_type === "announce",
+);
+// Only ``Create``-style types carry an editable object; reactions,
+// tombstones, and relayed types have nothing to edit.
+const isEditable = computed(() =>
+  ["create", "reply", "quote"].includes(activity.value.activity_type),
+);
+const isOwner = computed(
+  () =>
+    authStore.user?.id != null &&
+    authStore.user.id === activity.value.owner_user_id,
+);
 const canEdit = computed(
   () =>
     authStore.isAuthenticated &&
-    (authStore.isAdmin || authStore.user?.id === activity.value.owner_user_id),
+    isEditable.value &&
+    (authStore.isAdmin || isOwner.value),
 );
+const canDelete = computed(
+  () => authStore.isAuthenticated && (authStore.isAdmin || isOwner.value),
+);
+// The reacted-to activity once the embed resolves it — passed to the store
+// so retracting the reaction updates its counters too.
+const targetActivity = ref<ActivityResponse | null>(null);
+const embedFailed = ref(false);
 // ``can_interact`` is the server-computed gate: interaction types that make
 // no sense to interact with (likes, tombstones) opt out; everything else is
 // left to the backend's view checks, which stay authoritative.
@@ -314,15 +341,32 @@ async function submitReply(payload: StatusComposerPayload) {
 }
 
 async function remove() {
+  // Deleting one's own reaction means retracting it on the target (an
+  // ``Undo`` federates); admins retracting someone else's reaction go
+  // through the regular activity deletion path.
+  const retracting =
+    isReaction.value &&
+    isOwner.value &&
+    !!activity.value.in_reply_to_activity_id;
   const confirmed = await confirmStore.open({
     title: t("activities.delete.title"),
-    message: t("activities.delete.confirm"),
+    message: t(
+      retracting
+        ? activity.value.activity_type === "like"
+          ? "activities.unlikeConfirm"
+          : "activities.unboostConfirm"
+        : "activities.delete.confirm",
+    ),
     confirmLabel: t("common.delete"),
     danger: true,
   });
   if (!confirmed) return;
   try {
-    await store.remove(props.activity.id);
+    if (retracting) {
+      await store.retractReaction(activity.value, targetActivity.value);
+    } else {
+      await store.remove(props.activity.id);
+    }
     toast.push({ type: "success", message: t("activities.delete.done") });
   } catch (err) {
     toast.push({
@@ -334,7 +378,9 @@ async function remove() {
 
 async function copyUrl() {
   try {
-    await navigator.clipboard.writeText(activity.value.source_id);
+    await navigator.clipboard.writeText(
+      activity.value.object_url || activity.value.source_id,
+    );
     toast.push({ type: "success", message: t("activities.copyUrl.done") });
   } catch (err) {
     toast.push({
@@ -371,9 +417,11 @@ async function copyUrl() {
           }}</span>
           <span class="activity-card__handle">{{ actorName }}</span>
         </RouterLink>
-        <a :href="activity.source_id" class="activity-card__time">{{
-          formatDateTime(activity.published_at)
-        }}</a>
+        <a
+          :href="activity.object_url || activity.source_id"
+          class="activity-card__time"
+          >{{ formatDateTime(activity.published_at) }}</a
+        >
       </div>
       <div class="activity-card__badges">
         <span v-if="typeLabel" class="activity-card__type" :title="typeLabel">
@@ -388,6 +436,18 @@ async function copyUrl() {
         />
       </div>
     </header>
+
+    <div v-if="isReaction" class="activity-card__object">
+      <ActivityObjectEmbed
+        v-if="activity.in_reply_to_activity_id && !embedFailed"
+        :activity-id="activity.in_reply_to_activity_id"
+        @loaded="targetActivity = $event"
+        @error="embedFailed = true"
+      />
+      <p v-else class="activity-card__object-unavailable">
+        {{ t("activities.objectUnavailable") }}
+      </p>
+    </div>
 
     <p
       v-if="contentSegments.length"
@@ -483,7 +543,7 @@ async function copyUrl() {
     </div>
 
     <footer
-      v-if="!props.readonly && (canInteract || canEdit)"
+      v-if="!props.readonly && (canInteract || canDelete)"
       class="activity-card__actions"
     >
       <template v-if="canInteract">
@@ -566,7 +626,7 @@ async function copyUrl() {
         @click="editOpen = true"
       />
       <AppButton
-        v-if="canEdit"
+        v-if="canDelete"
         variant="ghost"
         size="sm"
         icon="trash"
@@ -768,6 +828,15 @@ async function copyUrl() {
 
 .activity-card__replies :deep(.activity-card) {
   width: auto;
+}
+
+.activity-card__object :deep(.activity-card) {
+  width: auto;
+}
+
+.activity-card__object-unavailable {
+  margin: 0;
+  color: var(--color-text-muted);
 }
 
 .activity-card__replies-loading {

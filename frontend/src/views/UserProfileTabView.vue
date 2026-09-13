@@ -29,6 +29,7 @@ import LibraryCard from "@/components/library/LibraryCard.vue";
 import PlaylistCard from "@/components/library/PlaylistCard.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import type { TrackResponse } from "@/player/types";
 
@@ -56,6 +57,12 @@ const hasMoreEntities = ref(false);
 
 const activitiesCursor = ref<string | null>(null);
 const activitiesHasMore = ref(false);
+
+// Mastodon-style posts-timeline filters: boosts are folded in by default,
+// replies are hidden unless requested. Only sent in ``posts`` mode —
+// ``all`` mode returns every activity regardless.
+const includeBoosts = ref(true);
+const includeReplies = ref(false);
 
 const emptyEntity = computed(() => {
   switch (props.tab) {
@@ -102,6 +109,8 @@ async function load(append = false) {
       const mode = props.tab === "posts" ? "posts" : "all";
       const result = await listUserActivities(username.value, {
         mode,
+        include_boosts: includeBoosts.value,
+        include_replies: includeReplies.value,
         limit,
       });
       activities.value = result;
@@ -182,6 +191,8 @@ async function loadMoreActivities() {
   try {
     const result = await listUserActivities(username.value, {
       mode: props.tab === "posts" ? "posts" : "all",
+      include_boosts: includeBoosts.value,
+      include_replies: includeReplies.value,
       cursor: activitiesCursor.value,
       limit,
     });
@@ -209,10 +220,25 @@ watch([() => props.tab, username], () => {
   reset();
   void load();
 });
+watch([includeBoosts, includeReplies], () => {
+  if (props.tab !== "posts") return;
+  reset();
+  void load();
+});
 </script>
 
 <template>
   <div class="user-profile-tab">
+    <div v-if="tab === 'posts'" class="user-profile-tab__filters">
+      <AppCheckbox
+        v-model="includeBoosts"
+        :label="t('activities.filters.boosts')"
+      />
+      <AppCheckbox
+        v-model="includeReplies"
+        :label="t('activities.filters.replies')"
+      />
+    </div>
     <div
       v-if="
         loading &&
@@ -358,6 +384,12 @@ watch([() => props.tab, username], () => {
 .user-profile-tab__empty {
   margin: 0;
   color: var(--color-text-muted);
+}
+
+.user-profile-tab__filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
 }
 
 .user-profile-tab__grid {

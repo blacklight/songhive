@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `activities`: like/boost cards in feeds now embed the reacted content —
+  the full `ActivityCard` for `Note` objects and the compact item card for
+  `Audio` — fetched through a shared cache, with an "unavailable"
+  placeholder when the target cannot be loaded. Their timestamp and
+  copy-link now point at the reacted object (`object_url`) instead of a
+  broken user-object URL, and `ActivityResponse` exposes `object_url` /
+  `object_type` plus `can_interact: false` on reaction types. Reaction
+  cards no longer offer Edit (they have no text payload — `PATCH` returns
+  422), and Delete retracts the caller's own like/boost (`Undo` federates
+  to the inboxes the reaction reached) instead of trying to delete the
+  target.
 - `notifications`: like/boost notifications now link the actor name to the
   actor's profile (or remote actor URL) and the "liked/boosted your post"
   text separately to the reacted activity's page, instead of linking the
@@ -40,6 +51,11 @@ All notable changes to this project will be documented in this file.
   `/{id}/boost` retract the caller's reaction — the like/boost icons act
   as toggles — removing the produced notification and federating an
   `Undo(Like)`/`Undo(Announce)` to the inboxes the reaction reached.
+- `users`: the profile posts timeline
+  (`GET /api/v1/users/{username}/activities?mode=posts`) now folds the
+  user's boosts in by default and offers Mastodon-style
+  `include_boosts` (default `true`) and `include_replies` (default
+  `false`) filters, mirrored as checkboxes on the profile Posts tab.
 - `statuses`: Standalone status posts. `POST /api/v1/statuses/` creates a
   `create` activity on the author's `user` entity that federates as a
   `Create(Note)` when federation is enabled and the visibility federates

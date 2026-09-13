@@ -48,6 +48,14 @@ export interface ActivityResponse {
   source_actor: string;
   source_id: string;
   local_object_id?: string | null;
+  /**
+   * Dereferenceable id of the activity's object — the activity's own
+   * object id for ``Create``-style payloads, the reacted object's id for
+   * ``like``/``announce`` cards.
+   */
+  object_url?: string | null;
+  /** ActivityStreams type of the embedded object (``Note``, ``Audio``, …). */
+  object_type?: string | null;
   owner_user_id?: string | null;
   source_actor_avatar_url?: string | null;
   source_actor_display_name?: string | null;
@@ -147,7 +155,11 @@ export function listEntityActivities(
 
 export function listUserActivities(
   username: string,
-  params?: ListActivitiesParams & { mode?: "posts" | "all" },
+  params?: ListActivitiesParams & {
+    mode?: "posts" | "all";
+    include_boosts?: boolean;
+    include_replies?: boolean;
+  },
 ): Promise<ActivityListResponse> {
   return apiRequest<ActivityListResponse>(`/users/${username}/activities`, {
     query: params,

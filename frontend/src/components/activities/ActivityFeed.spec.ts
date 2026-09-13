@@ -6,6 +6,7 @@ import ActivityFeed from "./ActivityFeed.vue";
 
 vi.mock("@/api/activities", () => ({
   listEntityActivities: vi.fn(),
+  getActivity: vi.fn(),
   likeActivity: vi.fn(),
   unlikeActivity: vi.fn(),
   boostActivity: vi.fn(),

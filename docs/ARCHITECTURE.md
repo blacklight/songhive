@@ -468,7 +468,14 @@ interactions recorded in Pubby's `federation_interactions` storage against
 the activity's `source_id` (`_remote_interactions`, thread-offloaded and
 best-effort); `liked`/`boosted` report the requester's own live
 like/announce rows, and `can_interact` is false for activity types that
-cannot themselves be reacted to (`like`, `delete`). `GET
+cannot themselves be reacted to (`like`, `announce`, `delete`).
+`ActivityResponse` also carries `object_url`/`object_type`, resolved from
+the payload's `object`: `Create`-style activities expose the embedded
+document's `id`/`type`, while `Like`/`Announce` payloads reference the
+reacted object as a bare id — which is exactly the target a reaction card
+should link to — and expose no `object_type`. `PATCH` rejects like and
+announce activities (422): a reaction's object is a bare reference and
+its visibility is inherited, so there is nothing editable. `GET
 /api/v1/activities/{id}/likes` and `/{id}/boosts` return the
 known interactors — local users resolved to profiles, remote actors from
 Pubby's interaction records — via `list_activity_interactors`, and
@@ -579,7 +586,11 @@ inbox recorded as `sent` in `activity_targets`, signed with the activity
 owner's private key; remote activities are hard-deleted without fan-out.
 Single-activity retraction follows the same rules through
 `services/activities.retract_activity`, exposed as `DELETE
-/api/v1/activities/{id}` behind `acl.can_manage` on the containing entity.
+/api/v1/activities/{id}` behind `acl.can_manage` on the containing entity —
+except that retracting a `like`/`announce` enqueues an `Undo` wrapping the
+originally federated reaction payload (matching the `unreact_activity`
+path) instead of a `Delete(Tombstone)`, since `Delete` is not the
+ActivityPub way to retract a reaction.
 
 Track fediverse publications are recorded as activities too: every publish
 path — the manual `POST /api/v1/tracks/{id}/publish`, uploads and imports
@@ -630,7 +641,12 @@ through `POST /api/v1/statuses/`, which calls
 (`ensure_user_actor`). The service records a `create` activity on the
 author's `user` entity, so statuses show up in the author's profile posts
 feed (`GET /api/v1/users/{username}/activities?mode=posts`) and can be
-edited/retracted through the regular activity endpoints. The request
+edited/retracted through the regular activity endpoints. Posts mode
+returns the user's local `create` activities plus — Mastodon-style —
+their `announce` boosts unless `include_boosts=false`, and their `reply`
+activities only with `include_replies=true` (replies are hidden by
+default); `mode=all` returns every authored activity and ignores the
+include flags. The request
 carries the raw `status` source text (rendered through `process_mentions`
 as `text/markdown` — the default — or `text/plain`), a `visibility`, an
 optional BCP-47 `language` (validated, stored on the activity, mirrored
@@ -1593,7 +1609,14 @@ markup, and `<ul>`/`<ol>` items flatten to bullet/numbered lines with
 indentation per nesting level. `ActivityCard` also renders
 the activity's `attachments` (the AP `attachment` documents of the embedded
 object): image media types inline, `Audio`/audio media types in an
-`<audio>` player, everything else as a link.
+`<audio>` player, everything else as a link. Reaction cards
+(`like`/`announce`) are wrappers: `ActivityObjectEmbed` fetches the reacted
+activity through a shared per-id cache (`utils/activityFetch.ts`) and
+renders the full `ActivityCard` for `Note` objects or the compact item
+card for `Audio` ones (falling back to an "unavailable" placeholder on
+fetch failure), the card's timestamp/copy links point at the reaction's
+`object_url`, and the Delete action retracts the caller's reaction
+(`stores/activities.retractReaction`) rather than deleting the target.
 
 `UserProfileView` (`/@{username}`) shows a Compose button to the profile
 owner that opens `components/statuses/StatusComposer.vue` in a modal; the

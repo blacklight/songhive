@@ -764,6 +764,275 @@ async def test_get_activity_endpoint_forbidden(client, db_session, regular_user,
     assert resp.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_get_activity_endpoint_object_fields_for_create(client, db_session, regular_user, auth_headers):
+    """A ``Create`` activity exposes its embedded object's id and type."""
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=regular_user.id,
+        payload={
+            "type": "Create",
+            "object": {"type": "Audio", "id": "https://local.example/users/regular/objects/t1"},
+        },
+    )
+    db_session.add(activity)
+    await db_session.commit()
+
+    resp = client.get(f"/api/v1/activities/{activity.id}", headers=auth_headers(regular_user))
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["object_url"] == "https://local.example/users/regular/objects/t1"
+    assert body["object_type"] == "Audio"
+    assert body["can_interact"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_activity_endpoint_reaction_fields(client, db_session, regular_user, other_user, auth_headers):
+    """A reaction activity points ``object_url`` at the reacted object."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    like = await like_activity(db_session, activity=activity, author=regular_user)
+    await db_session.commit()
+
+    resp = client.get(f"/api/v1/activities/{like.id}", headers=auth_headers(regular_user))
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["activity_type"] == "like"
+    assert body["object_url"] == activity.source_id
+    # The object is a bare id reference, not an embedded document.
+    assert body["object_type"] is None
+    assert body["in_reply_to_activity_id"] == str(activity.id)
+    # Reactions are not themselves interactable.
+    assert body["can_interact"] is False
+
+
+@pytest.mark.asyncio
+async def test_update_endpoint_reaction_rejected(client, db_session, regular_user, other_user, auth_headers):
+    """Like/announce activities carry no editable payload — PATCH is a 422."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    like = await like_activity(db_session, activity=activity, author=regular_user)
+    boost = await boost_activity(db_session, activity=activity, author=regular_user)
+    await db_session.commit()
+
+    for reaction_id in (like.id, boost.id):
+        resp = client.patch(
+            f"/api/v1/activities/{reaction_id}",
+            json={"content": "edited"},
+            headers=auth_headers(regular_user),
+        )
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_retract_activity_reaction_fans_out_undo(db_session, regular_user, other_user, config, monkeypatch):
+    """Retracting a like enqueues ``Undo(Like)``, not ``Delete(Tombstone)``."""
+    config = _fed_config(config)
+    regular_user.private_key_pem = "private-key"
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    like = await like_activity(db_session, activity=activity, author=regular_user)
+    db_session.add(ActivityTarget(activity_id=like.id, inbox_url="https://remote.example/inbox", state="sent"))
+    await db_session.flush()
+
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    await activity_service.retract_activity(db_session, like)
+
+    assert like.deleted_at is not None
+    deliver.delay.assert_called_once()
+    payload = deliver.delay.call_args.args[0]
+    assert payload["type"] == "Undo"
+    assert payload["object"]["type"] == "Like"
+    assert payload["object"]["object"] == activity.source_id
+
+
+@pytest.mark.asyncio
+async def test_retract_activity_create_still_fans_out_delete(db_session, regular_user, config, monkeypatch):
+    """Non-reaction retractions keep the ``Delete(Tombstone)`` behavior."""
+    config = _fed_config(config)
+    regular_user.private_key_pem = "private-key"
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=regular_user.id,
+        source_actor=regular_user.actor_url,
+        source_id=f"{regular_user.actor_url}/objects/pub-1",
+    )
+    db_session.add(activity)
+    await db_session.flush()
+    db_session.add(ActivityTarget(activity_id=activity.id, inbox_url="https://remote.example/inbox", state="sent"))
+    await db_session.flush()
+
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    await activity_service.retract_activity(db_session, activity)
+
+    assert activity.deleted_at is not None
+    deliver.delay.assert_called_once()
+    payload = deliver.delay.call_args.args[0]
+    assert payload["type"] == "Delete"
+
+
+# ---------------------------------------------------------------------------
+# list_user_activities posts-mode filters
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_user_activities_posts_defaults(db_session, regular_user, other_user, config):
+    """Posts mode includes creates and boosts, not replies or likes."""
+    track = await _make_track(db_session, other_user)
+    target = _make_activity("track", track.id, owner_user_id=other_user.id)
+    own = _make_activity(
+        "user",
+        regular_user.id,
+        owner_user_id=regular_user.id,
+        source_id="https://local.example/users/regular/objects/own-1",
+    )
+    db_session.add_all([target, own])
+    await db_session.flush()
+
+    await boost_activity(db_session, activity=target, author=regular_user)
+    await like_activity(db_session, activity=target, author=regular_user)
+    await reply_to_activity(db_session, activity=target, author=regular_user, config=config, status_text="nice")
+
+    activities, _ = await activity_service.list_user_activities(
+        db_session, owner_user_id=str(regular_user.id), user=regular_user, mode="posts"
+    )
+    types = {a.activity_type for a in activities}
+    assert types == {"create", "announce"}
+
+
+@pytest.mark.asyncio
+async def test_list_user_activities_posts_include_replies(db_session, regular_user, other_user, config):
+    """``include_replies`` folds the user's replies into posts mode."""
+    track = await _make_track(db_session, other_user)
+    target = _make_activity("track", track.id, owner_user_id=other_user.id)
+    own = _make_activity(
+        "user",
+        regular_user.id,
+        owner_user_id=regular_user.id,
+        source_id="https://local.example/users/regular/objects/own-1",
+    )
+    db_session.add_all([target, own])
+    await db_session.flush()
+
+    reply = await reply_to_activity(db_session, activity=target, author=regular_user, config=config, status_text="nice")
+
+    activities, _ = await activity_service.list_user_activities(
+        db_session,
+        owner_user_id=str(regular_user.id),
+        user=regular_user,
+        mode="posts",
+        include_replies=True,
+    )
+    assert reply.id in {a.id for a in activities}
+
+
+@pytest.mark.asyncio
+async def test_list_user_activities_posts_exclude_boosts(db_session, regular_user, other_user):
+    """``include_boosts=False`` removes announces from posts mode."""
+    track = await _make_track(db_session, other_user)
+    target = _make_activity("track", track.id, owner_user_id=other_user.id)
+    own = _make_activity(
+        "user",
+        regular_user.id,
+        owner_user_id=regular_user.id,
+        source_id="https://local.example/users/regular/objects/own-1",
+    )
+    db_session.add_all([target, own])
+    await db_session.flush()
+
+    await boost_activity(db_session, activity=target, author=regular_user)
+
+    activities, _ = await activity_service.list_user_activities(
+        db_session,
+        owner_user_id=str(regular_user.id),
+        user=regular_user,
+        mode="posts",
+        include_boosts=False,
+    )
+    assert {a.activity_type for a in activities} == {"create"}
+
+
+@pytest.mark.asyncio
+async def test_list_user_activities_all_ignores_include_flags(db_session, regular_user, other_user, config):
+    """``mode="all"`` returns every authored activity regardless of flags."""
+    track = await _make_track(db_session, other_user)
+    target = _make_activity("track", track.id, owner_user_id=other_user.id)
+    own = _make_activity(
+        "user",
+        regular_user.id,
+        owner_user_id=regular_user.id,
+        source_id="https://local.example/users/regular/objects/own-1",
+    )
+    db_session.add_all([target, own])
+    await db_session.flush()
+
+    await boost_activity(db_session, activity=target, author=regular_user)
+    await like_activity(db_session, activity=target, author=regular_user)
+    await reply_to_activity(db_session, activity=target, author=regular_user, config=config, status_text="nice")
+
+    activities, _ = await activity_service.list_user_activities(
+        db_session,
+        owner_user_id=str(regular_user.id),
+        user=regular_user,
+        mode="all",
+        include_boosts=False,
+        include_replies=False,
+    )
+    types = {a.activity_type for a in activities}
+    assert {"create", "announce", "like", "reply"} <= types
+
+
+@pytest.mark.asyncio
+async def test_user_activities_endpoint_posts_filters(client, db_session, regular_user, other_user, auth_headers):
+    """The route forwards the include flags in posts mode."""
+    track = await _make_track(db_session, other_user)
+    target = _make_activity("track", track.id, owner_user_id=other_user.id)
+    own = _make_activity(
+        "user",
+        regular_user.id,
+        owner_user_id=regular_user.id,
+        source_id="https://local.example/users/regular/objects/own-1",
+    )
+    db_session.add_all([target, own])
+    await db_session.flush()
+
+    await boost_activity(db_session, activity=target, author=regular_user)
+    await db_session.commit()
+
+    url = f"/api/v1/users/{regular_user.username}/activities"
+
+    resp = client.get(url, headers=auth_headers(regular_user))
+    assert resp.status_code == 200
+    assert {a["activity_type"] for a in resp.json()["activities"]} == {"create", "announce"}
+
+    resp = client.get(url, params={"include_boosts": "false"}, headers=auth_headers(regular_user))
+    assert {a["activity_type"] for a in resp.json()["activities"]} == {"create"}
+
+    resp = client.get(url, params={"include_boosts": "false", "mode": "all"}, headers=auth_headers(regular_user))
+    assert "announce" in {a["activity_type"] for a in resp.json()["activities"]}
+
+
 # ---------------------------------------------------------------------------
 # create_announce_activity payload builder
 # ---------------------------------------------------------------------------

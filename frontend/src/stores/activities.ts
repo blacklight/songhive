@@ -216,6 +216,39 @@ export const useActivitiesStore = defineStore("activities", () => {
     }
   }
 
+  /**
+   * Retract the user's own ``like``/``announce`` reaction activity.
+   *
+   * The reaction row references the reacted activity through
+   * ``in_reply_to_activity_id`` — the unretraction endpoints live on the
+   * target, so ``target`` (when the card's embed already fetched it) goes
+   * through ``unlike``/``unboost`` to keep its counters in sync; otherwise
+   * the bare API call is enough and the reaction card is dropped.
+   */
+  async function retractReaction(
+    reaction: ActivityResponse,
+    target?: ActivityResponse | null,
+  ): Promise<void> {
+    const targetId = reaction.in_reply_to_activity_id;
+    if (!targetId || deletingIds.value.has(reaction.id)) return;
+    deletingIds.value.add(reaction.id);
+    try {
+      if (reaction.activity_type === "like") {
+        if (target) await unlike(target);
+        else await unlikeActivityApi(targetId);
+      } else {
+        if (target) await unboost(target);
+        else await unboostActivityApi(targetId);
+      }
+      const index = items.value.findIndex((a) => a.id === reaction.id);
+      if (index !== -1) items.value.splice(index, 1);
+      updatedById.value.delete(reaction.id);
+      removedIds.value.add(reaction.id);
+    } finally {
+      deletingIds.value.delete(reaction.id);
+    }
+  }
+
   async function reply(
     activity: ActivityResponse,
     body: ActivityReplyRequest,
@@ -288,6 +321,7 @@ export const useActivitiesStore = defineStore("activities", () => {
     unlike,
     boost,
     unboost,
+    retractReaction,
     reply,
     remove,
     update,

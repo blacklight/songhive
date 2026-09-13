@@ -3,6 +3,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
 import * as activitiesApi from "@/api/activities";
 import type { ActivityResponse } from "@/api/activities";
+import { clearActivityCache } from "@/utils/activityFetch";
 import NotificationActivityCard from "./NotificationActivityCard.vue";
 
 vi.mock("@/api/activities", () => ({
@@ -41,6 +42,7 @@ function createActivity(
 describe("NotificationActivityCard", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    clearActivityCache();
     vi.clearAllMocks();
   });
 

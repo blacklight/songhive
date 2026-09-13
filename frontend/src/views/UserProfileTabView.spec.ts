@@ -8,6 +8,7 @@ import { listLibrariesWithMeta } from "@/api/libraries";
 import { listPlaylistsWithMeta } from "@/api/playlists";
 import { listTracksWithMeta } from "@/api/tracks";
 import { listUserActivities } from "@/api/activities";
+import type { ActivityResponse } from "@/api/activities";
 import type { AlbumResponse } from "@/api/albums";
 import type { LibraryResponse } from "@/api/libraries";
 import type { PlaylistResponse } from "@/api/playlists";
@@ -31,6 +32,7 @@ vi.mock("@/api/tracks", () => ({
 }));
 
 vi.mock("@/api/activities", () => ({
+  getActivity: vi.fn(),
   listUserActivities: vi.fn(),
 }));
 
@@ -100,6 +102,34 @@ function createTrack(id: string, title: string): TrackResponse {
     tags: [],
     genres: [],
   } as TrackResponse;
+}
+
+function createActivity(
+  id: string,
+  overrides: Partial<ActivityResponse> = {},
+): ActivityResponse {
+  return {
+    id,
+    entity_type: "user",
+    entity_id: "user-1",
+    activity_type: "create",
+    source_type: "local",
+    source_actor: "urn:songhive:user:user1",
+    source_id: `https://example.com/users/user1/objects/${id}`,
+    owner_user_id: "user-1",
+    visibility: "public",
+    content: "<p>post body</p>",
+    content_source: "post body",
+    published_at: "2026-01-01T00:00:00Z",
+    mentions: [],
+    like_count: 0,
+    boost_count: 0,
+    reply_count: 0,
+    liked: false,
+    boosted: false,
+    can_interact: true,
+    ...overrides,
+  };
 }
 
 function findLoadMoreButton(wrapper: ReturnType<typeof mount>) {
@@ -307,6 +337,83 @@ describe("UserProfileTabView", () => {
       expect(wrapper.text()).toContain("Playlist 0");
       expect(wrapper.text()).toContain("Playlist 19");
       expect(findLoadMoreButton(wrapper)).toBeUndefined();
+    });
+  });
+
+  describe("posts", () => {
+    it("fetches posts including boosts but not replies by default", async () => {
+      const router = createTestRouter();
+      await router.push("/user1");
+      await router.isReady();
+      wrapper = mount(UserProfileTabView, {
+        global: { plugins: [router, i18n] },
+        props: { tab: "posts" },
+      });
+      await flushPromises();
+
+      expect(listUserActivities).toHaveBeenCalledWith("user1", {
+        mode: "posts",
+        include_boosts: true,
+        include_replies: false,
+        limit: 20,
+      });
+    });
+
+    it("renders the filter checkboxes and refetches on toggle", async () => {
+      vi.mocked(listUserActivities).mockResolvedValue({
+        activities: [createActivity("a1")],
+        next_cursor: null,
+      });
+      const router = createTestRouter();
+      await router.push("/user1");
+      await router.isReady();
+      wrapper = mount(UserProfileTabView, {
+        global: { plugins: [router, i18n] },
+        props: { tab: "posts" },
+      });
+      await flushPromises();
+
+      const checkboxes = wrapper.findAll('input[type="checkbox"]');
+      expect(checkboxes.length).toBe(2);
+      expect((checkboxes[0].element as HTMLInputElement).checked).toBe(true);
+      expect((checkboxes[1].element as HTMLInputElement).checked).toBe(false);
+
+      await checkboxes[1].setValue(true);
+      await flushPromises();
+      expect(listUserActivities).toHaveBeenLastCalledWith("user1", {
+        mode: "posts",
+        include_boosts: true,
+        include_replies: true,
+        limit: 20,
+      });
+
+      await checkboxes[0].setValue(false);
+      await flushPromises();
+      expect(listUserActivities).toHaveBeenLastCalledWith("user1", {
+        mode: "posts",
+        include_boosts: false,
+        include_replies: true,
+        limit: 20,
+      });
+    });
+
+    it("does not show the filters on the activity tab", async () => {
+      const router = createTestRouter();
+      await router.push("/user1");
+      await router.isReady();
+      wrapper = mount(UserProfileTabView, {
+        global: { plugins: [router, i18n] },
+        props: { tab: "activity" },
+      });
+      await flushPromises();
+
+      expect(wrapper.findAll('input[type="checkbox"]').length).toBe(0);
+      expect(listUserActivities).toHaveBeenCalledWith("user1", {
+        mode: "all",
+        include_boosts: true,
+        include_replies: false,
+        limit: 20,
+      });
     });
   });
 
