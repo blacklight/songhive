@@ -30,6 +30,18 @@ const instanceDomain = computed(() => {
 const username = computed(() => String(route.params.username));
 const profile = computed<PublicUserResponse | null>(() => data.value);
 
+const fqn = computed(() => {
+  let instance: string | undefined = undefined;
+  if (instanceStore.instance?.uri) {
+    try {
+      instance = new URL(instanceStore.instance.uri).host;
+    } catch {
+      // Default to username only
+    }
+  }
+  return `@${username.value}` + (instance ? `@{instance}` : "");
+});
+
 const TABS = [
   { key: "posts", label: t("profile.tabs.posts"), name: "userProfilePosts" },
   {
@@ -69,9 +81,7 @@ async function loadProfile() {
 
 async function copyHandle() {
   try {
-    await navigator.clipboard.writeText(
-      `@${username.value}@${instanceDomain.value}`,
-    );
+    await navigator.clipboard.writeText(fqn.value);
   } catch {
     // ignore
   }
@@ -109,7 +119,7 @@ watch(username, loadProfile);
           }}</span>
         </div>
         <p class="user-profile__handle">
-          @{{ profile.username }}
+          {{ fqn }}
           <AppButton
             size="sm"
             variant="ghost"
@@ -215,7 +225,7 @@ watch(username, loadProfile);
 }
 
 .user-profile__handle {
-  margin: 0;
+  margin: calc(-1 * var(--space-2)) 0 0 0;
   color: var(--color-text-muted);
   display: flex;
   align-items: center;
