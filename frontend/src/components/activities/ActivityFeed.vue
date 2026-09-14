@@ -108,6 +108,12 @@ watch(() => [props.entityType, props.entityId], refresh);
   }
 }
 
+@media (max-width: 767px) {
+  .activity-feed__list {
+    margin: 0 calc(-1 * var(--space-3));
+  }
+}
+
 .activity-feed__empty {
   margin: 0;
   color: var(--color-text-muted);

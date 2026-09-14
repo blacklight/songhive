@@ -26,6 +26,7 @@ import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppModal from "@/components/feedback/AppModal.vue";
+import ContextMenu, { type MenuItem } from "@/components/ui/ContextMenu.vue";
 import EntityActions, {
   type ActionItem,
 } from "@/components/ui/EntityActions.vue";
@@ -158,6 +159,60 @@ async function toggleSeen(item: NotificationResponse) {
 
 async function dismiss(item: NotificationResponse) {
   await store.remove([item.id]);
+}
+
+// Per-row overflow menu: mark read/unread and dismiss live behind a "…"
+// trigger at the right of the notification's title row, Mastodon-style.
+const menuNotification = ref<NotificationResponse | null>(null);
+const menuOpen = ref(false);
+const menuX = ref(0);
+const menuY = ref(0);
+
+const menuItems = computed<MenuItem[]>(() => {
+  const item = menuNotification.value;
+  if (!item) return [];
+  return [
+    {
+      key: "toggle-seen",
+      label: item.seen_at
+        ? t("notifications.markUnread")
+        : t("notifications.markRead"),
+      icon: item.seen_at ? "eye-slash" : "eye",
+    },
+    {
+      key: "dismiss",
+      label: t("notifications.dismiss"),
+      icon: "xmark",
+      danger: true,
+    },
+  ];
+});
+
+function openMenu(event: MouseEvent, item: NotificationResponse) {
+  menuNotification.value = item;
+  const trigger = event.currentTarget as HTMLElement | null;
+  if (trigger) {
+    const rect = trigger.getBoundingClientRect();
+    menuX.value = Math.round(rect.right);
+    menuY.value = Math.round(rect.bottom);
+  } else {
+    menuX.value = event.clientX;
+    menuY.value = event.clientY;
+  }
+  menuOpen.value = true;
+}
+
+function closeMenu() {
+  menuOpen.value = false;
+  menuNotification.value = null;
+}
+
+function onMenuSelect(key: string) {
+  const item = menuNotification.value;
+  closeMenu();
+  if (!item) return;
+  if (key === "toggle-seen") void toggleSeen(item);
+  else if (key === "dismiss") void dismiss(item);
 }
 
 function toggleBulkMode() {
@@ -665,49 +720,64 @@ onBeforeUnmount(() => {
         />
         <div class="notifications-view__body">
           <div class="notifications-view__activity-header">
-            <AppIcon
-              :name="iconFor(item.type)"
-              class="notifications-view__icon"
-              :title="item.type"
-            />
-            <span class="notifications-view__text">
-              <RouterLink
-                v-if="actorLinkFor(item)?.to"
-                :to="actorLinkFor(item)!.to!"
-                class="notifications-view__actor"
-                ><strong>{{ actorName(item) }}</strong></RouterLink
-              >
-              <a
-                v-else-if="actorLinkFor(item)?.href"
-                :href="actorLinkFor(item)!.href"
-                target="_blank"
-                rel="noopener"
-                class="notifications-view__actor"
-                ><strong>{{ actorName(item) }}</strong></a
-              >
-              <strong v-else>{{ actorName(item) }}</strong>
-              {{ " " }}
-              <RouterLink
-                v-if="linkFor(item)?.to"
-                :to="linkFor(item)!.to!"
-                class="notifications-view__action"
-                >{{ actionText(item) }}</RouterLink
-              >
-              <a
-                v-else-if="linkFor(item)?.href"
-                :href="linkFor(item)!.href"
-                target="_blank"
-                rel="noopener"
-                class="notifications-view__action"
-                >{{ actionText(item) }}</a
-              >
-              <template v-else>{{ actionText(item) }}</template>
-            </span>
+            <div class="notifications-view__activity-header--left">
+              <AppIcon
+                :name="iconFor(item.type)"
+                class="notifications-view__icon"
+                :title="item.type"
+              />
+              <span class="notifications-view__text">
+                <RouterLink
+                  v-if="actorLinkFor(item)?.to"
+                  :to="actorLinkFor(item)!.to!"
+                  class="notifications-view__actor"
+                  ><strong>{{ actorName(item) }}</strong></RouterLink
+                >
+                <a
+                  v-else-if="actorLinkFor(item)?.href"
+                  :href="actorLinkFor(item)!.href"
+                  target="_blank"
+                  rel="noopener"
+                  class="notifications-view__actor"
+                  ><strong>{{ actorName(item) }}</strong></a
+                >
+                <strong v-else>{{ actorName(item) }}</strong>
+                {{ " " }}
+                <RouterLink
+                  v-if="linkFor(item)?.to"
+                  :to="linkFor(item)!.to!"
+                  class="notifications-view__action"
+                  >{{ actionText(item) }}</RouterLink
+                >
+                <a
+                  v-else-if="linkFor(item)?.href"
+                  :href="linkFor(item)!.href"
+                  target="_blank"
+                  rel="noopener"
+                  class="notifications-view__action"
+                  >{{ actionText(item) }}</a
+                >
+                <template v-else>{{ actionText(item) }}</template>
+              </span>
+            </div>
+            <div class="notifications-view__activity-header--right">
+              <AppButton
+                size="sm"
+                variant="ghost"
+                icon="ellipsis"
+                class="notifications-view__menu-btn"
+                :aria-label="t('common.openMenu')"
+                :title="t('common.openMenu')"
+                aria-haspopup="menu"
+                :aria-expanded="menuOpen && menuNotification?.id === item.id"
+                @click="openMenu($event, item)"
+              />
+            </div>
           </div>
 
           <NotificationActivityCard
             v-if="activityRefFor(item)"
-            :activity-id="activityRefFor(item)!"
+            :activity-id="activityRefFor(item) || ''"
             class="notifications-view__card"
             @error="onActivityCardError(item.id)"
           />
@@ -735,46 +805,23 @@ onBeforeUnmount(() => {
             :avatar-url="str(item.payload?.actor_avatar_url)"
             class="notifications-view__card"
           />
-          <RouterLink
-            v-if="targetContext(item)"
-            :to="targetContext(item)!.to!"
-            class="notifications-view__target"
-            >{{
-              t("notifications.onItem", { title: targetContext(item)!.title })
-            }}</RouterLink
-          >
-          <time
-            class="notifications-view__time"
-            :datetime="item.created_at || undefined"
-            :title="formatDateTime(item.created_at)"
-            >{{ relativeTime(item.created_at) }}</time
-          >
-        </div>
-        <div class="notifications-view__actions">
-          <AppButton
-            size="sm"
-            variant="ghost"
-            :icon="item.seen_at ? 'eye-slash' : 'eye'"
-            :aria-label="
-              item.seen_at
-                ? t('notifications.markUnread')
-                : t('notifications.markRead')
-            "
-            :title="
-              item.seen_at
-                ? t('notifications.markUnread')
-                : t('notifications.markRead')
-            "
-            @click="toggleSeen(item)"
-          />
-          <AppButton
-            size="sm"
-            variant="ghost"
-            icon="xmark"
-            :aria-label="t('notifications.dismiss')"
-            :title="t('notifications.dismiss')"
-            @click="dismiss(item)"
-          />
+
+          <div class="notifications-view__meta">
+            <RouterLink
+              v-if="targetContext(item)"
+              :to="targetContext(item)!.to!"
+              class="notifications-view__target"
+              >{{
+                t("notifications.onItem", { title: targetContext(item)!.title })
+              }}</RouterLink
+            >
+            <time
+              class="notifications-view__time"
+              :datetime="item.created_at || undefined"
+              :title="formatDateTime(item.created_at)"
+              >{{ relativeTime(item.created_at) }}</time
+            >
+          </div>
         </div>
       </li>
     </ul>
@@ -793,6 +840,15 @@ onBeforeUnmount(() => {
         {{ t("notifications.loadMore") }}
       </AppButton>
     </div>
+
+    <ContextMenu
+      :open="menuOpen"
+      :items="menuItems"
+      :x="menuX"
+      :y="menuY"
+      @select="onMenuSelect"
+      @close="closeMenu"
+    />
 
     <AppModal
       :open="clearAllOpen"
@@ -818,6 +874,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: var(--space-4);
   max-width: 48rem;
+
+  --notification-btn-width: 2.5rem;
 }
 
 .notifications-view__header {
@@ -892,12 +950,24 @@ onBeforeUnmount(() => {
   gap: var(--space-1);
 }
 
+@media (max-width: 767px) {
+  .notifications-view__list {
+    margin: 0 calc(-1 * var(--space-4));
+  }
+}
+
 .notifications-view__row {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
+}
+
+@media (max-width: 767px) {
+  .notifications-view__row {
+    padding: var(--space-3) 0;
+  }
 }
 
 .notifications-view__row--unseen {
@@ -924,20 +994,43 @@ onBeforeUnmount(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-2);
+  padding: var(--space-1);
   color: var(--color-text);
 }
 
 .notifications-view__activity-header {
-  display: inline-flex;
+  width: 100%;
+  display: flex;
   gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
 }
 
+.notifications-view__activity-header--left {
+  flex: 1;
+}
+
+@media (max-width: 767px) {
+  .notifications-view__activity-header--left {
+    padding: 0 var(--space-1);
+  }
+}
+
+.notifications-view__activity-header--right {
+  width: var(--notification-btn-width);
+}
+
 .notifications-view__text {
+  flex: 1;
+  min-width: 0;
   color: var(--color-text);
   text-decoration: none;
+}
+
+.notifications-view__menu-btn {
+  color: var(--color-text-muted);
 }
 
 .notifications-view__actor,
@@ -952,23 +1045,19 @@ onBeforeUnmount(() => {
   text-decoration: underline;
 }
 
-.notifications-view__actions {
-  display: flex;
-  gap: var(--space-2);
-}
-
-@media (max-width: 767px) {
-  .notifications-view__actions {
-    flex-direction: column;
-  }
-}
-
 /* ActivityCard widens itself on large screens for the feed; inside a
    notification row it must fit the row instead. */
 .notifications-view__row .notifications-view__card {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+.notifications-view__meta {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 .notifications-view__target {
@@ -990,5 +1079,12 @@ onBeforeUnmount(() => {
 .notifications-view__footer {
   display: flex;
   justify-content: center;
+}
+
+@media (max-width: 767px) {
+  .notifications-view__time,
+  .notifications-view__target {
+    padding: 0 var(--space-2);
+  }
 }
 </style>

@@ -374,6 +374,12 @@ watch([includeBoosts, includeReplies], () => {
   }
 }
 
+@media (max-width: 767px) {
+  .user-profile-tab__activities {
+    margin: 0 calc(var(--space-4) * -1);
+  }
+}
+
 .user-profile-tab__error {
   padding: var(--space-4);
   color: var(--color-danger);

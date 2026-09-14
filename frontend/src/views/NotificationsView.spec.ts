@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import * as notificationsApi from "@/api/notifications";
@@ -155,6 +155,22 @@ function intersectIds(ids: string[], isIntersecting = true) {
   observerCallback?.(entries);
 }
 
+const mountedWrappers: VueWrapper[] = [];
+
+function findMenuLabel(text: string) {
+  const menu = document.body.querySelector(".context-menu");
+  const labels = Array.from(
+    menu?.querySelectorAll(".context-menu__label") ?? [],
+  );
+  return labels.find((el) => el.textContent === text);
+}
+
+async function clickMenuItem(text: string) {
+  const item = findMenuLabel(text)?.parentElement as HTMLElement | null;
+  item?.click();
+  await flushPromises();
+}
+
 describe("NotificationsView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -169,6 +185,10 @@ describe("NotificationsView", () => {
   afterEach(() => {
     vi.useRealTimers();
     window.IntersectionObserver = OriginalIntersectionObserver;
+    // Unmount views first so their teleported overflow menus detach
+    // cleanly, then drop leftovers in <body>.
+    for (const wrapper of mountedWrappers.splice(0)) wrapper.unmount();
+    document.body.innerHTML = "";
   });
 
   async function mountView() {
@@ -176,6 +196,7 @@ describe("NotificationsView", () => {
     const wrapper = mount(NotificationsView, {
       global: { plugins: [router] },
     });
+    mountedWrappers.push(wrapper);
     await flushPromises();
     return { wrapper, router };
   }
@@ -283,9 +304,13 @@ describe("NotificationsView", () => {
     expect(
       card.find(".activity-card__content").element.innerHTML,
     ).not.toContain("<b>");
-    // Read-only: no like/edit actions, but the copy-URL button stays.
+    // Read-only: no like/edit actions; the copy-URL entry lives in the
+    // card's overflow menu.
     expect(card.find(".activity-card__action").exists()).toBe(false);
-    expect(card.find('button[aria-label="Copy link"]').exists()).toBe(true);
+    await card.find('button[aria-label="Open menu"]').trigger("click");
+    expect(document.body.querySelector(".context-menu")?.textContent).toContain(
+      "Copy link",
+    );
     // Timestamp links to the original remote object.
     expect(card.find("a.activity-card__time").attributes("href")).toBe(
       "https://remote.example/objects/note-1",
@@ -451,7 +476,7 @@ describe("NotificationsView", () => {
     expect(action.attributes("target")).toBe("_blank");
   });
 
-  it("shows a copy URL button on snapshot note cards", async () => {
+  it("shows a copy URL menu entry on snapshot note cards", async () => {
     listNotifications.mockResolvedValueOnce({
       items: [
         createNotification("n1", {
@@ -468,8 +493,13 @@ describe("NotificationsView", () => {
       total: 1,
     });
     const { wrapper } = await mountView();
-    const copy = wrapper.find('button[aria-label="Copy link"]');
-    expect(copy.exists()).toBe(true);
+    await wrapper
+      .find(".activity-card")
+      .find('button[aria-label="Open menu"]')
+      .trigger("click");
+    expect(document.body.querySelector(".context-menu")?.textContent).toContain(
+      "Copy link",
+    );
   });
 
   it("renders a target link for replies that reference a local item", async () => {
@@ -888,9 +918,10 @@ describe("NotificationsView", () => {
     await flushPromises();
     expect(store.items[0].seen_at).not.toBeNull();
 
-    const toggle = wrapper.find(".notifications-view__row button");
-    await toggle.trigger("click");
-    await flushPromises();
+    const menuBtn = wrapper.find(".notifications-view__row button");
+    expect(menuBtn.attributes("aria-label")).toBe("Open menu");
+    await menuBtn.trigger("click");
+    await clickMenuItem("Mark as unread");
     expect(markUnseenApi).toHaveBeenCalledWith(["n1"]);
     expect(store.items[0].seen_at).toBeNull();
 
@@ -908,7 +939,7 @@ describe("NotificationsView", () => {
     expect(markSeenApi).toHaveBeenLastCalledWith(["n1"]);
   });
 
-  it("toggles a seen row back to unseen via the row button", async () => {
+  it("toggles a seen row back to unseen via the row menu", async () => {
     listNotifications.mockResolvedValueOnce({
       items: [createNotification("n1", { seen_at: "2026-01-02T00:00:00Z" })],
       total: 1,
@@ -917,10 +948,10 @@ describe("NotificationsView", () => {
     const { wrapper } = await mountView();
     const store = useNotificationsStore();
 
-    const toggle = wrapper.find(".notifications-view__row button");
-    expect(toggle.attributes("aria-label")).toBe("Mark as unread");
-    await toggle.trigger("click");
-    await flushPromises();
+    const menuBtn = wrapper.find(".notifications-view__row button");
+    expect(menuBtn.attributes("aria-label")).toBe("Open menu");
+    await menuBtn.trigger("click");
+    await clickMenuItem("Mark as unread");
     expect(markUnseenApi).toHaveBeenCalledWith(["n1"]);
     expect(store.items[0].seen_at).toBeNull();
     expect(store.unreadCount).toBe(1);
@@ -946,7 +977,7 @@ describe("NotificationsView", () => {
     expect(store.unreadCount).toBe(0);
   });
 
-  it("dismisses a single notification via the row button", async () => {
+  it("dismisses a single notification via the row menu", async () => {
     listNotifications.mockResolvedValueOnce({
       items: [createNotification("n1"), createNotification("n2")],
       total: 2,
@@ -956,11 +987,10 @@ describe("NotificationsView", () => {
     const store = useNotificationsStore();
 
     const row = wrapper.findAll(".notifications-view__row")[0];
-    const dismiss = row
-      .findAll("button")
-      .find((b) => b.attributes("aria-label") === "Dismiss");
-    expect(dismiss).toBeDefined();
-    await dismiss!.trigger("click");
+    const menuBtn = row.find('button[aria-label="Open menu"]');
+    expect(menuBtn.exists()).toBe(true);
+    await menuBtn.trigger("click");
+    await clickMenuItem("Dismiss");
     await flushPromises();
 
     expect(deleteNotificationApi).toHaveBeenCalledWith("n1");

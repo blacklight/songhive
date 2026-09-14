@@ -220,7 +220,7 @@ const publicProfileLink = computed(() =>
           :aria-label="t('pages.goHome')"
           @click="closeNavOnMobile"
         >
-          <img src="/logo.png" alt="" class="app-layout__logo" />
+          <img src="/favicon.ico" alt="" class="app-layout__logo" />
           <span class="app-layout__brand-name">{{ instanceStore.name }}</span>
         </RouterLink>
         <AppButton
@@ -343,7 +343,7 @@ const publicProfileLink = computed(() =>
           class="app-layout__topbar-brand"
           :aria-label="t('pages.goHome')"
         >
-          <img src="/logo.png" alt="" class="app-layout__topbar-logo" />
+          <img src="/favicon.ico" alt="" class="app-layout__topbar-logo" />
           <span class="app-layout__topbar-name">{{ instanceStore.name }}</span>
         </RouterLink>
         <div
@@ -425,7 +425,7 @@ const publicProfileLink = computed(() =>
 .app-layout__topbar {
   display: none;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   padding-top: max(var(--space-2), env(safe-area-inset-top, 0px));
   background-color: var(--color-bg-menu);
@@ -604,8 +604,8 @@ const publicProfileLink = computed(() =>
 }
 
 .app-layout__logo {
-  width: 4rem;
-  height: 4rem;
+  width: 3rem;
+  height: 3rem;
 }
 
 .app-layout__nav-link .fa-solid {

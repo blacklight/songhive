@@ -18,6 +18,7 @@ import { formatDateTime } from "@/i18n";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
+import ContextMenu, { type MenuItem } from "@/components/ui/ContextMenu.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import StatusComposer, {
   type StatusComposerPayload,
@@ -248,7 +249,6 @@ const boosted = computed(
   () => activity.value.boosted || store.isBoosted(props.activity.id),
 );
 const boosting = computed(() => store.isBoosting(props.activity.id));
-const deleting = computed(() => store.isDeleting(props.activity.id));
 
 // Cards backed by a stored activity row navigate to their
 // ``/activities/{id}`` permalink — the whole card is the link target,
@@ -267,6 +267,63 @@ const copyTarget = computed(() =>
     ? `${window.location.origin}${activityPageUrl.value}`
     : objectLink.value,
 );
+
+// Mastodon-style overflow menu behind the header's "..." trigger: the
+// non-interaction actions (copy URL, edit, delete) live here so the footer
+// keeps only the interaction row even on narrow viewports.
+const menuOpen = ref(false);
+const menuX = ref(0);
+const menuY = ref(0);
+const menuItems = computed<MenuItem[]>(() => {
+  const items: MenuItem[] = [];
+  if (copyTarget.value) {
+    items.push({
+      key: "copy",
+      label: t("browse.share.copyUrl"),
+      icon: "clipboard",
+    });
+  }
+  if (!props.readonly && canEdit.value) {
+    items.push({
+      key: "edit",
+      label: t("common.edit"),
+      icon: "pen-to-square",
+    });
+  }
+  if (!props.readonly && canDelete.value) {
+    items.push({
+      key: "delete",
+      label: t("common.delete"),
+      icon: "trash",
+      danger: true,
+    });
+  }
+  return items;
+});
+
+function openMenu(event: MouseEvent) {
+  const trigger = event.currentTarget as HTMLElement | null;
+  if (trigger) {
+    const rect = trigger.getBoundingClientRect();
+    menuX.value = Math.round(rect.right);
+    menuY.value = Math.round(rect.bottom);
+  } else {
+    menuX.value = event.clientX;
+    menuY.value = event.clientY;
+  }
+  menuOpen.value = true;
+}
+
+function closeMenu() {
+  menuOpen.value = false;
+}
+
+function onMenuSelect(key: string) {
+  closeMenu();
+  if (key === "edit") editOpen.value = true;
+  else if (key === "delete") void remove();
+  else if (key === "copy") void copyUrl();
+}
 
 function onCardClick(event: MouseEvent) {
   if (!canNavigate.value) return;
@@ -704,9 +761,8 @@ async function copyUrl() {
       </div>
       <div class="activity-card__badges">
         <span v-if="typeLabel" class="activity-card__type" :title="typeLabel">
-          <AppIcon v-if="typeIcon" :name="typeIcon" spacing="right" />{{
-            typeLabel
-          }}
+          <AppIcon v-if="typeIcon" :name="typeIcon" spacing="right" />
+          <span class="activity-card__type-label">{{ typeLabel }}</span>
         </span>
         <AppIcon
           :name="visibilityIcon"
@@ -714,6 +770,18 @@ async function copyUrl() {
           :aria-label="visibilityLabel"
         />
       </div>
+      <AppButton
+        v-if="menuItems.length"
+        variant="ghost"
+        size="sm"
+        icon="ellipsis"
+        class="activity-card__menu-btn"
+        :title="t('common.openMenu')"
+        :aria-label="t('common.openMenu')"
+        aria-haspopup="menu"
+        :aria-expanded="menuOpen"
+        @click="openMenu"
+      />
     </header>
 
     <div v-if="isReaction" class="activity-card__object">
@@ -828,138 +896,104 @@ async function copyUrl() {
       <ActivityObjectEmbed :activity-id="activity.in_reply_to_activity_id" />
     </div>
 
-    <footer
-      v-if="copyTarget || showInteractions || (!props.readonly && canDelete)"
-      class="activity-card__actions"
-    >
-      <template v-if="showInteractions">
-        <span class="activity-card__action">
-          <AppButton
-            variant="ghost"
-            size="sm"
-            icon="reply"
-            :disabled="!canInteract"
-            :title="interactionHint ?? t('activities.reply')"
-            :aria-label="t('activities.reply')"
-            @click="replyComposerOpen = !replyComposerOpen"
-          />
-          <button
-            type="button"
-            class="activity-card__count"
-            :title="t('activities.replies')"
-            :aria-label="t('activities.replies')"
-            :aria-expanded="repliesOpen"
-            @click="toggleReplies"
-          >
-            {{ activity.reply_count }}
-          </button>
-        </span>
-        <span class="activity-card__action">
-          <AppButton
-            variant="ghost"
-            size="sm"
-            icon="quote-left"
-            :disabled="!canInteract"
-            :title="interactionHint ?? t('activities.quote')"
-            :aria-label="t('activities.quote')"
-            @click="quoteComposerOpen = !quoteComposerOpen"
-          />
-          <button
-            type="button"
-            class="activity-card__count"
-            :title="t('activities.quotes')"
-            :aria-label="t('activities.quotes')"
-            :aria-expanded="quotesOpen"
-            @click="toggleQuotes"
-          >
-            {{ activity.quote_count }}
-          </button>
-        </span>
-        <span class="activity-card__action">
-          <AppButton
-            variant="ghost"
-            size="sm"
-            icon="retweet"
-            :class="{ 'activity-card__action-btn--active': boosted }"
-            :loading="boosting"
-            :disabled="!canInteract"
-            :title="
-              interactionHint ??
-              (boosted ? t('activities.unboost') : t('activities.boost'))
-            "
-            :aria-label="
-              boosted ? t('activities.unboost') : t('activities.boost')
-            "
-            :aria-pressed="boosted"
-            @click="toggleBoost"
-          />
-          <button
-            type="button"
-            class="activity-card__count"
-            :title="t('activities.actors.boosts')"
-            :aria-label="t('activities.actors.boosts')"
-            @click="openActors('boosts')"
-          >
-            {{ activity.boost_count }}
-          </button>
-        </span>
-        <span class="activity-card__action">
-          <AppButton
-            variant="ghost"
-            size="sm"
-            icon="heart"
-            :icon-variant="liked ? 'solid' : 'regular'"
-            :class="{ 'activity-card__action-btn--active': liked }"
-            :loading="liking"
-            :disabled="!canInteract"
-            :title="
-              interactionHint ??
-              (liked ? t('activities.unlike') : t('activities.like'))
-            "
-            :aria-label="liked ? t('activities.unlike') : t('activities.like')"
-            :aria-pressed="liked"
-            @click="toggleLike"
-          />
-          <button
-            type="button"
-            class="activity-card__count"
-            :title="t('activities.actors.likes')"
-            :aria-label="t('activities.actors.likes')"
-            @click="openActors('likes')"
-          >
-            {{ activity.like_count }}
-          </button>
-        </span>
-      </template>
-      <span class="activity-card__actions-spacer" />
-      <AppButton
-        v-if="!props.readonly && canEdit"
-        variant="ghost"
-        size="sm"
-        icon="pen-to-square"
-        :title="t('common.edit')"
-        :aria-label="t('common.edit')"
-        @click="editOpen = true"
-      />
-      <AppButton
-        v-if="!props.readonly && canDelete"
-        variant="ghost"
-        size="sm"
-        icon="trash"
-        :loading="deleting"
-        :title="t('common.delete')"
-        :aria-label="t('common.delete')"
-        @click="remove"
-      />
-      <AppButton
-        v-if="copyTarget"
-        variant="ghost"
-        size="sm"
-        icon="clipboard"
-        :title="t('browse.share.copyUrl')"
-        :aria-label="t('browse.share.copyUrl')"
-        @click="copyUrl"
-      />
+    <footer v-if="showInteractions" class="activity-card__actions">
+      <span class="activity-card__action">
+        <AppButton
+          variant="ghost"
+          size="sm"
+          icon="reply"
+          :disabled="!canInteract"
+          :title="interactionHint ?? t('activities.reply')"
+          :aria-label="t('activities.reply')"
+          @click="replyComposerOpen = !replyComposerOpen"
+        />
+        <button
+          type="button"
+          class="activity-card__count"
+          :title="t('activities.replies')"
+          :aria-label="t('activities.replies')"
+          :aria-expanded="repliesOpen"
+          @click="toggleReplies"
+        >
+          {{ activity.reply_count }}
+        </button>
+      </span>
+      <span class="activity-card__action">
+        <AppButton
+          variant="ghost"
+          size="sm"
+          icon="quote-left"
+          :disabled="!canInteract"
+          :title="interactionHint ?? t('activities.quote')"
+          :aria-label="t('activities.quote')"
+          @click="quoteComposerOpen = !quoteComposerOpen"
+        />
+        <button
+          type="button"
+          class="activity-card__count"
+          :title="t('activities.quotes')"
+          :aria-label="t('activities.quotes')"
+          :aria-expanded="quotesOpen"
+          @click="toggleQuotes"
+        >
+          {{ activity.quote_count }}
+        </button>
+      </span>
+      <span class="activity-card__action">
+        <AppButton
+          variant="ghost"
+          size="sm"
+          icon="retweet"
+          :class="{ 'activity-card__action-btn--active': boosted }"
+          :loading="boosting"
+          :disabled="!canInteract"
+          :title="
+            interactionHint ??
+            (boosted ? t('activities.unboost') : t('activities.boost'))
+          "
+          :aria-label="
+            boosted ? t('activities.unboost') : t('activities.boost')
+          "
+          :aria-pressed="boosted"
+          @click="toggleBoost"
+        />
+        <button
+          type="button"
+          class="activity-card__count"
+          :title="t('activities.actors.boosts')"
+          :aria-label="t('activities.actors.boosts')"
+          @click="openActors('boosts')"
+        >
+          {{ activity.boost_count }}
+        </button>
+      </span>
+      <span class="activity-card__action">
+        <AppButton
+          variant="ghost"
+          size="sm"
+          icon="heart"
+          :icon-variant="liked ? 'solid' : 'regular'"
+          :class="{ 'activity-card__action-btn--active': liked }"
+          :loading="liking"
+          :disabled="!canInteract"
+          :title="
+            interactionHint ??
+            (liked ? t('activities.unlike') : t('activities.like'))
+          "
+          :aria-label="liked ? t('activities.unlike') : t('activities.like')"
+          :aria-pressed="liked"
+          @click="toggleLike"
+        />
+        <button
+          type="button"
+          class="activity-card__count"
+          :title="t('activities.actors.likes')"
+          :aria-label="t('activities.actors.likes')"
+          @click="openActors('likes')"
+        >
+          {{ activity.like_count }}
+        </button>
+      </span>
     </footer>
 
     <div v-if="replyComposerOpen" class="activity-card__reply-composer">
@@ -1036,6 +1070,15 @@ async function copyUrl() {
         />
       </template>
     </div>
+
+    <ContextMenu
+      :open="menuOpen"
+      :items="menuItems"
+      :x="menuX"
+      :y="menuY"
+      @select="onMenuSelect"
+      @close="closeMenu"
+    />
 
     <ActivityActorsModal
       v-if="!props.readonly"
@@ -1133,10 +1176,22 @@ async function copyUrl() {
   white-space: nowrap;
 }
 
+@media (max-width: 767px) {
+  .activity-card__type-label {
+    display: none;
+  }
+}
+
 .activity-card__content {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.activity-card__menu-btn {
+  align-self: flex-start;
+  align-items: flex-start;
+  padding: 0;
 }
 
 .activity-card__actions {
@@ -1167,10 +1222,6 @@ async function copyUrl() {
 .activity-card__count:hover {
   color: var(--color-text-hover);
   text-decoration: underline;
-}
-
-.activity-card__actions-spacer {
-  flex: 1;
 }
 
 .activity-card__reply-composer,
@@ -1302,6 +1353,12 @@ async function copyUrl() {
   padding: 0 0.2em;
   border-radius: var(--radius-sm);
   background-color: var(--color-surface-secondary);
+}
+
+@media (max-width: 767px) {
+  .activity-card {
+    margin: 0 var(--space-1);
+  }
 }
 
 a:hover {

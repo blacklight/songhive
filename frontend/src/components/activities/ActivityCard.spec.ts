@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import * as activitiesApi from "@/api/activities";
 import type { ActivityResponse } from "@/api/activities";
 import { useActivitiesStore } from "@/stores/activities";
@@ -87,14 +87,39 @@ function setAuthenticated(
   authStore.role = role;
 }
 
+// Wrappers stay mounted between tests; their context menus teleport to
+// <body> and keep document-level click listeners, so they must be unmounted
+// before the body is wiped or a later test's click re-renders detached DOM.
+const mountedWrappers: VueWrapper[] = [];
+
 function mountCard(overrides: Partial<ActivityResponse> = {}) {
-  return mount(ActivityCard, {
+  const wrapper = mount(ActivityCard, {
     props: { activity: createActivity(overrides) },
     global: {
       stubs: { RouterLink: true },
       renderStubDefaultSlot: true,
     },
   });
+  mountedWrappers.push(wrapper);
+  return wrapper;
+}
+
+async function openCardMenu(wrapper: ReturnType<typeof mountCard>) {
+  await wrapper.find('button[aria-label="Open menu"]').trigger("click");
+}
+
+function findMenuLabel(text: string) {
+  const menu = document.body.querySelector(".context-menu");
+  const labels = Array.from(
+    menu?.querySelectorAll(".context-menu__label") ?? [],
+  );
+  return labels.find((el) => el.textContent === text);
+}
+
+async function clickMenuItem(text: string) {
+  const item = findMenuLabel(text)?.parentElement as HTMLElement | null;
+  item?.click();
+  await flushPromises();
 }
 
 describe("ActivityCard", () => {
@@ -104,7 +129,9 @@ describe("ActivityCard", () => {
   });
 
   afterEach(() => {
-    // The actors modal teleports to <body>; drop leftovers between tests.
+    for (const wrapper of mountedWrappers.splice(0)) wrapper.unmount();
+    // The actors modal and the overflow menu teleport to <body>; drop
+    // leftovers between tests.
     document.body.innerHTML = "";
   });
 
@@ -270,7 +297,7 @@ describe("ActivityCard", () => {
     expect(link.classes()).toContain("activity-card__mark--bold");
   });
 
-  it("shows reply quote boost like edit and copy URL actions for the authenticated owner", () => {
+  it("shows reply quote boost and like actions for the authenticated owner", () => {
     setAuthenticated("user-1");
     const wrapper = mountCard({
       like_count: 2,
@@ -279,12 +306,25 @@ describe("ActivityCard", () => {
       quote_count: 4,
     });
     const buttons = wrapper.findAll(".activity-card__actions button");
-    // 4 interaction icons + 4 counters + edit + delete + copy URL
-    expect(buttons.length).toBe(11);
+    // 4 interaction icons + 4 counters — edit, delete and copy URL live in
+    // the header overflow menu.
+    expect(buttons.length).toBe(8);
     expect(wrapper.text()).toContain("2");
   });
 
-  it("shows counters and disabled action buttons for anonymous users", () => {
+  it("moves edit, delete and copy URL into the header overflow menu", async () => {
+    setAuthenticated("user-1");
+    const wrapper = mountCard();
+    // The footer keeps only the interaction row.
+    expect(wrapper.find('button[aria-label="Edit"]').exists()).toBe(false);
+    expect(wrapper.find('button[aria-label="Delete"]').exists()).toBe(false);
+    await openCardMenu(wrapper);
+    expect(findMenuLabel("Copy link")).toBeTruthy();
+    expect(findMenuLabel("Edit")).toBeTruthy();
+    expect(findMenuLabel("Delete")).toBeTruthy();
+  });
+
+  it("shows counters and disabled action buttons for anonymous users", async () => {
     const wrapper = mountCard({
       like_count: 2,
       boost_count: 1,
@@ -292,8 +332,8 @@ describe("ActivityCard", () => {
       quote_count: 4,
     });
     const buttons = wrapper.findAll(".activity-card__actions button");
-    // 4 interaction icons + 4 counters + copy URL
-    expect(buttons.length).toBe(9);
+    // 4 interaction icons + 4 counters
+    expect(buttons.length).toBe(8);
     const counts = wrapper.findAll(".activity-card__count");
     // reply, quote, boost, like
     expect(counts.map((count) => count.text())).toEqual(["3", "4", "1", "2"]);
@@ -303,6 +343,11 @@ describe("ActivityCard", () => {
       expect(icon.attributes("disabled")).toBeDefined();
       expect(icon.attributes("title")).toBe("Log in to interact");
     }
+    // Anonymous viewers still get the overflow menu for the copy URL entry.
+    await openCardMenu(wrapper);
+    expect(findMenuLabel("Copy link")).toBeTruthy();
+    expect(findMenuLabel("Edit")).toBeFalsy();
+    expect(findMenuLabel("Delete")).toBeFalsy();
   });
 
   it("lets anonymous users expand replies via the counter", async () => {
@@ -346,20 +391,28 @@ describe("ActivityCard", () => {
     expect(document.body.textContent).toContain("Bob");
   });
 
-  it("hides the edit action for non-owners", () => {
+  it("hides the edit action for non-owners", async () => {
     setAuthenticated("user-2");
     const wrapper = mountCard();
     const buttons = wrapper.findAll(".activity-card__actions button");
-    // 4 interaction icons + 4 counters + copy URL
-    expect(buttons.length).toBe(9);
+    // 4 interaction icons + 4 counters
+    expect(buttons.length).toBe(8);
+    await openCardMenu(wrapper);
+    expect(findMenuLabel("Copy link")).toBeTruthy();
+    expect(findMenuLabel("Edit")).toBeFalsy();
+    expect(findMenuLabel("Delete")).toBeFalsy();
   });
 
-  it("hides interaction buttons when the activity cannot be interacted with", () => {
+  it("hides interaction buttons when the activity cannot be interacted with", async () => {
     setAuthenticated("user-1");
     const wrapper = mountCard({ activity_type: "like", can_interact: false });
-    const buttons = wrapper.findAll(".activity-card__actions button");
-    // Reactions are not editable: delete + copy URL only
-    expect(buttons.length).toBe(2);
+    // Reactions are not editable: delete + copy URL in the overflow menu,
+    // no footer row at all.
+    expect(wrapper.find(".activity-card__actions").exists()).toBe(false);
+    await openCardMenu(wrapper);
+    expect(findMenuLabel("Delete")).toBeTruthy();
+    expect(findMenuLabel("Copy link")).toBeTruthy();
+    expect(findMenuLabel("Edit")).toBeFalsy();
   });
 
   it("renders the reacted activity inside a like card", async () => {
@@ -448,7 +501,8 @@ describe("ActivityCard", () => {
       in_reply_to_activity_id: "target-3",
     });
     await flushPromises();
-    await wrapper.find('button[aria-label="Delete"]').trigger("click");
+    await openCardMenu(wrapper);
+    await clickMenuItem("Delete");
     expect(confirmStore.state?.open).toBe(true);
     confirmStore.confirm();
     await flushPromises();
@@ -476,7 +530,8 @@ describe("ActivityCard", () => {
       in_reply_to_activity_id: "target-4",
     });
     await flushPromises();
-    await wrapper.find('button[aria-label="Delete"]').trigger("click");
+    await openCardMenu(wrapper);
+    await clickMenuItem("Delete");
     confirmStore.confirm();
     await flushPromises();
     expect(unboostActivity).toHaveBeenCalledWith("target-4");
@@ -984,10 +1039,8 @@ describe("ActivityCard", () => {
     deleteActivity.mockResolvedValue({ status: "ok" });
     const confirmStore = useConfirmStore();
     const wrapper = mountCard();
-    const deleteButton = wrapper
-      .findAll(".activity-card__actions button")
-      .at(-2)!;
-    await deleteButton.trigger("click");
+    await openCardMenu(wrapper);
+    await clickMenuItem("Delete");
     expect(confirmStore.state?.open).toBe(true);
     confirmStore.confirm();
     await flushPromises();
@@ -1027,10 +1080,8 @@ describe("ActivityCard", () => {
     deleteActivity.mockResolvedValue({ status: "ok" });
     const confirmStore = useConfirmStore();
     const wrapper = mountCard();
-    const deleteButton = wrapper
-      .findAll(".activity-card__actions button")
-      .at(-2)!;
-    await deleteButton.trigger("click");
+    await openCardMenu(wrapper);
+    await clickMenuItem("Delete");
     confirmStore.confirm();
     await flushPromises();
     expect(wrapper.find("article.activity-card").exists()).toBe(false);
@@ -1040,10 +1091,8 @@ describe("ActivityCard", () => {
     setAuthenticated("user-1");
     const confirmStore = useConfirmStore();
     const wrapper = mountCard();
-    const deleteButton = wrapper
-      .findAll(".activity-card__actions button")
-      .at(-2)!;
-    await deleteButton.trigger("click");
+    await openCardMenu(wrapper);
+    await clickMenuItem("Delete");
     confirmStore.cancel();
     await flushPromises();
     expect(deleteActivity).not.toHaveBeenCalled();
