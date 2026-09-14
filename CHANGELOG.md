@@ -115,6 +115,22 @@ All notable changes to this project will be documented in this file.
   list filter and `reply_count` alike, restricted replies stay confined
   to their owner and named audience for every viewer, authenticated or
   not.
+- `frontend`: Track lists no longer show bulk-action controls when bulk
+  mode is disabled (`bulkMode=false`).
+  ([`d03829e`](https://git.platypush.tech/blacklight/songhive/commit/d03829e255424ab889c63caefe98ceae8dc85348))
+- `activities`: Activity cards now show the reply/boost/like counters to
+  anonymous viewers — the action buttons stay disabled when logged out,
+  but the counters remain clickable to browse replies and actor lists.
+  ([`8baa8ff`](https://git.platypush.tech/blacklight/songhive/commit/8baa8ffdb575d3c589141437331e06af31d987c7))
+- `api`: Artist list and search results are now filtered by track/album
+  access for non-admin users — artists only reachable through private or
+  local-only content no longer leak to viewers without a share grant.
+  ([`0c748ca`](https://git.platypush.tech/blacklight/songhive/commit/0c748ca9b2be5b8bcf4050ed7fc0a4e3e18d9889))
+- `acl`: Album covers and artist images can now be downloaded when the
+  caller's access comes through a shared track or album — file access is
+  derived from the shared content instead of requiring direct rights on
+  the file's own entity.
+  ([`d139f52`](https://git.platypush.tech/blacklight/songhive/commit/d139f524a42a292f585fa92f7e4d18fec068caca))
 
 ### Added
 
@@ -198,6 +214,52 @@ All notable changes to this project will be documented in this file.
   own grants and tokens; the SPA exposes the list at `/shares`.
 - `swagger-ui`: Replace the separate swagger-ui container (only available in
   the docker-compose setup) with a bundled Swagger UI built in the frontend.
+- `replies`: Reply threads now render Mastodon-style — the flat reply
+  listing is grouped into one thread per root reply with a single
+  vertical line. `reply_count` is transitive over the whole
+  `in_reply_to` subtree (remote-to-remote chains are followed through
+  object ids), the replies endpoint returns all thread descendants, and
+  remote replies expose `in_reply_to` so clients can regroup them.
+  ([`5d24b81`](https://git.platypush.tech/blacklight/songhive/commit/5d24b817d006df616cd9b2f5ad116d5d15f12a5b))
+- `federation`: Profile pages now advertise the Mastodon-style actor URL
+  (`https://<instance>/@{username}`) in their `rel="me"` links.
+  ([`c1569ff`](https://git.platypush.tech/blacklight/songhive/commit/c1569ff9040c71b2c79a4a5d90cfe8f92f95514c))
+- `frontend`: Artist and album names in track search results now link to
+  their respective pages.
+  ([`880cd81`](https://git.platypush.tech/blacklight/songhive/commit/880cd818449c595311b8cfce426e2d5ce7294010))
+- `frontend`: The status composer can now be submitted with
+  Ctrl/Cmd+Enter.
+  ([`c0acca1`](https://git.platypush.tech/blacklight/songhive/commit/c0acca1ed00eb9b0bac6609ab608e15a993991b5))
+- `tags`: Activity hashtags are now indexed — activity-only tags appear
+  in tag lists, and tag item pages return the matching posts as an
+  `activity` item type, filtered by the same visibility rules as other
+  content.
+  ([`9cc3e95`](https://git.platypush.tech/blacklight/songhive/commit/9cc3e959275b14aea11f52cb5ac343511dd214fb))
+- `activities`: Activities now have permalink pages at
+  `/activities/{id}` showing the post with its ancestor chain and
+  expanded replies. `ActivityCard` navigates to the permalink (copy-link
+  remains for anonymous/read-only contexts), `GET
+  /api/v1/activities/lookup` resolves object URLs to stored activities,
+  and browser hits on `/users/{name}/objects/{id}` redirect to the
+  permalink page.
+  ([`5219aba`](https://git.platypush.tech/blacklight/songhive/commit/5219aba13cce932357ccf8bd10264d244b732875))
+- `activities`: Permalinks serve the ActivityPub object under content
+  negotiation (with `rel=alternate` hints and redirects for browser
+  hits), and the reply composer prefills the author's handle plus the
+  thread's existing mentions, deduplicated and skipping the replier.
+  ([`d55ba4a`](https://git.platypush.tech/blacklight/songhive/commit/d55ba4a5b7a9070cd7e56e82b1883d0a4ac86b5d))
+- `player`: Clicking an item in the play queue now jumps to it and
+  starts playback.
+  ([`bb99933`](https://git.platypush.tech/blacklight/songhive/commit/bb999339a35419835fc9cda4905f17aa1acfec22))
+- `tracks`: Library and playlist track lists can be filtered with a `q`
+  search query matching title, artist, album, tag or genre — both views
+  gained a search bar, and playlist reordering is disabled while a
+  search is active.
+  ([`f05e532`](https://git.platypush.tech/blacklight/songhive/commit/f05e5322d8e5d77c1cea3f22c941b7821e9248d0))
+- `frontend`: Activity card actions (copy link, edit, delete) and
+  per-notification actions (mark read/unread, dismiss) moved into `...`
+  overflow menus.
+  ([`54abc8e`](https://git.platypush.tech/blacklight/songhive/commit/54abc8e3ced934fb1fe2334989de2aa00ba0b83b))
 
 ## 0.1.2
 
