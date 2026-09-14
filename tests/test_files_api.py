@@ -532,6 +532,75 @@ async def test_derived_file_download_through_public_track(files_client, regular_
     assert private_download.status_code == 403
 
 
+async def test_shared_track_reveals_album_cover_and_artist_image(
+    files_client, regular_user, other_user, auth_headers, db_session
+):
+    """A share grant on a private track lets the recipient download its album cover and artist image."""
+    from io import BytesIO
+
+    from songhive.services import sharing
+    from songhive.services.storage import StorageService
+    from songhive.storage import get_storage
+
+    config = files_client.app.state.config.storage
+    storage = StorageService(get_storage(config), config)
+
+    cover_file = await storage.store_file(
+        db_session,
+        BytesIO(b"album cover"),
+        content_type="image/png",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    artist_file = await storage.store_file(
+        db_session,
+        BytesIO(b"artist image"),
+        content_type="image/png",
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add_all([cover_file, artist_file])
+    await db_session.flush()
+
+    artist = Artist(name="Shared Artist", image_file_id=artist_file.id)
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Shared Album",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+        cover_file_id=cover_file.id,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    track = Track(
+        title="Shared Track",
+        artist_id=artist.id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    await sharing.create_share_grant(
+        db_session, "track", str(track.id), str(other_user.id), created_by=str(regular_user.id)
+    )
+    await db_session.commit()
+
+    other_headers = auth_headers(other_user)
+    for stored_file, content in ((cover_file, b"album cover"), (artist_file, b"artist image")):
+        denied = files_client.get(f"/api/v1/files/{stored_file.id}/download")
+        assert denied.status_code == 403
+
+        download = files_client.get(f"/api/v1/files/{stored_file.id}/download", headers=other_headers)
+        assert download.status_code == 200
+        assert download.content == content
+
+
 def test_upload_audio_file_imports_as_track(files_client, regular_user, auth_headers, monkeypatch):
     """Uploading an audio file creates a track in the user's default Uploads library."""
     monkeypatch.setattr(

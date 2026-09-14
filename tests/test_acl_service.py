@@ -386,6 +386,160 @@ async def test_can_access_file_via_album_share_token(db_session, regular_user):
 
 
 @pytest.mark.asyncio
+async def test_can_access_track_image_via_track_share_grant(db_session, regular_user, make_user):
+    """A share grant on a track grants access to the track's image file."""
+    other_user = await make_user("other", email_verified=True)
+    file = await _make_file(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    track = await _make_track(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    track.image_file_id = file.id
+    await db_session.flush()
+
+    assert await can_access(db_session, other_user, "file", file.id) is False
+
+    await sharing.create_share_grant(db_session, "track", track.id, other_user.id, created_by=regular_user.id)
+    assert await can_access(db_session, other_user, "file", file.id) is True
+
+    await sharing.revoke_share_grant(db_session, "track", track.id, other_user.id)
+    assert await can_access(db_session, other_user, "file", file.id) is False
+
+
+@pytest.mark.asyncio
+async def test_can_access_album_cover_via_track_share_grant(db_session, regular_user, make_user):
+    """A share grant on a track grants access to its album's cover file."""
+    other_user = await make_user("other", email_verified=True)
+    file = await _make_file(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    album = await _make_album(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value, cover_file=file)
+    track = Track(
+        title="Album Track",
+        artist_id=album.artist_id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    assert await can_access(db_session, other_user, "file", file.id) is False
+
+    await sharing.create_share_grant(db_session, "track", track.id, other_user.id, created_by=regular_user.id)
+    assert await can_access(db_session, other_user, "file", file.id) is True
+
+    await sharing.revoke_share_grant(db_session, "track", track.id, other_user.id)
+    assert await can_access(db_session, other_user, "file", file.id) is False
+
+
+@pytest.mark.asyncio
+async def test_can_access_album_cover_via_track_share_token(db_session, regular_user):
+    """A share URL token for a track grants access to its album's cover file."""
+    file = await _make_file(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    album = await _make_album(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value, cover_file=file)
+    track = Track(
+        title="Album Track",
+        artist_id=album.artist_id,
+        album_id=album.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    token, raw = await sharing.create_share_token(db_session, "track", track.id, created_by=regular_user.id)
+    assert await can_access(db_session, None, "file", file.id, share_token=raw) is True
+    assert await can_access(db_session, None, "file", file.id) is False
+
+    await sharing.revoke_share_token(db_session, token.id)
+    assert await can_access(db_session, None, "file", file.id, share_token=raw) is False
+
+
+@pytest.mark.asyncio
+async def test_can_access_artist_image_via_track_share_grant(db_session, regular_user, make_user):
+    """A share grant on a track grants access to the track artist's image file."""
+    other_user = await make_user("other", email_verified=True)
+    file = await _make_file(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    artist = await _make_artist(db_session)
+    artist.image_file_id = file.id
+    track = Track(
+        title="Artist Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    assert await can_access(db_session, other_user, "file", file.id) is False
+
+    await sharing.create_share_grant(db_session, "track", track.id, other_user.id, created_by=regular_user.id)
+    assert await can_access(db_session, other_user, "file", file.id) is True
+
+    await sharing.revoke_share_grant(db_session, "track", track.id, other_user.id)
+    assert await can_access(db_session, other_user, "file", file.id) is False
+
+
+@pytest.mark.asyncio
+async def test_can_access_artist_cover_via_album_share_grant(db_session, regular_user, make_user):
+    """A share grant on an album grants access to the album artist's cover file."""
+    other_user = await make_user("other", email_verified=True)
+    file = await _make_file(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    artist = await _make_artist(db_session)
+    artist.cover_file_id = file.id
+    album = Album(
+        title="Artist Album",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    assert await can_access(db_session, other_user, "file", file.id) is False
+
+    await sharing.create_share_grant(db_session, "album", album.id, other_user.id, created_by=regular_user.id)
+    assert await can_access(db_session, other_user, "file", file.id) is True
+
+    await sharing.revoke_share_grant(db_session, "album", album.id, other_user.id)
+    assert await can_access(db_session, other_user, "file", file.id) is False
+
+
+@pytest.mark.asyncio
+async def test_can_access_artist_image_without_accessible_content(db_session, regular_user, make_user):
+    """An artist image stays private when none of the artist's content is accessible."""
+    other_user = await make_user("other", email_verified=True)
+    file = await _make_file(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    artist = await _make_artist(db_session)
+    artist.image_file_id = file.id
+    track = Track(
+        title="Artist Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    assert await can_access(db_session, other_user, "file", file.id) is False
+    assert await can_access(db_session, None, "file", file.id) is False
+
+
+@pytest.mark.asyncio
+async def test_can_access_artist_image_via_public_track(db_session, regular_user):
+    """An anonymous user can access an artist image through a public track."""
+    file = await _make_file(db_session, owner=regular_user, visibility=Visibility.PRIVATE.value)
+    artist = await _make_artist(db_session)
+    artist.image_file_id = file.id
+    track = Track(
+        title="Artist Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    assert await can_access(db_session, None, "file", file.id) is True
+
+
+@pytest.mark.asyncio
 async def test_filter_accessible_track_ids_includes_shared_album(db_session, regular_user, make_user):
     """filter_accessible_track_ids includes tracks in a shared album."""
     other_user = await make_user("other", email_verified=True)

@@ -7,7 +7,7 @@ designed to be used by the FastAPI route layer and by federation serializers.
 """
 
 import logging
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Set, Tuple, Type
 
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -319,10 +319,32 @@ async def _can_access(  # pylint: disable=too-many-return-statements,too-many-br
             (await session.execute(select(Playlist.id).where(Playlist.cover_file_id == item_id))).scalars().all()
         )
 
+        # Images attached to an album or artist are also surfaced through that
+        # entity's content: sharing a track reveals its album cover and artist
+        # image, and sharing an album reveals the album artist's images.
+        album_track_ids: Sequence[str] = ()
+        if album_ids:
+            album_track_ids = (
+                (await session.execute(select(Track.id).where(Track.album_id.in_(album_ids)))).scalars().all()
+            )
+        artist_ids = set(artist_image_ids) | set(artist_cover_ids)
+        artist_track_ids: Sequence[str] = ()
+        artist_album_ids: Sequence[str] = ()
+        if artist_ids:
+            artist_track_ids = (
+                (await session.execute(select(Track.id).where(Track.artist_id.in_(artist_ids)))).scalars().all()
+            )
+            artist_album_ids = (
+                (await session.execute(select(Album.id).where(Album.artist_id.in_(artist_ids)))).scalars().all()
+            )
+
         derived_item_ids = (
-            [("track", str(i)) for i in set(track_ids) | set(track_image_ids)]
-            + [("album", str(i)) for i in album_ids]
-            + [("artist", str(i)) for i in set(artist_image_ids) | set(artist_cover_ids)]
+            [
+                ("track", str(i))
+                for i in set(track_ids) | set(track_image_ids) | set(album_track_ids) | set(artist_track_ids)
+            ]
+            + [("album", str(i)) for i in set(album_ids) | set(artist_album_ids)]
+            + [("artist", str(i)) for i in artist_ids]
             + [("library", str(i)) for i in set(library_image_ids) | set(library_cover_ids)]
             + [("playlist", str(i)) for i in set(playlist_image_ids) | set(playlist_cover_ids)]
         )
