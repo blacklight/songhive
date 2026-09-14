@@ -817,23 +817,61 @@ def test_publish_track_local_rejected(client, sample_tracks, regular_user, auth_
     mock.assert_not_called()
 
 
-def test_publish_track_denied_for_other_user(client, sample_tracks, other_user, auth_headers, monkeypatch):
-    """Non-owners cannot publish another user's track."""
+def test_publish_track_allows_non_owner_note_share(client, sample_tracks, other_user, auth_headers, monkeypatch):
+    """Any authenticated user can share a public track as a Note under their own actor."""
     _enable_federation(client)
     track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
     mock = _patch_publish(monkeypatch)
 
     response = client.post(
         f"/api/v1/tracks/{track.id}/publish",
-        json={},
+        json={"status": "shared by someone else"},
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == 200
+    mock.assert_called_once()
+    call = mock.call_args.kwargs
+    assert str(call["track"].id) == str(track.id)
+    assert str(call["owner"].id) == str(other_user.id)
+    assert call["object_type"] == "note"
+    assert call["status"] == "shared by someone else"
+
+
+def test_publish_track_audio_denied_for_non_owner(client, sample_tracks, other_user, auth_headers, monkeypatch):
+    """Non-owners cannot republish the track's canonical Audio object."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={"object_type": "audio"},
         headers=auth_headers(other_user),
     )
     assert response.status_code == 403
     mock.assert_not_called()
 
 
-def test_publish_track_denied_for_admin_non_owner(client, sample_tracks, admin_user, auth_headers, monkeypatch):
-    """Admins cannot publish someone else's track under the owner's actor."""
+def test_publish_track_audio_allowed_for_admin_non_owner(client, sample_tracks, admin_user, auth_headers, monkeypatch):
+    """Admins can republish another user's track as an Audio object under their own actor."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={"object_type": "audio"},
+        headers=auth_headers(admin_user),
+    )
+    assert response.status_code == 200
+    mock.assert_called_once()
+    call = mock.call_args.kwargs
+    assert str(call["owner"].id) == str(admin_user.id)
+    assert call["object_type"] == "audio"
+
+
+def test_publish_track_note_allowed_for_admin_non_owner(client, sample_tracks, admin_user, auth_headers, monkeypatch):
+    """Admins can also share someone else's public track as a Note."""
     _enable_federation(client)
     track = next(t for t in sample_tracks if t.visibility == Visibility.PUBLIC.value)
     mock = _patch_publish(monkeypatch)
@@ -843,7 +881,23 @@ def test_publish_track_denied_for_admin_non_owner(client, sample_tracks, admin_u
         json={},
         headers=auth_headers(admin_user),
     )
-    assert response.status_code == 403
+    assert response.status_code == 200
+    mock.assert_called_once()
+    assert str(mock.call_args.kwargs["owner"].id) == str(admin_user.id)
+
+
+def test_publish_track_non_owner_private_rejected(client, sample_tracks, other_user, auth_headers, monkeypatch):
+    """Non-owners cannot publish a track that is not public."""
+    _enable_federation(client)
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    mock = _patch_publish(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracks/{track.id}/publish",
+        json={},
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == 422
     mock.assert_not_called()
 
 

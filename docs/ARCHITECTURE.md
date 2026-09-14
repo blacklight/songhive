@@ -1167,9 +1167,16 @@ the HTTP routes.
 - Each public lifecycle gets a fresh `Track.federation_object_id` (generated
   on every transition to public) so a previous `Tombstone` at the same URL
   cannot block re-publication.
-- `POST /api/v1/tracks/{id}/publish` lets the track's owner publish a
-  public track to the fediverse at any time (the "Fediverse" tab of the
-  share dialog). It accepts an optional `status` — a one-off post text used
+- `POST /api/v1/tracks/{id}/publish` publishes a public track to the
+  fediverse at any time (the "Fediverse" tab of the share dialog). Any
+  authenticated user may share a public track as a `Create(Note)` post
+  under their own actor; republishing the canonical `Create(Audio)`
+  object (`object_type=audio`, which re-mints
+  `Track.federation_object_id`) is restricted to the track's owner and
+  admins. The publication activity is attributed to the publisher — its
+  `owner_user_id` — who can edit or retract it via the activity
+  endpoints even when they cannot manage the track itself. It accepts an
+  optional `status` — a one-off post text used
   as the object's `content` instead of the stored
   `description`, run through the `process_mentions` pipeline so `@handle`s
   become links, `Mention` tags, and `activity_mentions` rows — an

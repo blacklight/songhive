@@ -20,7 +20,9 @@ import {
 import { publishTrack } from "@/api/tracks";
 import type { StatusComposerPayload } from "@/components/statuses/StatusComposer.vue";
 import { getApiErrorMessage, ApiError } from "@/api/client";
+import { useCanManage } from "@/composables/useCanManage";
 import { useOwnership } from "@/composables/useOwnership";
+import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
 import { useInstanceStore } from "@/stores/instance";
 import { useSearchSections } from "@/composables/useSearchSections";
@@ -51,8 +53,10 @@ const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 const confirm = useConfirmStore();
 const toast = useToastStore();
+const authStore = useAuthStore();
 const instanceStore = useInstanceStore();
 const { isOwner } = useOwnership(computed(() => props.ownerId ?? null));
+const { canManage } = useCanManage(computed(() => props.ownerId ?? null));
 
 type TabKey = "grants" | "urls" | "fediverse" | "public";
 
@@ -79,13 +83,21 @@ const availableTabs = computed(() => {
       label: t("browse.share.shareUrls"),
       icon: "link",
     });
-    if (props.itemType === "track" && instanceStore.federationEnabled) {
-      tabs.push({
-        key: "fediverse",
-        label: t("browse.share.fediverse"),
-        icon: "paper-plane",
-      });
-    }
+  }
+  // Any signed-in user may share a public track as a fediverse post; the
+  // owner/admin also get the tab on non-public tracks so the hint can tell
+  // them to publish it first.
+  if (
+    props.itemType === "track" &&
+    instanceStore.federationEnabled &&
+    authStore.isAuthenticated &&
+    (canManage.value || isPublic.value)
+  ) {
+    tabs.push({
+      key: "fediverse",
+      label: t("browse.share.fediverse"),
+      icon: "paper-plane",
+    });
   }
   if (publicUrl.value) {
     tabs.push({
@@ -336,7 +348,9 @@ async function submitFediverse(payload: StatusComposerPayload) {
   await publishTrack(props.itemId, {
     status: payload.status || null,
     visibility: payload.visibility,
-    object_type: publishObjectType.value,
+    // Only the owner/admin may republish the canonical Audio object —
+    // everyone else shares the track as a Note post under their own actor.
+    object_type: canManage.value ? publishObjectType.value : "note",
     content_type: payload.content_type,
     language: payload.language,
     media_ids: payload.media_ids,
@@ -563,6 +577,7 @@ watch(
           :options="publishObjectTypeOptions"
           :label="t('browse.share.fediverseType')"
           :hint="publishObjectTypeHint"
+          :disabled="!canManage"
         />
         <StatusComposer
           :submit="submitFediverse"

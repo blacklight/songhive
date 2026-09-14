@@ -21,7 +21,9 @@ from fastapi import HTTPException
 from pubby import InteractionType
 from pubby.content import render_post_html, set_object_content
 from pydantic import BaseModel, field_validator
-from sqlalchemy import and_, delete, func, or_, select, union_all
+from sqlalchemy import and_, delete, func
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -2855,9 +2857,17 @@ async def record_track_publication(
         audio_object_id = None
     else:
         object_uuid = str(uuid.uuid4())
-        audio_object_id = (
-            f"{owner.actor_url}/objects/{track.federation_object_id}" if track.federation_object_id else None
-        )
+        audio_object_id = None
+        if track.federation_object_id:
+            # The canonical Audio object is served under the track owner's
+            # actor, so shares published by someone else must link that URL —
+            # the same id under the publisher's actor would not dereference.
+            unloaded: frozenset = getattr(sa_inspect(track), "unloaded", frozenset())
+            track_owner = getattr(track, "owner", None) if "owner" not in unloaded else None
+            audio_actor_url = (
+                track_owner.actor_url if track_owner is not None and track_owner.actor_url else owner.actor_url
+            )
+            audio_object_id = f"{audio_actor_url}/objects/{track.federation_object_id}"
     object_id = f"{owner.actor_url}/objects/{object_uuid}"
     args: _TrackPublicationKwargs = {
         "actor_url": owner.actor_url,

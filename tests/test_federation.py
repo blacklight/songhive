@@ -1220,6 +1220,39 @@ async def test_record_track_publication_note_share(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_record_track_publication_note_share_links_track_owner_actor(db_session, monkeypatch):
+    """A Note share by a non-owner points the attachment id at the track owner's object."""
+    owner = _make_federated_user(username="carol")
+    publisher = _make_federated_user(username="dave")
+    db_session.add_all([owner, publisher])
+    await db_session.flush()
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = _publication_track()
+    track.owner = owner
+
+    deliver_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver_mock)
+
+    activity = await record_track_publication(
+        db_session,
+        track=track,
+        artist=artist,
+        owner=publisher,
+        config=_fed_config(),
+        object_type="note",
+    )
+
+    assert activity is not None
+    # The share itself is attributed to the publisher...
+    assert activity.source_id.startswith(f"{publisher.actor_url}/objects/")
+    assert activity.payload["actor"] == publisher.actor_url
+    # ...but the embedded Audio attachment id dereferences under the track
+    # owner's actor, where the canonical object is served.
+    assert activity.payload["object"]["attachment"][0]["id"] == f"{owner.actor_url}/objects/obj-1"
+
+
+@pytest.mark.asyncio
 async def test_record_track_publication_note_without_federation_object_id(db_session, monkeypatch):
     """A Note share works on a track that was never published as Audio."""
     user = _make_federated_user()

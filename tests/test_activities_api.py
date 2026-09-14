@@ -487,6 +487,40 @@ async def test_delete_activity_forbidden_for_non_manager(client, db_session, reg
 
 
 @pytest.mark.asyncio
+async def test_delete_activity_allowed_for_author(client, db_session, regular_user, other_user, auth_headers):
+    """The activity's author may retract it without manage rights on the entity."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.delete(f"/api/v1/activities/{activity.id}", headers=auth_headers(regular_user))
+
+    assert resp.status_code == 200
+    await db_session.refresh(activity)
+    assert activity.deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_update_activity_allowed_for_author(client, db_session, regular_user, other_user, auth_headers):
+    """The activity's author may edit it without manage rights on the entity."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.patch(
+        f"/api/v1/activities/{activity.id}",
+        json={"content": "edited by the share's author"},
+        headers=auth_headers(regular_user),
+    )
+
+    assert resp.status_code == 200
+    await db_session.refresh(activity)
+    assert activity.content_source == "edited by the share's author"
+
+
+@pytest.mark.asyncio
 async def test_delete_remote_activity_soft_deletes_local_copy(
     client, db_session, regular_user, auth_headers, monkeypatch
 ):

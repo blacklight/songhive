@@ -1076,7 +1076,7 @@ async def publish_track(
     config: SonghiveConfig = Depends(get_config),
 ):
     """
-    Publish a public track to the owner's ActivityPub followers.
+    Publish a public track to the fediverse as the current user's post.
 
     Records a ``create`` activity carrying a fresh ``Create`` payload for
     the track — making the share visible in the track's activity feed and
@@ -1085,14 +1085,17 @@ async def publish_track(
     one-off post text used as the object's ``content`` instead of the track's
     stored ``description``; it is never persisted. ``visibility`` selects the
     post's audience (``public`` by default): ``public`` and ``followers``
-    reach the owner's follower inboxes plus remote mentioned actors,
+    reach the publisher's follower inboxes plus remote mentioned actors,
     ``mentioned`` reaches only the mentioned actors, and
     ``private``/``local`` record the activity without federating it.
 
     ``object_type`` selects the federated object shape: ``note`` (the
     default) shares the track as a ``Create(Note)`` — the post body renders
     on every remote server — while ``audio`` republishes the canonical
-    ``Create(Audio)`` media object. A new ``federation_object_id`` is minted
+    ``Create(Audio)`` media object. Any authenticated user may share a
+    public track as a ``note`` under their own actor; ``audio`` republishes
+    the track's own object and is restricted to users who can manage the
+    track (its owner or an admin). A new ``federation_object_id`` is minted
     on every ``audio`` call so each publication is a distinct remote object
     unaffected by earlier ``Tombstone`` deletions; ``note`` shares mint their
     own per-share object id instead.
@@ -1107,12 +1110,6 @@ async def publish_track(
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if track.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the track owner can publish it",
-        )
-
     if track.visibility != Visibility.PUBLIC.value:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -1123,9 +1120,20 @@ async def publish_track(
     publish_visibility = body.visibility or Visibility.PUBLIC
     object_type = body.object_type
 
+    if object_type == "audio" and not await acl.can_manage(db, current_user, "track", track_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the track owner or an admin can publish the Audio object",
+        )
+
     ensure_user_actor(current_user, config)
     if object_type == "audio":
         track.federation_object_id = str(uuid.uuid4())
+    elif track.federation_object_id and track.owner is not None:
+        # A note share's attachment links the canonical Audio object, which
+        # is served under the track owner's actor — provision it when the
+        # publisher is someone else so the URL resolves.
+        ensure_user_actor(track.owner, config)
 
     await audit.log_action(
         db,

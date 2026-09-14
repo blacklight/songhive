@@ -286,6 +286,16 @@ async def _resolve_activity_by_object_url(db: AsyncSession, url: str) -> Optiona
     return await db.scalar(select(Activity).where(or_(*conditions)).limit(1))
 
 
+def _is_activity_author(activity: Activity, user: User) -> bool:
+    """Return whether ``user`` authored ``activity``.
+
+    Authors may edit or retract their own local activities — e.g. a track
+    share published by a non-owner — even when they cannot manage the
+    activity's entity.
+    """
+    return activity.owner_user_id is not None and str(activity.owner_user_id) == str(user.id)
+
+
 @router.get("/lookup", response_model=ActivityResponse)
 async def lookup_activity(
     request: Request,
@@ -360,7 +370,9 @@ async def update_activity(
             detail="Reaction activities are not editable",
         )
 
-    if not await acl.can_manage(db, current_user, activity.entity_type, activity.entity_id):
+    if not _is_activity_author(activity, current_user) and not await acl.can_manage(
+        db, current_user, activity.entity_type, activity.entity_id
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to edit this activity",
@@ -451,7 +463,9 @@ async def delete_activity(
     if activity is None or activity.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
 
-    if not await acl.can_manage(db, current_user, activity.entity_type, activity.entity_id):
+    if not _is_activity_author(activity, current_user) and not await acl.can_manage(
+        db, current_user, activity.entity_type, activity.entity_id
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this activity",

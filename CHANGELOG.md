@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `federation`: any signed-in user can now share a public track to the
+  fediverse from the share dialog's Fediverse tab, not just the track's
+  owner. The share is published as a `Create(Note)` post attributed to the
+  sharing user's own actor — the post-type picker is locked to `Note` for
+  non-managers, since republishing the canonical `Audio` object
+  (`object_type=audio`, which re-mints `Track.federation_object_id`)
+  remains restricted to the track's owner and admins. A `Note` share's
+  embedded `Audio` attachment now links the canonical object under the
+  *track owner's* actor URL so it still dereferences when someone else
+  published the share, and `PATCH`/`DELETE /api/v1/activities/{id}` now
+  also accept the activity's author (`owner_user_id`), so a share's
+  publisher can edit or retract it without manage rights on the track.
 - `instance`: contact and staff discovery. The `/about` page now lists the
   instance's active admin accounts (avatar, display name and
   `@user@domain` handle when federation is enabled, linked to their

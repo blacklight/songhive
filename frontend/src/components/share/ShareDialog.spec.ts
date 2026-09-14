@@ -705,8 +705,70 @@ describe("ShareDialog", () => {
     expect(fediverseTab).toBeUndefined();
   });
 
-  it("hides the fediverse tab from non-owners", async () => {
+  it("shows the fediverse tab to non-owners of a public track, publishing as a note", async () => {
+    vi.mocked(tracksApi.publishTrack).mockResolvedValue({
+      track_id: "track-1",
+      enqueued: true,
+      object_id: "https://music.example.com/users/alice/objects/obj-1",
+    });
+
     setAuthenticated("user-1");
+    setFederated();
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-2",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    expect(fediverseTab).toBeDefined();
+    await fediverseTab?.click();
+    await flushPromises();
+
+    // Non-managers cannot pick the canonical Audio object type.
+    const typeSelect = document.body.querySelector(
+      "select",
+    ) as HTMLSelectElement;
+    expect(typeSelect).toBeDefined();
+    expect(typeSelect.value).toBe("note");
+    expect(typeSelect.disabled).toBe(true);
+
+    const publishButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("browse.share.fediversePublish"),
+    );
+    await publishButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.publishTrack).toHaveBeenCalledWith(
+      "track-1",
+      expect.objectContaining({ object_type: "note" }),
+    );
+  });
+
+  it("hides the fediverse tab from non-owners of a non-public track", async () => {
+    setAuthenticated("user-1");
+    setFederated();
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-2",
+      visibility: "private",
+    });
+    await flushPromises();
+
+    const fediverseTab = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.fediverse"));
+    expect(fediverseTab).toBeUndefined();
+  });
+
+  it("hides the fediverse tab from anonymous viewers of a public track", async () => {
     setFederated();
     wrapper = mountOpen({
       itemType: "track",
