@@ -18,7 +18,7 @@ from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, 
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
-from pubby import InteractionType
+from pubby import InteractionType, allow_public_quotes, set_quote_target
 from pubby.content import render_post_html, set_object_content
 from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, delete, func
@@ -80,8 +80,10 @@ __all__ = [
     "list_activities",
     "list_activities_for_tag",
     "list_activity_interactors",
+    "list_activity_quotes",
     "list_activity_replies",
     "list_user_activities",
+    "quote_activity",
     "reply_to_activity",
     "resolve_interaction_summaries",
     "resolve_audience",
@@ -428,13 +430,14 @@ async def list_user_activities(
     """
     List activities by a user, newest first.
 
-    ``mode="posts"`` returns the user's published local ``create``
-    activities (Note posts and published-track shares); ``include_boosts``
-    folds their ``announce`` activities into the timeline (the Mastodon
-    default) and ``include_replies`` their ``reply`` activities (hidden by
-    default). ``mode="all"`` returns every visible activity they authored
-    or relayed (create, announce, like, reply, ...) and ignores the include
-    flags. Visibility is applied through ``_activity_visibility_filter``.
+    ``mode="posts"`` returns the user's published local ``create`` and
+    ``quote`` activities (Note posts, published-track shares and quote
+    posts); ``include_boosts`` folds their ``announce`` activities into the
+    timeline (the Mastodon default) and ``include_replies`` their ``reply``
+    activities (hidden by default). ``mode="all"`` returns every visible
+    activity they authored or relayed (create, announce, like, reply,
+    quote, ...) and ignores the include flags. Visibility is applied
+    through ``_activity_visibility_filter``.
     """
     if mode not in ("posts", "all"):
         raise HTTPException(status_code=400, detail="Invalid mode")
@@ -450,7 +453,7 @@ async def list_user_activities(
     )
 
     if mode == "posts":
-        activity_types = ["create"]
+        activity_types = ["create", "quote"]
         if include_boosts:
             activity_types.append("announce")
         if include_replies:
@@ -746,6 +749,7 @@ class InteractionSummary(NamedTuple):
     like_count: int = 0
     boost_count: int = 0
     reply_count: int = 0
+    quote_count: int = 0
     liked: bool = False
     boosted: bool = False
 
@@ -773,7 +777,7 @@ async def resolve_interaction_summaries(
         return {}
 
     ids = [str(a.id) for a in activities]
-    counts: Dict[str, Dict[str, int]] = {i: {"like": 0, "announce": 0, "reply": 0} for i in ids}
+    counts: Dict[str, Dict[str, int]] = {i: {"like": 0, "announce": 0, "reply": 0, "quote": 0} for i in ids}
     rows = await session.execute(
         select(Activity.in_reply_to_activity_id, Activity.activity_type, func.count())
         .where(
@@ -809,12 +813,14 @@ async def resolve_interaction_summaries(
                     counts[str(activity.id)][activity_type] += 1
 
     await _add_threaded_reply_counts(session, activities, counts, config, user)
+    await _add_quote_counts(session, activities, counts, remote, user)
 
     return {
         str(a.id): InteractionSummary(
             like_count=counts[str(a.id)]["like"],
             boost_count=counts[str(a.id)]["announce"],
             reply_count=counts[str(a.id)]["reply"],
+            quote_count=counts[str(a.id)]["quote"],
             liked=str(a.id) in reacted["like"],
             boosted=str(a.id) in reacted["announce"],
         )
@@ -931,6 +937,51 @@ async def _add_threaded_reply_counts(
             continue
         for root_id in roots:
             counts[root_id]["reply"] += 1
+
+
+async def _add_quote_counts(
+    session: AsyncSession,
+    activities: List[Activity],
+    counts: Dict[str, Dict[str, int]],
+    remote: Dict[str, List[Any]],
+    user: Optional[User],
+) -> None:
+    """
+    Fold quote counts into ``counts`` in place.
+
+    ``quote_count`` covers direct quotes only — quotes are not threaded,
+    so unlike ``reply_count`` there is no descendant walk: live
+    ``quote``-type children (local quotes and materialized remote quotes)
+    the requester may see, plus confirmed remote ``QUOTE`` interactions
+    from Pubby's storage. ``remote`` is the already-fetched
+    ``resolve_interaction_summaries`` interaction map; quote interactions
+    backed by a materialized row are skipped so they count once.
+    """
+    ids = [str(a.id) for a in activities]
+    rows = (
+        await session.execute(
+            select(Activity.in_reply_to_activity_id, Activity.source_id).where(
+                Activity.in_reply_to_activity_id.in_(ids),
+                Activity.activity_type == "quote",
+                Activity.deleted_at.is_(None),
+                _activity_visibility_filter(user),
+            )
+        )
+    ).all()
+
+    materialized: Dict[str, Set[str]] = {}
+    for target_id, source_id in rows:
+        counts[str(target_id)]["quote"] += 1
+        materialized.setdefault(str(target_id), set()).add(source_id)
+
+    for activity in activities:
+        seen = materialized.get(str(activity.id), set())
+        for interaction in remote.get(activity.source_id, []):
+            if interaction.interaction_type != InteractionType.QUOTE:
+                continue
+            if getattr(interaction, "object_id", None) in seen:
+                continue
+            counts[str(activity.id)]["quote"] += 1
 
 
 class InteractionActor(NamedTuple):
@@ -1067,6 +1118,52 @@ async def list_activity_replies(
         key=lambda i: _interaction_sort_key(i.published),
     )
     return local, remote_replies
+
+
+async def list_activity_quotes(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    user: Optional[User],
+    config: SonghiveConfig,
+) -> Tuple[List[Activity], List[Any]]:
+    """
+    List the known quotes of ``activity``, oldest first.
+
+    Returns ``(local, remote)`` mirroring :func:`list_activity_replies`:
+    local quotes are live ``quote``-type children — locally authored
+    quotes and remote quotes materialized into ``Activity`` rows —
+    filtered by the requester's visibility; remote quotes are confirmed
+    Pubby ``InteractionType.QUOTE`` interactions whose ``target_resource``
+    is the activity's object id (a ``Create`` carrying
+    ``quote``/``quoteUrl``/``_misskey_quote`` is recorded by the inbox
+    processor keyed by the quoted object id, ``activity.source_id``),
+    minus those already backed by a materialized row.
+    """
+    local = list(
+        (
+            await session.execute(
+                select(Activity)
+                .where(
+                    Activity.in_reply_to_activity_id == str(activity.id),
+                    Activity.activity_type == "quote",
+                    Activity.deleted_at.is_(None),
+                    _activity_visibility_filter(user),
+                )
+                .order_by(Activity.published_at.asc(), Activity.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    materialized = {row.source_id for row in local}
+    remote = await _remote_interactions(config, [activity.source_id], InteractionType.QUOTE)
+    remote_quotes = sorted(
+        (i for i in remote.get(activity.source_id, []) if getattr(i, "object_id", None) not in materialized),
+        key=lambda i: _interaction_sort_key(i.published),
+    )
+    return local, remote_quotes
 
 
 async def _fan_out_visibility_update(
@@ -1877,7 +1974,10 @@ async def reply_to_activity(
     committing; the caller owns the transaction.
     """
     from ..federation.activities import create_status_activity
-    from ..federation.serializers import stored_file_to_attachment, track_to_attachment
+    from ..federation.serializers import (
+        stored_file_to_attachment,
+        track_to_attachment,
+    )
 
     if activity.deleted_at is not None:
         raise HTTPException(404, detail="Activity not found")
@@ -1970,6 +2070,7 @@ async def reply_to_activity(
         tags.extend(tag for tag in extra_tags if tag["name"].lower() not in seen)
         note["tag"] = tags
 
+    allow_public_quotes(note)
     payload = create_status_activity(
         actor_url,
         note,
@@ -2071,6 +2172,351 @@ async def _notify_reply(
         )
     except Exception as exc:
         logger.warning("Failed to create reply notification for activity %s: %s", activity.id, exc)
+
+
+async def quote_activity(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    author: User,
+    config: SonghiveConfig,
+    status_text: Optional[str] = None,
+    content_type: str = CONTENT_TYPE_MARKDOWN,
+    visibility: "Visibility | str | None" = None,
+    language: Optional[str] = None,
+    media_ids: Optional[Iterable[str]] = None,
+    track_ids: Optional[Iterable[str]] = None,
+) -> Activity:
+    """Record ``author``'s quote of ``activity`` as a ``quote`` activity.
+
+    The quote is a ``Create(Note)`` whose object references the quoted
+    post through the FEP-0449 ``quote`` field plus Mastodon's ``quoteUrl``
+    and Misskey's ``_misskey_quote`` (all set to ``activity.source_id`` so
+    every flavour of quote-aware server recognizes it). Like a reply, it
+    is attached to the quoted activity's entity, linked through
+    ``in_reply_to_activity_id``, and defaults to — without exceeding — the
+    quoted activity's and containing entity's visibility.
+
+    The quoted author is always addressed: a local owner gets an
+    ``ActivityMention`` row plus a ``quote`` notification; a remote author
+    gets a mention row + ``Mention`` tag so ``resolve_audience`` delivers
+    the quote to their inbox. Authorization follows FEP-044f: quoting a
+    local user's post self-issues the ``QuoteAuthorization`` their own
+    auto-approval would grant (stored so it dereferences) and stamps it on
+    the note; quoting a remote post delivers a ``QuoteRequest`` to the
+    remote author's inbox so their server can issue one.
+
+    Raises ``HTTPException`` 404 when the quoted activity has been
+    retracted or its entity is gone, and 422 for an empty quote, an
+    invalid ``content_type``/``visibility``/``language``, an over-limit
+    attachment list, or a visibility exceeding the quoted activity's.
+    Flushes without committing; the caller owns the transaction.
+    """
+    from ..federation.activities import create_status_activity
+    from ..federation.serializers import (
+        stored_file_to_attachment,
+        track_to_attachment,
+    )
+
+    if activity.deleted_at is not None:
+        raise HTTPException(404, detail="Activity not found")
+
+    text = (status_text or "").strip()
+    media_ids = list(media_ids or [])
+    track_ids = list(track_ids or [])
+    if not text and not media_ids and not track_ids:
+        raise HTTPException(422, detail="Quote must not be empty")
+    if len(set(media_ids)) > _MAX_STATUS_ATTACHMENTS or len(set(track_ids)) > _MAX_STATUS_ATTACHMENTS:
+        raise HTTPException(422, detail="Too many attachments")
+    if content_type not in STATUS_CONTENT_TYPES:
+        raise HTTPException(422, detail=f"Invalid content_type: {content_type}")
+    language = _validate_status_language(language)
+
+    try:
+        target_visibility = Visibility(activity.visibility)
+    except ValueError:
+        raise HTTPException(422, detail=f"Invalid target visibility: {activity.visibility}")
+    if visibility is None:
+        quote_visibility = target_visibility
+    else:
+        try:
+            quote_visibility = Visibility(visibility)
+        except ValueError:
+            raise HTTPException(422, detail=f"Invalid visibility: {visibility}")
+    if not Visibility.can_contain(quote_visibility, target_visibility):
+        raise HTTPException(422, detail="Quote visibility exceeds the quoted activity's visibility")
+
+    entity = await resolve_entity(session, activity.entity_type, activity.entity_id)
+    if entity is None:
+        raise HTTPException(404, detail="Entity not found")
+    VisibilityRules.enforce_activity_visibility(quote_visibility, _entity_visibility(entity))
+
+    processed = await process_mentions(session, text, config, content_type=content_type)
+    mentioned_user_ids = [m.user_id for m in processed.mentions if m.user_id]
+    files = await _resolve_status_media(session, author, media_ids, quote_visibility, mentioned_user_ids)
+    tracks = await _resolve_status_tracks(session, author, track_ids)
+
+    domain = (config.federation.instance_domain or "").strip()
+    actor_url = _local_actor_url(author)
+    attachments = [stored_file_to_attachment(stored, domain) for stored in files]
+    for track in tracks:
+        artist = await session.get(Artist, track.artist_id) if track.artist_id else None
+        audio_object_id = f"{actor_url}/objects/{track.federation_object_id}" if track.federation_object_id else None
+        attachments.append(track_to_attachment(track, artist, domain, audio_object_id=audio_object_id))
+
+    # The quoted author is always addressed — locally through a mention
+    # row (which keeps ``mentioned``-visibility quotes viewable to them)
+    # and a ``quote`` notification, remotely through a mention row +
+    # ``Mention`` tag so ``resolve_audience`` reaches their inbox.
+    mention_dicts = [m.as_dict() for m in processed.mentions]
+    mention_actor_urls: List[str] = [m.actor_url for m in processed.mentions if m.actor_url]  # type: ignore
+    extra_tags: List[dict] = []
+    target_owner = await session.get(User, activity.owner_user_id) if activity.owner_user_id else None
+    if target_owner is not None:
+        if all(m.user_id != target_owner.id for m in processed.mentions):
+            handle = f"@{target_owner.username}"
+            mention_dicts.append({"handle": handle, "actor_url": target_owner.actor_url, "user_id": target_owner.id})
+            if target_owner.actor_url:
+                mention_actor_urls.append(target_owner.actor_url)
+                extra_tags.append({"type": "Mention", "href": target_owner.actor_url, "name": handle})
+    elif activity.source_actor.startswith(("http://", "https://")) and all(
+        m.actor_url != activity.source_actor for m in processed.mentions
+    ):
+        handle = _remote_actor_handle(activity.source_actor)
+        mention_dicts.append({"handle": handle, "actor_url": activity.source_actor, "user_id": None})
+        mention_actor_urls.append(activity.source_actor)
+        extra_tags.append({"type": "Mention", "href": activity.source_actor, "name": handle})
+
+    object_uuid = str(uuid.uuid4())
+    object_id = f"{actor_url}/objects/{object_uuid}"
+    note: dict = {
+        "type": "Note",
+        "id": object_id,
+        "url": object_id,
+        "attributedTo": actor_url,
+        "published": datetime.now(timezone.utc).isoformat(),
+    }
+    set_quote_target(note, activity.source_id)
+    if processed.html:
+        note["content"] = processed.html
+        if language:
+            note["contentMap"] = {language: processed.html}
+    if attachments:
+        note["attachment"] = attachments
+    if processed.tags or extra_tags:
+        tags = list(processed.tags)
+        seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
+        tags.extend(tag for tag in extra_tags if tag["name"].lower() not in seen)
+        note["tag"] = tags
+
+    if (
+        target_owner is not None
+        and target_owner.actor_url
+        and config.federation.enabled
+        and config.federation.instance_domain
+    ):
+        # FEP-044f: quoting a local user's post self-issues the
+        # ``QuoteAuthorization`` our auto-approval would grant, stored so
+        # the authorization URL dereferences and stamped on the note so
+        # remote servers see the quote as verified.
+        from pubby import build_quote_authorization
+
+        authorization = build_quote_authorization(
+            target_owner.actor_url,
+            interacting_object=object_id,
+            interaction_target=activity.source_id,
+            to=["https://www.w3.org/ns/activitystreams#Public"],
+            cc=[f"{target_owner.actor_url}/followers"],
+        )
+        try:
+            await asyncio.to_thread(_store_quote_authorization, config, authorization)
+            note["quoteAuthorization"] = authorization["id"]
+        except Exception as exc:
+            logger.warning("Failed to store quote authorization for %s: %s", object_id, exc)
+
+    allow_public_quotes(note)
+    payload = create_status_activity(
+        actor_url,
+        note,
+        quote_visibility,
+        mention_actor_urls=mention_actor_urls,
+    )
+
+    quote = Activity(
+        entity_type=activity.entity_type,
+        entity_id=activity.entity_id,
+        activity_type="quote",
+        source_type="local",
+        source_actor=actor_url,
+        source_id=object_id,
+        local_object_id=object_uuid,
+        owner_user_id=author.id,
+        visibility=quote_visibility.value,
+        in_reply_to_activity_id=str(activity.id),
+        content=processed.html or None,
+        content_source=text or None,
+        content_type=content_type,
+        language=language,
+        payload=payload,
+    )
+    session.add(quote)
+    await session.flush()
+
+    for mention in mention_dicts:
+        session.add(ActivityMention(activity_id=quote.id, **mention))
+    await session.flush()
+
+    await _sync_activity_tags(session, quote, processed.tag_names)
+    await _notify_quote(session, activity=activity, quote=quote, author=author)
+    await _notify_status_mentions(
+        session,
+        activity=quote,
+        author=author,
+        mentions=processed.mentions,
+        skip_user_ids={str(activity.owner_user_id)} if activity.owner_user_id else set(),
+    )
+
+    # FEP-044f order: the ``QuoteRequest`` goes first so the remote
+    # authorization flow starts before the ``Create`` triggers the
+    # quoted server's quote verification.
+    try:
+        await _deliver_quote_request(session, quote=quote, target=activity, author=author, config=config)
+    except Exception as e:
+        # The ``QuoteRequest`` is best-effort: the quote post still
+        # reaches the remote author's inbox through the mention audience.
+        logger.exception("Failed to deliver quote request for activity %s: %s: %s", activity.id, type(e), e)
+    try:
+        await fan_out_activity(session, quote, config, owner=author)
+    except Exception as e:
+        # Fan-out is best-effort: a broker or resolution failure must not
+        # fail the quote itself — the activity row still records it.
+        logger.exception("Failed to fan out quote for activity %s: %s: %s", activity.id, type(e), e)
+    return quote
+
+
+def _store_quote_authorization(config: SonghiveConfig, authorization: dict) -> None:
+    """
+    Persist a self-issued ``QuoteAuthorization`` in Pubby's storage.
+
+    Stores the document under its own ``id`` — the same
+    ``{actor_url}/quote_authorizations/{auth_id}`` shape the inbox
+    processor uses for incoming ``QuoteRequest`` approvals — so the
+    federation route can serve it to servers verifying the quote.
+    Synchronous; invoke through ``asyncio.to_thread``.
+    """
+    storage = create_activitypub_storage(config.database.url)
+    storage.store_quote_authorization(authorization["id"], authorization)
+
+
+async def _deliver_quote_request(
+    session: AsyncSession,
+    *,
+    quote: Activity,
+    target: Activity,
+    author: User,
+    config: SonghiveConfig,
+) -> None:
+    """
+    Send the FEP-044f ``QuoteRequest`` to a remote quoted-post author.
+
+    Quoting a remote post asks its author for a ``QuoteAuthorization``:
+    the request carries the quoting ``Note`` as ``instrument`` and the
+    remote server replies with an ``Accept`` whose ``result`` is stamped
+    onto the quoting object by
+    ``federation.incoming.apply_quote_authorization``. No-op when the
+    quoted post is local, federation is disabled, the quote's visibility
+    does not federate, the author cannot sign, or the remote inbox cannot
+    be resolved.
+    """
+    if (
+        not config.federation.enabled
+        or not config.federation.instance_domain
+        or target.source_type != "remote"
+        or not target.source_actor.startswith(("http://", "https://"))
+        or not author.actor_url
+        or not author.private_key_pem
+    ):
+        return
+    try:
+        federates = Visibility.federates(Visibility(quote.visibility))
+    except ValueError:
+        return
+    if not federates:
+        return
+
+    obj = quote.payload.get("object") if isinstance(quote.payload, dict) else None
+    if not isinstance(obj, dict):
+        return
+
+    from pubby import build_quote_request_activity
+
+    from ..tasks.federation import deliver_activity
+
+    inbox = await asyncio.to_thread(
+        federation_service.resolve_actor_inbox,
+        target.source_actor,
+        config,
+        key_id=f"{author.actor_url}#main-key",
+        private_key_pem=author.private_key_pem,
+    )
+    if not inbox:
+        return
+    request = build_quote_request_activity(author.actor_url, target.source_id, obj, target.source_actor)
+    deliver_activity.delay(request, inbox, f"{author.actor_url}#main-key", author.private_key_pem)  # type: ignore
+
+
+async def _notify_quote(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    quote: Activity,
+    author: User,
+) -> None:
+    """Notify the quoted activity's local owner, never failing the quote.
+
+    Mirrors :func:`_notify_reply` — and the federated quote inbox path:
+    the payload carries a snapshot of the quoting note (``object_*``
+    fields) plus the ``target_*`` fields resolving the quoted activity,
+    and ``source_url``/``payload.activity_id`` point at the quote's own
+    object id so ``retract_activity`` removes the row when the quote is
+    deleted. Self-quotes and remote targets (no ``owner_user_id``) produce
+    nothing.
+    """
+    if activity.owner_user_id is None or str(activity.owner_user_id) == str(author.id):
+        return
+    try:
+        from ..federation.notifications import _note_snapshot
+        from . import notifications as notifications_service
+
+        note = quote.payload.get("object") if isinstance(quote.payload, dict) else {}
+        snapshot = _note_snapshot(note) if isinstance(note, dict) else {}
+        # The quote's own link fields let clients render its real card and
+        # link to its page; ``target_*`` resolves the quoted activity.
+        object_fields = await _entity_link_fields(session, quote)
+        target_fields = {
+            f"target_{key}": value for key, value in (await _entity_link_fields(session, activity)).items()
+        }
+        payload: Dict[str, Any] = {
+            "activity_id": quote.source_id,
+            "actor_name": author.display_name or author.username,
+            "actor_avatar_url": author.avatar_url,
+            **snapshot,
+            **object_fields,
+            "target_url": activity.source_id,
+            **target_fields,
+        }
+        if author.display_name:
+            payload["actor_display_name"] = author.display_name
+        await notifications_service.create_notification(
+            session,
+            user_id=str(activity.owner_user_id),
+            type=NotificationType.QUOTE,
+            actor_url=_local_actor_url(author),
+            source_url=quote.source_id,
+            payload=payload,
+        )
+    except Exception as exc:
+        logger.warning("Failed to create quote notification for activity %s: %s", activity.id, exc)
 
 
 async def _remote_mention_actor_urls(
@@ -2598,7 +3044,10 @@ async def create_status(
     without committing; the caller owns the transaction.
     """
     from ..federation.activities import create_status_activity
-    from ..federation.serializers import stored_file_to_attachment, track_to_attachment
+    from ..federation.serializers import (
+        stored_file_to_attachment,
+        track_to_attachment,
+    )
 
     text = (status_text or "").strip()
     media_ids = list(media_ids or [])
@@ -2646,6 +3095,7 @@ async def create_status(
     if processed.tags:
         note["tag"] = processed.tags
 
+    allow_public_quotes(note)
     mention_actor_urls: List[str] = [m.actor_url for m in processed.mentions if m.actor_url]  # type: ignore
     payload = create_status_activity(
         actor_url,

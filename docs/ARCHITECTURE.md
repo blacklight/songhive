@@ -456,7 +456,8 @@ remote author gets a `Mention` tag so `resolve_audience` delivers the
 reply to their inbox. Interactions skip the `can_manage` gate
 (`require_manage=False`) — view access on the target is enough — while
 content-producing activity types still require manage rights. The
-`POST /api/v1/activities/{id}/like`, `/{id}/boost` and `/{id}/reply`
+`POST /api/v1/activities/{id}/like`, `/{id}/boost`, `/{id}/reply` and
+`/{id}/quote`
 endpoints perform the 404/403/400 (or 422 for invalid replies) checks,
 provision the author's actor keys (`ensure_user_actor`), commit, then fan
 out: likes and boosts share `_fan_out_reaction_activity` (exposed as
@@ -465,8 +466,25 @@ targets — resolves the reacted author's inbox via
 `services/federation.resolve_actor_inbox` (the `federation_actor_cache`
 table first, then a signed actor-document fetch, preferring `sharedInbox`)
 and hands it to `fan_out_activity` alongside the reaction's own audience;
-replies fan out inline through `fan_out_activity`, best-effort.
-`DELETE /api/v1/activities/{id}/like` and `/{id}/boost` retract the
+replies fan out inline through `fan_out_activity`, best-effort. Quotes
+(`quote_activity`) work like replies — a `Create(Note)` row linked to the
+quoted activity through `in_reply_to_activity_id` — but the note carries
+the FEP-0449 `quote` field plus the `quoteUri`/`quoteUrl` forms Fedibird,
+Akkoma and Mastodon read and Misskey's `_misskey_quote` (never
+`inReplyTo`: a quote is not a reply), the quoted author is always
+addressed via a `Mention` tag — and `activity_audience` puts mentioned
+actors in `to` for public and followers posts, matching how Mastodon and
+Akkoma address their own — and FEP-044f authorization
+is negotiated: quoting a local user's post self-issues the
+`QuoteAuthorization` their auto-approval would grant (stored so it
+dereferences, stamped as `quoteAuthorization` on the note), while quoting
+a remote post delivers a `QuoteRequest` — quoting `Note` as `instrument`,
+quoted object as `object` — to the remote author's inbox
+(`_deliver_quote_request`, sent before the `Create` fan-out so the
+authorization flow starts first). The remote `Accept` answering it stamps the
+issued authorization id onto the stored quote (see inbound
+materialization below). `DELETE /api/v1/activities/{id}/like` and
+`/{id}/boost` retract the
 caller's reaction: `unreact_activity` soft-deletes the like/announce row
 (so the target can be reacted to again), removes the notification it
 produced, and returns the retracted activity; `fan_out_unreaction_activity`
@@ -486,7 +504,11 @@ non-deleted `reply` descendant reachable through the `in_reply_to` chain —
 computed with the `_activity_descendants_cte` recursive CTE — plus remote
 replies targeting any node in it, including remote replies to remote
 replies reached breadth-first through `object_id` chains
-(`_remote_thread_interactions`). Remote replies already materialized into
+(`_remote_thread_interactions`). `quote_count` is flat — quotes attach to
+the quoted post itself, never to each other — and counts direct
+`quote`-type children (local quotes and materialized remote ones) plus
+confirmed remote `QUOTE` interactions, deduplicated on `object_id`.
+Remote replies already materialized into
 `Activity` rows are skipped so a reply backed by both a row and a stored
 interaction counts once. Descendants the requester may not see
 (`mentioned` replies naming someone else, `private` rows owned by another
@@ -511,14 +533,30 @@ full `ActivityResponse`s plus remote replies rebuilt from the `raw_object`
 metadata the inbox processor stored, each carrying `in_reply_to` (the
 replied-to object id) so clients can regroup the flat list into threads.
 Replies already materialized into `Activity` rows are filtered out of the
-remote list so they render only as full cards.
+remote list so they render only as full cards. `GET
+/api/v1/activities/{id}/quotes` lists the known quotes via
+`list_activity_quotes`: visibility-filtered local `quote` activities —
+locally authored ones and remote quotes materialized into `Activity`
+rows — serialized as full `ActivityResponse`s, plus remote quotes rebuilt
+from Pubby `InteractionType.QUOTE` records keyed by the quoted object's
+`source_id`, each carrying `quoted` (the quoted object id) instead of the
+reply's `in_reply_to`. Materialized remote quotes are filtered out of the
+remote list so they render only as cards.
 The frontend renders them Mastodon-style: every descendant of a direct
 reply is unfolded flat into that reply's thread, each thread marked by its
-own vertical line. All three listings gate on `can_view_activity` and allow
+own vertical line. All four listings gate on `can_view_activity` and allow
 anonymous reads of public targets.
 `GET /api/v1/activities/{id}` returns a single activity under the same
 rules — it backs the notification UI's embedded activity cards and the
-SPA's `/activities/:id` permalink page (`views/ActivityView.vue`).
+SPA's `/activities/:id` permalink page (`views/ActivityView.vue`), which
+also lists the known quotes (`GET /{id}/quotes`) under the card — local
+ones as `ActivityCard`s, federated-only ones as `ActivityRemoteReply`
+rows — failure-isolated so a listing error cannot sink the page.
+`ActivityCard.vue` carries a separate Quote action next to Reply: a
+`StatusComposer` posts the quote through `POST
+/api/v1/activities/{id}/quote`, the `quote_count` button toggles a flat
+chronological list of local and remote quotes, and a quote card itself
+embeds the quoted post via `ActivityObjectEmbed`.
 `GET /api/v1/activities/lookup?url=...` resolves an ActivityPub object URL
 to the same `ActivityResponse`: it matches `Activity.source_id` directly
 (covering materialized remote replies whose object ids live on remote
@@ -690,11 +728,11 @@ through `POST /api/v1/statuses/`, which calls
 author's `user` entity, so statuses show up in the author's profile posts
 feed (`GET /api/v1/users/{username}/activities?mode=posts`) and can be
 edited/retracted through the regular activity endpoints. Posts mode
-returns the user's local `create` activities plus — Mastodon-style —
-their `announce` boosts unless `include_boosts=false`, and their `reply`
-activities only with `include_replies=true` (replies are hidden by
-default); `mode=all` returns every authored activity and ignores the
-include flags. The request
+returns the user's local `create` and `quote` activities plus —
+Mastodon-style — their `announce` boosts unless `include_boosts=false`,
+and their `reply` activities only with `include_replies=true` (replies
+are hidden by default); `mode=all` returns every authored activity and
+ignores the include flags. The request
 carries the raw `status` source text (rendered through `process_mentions`
 as `text/markdown` — the default — or `text/plain`), a `visibility`, an
 optional BCP-47 `language` (validated, stored on the activity, mirrored
@@ -734,6 +772,14 @@ except `Create` envelopes, whose embedded object is served instead because
 the activity's `source_id` identifies the published object, not the
 envelope — or a synthesized `Note` carrying the rendered `content`, the
 `activity_audience`-derived `to`/`cc`, `Mention` tags, and `inReplyTo`.
+Every post object — `track_to_audio_object`/`track_to_note_object`
+serials, status and reply `Note`s, and payload-derived documents at serve
+time — is stamped by `pubby.allow_public_quotes` with
+`interactionPolicy.canQuote` granting `automaticApproval` to `as:Public`
+(FEP-044f): quoting is always allowed, so Mastodon enables its Quote
+action and auto-approves the quote once the `QuoteAuthorization` it
+fetches matches. Restamping at serve time keeps objects published before
+the policy existed quotable without rewriting stored payloads.
 Because object URLs double as the objects' own `url` (a `Note` share's
 permalink on remote servers), clients not accepting an ActivityStreams
 media type are redirected to the SPA rather than served JSON: a
@@ -1247,20 +1293,23 @@ the HTTP routes.
   `/users/{username}/followers`). The SPA shows the count on
   `/@{username}` and renders follower details at `/@{username}/followers`.
 
-**Inbound remote replies** are materialized into `Activity` rows by
-`federation/incoming.py`, invoked from `tasks/federation.py`'s
-`process_incoming` for `Create`/`Update`/`Delete` activities after pubby's
-`InboxProcessor` has run. A `Create` whose object replies to a known
-activity — matched by `source_id` or the `/objects/{id}` permalink form —
-becomes a `source_type="remote"` `reply` row attached to the parent's
-entity, linked through `in_reply_to_activity_id`, carrying the raw
-activity as `payload` and the remote actor as `source_actor`. Publicly
-addressed replies keep the entity-clamped `public` visibility; non-public
-replies (direct messages, followers-only) are stored with `mentioned`
+**Inbound remote replies and quotes** are materialized into `Activity`
+rows by `federation/incoming.py`, invoked from `tasks/federation.py`'s
+`process_incoming` for `Create`/`Update`/`Delete`/`Accept` activities
+after pubby's `InboxProcessor` has run. A `Create` whose object replies
+to — or quotes — a known activity (matched by `source_id` or the
+`/objects/{id}` permalink form) becomes a `source_type="remote"`
+`reply`/`quote` row attached to the parent's entity, linked through
+`in_reply_to_activity_id`, carrying the raw activity as `payload` and the
+remote actor as `source_actor`. Quote fields (FEP-0449 `quote`, Mastodon
+`quoteUrl`, Misskey `_misskey_quote`) take precedence over `inReplyTo`,
+mirroring pubby's interaction typing. Publicly
+addressed objects keep the entity-clamped `public` visibility; non-public
+ones (direct messages, followers-only) are stored with `mentioned`
 visibility when they address at least one local user — through
 `to`/`cc`/`bto`/`bcc` addressees or `Mention` tags — each resolved local
 addressee getting an `ActivityMention` row so only that audience sees the
-reply in the thread. Non-public replies addressing no local user are not
+post in the listing. Non-public objects addressing no local user are not
 materialized. Attribution is enforced by pubby's `attribution.validate`:
 `process_incoming` enables `strict_attribution` on the `InboxProcessor`,
 and materialization/update re-apply `pubby.validate_attribution` to the
@@ -1268,15 +1317,23 @@ raw activity since the sync runs regardless of the processor's verdict —
 the delivering actor must match `attributedTo` and share the object's
 host. `Update` revises
 content, payload, mentions, hashtags and visibility (materializing
-replies whose `Create` was missed, and degrading rows that lose their
+posts whose `Create` was missed, and degrading rows that lose their
 public audience to `mentioned`); `Delete` soft-deletes the row, but only
-for the recorded `source_actor`. Because the Pubby `federation_interactions` record
-is kept alongside the row, reply counts and listings deduplicate on
-`object_id`. Materialized replies render as regular activity cards and
-accept the same interactions as local replies: likes and boosts federate
+for the recorded `source_actor`. An `Accept` answering a `QuoteRequest`
+we sent (`apply_quote_authorization`) stamps the issued
+`QuoteAuthorization` id onto the local `quote` row's stored `Create`
+payload — and fans out an `Update` — but only when the accepting actor is
+the quoted post's author and the `instrument`/`object` match the recorded
+quote and target. Because the Pubby `federation_interactions` record
+is kept alongside the row, reply/quote counts and listings deduplicate on
+`object_id`. Materialized replies and quotes render as regular activity
+cards and
+accept the same interactions as local ones: likes and boosts federate
 to the remote author's inbox through `fan_out_like_activity`/
-`fan_out_boost_activity`, and local replies address the remote author via
-a `Mention` tag with `inReplyTo` set to the remote `source_id`.
+`fan_out_boost_activity`, and local replies/quotes address the remote
+author via
+a `Mention` tag with `inReplyTo`/quote fields set to the remote
+`source_id`.
 
 **Instance-level actor:**
 
@@ -1421,11 +1478,24 @@ user's activity (`services/activities.py`'s `like_activity`, reached via
 share grant (`api/routes/shares.py` via `services/sharing.py`'s
 `(grant, created)` return) creates a `share`. The federation inbox path
 (`tasks/federation.py` → `federation/notifications.py`) maps Follow/Like/
-Announce/Create activities for each resolved local recipient — the
-addressed user for per-user inboxes, `resolve_inbox_recipients`' audience
-resolution for shared-inbox deliveries — `quote` wins over
-`reply` when a Create is both — and stamps matching
-`ActivityMention.notified_at` rows for `mention` notifications.
+Announce/Create/QuoteRequest activities for each resolved local recipient
+— the addressed user for per-user inboxes, `resolve_inbox_recipients`'
+audience resolution for shared-inbox deliveries — `quote` wins over
+`reply` when a Create is both, and only the target's owner gets the
+`reply`/`quote` notification (a reply or quote of someone else's post
+that merely tags the recipient stays a `mention`, which is otherwise
+suppressed once a reply/quote notification for the same note fired) —
+and stamps matching `ActivityMention.notified_at` rows. A FEP-044f
+`QuoteRequest` (auto-approved by pubby, which stores a dereferenceable
+`QuoteAuthorization` and answers `Accept`) also yields a `quote`
+notification when its `object` resolves to a local post owned by the
+recipient — the quote's own `Create` may never reach the inbox — with the
+`instrument` id recorded as `source_url`. Because a quote can arrive
+twice (request then `Create`, or the same `Create` on two inboxes) and
+the first row may already be seen, `quote` notifications deduplicate and
+merge payloads on `(recipient, actor, quoting object)` regardless of
+seen state, preserving the existing row and its read marker
+(`_create_or_update_quote_notification`).
 
 Notification `payload`s are denormalized at creation so rows stay renderable
 after the source object disappears. Every hook records the actor's
@@ -1445,7 +1515,12 @@ entities have no item page, so `item_type`/`item_id` are omitted there and
 `local_url` points at the author's `/@username` profile. `Create` payloads carry a `_note_snapshot` —
 `object_content` (capped raw HTML), `object_summary`, `object_name`,
 `object_url`, `published`, `object_mentions` — and replies/quotes add
-`target_url` plus `target_*` fields for a resolved local target.
+`target_url` plus `target_*` fields for a resolved local target. The
+`RE: <link>` quote fallback remote servers embed for non-quote-aware
+clients (a `quote-inline` element for Mastodon/Akkoma, a bare `RE: <url>`
+tail for Misskey/Threads) is stripped from stored content and snapshots
+(`strip_quote_fallback`) — the quoted activity renders through the
+`in_reply_to_activity_id` embed instead.
 
 Retraction mirrors creation so notifications don't outlive their event:
 unfavoriting a track retracts the owner's `like` notification, retracting a
@@ -1814,6 +1889,7 @@ REST API under `/api/v1/`:
 ```
 /users/{username}               # Per-user ActivityPub actor document (AP clients) or browser redirect to /@{username}
 /users/{username}/objects/{id}  # Dereferenceable ActivityPub objects (Audio, Note, Tombstone, stored payloads)
+/users/{username}/quote_authorizations/{id}  # FEP-044f QuoteAuthorization documents issued for the user actor
 /@{username}                    # Mastodon-style profile: AP actor for AP clients, SPA shell for browsers with rel="me" links
 /tracks/{id}                    # Track page: Audio object for AP clients, SPA + rel=alternate hints for browsers
 /.well-known/webfinger          # WebFinger discovery

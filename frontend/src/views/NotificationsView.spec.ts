@@ -497,6 +497,43 @@ describe("NotificationsView", () => {
     expect(target.text()).toContain("My Song");
   });
 
+  it("renders a quote notification as a quote card embedding the quoted activity", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "quote",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/objects/note-9",
+          payload: {
+            actor_name: "bob",
+            object_url: "https://remote.example/objects/note-9",
+            object_content: "<p>my take on this</p>",
+            target_url: "https://example.com/users/me/objects/o-1",
+            target_object_activity_id: "act-quoted",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    getActivity.mockResolvedValueOnce(
+      createActivity({ id: "act-quoted", content: "<p>the original</p>" }),
+    );
+    const { wrapper } = await mountView();
+    await flushPromises();
+
+    // "quoted your post" links to the quoted activity's page.
+    const action = wrapper.find(".notifications-view__action");
+    expect(action.attributes("href")).toBe("/activities/act-quoted");
+
+    // The snapshot card is a quote card: the quoter's message is the
+    // primary content, with the quoted activity embedded inside.
+    const card = wrapper.find(".activity-card");
+    expect(card.exists()).toBe(true);
+    expect(card.text()).toContain("my take on this");
+    expect(getActivity).toHaveBeenCalledWith("act-quoted");
+    expect(card.text()).toContain("the original");
+  });
+
   it("renders an item card for share notifications", async () => {
     listNotifications.mockResolvedValueOnce({
       items: [

@@ -5,6 +5,7 @@ import {
   deleteActivity as deleteActivityApi,
   listEntityActivities,
   likeActivity as likeActivityApi,
+  quoteActivity as quoteActivityApi,
   replyToActivity as replyToActivityApi,
   unboostActivity as unboostActivityApi,
   unlikeActivity as unlikeActivityApi,
@@ -134,7 +135,12 @@ export const useActivitiesStore = defineStore("activities", () => {
     patch: Partial<
       Pick<
         ActivityResponse,
-        "like_count" | "boost_count" | "reply_count" | "liked" | "boosted"
+        | "like_count"
+        | "boost_count"
+        | "reply_count"
+        | "quote_count"
+        | "liked"
+        | "boosted"
       >
     >,
   ): void {
@@ -259,6 +265,16 @@ export const useActivitiesStore = defineStore("activities", () => {
     return created;
   }
 
+  async function quote(
+    activity: ActivityResponse,
+    body: ActivityReplyRequest,
+  ): Promise<ActivityResponse> {
+    const created = await quoteActivityApi(activity.id, body);
+    const current = updatedById.value.get(activity.id) ?? activity;
+    patchInteraction(current, { quote_count: current.quote_count + 1 });
+    return created;
+  }
+
   async function remove(activityId: string): Promise<void> {
     if (deletingIds.value.has(activityId)) return;
     deletingIds.value.add(activityId);
@@ -323,6 +339,7 @@ export const useActivitiesStore = defineStore("activities", () => {
     unboost,
     retractReaction,
     reply,
+    quote,
     remove,
     update,
     $resetFeed,

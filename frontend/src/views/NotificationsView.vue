@@ -379,11 +379,15 @@ function noteActivity(item: NotificationResponse): ActivityResponse | null {
   const payload = item.payload ?? {};
   const sourceId = str(payload.object_url) ?? item.source_url ?? "";
   if (!sourceId && !str(payload.object_content)) return null;
+  const isQuote = item.type === "quote";
   return {
     id: item.id,
     entity_type: "",
     entity_id: "",
-    activity_type: "create",
+    // Quote notifications render the quoter's note as a quote card: the
+    // quoted activity — whose local id the payload carries under
+    // ``target_object_activity_id`` — embeds inside it like any quote.
+    activity_type: isQuote ? "quote" : "create",
     source_type: "remote",
     source_actor: item.actor_url ?? "",
     source_id: sourceId,
@@ -394,7 +398,9 @@ function noteActivity(item: NotificationResponse): ActivityResponse | null {
     source_actor_display_name:
       str(payload.actor_display_name) ?? str(payload.actor_name) ?? null,
     visibility: "public",
-    in_reply_to_activity_id: null,
+    in_reply_to_activity_id: isQuote
+      ? (str(payload.target_object_activity_id) ?? null)
+      : null,
     content: str(payload.object_content) ?? str(payload.object_name) ?? null,
     content_source: null,
     content_type: "text/html",
@@ -404,6 +410,7 @@ function noteActivity(item: NotificationResponse): ActivityResponse | null {
     like_count: 0,
     boost_count: 0,
     reply_count: 0,
+    quote_count: 0,
     liked: false,
     boosted: false,
     can_interact: false,

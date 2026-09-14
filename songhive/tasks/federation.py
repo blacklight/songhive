@@ -105,6 +105,10 @@ def process_incoming(
         allowed_instances=config.federation.allowed_instances,
         blocked_instances=config.federation.blocked_instances,
         strict_attribution=True,
+        # FEP-044f: quoting is always allowed — incoming QuoteRequest
+        # activities get an automatic Accept carrying a dereferenceable
+        # QuoteAuthorization.
+        auto_approve_quotes=True,
     )
 
     body: Optional[bytes] = None
@@ -220,16 +224,17 @@ def _retract_shared_inbox_follows(
 
 def _sync_remote_activities(config, activity: dict) -> None:
     """
-    Materialize inbound remote replies into ``Activity`` rows.
+    Materialize inbound remote replies and quotes into ``Activity`` rows.
 
-    ``Create`` replies to known local activities become
+    ``Create`` replies and quotes of known local activities become
     ``source_type="remote"`` rows — public ones outright, non-public ones
     when they address a local user — so they render as full cards and
-    accept interactions; ``Update``/``Delete`` revise or retract them.
-    Non-reply types are skipped — likes, boosts and quotes stay
+    accept interactions; ``Update``/``Delete`` revise or retract them, and
+    an ``Accept`` answering a ``QuoteRequest`` we sent stamps the issued
+    authorization onto the quoting post. Likes and boosts stay
     interaction-only.
     """
-    if activity.get("type") not in ("Create", "Update", "Delete"):
+    if activity.get("type") not in ("Create", "Update", "Delete", "Accept"):
         return
 
     from ..federation.incoming import sync_remote_activity
@@ -239,7 +244,7 @@ def _sync_remote_activities(config, activity: dict) -> None:
     async def _run() -> None:
         try:
             async with get_session() as session:
-                await sync_remote_activity(session, activity=activity)
+                await sync_remote_activity(session, activity=activity, config=config)
                 await session.commit()
         finally:
             await dispose_and_reset()

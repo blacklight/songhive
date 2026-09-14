@@ -94,6 +94,7 @@ class ActivityResponse(BaseModel):
     like_count: int = 0
     boost_count: int = 0
     reply_count: int = 0
+    quote_count: int = 0
     liked: bool = False
     boosted: bool = False
     can_interact: bool = True
@@ -229,6 +230,7 @@ def _build_activity_response(
         response.like_count = summary.like_count
         response.boost_count = summary.boost_count
         response.reply_count = summary.reply_count
+        response.quote_count = summary.quote_count
         response.liked = summary.liked
         response.boosted = summary.boosted
     response.object_url = _activity_object_url(activity)
@@ -758,6 +760,80 @@ async def reply_activity(
     )
 
 
+@router.post(
+    "/{activity_id}/quote",
+    response_model=ActivityResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def quote_activity(
+    activity_id: str,
+    body: ActivityReplyRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Post a quote of an activity as the current user.
+
+    The quote is a ``Create(Note)`` whose object references the quoted
+    post through the FEP-0449 ``quote``/Mastodon ``quoteUrl``/Misskey
+    ``_misskey_quote`` fields and inherits — unless a narrower
+    ``visibility`` is requested — the quoted activity's visibility. It is
+    attached to the same entity, federated to its audience, and notified
+    to the quoted author. Quoting a remote activity additionally sends a
+    FEP-044f ``QuoteRequest`` to the remote author's inbox; quoting a
+    local user's post self-issues the ``QuoteAuthorization``. A quote of
+    a deleted activity returns 404.
+    """
+    activity = await db.get(Activity, activity_id)
+    if activity is None or activity.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+
+    if not await activity_service.can_view_activity(db, current_user, activity):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this activity",
+        )
+
+    config = get_config(request)
+    ensure_user_actor(current_user, config)
+    quote = await activity_service.quote_activity(
+        db,
+        activity=activity,
+        author=current_user,
+        config=config,
+        status_text=body.status,
+        content_type=body.content_type,
+        visibility=body.visibility,
+        language=body.language,
+        media_ids=body.media_ids,
+        track_ids=body.track_ids,
+    )
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="activity.quote",
+        target_type="activity",
+        target_id=str(activity.id),
+        details={
+            "entity_type": activity.entity_type,
+            "entity_id": activity.entity_id,
+            "quote_id": str(quote.id),
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+    await db.refresh(quote, ["mentions"])
+
+    profile_map = await activity_service.resolve_source_actor_profiles(db, [quote], config)
+    summary_map = await activity_service.resolve_interaction_summaries(db, [quote], current_user, config)
+    return _build_activity_response(
+        quote,
+        profile_map.get(str(quote.id), activity_service.ActorProfile()),
+        summary_map.get(str(quote.id)),
+    )
+
+
 def _actor_handle(actor: activity_service.InteractionActor) -> str:
     """Derive a display handle: ``@username`` for locals, ``@name@host`` remote."""
     if actor.username:
@@ -901,4 +977,68 @@ async def list_activity_replies(
             for a in local
         ],
         remote_replies=[_remote_reply_payload(i) for i in remote],
+    )
+
+
+class QuoteActivityListResponse(BaseModel):
+    """The known quotes of an activity, local and federated."""
+
+    activities: List[ActivityResponse] = []
+    remote_quotes: List[dict] = []
+
+
+def _remote_quote_payload(interaction: Any) -> dict:
+    """
+    Serialize a Pubby quote ``Interaction`` for the quote list.
+
+    Same card fields as ``_remote_reply_payload``; ``quoted`` carries the
+    quoted object id (the interaction's target) in place of the reply's
+    ``in_reply_to`` parent pointer — quotes attach to the object they
+    quote, not to a thread parent.
+    """
+    payload = _remote_reply_payload(interaction)
+    payload.pop("in_reply_to", None)
+    payload["quoted"] = interaction.target_resource or None
+    return payload
+
+
+@router.get("/{activity_id}/quotes", response_model=QuoteActivityListResponse)
+async def list_activity_quotes(
+    activity_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    List the known quotes of an activity, oldest first.
+
+    Local quotes — locally authored ones and remote quotes materialized
+    into ``Activity`` rows — are serialized as full activity cards;
+    federated quotes that were never materialized come from Pubby's
+    interaction storage as compact ``raw_object``-backed records carrying
+    ``quoted`` (the quoted object id).
+    """
+    activity = await db.get(Activity, activity_id)
+    if activity is None or activity.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    if not await activity_service.can_view_activity(db, user, activity):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this activity",
+        )
+
+    config = get_config(request)
+    local, remote = await activity_service.list_activity_quotes(db, activity=activity, user=user, config=config)
+    profile_map = await activity_service.resolve_source_actor_profiles(db, local, config)
+    summary_map = await activity_service.resolve_interaction_summaries(db, local, user, config)
+    return QuoteActivityListResponse(
+        activities=[
+            _build_activity_response(
+                a,
+                profile_map.get(str(a.id), activity_service.ActorProfile()),
+                summary_map.get(str(a.id)),
+            )
+            for a in local
+        ],
+        remote_quotes=[_remote_quote_payload(i) for i in remote],
     )

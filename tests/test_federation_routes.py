@@ -428,6 +428,92 @@ async def test_get_object_serves_create_payload_object(fed_client, db_session, r
     assert "object" not in data
 
 
+async def test_get_object_restamps_quote_policy_on_stored_payload(fed_client, db_session, regular_user):
+    """Objects published before the quote policy advertise it when served.
+
+    Mastodon only enables its Quote action on objects whose
+    ``interactionPolicy.canQuote`` grants automatic approval; restamping at
+    serve time keeps legacy posts quotable without rewriting payloads.
+    """
+    actor_url = "https://music.example.com/users/regular"
+    note = {
+        "id": f"{actor_url}/objects/legacy-1",
+        "type": "Note",
+        "content": "<p>shared before quotes</p>",
+        "url": f"{actor_url}/objects/legacy-1",
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [f"{actor_url}/followers"],
+    }
+    payload = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": f"{actor_url}/activities/create-legacy",
+        "type": "Create",
+        "actor": actor_url,
+        "object": note,
+        "to": note["to"],
+        "cc": note["cc"],
+    }
+    db_session.add(_make_activity(regular_user, object_id="legacy-1", payload=payload))
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/objects/legacy-1", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+    assert data["interactionPolicy"] == {
+        "canQuote": {
+            "automaticApproval": ["https://www.w3.org/ns/activitystreams#Public"],
+            "manualApproval": [],
+        }
+    }
+
+
+async def test_get_quote_authorization_serves_stored_document(fed_client, db_session, regular_user, fed_config):
+    """GET /users/{username}/quote_authorizations/{id} dereferences a stored FEP-044f doc."""
+    from songhive.federation.actors import get_federation_storage
+
+    auth_id = "https://music.example.com/users/regular/quote_authorizations/auth-1"
+    document = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": auth_id,
+        "type": "QuoteAuthorization",
+        "interactingObject": "https://remote.example/notes/quoted-1",
+        "interactionTarget": "https://music.example.com/users/regular/objects/share-1",
+        "attributedTo": "https://music.example.com/users/regular",
+    }
+    # Release the async session's write lock so the synchronous pubby
+    # storage can write to the same SQLite file.
+    await db_session.commit()
+    storage = get_federation_storage(fed_config.database.url)
+    storage.store_quote_authorization(auth_id, document)
+
+    response = fed_client.get(
+        "/users/regular/quote_authorizations/auth-1",
+        headers={"Accept": ACTIVITY_JSON},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert ACTIVITY_JSON in response.headers["content-type"]
+    assert response.json() == document
+
+
+async def test_get_quote_authorization_unknown_returns_404(fed_client, regular_user):
+    """Unknown authorization ids answer 404."""
+    response = fed_client.get(
+        "/users/regular/quote_authorizations/missing",
+        headers={"Accept": ACTIVITY_JSON},
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_get_quote_authorization_unknown_user_returns_404(fed_client):
+    """The authorization route 404s for unknown local users."""
+    response = fed_client.get(
+        "/users/nobody/quote_authorizations/auth-1",
+        headers={"Accept": ACTIVITY_JSON},
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
 async def test_get_object_redirects_browsers_to_track_page(fed_client, db_session, regular_user):
     """A browser opening a track-resolved object URL lands on the track page."""
     artist = Artist(name="Artist")
@@ -494,7 +580,10 @@ async def test_get_object_synthesizes_note_for_content_activity(fed_client, db_s
     assert data["attributedTo"] == actor_url
     assert data["content"].startswith("<p>hi")
     assert data["published"]
-    assert data["to"] == ["https://www.w3.org/ns/activitystreams#Public"]
+    assert data["to"] == [
+        "https://www.w3.org/ns/activitystreams#Public",
+        "https://remote.example/users/bob",
+    ]
     assert data["cc"] == [f"{actor_url}/followers"]
     assert data["inReplyTo"] == f"{actor_url}/objects/parent-1"
     assert data["tag"] == [

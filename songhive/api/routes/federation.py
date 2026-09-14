@@ -219,6 +219,36 @@ async def get_object(
     return _activity_object_response(activity)
 
 
+@router.get("/users/{username}/quote_authorizations/{auth_id:path}")
+async def get_quote_authorization(
+    username: str,
+    auth_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Dereference a ``QuoteAuthorization`` issued for this actor (FEP-044f).
+
+    Pubby's inbox processor auto-approves incoming ``QuoteRequest``
+    activities and stores the authorization under the addressed actor's URL
+    — ``{actor_url}/quote_authorizations/{id}`` — so remote servers can
+    fetch it to clear the pending state on their quote posts. Requests for
+    the instance actor's authorizations are served by pubby's own adapter
+    route (``/ap/actor/quote_authorizations/{id}``).
+    """
+    config = _federation_config(request)
+    user = await _get_active_user(db, username)
+    ensure_user_actor(user, config)
+    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    document = await asyncio.to_thread(
+        storage.get_quote_authorization,
+        f"{user.actor_url}/quote_authorizations/{auth_id}",
+    )
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return JSONResponse(content=document, media_type=ACTIVITY_JSON)
+
+
 @router.get("/activities/{activity_id}")
 async def get_activity_page(
     activity_id: str,

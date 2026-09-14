@@ -2,8 +2,14 @@
 import { computed, ref, watch } from "vue";
 import { useRoute, RouterLink } from "vue-router";
 import { useI18n } from "vue-i18n";
-import { getActivity, type ActivityResponse } from "@/api/activities";
+import {
+  getActivity,
+  listActivityQuotes,
+  type ActivityResponse,
+  type RemoteQuote,
+} from "@/api/activities";
 import ActivityCard from "@/components/activities/ActivityCard.vue";
+import ActivityRemoteReply from "@/components/activities/ActivityRemoteReply.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
@@ -11,9 +17,20 @@ import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 // Permalink page for a single activity — the SPA destination of the
 // ``{actor}/objects/{id}`` object URLs. Renders the card with its reply
 // threads expanded, Mastodon-style, preceded by its ancestor chain so a
-// reply opens with its conversation context.
+// reply opens with its conversation context. Quotes — local ones and
+// federated posts carrying a ``quote``/``quoteUrl`` targeting this
+// object — are listed under the card.
 const { t } = useI18n();
 const route = useRoute();
+
+type QuoteEntry =
+  | {
+      kind: "local";
+      key: string;
+      publishedAt: string;
+      activity: ActivityResponse;
+    }
+  | { kind: "remote"; key: string; publishedAt: string; quote: RemoteQuote };
 
 const ENTITY_ROUTES: Record<string, string> = {
   track: "tracks",
@@ -27,6 +44,7 @@ const MAX_ANCESTORS = 20;
 
 const activity = ref<ActivityResponse | null>(null);
 const ancestors = ref<ActivityResponse[]>([]);
+const quotes = ref<QuoteEntry[]>([]);
 const loading = ref(true);
 const failed = ref(false);
 
@@ -35,9 +53,30 @@ async function load(activityId: string) {
   failed.value = false;
   activity.value = null;
   ancestors.value = [];
+  quotes.value = [];
   try {
     const main = await getActivity(activityId);
     activity.value = main;
+    // Quotes are additive context: a listing failure must not sink the page.
+    try {
+      const listed = await listActivityQuotes(activityId);
+      quotes.value = [
+        ...listed.activities.map((a) => ({
+          kind: "local" as const,
+          key: a.id,
+          publishedAt: a.published_at,
+          activity: a,
+        })),
+        ...listed.remote_quotes.map((q) => ({
+          kind: "remote" as const,
+          key: q.id,
+          publishedAt: q.published_at ?? "",
+          quote: q,
+        })),
+      ].sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
+    } catch {
+      quotes.value = [];
+    }
     const chain: ActivityResponse[] = [];
     const seen = new Set([main.id]);
     let cursor = main.in_reply_to_activity_id ?? null;
@@ -109,6 +148,20 @@ const backLink = computed(() => {
         />
       </div>
       <ActivityCard :key="activity.id" :activity="activity" expand-replies />
+      <section v-if="quotes.length" class="activity-view__quotes">
+        <h2 class="activity-view__quotes-title">
+          <AppIcon name="quote-left" spacing="right" />{{
+            t("activities.quotes")
+          }}
+        </h2>
+        <template v-for="entry in quotes" :key="entry.key">
+          <ActivityCard
+            v-if="entry.kind === 'local'"
+            :activity="entry.activity"
+          />
+          <ActivityRemoteReply v-else :reply="entry.quote" />
+        </template>
+      </section>
     </template>
   </div>
 </template>
@@ -141,6 +194,24 @@ const backLink = computed(() => {
 
 .activity-view__ancestors :deep(.activity-card) {
   width: auto;
+}
+
+.activity-view__quotes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.activity-view__quotes :deep(.activity-card) {
+  width: auto;
+}
+
+.activity-view__quotes-title {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  font-size: 1rem;
+  color: var(--color-text-secondary);
 }
 
 .activity-view__error {

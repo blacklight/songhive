@@ -33,7 +33,9 @@ from songhive.services.activities import (
     fan_out_unreaction_activity,
     like_activity,
     list_activity_interactors,
+    list_activity_quotes,
     list_activity_replies,
+    quote_activity,
     reply_to_activity,
     resolve_interaction_summaries,
     unreact_activity,
@@ -258,7 +260,8 @@ async def test_like_activity_creates_like(db_session, regular_user, other_user):
     assert like.payload["actor"] == f"urn:songhive:user:{regular_user.username}"
     assert like.payload["object"] == activity.source_id
     assert like.payload["id"] == like.source_id
-    assert like.payload["to"] == [AS_PUBLIC]
+    # The liked post's author is addressed directly, Mastodon-style.
+    assert like.payload["to"] == [AS_PUBLIC, activity.source_actor]
 
 
 @pytest.mark.asyncio
@@ -898,7 +901,7 @@ async def test_retract_activity_create_still_fans_out_delete(db_session, regular
 
 @pytest.mark.asyncio
 async def test_list_user_activities_posts_defaults(db_session, regular_user, other_user, config):
-    """Posts mode includes creates and boosts, not replies or likes."""
+    """Posts mode includes creates, quotes and boosts, not replies or likes."""
     track = await _make_track(db_session, other_user)
     target = _make_activity("track", track.id, owner_user_id=other_user.id)
     own = _make_activity(
@@ -913,12 +916,13 @@ async def test_list_user_activities_posts_defaults(db_session, regular_user, oth
     await boost_activity(db_session, activity=target, author=regular_user)
     await like_activity(db_session, activity=target, author=regular_user)
     await reply_to_activity(db_session, activity=target, author=regular_user, config=config, status_text="nice")
+    await quote_activity(db_session, activity=target, author=regular_user, config=config, status_text="qt")
 
     activities, _ = await activity_service.list_user_activities(
         db_session, owner_user_id=str(regular_user.id), user=regular_user, mode="posts"
     )
     types = {a.activity_type for a in activities}
-    assert types == {"create", "announce"}
+    assert types == {"create", "announce", "quote"}
 
 
 @pytest.mark.asyncio
@@ -1100,7 +1104,8 @@ async def test_boost_activity_creates_announce(db_session, regular_user, other_u
     assert boost.payload["actor"] == f"urn:songhive:user:{regular_user.username}"
     assert boost.payload["object"] == activity.source_id
     assert boost.payload["id"] == boost.source_id
-    assert boost.payload["to"] == [AS_PUBLIC]
+    # The boosted post's author is addressed directly, Mastodon-style.
+    assert boost.payload["to"] == [AS_PUBLIC, activity.source_actor]
 
 
 @pytest.mark.asyncio
@@ -1606,6 +1611,393 @@ async def test_list_replies_includes_remote_thread_replies(db_session, regular_u
 
 
 @pytest.mark.asyncio
+async def test_list_quotes_returns_remote_quotes_oldest_first(db_session, regular_user, config, monkeypatch):
+    """Confirmed remote quotes of the activity surface from pubby storage."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    older = Interaction(
+        source_actor_id="https://remote.example/users/bob",
+        target_resource=activity.source_id,
+        interaction_type=InteractionType.QUOTE,
+        object_id="https://remote.example/objects/q1",
+        content="<p>first quote</p>",
+        published=datetime(2024, 1, 1, tzinfo=timezone.utc),
+    )
+    newer = Interaction(
+        source_actor_id="https://remote.example/users/carol",
+        target_resource=activity.source_id,
+        interaction_type=InteractionType.QUOTE,
+        object_id="https://remote.example/objects/q2",
+        published=datetime(2024, 1, 2, tzinfo=timezone.utc),
+    )
+    unrelated = Interaction(
+        source_actor_id="https://remote.example/users/dan",
+        target_resource="https://remote.example/objects/elsewhere",
+        interaction_type=InteractionType.QUOTE,
+        object_id="https://remote.example/objects/q3",
+    )
+    interactions = (newer, unrelated, older)
+    monkeypatch.setattr(
+        activity_service,
+        "_fetch_remote_interactions",
+        lambda cfg, ids, interaction_type=None: {
+            sid: [
+                i
+                for i in interactions
+                if i.target_resource == sid and (interaction_type is None or i.interaction_type == interaction_type)
+            ]
+            for sid in ids
+        },
+    )
+
+    local, remote = await list_activity_quotes(db_session, activity=activity, user=None, config=config)
+    assert local == []
+    assert [q.object_id for q in remote] == [
+        "https://remote.example/objects/q1",
+        "https://remote.example/objects/q2",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_quotes_empty_when_federation_disabled(db_session, regular_user, config):
+    """Without federation the quote listing is empty."""
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    assert await list_activity_quotes(db_session, activity=activity, user=None, config=config) == ([], [])
+
+
+# ---------------------------------------------------------------------------
+# quote_activity
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_quote_activity_creates_quote(db_session, regular_user, other_user, config):
+    """A quote becomes a ``quote`` activity whose Note carries quote fields."""
+    other_user.actor_url = "https://local.example/users/other"
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    quote = await quote_activity(
+        db_session, activity=activity, author=regular_user, config=config, status_text="check this"
+    )
+
+    assert quote.activity_type == "quote"
+    assert quote.source_type == "local"
+    assert quote.in_reply_to_activity_id == str(activity.id)
+    assert quote.entity_type == activity.entity_type
+    assert quote.entity_id == activity.entity_id
+    assert quote.owner_user_id == regular_user.id
+    assert "check this" in (quote.content or "")
+
+    obj = quote.payload["object"]
+    assert obj["type"] == "Note"
+    assert obj["id"] == quote.source_id
+    # The quote fields point at the quoted object; no inReplyTo — a quote
+    # is not a reply.
+    assert obj["quote"] == activity.source_id
+    assert obj["quoteUri"] == activity.source_id
+    assert obj["quoteUrl"] == activity.source_id
+    assert obj["_misskey_quote"] == activity.source_id
+    assert "inReplyTo" not in obj
+    # Quoting stays always-allowed on the quote object itself.
+    assert obj["interactionPolicy"]["canQuote"]["automaticApproval"] == [AS_PUBLIC]
+    # The quoted author is addressed through a Mention tag.
+    assert any(
+        tag.get("type") == "Mention" and tag.get("name") == f"@{other_user.username}" for tag in obj.get("tag", [])
+    )
+
+
+@pytest.mark.asyncio
+async def test_quote_activity_notifies_quoted_owner(db_session, regular_user, other_user, config):
+    """Quoting another user's activity creates a quote notification."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    quote = await quote_activity(db_session, activity=activity, author=regular_user, config=config, status_text="qt")
+
+    notifications = await _notifications_for(db_session, other_user.id)
+    assert len(notifications) == 1
+    notification = notifications[0]
+    assert notification.type == "quote"
+    assert notification.source_url == quote.source_id
+    assert notification.payload["activity_id"] == quote.source_id
+    assert notification.payload["target_url"] == activity.source_id
+
+
+@pytest.mark.asyncio
+async def test_quote_activity_self_quote_no_notification(db_session, regular_user, config):
+    """Quoting one's own activity does not notify."""
+    track = await _make_track(db_session, regular_user)
+    activity = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    await quote_activity(db_session, activity=activity, author=regular_user, config=config, status_text="self")
+
+    assert await _notifications_for(db_session, regular_user.id) == []
+
+
+@pytest.mark.asyncio
+async def test_quote_activity_empty_422(db_session, regular_user, other_user, config):
+    """A quote needs text or attachments."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    with pytest.raises(HTTPException) as excinfo:
+        await quote_activity(db_session, activity=activity, author=regular_user, config=config)
+    assert excinfo.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_quote_activity_deleted_target_404(db_session, regular_user, other_user, config):
+    """Quoting a retracted activity returns 404."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id, deleted_at=datetime.now(timezone.utc))
+    db_session.add(activity)
+    await db_session.flush()
+
+    with pytest.raises(HTTPException) as excinfo:
+        await quote_activity(db_session, activity=activity, author=regular_user, config=config, status_text="hi")
+    assert excinfo.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_quote_activity_visibility_cannot_exceed_target(db_session, regular_user, other_user, config):
+    """A quote may narrow but never widen the quoted activity's visibility."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id, visibility=Visibility.FOLLOWERS.value)
+    db_session.add(activity)
+    await db_session.flush()
+
+    with pytest.raises(HTTPException) as excinfo:
+        await quote_activity(
+            db_session,
+            activity=activity,
+            author=regular_user,
+            config=config,
+            status_text="hi",
+            visibility=Visibility.PUBLIC.value,
+        )
+    assert excinfo.value.status_code == 422
+
+    quote = await quote_activity(db_session, activity=activity, author=regular_user, config=config, status_text="hi")
+    assert quote.visibility == Visibility.FOLLOWERS.value
+
+
+@pytest.mark.asyncio
+async def test_quote_activity_local_target_self_issues_authorization(
+    db_session, regular_user, other_user, config, monkeypatch
+):
+    """Quoting a local post stamps a stored QuoteAuthorization on the note."""
+    config = _fed_config(config)
+    other_user.actor_url = "https://local.example/users/other"
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=other_user.id,
+        source_actor=other_user.actor_url,
+        source_id=f"{other_user.actor_url}/objects/t1",
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    # Pubby's storage opens its own connection — recording the document
+    # in-memory keeps the test independent of the sqlite write lock the
+    # open session holds.
+    stored: list[dict] = []
+    monkeypatch.setattr(
+        activity_service,
+        "_store_quote_authorization",
+        lambda cfg, authorization: stored.append(authorization),
+    )
+
+    quote = await quote_activity(db_session, activity=activity, author=regular_user, config=config, status_text="qt")
+
+    auth_id = quote.payload["object"]["quoteAuthorization"]
+    assert auth_id.startswith(f"{other_user.actor_url}/quote_authorizations/")
+    assert len(stored) == 1
+    document = stored[0]
+    assert document["id"] == auth_id
+    assert document["attributedTo"] == other_user.actor_url
+    assert document["interactionTarget"] == activity.source_id
+    assert document["interactingObject"] == quote.source_id
+
+
+@pytest.mark.asyncio
+async def test_quote_activity_remote_target_sends_quote_request(db_session, regular_user, config, monkeypatch):
+    """Quoting a remote post delivers a FEP-044f QuoteRequest to its author."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    regular_user.private_key_pem = "private-key"
+    track = await _make_track(db_session, regular_user)
+    target = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=None,
+        source_type="remote",
+        source_actor="https://remote.example/users/bob",
+        source_id="https://remote.example/objects/p1",
+    )
+    db_session.add(target)
+    await db_session.flush()
+
+    deliveries = []
+    deliver = MagicMock()
+    deliver.delay.side_effect = lambda payload, inbox, key_id, key: deliveries.append((payload, inbox))
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+    monkeypatch.setattr(federation_service, "get_follower_inboxes", lambda *a, **k: [])
+    monkeypatch.setattr(federation_service, "resolve_actor_inbox", lambda *a, **k: "https://remote.example/inbox")
+
+    quote = await quote_activity(db_session, activity=target, author=regular_user, config=config, status_text="qt")
+
+    kinds = [payload["type"] for payload, _inbox in deliveries]
+    assert "Create" in kinds
+    assert "QuoteRequest" in kinds
+    request = next(payload for payload, _inbox in deliveries if payload["type"] == "QuoteRequest")
+    assert request["actor"] == regular_user.actor_url
+    assert request["object"] == target.source_id
+    assert request["instrument"]["id"] == quote.source_id
+    assert request["instrument"]["quoteUrl"] == target.source_id
+    assert request["to"] == [target.source_actor]
+    assert all(inbox == "https://remote.example/inbox" for _p, inbox in deliveries)
+
+
+@pytest.mark.asyncio
+async def test_summaries_count_quotes(db_session, regular_user, other_user, config, monkeypatch):
+    """``quote_count`` covers local quotes plus confirmed remote ones, deduped."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    quote = await quote_activity(
+        db_session, activity=activity, author=regular_user, config=config, status_text="local quote"
+    )
+    # A reply to the quote threads under it but is not a quote itself.
+    await reply_to_activity(db_session, activity=quote, author=other_user, config=config, status_text="reply to quote")
+
+    remote_quote = Interaction(
+        source_actor_id="https://remote.example/users/bob",
+        target_resource=activity.source_id,
+        interaction_type=InteractionType.QUOTE,
+        object_id="https://remote.example/objects/q1",
+    )
+    # An interaction already backed by a materialized row must not count twice.
+    materialized = Interaction(
+        source_actor_id="https://remote.example/users/carol",
+        target_resource=activity.source_id,
+        interaction_type=InteractionType.QUOTE,
+        object_id="https://remote.example/objects/q2",
+    )
+    db_session.add(
+        _make_activity(
+            "track",
+            track.id,
+            activity_type="quote",
+            source_type="remote",
+            source_actor="https://remote.example/users/carol",
+            source_id="https://remote.example/objects/q2",
+            in_reply_to_activity_id=str(activity.id),
+        )
+    )
+    await db_session.flush()
+
+    monkeypatch.setattr(
+        activity_service,
+        "_fetch_remote_interactions",
+        lambda cfg, ids, interaction_type=None: {
+            sid: [
+                i
+                for i in (remote_quote, materialized)
+                if i.target_resource == sid and (interaction_type is None or i.interaction_type == interaction_type)
+            ]
+            for sid in ids
+        },
+    )
+
+    summaries = await resolve_interaction_summaries(db_session, [activity, quote], regular_user, config)
+    assert summaries[str(activity.id)].quote_count == 3
+    # Reply counts are threaded — the reply under the quote also counts
+    # toward the quoted root — while ``quote_count`` stays flat.
+    assert summaries[str(activity.id)].reply_count == 1
+    assert summaries[str(quote.id)].quote_count == 0
+    assert summaries[str(quote.id)].reply_count == 1
+
+
+@pytest.mark.asyncio
+async def test_list_quotes_merges_local_and_remote(db_session, regular_user, other_user, config, monkeypatch):
+    """The quote listing returns materialized quotes once, plus remote-only ones."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    local_quote = await quote_activity(
+        db_session, activity=activity, author=regular_user, config=config, status_text="local quote"
+    )
+    # A materialized remote quote whose interaction record still exists.
+    materialized = _make_activity(
+        "track",
+        track.id,
+        activity_type="quote",
+        source_type="remote",
+        source_actor="https://remote.example/users/carol",
+        source_id="https://remote.example/objects/q2",
+        in_reply_to_activity_id=str(activity.id),
+        published_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
+    )
+    db_session.add(materialized)
+    await db_session.flush()
+
+    remote_only = Interaction(
+        source_actor_id="https://remote.example/users/bob",
+        target_resource=activity.source_id,
+        interaction_type=InteractionType.QUOTE,
+        object_id="https://remote.example/objects/q1",
+        published=datetime(2024, 1, 1, tzinfo=timezone.utc),
+    )
+    materialized_interaction = Interaction(
+        source_actor_id="https://remote.example/users/carol",
+        target_resource=activity.source_id,
+        interaction_type=InteractionType.QUOTE,
+        object_id="https://remote.example/objects/q2",
+    )
+    monkeypatch.setattr(
+        activity_service,
+        "_fetch_remote_interactions",
+        lambda cfg, ids, interaction_type=None: {
+            sid: [
+                i
+                for i in (remote_only, materialized_interaction)
+                if i.target_resource == sid and (interaction_type is None or i.interaction_type == interaction_type)
+            ]
+            for sid in ids
+        },
+    )
+
+    local, remote = await list_activity_quotes(db_session, activity=activity, user=None, config=config)
+    assert {str(q.id) for q in local} == {str(local_quote.id), str(materialized.id)}
+    assert [q.object_id for q in remote] == ["https://remote.example/objects/q1"]
+
+
+@pytest.mark.asyncio
 async def test_summaries_count_nested_replies(db_session, regular_user, other_user, config):
     """``reply_count`` covers the whole sub-thread, not just direct replies."""
     track = await _make_track(db_session, other_user)
@@ -1815,6 +2207,61 @@ async def test_reply_endpoint_forbidden(client, db_session, regular_user, other_
 
 
 # ---------------------------------------------------------------------------
+# POST /api/v1/activities/{activity_id}/quote
+# ---------------------------------------------------------------------------
+
+
+def test_quote_endpoint_requires_auth(client):
+    """Unauthenticated requests are rejected."""
+    resp = client.post("/api/v1/activities/whatever/quote", json={"status": "hi"})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_quote_endpoint_creates_quote(client, db_session, regular_user, other_user, auth_headers):
+    """A quote returns the new quote activity serialized as a card."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.post(
+        f"/api/v1/activities/{activity.id}/quote",
+        headers=auth_headers(regular_user),
+        json={"status": "look at this"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["activity_type"] == "quote"
+    assert body["in_reply_to_activity_id"] == str(activity.id)
+    assert "look at this" in body["content"]
+    assert body["like_count"] == 0
+    assert body["reply_count"] == 0
+    assert body["quote_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_quote_endpoint_forbidden(client, db_session, regular_user, other_user, auth_headers):
+    """Activities the user cannot view return 403."""
+    track = await _make_track(db_session, other_user, visibility=Visibility.PRIVATE.value)
+    activity = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=other_user.id,
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.post(
+        f"/api/v1/activities/{activity.id}/quote",
+        headers=auth_headers(regular_user),
+        json={"status": "hi"},
+    )
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
 # GET /{id}/likes, /{id}/boosts, /{id}/replies
 # ---------------------------------------------------------------------------
 
@@ -1895,6 +2342,85 @@ async def test_replies_endpoint_lists_replies(client, db_session, regular_user, 
     assert body["activities"][0]["activity_type"] == "reply"
     assert "a reply" in body["activities"][0]["content"]
     assert body["remote_replies"] == []
+
+
+@pytest.mark.asyncio
+async def test_quotes_endpoint_lists_remote_quotes(client, db_session, regular_user, other_user, monkeypatch):
+    """GET /activities/{id}/quotes returns the stored remote quote records."""
+    client.app.state.config.federation.enabled = True
+    client.app.state.config.federation.instance_domain = "local.example"
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    quote = Interaction(
+        source_actor_id="https://remote.example/users/bob",
+        target_resource=activity.source_id,
+        interaction_type=InteractionType.QUOTE,
+        object_id="https://remote.example/objects/q1",
+        content="<p>quoted!</p>",
+        author_name="Bob Remote",
+        metadata={
+            "raw_object": {
+                "id": "https://remote.example/objects/q1",
+                "url": "https://remote.example/notes/q1",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        activity_service,
+        "_fetch_remote_interactions",
+        lambda cfg, ids, interaction_type=None: {sid: [quote] for sid in ids},
+    )
+
+    resp = client.get(f"/api/v1/activities/{activity.id}/quotes")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["activities"] == []
+    assert len(body["remote_quotes"]) == 1
+    item = body["remote_quotes"][0]
+    assert item["object_id"] == "https://remote.example/objects/q1"
+    assert item["quoted"] == activity.source_id
+    assert "in_reply_to" not in item
+    assert item["content"] == "<p>quoted!</p>"
+    assert item["source_actor_name"] == "Bob Remote"
+    assert item["url"] == "https://remote.example/notes/q1"
+
+
+@pytest.mark.asyncio
+async def test_quotes_endpoint_lists_local_quotes(client, db_session, regular_user, other_user, auth_headers):
+    """The quotes listing returns materialized quote activities as cards."""
+    track = await _make_track(db_session, other_user)
+    activity = _make_activity("track", track.id, owner_user_id=other_user.id)
+    db_session.add(activity)
+    await db_session.flush()
+
+    resp = client.post(
+        f"/api/v1/activities/{activity.id}/quote",
+        headers=auth_headers(regular_user),
+        json={"status": "quoted!"},
+    )
+    assert resp.status_code == 201
+
+    resp = client.get(f"/api/v1/activities/{activity.id}/quotes")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["activities"]) == 1
+    card = body["activities"][0]
+    assert card["activity_type"] == "quote"
+    assert "quoted!" in card["content"]
+    assert card["in_reply_to_activity_id"] == str(activity.id)
+    assert card["owner_user_id"] == str(regular_user.id)
+    assert card["quote_count"] == 0
+    assert body["remote_quotes"] == []
+
+
+@pytest.mark.asyncio
+async def test_quotes_endpoint_unknown_activity_404(client):
+    """The quotes listing 404s for unknown activities."""
+    resp = client.get("/api/v1/activities/missing/quotes")
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio

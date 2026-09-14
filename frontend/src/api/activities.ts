@@ -71,6 +71,7 @@ export interface ActivityResponse {
   like_count: number;
   boost_count: number;
   reply_count: number;
+  quote_count: number;
   liked: boolean;
   boosted: boolean;
   can_interact: boolean;
@@ -121,6 +122,21 @@ export interface RemoteReply {
 export interface ReplyActivityListResponse {
   activities: ActivityResponse[];
   remote_replies: RemoteReply[];
+}
+
+/** A federated quote of an activity, serialized from the pubby raw object. */
+export type RemoteQuote = Omit<RemoteReply, "in_reply_to"> & {
+  /** Object id of the quoted activity. */
+  quoted?: string | null;
+};
+
+export interface QuoteActivityListResponse {
+  /**
+   * Local quote cards — locally authored quotes and remote quotes
+   * materialized into ``Activity`` rows.
+   */
+  activities: ActivityResponse[];
+  remote_quotes: RemoteQuote[];
 }
 
 export interface ActivityReplyRequest {
@@ -249,6 +265,16 @@ export function replyToActivity(
   });
 }
 
+export function quoteActivity(
+  activityId: string,
+  body: ActivityReplyRequest,
+): Promise<ActivityResponse> {
+  return apiRequest<ActivityResponse>(`/activities/${activityId}/quote`, {
+    method: "POST",
+    body,
+  });
+}
+
 export function listActivityLikes(
   activityId: string,
 ): Promise<ActivityActorListResponse> {
@@ -270,5 +296,13 @@ export function listActivityReplies(
 ): Promise<ReplyActivityListResponse> {
   return apiRequest<ReplyActivityListResponse>(
     `/activities/${activityId}/replies`,
+  );
+}
+
+export function listActivityQuotes(
+  activityId: string,
+): Promise<QuoteActivityListResponse> {
+  return apiRequest<QuoteActivityListResponse>(
+    `/activities/${activityId}/quotes`,
   );
 }

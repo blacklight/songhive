@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from functools import partial
 from typing import Optional
 
+from pubby import allow_public_quotes
 from pubby.content import (
     build_hashtag_tags,
     format_duration,
@@ -57,6 +58,14 @@ def set_post_content(
 # shares, since Mastodon renders ``content`` only for ``Note``/``Question``
 # objects (``Audio`` is a "converted" type rendered from name/summary/url).
 _POST_OBJECT_TYPES = frozenset({"Audio", "Note"})
+
+# Every federated post object is stamped with ``pubby.allow_public_quotes``
+# — the FEP-044f ``interactionPolicy`` allowing anyone to quote without
+# manual approval. Mastodon reads ``interactionPolicy.canQuote`` to decide
+# whether its Quote action is enabled — without it the menu reads "You are
+# not allowed to quote this post" — and whether an incoming quote needs a
+# ``QuoteAuthorization`` stamp to leave its pending state (pubby
+# auto-approves those requests).
 
 
 def normalize_post_content(obj: dict, link_href: Optional[str] = None) -> None:
@@ -303,7 +312,7 @@ def track_to_audio_object(
             }
         ]
 
-    return obj
+    return allow_public_quotes(obj)
 
 
 def track_to_note_object(
@@ -393,7 +402,7 @@ def track_to_note_object(
             attachment["duration"] = format_duration(track.duration)
         obj["attachment"] = [attachment]
 
-    return obj
+    return allow_public_quotes(obj)
 
 
 def stored_file_to_attachment(stored_file: StoredFile, domain: str = "") -> dict:

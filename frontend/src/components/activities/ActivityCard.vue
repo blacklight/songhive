@@ -3,8 +3,10 @@ import { RouterLink, useRouter } from "vue-router";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import {
+  listActivityQuotes,
   listActivityReplies,
   type ActivityResponse,
+  type RemoteQuote,
   type RemoteReply,
 } from "@/api/activities";
 import { getApiErrorMessage } from "@/api/client";
@@ -196,6 +198,9 @@ const isReaction = computed(
     activity.value.activity_type === "like" ||
     activity.value.activity_type === "announce",
 );
+// Quote cards embed the quoted activity below their content — the
+// ``in_reply_to_activity_id`` link doubles as the quote pointer.
+const isQuote = computed(() => activity.value.activity_type === "quote");
 // Only ``Create``-style types carry an editable object; reactions,
 // tombstones, and relayed types have nothing to edit.
 const isEditable = computed(() =>
@@ -268,7 +273,7 @@ function onCardClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null;
   if (
     target?.closest(
-      "a, button, input, textarea, select, label, audio, video, .activity-card__reply-composer",
+      "a, button, input, textarea, select, label, audio, video, .activity-card__reply-composer, .activity-card__quote-composer",
     )
   ) {
     return;
@@ -286,6 +291,12 @@ const repliesLoading = ref(false);
 const localReplies = ref<ActivityResponse[]>([]);
 const remoteReplies = ref<RemoteReply[]>([]);
 const replyComposerOpen = ref(false);
+const quotesOpen = ref(false);
+const quotesLoaded = ref(false);
+const quotesLoading = ref(false);
+const localQuotes = ref<ActivityResponse[]>([]);
+const remoteQuotes = ref<RemoteQuote[]>([]);
+const quoteComposerOpen = ref(false);
 
 onMounted(() => {
   if (props.expandReplies && canNavigate.value) {
@@ -350,6 +361,57 @@ async function toggleReplies() {
   repliesOpen.value = !repliesOpen.value;
   if (repliesOpen.value && !repliesLoaded.value) await loadReplies();
 }
+
+async function loadQuotes() {
+  quotesLoading.value = true;
+  try {
+    const response = await listActivityQuotes(props.activity.id);
+    localQuotes.value = response.activities;
+    remoteQuotes.value = response.remote_quotes;
+    quotesLoaded.value = true;
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: getApiErrorMessage(err) || t("activities.quotesError"),
+    });
+  } finally {
+    quotesLoading.value = false;
+  }
+}
+
+async function toggleQuotes() {
+  quotesOpen.value = !quotesOpen.value;
+  if (quotesOpen.value && !quotesLoaded.value) await loadQuotes();
+}
+
+type QuoteEntry =
+  | {
+      kind: "local";
+      key: string;
+      publishedAt: string;
+      activity: ActivityResponse;
+    }
+  | { kind: "remote"; key: string; publishedAt: string; quote: RemoteQuote };
+
+// Quotes are not threaded — unlike replies they attach to the quoted post
+// itself, so the listing is a flat, chronologically ordered merge of local
+// cards and federated interaction records.
+const quoteEntries = computed<QuoteEntry[]>(() =>
+  [
+    ...localQuotes.value.map((a) => ({
+      kind: "local" as const,
+      key: a.id,
+      publishedAt: a.published_at,
+      activity: a,
+    })),
+    ...remoteQuotes.value.map((q) => ({
+      kind: "remote" as const,
+      key: q.id,
+      publishedAt: q.published_at ?? "",
+      quote: q,
+    })),
+  ].sort((a, b) => a.publishedAt.localeCompare(b.publishedAt)),
+);
 
 type ReplyEntry =
   | {
@@ -522,6 +584,23 @@ async function submitReply(payload: StatusComposerPayload) {
     await loadReplies();
   }
   repliesOpen.value = true;
+}
+
+async function submitQuote(payload: StatusComposerPayload) {
+  const created = await store.quote(activity.value, {
+    status: payload.status,
+    content_type: payload.content_type,
+    visibility: payload.visibility,
+    language: payload.language,
+    media_ids: payload.media_ids,
+    track_ids: payload.track_ids,
+  });
+  if (quotesLoaded.value) {
+    localQuotes.value = [...localQuotes.value, created];
+  } else {
+    await loadQuotes();
+  }
+  quotesOpen.value = true;
 }
 
 async function remove() {
@@ -742,6 +821,13 @@ async function copyUrl() {
       </ul>
     </div>
 
+    <div
+      v-if="isQuote && activity.in_reply_to_activity_id"
+      class="activity-card__quote"
+    >
+      <ActivityObjectEmbed :activity-id="activity.in_reply_to_activity_id" />
+    </div>
+
     <footer
       v-if="copyTarget || showInteractions || (!props.readonly && canDelete)"
       class="activity-card__actions"
@@ -766,6 +852,27 @@ async function copyUrl() {
             @click="toggleReplies"
           >
             {{ activity.reply_count }}
+          </button>
+        </span>
+        <span class="activity-card__action">
+          <AppButton
+            variant="ghost"
+            size="sm"
+            icon="quote-left"
+            :disabled="!canInteract"
+            :title="interactionHint ?? t('activities.quote')"
+            :aria-label="t('activities.quote')"
+            @click="quoteComposerOpen = !quoteComposerOpen"
+          />
+          <button
+            type="button"
+            class="activity-card__count"
+            :title="t('activities.quotes')"
+            :aria-label="t('activities.quotes')"
+            :aria-expanded="quotesOpen"
+            @click="toggleQuotes"
+          >
+            {{ activity.quote_count }}
           </button>
         </span>
         <span class="activity-card__action">
@@ -894,6 +1001,40 @@ async function copyUrl() {
           />
         </template>
       </div>
+    </div>
+
+    <div v-if="quoteComposerOpen" class="activity-card__quote-composer">
+      <StatusComposer
+        :submit="submitQuote"
+        :submit-label="t('activities.quoteSubmit')"
+        :placeholder="t('activities.quotePlaceholder')"
+        :initial-visibility="activity.visibility"
+        @submitted="quoteComposerOpen = false"
+      />
+    </div>
+
+    <div v-if="quotesOpen" class="activity-card__quotes">
+      <div v-if="quotesLoading" class="activity-card__replies-loading">
+        <AppSpinner />
+      </div>
+      <p
+        v-else-if="quotesLoaded && !quoteEntries.length"
+        class="activity-card__replies-empty"
+      >
+        {{ t("activities.noQuotes") }}
+      </p>
+      <template v-for="entry in quoteEntries" :key="entry.key">
+        <ActivityCard
+          v-if="entry.kind === 'local'"
+          :activity="entry.activity"
+          class="activity-card__reply"
+        />
+        <ActivityRemoteReply
+          v-else
+          :reply="entry.quote"
+          class="activity-card__reply"
+        />
+      </template>
     </div>
 
     <ActivityActorsModal
@@ -1032,14 +1173,20 @@ async function copyUrl() {
   flex: 1;
 }
 
-.activity-card__reply-composer {
+.activity-card__reply-composer,
+.activity-card__quote-composer {
   padding: var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background-color: var(--color-surface-secondary);
 }
 
-.activity-card__replies {
+.activity-card__quote :deep(.activity-card) {
+  width: auto;
+}
+
+.activity-card__replies,
+.activity-card__quotes {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);

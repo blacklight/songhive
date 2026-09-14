@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from celery.exceptions import Retry
 from fastapi import HTTPException
+from pubby import PUBLIC_QUOTE_POLICY
 from pubby.content import render_bio_html, render_post_html, render_verified_link
 from sqlalchemy import select
 
@@ -27,7 +28,10 @@ from songhive.federation.actors import (
     sync_user_actor,
     user_to_actor_document,
 )
-from songhive.federation.serializers import track_to_audio_object, track_to_note_object
+from songhive.federation.serializers import (
+    track_to_audio_object,
+    track_to_note_object,
+)
 from songhive.models import Visibility
 from songhive.models.activity import ActivityMention, ActivityTarget
 from songhive.models.album import Album  # noqa: F401
@@ -471,6 +475,120 @@ def test_track_to_note_object_rejects_non_public_track():
     track.id = "track-1"
 
     assert track_to_note_object(track, artist, "music.example.com") is None
+
+
+def test_post_objects_advertise_public_quote_policy():
+    """Serialized Audio and Note objects carry the FEP-044f canQuote policy."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    expected = {
+        "canQuote": {
+            "automaticApproval": ["https://www.w3.org/ns/activitystreams#Public"],
+            "manualApproval": [],
+        }
+    }
+    audio = track_to_audio_object(track, artist, "music.example.com")
+    assert audio["interactionPolicy"] == expected
+    note = track_to_note_object(
+        track,
+        artist,
+        "music.example.com",
+        actor_url="https://music.example.com/users/alice",
+        ap_object_id="https://music.example.com/users/alice/objects/note-1",
+        audio_object_id="https://music.example.com/users/alice/objects/obj-1",
+    )
+    assert note["interactionPolicy"] == expected
+
+    # Stamping deep-copies the shared constant — mutating one object must
+    # not leak into the policy of the next.
+    audio["interactionPolicy"]["canQuote"]["manualApproval"].append("x")
+    assert PUBLIC_QUOTE_POLICY["canQuote"]["manualApproval"] == []
+
+
+def test_build_activity_object_synthesizes_quote_fields():
+    """A payload-less quote row serves quote fields, never ``inReplyTo``."""
+    from songhive.federation.activities import build_activity_object
+    from songhive.models.activity import Activity
+
+    quoted = Activity(
+        entity_type="track",
+        entity_id="t1",
+        activity_type="create",
+        source_type="local",
+        source_actor="https://local.example/users/bob",
+        source_id="https://local.example/users/bob/objects/p1",
+        visibility="public",
+    )
+    quote = Activity(
+        entity_type="track",
+        entity_id="t1",
+        activity_type="quote",
+        source_type="local",
+        source_actor="https://local.example/users/alice",
+        source_id="https://local.example/users/alice/objects/q1",
+        visibility="public",
+        payload=None,
+        content="<p>qt</p>",
+    )
+    quote.in_reply_to_activity = quoted
+
+    document = build_activity_object(quote)
+
+    assert document["quote"] == quoted.source_id
+    assert document["quoteUri"] == quoted.source_id
+    assert document["quoteUrl"] == quoted.source_id
+    assert document["_misskey_quote"] == quoted.source_id
+    assert "inReplyTo" not in document
+    assert document["interactionPolicy"]["canQuote"]["automaticApproval"] == [
+        "https://www.w3.org/ns/activitystreams#Public"
+    ]
+
+
+def test_strip_quote_fallback_removes_inline_elements():
+    """Mastodon/Akkoma ``quote-inline`` elements are removed entirely."""
+    from songhive.federation.notifications import strip_quote_fallback
+
+    quoted = "https://local.example/users/bob/objects/p1"
+    mastodon = f'<p class="quote-inline">RE: <a href="{quoted}">{quoted}</a></p>' "<p>my take</p>"
+    assert strip_quote_fallback(mastodon, quoted) == "<p>my take</p>"
+
+    akkoma = '<p>my take</p><span class="quote-inline"><br/><br/>RE: ' f'<a href="{quoted}">{quoted}</a></span>'
+    assert strip_quote_fallback(akkoma, quoted) == "<p>my take</p>"
+
+
+def test_strip_quote_fallback_removes_bare_re_tail():
+    """A bare ``RE: <url>`` tail (Misskey/Threads) is stripped when it links the quote."""
+    from songhive.federation.notifications import strip_quote_fallback
+
+    quoted = "https://local.example/users/bob/objects/p1"
+    misskey = f"<p>my take</p> RE: {quoted} "
+    assert strip_quote_fallback(misskey, quoted) == "<p>my take</p>"
+
+    anchored = f'<p>my take</p> RE: <a href="{quoted}">{quoted}</a>'
+    assert strip_quote_fallback(anchored, quoted) == "<p>my take</p>"
+
+
+def test_strip_quote_fallback_preserves_legitimate_content():
+    """Non-quote ``RE:`` text and unrelated links are never touched."""
+    from songhive.federation.notifications import strip_quote_fallback
+
+    quoted = "https://local.example/users/bob/objects/p1"
+    content = "<p>RE: your earlier point, I disagree</p>"
+    assert strip_quote_fallback(content, quoted) == content
+
+    other = "<p>take</p> RE: https://elsewhere.example/objects/x"
+    assert strip_quote_fallback(other, quoted) == other
+
+    assert strip_quote_fallback(content) == content
+    assert strip_quote_fallback(None, quoted) is None
 
 
 def test_create_note_activity():

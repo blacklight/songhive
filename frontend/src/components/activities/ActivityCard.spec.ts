@@ -16,9 +16,11 @@ vi.mock("@/api/activities", () => ({
   boostActivity: vi.fn(),
   unboostActivity: vi.fn(),
   replyToActivity: vi.fn(),
+  quoteActivity: vi.fn(),
   listActivityLikes: vi.fn(),
   listActivityBoosts: vi.fn(),
   listActivityReplies: vi.fn(),
+  listActivityQuotes: vi.fn(),
   updateActivity: vi.fn(),
   deleteActivity: vi.fn(),
 }));
@@ -37,9 +39,11 @@ const unlikeActivity = vi.mocked(activitiesApi.unlikeActivity);
 const boostActivity = vi.mocked(activitiesApi.boostActivity);
 const unboostActivity = vi.mocked(activitiesApi.unboostActivity);
 const replyToActivity = vi.mocked(activitiesApi.replyToActivity);
+const quoteActivity = vi.mocked(activitiesApi.quoteActivity);
 const listActivityLikes = vi.mocked(activitiesApi.listActivityLikes);
 const listActivityBoosts = vi.mocked(activitiesApi.listActivityBoosts);
 const listActivityReplies = vi.mocked(activitiesApi.listActivityReplies);
+const listActivityQuotes = vi.mocked(activitiesApi.listActivityQuotes);
 const updateActivity = vi.mocked(activitiesApi.updateActivity);
 const deleteActivity = vi.mocked(activitiesApi.deleteActivity);
 
@@ -64,6 +68,7 @@ function createActivity(
     like_count: 0,
     boost_count: 0,
     reply_count: 0,
+    quote_count: 0,
     liked: false,
     boosted: false,
     can_interact: true,
@@ -265,16 +270,17 @@ describe("ActivityCard", () => {
     expect(link.classes()).toContain("activity-card__mark--bold");
   });
 
-  it("shows reply boost like edit and copy URL actions for the authenticated owner", () => {
+  it("shows reply quote boost like edit and copy URL actions for the authenticated owner", () => {
     setAuthenticated("user-1");
     const wrapper = mountCard({
       like_count: 2,
       boost_count: 1,
       reply_count: 3,
+      quote_count: 4,
     });
     const buttons = wrapper.findAll(".activity-card__actions button");
-    // 3 interaction icons + 3 counters + edit + delete + copy URL
-    expect(buttons.length).toBe(9);
+    // 4 interaction icons + 4 counters + edit + delete + copy URL
+    expect(buttons.length).toBe(11);
     expect(wrapper.text()).toContain("2");
   });
 
@@ -283,14 +289,16 @@ describe("ActivityCard", () => {
       like_count: 2,
       boost_count: 1,
       reply_count: 3,
+      quote_count: 4,
     });
     const buttons = wrapper.findAll(".activity-card__actions button");
-    // 3 interaction icons + 3 counters + copy URL
-    expect(buttons.length).toBe(7);
+    // 4 interaction icons + 4 counters + copy URL
+    expect(buttons.length).toBe(9);
     const counts = wrapper.findAll(".activity-card__count");
-    expect(counts.map((count) => count.text())).toEqual(["3", "1", "2"]);
+    // reply, quote, boost, like
+    expect(counts.map((count) => count.text())).toEqual(["3", "4", "1", "2"]);
     const icons = wrapper.findAll(".activity-card__action .app-btn");
-    expect(icons.length).toBe(3);
+    expect(icons.length).toBe(4);
     for (const icon of icons) {
       expect(icon.attributes("disabled")).toBeDefined();
       expect(icon.attributes("title")).toBe("Log in to interact");
@@ -332,7 +340,7 @@ describe("ActivityCard", () => {
     });
     const wrapper = mountCard({ like_count: 1 });
     const counts = wrapper.findAll(".activity-card__count");
-    await counts[2].trigger("click");
+    await counts[3].trigger("click");
     await flushPromises();
     expect(listActivityLikes).toHaveBeenCalledWith("a1");
     expect(document.body.textContent).toContain("Bob");
@@ -342,8 +350,8 @@ describe("ActivityCard", () => {
     setAuthenticated("user-2");
     const wrapper = mountCard();
     const buttons = wrapper.findAll(".activity-card__actions button");
-    // 3 interaction icons + 3 counters + copy URL
-    expect(buttons.length).toBe(7);
+    // 4 interaction icons + 4 counters + copy URL
+    expect(buttons.length).toBe(9);
   });
 
   it("hides interaction buttons when the activity cannot be interacted with", () => {
@@ -385,7 +393,7 @@ describe("ActivityCard", () => {
     // No edit button on a reaction; the only interaction groups are the
     // embedded card's own action bar.
     expect(wrapper.find('button[aria-label="Edit"]').exists()).toBe(false);
-    expect(wrapper.findAll(".activity-card__action").length).toBe(3);
+    expect(wrapper.findAll(".activity-card__action").length).toBe(4);
   });
 
   it("renders the reacted activity inside a boost card", async () => {
@@ -487,7 +495,7 @@ describe("ActivityCard", () => {
     expect(wrapper.find('button[aria-label="Unlike"]').exists()).toBe(true);
     // The counter next to the icon reflects the new like.
     const counts = wrapper.findAll(".activity-card__count");
-    expect(counts[2].text()).toBe("1");
+    expect(counts[3].text()).toBe("1");
   });
 
   it("unlikes a liked activity and drops the counter", async () => {
@@ -502,7 +510,7 @@ describe("ActivityCard", () => {
     expect(likeActivity).not.toHaveBeenCalled();
     expect(wrapper.find('button[aria-label="Like"]').exists()).toBe(true);
     const counts = wrapper.findAll(".activity-card__count");
-    expect(counts[2].text()).toBe("0");
+    expect(counts[3].text()).toBe("0");
   });
 
   it("boosts the activity once and bumps the counter", async () => {
@@ -515,7 +523,7 @@ describe("ActivityCard", () => {
     expect(boostActivity).toHaveBeenCalledWith("a1");
     expect(wrapper.find('button[aria-label="Unboost"]').exists()).toBe(true);
     const counts = wrapper.findAll(".activity-card__count");
-    expect(counts[1].text()).toBe("1");
+    expect(counts[2].text()).toBe("1");
   });
 
   it("unboosts a boosted activity and drops the counter", async () => {
@@ -530,7 +538,7 @@ describe("ActivityCard", () => {
     expect(boostActivity).not.toHaveBeenCalled();
     expect(wrapper.find('button[aria-label="Boost"]').exists()).toBe(true);
     const counts = wrapper.findAll(".activity-card__count");
-    expect(counts[1].text()).toBe("0");
+    expect(counts[2].text()).toBe("0");
   });
 
   it("opens the actors modal when the like counter is clicked", async () => {
@@ -547,7 +555,7 @@ describe("ActivityCard", () => {
     });
     const wrapper = mountCard({ like_count: 1 });
     const counts = wrapper.findAll(".activity-card__count");
-    await counts[2].trigger("click");
+    await counts[3].trigger("click");
     await flushPromises();
     expect(listActivityLikes).toHaveBeenCalledWith("a1");
     expect(document.body.textContent).toContain("Liked by");
@@ -559,7 +567,7 @@ describe("ActivityCard", () => {
     listActivityBoosts.mockResolvedValue({ actors: [] });
     const wrapper = mountCard({ boost_count: 1 });
     const counts = wrapper.findAll(".activity-card__count");
-    await counts[1].trigger("click");
+    await counts[2].trigger("click");
     await flushPromises();
     expect(listActivityBoosts).toHaveBeenCalledWith("a1");
     expect(document.body.textContent).toContain("Boosted by");
@@ -854,6 +862,121 @@ describe("ActivityCard", () => {
     await wrapper.find('button[aria-label="Reply"]').trigger("click");
     const textarea = wrapper.find("textarea");
     expect((textarea.element as HTMLTextAreaElement).value).toBe("@bob ");
+  });
+
+  it("toggles the quote composer when the quote icon is clicked", async () => {
+    setAuthenticated("user-1");
+    const wrapper = mountCard();
+    expect(wrapper.find(".activity-card__quote-composer").exists()).toBe(false);
+    await wrapper.find('button[aria-label="Quote"]').trigger("click");
+    expect(wrapper.find(".activity-card__quote-composer").exists()).toBe(true);
+    expect(wrapper.find("textarea").exists()).toBe(true);
+  });
+
+  it("posts a quote through the composer and bumps the counter", async () => {
+    setAuthenticated("user-1");
+    const created = createActivity({
+      id: "q1",
+      activity_type: "quote",
+      in_reply_to_activity_id: "a1",
+      content: "<p>worth a listen</p>",
+      content_source: "worth a listen",
+    });
+    quoteActivity.mockResolvedValue(created);
+    listActivityQuotes.mockResolvedValue({
+      activities: [created],
+      remote_quotes: [],
+    });
+    const wrapper = mountCard();
+    await wrapper.find('button[aria-label="Quote"]').trigger("click");
+    const textarea = wrapper.find("textarea");
+    await textarea.setValue("worth a listen");
+    await wrapper.find("form.status-composer").trigger("submit");
+    await flushPromises();
+    expect(quoteActivity).toHaveBeenCalledWith(
+      "a1",
+      expect.objectContaining({ status: "worth a listen" }),
+    );
+    // The composer closes, the quote list opens and the counter bumps.
+    expect(wrapper.find(".activity-card__quote-composer").exists()).toBe(false);
+    expect(wrapper.find(".activity-card__quotes").exists()).toBe(true);
+    expect(wrapper.find(".activity-card__quotes").text()).toContain(
+      "worth a listen",
+    );
+    expect(wrapper.findAll(".activity-card__count")[1].text()).toBe("1");
+  });
+
+  it("expands quotes when the quote counter is clicked", async () => {
+    setAuthenticated("user-1");
+    listActivityQuotes.mockResolvedValue({
+      activities: [
+        createActivity({
+          id: "q1",
+          activity_type: "quote",
+          in_reply_to_activity_id: "a1",
+          content: "<p>a quote</p>",
+          content_source: "a quote",
+          published_at: "2026-01-02T00:00:00Z",
+        }),
+      ],
+      remote_quotes: [
+        {
+          id: "rq1",
+          object_id: "https://remote.example/objects/rq1",
+          quoted: "https://example.com/users/alice/objects/o1",
+          source_actor: "https://remote.example/users/carol",
+          source_actor_name: "Carol",
+          content: "<p>remote quote</p>",
+          attachments: [],
+          published_at: "2026-01-03T00:00:00Z",
+        },
+      ],
+    });
+    const wrapper = mountCard({ quote_count: 2 });
+    const counts = wrapper.findAll(".activity-card__count");
+    await counts[1].trigger("click");
+    await flushPromises();
+    expect(listActivityQuotes).toHaveBeenCalledWith("a1");
+    const quotes = wrapper.find(".activity-card__quotes");
+    expect(quotes.exists()).toBe(true);
+    expect(quotes.text()).toContain("a quote");
+    expect(quotes.text()).toContain("remote quote");
+    expect(quotes.text()).toContain("Carol");
+  });
+
+  it("shows an empty state when there are no quotes", async () => {
+    setAuthenticated("user-1");
+    listActivityQuotes.mockResolvedValue({
+      activities: [],
+      remote_quotes: [],
+    });
+    const wrapper = mountCard();
+    const counts = wrapper.findAll(".activity-card__count");
+    await counts[1].trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("No quotes yet.");
+  });
+
+  it("embeds the quoted activity inside a quote card", async () => {
+    setAuthenticated("user-1");
+    getActivity.mockResolvedValue(
+      createActivity({
+        id: "target-q",
+        owner_user_id: "user-2",
+        content: "<p>the quoted post</p>",
+        content_source: "the quoted post",
+      }),
+    );
+    const wrapper = mountCard({
+      activity_type: "quote",
+      in_reply_to_activity_id: "target-q",
+      content: "<p>my quote text</p>",
+      content_source: "my quote text",
+    });
+    await flushPromises();
+    expect(getActivity).toHaveBeenCalledWith("target-q");
+    expect(wrapper.text()).toContain("my quote text");
+    expect(wrapper.text()).toContain("the quoted post");
   });
 
   it("deletes the activity after confirmation", async () => {

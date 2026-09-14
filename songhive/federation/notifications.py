@@ -12,6 +12,10 @@ Maps federated interactions to user notifications:
   mention the recipient's actor URL. Creating a ``mention`` notification also
   stamps ``ActivityMention.notified_at`` on the recipient's pending mention
   rows.
+- ``QuoteRequest`` (FEP-044f): ``quote`` when the requested object resolves
+  to a local one — pubby auto-approves the request, so the notification is
+  what tells the quoted post's owner the quote happened even when the
+  quoting note's own ``Create`` never reaches this inbox.
 
 The incoming activity's own ``id`` is recorded in each notification's
 ``payload.activity_id`` so a later ``Undo`` or ``Delete`` can retract the
@@ -38,6 +42,7 @@ from urllib.parse import urlparse
 
 from pubby.audience import addressees, is_public, mentioned_actors
 from pubby.moderation import extract_domain
+from pubby.quotes import extract_quote_target
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +59,7 @@ from ..services.activities import (
 )
 from ..services.notifications import (
     OBJECT_SNAPSHOT_KEYS,
+    _push_updated,
     create_notification,
     delete_notifications,
     retract_notifications,
@@ -113,6 +119,49 @@ def _object_url(obj: dict) -> Optional[str]:
     return note_id if isinstance(note_id, str) and note_id else None
 
 
+def strip_quote_fallback(content: Any, quote_target: Optional[str] = None) -> Any:
+    """
+    Remove the ``RE: <link>`` quote fallback remote servers embed.
+
+    Mastodon (and compatible servers) add a ``quote-inline`` element to a
+    quote note's ``content`` so clients that cannot render quotes still
+    show a link to the quoted object — Mastodon prepends a
+    ``<p class="quote-inline">`` paragraph, Akkoma appends a
+    ``<span class="quote-inline">``, and Misskey/Threads append a bare
+    ``RE: <url>`` tail. Songhive renders the quoted activity itself, so
+    the fallback only produces a dangling ``RE:`` link — which can point
+    at an object URL that does not dereference to a browser page.
+
+    Elements carrying a ``quote-inline`` class are always stripped; the
+    bare ``RE:`` tail is stripped only when it links to ``quote_target``,
+    so legitimate "RE:" text a user wrote is never touched. Other content
+    is returned untouched.
+    """
+    if not isinstance(content, str):
+        return content
+    stripped = _QUOTE_INLINE_RE.sub("", content) if "quote-inline" in content else content
+    if quote_target:
+        tail = re.compile(
+            rf"\s*RE:\s*(?:<a\b[^>]*?href=[\"']?{re.escape(quote_target)}[\"']?[^>]*>.*?</a>"
+            rf"|{re.escape(quote_target)})\s*$",
+            re.IGNORECASE | re.DOTALL,
+        )
+        stripped = tail.sub("", stripped)
+    if stripped is content:
+        return content
+    return _EMPTY_PARA_RE.sub("", stripped).strip()
+
+
+# ``<span|p|div class="…quote-inline…">…</tag>`` — the wrapper Mastodon
+# and Akkoma emit for their plain-text ``RE:`` quote fallback.
+_QUOTE_INLINE_RE = re.compile(
+    r"<(span|p|div)\b[^>]*\bclass=\"[^\"]*quote-inline[^\"]*\"[^>]*>.*?</\1>",
+    re.IGNORECASE | re.DOTALL,
+)
+# Paragraphs emptied by the strip (``<p></p>``, ``<p><br/></p>``, ``<p> </p>``).
+_EMPTY_PARA_RE = re.compile(r"<p>(?:\s|<br\s*/?>)*</p>", re.IGNORECASE)
+
+
 def _note_snapshot(obj: dict) -> Dict[str, Any]:
     """
     Snapshot the renderable fields of an incoming ``Note`` object.
@@ -125,7 +174,7 @@ def _note_snapshot(obj: dict) -> Dict[str, Any]:
     ``actor_url``) so ``@handle`` text links to the real actor.
     """
     snapshot: Dict[str, Any] = {}
-    content = obj.get("content")
+    content = strip_quote_fallback(obj.get("content"), extract_quote_target(obj))
     if isinstance(content, str) and content:
         snapshot["object_content"] = content[:_MAX_CONTENT_SNAPSHOT]
     summary = obj.get("summary")
@@ -249,20 +298,6 @@ async def _resolve_local_object(
     return resolved
 
 
-def _extract_quote_target(obj: dict) -> Optional[str]:
-    """
-    Extract the quoted object URL from a Create object, if present.
-
-    Checks the FEP-0449 ``quote`` field, Mastodon's ``quoteUrl``, and
-    Misskey's ``_misskey_quote``.
-    """
-    for key in ("quote", "quoteUrl", "_misskey_quote"):
-        value = obj.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return None
-
-
 def _mentions_recipient(obj: dict, actor_url: Optional[str]) -> bool:
     """Return True when the object's Mention tags address ``actor_url``."""
     return bool(actor_url) and actor_url in mentioned_actors(obj)
@@ -280,6 +315,54 @@ async def _stamp_mention_rows(session: AsyncSession, recipient: User) -> None:
             ActivityMention.notified_at.is_(None),
         )
         .values(notified_at=datetime.now(timezone.utc))
+    )
+
+
+async def _create_or_update_quote_notification(
+    session: AsyncSession,
+    *,
+    recipient: User,
+    actor_url: str,
+    source_url: Optional[str],
+    payload: Dict[str, Any],
+) -> Optional[Notification]:
+    """
+    Create the ``quote`` notification for a quote note, refreshing any
+    existing row instead of duplicating it.
+
+    A quote can reach the inbox twice — once as a FEP-044f
+    ``QuoteRequest`` and again as the quoting note's ``Create`` — and the
+    first row may already be seen when the second arrives, so the generic
+    unseen-only dedup in ``create_notification`` cannot cover it. Any
+    existing row for the same quoting object (seen or not) is enriched
+    with the newer payload — a ``Create`` snapshot fills the gaps a bare
+    ``instrument`` id left — and returned; its seen state is preserved.
+    """
+    if source_url:
+        existing = await session.scalar(
+            select(Notification)
+            .where(
+                Notification.user_id == recipient.id,
+                Notification.type == NotificationType.QUOTE,
+                Notification.actor_url == actor_url,
+                Notification.source_url == source_url,
+            )
+            .limit(1)
+        )
+        if existing is not None:
+            merged = {**(existing.payload or {}), **payload}
+            if merged != (existing.payload or {}):
+                existing.payload = merged
+                await session.flush()
+                _push_updated({str(recipient.id): [existing]})
+            return existing
+    return await create_notification(
+        session,
+        user_id=recipient.id,
+        type=NotificationType.QUOTE,
+        actor_url=actor_url,
+        source_url=source_url,
+        payload=payload,
     )
 
 
@@ -304,7 +387,7 @@ def _activity_audience_urls(activity: dict) -> set:
     elif isinstance(obj, dict):
         _add(obj)
         candidates.update(mentioned_actors(obj))
-        for key in ("inReplyTo", "quote", "quoteUrl", "_misskey_quote"):
+        for key in ("inReplyTo", "quote", "quoteUri", "quoteUrl", "_misskey_quote"):
             target = obj.get(key)
             if isinstance(target, str) and target:
                 candidates.add(target)
@@ -450,12 +533,53 @@ async def create_inbox_notifications(
         )
         return
 
+    if activity_type == "QuoteRequest":
+        # FEP-044f: ``object`` is the quoted post, ``instrument`` the
+        # quoting post (a bare id, or the embedded object when the remote
+        # server includes it). Pubby auto-approves the request; this
+        # notification is what tells the quoted post's owner it happened —
+        # the quote's own ``Create`` may never reach this inbox. The
+        # instrument id is used as ``source_url`` so a later ``Create``
+        # notification for the same note dedupes onto this row while it
+        # stays unseen.
+        quoted_uri = obj if isinstance(obj, str) else obj.get("id") if isinstance(obj, dict) else None
+        if not isinstance(quoted_uri, str) or not quoted_uri:
+            return
+        resolved = await _resolve_local_object(session, quoted_uri, instance_domain)
+        if resolved is None:
+            # The quoted object is unknown — the request does not concern
+            # a local post of this recipient.
+            return
+        owners = await _target_owner_users(session, {quoted_uri})
+        if not any(str(owner.id) == str(recipient.id) for owner in owners):
+            # The quoted object is local but belongs to someone else — the
+            # request was misaddressed to this recipient's inbox.
+            return
+        instrument = activity.get("instrument")
+        instrument_doc = instrument if isinstance(instrument, dict) else {}
+        quoting_id = instrument_doc.get("id") if instrument_doc else instrument
+        source_url = quoting_id if isinstance(quoting_id, str) and quoting_id else activity_id
+        target_fields = {f"target_{key}": value for key, value in resolved.items()}
+        await _create_or_update_quote_notification(
+            session,
+            recipient=recipient,
+            actor_url=actor_url,
+            source_url=source_url,
+            payload={
+                **payload,
+                **_note_snapshot(instrument_doc),
+                "target_url": quoted_uri,
+                **target_fields,
+            },
+        )
+        return
+
     if activity_type != "Create" or not isinstance(obj, dict):
         return
 
     note_id = obj.get("id")
     source_url = note_id if isinstance(note_id, str) else None
-    quote_target = _extract_quote_target(obj)
+    quote_target = extract_quote_target(obj)
     in_reply_to = obj.get("inReplyTo")
     note = _note_snapshot(obj)
     # The note itself may map to a stored activity — remote replies are
@@ -464,42 +588,62 @@ async def create_inbox_notifications(
     # may not dereference to a browser page (e.g. private Akkoma notes).
     self_fields = await _resolve_local_object(session, source_url, instance_domain) or {}
 
+    # ``thread_notified`` suppresses a redundant ``mention`` for the same
+    # note: a reply/quote notification already tells the recipient the note
+    # concerns them — quoting or replying to their post always tags them.
+    thread_notified = False
     if quote_target:
         resolved = await _resolve_local_object(session, quote_target, instance_domain)
-        target_fields = {f"target_{key}": value for key, value in (resolved or {}).items()}
-        await create_notification(
-            session,
-            user_id=recipient.id,
-            type=NotificationType.QUOTE,
-            actor_url=actor_url,
-            source_url=source_url,
-            payload={
-                **payload,
-                **note,
-                **self_fields,
-                "target_url": quote_target,
-                **target_fields,
-            },
-        )
+        owners = await _target_owner_users(session, {quote_target})
+        if resolved is not None and any(str(owner.id) == str(recipient.id) for owner in owners):
+            # Only the quoted post's owner gets "quoted your post" — a
+            # quote of someone else's post that merely tags the recipient
+            # stays a ``mention``.
+            target_fields = {f"target_{key}": value for key, value in resolved.items()}
+            thread_notified = (
+                await _create_or_update_quote_notification(
+                    session,
+                    recipient=recipient,
+                    actor_url=actor_url,
+                    source_url=source_url,
+                    payload={
+                        **payload,
+                        **note,
+                        **self_fields,
+                        "target_url": quote_target,
+                        **target_fields,
+                    },
+                )
+                is not None
+            )
     elif isinstance(in_reply_to, str) and in_reply_to:
         resolved = await _resolve_local_object(session, in_reply_to, instance_domain)
-        target_fields = {f"target_{key}": value for key, value in (resolved or {}).items()}
-        await create_notification(
-            session,
-            user_id=recipient.id,
-            type=NotificationType.REPLY,
-            actor_url=actor_url,
-            source_url=source_url,
-            payload={
-                **payload,
-                **note,
-                **self_fields,
-                "target_url": in_reply_to,
-                **target_fields,
-            },
-        )
+        owners = await _target_owner_users(session, {in_reply_to})
+        if resolved is not None and any(str(owner.id) == str(recipient.id) for owner in owners):
+            # Only the replied-to post's owner gets "replied to your
+            # post" — a reply to someone else's post that merely tags
+            # the recipient stays a ``mention``.
+            target_fields = {f"target_{key}": value for key, value in resolved.items()}
+            thread_notified = (
+                await create_notification(
+                    session,
+                    user_id=recipient.id,
+                    type=NotificationType.REPLY,
+                    actor_url=actor_url,
+                    source_url=source_url,
+                    payload={
+                        **payload,
+                        **note,
+                        **self_fields,
+                        "target_url": in_reply_to,
+                        **target_fields,
+                    },
+                )
+                is not None
+            )
 
-    if _mentions_recipient(obj, recipient.actor_url):
+    mentioned = _mentions_recipient(obj, recipient.actor_url)
+    if not thread_notified and mentioned:
         mention = await create_notification(
             session,
             user_id=recipient.id,
@@ -510,6 +654,10 @@ async def create_inbox_notifications(
         )
         if mention is not None:
             await _stamp_mention_rows(session, recipient)
+    elif thread_notified and mentioned:
+        # The reply/quote notification covered the mention — the pending
+        # ``ActivityMention`` rows are still marked as notified.
+        await _stamp_mention_rows(session, recipient)
 
 
 async def retract_inbox_notifications(
@@ -695,7 +843,7 @@ async def _update_object_notifications(
 
     in_reply_to = obj.get("inReplyTo")
     reply_target = in_reply_to if isinstance(in_reply_to, str) and in_reply_to else None
-    quote_target = _extract_quote_target(obj)
+    quote_target = extract_quote_target(obj)
     resolved_self = await _resolve_local_object(session, obj_id, instance_domain)
     resolved_reply = await _resolve_local_object(session, reply_target, instance_domain) if reply_target else None
     resolved_quote = await _resolve_local_object(session, quote_target, instance_domain) if quote_target else None

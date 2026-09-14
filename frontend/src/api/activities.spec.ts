@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as client from "./client";
 import {
   listEntityActivities,
+  listActivityQuotes,
   updateActivity,
   deleteActivity,
   likeActivity,
@@ -93,5 +94,23 @@ describe("activities api", () => {
       method: "POST",
     });
     expect(result).toEqual({ status: "ok", activity_id: "l1" });
+  });
+
+  it("listActivityQuotes fetches the quotes endpoint", async () => {
+    const page = {
+      remote_quotes: [
+        {
+          id: "https://remote.example/objects/q1",
+          object_id: "https://remote.example/objects/q1",
+          quoted: "https://example.com/users/alice/objects/o1",
+          source_actor: "https://remote.example/users/bob",
+          attachments: [],
+        },
+      ],
+    };
+    apiRequest.mockResolvedValueOnce(page);
+    const result = await listActivityQuotes("a1");
+    expect(apiRequest).toHaveBeenCalledWith("/activities/a1/quotes");
+    expect(result).toEqual(page);
   });
 });

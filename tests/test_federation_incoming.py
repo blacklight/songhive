@@ -80,6 +80,21 @@ def test_process_incoming_enables_strict_attribution(tmp_path):
     assert mock_processor.call_args.kwargs["strict_attribution"] is True
 
 
+def test_process_incoming_enables_auto_approve_quotes(tmp_path):
+    """The task constructs InboxProcessor with FEP-044f quote auto-approval."""
+    config = _make_config(tmp_path)
+    activity = {"actor": "https://remote.example/users/bob", "type": "Follow"}
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.load_config", return_value=config),
+        patch("songhive.tasks.federation.get_federation_storage"),
+    ):
+        process_incoming(activity)
+
+    assert mock_processor.call_args.kwargs["auto_approve_quotes"] is True
+
+
 def test_process_incoming_instance_actor(tmp_path):
     """Instance-targeted activities use the instance actor and key, with signatures enabled."""
     config = _make_config(tmp_path)
@@ -396,6 +411,7 @@ def test_process_incoming_reply_and_quote_prefers_quote(engine, tmp_path, monkey
     """A note that is both a reply and a quote yields exactly one quote notification."""
     config = _make_config(tmp_path)
     user = _seed_alice(engine, config)
+    _seed_local_object(engine, user, object_id="t2")
 
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
 
@@ -421,6 +437,385 @@ def test_process_incoming_reply_and_quote_prefers_quote(engine, tmp_path, monkey
     rows = _notifications_for(engine, user.id)
     assert [r.type for r in rows] == ["quote"]
     assert rows[0].source_url == "https://remote.example/notes/1"
+
+
+def _seed_local_object(engine, user, object_id="t1"):
+    """Persist a track and its ``create`` activity behind a local object URL."""
+    from songhive.models.activity import Activity
+    from songhive.models.artist import Artist
+    from songhive.models.track import Track
+
+    init_db(engine=engine, force=True)
+
+    async def _seed():
+        async with get_session() as session:
+            artist = Artist(name="Artist")
+            session.add(artist)
+            await session.flush()
+            track = Track(
+                title="Track",
+                artist_id=artist.id,
+                owner_id=str(user.id),
+                visibility="public",
+            )
+            session.add(track)
+            await session.flush()
+            session.add(
+                Activity(
+                    entity_type="track",
+                    entity_id=str(track.id),
+                    activity_type="create",
+                    source_type="local",
+                    source_actor=user.actor_url,
+                    source_id=f"{user.actor_url}/objects/{object_id}",
+                    local_object_id=object_id,
+                    owner_user_id=str(user.id),
+                    visibility="public",
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_seed())
+    reset_db()
+
+
+def test_process_incoming_quote_request_creates_notification(engine, tmp_path, monkeypatch):
+    """A FEP-044f QuoteRequest for a local object notifies its owner."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        activity = {
+            "type": "QuoteRequest",
+            "id": "https://remote.example/activities/qr1",
+            "actor": "https://remote.example/users/bob",
+            "object": "https://music.example.com/users/alice/objects/t1",
+            "instrument": {
+                "type": "Note",
+                "id": "https://remote.example/notes/q1",
+                "content": "<p>quoting this</p>",
+            },
+        }
+        process_incoming(activity, username="alice")
+
+    rows = _notifications_for(engine, user.id)
+    assert [r.type for r in rows] == ["quote"]
+    row = rows[0]
+    assert row.actor_url == "https://remote.example/users/bob"
+    assert row.source_url == "https://remote.example/notes/q1"
+    assert row.payload["target_url"] == "https://music.example.com/users/alice/objects/t1"
+    assert row.payload["object_content"] == "<p>quoting this</p>"
+
+
+def test_process_incoming_quote_request_string_instrument(engine, tmp_path, monkeypatch):
+    """A QuoteRequest whose instrument is a bare id still notifies."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        activity = {
+            "type": "QuoteRequest",
+            "id": "https://remote.example/activities/qr2",
+            "actor": "https://remote.example/users/bob",
+            "object": "https://music.example.com/users/alice/objects/t1",
+            "instrument": "https://remote.example/notes/q2",
+        }
+        process_incoming(activity, username="alice")
+
+    rows = _notifications_for(engine, user.id)
+    assert [r.type for r in rows] == ["quote"]
+    assert rows[0].source_url == "https://remote.example/notes/q2"
+
+
+def test_process_incoming_quote_request_shared_inbox(engine, tmp_path, monkeypatch):
+    """A shared-inbox QuoteRequest resolves the quoted object's owner."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        activity = {
+            "type": "QuoteRequest",
+            "id": "https://remote.example/activities/qr3",
+            "actor": "https://remote.example/users/bob",
+            "object": "https://music.example.com/users/alice/objects/t1",
+            "instrument": "https://remote.example/notes/q3",
+        }
+        process_incoming(activity, username=None)
+
+    rows = _notifications_for(engine, user.id)
+    assert [r.type for r in rows] == ["quote"]
+
+
+def test_process_incoming_quote_request_unknown_object_no_notification(engine, tmp_path, monkeypatch):
+    """A QuoteRequest for an unknown or remote object creates nothing."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        activity = {
+            "type": "QuoteRequest",
+            "id": "https://remote.example/activities/qr4",
+            "actor": "https://remote.example/users/bob",
+            "object": "https://remote.example/objects/not-ours",
+            "instrument": "https://remote.example/notes/q4",
+        }
+        process_incoming(activity, username="alice")
+
+    assert _notifications_for(engine, user.id) == []
+
+
+def test_process_incoming_quote_request_misaddressed_no_notification(engine, tmp_path, monkeypatch):
+    """A QuoteRequest quoting another user's post does not notify the addressee."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+
+    init_db(engine=engine, force=True)
+
+    async def _seed_carol():
+        async with get_session() as session:
+            return await create_user(
+                session,
+                username="carol",
+                email="carol@example.com",
+                password="secret",
+                config=config,
+            )
+
+    carol = asyncio.run(_seed_carol())
+    _seed_local_object(engine, carol, object_id="c1")
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        activity = {
+            "type": "QuoteRequest",
+            "id": "https://remote.example/activities/qr5",
+            "actor": "https://remote.example/users/bob",
+            # Quoting carol's post, but delivered to alice's inbox.
+            "object": "https://music.example.com/users/carol/objects/c1",
+            "instrument": "https://remote.example/notes/q5",
+        }
+        process_incoming(activity, username="alice")
+
+    assert _notifications_for(engine, user.id) == []
+
+
+def _mark_seen(engine, user_id):
+    """Mark every notification of the user as seen on the test engine."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+    from songhive.services.notifications import mark_seen
+
+    init_db(engine=engine, force=True)
+
+    async def _run():
+        async with get_session() as session:
+            rows = (
+                (await session.execute(select(Notification.id).where(Notification.user_id == user_id))).scalars().all()
+            )
+            await mark_seen(session, user_id, [str(row) for row in rows])
+            await session.commit()
+
+    asyncio.run(_run())
+    reset_db()
+
+
+def test_process_incoming_quote_request_then_create_dedupes(engine, tmp_path, monkeypatch):
+    """A quote Create after its QuoteRequest enriches the same notification."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    actor = "https://remote.example/users/bob"
+    note_id = "https://remote.example/notes/q6"
+    _process(
+        engine,
+        {
+            "type": "QuoteRequest",
+            "id": "https://remote.example/activities/qr6",
+            "actor": actor,
+            "object": "https://music.example.com/users/alice/objects/t1",
+            # Bare instrument id — the snapshot has no content yet.
+            "instrument": note_id,
+        },
+    )
+    rows = _notifications_for(engine, user.id)
+    assert [r.type for r in rows] == ["quote"]
+    assert "object_content" not in rows[0].payload
+
+    _process(
+        engine,
+        {
+            "type": "Create",
+            "id": "https://remote.example/activities/c6",
+            "actor": actor,
+            "object": {
+                "type": "Note",
+                "id": note_id,
+                "content": "<p>quoting this</p>",
+                "quoteUrl": "https://music.example.com/users/alice/objects/t1",
+            },
+        },
+    )
+    rows = _notifications_for(engine, user.id)
+    assert [r.type for r in rows] == ["quote"]
+    assert rows[0].payload["object_content"] == "<p>quoting this</p>"
+
+
+def test_process_incoming_seen_quote_notification_not_duplicated(engine, tmp_path, monkeypatch):
+    """A seen QuoteRequest notification still dedupes the later Create."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    actor = "https://remote.example/users/bob"
+    note_id = "https://remote.example/notes/q7"
+    _process(
+        engine,
+        {
+            "type": "QuoteRequest",
+            "id": "https://remote.example/activities/qr7",
+            "actor": actor,
+            "object": "https://music.example.com/users/alice/objects/t1",
+            "instrument": note_id,
+        },
+    )
+    _mark_seen(engine, user.id)
+
+    _process(
+        engine,
+        {
+            "type": "Create",
+            "id": "https://remote.example/activities/c7",
+            "actor": actor,
+            "object": {
+                "type": "Note",
+                "id": note_id,
+                "content": "<p>quoting this</p>",
+                "quoteUrl": "https://music.example.com/users/alice/objects/t1",
+            },
+        },
+    )
+    rows = _notifications_for(engine, user.id)
+    assert [r.type for r in rows] == ["quote"]
+    assert rows[0].seen_at is not None
+    assert rows[0].payload["object_content"] == "<p>quoting this</p>"
+
+
+def test_process_incoming_quote_of_foreign_post_is_mention(engine, tmp_path, monkeypatch):
+    """A quote of someone else's post that tags the recipient stays a mention."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
+
+    async def _seed_carol():
+        init_db(engine=engine, force=True)
+        async with get_session() as session:
+            return await create_user(
+                session,
+                username="carol",
+                email="carol@example.com",
+                password="secret",
+                config=config,
+            )
+
+    carol = asyncio.run(_seed_carol())
+    _seed_local_object(engine, carol, object_id="c1")
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    _process(
+        engine,
+        {
+            "type": "Create",
+            "id": "https://remote.example/activities/c8",
+            "actor": "https://remote.example/users/bob",
+            "object": {
+                "type": "Note",
+                "id": "https://remote.example/notes/q8",
+                "content": "<p>look @alice</p>",
+                "quoteUrl": "https://music.example.com/users/carol/objects/c1",
+                "tag": [
+                    {
+                        "type": "Mention",
+                        "href": "https://music.example.com/users/alice",
+                        "name": "@alice@music.example.com",
+                    }
+                ],
+            },
+        },
+    )
+    rows = _notifications_for(engine, user.id)
+    assert [r.type for r in rows] == ["mention"]
+
+
+def test_process_incoming_quote_strips_re_fallback(engine, tmp_path, monkeypatch):
+    """The remote server's ``RE:`` quote fallback is stripped from the snapshot."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    quoted = "https://music.example.com/users/alice/objects/t1"
+    _process(
+        engine,
+        {
+            "type": "Create",
+            "id": "https://remote.example/activities/c9",
+            "actor": "https://remote.example/users/bob",
+            "object": {
+                "type": "Note",
+                "id": "https://remote.example/notes/q9",
+                "content": (
+                    '<p class="quote-inline">RE: ' f'<a href="{quoted}">{quoted}</a></p>' "<p>my take on this</p>"
+                ),
+                "quoteUrl": quoted,
+            },
+        },
+    )
+    rows = _notifications_for(engine, user.id)
+    assert [r.type for r in rows] == ["quote"]
+    content = rows[0].payload["object_content"]
+    assert "RE:" not in content
+    assert "my take on this" in content
 
 
 def test_process_incoming_mention_stamps_notified_at(engine, tmp_path, monkeypatch):
@@ -590,6 +985,7 @@ def test_process_incoming_delete_note_retracts_notification(engine, tmp_path, mo
     """A Delete of a note removes quote/reply/mention notifications for it."""
     config = _make_config(tmp_path)
     user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
 
     actor = "https://remote.example/users/bob"
@@ -1120,6 +1516,7 @@ def test_process_incoming_update_retargeted_reply_retracts(engine, tmp_path, mon
     """A reply notification is retracted when the note is retargeted away."""
     config = _make_config(tmp_path)
     user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
 
     actor = "https://remote.example/users/bob"
@@ -1164,6 +1561,7 @@ def test_process_incoming_update_reply_same_target_refreshes(engine, tmp_path, m
     """A reply notification keeps its target and refreshes the snapshot."""
     config = _make_config(tmp_path)
     user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
 
     actor = "https://remote.example/users/bob"
@@ -1252,6 +1650,7 @@ def test_process_incoming_update_ignores_other_actors(engine, tmp_path, monkeypa
     """An Update only touches the sender's own notifications."""
     config = _make_config(tmp_path)
     user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
 
     note_id = "https://remote.example/notes/u7"

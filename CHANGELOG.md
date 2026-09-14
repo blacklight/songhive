@@ -6,6 +6,39 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `federation`: ActivityPub quote support, incoming and outgoing
+  (FEP-044f/0449). Published objects advertise
+  `interactionPolicy.canQuote` with public automatic approval — including
+  objects published before this change, restamped at serve time — so
+  Mastodon's Quote action is enabled on Songhive posts. Incoming
+  `QuoteRequest` activities are auto-approved by pubby's inbox processor
+  (`auto_approve_quotes`), which stores a `QuoteAuthorization` and answers
+  `Accept`; the authorization document is dereferenceable at
+  `GET /users/{username}/quote_authorizations/{id}` for per-user actors.
+  The quoted post's owner gets a `quote` notification when the request
+  arrives — even if the quote's own `Create` never federates back — and
+  request/Create deliveries deduplicate into a single notification whose
+  payload is enriched as more of the quoting note becomes known.
+  Inbound quote posts are materialized into `Activity` rows like replies
+  (public, or `mentioned` when addressing a local user) and kept current
+  by `Update`/`Delete`; the `RE:` quote fallback remote servers embed
+  (`quote-inline` elements, bare `RE: <url>` tails) is stripped from
+  stored content, and `quote`/`quoteUri`/`quoteUrl`/`_misskey_quote`
+  fields are all recognized.
+- `activities`: quoting a post from Songhive — `POST
+  /api/v1/activities/{id}/quote`, a separate Quote action with its own
+  counter on each card, and a `StatusComposer` for the quote's optional
+  text, media, tracks and visibility — records a local `quote` activity
+  whose `Note` carries `quote`/`quoteUri`/`quoteUrl`/`_misskey_quote`,
+  notifies the quoted author, and federates like a reply. Quoting a
+  remote post sends a FEP-044f `QuoteRequest` to its author's inbox
+  before the `Create` fan-out; the answering `Accept` stamps the issued
+  `QuoteAuthorization` onto the stored quote (and a local quote of a
+  local post self-issues one). Mentioned actors are now addressed in
+  `to` on public and followers posts, matching Mastodon/Akkoma
+  addressing. `GET /api/v1/activities/{id}/quotes` lists local and
+  remote quotes together; `ActivityResponse` carries `quote_count`;
+  quotes appear on `/@{user}/posts` like boosts.
 - `federation`: any signed-in user can now share a public track to the
   fediverse from the share dialog's Fediverse tab, not just the track's
   owner. The share is published as a `Create(Note)` post attributed to the

@@ -7,11 +7,13 @@ from datetime import datetime, timezone
 from typing import Iterable, List, Optional, Tuple
 
 from pubby import (
+    allow_public_quotes,
     build_announce_activity,
     build_delete_activity,
     build_like_activity,
     build_undo_activity,
     build_update_activity,
+    set_quote_target,
 )
 from pubby.content import format_duration
 
@@ -20,7 +22,11 @@ from ..models.activity import Activity
 from ..models.artist import Artist
 from ..models.track import Track
 from ._common import get_stream_url, get_track_url
-from .serializers import set_post_content, track_to_audio_object, track_to_note_object
+from .serializers import (
+    set_post_content,
+    track_to_audio_object,
+    track_to_note_object,
+)
 
 AS_PUBLIC = "https://www.w3.org/ns/activitystreams#Public"
 AS_CONTEXT = "https://www.w3.org/ns/activitystreams"
@@ -191,18 +197,21 @@ def activity_audience(
     """
     Map an activity visibility to ActivityPub ``(to, cc)`` addressing.
 
-    ``public`` addresses the ActivityStreams public collection with the
-    actor's followers in ``cc``; ``followers`` addresses the followers
-    collection only; ``mentioned`` addresses the mentioned actors only.
-    ``private`` and ``local`` are not federated and produce an empty audience.
+    ``public`` addresses the ActivityStreams public collection plus the
+    mentioned actors — matching how Mastodon and Akkoma address their own
+    posts — with the actor's followers in ``cc``; ``followers`` addresses
+    the followers collection plus the mentioned actors; ``mentioned``
+    addresses the mentioned actors only. ``private`` and ``local`` are not
+    federated and produce an empty audience.
     """
+    mentions = sorted(set(mention_actor_urls))
     value = Visibility(visibility)
     if value == Visibility.PUBLIC:
-        return [AS_PUBLIC], [f"{actor_url}/followers"]
+        return [AS_PUBLIC, *mentions], [f"{actor_url}/followers"]
     if value == Visibility.FOLLOWERS:
-        return [f"{actor_url}/followers"], []
+        return [f"{actor_url}/followers", *mentions], []
     if value == Visibility.MENTIONED:
-        return sorted(set(mention_actor_urls)), []
+        return mentions, []
     return [], []
 
 
@@ -423,7 +432,9 @@ def build_activity_object(activity: Activity) -> dict:
     if isinstance(activity.payload, dict):
         payload = activity.payload
         if payload.get("type") == "Create" and isinstance(payload.get("object"), dict):
-            return {"@context": payload.get("@context", AS_CONTEXT), **payload["object"]}
+            # ``interactionPolicy`` is restamped at serve time so objects
+            # published before the quote policy existed still advertise it.
+            return allow_public_quotes({"@context": payload.get("@context", AS_CONTEXT), **payload["object"]})
         return payload
 
     mention_actor_urls: List[str] = [m.actor_url for m in activity.mentions if m.actor_url]  # type: ignore
@@ -446,7 +457,13 @@ def build_activity_object(activity: Activity) -> dict:
     if activity.content:
         obj["content"] = activity.content
     if activity.in_reply_to_activity is not None:
-        obj["inReplyTo"] = activity.in_reply_to_activity.source_id
+        if activity.activity_type == "quote":
+            # Quotes reuse ``in_reply_to_activity_id`` to link the quoted
+            # post locally, but federate it through the FEP-0449 ``quote``
+            # fields — emitting ``inReplyTo`` would render it as a reply.
+            set_quote_target(obj, activity.in_reply_to_activity.source_id)
+        else:
+            obj["inReplyTo"] = activity.in_reply_to_activity.source_id
 
     tags = [
         {"type": "Mention", "href": mention.actor_url, "name": mention.handle}
@@ -456,7 +473,7 @@ def build_activity_object(activity: Activity) -> dict:
     if tags:
         obj["tag"] = tags
 
-    return obj
+    return allow_public_quotes(obj)
 
 
 def create_delete_activity(

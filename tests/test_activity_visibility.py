@@ -170,6 +170,39 @@ def test_activity_audience_mentioned():
     assert cc == []
 
 
+def test_activity_audience_public_includes_mentions():
+    """Mentioned actors join ``to`` on public posts — Mastodon's own shape."""
+    to, cc = activity_audience(
+        Visibility.PUBLIC,
+        "https://local.example/users/alice",
+        mention_actor_urls=[
+            "https://remote.example/users/bob",
+            "https://other.example/users/carol",
+            "https://remote.example/users/bob",
+        ],
+    )
+    assert to == [
+        AS_PUBLIC,
+        "https://other.example/users/carol",
+        "https://remote.example/users/bob",
+    ]
+    assert cc == ["https://local.example/users/alice/followers"]
+
+
+def test_activity_audience_followers_includes_mentions():
+    """Mentioned actors join ``to`` on followers-only posts too."""
+    to, cc = activity_audience(
+        Visibility.FOLLOWERS,
+        "https://local.example/users/alice",
+        mention_actor_urls=["https://remote.example/users/bob"],
+    )
+    assert to == [
+        "https://local.example/users/alice/followers",
+        "https://remote.example/users/bob",
+    ]
+    assert cc == []
+
+
 def test_create_visibility_update_activity():
     """The Update payload carries the new audience on the envelope and object."""
     payload = create_visibility_update_activity(
@@ -287,7 +320,10 @@ async def test_cascade_visibility_update_sends_update_to_sent_inboxes(db_session
         assert payload["type"] == "Update"
         assert payload["actor"] == regular_user.actor_url
         assert payload["object"]["id"] == activity.source_id
-        assert payload["to"] == [f"{regular_user.actor_url}/followers"]
+        assert payload["to"] == [
+            f"{regular_user.actor_url}/followers",
+            "https://remote.example/users/bob",
+        ]
         assert inbox in {"https://a.example/inbox", "https://b.example/inbox"}
         assert key_id == f"{regular_user.actor_url}#main-key"
         assert key == "private-key"
