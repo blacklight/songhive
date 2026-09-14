@@ -7,7 +7,11 @@ from datetime import datetime, timezone
 
 import pytest
 
+from songhive.models._enums import Visibility
+from songhive.models.album import Album
 from songhive.models.artist import Artist
+from songhive.models.share_grant import ShareGrant
+from songhive.models.track import Track
 
 
 @pytest.fixture
@@ -109,6 +113,15 @@ async def sortable_artists(db_session):
     ]
     for artist in artists:
         db_session.add(artist)
+    await db_session.flush()
+    for artist in artists:
+        db_session.add(
+            Track(
+                title=f"{artist.name} track",
+                artist_id=artist.id,
+                visibility=Visibility.PUBLIC.value,
+            )
+        )
     await db_session.commit()
     return artists
 
@@ -131,3 +144,148 @@ async def test_list_artists_sorts(client, sortable_artists, sort_by, sort_dir, e
     assert response.status_code == 200
     data = response.json()
     assert [artist["name"] for artist in data] == expected
+
+
+async def _artist_names(response) -> set:
+    """Return the set of artist names in a list response."""
+    assert response.status_code == 200
+    return {artist["name"] for artist in response.json()}
+
+
+@pytest.mark.asyncio
+async def test_list_artists_hides_fully_private_artists(client, db_session, regular_user, other_user, auth_headers):
+    """Artists whose tracks are all private and unshared are hidden from others."""
+    private_artist = Artist(name="Private Artist")
+    public_artist = Artist(name="Public Artist")
+    db_session.add_all([private_artist, public_artist])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            Track(
+                title="Secret Track",
+                artist_id=private_artist.id,
+                owner_id=regular_user.id,
+                visibility=Visibility.PRIVATE.value,
+            ),
+            Track(
+                title="Open Track",
+                artist_id=public_artist.id,
+                owner_id=regular_user.id,
+                visibility=Visibility.PUBLIC.value,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    names = await _artist_names(client.get("/api/v1/artists/"))
+    assert names == {"Public Artist"}
+
+    names = await _artist_names(client.get("/api/v1/artists/", headers=auth_headers(other_user)))
+    assert names == {"Public Artist"}
+
+    names = await _artist_names(client.get("/api/v1/artists/", headers=auth_headers(regular_user)))
+    assert names == {"Private Artist", "Public Artist"}
+
+
+@pytest.mark.asyncio
+async def test_list_artists_share_grant_reveals_artist(client, db_session, regular_user, other_user, auth_headers):
+    """A share grant on an artist's track makes the artist visible again."""
+    artist = Artist(name="Shared Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    track = Track(
+        title="Shared Track",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+    db_session.add(
+        ShareGrant(
+            item_type="track",
+            item_id=track.id,
+            user_id=other_user.id,
+            created_by=regular_user.id,
+        )
+    )
+    await db_session.commit()
+
+    names = await _artist_names(client.get("/api/v1/artists/"))
+    assert names == set()
+
+    names = await _artist_names(client.get("/api/v1/artists/", headers=auth_headers(other_user)))
+    assert names == {"Shared Artist"}
+
+
+@pytest.mark.asyncio
+async def test_list_artists_visible_through_public_album(client, db_session, regular_user, auth_headers):
+    """An artist with a public album stays listed even when its tracks are private."""
+    artist = Artist(name="Album Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    album = Album(
+        title="Public Album",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+    db_session.add(
+        Track(
+            title="Private Track",
+            artist_id=artist.id,
+            album_id=album.id,
+            owner_id=regular_user.id,
+            visibility=Visibility.PRIVATE.value,
+        )
+    )
+    await db_session.commit()
+
+    names = await _artist_names(client.get("/api/v1/artists/"))
+    assert names == {"Album Artist"}
+
+
+@pytest.mark.asyncio
+async def test_list_artists_admin_sees_all(client, db_session, regular_user, admin_user, auth_headers):
+    """Admins bypass the artist access filter entirely."""
+    empty_artist = Artist(name="Empty Artist")
+    private_artist = Artist(name="Private Artist")
+    db_session.add_all([empty_artist, private_artist])
+    await db_session.flush()
+    db_session.add(
+        Track(
+            title="Secret Track",
+            artist_id=private_artist.id,
+            owner_id=regular_user.id,
+            visibility=Visibility.PRIVATE.value,
+        )
+    )
+    await db_session.commit()
+
+    names = await _artist_names(client.get("/api/v1/artists/", headers=auth_headers(admin_user)))
+    assert names == {"Empty Artist", "Private Artist"}
+
+
+@pytest.mark.asyncio
+async def test_list_artists_local_tracks_require_auth(client, db_session, regular_user, other_user, auth_headers):
+    """Artists with only LOCAL tracks are visible to authenticated users only."""
+    artist = Artist(name="Local Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    db_session.add(
+        Track(
+            title="Local Track",
+            artist_id=artist.id,
+            owner_id=regular_user.id,
+            visibility=Visibility.LOCAL.value,
+        )
+    )
+    await db_session.commit()
+
+    names = await _artist_names(client.get("/api/v1/artists/"))
+    assert names == set()
+
+    names = await _artist_names(client.get("/api/v1/artists/", headers=auth_headers(other_user)))
+    assert names == {"Local Artist"}

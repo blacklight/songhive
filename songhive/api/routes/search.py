@@ -192,8 +192,8 @@ async def _artist_section(
 ) -> SearchResultSection:
     from ..responses import build_artist_summary
 
-    total = await music.count_artists(db, query=term)
-    rows = await music.list_artists(db, query=term, limit=limit, offset=0)
+    total = await music.count_artists(db, query=term, user=user)
+    rows = await music.list_artists(db, query=term, user=user, limit=limit, offset=0)
     items: List[SearchResultItem] = []
     for artist in rows:
         summary = await build_artist_summary(artist, storage)

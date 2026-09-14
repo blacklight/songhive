@@ -31,7 +31,7 @@ from ...services.tags import (
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
 from .._sorting import SortParams, get_sort
-from ..deps import get_current_user, get_db, get_storage_service
+from ..deps import get_current_user, get_current_user_optional, get_db, get_storage_service
 from ..middleware.rate_limit import rate_limit_account
 from ..responses import (
     AlbumSummary,
@@ -147,17 +147,19 @@ async def _build_artist_response(
 async def list_artists(
     response: Response,
     q: Optional[str] = Query(None, description="Search query"),
+    user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
-    """List or search artists."""
-    total = await music.count_artists(db, query=q)
+    """List or search artists visible to the requester."""
+    total = await music.count_artists(db, query=q, user=user)
     rows = await music.list_artists(
         db,
         query=q,
+        user=user,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),

@@ -1007,7 +1007,11 @@ alembic revision --autogenerate -m "add example column"
   dependency enforces admin-only routes.
 - **ACL service** (`services/acl.py`) — three-level visibility check augmented
   with `ShareGrant` (owner grants a named user) and `ShareToken` (revocable
-  short-link cookie).
+  short-link cookie). `Artist` rows carry no `visibility`/`owner_id` of their
+  own, so artist listings (`GET /api/v1/artists/` and the artists section of
+  `GET /api/v1/search/`) instead require at least one track or album the
+  requester can access; artists whose content is entirely private or unshared
+  are hidden. Admins bypass the filter.
 - **Rate limiting** — Redis sliding-window; `rate_limit` (IP), `rate_limit_user_or_ip`
   (authenticated users keyed by id), and `rate_limit_account` (always per-user)
   FastAPI dependencies. Media `DELETE` endpoints use `rate_limit_account` for

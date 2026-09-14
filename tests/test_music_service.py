@@ -115,8 +115,9 @@ async def test_get_artist_missing(db_session):
 @pytest.mark.asyncio
 async def test_list_and_count_artists_with_query(db_session):
     """list_artists and count_artists honour the query filter."""
-    await _make_artist(db_session, "Alpha Artist")
-    await _make_artist(db_session, "Beta Band")
+    for name in ("Alpha Artist", "Beta Band"):
+        artist = await _make_artist(db_session, name)
+        await _make_track(db_session, artist, visibility=Visibility.PUBLIC.value)
 
     all_artists = await music.list_artists(db_session)
     assert len(all_artists) == 2
