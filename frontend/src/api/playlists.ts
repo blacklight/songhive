@@ -105,6 +105,7 @@ export function addTracksToPlaylist(
 export function listPlaylistTracks(
   id: string,
   params?: {
+    q?: string;
     limit?: number;
     offset?: number;
     include?: string;

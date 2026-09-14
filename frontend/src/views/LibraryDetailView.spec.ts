@@ -114,6 +114,7 @@ describe("LibraryDetailView", () => {
       include: "owner",
     });
     expect(librariesApi.listLibraryTracks).toHaveBeenCalledWith("library-1", {
+      q: "",
       limit: 20,
       offset: 0,
       include: "artist,album",
@@ -172,6 +173,7 @@ describe("LibraryDetailView", () => {
     await flushPromises();
 
     expect(fetcher).toHaveBeenLastCalledWith("library-1", {
+      q: "",
       limit: 20,
       offset: 20,
       include: "artist,album",
@@ -180,6 +182,39 @@ describe("LibraryDetailView", () => {
     });
     expect(wrapper.text()).toContain("Song 19");
     expect(wrapper.text()).toContain("Song 20");
+  });
+
+  it("filters tracks by search query", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi.mocked(librariesApi.listLibraryTracks);
+      fetcher
+        .mockResolvedValueOnce([createTrack("track-1", "First Song")])
+        .mockResolvedValueOnce([createTrack("track-2", "Searched Song")]);
+
+      await mountAt("/libraries/library-1");
+
+      const input = wrapper.find('input[type="search"]');
+      expect(input.exists()).toBe(true);
+      await input.setValue("searched");
+
+      vi.advanceTimersByTime(0);
+      vi.advanceTimersByTime(300);
+      await flushPromises();
+
+      expect(fetcher).toHaveBeenLastCalledWith("library-1", {
+        q: "searched",
+        limit: 20,
+        offset: 0,
+        include: "artist,album",
+        sort_by: "created_at",
+        sort_dir: "desc",
+      });
+      expect(wrapper.text()).toContain("Searched Song");
+      expect(wrapper.text()).not.toContain("First Song");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("displays artist and album metadata from included track summaries", async () => {

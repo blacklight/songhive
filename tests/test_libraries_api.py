@@ -8,9 +8,12 @@ from datetime import datetime, timezone
 import pytest
 
 from songhive.models._enums import Visibility
+from songhive.models.album import Album
 from songhive.models.artist import Artist
+from songhive.models.genre import Genre, GenreTrack
 from songhive.models.library import Library
 from songhive.models.library_track import LibraryTrack
+from songhive.models.tag import Tag, TagTrack
 from songhive.models.track import Track
 from songhive.services.metadata import AudioMetadata
 
@@ -926,3 +929,52 @@ async def test_list_library_tracks_sorted_by_title(
     assert response.status_code == 200
     data = response.json()
     assert [track["title"] for track in data] == ["A Track", "B Track", "C Track"]
+
+
+@pytest.mark.asyncio
+async def test_list_library_tracks_filters_by_query(
+    client,
+    regular_user,
+    auth_headers,
+    sortable_library_tracks,
+    db_session,
+):
+    """Library tracks can be searched by title, artist, album, tag, or genre."""
+    library, tracks = sortable_library_tracks
+    headers = auth_headers(regular_user)
+
+    album = Album(
+        title="Blue Album",
+        artist_id=tracks[0].artist_id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    tracks[0].album_id = album.id
+    tracks[0].genre = "shoegaze"
+
+    tag = Tag(name="driving")
+    genre = Genre(name="dream pop")
+    db_session.add_all([tag, genre])
+    await db_session.flush()
+    db_session.add(TagTrack(tag_id=tag.id, track_id=tracks[1].id, user_id=regular_user.id))
+    db_session.add(GenreTrack(genre_id=genre.id, track_id=tracks[2].id))
+    await db_session.commit()
+
+    url = f"/api/v1/libraries/{library.id}/tracks"
+    cases = [
+        ("a track", {"A Track"}),
+        ("sample artist", {"A Track", "B Track", "C Track"}),
+        ("blue album", {"C Track"}),
+        ("driving", {"A Track"}),
+        ("dream pop", {"B Track"}),
+        ("shoegaze", {"C Track"}),
+        ("no such thing", set()),
+    ]
+    for term, expected in cases:
+        response = client.get(url, params={"q": term}, headers=headers)
+        assert response.status_code == 200
+        assert {track["title"] for track in response.json()} == expected
+        assert response.headers["X-Total-Count"] == str(len(expected))

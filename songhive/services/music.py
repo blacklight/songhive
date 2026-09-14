@@ -461,6 +461,20 @@ def _apply_tracks_query(
     return stmt
 
 
+def _apply_collection_tracks_query(stmt: Select[Any], query: str) -> Select[Any]:
+    """Filter collection member tracks by title, artist, album, tag, or genre."""
+    return stmt.where(
+        or_(
+            ilike_contains(Track.title, query),
+            Track.artist.has(ilike_contains(Artist.name, query)),
+            Track.album.has(ilike_contains(Album.title, query)),
+            ilike_contains(Track.genre, query),
+            Track.tags.any(ilike_contains(Tag.name, query)),
+            Track.genres.any(ilike_contains(Genre.name, query)),
+        )
+    )
+
+
 def _track_sort_clause(sort_by: str, sort_dir: str) -> Tuple[Any, ...]:
     """Return ORDER BY clauses for a track list based on the requested field."""
     artist_name = select(Artist.name).where(Artist.id == Track.artist_id).scalar_subquery()
@@ -742,6 +756,7 @@ async def list_library_tracks(
     include: Optional[Set[str]] = None,
     sort_by: str = "created_at",
     sort_dir: str = "desc",
+    query: Optional[str] = None,
 ) -> List[Track]:
     """List tracks that are members of ``library_id``."""
     stmt = (
@@ -750,6 +765,8 @@ async def list_library_tracks(
         .join(LibraryTrack, LibraryTrack.track_id == Track.id)
         .where(LibraryTrack.library_id == library_id)
     )
+    if query:
+        stmt = _apply_collection_tracks_query(stmt, query)
     stmt = apply_access_filter(stmt, Track, user, "track")
     stmt = stmt.order_by(*_track_sort_clause(sort_by, sort_dir))
     stmt = stmt.offset(offset).limit(limit)
@@ -761,11 +778,14 @@ async def count_library_tracks(
     session: AsyncSession,
     library_id: str,
     user: Optional[User] = None,
+    query: Optional[str] = None,
 ) -> int:
     """Return the total number of tracks in ``library_id`` visible to ``user``."""
     stmt = (
         select(Track).join(LibraryTrack, LibraryTrack.track_id == Track.id).where(LibraryTrack.library_id == library_id)
     )
+    if query:
+        stmt = _apply_collection_tracks_query(stmt, query)
     stmt = apply_access_filter(stmt, Track, user, "track")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
@@ -1271,6 +1291,7 @@ async def list_playlist_tracks(
     include: Optional[Set[str]] = None,
     sort_by: str = "position",
     sort_dir: str = "asc",
+    query: Optional[str] = None,
 ) -> List[Track]:
     """List tracks that are members of ``playlist_id``."""
     stmt = (
@@ -1279,6 +1300,8 @@ async def list_playlist_tracks(
         .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
         .where(PlaylistTrack.playlist_id == playlist_id)
     )
+    if query:
+        stmt = _apply_collection_tracks_query(stmt, query)
     stmt = apply_access_filter(stmt, Track, user, "track")
     stmt = stmt.order_by(*_playlist_track_sort_clause(sort_by, sort_dir))
     stmt = stmt.offset(offset).limit(limit)
@@ -1290,6 +1313,7 @@ async def count_playlist_tracks(
     session: AsyncSession,
     playlist_id: str,
     user: Optional[User] = None,
+    query: Optional[str] = None,
 ) -> int:
     """Return the total number of tracks in ``playlist_id`` visible to ``user``."""
     stmt = (
@@ -1297,6 +1321,8 @@ async def count_playlist_tracks(
         .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
         .where(PlaylistTrack.playlist_id == playlist_id)
     )
+    if query:
+        stmt = _apply_collection_tracks_query(stmt, query)
     stmt = apply_access_filter(stmt, Track, user, "track")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0

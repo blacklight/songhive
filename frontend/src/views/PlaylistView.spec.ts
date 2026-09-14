@@ -123,6 +123,7 @@ describe("PlaylistView", () => {
       include: "owner",
     });
     expect(playlistsApi.listPlaylistTracks).toHaveBeenCalledWith("playlist-1", {
+      q: "",
       limit: 20,
       offset: 0,
       include: "artist,album",
@@ -185,6 +186,41 @@ describe("PlaylistView", () => {
       include: "owner",
     });
     expect(wrapper.text()).toContain("Chill");
+  });
+
+  it("filters tracks by search query", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(playlistsApi.listPlaylistTracks)
+        .mockResolvedValueOnce([createTrack("track-1", "First Song")])
+        .mockResolvedValueOnce([createTrack("track-2", "Searched Song")]);
+
+      await mountAt("/playlists/playlist-1");
+
+      const input = wrapper.find('input[type="search"]');
+      expect(input.exists()).toBe(true);
+      await input.setValue("searched");
+
+      vi.advanceTimersByTime(0);
+      vi.advanceTimersByTime(300);
+      await flushPromises();
+
+      expect(playlistsApi.listPlaylistTracks).toHaveBeenLastCalledWith(
+        "playlist-1",
+        {
+          q: "searched",
+          limit: 20,
+          offset: 0,
+          include: "artist,album",
+          sort_by: "position",
+          sort_dir: "asc",
+        },
+      );
+      expect(wrapper.text()).toContain("Searched Song");
+      expect(wrapper.text()).not.toContain("First Song");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reorders tracks and refreshes the list", async () => {

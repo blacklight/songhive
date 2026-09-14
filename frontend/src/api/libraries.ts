@@ -130,6 +130,7 @@ export function deleteLibraryCover(id: string): Promise<LibraryResponse> {
 export function listLibraryTracks(
   id: string,
   params?: {
+    q?: string;
     limit?: number;
     offset?: number;
     include?: string;

@@ -26,6 +26,7 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackList from "@/components/library/TrackList.vue";
+import SearchBar from "@/components/ui/SearchBar.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import SortControl from "@/components/ui/SortControl.vue";
@@ -48,14 +49,17 @@ const {
   hasMore: tracksHasMore,
   sortBy: trackSortBy,
   sortDir: trackSortDir,
+  query: tracksQuery,
   load: loadTracks,
   loadMore: loadMoreTracks,
+  search: searchTracks,
   setSort: setTrackSort,
   retry: retryTracks,
   refresh: refreshTracks,
 } = useEntityList<TrackResponse>(
   (params: EntityListParams) =>
     listLibraryTracks(libraryId.value, {
+      q: params.q,
       limit: params.limit,
       offset: params.offset,
       sort_by: params.sort_by,
@@ -307,13 +311,26 @@ watch(
             {{ t("browse.detail.tracks") }}
           </AppPageTitle>
 
-          <SortControl
-            :model-value="trackSortBy"
-            :direction="trackSortDir"
-            :options="trackSortOptions"
-            @update:model-value="(field) => onTrackSort(field, trackSortDir)"
-            @update:direction="(dir) => onTrackSort(trackSortBy, dir)"
-          />
+          <div class="library-detail-view__controls">
+            <SearchBar
+              :model-value="tracksQuery"
+              :debounce="0"
+              class="library-detail-view__search"
+              :placeholder="
+                t('browse.list.searchPlaceholder', {
+                  entity: t('browse.entities.tracks'),
+                })
+              "
+              @update:model-value="searchTracks"
+            />
+            <SortControl
+              :model-value="trackSortBy"
+              :direction="trackSortDir"
+              :options="trackSortOptions"
+              @update:model-value="(field) => onTrackSort(field, trackSortDir)"
+              @update:direction="(dir) => onTrackSort(trackSortBy, dir)"
+            />
+          </div>
         </div>
 
         <div
@@ -485,6 +502,19 @@ watch(
   justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--space-3);
+}
+
+.library-detail-view__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.library-detail-view__search {
+  flex: 1;
+  min-width: 12rem;
+  max-width: 24rem;
 }
 
 .library-detail-view__footer {

@@ -748,6 +748,7 @@ async def scan_library(
 async def list_library_tracks_route(
     response: Response,
     library_id: str,
+    q: Optional[str] = Query(None, description="Search tracks by title, artist, album, tag, or genre"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(
@@ -771,7 +772,7 @@ async def list_library_tracks_route(
             detail="Access denied",
         )
 
-    total = await music.count_library_tracks(db, library_id=library_id, user=user)
+    total = await music.count_library_tracks(db, library_id=library_id, user=user, query=q)
     rows = await music.list_library_tracks(
         db,
         library_id=library_id,
@@ -781,6 +782,7 @@ async def list_library_tracks_route(
         include=set(include.values),
         sort_by=sort.field,
         sort_dir=sort.direction,
+        query=q,
     )
     pagination.set_total(response, total)
     favorited_ids = await music.get_favorited_track_ids(
