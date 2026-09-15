@@ -3,17 +3,24 @@ Integration tests for the application entry point.
 """
 
 import asyncio
+import shutil
 import signal
 import sys
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import tornado.testing
 import uvicorn
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 import songhive.app as app_module
 from songhive.api.app import create_app
 from songhive.app import _build_tornado_app, _run_tornado, _run_uvicorn, main
 from songhive.config.schema import SonghiveConfig
+from songhive.models.base import Base, init_db, reset_db
 from songhive.services.redis import create_redis_client as _real_create_redis_client
 
 
@@ -340,3 +347,90 @@ def test_unknown_api_route_is_404(client):
     response = client.get("/api/v1/does-not-exist")
     assert response.status_code == 404
     assert response.headers["content-type"].startswith("application/problem+json")
+
+
+def test_head_request_behaves_like_bodyless_get(client):
+    """HEAD is answered as a GET with headers but no body.
+
+    FastAPI's APIRoute does not register HEAD, so GET endpoints used to
+    answer HEAD with 405; the HeadToGetMiddleware serves them instead.
+    """
+    get_response = client.get("/api/v1/instance")
+    head_response = client.head("/api/v1/instance")
+    assert get_response.status_code == 200
+    assert head_response.status_code == 200
+    assert head_response.content == b""
+
+    response = client.head("/")
+    assert response.status_code == 200
+    assert response.content == b""
+
+
+class TestHeadRequestsThroughBridge(tornado.testing.AsyncHTTPTestCase):
+    """HEAD requests through the Tornado↔a2wsgi bridge must not fail.
+
+    Regression test: FastAPI GET routes answered HEAD with 405, and response
+    bodies emitted for HEAD made Tornado's ``WSGIContainer`` raise
+    ``HTTPOutputError`` ("Tried to write more data than Content-Length") —
+    every HEAD request surfaced as a 502, which breaks crawlers that probe
+    ``og:image`` URLs (and any other URL) with HEAD.
+    """
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp())
+        self.config = SonghiveConfig(
+            auth={"secret_key": "a" * 64},  # type: ignore
+            database={"url": f"sqlite+aiosqlite:///{self._tmp / 'songhive.db'}"},  # type: ignore
+        )
+        self.engine = create_async_engine(self.config.database.url, poolclass=NullPool)
+        init_db(engine=self.engine, force=True)
+        super().setUp()
+
+        async def _create_tables():
+            async with self.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+        self.io_loop.run_sync(_create_tables)
+
+    def tearDown(self):
+        self.io_loop.run_sync(self.engine.dispose)
+        reset_db()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+        super().tearDown()
+
+    def get_app(self):
+        from fakeredis.aioredis import FakeRedis
+
+        app = create_app(self.config)
+        app.state.redis = FakeRedis(decode_responses=True)
+        return _build_tornado_app(self.config, app)
+
+    def test_head_on_api_route_returns_headers_only(self):
+        response = self.fetch("/openapi.json", method="HEAD")
+        assert response.code == 200
+        assert response.body == b""
+        # Content-Length still advertises the GET body size.
+        assert int(response.headers["Content-Length"]) > 0
+
+    def test_head_on_get_route_behaves_like_get(self):
+        # FastAPI APIRoutes only register GET; HEAD used to 405.
+        get_response = self.fetch("/api/v1/instance", method="GET")
+        head_response = self.fetch("/api/v1/instance", method="HEAD")
+        assert get_response.code == 200
+        assert head_response.code == 200
+        assert head_response.body == b""
+
+    def test_head_on_spa_page_returns_headers_only(self):
+        response = self.fetch("/", method="HEAD")
+        assert response.code == 200
+        assert response.body == b""
+
+    def test_head_on_unknown_api_route_returns_404(self):
+        response = self.fetch("/api/v1/does-not-exist", method="HEAD")
+        assert response.code == 404
+        assert response.body == b""
+
+    def test_get_still_returns_body(self):
+        response = self.fetch("/openapi.json", method="GET")
+        assert response.code == 200
+        assert response.body

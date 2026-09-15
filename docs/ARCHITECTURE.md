@@ -112,6 +112,7 @@ songhive/
 │   └── middleware/
 │       ├── auth.py         # JWT decode middleware + access-token helpers
 │       ├── csrf.py         # Double-submit CSRF check for cookie-authenticated unsafe requests
+│       ├── head.py         # HEAD answered as bodyless GET (crawler probes, e.g. og:image)
 │       ├── media_cors.py   # Wildcard CORS on read-only media endpoints (federation embeds)
 │       ├── rate_limit.py   # Redis sliding-window rate limiting (IP / user)
 │       └── proxy.py        # X-Forwarded-Proto scheme handling behind reverse proxies

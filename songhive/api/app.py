@@ -22,6 +22,7 @@ from ..services.settings import apply_settings_overrides
 from ..version import __version__
 from .errors import install_error_handlers
 from .middleware.csrf import CsrfMiddleware
+from .middleware.head import HeadToGetMiddleware
 from .middleware.media_cors import MediaCorsMiddleware
 from .middleware.proxy import ForwardedProtoMiddleware
 from .routes import (
@@ -246,6 +247,10 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     # embed audio cross-origin. Added last so it wraps CORSMiddleware and sees
     # media-path preflights before the allowlist middleware can reject them.
     app.add_middleware(MediaCorsMiddleware, allow_origins=config.server.cors_origins)
+
+    # Answer HEAD as a bodyless GET: APIRoute does not register HEAD, and the
+    # Tornado/a2wsgi bridge cannot carry response bodies for it.
+    app.add_middleware(HeadToGetMiddleware)
 
     # Double-submit CSRF check for unsafe requests authenticated through the
     # server-managed auth cookies; bearer-authenticated and safe requests pass
