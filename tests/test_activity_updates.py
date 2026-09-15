@@ -91,14 +91,16 @@ def _federated_user(user: User) -> User:
     return user
 
 
-def _patch_resolution(monkeypatch, followers=(), inboxes=None):
+def _patch_resolution(monkeypatch, followers=(), inboxes=None, object_followers=()):
     """Stub follower collection and per-actor inbox resolution."""
     followers_mock = MagicMock(return_value=list(followers))
     monkeypatch.setattr("songhive.services.federation.get_follower_inboxes", followers_mock)
+    objects_mock = MagicMock(return_value=list(object_followers))
+    monkeypatch.setattr("songhive.services.federation.get_object_follower_inboxes", objects_mock)
     inboxes = dict(inboxes or {})
     resolve_mock = MagicMock(side_effect=lambda actor_url, config, **_: inboxes.get(actor_url))
     monkeypatch.setattr("songhive.services.federation.resolve_actor_inbox", resolve_mock)
-    return followers_mock, resolve_mock
+    return followers_mock, objects_mock, resolve_mock
 
 
 # ---------------------------------------------------------------------------

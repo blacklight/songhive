@@ -1217,6 +1217,7 @@
     "loadMore": "Load more",
     "types": {
       "follow": "started following you",
+      "followObject": "followed your {object}",
       "like": "liked your {object}",
       "boost": "boosted your {object}",
       "quote": "quoted your {object}",

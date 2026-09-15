@@ -576,6 +576,13 @@ the author's follower inboxes (`services/federation.get_follower_inboxes`
 reads Pubby's `federation_followers` storage via `pubby.collect_inboxes`,
 preferring `shared_inbox` and deduplicating) plus every remote mentioned
 actor, while `mentioned` activities reach only the mentioned actors.
+`public` activities additionally reach followers of objects in the
+reply chain — remote actors can `Follow` a local object rather than an
+actor (Friendica sends `Follow` on a thread's root item for conversation
+subscriptions; see *Object follows* below), and
+`services/federation.get_object_follower_inboxes` collects the inboxes
+subscribed to the activity's own object id or any of its
+`in_reply_to_activity_id` ancestors.
 Mentions that resolved to a local user (`user_id` set) or an actor URL on
 the local instance domain have no remote inbox and are excluded, as are
 non-HTTP(S) actor URLs; `private` and `local` never federate. Mentioned
@@ -1292,6 +1299,31 @@ the HTTP routes.
   (distinct from the ActivityPub `OrderedCollection` served at
   `/users/{username}/followers`). The SPA shows the count on
   `/@{username}` and renders follower details at `/@{username}/followers`.
+- *Object follows*: a `Follow` may also target a local **object** rather
+  than an actor — Friendica sends `Follow` on a thread's root item
+  (`parent-uri`) for conversation subscriptions, the FEP-efda
+  "followable objects" pattern. Pubby stores those rows scoped to the
+  object's own URL in `target_actor_id`, so they never count as actor
+  followers (the counts above key on the actor URL) and `Undo(Follow)`
+  retracts them by the same key. `Follow`s targeting *remote* actors or
+  objects are dropped by the processor without an `Accept` — the remote
+  server owns their followers collection. Object-scoped rows are read in
+  bulk through `storage.get_followers_of_targets(...)` and their inboxes
+  collected by `services/federation.get_object_follower_inboxes`:
+  `resolve_audience` fans public activities out to followers of the
+  activity's own object id and every `in_reply_to_activity_id` ancestor
+  (covering replies to followed threads), and newly materialized public
+  remote replies/quotes are relayed to the same subscribers — the raw
+  activity forwarded verbatim and signed by the nearest local ancestor's
+  owner, or the instance actor when the chain has no local node
+  (`federation/incoming._relay_thread_activity`). Served object documents
+  advertise their `followers` collection (an `OrderedCollection` of the
+  subscribers' actor ids) at
+  `GET /users/{username}/objects/{object_id}/followers`. An object-scoped
+  `Follow` creates a `follow` notification only for the object's owner —
+  a personal-inbox delivery addressed to another user is misaddressed and
+  skipped — with `target_*` payload fields describing the followed
+  object, matching the reply/quote payload convention.
 
 **Inbound remote replies and quotes** are materialized into `Activity`
 rows by `federation/incoming.py`, invoked from `tasks/federation.py`'s

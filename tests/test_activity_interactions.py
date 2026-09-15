@@ -1861,6 +1861,7 @@ async def test_quote_activity_remote_target_sends_quote_request(db_session, regu
     deliver.delay.side_effect = lambda payload, inbox, key_id, key: deliveries.append((payload, inbox))
     monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
     monkeypatch.setattr(federation_service, "get_follower_inboxes", lambda *a, **k: [])
+    monkeypatch.setattr(federation_service, "get_object_follower_inboxes", lambda *a, **k: [])
     monkeypatch.setattr(federation_service, "resolve_actor_inbox", lambda *a, **k: "https://remote.example/inbox")
 
     quote = await quote_activity(db_session, activity=target, author=regular_user, config=config, status_text="qt")

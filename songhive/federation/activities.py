@@ -434,7 +434,13 @@ def build_activity_object(activity: Activity) -> dict:
         if payload.get("type") == "Create" and isinstance(payload.get("object"), dict):
             # ``interactionPolicy`` is restamped at serve time so objects
             # published before the quote policy existed still advertise it.
-            return allow_public_quotes({"@context": payload.get("@context", AS_CONTEXT), **payload["object"]})
+            doc = {"@context": payload.get("@context", AS_CONTEXT), **payload["object"]}
+            # ``followers`` advertises the object's thread-subscription
+            # collection (FEP-efda) on objects published before it existed.
+            object_id = payload["object"].get("id")
+            if isinstance(object_id, str) and object_id.startswith(("http://", "https://")):
+                doc.setdefault("followers", f"{object_id}/followers")
+            return allow_public_quotes(doc)
         return payload
 
     mention_actor_urls: List[str] = [m.actor_url for m in activity.mentions if m.actor_url]  # type: ignore
@@ -450,6 +456,8 @@ def build_activity_object(activity: Activity) -> dict:
         "attributedTo": activity.source_actor,
         "to": to,
         "cc": cc,
+        # The object's thread-subscription collection (FEP-efda).
+        "followers": f"{activity.source_id}/followers",
     }
 
     if activity.published_at is not None:

@@ -233,6 +233,36 @@ describe("NotificationsView", () => {
     expect(link.attributes("target")).toBe("_blank");
   });
 
+  it("links object-scoped follow notifications to the followed object", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "follow",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/users/bob",
+          payload: {
+            actor_name: "bob",
+            target_url: "https://music.example.com/users/me/objects/t1",
+            target_local_url: "/tracks/t1",
+            target_item_type: "track",
+            target_item_title: "Track",
+            target_object_page_url: "/activities/act-9",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    const { wrapper } = await mountView();
+    const action = wrapper.find("a.notifications-view__action");
+    expect(action.text()).toContain("followed your track");
+    expect(action.attributes("href")).toBe("/activities/act-9");
+    const chip = wrapper.find("a.notifications-view__target");
+    expect(chip.exists()).toBe(true);
+    expect(chip.text()).toContain("Track");
+    // The follower's actor card still renders.
+    expect(wrapper.find(".actor-card").exists()).toBe(true);
+  });
+
   it("renders a user card for follow notifications", async () => {
     listNotifications.mockResolvedValueOnce({
       items: [

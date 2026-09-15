@@ -60,15 +60,19 @@ function objectKind(
  *
  * Likes and boosts name the reacted object, shares the granted item;
  * replies and quotes name the ``target_*`` object — their ``object_*``
- * fields snapshot the reply or quote note itself. Follows and mentions
- * name no object (their texts ignore the parameter).
+ * fields snapshot the reply or quote note itself. Object-scoped follows
+ * (thread subscriptions) also name their ``target_*`` object; plain
+ * follows and mentions name no object (their texts ignore the
+ * parameter).
  */
 export function notificationObjectKind(
   notification: Pick<NotificationResponse, "type" | "payload">,
 ): NotificationObjectKind {
   const payload = notification.payload ?? {};
   const prefix =
-    notification.type === "reply" || notification.type === "quote"
+    notification.type === "reply" ||
+    notification.type === "quote" ||
+    notification.type === "follow"
       ? "target_"
       : "";
   return objectKind(payload, prefix);
@@ -82,7 +86,11 @@ export function notificationObjectKind(
 export function notificationActionText(
   notification: Pick<NotificationResponse, "type" | "payload">,
 ): string {
-  const key = `notifications.types.${notification.type}`;
+  const payload = notification.payload ?? {};
+  const key =
+    notification.type === "follow" && str(payload.target_url)
+      ? "notifications.types.followObject"
+      : `notifications.types.${notification.type}`;
   // ``share`` phrases its object with an indefinite article ("shared a
   // track with you"); the other types use the bare entity name.
   const objectsKey =

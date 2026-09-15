@@ -32,7 +32,7 @@ mutagen>=1.47
 musicbrainzngs>=0.7.1
 
 # Federation
-pubby>=0.3.7
+pubby>=0.3.8
 
 # Markdown support
 mistune>=3.0

@@ -150,6 +150,10 @@ async def test_record_track_publication_enqueues_create_to_followers(db_session,
             "songhive.services.federation.get_follower_inboxes",
             return_value=["https://a.example/inbox", "https://b.example/inbox"],
         ),
+        patch(
+            "songhive.services.federation.get_object_follower_inboxes",
+            return_value=[],
+        ),
         patch("songhive.tasks.federation.deliver_activity") as mock_deliver,
     ):
         activity = await record_track_publication(db_session, track=track, artist=artist, owner=user, config=fed_config)

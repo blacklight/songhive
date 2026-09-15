@@ -252,6 +252,16 @@ def _seed_user(engine, config, username="alice"):
 
 def _run_process_incoming(engine, config, activity, username="alice"):
     """Run the incoming-activity task against the test engine."""
+    from pubby.handlers._inbox import InboxProcessor
+
+    real_process = InboxProcessor.process
+
+    def _process_unverified(self, *args, **kwargs):
+        # These tests exercise follower bookkeeping, not request signing:
+        # the real processor requires verified HTTP signature headers.
+        kwargs["skip_verification"] = True
+        return real_process(self, *args, **kwargs)
+
     with (
         patch(
             "songhive.tasks.federation.init_db",
@@ -262,6 +272,7 @@ def _run_process_incoming(engine, config, activity, username="alice"):
             "pubby.handlers._inbox.InboxProcessor._deliver_to_inbox",
             lambda *a, **k: True,
         ),
+        patch.object(InboxProcessor, "process", _process_unverified),
     ):
         return process_incoming(activity, username=username)
 
@@ -376,16 +387,25 @@ def test_incoming_delete_of_other_object_keeps_follower(engine, tmp_path):
 
 def test_incoming_follow_visible_via_api(fed_client, fed_config, engine, fed_user):
     """End-to-end: an incoming Follow shows up on the followers API."""
+    from pubby.handlers._inbox import InboxProcessor
+
     storage = get_federation_storage(fed_config.database.url)
     storage.cache_remote_actor(BOB_ACTOR, BOB_DOC, datetime.now(timezone.utc))
 
     def _init(*a, **k):
         init_db(engine=engine, force=True)
 
+    real_process = InboxProcessor.process
+
+    def _process_unverified(self, *args, **kwargs):
+        kwargs["skip_verification"] = True
+        return real_process(self, *args, **kwargs)
+
     with (
         patch("songhive.tasks.federation.init_db", _init),
         patch("songhive.tasks.federation.load_config", lambda *_, **__: fed_config),
         patch("pubby.handlers._inbox.InboxProcessor._deliver_to_inbox", lambda *a, **k: True),
+        patch.object(InboxProcessor, "process", _process_unverified),
     ):
         process_incoming(
             {
@@ -405,3 +425,98 @@ def test_incoming_follow_visible_via_api(fed_client, fed_config, engine, fed_use
 
     profile = fed_client.get("/api/v1/users/regular")
     assert profile.json()["followers_count"] == 1
+
+
+def test_incoming_object_follow_is_not_an_actor_follower(engine, tmp_path):
+    """A Follow of a local object (thread subscription) is stored scoped to
+    the object and never surfaces as an actor follower."""
+    config = _task_config(tmp_path)
+    user = _seed_user(engine, config)
+    actor_url = user.actor_url
+    object_url = f"{actor_url}/objects/thread-1"
+
+    storage = get_federation_storage(config.database.url)
+    storage.cache_remote_actor(BOB_ACTOR, BOB_DOC, datetime.now(timezone.utc))
+
+    _run_process_incoming(
+        engine,
+        config,
+        {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f2",
+            "actor": BOB_ACTOR,
+            "object": object_url,
+        },
+    )
+
+    # Stored under the object's id — a thread subscription…
+    assert [f.actor_id for f in storage.get_followers(actor_id=object_url)] == [BOB_ACTOR]
+    # …but the actor's own followers (API + counts) exclude it. Unassigned
+    # rows remain visible via ``get_followers(actor_id=...)``, so filter on
+    # the recorded target to prove the actor count is untouched.
+    actor_followers = [f for f in _followers_of(config, actor_url) if f.target_actor_id == actor_url]
+    assert actor_followers == []
+    assert count_followers_by_actor(storage).get(actor_url, 0) == 0
+
+
+def test_incoming_follow_of_remote_object_dropped(engine, tmp_path):
+    """A Follow targeting a remote object is ignored: nothing is stored."""
+    config = _task_config(tmp_path)
+    _seed_user(engine, config)
+
+    storage = get_federation_storage(config.database.url)
+    storage.cache_remote_actor(BOB_ACTOR, BOB_DOC, datetime.now(timezone.utc))
+
+    result = _run_process_incoming(
+        engine,
+        config,
+        {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f3",
+            "actor": BOB_ACTOR,
+            "object": "https://remote.example/notes/1",
+        },
+    )
+
+    assert result is None
+    assert storage.get_followers() == []
+
+
+def test_incoming_undo_follow_removes_object_subscription(engine, tmp_path):
+    """Undo(Follow) of an object follow removes only that subscription."""
+    config = _task_config(tmp_path)
+    user = _seed_user(engine, config)
+    actor_url = user.actor_url
+    object_url = f"{actor_url}/objects/thread-1"
+
+    storage = get_federation_storage(config.database.url)
+    storage.cache_remote_actor(BOB_ACTOR, BOB_DOC, datetime.now(timezone.utc))
+
+    _run_process_incoming(
+        engine,
+        config,
+        {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f4",
+            "actor": BOB_ACTOR,
+            "object": object_url,
+        },
+    )
+    assert storage.get_followers(actor_id=object_url)
+
+    _run_process_incoming(
+        engine,
+        config,
+        {
+            "type": "Undo",
+            "id": "https://remote.example/activities/u2",
+            "actor": BOB_ACTOR,
+            "object": {
+                "type": "Follow",
+                "id": "https://remote.example/activities/f4",
+                "actor": BOB_ACTOR,
+                "object": object_url,
+            },
+        },
+    )
+    assert storage.get_followers(actor_id=object_url) == []

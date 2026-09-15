@@ -181,11 +181,11 @@ def _patch_db(engine):
     """Return a patch that reinstalls the test engine on init_db calls."""
     return patch(
         "songhive.tasks.federation.init_db",
-        lambda *a, **k: init_db(engine=engine, force=True),
+        lambda *_, **__: init_db(engine=engine, force=True),
     )
 
 
-def _seed_alice(engine, config):
+def _seed_alice(engine, config, username="alice"):
     """Create the local recipient user on the test engine."""
     init_db(engine=engine, force=True)
 
@@ -193,8 +193,8 @@ def _seed_alice(engine, config):
         async with get_session() as session:
             return await create_user(
                 session,
-                username="alice",
-                email="alice@example.com",
+                username=username,
+                email=f"{username}@example.com",
                 password="secret",
                 config=config,
             )
@@ -246,6 +246,93 @@ def test_process_incoming_follow_creates_notification(engine, tmp_path, monkeypa
     assert rows[0].type == "follow"
     assert rows[0].actor_url == "https://remote.example/users/bob"
     assert rows[0].source_url == "https://remote.example/users/bob"
+
+
+def test_process_incoming_object_follow_notifies_owner(engine, tmp_path, monkeypatch):
+    """An object-scoped Follow notifies the object's owner with target fields."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        activity = {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f1",
+            "actor": "https://remote.example/users/bob",
+            "object": "https://music.example.com/users/alice/objects/t1",
+        }
+        process_incoming(activity, username="alice")
+
+    rows = _notifications_for(engine, user.id)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.type == "follow"
+    assert row.actor_url == "https://remote.example/users/bob"
+    assert row.payload["target_url"] == "https://music.example.com/users/alice/objects/t1"
+    assert row.payload["target_item_type"] == "track"
+    assert row.payload["target_item_title"] == "Track"
+    assert row.payload["target_local_url"].startswith("/tracks/")
+
+
+def test_process_incoming_object_follow_misaddressed(engine, tmp_path, monkeypatch):
+    """An object-scoped Follow does not notify a non-owner recipient."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    carol = _seed_alice(engine, config, username="carol")
+    _seed_local_object(engine, user)
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        activity = {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f1",
+            "actor": "https://remote.example/users/bob",
+            "object": "https://music.example.com/users/alice/objects/t1",
+        }
+        process_incoming(activity, username="carol")
+
+    assert _notifications_for(engine, carol.id) == []
+
+
+def test_process_incoming_shared_inbox_object_follow_notifies_owner(engine, tmp_path, monkeypatch):
+    """A shared-inbox object Follow resolves the object's owner as recipient."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        activity = {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f1",
+            "actor": "https://remote.example/users/bob",
+            "object": "https://music.example.com/users/alice/objects/t1",
+        }
+        process_incoming(activity, username=None)
+
+    rows = _notifications_for(engine, user.id)
+    assert len(rows) == 1
+    assert rows[0].type == "follow"
+    assert rows[0].payload["target_url"] == "https://music.example.com/users/alice/objects/t1"
 
 
 def test_process_incoming_like_and_announce(engine, tmp_path, monkeypatch):

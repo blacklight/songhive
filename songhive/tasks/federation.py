@@ -104,6 +104,11 @@ def process_incoming(
         key_id=key_id,
         allowed_instances=config.federation.allowed_instances,
         blocked_instances=config.federation.blocked_instances,
+        # Object-scoped Follows (thread subscriptions) target URLs under
+        # the instance domain that share no path prefix with the actor, so
+        # the domain is declared explicitly rather than relying on the
+        # actor-derived default.
+        local_base_urls=[f"https://{domain}"],
         strict_attribution=True,
         # FEP-044f: quoting is always allowed — incoming QuoteRequest
         # activities get an automatic Accept carrying a dereferenceable

@@ -90,6 +90,21 @@ describe("notificationObjectKind", () => {
       ),
     ).toBe("track");
   });
+
+  it("names the followed object for object-scoped follows", () => {
+    expect(
+      notificationObjectKind(
+        notification("follow", {
+          target_url: "https://example.com/users/me/objects/o1",
+          target_item_type: "track",
+          target_item_id: "t-1",
+        }),
+      ),
+    ).toBe("track");
+    // Plain actor follows carry no target_* fields; the follow text
+    // ignores the object parameter anyway.
+    expect(notificationObjectKind(notification("follow"))).toBe("post");
+  });
 });
 
 describe("notificationActionText", () => {
@@ -120,6 +135,21 @@ describe("notificationActionText", () => {
         notification("share", { item_type: "track", item_id: "t-1" }),
       ),
     ).toBe("shared a track with you");
+  });
+
+  it("renders the followed object for object-scoped follows", () => {
+    expect(
+      notificationActionText(
+        notification("follow", {
+          target_url: "https://example.com/users/me/objects/o1",
+          target_item_type: "track",
+          target_item_id: "t-1",
+        }),
+      ),
+    ).toBe("followed your track");
+    expect(notificationActionText(notification("follow"))).toBe(
+      "started following you",
+    );
   });
 
   it("falls back for unknown types", () => {

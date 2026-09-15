@@ -599,6 +599,11 @@ async def test_like_remote_reply_fans_out_to_remote_author(db_session, regular_u
         "get_follower_inboxes",
         lambda *a, **k: [],
     )
+    monkeypatch.setattr(
+        activity_service.federation_service,
+        "get_object_follower_inboxes",
+        lambda *a, **k: [],
+    )
     deliver = MagicMock()
     monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
 
@@ -639,6 +644,11 @@ async def test_boost_remote_reply_fans_out_to_remote_author(db_session, regular_
         "get_follower_inboxes",
         lambda *a, **k: [],
     )
+    monkeypatch.setattr(
+        activity_service.federation_service,
+        "get_object_follower_inboxes",
+        lambda *a, **k: [],
+    )
     deliver = MagicMock()
     monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
 
@@ -669,6 +679,11 @@ async def test_reply_to_remote_reply_addresses_remote_author(db_session, regular
     monkeypatch.setattr(
         activity_service.federation_service,
         "get_follower_inboxes",
+        lambda *a, **k: [],
+    )
+    monkeypatch.setattr(
+        activity_service.federation_service,
+        "get_object_follower_inboxes",
         lambda *a, **k: [],
     )
     monkeypatch.setattr(
@@ -1371,3 +1386,130 @@ async def test_accept_quote_request_wrong_actor_ignored(db_session, regular_user
     await db_session.flush()
 
     assert "quoteAuthorization" not in quote.payload["object"]
+
+
+# ---------------------------------------------------------------------------
+# thread-subscription relay (object-scoped follows)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_public_reply_relayed_to_object_followers(db_session, regular_user, config, monkeypatch):
+    """A public remote reply is relayed to followers of its thread objects."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    regular_user.private_key_pem = "private-key"
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    object_inboxes = MagicMock(return_value=["https://sub.example/inbox"])
+    monkeypatch.setattr(
+        "songhive.federation.incoming.federation_service.get_object_follower_inboxes",
+        object_inboxes,
+    )
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    activity = _create_activity(parent)
+    reply = await materialize_remote_reply(db_session, activity=activity, config=config)
+
+    assert reply is not None
+    # The followed thread root's id was queried.
+    object_inboxes.assert_called_once_with({parent.source_id}, config.database.url)
+    # The received activity is forwarded verbatim, signed by the local
+    # ancestor's owner.
+    deliver.delay.assert_called_once_with(
+        activity,
+        "https://sub.example/inbox",
+        "https://local.example/users/regular#main-key",
+        "private-key",
+    )
+
+
+@pytest.mark.asyncio
+async def test_relay_walks_reply_chain_and_uses_instance_key_without_local_owner(
+    db_session, regular_user, config, monkeypatch, tmp_path
+):
+    """Thread followers on any ancestor are reached; a remote-only chain
+    falls back to the instance actor's key."""
+    config = _fed_config(config)
+    config.federation.private_key_path = tmp_path / "instance.pem"
+    track = await _make_track(db_session, regular_user)
+    root = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=None,
+        source_type="remote",
+        source_actor="https://remote.example/users/bob",
+        source_id="https://remote.example/objects/root",
+    )
+    mid = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=None,
+        source_type="remote",
+        source_actor="https://remote.example/users/carol",
+        source_id="https://remote.example/objects/mid",
+    )
+    db_session.add_all([root, mid])
+    await db_session.flush()
+    mid.in_reply_to_activity_id = str(root.id)
+    await db_session.flush()
+
+    monkeypatch.setattr(
+        "songhive.federation.incoming.federation_service.get_object_follower_inboxes",
+        MagicMock(return_value=["https://sub.example/inbox"]),
+    )
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    reply = await materialize_remote_reply(
+        db_session,
+        activity=_create_activity(mid, object_id="https://remote.example/notes/r2"),
+        config=config,
+    )
+
+    assert reply is not None
+    deliver.delay.assert_called_once()
+    args = deliver.delay.call_args.args
+    assert args[1] == "https://sub.example/inbox"
+    assert args[2] == "https://local.example/ap/actor#main-key"
+
+
+@pytest.mark.asyncio
+async def test_non_public_reply_not_relayed_to_object_followers(db_session, regular_user, config, monkeypatch):
+    """A non-public reply is materialized for its addressee but never relayed."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    monkeypatch.setattr(
+        "songhive.federation.incoming.federation_service.get_object_follower_inboxes",
+        MagicMock(return_value=["https://sub.example/inbox"]),
+    )
+    deliver = MagicMock()
+    monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
+
+    reply = await materialize_remote_reply(
+        db_session,
+        activity=_create_activity(
+            parent,
+            public=False,
+            tags=[
+                {
+                    "type": "Mention",
+                    "href": "https://local.example/users/regular",
+                    "name": "@regular@local.example",
+                }
+            ],
+        ),
+        config=config,
+    )
+
+    assert reply is not None
+    deliver.delay.assert_not_called()

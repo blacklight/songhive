@@ -2552,6 +2552,36 @@ async def _remote_mention_actor_urls(
     return urls
 
 
+async def _ancestor_source_ids(session: AsyncSession, activity: Activity) -> Set[str]:
+    """
+    Return the ``source_id``s of the activity's in-reply-to ancestors.
+
+    The chain is walked via ``in_reply_to_activity_id`` regardless of each
+    ancestor's ``source_type`` — a local reply may sit under materialized
+    remote rows before reaching the local thread root. Cycles terminate
+    via the ``seen`` set.
+    """
+    ids: Set[str] = set()
+    seen: Set[str] = set()
+    parent_id = activity.in_reply_to_activity_id
+    while parent_id and parent_id not in seen:
+        seen.add(parent_id)
+        row = (
+            await session.execute(
+                select(
+                    Activity.source_id,
+                    Activity.in_reply_to_activity_id,
+                ).where(Activity.id == parent_id)
+            )
+        ).first()
+        if row is None:
+            break
+        if row.source_id:
+            ids.add(row.source_id)
+        parent_id = row.in_reply_to_activity_id
+    return ids
+
+
 async def resolve_audience(
     session: AsyncSession,
     activity: Activity,
@@ -2567,6 +2597,11 @@ async def resolve_audience(
     - ``public`` and ``followers`` reach the author's follower inboxes (from
       Pubby's follower storage via ``get_follower_inboxes``, which prefers
       each follower's ``shared_inbox``) plus every remote mentioned actor.
+    - ``public`` additionally reaches the inboxes of remote actors that
+      follow any object in the activity's reply chain — object-scoped
+      follows (e.g. Friendica thread subscriptions) are stored under the
+      followed object's id and collected through
+      ``get_object_follower_inboxes``.
     - ``mentioned`` reaches only the remote mentioned actors.
     - ``private`` and ``local`` never federate and produce an empty audience.
 
@@ -2594,6 +2629,20 @@ async def resolve_audience(
             await asyncio.to_thread(
                 federation_service.get_follower_inboxes,
                 activity.source_actor,
+                config.database.url,
+            )
+        )
+
+    if visibility == Visibility.PUBLIC:
+        # Remote actors may follow local objects (thread subscriptions):
+        # the activity's own object id and its ancestors' cover the cases
+        # where the followed object is updated or a new reply joins the
+        # thread. Non-public posts never leak to object followers.
+        object_ids = {activity.source_id} | await _ancestor_source_ids(session, activity)
+        inboxes.update(
+            await asyncio.to_thread(
+                federation_service.get_object_follower_inboxes,
+                object_ids,
                 config.database.url,
             )
         )

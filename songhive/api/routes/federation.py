@@ -117,8 +117,10 @@ def _track_object_document(track: Track, owner: Any, config: SonghiveConfig) -> 
     The document extends the object embedded in ``Create`` deliveries with
     the fields remote fetchers require: ``@context`` makes it a valid
     standalone ActivityStreams document (context-less payloads are rejected
-    upstream), and the ``to``/``cc`` audience lets remote importers classify
-    it as a public status instead of a direct-only one.
+    upstream), the ``to``/``cc`` audience lets remote importers classify it
+    as a public status instead of a direct-only one, and ``followers``
+    advertises the object's follower collection so remote servers can
+    subscribe to the thread (FEP-efda followable objects).
     """
     if track.artist is None or owner is None or not owner.actor_url or not track.federation_object_id:
         return None
@@ -142,6 +144,7 @@ def _track_object_document(track: Track, owner: Any, config: SonghiveConfig) -> 
         **audio_object,
         "to": to,
         "cc": cc,
+        "followers": f"{object_url}/followers",
     }
 
 
@@ -217,6 +220,63 @@ async def get_object(
         )
 
     return _activity_object_response(activity)
+
+
+@router.get("/users/{username}/objects/{object_id}/followers")
+async def get_object_followers(
+    username: str,
+    object_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return the followers collection of a federated object.
+
+    Remote actors may ``Follow`` a local object rather than an actor —
+    e.g. Friendica sends ``Follow`` on a thread's root item to subscribe
+    to the conversation (FEP-efda followable objects). Pubby stores those
+    rows scoped to the object's id; this collection dereferences them so
+    the ``followers`` field advertised on served object documents stays
+    resolvable. Only objects that ``get_object`` would serve answer — the
+    collection follows the object's own dereferenceability.
+    """
+    config = _federation_config(request)
+    user = await _get_active_user(db, username)
+    ensure_user_actor(user, config)
+    object_url = f"{user.actor_url}/objects/{object_id}"
+    wanted = {object_url}
+    track_id = await db.scalar(
+        select(Track.id).where(
+            Track.federation_object_id == object_id,
+            Track.owner_id == str(user.id),
+            Track.visibility == Visibility.PUBLIC.value,
+        )
+    )
+    if track_id is None:
+        activity_result = await db.execute(
+            select(Activity).where(
+                or_(
+                    Activity.local_object_id == object_id,
+                    Activity.source_id == object_id,
+                ),
+                Activity.owner_user_id == str(user.id),
+            )
+        )
+        activity = activity_result.scalar_one_or_none()
+        if activity is None or activity.deleted_at is not None or not _visibility_federates(activity.visibility):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        if activity.source_id:
+            wanted.add(activity.source_id)
+
+    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    followers = await asyncio.to_thread(storage.get_followers_of_targets, wanted)
+    return JSONResponse(
+        content=_ordered_collection(
+            f"{object_url}/followers",
+            [f.actor_id for f in followers],
+        ),
+        media_type=ACTIVITY_JSON,
+    )
 
 
 @router.get("/users/{username}/quote_authorizations/{auth_id:path}")

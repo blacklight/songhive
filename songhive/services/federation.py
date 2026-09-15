@@ -9,7 +9,7 @@ thread when inside an async context.
 
 import logging
 from datetime import timezone
-from typing import Optional
+from typing import Iterable, Optional
 
 from pubby import Follower, collect_inboxes
 from pubby import resolve_actor_inbox as _pubby_resolve_actor_inbox
@@ -106,6 +106,25 @@ def get_follower_inboxes(actor_url: str, database_url: str) -> list[str]:
     """
     storage = create_activitypub_storage(database_url)
     return collect_inboxes(storage.get_followers(actor_id=actor_url))
+
+
+def get_object_follower_inboxes(object_ids: Iterable[str], database_url: str) -> list[str]:
+    """
+    Return unique follower inboxes for any of the given local objects.
+
+    Remote actors may ``Follow`` a local object rather than an actor —
+    e.g. Friendica sends ``Follow`` on a thread's root item for
+    conversation subscriptions — and pubby stores those rows scoped to
+    the object's id. ``object_ids`` typically mixes an activity's own
+    object id with the ids of its in-reply-to ancestors, so thread
+    subscribers are reached wherever they attached. Unassigned followers
+    are never included: they follow the actor, not any object.
+    """
+    wanted = {oid for oid in object_ids if oid}
+    if not wanted:
+        return []
+    storage = create_activitypub_storage(database_url)
+    return collect_inboxes(storage.get_followers_of_targets(wanted))
 
 
 def _followed_at_key(follower: Follower) -> float:

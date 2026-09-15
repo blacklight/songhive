@@ -3,7 +3,9 @@ Notification hooks for incoming ActivityPub activities.
 
 Maps federated interactions to user notifications:
 
-- ``Follow`` → ``follow``
+- ``Follow`` → ``follow``; an object-scoped Follow (FEP-efda thread
+  subscription) notifies only the object's owner and carries
+  ``target_*`` payload fields describing the followed object
 - ``Like`` → ``like``
 - ``Announce`` → ``boost``
 - ``Create`` (Note): ``quote`` when the note quotes a local object URL,
@@ -468,6 +470,202 @@ async def resolve_inbox_recipients(session: AsyncSession, *, activity: dict) -> 
     return recipients
 
 
+async def _create_follow_inbox_notification(
+    session: AsyncSession,
+    *,
+    actor_url: str,
+    recipient: User,
+    payload: Dict[str, Any],
+    obj: Optional[Any] = None,
+    instance_domain: Optional[str] = None,
+) -> None:
+    """
+    Create notifications for an incoming ``Follow`` activity.
+
+    The Follow object is normally the followed actor (the recipient);
+    object-scoped Follows (FEP-efda thread subscriptions, e.g. Friendica)
+    target a local object instead. Object follows carry the resolved
+    ``target_*`` fields so clients can render "followed your post", and only
+    the object's owner is notified — a personal-inbox delivery to someone else
+    is misaddressed.
+    """
+    target = obj if isinstance(obj, str) else obj.get("id") if isinstance(obj, dict) else None
+    if isinstance(target, str) and target:
+        resolved = await _resolve_local_object(session, target, instance_domain)
+        if resolved is not None:
+            owners = await _target_owner_users(session, {target})
+            if not any(str(owner.id) == str(recipient.id) for owner in owners):
+                return
+            payload = {
+                **payload,
+                "target_url": target,
+                **{f"target_{key}": value for key, value in resolved.items()},
+            }
+
+    await create_notification(
+        session,
+        user_id=recipient.id,
+        type=NotificationType.FOLLOW,
+        actor_url=actor_url,
+        source_url=actor_url,
+        payload=payload,
+    )
+
+
+async def _create_quote_inbox_notification(
+    session: AsyncSession,
+    *,
+    actor_url: str,
+    recipient: User,
+    activity: Dict[str, Any],
+    payload: Dict[str, Any],
+    activity_id: Optional[str] = None,
+    obj: Optional[Any] = None,
+    instance_domain: Optional[str] = None,
+) -> None:
+    """
+    FEP-044f: ``object`` is the quoted post, ``instrument`` the
+    quoting post (a bare id, or the embedded object when the remote
+    server includes it). Pubby auto-approves the request; this
+    notification is what tells the quoted post's owner it happened —
+    the quote's own ``Create`` may never reach this inbox. The
+    instrument id is used as ``source_url`` so a later ``Create``
+    notification for the same note dedupes onto this row while it
+    stays unseen.
+    """
+
+    quoted_uri = obj if isinstance(obj, str) else obj.get("id") if isinstance(obj, dict) else None
+    if not isinstance(quoted_uri, str) or not quoted_uri:
+        return
+    resolved = await _resolve_local_object(session, quoted_uri, instance_domain)
+    if resolved is None:
+        # The quoted object is unknown — the request does not concern
+        # a local post of this recipient.
+        return
+    owners = await _target_owner_users(session, {quoted_uri})
+    if not any(str(owner.id) == str(recipient.id) for owner in owners):
+        # The quoted object is local but belongs to someone else — the
+        # request was misaddressed to this recipient's inbox.
+        return
+    instrument = activity.get("instrument")
+    instrument_doc = instrument if isinstance(instrument, dict) else {}
+    quoting_id = instrument_doc.get("id") if instrument_doc else instrument
+    source_url = quoting_id if isinstance(quoting_id, str) and quoting_id else activity_id
+    target_fields = {f"target_{key}": value for key, value in resolved.items()}
+    await _create_or_update_quote_notification(
+        session,
+        recipient=recipient,
+        actor_url=actor_url,
+        source_url=source_url,
+        payload={
+            **payload,
+            **_note_snapshot(instrument_doc),
+            "target_url": quoted_uri,
+            **target_fields,
+        },
+    )
+
+
+async def _process_incoming_quote_notification(
+    session: AsyncSession,
+    *,
+    actor_url: str,
+    recipient: User,
+    payload: Dict[str, Any],
+    quote_target: str,
+    source_url: Optional[str],
+    instance_domain: Optional[str],
+    note: Dict[str, Any],
+    self_fields: Dict[str, Any],
+) -> bool:
+    """
+    FEP-044f: ``object`` is the quoted post, ``instrument`` the
+    quoting post (a bare id, or the embedded object when the remote
+    server includes it). Pubby auto-approves the request; this
+    notification is what tells the quoted post's owner it happened —
+    the quote's own ``Create`` may never reach this inbox. The
+    instrument id is used as ``source_url`` so a later ``Create``
+    notification for the same note dedupes onto this row while it
+    stays unseen.
+    """
+    resolved = await _resolve_local_object(session, quote_target, instance_domain)
+    owners = await _target_owner_users(session, {quote_target})
+    if resolved is not None and any(str(owner.id) == str(recipient.id) for owner in owners):
+        # Only the quoted post's owner gets "quoted your post" — a
+        # quote of someone else's post that merely tags the recipient
+        # stays a ``mention``.
+        target_fields = {f"target_{key}": value for key, value in resolved.items()}
+        return (
+            await _create_or_update_quote_notification(
+                session,
+                recipient=recipient,
+                actor_url=actor_url,
+                source_url=source_url,
+                payload={
+                    **payload,
+                    **note,
+                    **self_fields,
+                    "target_url": quote_target,
+                    **target_fields,
+                },
+            )
+            is not None
+        )
+
+    return False
+
+
+async def _process_incoming_reply_notification(
+    session: AsyncSession,
+    *,
+    actor_url: str,
+    recipient: User,
+    payload: Dict[str, Any],
+    in_reply_to: str,
+    source_url: Optional[str],
+    instance_domain: Optional[str],
+    note: Dict[str, Any],
+    self_fields: Dict[str, Any],
+) -> bool:
+    """
+    FEP-044f: ``object`` is the replied-to post, ``instrument`` the
+    replying post (a bare id, or the embedded object when the remote
+    server includes it). Pubby auto-approves the request; this
+    notification is what tells the replied-to post's owner it happened
+    — the reply's own ``Create`` may never reach this inbox. The
+    instrument id is used as ``source_url`` so a later ``Create``
+    notification for the same note dedupes onto this row while it
+    stays unseen.
+    """
+
+    resolved = await _resolve_local_object(session, in_reply_to, instance_domain)
+    owners = await _target_owner_users(session, {in_reply_to})
+    if resolved is not None and any(str(owner.id) == str(recipient.id) for owner in owners):
+        # Only the replied-to post's owner gets "replied to your
+        # post" — a reply to someone else's post that merely tags
+        # the recipient stays a ``mention``.
+        target_fields = {f"target_{key}": value for key, value in resolved.items()}
+        return (
+            await create_notification(
+                session,
+                user_id=recipient.id,
+                type=NotificationType.REPLY,
+                actor_url=actor_url,
+                source_url=source_url,
+                payload={
+                    **payload,
+                    **note,
+                    **self_fields,
+                    "target_url": in_reply_to,
+                    **target_fields,
+                },
+            )
+            is not None
+        )
+
+    return False
+
+
 async def create_inbox_notifications(
     session: AsyncSession,
     *,
@@ -508,15 +706,13 @@ async def create_inbox_notifications(
             payload["actor_avatar_url"] = avatar_url
 
     if activity_type == "Follow":
-        # The Follow object is the followed actor (the recipient); link the
-        # notification to the follower's actor URL instead.
-        await create_notification(
+        await _create_follow_inbox_notification(
             session,
-            user_id=recipient.id,
-            type=NotificationType.FOLLOW,
             actor_url=actor_url,
-            source_url=actor_url,
+            recipient=recipient,
             payload=payload,
+            obj=obj,
+            instance_domain=instance_domain,
         )
         return
 
@@ -534,43 +730,15 @@ async def create_inbox_notifications(
         return
 
     if activity_type == "QuoteRequest":
-        # FEP-044f: ``object`` is the quoted post, ``instrument`` the
-        # quoting post (a bare id, or the embedded object when the remote
-        # server includes it). Pubby auto-approves the request; this
-        # notification is what tells the quoted post's owner it happened —
-        # the quote's own ``Create`` may never reach this inbox. The
-        # instrument id is used as ``source_url`` so a later ``Create``
-        # notification for the same note dedupes onto this row while it
-        # stays unseen.
-        quoted_uri = obj if isinstance(obj, str) else obj.get("id") if isinstance(obj, dict) else None
-        if not isinstance(quoted_uri, str) or not quoted_uri:
-            return
-        resolved = await _resolve_local_object(session, quoted_uri, instance_domain)
-        if resolved is None:
-            # The quoted object is unknown — the request does not concern
-            # a local post of this recipient.
-            return
-        owners = await _target_owner_users(session, {quoted_uri})
-        if not any(str(owner.id) == str(recipient.id) for owner in owners):
-            # The quoted object is local but belongs to someone else — the
-            # request was misaddressed to this recipient's inbox.
-            return
-        instrument = activity.get("instrument")
-        instrument_doc = instrument if isinstance(instrument, dict) else {}
-        quoting_id = instrument_doc.get("id") if instrument_doc else instrument
-        source_url = quoting_id if isinstance(quoting_id, str) and quoting_id else activity_id
-        target_fields = {f"target_{key}": value for key, value in resolved.items()}
-        await _create_or_update_quote_notification(
+        await _create_quote_inbox_notification(
             session,
-            recipient=recipient,
             actor_url=actor_url,
-            source_url=source_url,
-            payload={
-                **payload,
-                **_note_snapshot(instrument_doc),
-                "target_url": quoted_uri,
-                **target_fields,
-            },
+            recipient=recipient,
+            activity=activity,
+            activity_id=activity_id,
+            payload=payload,
+            obj=obj,
+            instance_domain=instance_domain,
         )
         return
 
@@ -593,54 +761,29 @@ async def create_inbox_notifications(
     # concerns them — quoting or replying to their post always tags them.
     thread_notified = False
     if quote_target:
-        resolved = await _resolve_local_object(session, quote_target, instance_domain)
-        owners = await _target_owner_users(session, {quote_target})
-        if resolved is not None and any(str(owner.id) == str(recipient.id) for owner in owners):
-            # Only the quoted post's owner gets "quoted your post" — a
-            # quote of someone else's post that merely tags the recipient
-            # stays a ``mention``.
-            target_fields = {f"target_{key}": value for key, value in resolved.items()}
-            thread_notified = (
-                await _create_or_update_quote_notification(
-                    session,
-                    recipient=recipient,
-                    actor_url=actor_url,
-                    source_url=source_url,
-                    payload={
-                        **payload,
-                        **note,
-                        **self_fields,
-                        "target_url": quote_target,
-                        **target_fields,
-                    },
-                )
-                is not None
-            )
+        thread_notified = await _process_incoming_quote_notification(
+            session,
+            actor_url=actor_url,
+            recipient=recipient,
+            payload=payload,
+            quote_target=quote_target,
+            instance_domain=instance_domain,
+            source_url=source_url,
+            note=note,
+            self_fields=self_fields,
+        )
     elif isinstance(in_reply_to, str) and in_reply_to:
-        resolved = await _resolve_local_object(session, in_reply_to, instance_domain)
-        owners = await _target_owner_users(session, {in_reply_to})
-        if resolved is not None and any(str(owner.id) == str(recipient.id) for owner in owners):
-            # Only the replied-to post's owner gets "replied to your
-            # post" — a reply to someone else's post that merely tags
-            # the recipient stays a ``mention``.
-            target_fields = {f"target_{key}": value for key, value in resolved.items()}
-            thread_notified = (
-                await create_notification(
-                    session,
-                    user_id=recipient.id,
-                    type=NotificationType.REPLY,
-                    actor_url=actor_url,
-                    source_url=source_url,
-                    payload={
-                        **payload,
-                        **note,
-                        **self_fields,
-                        "target_url": in_reply_to,
-                        **target_fields,
-                    },
-                )
-                is not None
-            )
+        thread_notified = await _process_incoming_reply_notification(
+            session,
+            actor_url=actor_url,
+            recipient=recipient,
+            payload=payload,
+            in_reply_to=in_reply_to,
+            instance_domain=instance_domain,
+            source_url=source_url,
+            note=note,
+            self_fields=self_fields,
+        )
 
     mentioned = _mentions_recipient(obj, recipient.actor_url)
     if not thread_notified and mentioned:

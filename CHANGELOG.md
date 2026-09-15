@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `federation`: object-scoped follows (FEP-efda "followable objects") —
+  remote actors can `Follow` a local object rather than an actor, the
+  pattern Friendica uses for thread subscriptions (`Follow` on the
+  thread's root item). Pubby stores these rows scoped to the object's
+  URL, so they never count as actor followers; `Follow`s targeting
+  remote actors or objects are now dropped without an `Accept`. Public
+  activities fan out to followers of the activity's own object and every
+  in-reply-to ancestor (`resolve_audience`), and newly materialized
+  public remote replies and quotes are relayed to thread subscribers —
+  forwarded verbatim and signed by the nearest local ancestor's owner or
+  the instance actor. Served object documents advertise their
+  `followers` collection, dereferenceable at
+  `GET /users/{username}/objects/{object_id}/followers`. Object-scoped
+  follows create a `follow` notification only for the object's owner,
+  with `target_*` payload fields describing the followed object.
+
 ## 0.1.3
 
 ### Added

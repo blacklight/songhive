@@ -343,6 +343,13 @@ function onActivityCardError(notificationId: string) {
 function rawLinkFor(item: NotificationResponse): string | undefined {
   const payload = item.payload ?? {};
   if (item.type === "follow") {
+    // Object-scoped follows (thread subscriptions) link to the followed
+    // object; plain actor follows link to the follower's profile.
+    const target =
+      str(payload.target_object_page_url) ??
+      str(payload.target_local_url) ??
+      str(payload.target_url);
+    if (target) return target;
     const actor = item.actor_url || item.source_url || "";
     if (actor.startsWith(URN_PREFIX)) {
       return `/@${actor.slice(URN_PREFIX.length)}`;
@@ -552,7 +559,9 @@ function targetContext(item: NotificationResponse):
     })
   | null {
   const payload = item.payload ?? {};
-  if (!NOTE_TYPES.has(item.type)) return null;
+  // Object-scoped follows carry ``target_*`` fields for the followed
+  // object — the same chip note types use for their reply/quote target.
+  if (!NOTE_TYPES.has(item.type) && item.type !== "follow") return null;
   const to = str(payload.target_local_url);
   const title = str(payload.target_item_title);
   if (!to || !title) return null;

@@ -74,14 +74,16 @@ async def _targets(session, activity_id) -> list[ActivityTarget]:
     return list(result.scalars().all())
 
 
-def _patch_resolution(monkeypatch, followers=(), inboxes=None):
+def _patch_resolution(monkeypatch, followers=(), inboxes=None, object_followers=()):
     """Stub follower collection and per-actor inbox resolution."""
     followers_mock = MagicMock(return_value=list(followers))
     monkeypatch.setattr("songhive.services.federation.get_follower_inboxes", followers_mock)
+    objects_mock = MagicMock(return_value=list(object_followers))
+    monkeypatch.setattr("songhive.services.federation.get_object_follower_inboxes", objects_mock)
     inboxes = dict(inboxes or {})
     resolve_mock = MagicMock(side_effect=lambda actor_url, config, **_: inboxes.get(actor_url))
     monkeypatch.setattr("songhive.services.federation.resolve_actor_inbox", resolve_mock)
-    return followers_mock, resolve_mock
+    return followers_mock, objects_mock, resolve_mock
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +109,7 @@ async def test_resolve_audience_public_includes_followers_and_mentions(
     db_session.add(activity)
     await db_session.flush()
 
-    followers, resolve = _patch_resolution(
+    followers, _, resolve = _patch_resolution(
         monkeypatch,
         followers=["https://f1.example/inbox", "https://f2.example/inbox"],
         inboxes={"https://remote.example/users/bob": "https://remote.example/inbox"},
@@ -144,7 +146,7 @@ async def test_resolve_audience_followers_visibility(db_session, config, regular
     db_session.add(activity)
     await db_session.flush()
 
-    followers, _ = _patch_resolution(
+    followers, _, _ = _patch_resolution(
         monkeypatch,
         followers=["https://f1.example/inbox"],
         inboxes={"https://remote.example/users/bob": "https://remote.example/inbox"},
@@ -173,7 +175,7 @@ async def test_resolve_audience_mentioned_skips_followers(db_session, config, re
     db_session.add(activity)
     await db_session.flush()
 
-    followers, resolve = _patch_resolution(
+    followers, _, resolve = _patch_resolution(
         monkeypatch,
         followers=["https://f1.example/inbox"],
         inboxes={"https://remote.example/users/bob": "https://remote.example/inbox"},
@@ -191,7 +193,7 @@ async def test_resolve_audience_non_federated_visibility_empty(db_session, confi
     """Private and local activities never produce a remote audience."""
     config = _fed_config(config)
     track = await _make_track(db_session, regular_user)
-    followers, resolve = _patch_resolution(monkeypatch, followers=["https://f1.example/inbox"])
+    followers, _, resolve = _patch_resolution(monkeypatch, followers=["https://f1.example/inbox"])
 
     for visibility in (Visibility.PRIVATE.value, Visibility.LOCAL.value):
         activity = _make_activity(
@@ -223,7 +225,7 @@ async def test_resolve_audience_federation_disabled(db_session, config, regular_
     db_session.add(activity)
     await db_session.flush()
 
-    followers, _ = _patch_resolution(monkeypatch, followers=["https://f1.example/inbox"])
+    followers, _, _ = _patch_resolution(monkeypatch, followers=["https://f1.example/inbox"])
 
     assert await activity_service.resolve_audience(db_session, activity, config) == set()
     followers.assert_not_called()
@@ -246,7 +248,7 @@ async def test_resolve_audience_skips_local_domain_actor_url(db_session, config,
     db_session.add(activity)
     await db_session.flush()
 
-    _, resolve = _patch_resolution(monkeypatch)
+    _, _, resolve = _patch_resolution(monkeypatch)
 
     assert await activity_service.resolve_audience(db_session, activity, config) == set()
     resolve.assert_not_called()
@@ -272,6 +274,76 @@ async def test_resolve_audience_drops_unresolvable_inboxes(db_session, config, r
     _patch_resolution(monkeypatch, inboxes={})
 
     assert await activity_service.resolve_audience(db_session, activity, config) == set()
+
+
+@pytest.mark.asyncio
+async def test_resolve_audience_public_includes_object_followers(db_session, config, regular_user, monkeypatch):
+    """Public activities reach followers of objects in the reply chain."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity(
+        "track",
+        track.id,
+        owner_user_id=regular_user.id,
+        source_id="https://local.example/users/alice/objects/root",
+    )
+    db_session.add(parent)
+    await db_session.flush()
+    reply = _make_activity(
+        "track",
+        track.id,
+        activity_type="reply",
+        owner_user_id=regular_user.id,
+        source_id="https://local.example/users/alice/objects/reply1",
+        in_reply_to_activity_id=str(parent.id),
+    )
+    db_session.add(reply)
+    await db_session.flush()
+
+    _, objects, _ = _patch_resolution(
+        monkeypatch,
+        object_followers=["https://sub.example/inbox"],
+    )
+
+    audience = await activity_service.resolve_audience(db_session, reply, config)
+
+    assert "https://sub.example/inbox" in audience
+    # The activity's own object id and its ancestors' are queried so
+    # subscribers attached anywhere in the thread are reached.
+    objects.assert_called_once_with(
+        {
+            "https://local.example/users/alice/objects/reply1",
+            "https://local.example/users/alice/objects/root",
+        },
+        config.database.url,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_audience_non_public_skips_object_followers(db_session, config, regular_user, monkeypatch):
+    """Non-public posts never reach object followers."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    _, objects, _ = _patch_resolution(
+        monkeypatch,
+        object_followers=["https://sub.example/inbox"],
+    )
+
+    for visibility in (Visibility.FOLLOWERS.value, Visibility.MENTIONED.value):
+        activity = _make_activity(
+            "track",
+            track.id,
+            owner_user_id=regular_user.id,
+            visibility=visibility,
+            source_id=f"https://local.example/users/alice/objects/{visibility}",
+        )
+        db_session.add(activity)
+        await db_session.flush()
+
+        audience = await activity_service.resolve_audience(db_session, activity, config)
+        assert "https://sub.example/inbox" not in audience
+
+    objects.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -601,7 +673,7 @@ async def test_fan_out_like_activity_local_target(db_session, config, regular_us
     db_session.add_all([target, like])
     await db_session.flush()
 
-    _, resolve = _patch_resolution(monkeypatch, followers=["https://f1.example/inbox"])
+    _, _, resolve = _patch_resolution(monkeypatch, followers=["https://f1.example/inbox"])
     deliver = MagicMock()
     monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
 
@@ -653,7 +725,7 @@ async def test_fan_out_like_activity_non_federated_like(db_session, config, regu
     db_session.add(like)
     await db_session.flush()
 
-    _, resolve = _patch_resolution(monkeypatch, followers=["https://f1.example/inbox"])
+    _, _, resolve = _patch_resolution(monkeypatch, followers=["https://f1.example/inbox"])
     deliver = MagicMock()
     monkeypatch.setattr("songhive.tasks.federation.deliver_activity", deliver)
 

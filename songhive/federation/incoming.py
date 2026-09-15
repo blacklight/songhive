@@ -17,10 +17,11 @@ only the addressed audience can see them. Non-public posts addressing no
 local user are not materialized.
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 from pubby import AttributionMismatch, validate_attribution
@@ -33,6 +34,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from ..config.schema import SonghiveConfig
 from ..models import User, Visibility
 from ..models.activity import _MENTION_HANDLE_RE, Activity, ActivityMention
+from ..services import federation as federation_service
 from ..services.activities import (
     _entity_visibility,
     _remote_actor_handle,
@@ -41,6 +43,7 @@ from ..services.activities import (
     resolve_entity,
 )
 from .notifications import strip_quote_fallback
+from .storage import get_or_create_private_key
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +213,89 @@ def _materialized_visibility(obj: dict, entity: Any) -> Visibility:
     return Visibility.MENTIONED
 
 
+async def _relay_thread_activity(
+    session: AsyncSession,
+    *,
+    activity: dict,
+    obj: dict,
+    target: Activity,
+    config: Optional[SonghiveConfig],
+) -> None:
+    """
+    Relay a public remote reply/quote to followers of its thread objects.
+
+    Remote actors may ``Follow`` a local object rather than an actor —
+    e.g. Friendica sends ``Follow`` on a thread's root item for
+    conversation subscriptions — and expect the object's server to
+    forward new thread items to them. The received activity is forwarded
+    verbatim, signed by the nearest local ancestor's owner (or the
+    instance actor), to every inbox following an object in the reply
+    chain. Non-public objects are never relayed.
+    """
+    if config is None or not config.federation.enabled or not config.federation.instance_domain or not is_public(obj):
+        return
+
+    object_ids: Set[str] = set()
+    if target.source_id:
+        object_ids.add(target.source_id)
+    owner_id = target.owner_user_id if target.source_type == "local" else None
+    seen: Set[str] = {target.id}
+    parent_id = target.in_reply_to_activity_id
+
+    while parent_id and parent_id not in seen:
+        seen.add(parent_id)
+        row = (
+            await session.execute(
+                select(
+                    Activity.source_id,
+                    Activity.source_type,
+                    Activity.owner_user_id,
+                    Activity.in_reply_to_activity_id,
+                ).where(Activity.id == parent_id)
+            )
+        ).first()
+        if row is None:
+            break
+        if row.source_id:
+            object_ids.add(row.source_id)
+        if owner_id is None and row.source_type == "local" and row.owner_user_id:
+            owner_id = row.owner_user_id
+        parent_id = row.in_reply_to_activity_id
+
+    signer = await session.get(User, owner_id) if owner_id else None
+    inboxes = await asyncio.to_thread(
+        federation_service.get_object_follower_inboxes,
+        object_ids,
+        config.database.url,
+    )
+
+    if not inboxes:
+        return
+
+    if signer is not None and signer.actor_url and signer.private_key_pem:
+        key_id = f"{signer.actor_url}#main-key"
+        private_key_pem = signer.private_key_pem
+    else:
+        domain = config.federation.instance_domain
+        key_id = f"https://{domain}/ap/actor#main-key"
+        private_key_pem = get_or_create_private_key(config.federation.private_key_path).read_text(encoding="utf-8")
+
+    # Deferred: ``tasks.federation`` drives this module's sync entry point.
+    from ..tasks.federation import deliver_activity
+
+    for inbox in inboxes:
+        try:
+            deliver_activity.delay(activity, inbox, key_id, private_key_pem)
+        except Exception as exc:
+            logger.warning("Cannot relay %s to %s: %s", activity.get("id"), inbox, exc)
+    logger.info(
+        "Relayed remote %s %s to %d object follower(s)",
+        activity.get("type"),
+        obj.get("id"),
+        len(inboxes),
+    )
+
+
 async def _materialize_remote_object(
     session: AsyncSession,
     *,
@@ -219,6 +305,7 @@ async def _materialize_remote_object(
     object_id: str,
     target: Activity,
     activity_type: str,
+    config: Optional[SonghiveConfig] = None,
 ) -> Optional[Activity]:
     """
     Store a validated inbound ``Create`` object as a remote activity row.
@@ -283,10 +370,19 @@ async def _materialize_remote_object(
         actor,
         target.source_id,
     )
+    try:
+        await _relay_thread_activity(session, activity=activity, obj=obj, target=target, config=config)
+    except Exception as exc:
+        logger.warning("Failed to relay remote %s to object followers: %s", object_id, exc)
     return row
 
 
-async def materialize_remote_reply(session: AsyncSession, *, activity: dict) -> Optional[Activity]:
+async def materialize_remote_reply(
+    session: AsyncSession,
+    *,
+    activity: dict,
+    config: Optional[SonghiveConfig] = None,
+) -> Optional[Activity]:
     """
     Store an inbound ``Create`` reply as a ``source_type="remote"`` activity.
 
@@ -340,10 +436,16 @@ async def materialize_remote_reply(session: AsyncSession, *, activity: dict) -> 
         object_id=object_id,
         target=parent,
         activity_type="reply",
+        config=config,
     )
 
 
-async def materialize_remote_quote(session: AsyncSession, *, activity: dict) -> Optional[Activity]:
+async def materialize_remote_quote(
+    session: AsyncSession,
+    *,
+    activity: dict,
+    config: Optional[SonghiveConfig] = None,
+) -> Optional[Activity]:
     """
     Store an inbound ``Create`` quote as a ``source_type="remote"`` activity.
 
@@ -393,10 +495,16 @@ async def materialize_remote_quote(session: AsyncSession, *, activity: dict) -> 
         object_id=object_id,
         target=target,
         activity_type="quote",
+        config=config,
     )
 
 
-async def update_remote_object(session: AsyncSession, *, activity: dict) -> None:
+async def update_remote_object(
+    session: AsyncSession,
+    *,
+    activity: dict,
+    config: Optional[SonghiveConfig] = None,
+) -> None:
     """
     Apply an inbound ``Update`` to a materialized remote reply or quote.
 
@@ -429,9 +537,9 @@ async def update_remote_object(session: AsyncSession, *, activity: dict) -> None
         # materializer — quote fields take precedence over ``inReplyTo``,
         # mirroring Pubby's interaction typing.
         if extract_quote_target(obj):
-            await materialize_remote_quote(session, activity={**activity, "type": "Create"})
+            await materialize_remote_quote(session, activity={**activity, "type": "Create"}, config=config)
         elif isinstance(obj.get("inReplyTo"), str) and obj["inReplyTo"]:
-            await materialize_remote_reply(session, activity={**activity, "type": "Create"})
+            await materialize_remote_reply(session, activity={**activity, "type": "Create"}, config=config)
         return
 
     entity = await resolve_entity(session, row.entity_type, row.entity_id)
@@ -574,8 +682,11 @@ async def sync_remote_activity(
     ``Create`` materializes replies to — and quotes of — known activities;
     ``Update`` revises and ``Delete`` retracts materialized rows; an
     ``Accept`` answering a ``QuoteRequest`` we sent stamps the issued
-    ``QuoteAuthorization`` onto the quoting post. Other activity types are
-    ignored — likes and boosts stay interaction-only.
+    ``QuoteAuthorization`` onto the quoting post. Newly materialized
+    public replies and quotes are relayed to remote actors following an
+    object in the thread — object-scoped follows (e.g. Friendica thread
+    subscriptions) — signed by the nearest local ancestor's owner. Other
+    activity types are ignored — likes and boosts stay interaction-only.
     """
     activity_type = activity.get("type")
     if activity_type == "Create":
@@ -583,11 +694,11 @@ async def sync_remote_activity(
         # Quote fields take precedence over ``inReplyTo`` — mirroring
         # Pubby, which records a note carrying both as a QUOTE interaction.
         if isinstance(obj, dict) and extract_quote_target(obj):
-            await materialize_remote_quote(session, activity=activity)
+            await materialize_remote_quote(session, activity=activity, config=config)
         else:
-            await materialize_remote_reply(session, activity=activity)
+            await materialize_remote_reply(session, activity=activity, config=config)
     elif activity_type == "Update":
-        await update_remote_object(session, activity=activity)
+        await update_remote_object(session, activity=activity, config=config)
     elif activity_type == "Delete":
         await retract_remote_object(session, activity=activity)
     elif activity_type == "Accept":

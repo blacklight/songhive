@@ -320,6 +320,93 @@ async def test_get_followers_returns_only_requested_actors_followers(fed_client,
     storage.get_followers.assert_called_once_with(actor_id=regular_actor_url)
 
 
+async def test_get_object_advertises_followers_collection(fed_client, db_session, regular_user):
+    """Served object documents advertise their ``followers`` collection."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    db_session.add(
+        Track(
+            title="Public Track",
+            artist_id=str(artist.id),
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            federation_object_id="pub-f1",
+        )
+    )
+    await db_session.commit()
+
+    response = fed_client.get(
+        "/users/regular/objects/pub-f1",
+        headers={"Accept": ACTIVITY_JSON},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["followers"] == "https://music.example.com/users/regular/objects/pub-f1/followers"
+
+
+async def test_get_object_followers_collection(fed_client, db_session, regular_user, fed_config):
+    """GET /users/{u}/objects/{id}/followers lists object-scoped followers only."""
+    from pubby import Follower
+
+    from songhive.federation.storage import create_activitypub_storage
+
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    db_session.add(
+        Track(
+            title="Public Track",
+            artist_id=str(artist.id),
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            federation_object_id="pub-f2",
+        )
+    )
+    await db_session.commit()
+
+    object_url = "https://music.example.com/users/regular/objects/pub-f2"
+    storage = create_activitypub_storage(fed_config.database.url)
+    now = datetime.now(timezone.utc)
+    storage.store_follower(
+        Follower(
+            actor_id="https://remote.example/users/sub",
+            inbox="https://remote.example/users/sub/inbox",
+            followed_at=now,
+            actor_data={},
+            target_actor_id=object_url,
+        )
+    )
+    # An actor-scoped follow is not part of the object's collection.
+    storage.store_follower(
+        Follower(
+            actor_id="https://remote.example/users/fan",
+            inbox="https://remote.example/users/fan/inbox",
+            followed_at=now,
+            actor_data={},
+            target_actor_id="https://music.example.com/users/regular",
+        )
+    )
+
+    response = fed_client.get(
+        "/users/regular/objects/pub-f2/followers",
+        headers={"Accept": ACTIVITY_JSON},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["type"] == "OrderedCollection"
+    assert data["id"] == f"{object_url}/followers"
+    assert data["orderedItems"] == ["https://remote.example/users/sub"]
+
+
+async def test_get_object_followers_unknown_object_404(fed_client, regular_user):
+    """The followers collection 404s for objects the route would not serve."""
+    response = fed_client.get(
+        "/users/regular/objects/missing/followers",
+        headers={"Accept": ACTIVITY_JSON},
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
 async def test_get_object_returns_404_when_audio_object_is_none(fed_client, db_session, regular_user, monkeypatch):
     """GET /users/{username}/objects/{object_id} returns 404 when serialization fails."""
     monkeypatch.setattr("songhive.api.routes.federation.track_to_audio_object", lambda *args, **kwargs: None)
