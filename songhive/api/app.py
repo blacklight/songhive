@@ -337,6 +337,8 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
             allowed_instances=config.federation.allowed_instances,
             blocked_instances=config.federation.blocked_instances,
             user_agent=get_default_user_agent(),
+            software_name="Songhive",
+            software_version=__version__,
         )
         app.state.federation_handler = handler
         bind_activitypub(app, handler, prefix="/ap")

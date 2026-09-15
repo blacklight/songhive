@@ -16,6 +16,7 @@ from songhive.models.activity import Activity, ActivityMention
 from songhive.models.artist import Artist
 from songhive.models.base import init_db
 from songhive.models.track import Track
+from songhive.version import __version__
 
 ACTIVITY_JSON = "application/activity+json"
 JRD_JSON = "application/jrd+json"
@@ -1304,6 +1305,13 @@ async def test_webfinger_accepts_leading_at_symbol(fed_client, regular_user):
     response = fed_client.get("/.well-known/webfinger?resource=acct:@regular@music.example.com")
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["subject"] == "acct:regular@music.example.com"
+
+
+async def test_nodeinfo_document_reports_songhive_software(fed_client):
+    """GET /nodeinfo/2.1 reports Songhive as the server software."""
+    response = fed_client.get("/nodeinfo/2.1")
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["software"] == {"name": "Songhive", "version": __version__}
 
 
 async def test_nodeinfo_document_includes_staff_accounts(fed_client, admin_user):
