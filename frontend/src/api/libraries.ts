@@ -74,6 +74,14 @@ export function getLibrary(
   return apiRequest<LibraryResponse>(`/libraries/${id}`);
 }
 
+export interface LibraryStats {
+  track_count: number;
+}
+
+export function getLibraryStats(id: string): Promise<LibraryStats> {
+  return apiRequest<LibraryStats>(`/libraries/${id}/stats`);
+}
+
 export function updateLibrary(
   id: string,
   body: LibraryUpdate,

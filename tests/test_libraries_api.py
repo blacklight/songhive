@@ -978,3 +978,57 @@ async def test_list_library_tracks_filters_by_query(
         assert response.status_code == 200
         assert {track["title"] for track in response.json()} == expected
         assert response.headers["X-Total-Count"] == str(len(expected))
+
+
+@pytest.mark.asyncio
+async def test_library_stats_counts_accessible_tracks(client, db_session, sample_libraries, regular_user, auth_headers):
+    """Library stats count the requester's accessible member tracks."""
+    library = next(lib for lib in sample_libraries if lib["visibility"] == "public")
+
+    artist = Artist(name="Stats Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    public_track = Track(
+        title="Public Track",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    private_track = Track(
+        title="Private Track",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add_all([public_track, private_track])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            LibraryTrack(library_id=library["id"], track_id=public_track.id),
+            LibraryTrack(library_id=library["id"], track_id=private_track.id),
+        ]
+    )
+    await db_session.commit()
+
+    anon = client.get(f"/api/v1/libraries/{library['id']}/stats")
+    assert anon.status_code == 200
+    assert anon.json() == {"track_count": 1}
+
+    owner = client.get(f"/api/v1/libraries/{library['id']}/stats", headers=auth_headers(regular_user))
+    assert owner.status_code == 200
+    assert owner.json() == {"track_count": 2}
+
+
+def test_library_stats_denied_for_private_library(client, sample_libraries, other_user, auth_headers):
+    """Stats for a private library are denied to other authenticated users."""
+    library = next(lib for lib in sample_libraries if lib["visibility"] == "private")
+    response = client.get(f"/api/v1/libraries/{library['id']}/stats", headers=auth_headers(other_user))
+    assert response.status_code == 403
+
+
+def test_library_stats_missing_returns_404(client):
+    """Requesting stats for a missing library returns 404."""
+    response = client.get("/api/v1/libraries/00000000-0000-0000-0000-000000000000/stats")
+    assert response.status_code == 404

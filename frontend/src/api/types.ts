@@ -881,6 +881,26 @@ export interface paths {
     patch: operations["update_artist_api_v1_artists__artist_id__patch"];
     trace?: never;
   };
+  "/api/v1/artists/{artist_id}/stats": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Artist Stats
+     * @description Return aggregate track and album counts for an artist.
+     */
+    get: operations["get_artist_stats_api_v1_artists__artist_id__stats_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/artists/{artist_id}/image": {
     parameters: {
       query?: never;
@@ -1015,6 +1035,26 @@ export interface paths {
      * @description Partially update an album.
      */
     patch: operations["update_album_api_v1_albums__album_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/albums/{album_id}/stats": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Album Stats
+     * @description Return aggregate track count and total duration for an album.
+     */
+    get: operations["get_album_stats_api_v1_albums__album_id__stats_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/albums/{album_id}/cover": {
@@ -1444,6 +1484,26 @@ export interface paths {
     patch: operations["update_playlist_api_v1_playlists__playlist_id__patch"];
     trace?: never;
   };
+  "/api/v1/playlists/{playlist_id}/stats": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Playlist Stats
+     * @description Return aggregate track count and total duration for a playlist.
+     */
+    get: operations["get_playlist_stats_api_v1_playlists__playlist_id__stats_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/playlists/{playlist_id}/image": {
     parameters: {
       query?: never;
@@ -1646,6 +1706,26 @@ export interface paths {
      * @description Partially update a library.
      */
     patch: operations["update_library_api_v1_libraries__library_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/libraries/{library_id}/stats": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Library Stats
+     * @description Return the number of tracks in a library.
+     */
+    get: operations["get_library_stats_api_v1_libraries__library_id__stats_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/libraries/{library_id}/tracks": {

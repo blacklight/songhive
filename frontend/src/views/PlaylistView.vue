@@ -8,10 +8,12 @@ import {
 } from "@/composables/useEntityList";
 import {
   getPlaylist,
+  getPlaylistStats,
   listPlaylistTracks,
   reorderPlaylistTracks,
   deletePlaylist as deletePlaylistApi,
   type PlaylistResponse,
+  type PlaylistStats,
 } from "@/api/playlists";
 import { useToastStore } from "@/stores/toast";
 import type { TrackResponse } from "@/api/tracks";
@@ -27,6 +29,7 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import CollectionStats from "@/components/library/CollectionStats.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -42,6 +45,7 @@ const router = useRouter();
 const playlistId = computed(() => String(route.params.id));
 
 const playlist = ref<PlaylistResponse | null>(null);
+const stats = ref<PlaylistStats | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -164,7 +168,7 @@ function onTrackShare(track: QueueTrack) {
 }
 
 async function onTracksRemoved() {
-  await refreshTracks();
+  await Promise.all([refreshTracks(), loadStats()]);
 }
 
 const trackSortOptions = computed(() => [
@@ -256,12 +260,21 @@ async function loadPlaylist() {
   }
 }
 
+async function loadStats() {
+  try {
+    stats.value = await getPlaylistStats(playlistId.value);
+  } catch {
+    stats.value = null;
+  }
+}
+
 async function load() {
   playlist.value = null;
+  stats.value = null;
   error.value = null;
   await loadPlaylist();
   if (!playlist.value) return;
-  await loadTracks(true);
+  await Promise.all([loadTracks(true), loadStats()]);
 }
 
 onMounted(() => load());
@@ -320,6 +333,11 @@ watch(
           <span :title="visibilityText" class="playlist-view__visibility">
             <i :class="visibilityIcon" />
           </span>
+          <CollectionStats
+            v-if="stats"
+            :track-count="stats.track_count"
+            :total-duration="stats.total_duration"
+          />
         </div>
 
         <EntityActions

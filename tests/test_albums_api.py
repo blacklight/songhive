@@ -734,3 +734,46 @@ async def test_list_albums_sorts(
     assert response.status_code == 200
     data = response.json()
     assert [album["title"] for album in data] == expected
+
+
+@pytest.mark.asyncio
+async def test_album_stats_counts_accessible_tracks(client, db_session, sample_albums, regular_user, auth_headers):
+    """Album stats aggregate over the requester's accessible tracks."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PUBLIC.value)
+    tracks = await _add_album_tracks(
+        db_session,
+        album,
+        regular_user,
+        Visibility.PUBLIC,
+        Visibility.PUBLIC,
+        Visibility.PRIVATE,
+    )
+    tracks[0].duration = 60.0
+    tracks[1].duration = 90.5
+    tracks[2].duration = 30.0
+    await db_session.commit()
+
+    anon = client.get(f"/api/v1/albums/{album.id}/stats")
+    assert anon.status_code == 200
+    anon_data = anon.json()
+    assert anon_data["track_count"] == 2
+    assert anon_data["total_duration"] == pytest.approx(150.5)
+
+    owner = client.get(f"/api/v1/albums/{album.id}/stats", headers=auth_headers(regular_user))
+    assert owner.status_code == 200
+    owner_data = owner.json()
+    assert owner_data["track_count"] == 3
+    assert owner_data["total_duration"] == pytest.approx(180.5)
+
+
+def test_album_stats_denied_for_private_album(client, sample_albums, other_user, auth_headers):
+    """Stats for a private album are denied to other authenticated users."""
+    album = next(a for a in sample_albums if a.visibility == Visibility.PRIVATE.value)
+    response = client.get(f"/api/v1/albums/{album.id}/stats", headers=auth_headers(other_user))
+    assert response.status_code == 403
+
+
+def test_album_stats_missing_returns_404(client):
+    """Requesting stats for a missing album returns 404."""
+    response = client.get("/api/v1/albums/00000000-0000-0000-0000-000000000000/stats")
+    assert response.status_code == 404

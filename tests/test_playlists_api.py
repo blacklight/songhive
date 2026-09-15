@@ -480,3 +480,65 @@ async def test_list_playlist_tracks_filters_by_query(
         assert response.status_code == 200
         assert [track["title"] for track in response.json()] == expected
         assert response.headers["X-Total-Count"] == str(len(expected))
+
+
+@pytest.mark.asyncio
+async def test_playlist_stats_counts_accessible_tracks(
+    client, db_session, sample_playlists, regular_user, auth_headers
+):
+    """Playlist stats aggregate over the requester's accessible member tracks."""
+    playlist = next(p for p in sample_playlists if p["visibility"] == "public")
+
+    artist = Artist(name="Stats Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    public_track = Track(
+        title="Public Track",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+        duration=60.0,
+    )
+    private_track = Track(
+        title="Private Track",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PRIVATE.value,
+        duration=120.0,
+    )
+    db_session.add_all([public_track, private_track])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            PlaylistTrack(playlist_id=playlist["id"], track_id=public_track.id, position=1),
+            PlaylistTrack(playlist_id=playlist["id"], track_id=private_track.id, position=2),
+        ]
+    )
+    await db_session.commit()
+
+    anon = client.get(f"/api/v1/playlists/{playlist['id']}/stats")
+    assert anon.status_code == 200
+    anon_data = anon.json()
+    assert anon_data["track_count"] == 1
+    assert anon_data["total_duration"] == pytest.approx(60.0)
+
+    owner = client.get(f"/api/v1/playlists/{playlist['id']}/stats", headers=auth_headers(regular_user))
+    assert owner.status_code == 200
+    owner_data = owner.json()
+    assert owner_data["track_count"] == 2
+    assert owner_data["total_duration"] == pytest.approx(180.0)
+
+
+def test_playlist_stats_denied_for_private_playlist(client, sample_playlists, other_user, auth_headers):
+    """Stats for a private playlist are denied to other authenticated users."""
+    playlist = next(p for p in sample_playlists if p["visibility"] == "private")
+    response = client.get(f"/api/v1/playlists/{playlist['id']}/stats", headers=auth_headers(other_user))
+    assert response.status_code == 403
+
+
+def test_playlist_stats_missing_returns_404(client):
+    """Requesting stats for a missing playlist returns 404."""
+    response = client.get("/api/v1/playlists/00000000-0000-0000-0000-000000000000/stats")
+    assert response.status_code == 404

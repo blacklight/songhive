@@ -289,3 +289,61 @@ async def test_list_artists_local_tracks_require_auth(client, db_session, regula
 
     names = await _artist_names(client.get("/api/v1/artists/", headers=auth_headers(other_user)))
     assert names == {"Local Artist"}
+
+
+@pytest.mark.asyncio
+async def test_artist_stats_counts_accessible_content(client, db_session, regular_user, auth_headers):
+    """Artist stats aggregate over the requester's accessible tracks and albums."""
+    artist = Artist(name="Stats Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    public_album = Album(
+        title="Public Album",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    private_album = Album(
+        title="Private Album",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add_all([public_album, private_album])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            Track(
+                title="Public Track",
+                artist_id=artist.id,
+                album_id=public_album.id,
+                owner_id=regular_user.id,
+                visibility=Visibility.PUBLIC.value,
+                duration=60.0,
+            ),
+            Track(
+                title="Private Track",
+                artist_id=artist.id,
+                album_id=public_album.id,
+                owner_id=regular_user.id,
+                visibility=Visibility.PRIVATE.value,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    anon = client.get(f"/api/v1/artists/{artist.id}/stats")
+    assert anon.status_code == 200
+    assert anon.json() == {"track_count": 1, "album_count": 1}
+
+    owner = client.get(f"/api/v1/artists/{artist.id}/stats", headers=auth_headers(regular_user))
+    assert owner.status_code == 200
+    assert owner.json() == {"track_count": 2, "album_count": 2}
+
+
+def test_artist_stats_missing_returns_404(client):
+    """Requesting stats for a missing artist returns 404."""
+    response = client.get("/api/v1/artists/00000000-0000-0000-0000-000000000000/stats")
+    assert response.status_code == 404

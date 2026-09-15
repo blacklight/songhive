@@ -61,6 +61,15 @@ export function getAlbum(
   return apiRequest<AlbumResponse>(`/albums/${id}`);
 }
 
+export interface AlbumStats {
+  track_count: number;
+  total_duration: number;
+}
+
+export function getAlbumStats(id: string): Promise<AlbumStats> {
+  return apiRequest<AlbumStats>(`/albums/${id}/stats`);
+}
+
 export function updateAlbum(
   id: string,
   body: AlbumUpdate,

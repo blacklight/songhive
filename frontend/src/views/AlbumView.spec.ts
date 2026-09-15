@@ -14,6 +14,7 @@ import AlbumView from "./AlbumView.vue";
 
 vi.mock("@/api/albums", () => ({
   getAlbum: vi.fn(),
+  getAlbumStats: vi.fn(),
   deleteAlbum: vi.fn(),
 }));
 
@@ -133,6 +134,10 @@ describe("AlbumView", () => {
     vi.mocked(albumsApi.getAlbum).mockResolvedValue(
       createAlbum("album-1", "Meadowland"),
     );
+    vi.mocked(albumsApi.getAlbumStats).mockResolvedValue({
+      track_count: 0,
+      total_duration: 0,
+    });
     vi.mocked(artistsApi.getArtist).mockResolvedValue(
       createArtist("artist-1", "The Larks"),
     );
@@ -181,6 +186,19 @@ describe("AlbumView", () => {
       "fa-globe",
     );
     expect(wrapper.find(".album-view__owner").text()).toContain("user-1");
+  });
+
+  it("shows aggregate stats in the header", async () => {
+    vi.mocked(albumsApi.getAlbumStats).mockResolvedValue({
+      track_count: 12,
+      total_duration: 3705,
+    });
+
+    await mountAt("/albums/album-1");
+
+    expect(albumsApi.getAlbumStats).toHaveBeenCalledWith("album-1");
+    expect(wrapper.text()).toContain("12 tracks");
+    expect(wrapper.text()).toContain("1:01:45");
   });
 
   it("renders album tags", async () => {

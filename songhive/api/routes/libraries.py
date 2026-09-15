@@ -83,6 +83,12 @@ def _can_write_library(user: Optional[User], library: Library) -> bool:
     return user.is_admin or library.owner_id == user.id
 
 
+class LibraryStatsResponse(BaseModel):
+    """Aggregate statistics for a library's accessible tracks."""
+
+    track_count: int
+
+
 class LibraryCreate(BaseModel):
     """Library creation payload."""
 
@@ -280,6 +286,24 @@ async def get_library(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     return await _build_library_response(library, user, storage, include)
+
+
+@router.get(
+    "/{library_id}/stats",
+    response_model=LibraryStatsResponse,
+    dependencies=[Depends(require_access("library"))],
+)
+async def get_library_stats(
+    library_id: str,
+    user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the number of tracks in a library."""
+    library = await music.get_library(db, library_id)
+    if library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    return await music.get_library_stats(db, library_id, user=user)
 
 
 async def _track_response(

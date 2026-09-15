@@ -51,6 +51,15 @@ export function getArtist(
   return apiRequest<ArtistResponse>(`/artists/${id}`);
 }
 
+export interface ArtistStats {
+  track_count: number;
+  album_count: number;
+}
+
+export function getArtistStats(id: string): Promise<ArtistStats> {
+  return apiRequest<ArtistStats>(`/artists/${id}/stats`);
+}
+
 export function updateArtist(
   id: string,
   body: ArtistUpdate,

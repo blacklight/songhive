@@ -105,6 +105,13 @@ class AlbumEnrichResponse(BaseModel):
     enqueued: int
 
 
+class AlbumStatsResponse(BaseModel):
+    """Aggregate statistics for an album's accessible tracks."""
+
+    track_count: int
+    total_duration: float
+
+
 async def _cover_url(storage: StorageService, album) -> Optional[str]:
     """Resolve an album's cover URL from its stored cover file if available."""
     if album.cover_file_id and album.cover_file:
@@ -247,6 +254,24 @@ async def get_album(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     return await _build_album_response(album, user, storage, include)
+
+
+@router.get(
+    "/{album_id}/stats",
+    response_model=AlbumStatsResponse,
+    dependencies=[Depends(require_access("album"))],
+)
+async def get_album_stats(
+    album_id: str,
+    user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return aggregate track count and total duration for an album."""
+    album = await music.get_album(db, album_id)
+    if album is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    return await music.get_album_stats(db, album_id, user=user)
 
 
 @router.patch("/{album_id}", response_model=AlbumResponse)

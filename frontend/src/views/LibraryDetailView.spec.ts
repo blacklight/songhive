@@ -10,6 +10,7 @@ import LibraryDetailView from "./LibraryDetailView.vue";
 
 vi.mock("@/api/libraries", () => ({
   getLibrary: vi.fn(),
+  getLibraryStats: vi.fn(),
   listLibraryTracks: vi.fn(),
   deleteLibrary: vi.fn(),
 }));
@@ -85,6 +86,9 @@ describe("LibraryDetailView", () => {
     vi.mocked(librariesApi.getLibrary).mockResolvedValue(
       createLibrary("library-1", "Main Library"),
     );
+    vi.mocked(librariesApi.getLibraryStats).mockResolvedValue({
+      track_count: 0,
+    });
     vi.mocked(librariesApi.listLibraryTracks).mockResolvedValue([]);
   });
 
@@ -128,6 +132,17 @@ describe("LibraryDetailView", () => {
     expect(
       wrapper.find(".library-detail-view__visibility i").classes(),
     ).toContain("fa-globe");
+  });
+
+  it("shows aggregate stats in the header", async () => {
+    vi.mocked(librariesApi.getLibraryStats).mockResolvedValue({
+      track_count: 25,
+    });
+
+    await mountAt("/libraries/library-1");
+
+    expect(librariesApi.getLibraryStats).toHaveBeenCalledWith("library-1");
+    expect(wrapper.text()).toContain("25 tracks");
   });
 
   it("shows an error banner with a retry button", async () => {

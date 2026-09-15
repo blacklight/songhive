@@ -70,6 +70,15 @@ export function getPlaylist(
   return apiRequest<PlaylistResponse>(`/playlists/${id}`);
 }
 
+export interface PlaylistStats {
+  track_count: number;
+  total_duration: number;
+}
+
+export function getPlaylistStats(id: string): Promise<PlaylistStats> {
+  return apiRequest<PlaylistStats>(`/playlists/${id}/stats`);
+}
+
 export function updatePlaylist(
   id: string,
   body: PlaylistUpdate,

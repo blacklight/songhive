@@ -8,9 +8,11 @@ import {
 } from "@/composables/useEntityList";
 import {
   getAlbum,
+  getAlbumStats,
   deleteAlbum as deleteAlbumApi,
   enrichAlbum,
   type AlbumResponse,
+  type AlbumStats,
 } from "@/api/albums";
 import { getArtist, type ArtistResponse } from "@/api/artists";
 import { listTracks, type TrackResponse } from "@/api/tracks";
@@ -28,6 +30,7 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import CollectionStats from "@/components/library/CollectionStats.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
@@ -53,6 +56,7 @@ function openAddDialog(mode: "library" | "playlist") {
 
 const album = ref<AlbumResponse | null>(null);
 const artist = ref<ArtistResponse | null>(null);
+const stats = ref<AlbumStats | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -121,7 +125,7 @@ function onTrackShare(track: QueueTrack) {
 }
 
 async function onTracksRemoved() {
-  await refreshTracks();
+  await Promise.all([refreshTracks(), loadStats()]);
 }
 
 const actions = computed(() => [
@@ -252,13 +256,22 @@ async function loadArtist() {
   }
 }
 
+async function loadStats() {
+  try {
+    stats.value = await getAlbumStats(albumId.value);
+  } catch {
+    stats.value = null;
+  }
+}
+
 async function load() {
   album.value = null;
   artist.value = null;
+  stats.value = null;
   error.value = null;
   await loadAlbum();
   if (!album.value) return;
-  await Promise.all([loadArtist(), loadTracks(true)]);
+  await Promise.all([loadArtist(), loadTracks(true), loadStats()]);
 }
 
 onMounted(() => load());
@@ -330,6 +343,11 @@ watch(
                 <i :class="visibilityIcon" />
               </span>
             </span>
+            <CollectionStats
+              v-if="stats"
+              :track-count="stats.track_count"
+              :total-duration="stats.total_duration"
+            />
           </div>
 
           <div v-if="album.tags?.length" class="album-view__tags">

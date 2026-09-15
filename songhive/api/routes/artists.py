@@ -71,6 +71,13 @@ class ArtistUpdate(BaseModel):
     bio: Optional[str] = None
 
 
+class ArtistStatsResponse(BaseModel):
+    """Aggregate statistics for an artist's accessible content."""
+
+    track_count: int
+    album_count: int
+
+
 async def _image_url(artist, storage: StorageService) -> Optional[str]:
     """Resolve an artist image URL from a stored file or remote URL."""
     if artist.image_file_id and artist.image_file:
@@ -183,6 +190,20 @@ async def get_artist(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     return await _build_artist_response(artist, storage, include)
+
+
+@router.get("/{artist_id}/stats", response_model=ArtistStatsResponse)
+async def get_artist_stats(
+    artist_id: str,
+    user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return aggregate track and album counts for an artist."""
+    artist = await music.get_artist(db, artist_id)
+    if artist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    return await music.get_artist_stats(db, artist_id, user=user)
 
 
 @router.patch("/{artist_id}", response_model=ArtistResponse)

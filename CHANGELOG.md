@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- `api`: Aggregate collection statistics. New `GET
+  /api/v1/artists/{id}/stats`, `/albums/{id}/stats`,
+  `/playlists/{id}/stats` and `/libraries/{id}/stats` endpoints return
+  `track_count`, `album_count` (artists) and `total_duration` (albums,
+  playlists) computed with SQL `COUNT`/`SUM` queries filtered by the
+  caller's access rights, so totals reflect only visible content and
+  detail pages don't have to load every track.
+- `frontend`: Artist, album, playlist and library detail pages now show
+  their aggregate stats in the header — track count, album count and
+  total duration — via a shared `CollectionStats` component loaded
+  asynchronously from the new stats endpoints, and refreshed when tracks
+  are removed from the collection.
+
 ## 0.1.4
 
 ### Added

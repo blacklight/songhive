@@ -1349,6 +1349,67 @@ async def count_playlist_tracks(
     return result.scalar() or 0
 
 
+async def _count_and_duration(session: AsyncSession, stmt: Select[Any]) -> Dict[str, Any]:
+    """Return ``track_count``/``total_duration`` aggregates over a tracks statement."""
+    sub = stmt.subquery()
+    row = (await session.execute(select(func.count(), func.coalesce(func.sum(sub.c.duration), 0.0)))).one()
+    return {"track_count": int(row[0]), "total_duration": float(row[1])}
+
+
+async def get_artist_stats(
+    session: AsyncSession,
+    artist_id: str,
+    user: Optional[User] = None,
+) -> Dict[str, Any]:
+    """Return aggregate track/album counts for ``artist_id`` visible to ``user``."""
+    tracks_stmt = _build_tracks_stmt(session, artist_id=artist_id)
+    tracks_stmt = apply_access_filter(tracks_stmt, Track, user, "track")
+    track_count = int((await session.execute(select(func.count()).select_from(tracks_stmt.subquery()))).scalar() or 0)
+    albums_stmt = apply_access_filter(_build_albums_stmt(artist_id=artist_id), Album, user, "album")
+    album_count = int((await session.execute(select(func.count()).select_from(albums_stmt.subquery()))).scalar() or 0)
+    return {"track_count": track_count, "album_count": album_count}
+
+
+async def get_album_stats(
+    session: AsyncSession,
+    album_id: str,
+    user: Optional[User] = None,
+) -> Dict[str, Any]:
+    """Return aggregate track count and total duration for ``album_id`` visible to ``user``."""
+    stmt = _build_tracks_stmt(session, album_id=album_id)
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    return await _count_and_duration(session, stmt)
+
+
+async def get_playlist_stats(
+    session: AsyncSession,
+    playlist_id: str,
+    user: Optional[User] = None,
+) -> Dict[str, Any]:
+    """Return aggregate track count and total duration for ``playlist_id`` visible to ``user``."""
+    stmt = (
+        select(Track)
+        .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+    )
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    return await _count_and_duration(session, stmt)
+
+
+async def get_library_stats(
+    session: AsyncSession,
+    library_id: str,
+    user: Optional[User] = None,
+) -> Dict[str, Any]:
+    """Return the number of tracks in ``library_id`` visible to ``user``."""
+    stmt = (
+        select(Track).join(LibraryTrack, LibraryTrack.track_id == Track.id).where(LibraryTrack.library_id == library_id)
+    )
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    track_count = int((await session.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0)
+    return {"track_count": track_count}
+
+
 async def resolve_track_ids_for_sync(
     session: AsyncSession,
     *,

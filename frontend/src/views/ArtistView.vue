@@ -8,8 +8,10 @@ import {
 } from "@/composables/useEntityList";
 import {
   getArtist,
+  getArtistStats,
   deleteArtist as deleteArtistApi,
   type ArtistResponse,
+  type ArtistStats,
 } from "@/api/artists";
 import { listAlbums, type AlbumResponse } from "@/api/albums";
 import { listTracks, type TrackResponse } from "@/api/tracks";
@@ -25,6 +27,7 @@ import AppAvatar from "@/components/ui/AppAvatar.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AlbumCard from "@/components/library/AlbumCard.vue";
+import CollectionStats from "@/components/library/CollectionStats.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
@@ -47,6 +50,7 @@ function openAddDialog(mode: "library" | "playlist") {
 }
 
 const artist = ref<ArtistResponse | null>(null);
+const stats = ref<ArtistStats | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -147,7 +151,7 @@ function onTrackShare(track: QueueTrack) {
 }
 
 async function onTracksRemoved() {
-  await refreshTracks();
+  await Promise.all([refreshTracks(), loadStats()]);
 }
 
 const albumSortOptions = computed(() => [
@@ -260,12 +264,21 @@ async function loadArtist() {
   }
 }
 
+async function loadStats() {
+  try {
+    stats.value = await getArtistStats(artistId.value);
+  } catch {
+    stats.value = null;
+  }
+}
+
 async function load() {
   artist.value = null;
+  stats.value = null;
   error.value = null;
   await loadArtist();
   if (!artist.value) return;
-  await Promise.all([loadAlbums(true), loadTracks(true)]);
+  await Promise.all([loadAlbums(true), loadTracks(true), loadStats()]);
 }
 
 onMounted(() => load());
@@ -300,6 +313,11 @@ watch(
           <AppPageTitle class="artist-view__name" icon="users">{{
             artist.name
           }}</AppPageTitle>
+          <CollectionStats
+            v-if="stats"
+            :track-count="stats.track_count"
+            :album-count="stats.album_count"
+          />
           <p v-if="artist.bio" class="artist-view__bio">{{ artist.bio }}</p>
           <div v-if="artist.tags?.length" class="artist-view__tags">
             <TagList :tags="artist.tags" />

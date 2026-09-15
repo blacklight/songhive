@@ -11,6 +11,7 @@ import PlaylistView from "./PlaylistView.vue";
 
 vi.mock("@/api/playlists", () => ({
   getPlaylist: vi.fn(),
+  getPlaylistStats: vi.fn(),
   listPlaylistTracks: vi.fn(),
   reorderPlaylistTracks: vi.fn(),
   deletePlaylist: vi.fn(),
@@ -94,6 +95,10 @@ describe("PlaylistView", () => {
     vi.mocked(playlistsApi.getPlaylist).mockResolvedValue(
       createPlaylist("playlist-1", "Road Trip"),
     );
+    vi.mocked(playlistsApi.getPlaylistStats).mockResolvedValue({
+      track_count: 0,
+      total_duration: 0,
+    });
     vi.mocked(playlistsApi.listPlaylistTracks).mockResolvedValue([]);
   });
 
@@ -137,6 +142,19 @@ describe("PlaylistView", () => {
     expect(wrapper.find(".playlist-view__visibility i").classes()).toContain(
       "fa-globe",
     );
+  });
+
+  it("shows aggregate stats in the header", async () => {
+    vi.mocked(playlistsApi.getPlaylistStats).mockResolvedValue({
+      track_count: 8,
+      total_duration: 1800,
+    });
+
+    await mountAt("/playlists/playlist-1");
+
+    expect(playlistsApi.getPlaylistStats).toHaveBeenCalledWith("playlist-1");
+    expect(wrapper.text()).toContain("8 tracks");
+    expect(wrapper.text()).toContain("30:00");
   });
 
   it("shows an empty state when the playlist has no tracks", async () => {

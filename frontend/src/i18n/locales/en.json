@@ -884,7 +884,9 @@
       "visibility": "Visibility",
       "actions": "Actions",
       "tags": "Tags",
-      "playAll": "Play all"
+      "playAll": "Play all",
+      "trackCount": "No tracks | {count} track | {count} tracks",
+      "albumCount": "No albums | {count} album | {count} albums"
     },
     "visibility": {
       "private": "Private",

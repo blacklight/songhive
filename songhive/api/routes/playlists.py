@@ -68,6 +68,13 @@ class PlaylistResponse(BaseModel):
     tags: List[str] = []
 
 
+class PlaylistStatsResponse(BaseModel):
+    """Aggregate statistics for a playlist's accessible tracks."""
+
+    track_count: int
+    total_duration: float
+
+
 class PlaylistCreate(BaseModel):
     """Playlist creation payload."""
 
@@ -259,6 +266,24 @@ async def get_playlist(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
 
     return await _build_playlist_response(playlist, user, storage, include)
+
+
+@router.get(
+    "/{playlist_id}/stats",
+    response_model=PlaylistStatsResponse,
+    dependencies=[Depends(require_access("playlist"))],
+)
+async def get_playlist_stats(
+    playlist_id: str,
+    user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return aggregate track count and total duration for a playlist."""
+    playlist = await music.get_playlist(db, playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+
+    return await music.get_playlist_stats(db, playlist_id, user=user)
 
 
 @router.patch("/{playlist_id}", response_model=PlaylistResponse)

@@ -14,6 +14,7 @@ import ArtistView from "./ArtistView.vue";
 
 vi.mock("@/api/artists", () => ({
   getArtist: vi.fn(),
+  getArtistStats: vi.fn(),
   deleteArtist: vi.fn(),
 }));
 
@@ -118,6 +119,10 @@ describe("ArtistView", () => {
     vi.mocked(artistsApi.getArtist).mockResolvedValue(
       createArtist("artist-1", "The Larks"),
     );
+    vi.mocked(artistsApi.getArtistStats).mockResolvedValue({
+      track_count: 0,
+      album_count: 0,
+    });
     vi.mocked(albumsApi.listAlbums).mockResolvedValue([]);
     vi.mocked(tracksApi.listTracks).mockResolvedValue([]);
   });
@@ -171,6 +176,19 @@ describe("ArtistView", () => {
     expect(wrapper.text()).toContain("The Larks");
     expect(wrapper.text()).toContain("Meadowland");
     expect(wrapper.text()).toContain("Song One");
+  });
+
+  it("shows aggregate stats in the header", async () => {
+    vi.mocked(artistsApi.getArtistStats).mockResolvedValue({
+      track_count: 42,
+      album_count: 3,
+    });
+
+    await mountAt("/artists/artist-1");
+
+    expect(artistsApi.getArtistStats).toHaveBeenCalledWith("artist-1");
+    expect(wrapper.text()).toContain("3 albums");
+    expect(wrapper.text()).toContain("42 tracks");
   });
 
   it("renders artist tags", async () => {

@@ -8,9 +8,11 @@ import {
 } from "@/composables/useEntityList";
 import {
   getLibrary,
+  getLibraryStats,
   listLibraryTracks,
   deleteLibrary as deleteLibraryApi,
   type LibraryResponse,
+  type LibraryStats,
 } from "@/api/libraries";
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
@@ -25,6 +27,7 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import CollectionStats from "@/components/library/CollectionStats.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -38,6 +41,7 @@ const router = useRouter();
 const libraryId = computed(() => String(route.params.id));
 
 const library = ref<LibraryResponse | null>(null);
+const stats = ref<LibraryStats | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -130,7 +134,7 @@ const removableFrom = computed(() => {
 });
 
 async function onTracksRemoved() {
-  await refreshTracks();
+  await Promise.all([refreshTracks(), loadStats()]);
 }
 
 const trackSortOptions = computed(() => [
@@ -221,12 +225,21 @@ async function loadLibrary() {
   }
 }
 
+async function loadStats() {
+  try {
+    stats.value = await getLibraryStats(libraryId.value);
+  } catch {
+    stats.value = null;
+  }
+}
+
 async function load() {
   library.value = null;
+  stats.value = null;
   error.value = null;
   await loadLibrary();
   if (!library.value) return;
-  await loadTracks(true);
+  await Promise.all([loadTracks(true), loadStats()]);
 }
 
 onMounted(() => load());
@@ -288,6 +301,7 @@ watch(
           <span :title="visibilityText" class="library-detail-view__visibility">
             <i :class="visibilityIcon" />
           </span>
+          <CollectionStats v-if="stats" :track-count="stats.track_count" />
         </div>
 
         <EntityActions
