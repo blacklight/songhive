@@ -23,6 +23,7 @@ from ...models.user import User
 from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor
 from ..deps import get_db
+from ..semantic_meta import inject_head_tags, public_base_url, user_head_tags
 
 router = APIRouter(include_in_schema=False)
 
@@ -52,13 +53,15 @@ def _spa_index_path() -> Path:
 def _spa_response(
     alternate_url: Optional[str] = None,
     me_urls: Optional[Sequence[str]] = None,
+    extra_tags: Optional[Sequence[str]] = None,
 ) -> HTMLResponse:
     """
     Serve the SPA shell for browser requests.
 
     Injects ``rel="me"`` links for the user's profile fields and, when
     federation is enabled, the ``rel="alternate"`` discovery hints that
-    remote servers use to find the ActivityPub actor document.
+    remote servers use to find the ActivityPub actor document. ``extra_tags``
+    carries additional ``<head>`` markup such as OpenGraph metadata.
     """
     index = _spa_index_path()
     if not index.is_file():
@@ -71,28 +74,33 @@ def _spa_response(
     if me_urls:
         for url in me_urls:
             tags.append(f'<link rel="me" href="{escape(url, quote=True)}">')
-
     if alternate_url:
         tag = f'<link rel="alternate" type="{ACTIVITY_JSON}" href="{escape(alternate_url, quote=True)}">'
         tags.append(tag)
         headers["Link"] = f'<{alternate_url}>; rel="alternate"; type="{ACTIVITY_JSON}"'
-
-    if tags and "</head>" in body:
-        body = body.replace("</head>", f"{''.join(tags)}</head>", 1)
-    elif tags:
-        body = f"{body}{''.join(tags)}"
+    if extra_tags:
+        tags.extend(extra_tags)
+    if tags:
+        body = inject_head_tags(body, list(tags))
 
     return HTMLResponse(content=body, headers=headers)
 
 
-def _user_spa_response(user: User, alternate_url: Optional[str] = None, domain: Optional[str] = None) -> HTMLResponse:
-    """Return the SPA shell annotated with the user's ``rel="me"`` links."""
+def _user_spa_response(
+    user: User,
+    request: Request,
+    alternate_url: Optional[str] = None,
+    domain: Optional[str] = None,
+) -> HTMLResponse:
+    """Return the SPA shell annotated with the user's ``rel="me"`` and OpenGraph tags."""
     me_urls: list[str] = [link.url for link in user.links or [] if link.url]
     if alternate_url:
         me_urls.append(alternate_url)
         if domain:
             me_urls.append(get_mastodon_actor_url(domain, user.username))
-    return _spa_response(alternate_url=alternate_url, me_urls=me_urls)
+    config = request.app.state.config
+    og_tags = user_head_tags(user, public_base_url(request, config), config.federation.instance_name)
+    return _spa_response(alternate_url=alternate_url, me_urls=me_urls, extra_tags=og_tags)
 
 
 def _federation_enabled_config(request: Request) -> tuple[bool, Optional[str]]:
@@ -143,4 +151,4 @@ async def get_user_profile_page(
         return JSONResponse(content=actor, media_type=ACTIVITY_JSON)
 
     alternate_url = get_actor_url(domain, user.username) if ap_enabled and domain else None
-    return _user_spa_response(user, alternate_url=alternate_url, domain=domain)
+    return _user_spa_response(user, request, alternate_url=alternate_url, domain=domain)

@@ -82,6 +82,7 @@ songhive/
 │   ├── cookies.py          # Set/clear HttpOnly auth cookies + double-submit CSRF cookie
 │   ├── deps.py             # Dependency injection (DB session, current user, config, Redis, storage)
 │   ├── errors.py           # RFC 7807 problem-detail exception handlers
+│   ├── semantic_meta.py    # OpenGraph/rel="tag" <head> tag builders + SPA shell injection
 │   ├── routes/             # Route modules (one file per resource)
 │   │   ├── auth.py         # Login, registration, token refresh, password reset
 │   │   ├── sessions.py     # List and revoke active refresh-token sessions
@@ -1875,6 +1876,21 @@ app sets `router.default` to an ASGI handler that serves files directly from
 `songhive/static/` and falls back to `index.html` for unhandled non-API paths,
 so the Vue Router handles deep links such as `/verify-email?token=...`.
 
+When the fallback serves the SPA shell for an object page (`/tracks/{id}`,
+`/albums/{id}`, `/artists/{id}`, `/playlists/{id}`, `/libraries/{id}`,
+`/genres/{name}`, `/tags/{name}` and `/@{username}` plus their sub-pages),
+`api/semantic_meta.py` injects semantic `<head>` tags into it: OpenGraph
+`og:title`/`og:description`/`og:url`/`og:type`/`og:site_name`/`og:image`
+metadata for social-media preview cards, and `<link rel="tag">` elements for
+the entity's hashtags. Ownership and related entities are expressed with the
+OpenGraph music namespace and HTML authorship annotations: `music:musician`
+links tracks and albums to their artist page, `music:album` links a track to
+its album, `music:creator` links playlists/libraries to their owner, and
+every uploadable entity also carries `<link rel="author">`, `name="author"`
+and `fediverse:creator` tags pointing at the uploading user. Lookups go
+through the regular ACL checks so private entities never leak metadata, and
+any failure falls back to the unmodified shell.
+
 The Vite build also copies the `swagger-ui-dist` bundle into
 `songhive/static/swagger-ui/` and rewrites `swagger-initializer.js` to point
 at the instance's own `/openapi.json`. FastAPI mounts those assets at
@@ -1925,8 +1941,8 @@ REST API under `/api/v1/`:
 /users/{username}               # Per-user ActivityPub actor document (AP clients) or browser redirect to /@{username}
 /users/{username}/objects/{id}  # Dereferenceable ActivityPub objects (Audio, Note, Tombstone, stored payloads)
 /users/{username}/quote_authorizations/{id}  # FEP-044f QuoteAuthorization documents issued for the user actor
-/@{username}                    # Mastodon-style profile: AP actor for AP clients, SPA shell for browsers with rel="me" links
-/tracks/{id}                    # Track page: Audio object for AP clients, SPA + rel=alternate hints for browsers
+/@{username}                    # Mastodon-style profile: AP actor for AP clients, SPA shell for browsers with rel="me" links + OpenGraph tags
+/tracks/{id}                    # Track page: Audio object for AP clients, SPA + rel=alternate hints + OpenGraph tags for browsers
 /.well-known/webfinger          # WebFinger discovery
 /.well-known/nodeinfo           # NodeInfo discovery document (pubby)
 /nodeinfo/2.{0,1}[.json]        # NodeInfo document (Songhive): pubby usage stats plus
@@ -1948,13 +1964,17 @@ Docker Compose (`docker-compose.yml`) provides a reference deployment:
 - `celery` — Celery worker container (same image, different entrypoint)
 - `postgres` — PostgreSQL database
 - `redis` — Redis (broker + cache + sessions)
-- `nginx` — Reverse proxy (`docker/nginx.conf`). It proxies federation routes
-(`/.well-known/*`, `/ap/*`, `/users/<user>`, `/@<user>`, etc.) to the
-application. Browser `text/html` requests for `/@<user>` and
-`/users/<user>` are also proxied to FastAPI, where `api/routes/profile_pages.py`
-performs ActivityPub/browser content negotiation and injects `rel="me"` links
-into the SPA shell. The Vue SPA still handles `/tracks/<id>` directly, with
-`rel="alternate"` ActivityPub hints supplied by the backend.
+- `nginx` — Reverse proxy (`docker/nginx.conf`). It proxies everything to the
+application, so the REST API, federation endpoints, frontend assets and the
+SPA shell are all served by FastAPI (`api/app.py` sets `router.default` to a
+handler that serves `songhive/static/` files directly and falls back to
+`index.html`). Serving the SPA through the backend lets it inject `rel="me"`
+links, `rel="alternate"` ActivityPub hints and OpenGraph/`rel="tag"` metadata
+into object pages (`api/routes/profile_pages.py` and `api/semantic_meta.py`),
+and perform the ActivityPub/browser content negotiation for routes that
+double as dereferenceable AP objects. Only two paths get special treatment:
+`/ws/` needs the WebSocket upgrade headers and `/api/v1/stream/` disables
+response buffering for real-time audio delivery.
 
 Persistent data is stored under `volumes/`.
 

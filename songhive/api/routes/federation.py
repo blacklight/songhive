@@ -21,11 +21,13 @@ from ...federation.activities import (
 )
 from ...federation.actors import get_federation_storage
 from ...federation.serializers import track_to_audio_object
-from ...models import Activity, Track, Visibility
+from ...models import Activity, Track, User, Visibility
 from ...services.auth import get_user_by_id, get_user_by_username
 from ...services.federation import ensure_user_actor, extract_domain, is_domain_allowed
+from ...services.storage import StorageService
 from ...tasks.federation import process_incoming
-from ..deps import get_db
+from ..deps import get_current_user_optional, get_db, get_storage_service
+from ..semantic_meta import entity_head_tags
 from .instance import _admin_users
 from .profile_pages import _accepts_activitypub, _get_active_user, _spa_response
 
@@ -362,6 +364,8 @@ async def get_track_page(
     track_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+    storage: StorageService = Depends(get_storage_service),
 ):
     """
     Dereference the canonical track page URL.
@@ -410,7 +414,8 @@ async def get_track_page(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     alternate_url = f"{owner.actor_url}/objects/{track.federation_object_id}" if track is not None else None
-    return _spa_response(alternate_url)
+    og_tags = await entity_head_tags(request, db, user, storage, "track", track_id)
+    return _spa_response(alternate_url, extra_tags=og_tags)
 
 
 async def _enqueue_incoming(request: Request, username: Optional[str]) -> JSONResponse:

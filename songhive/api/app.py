@@ -56,6 +56,7 @@ from .routes import (
     tracks,
     users,
 )
+from .semantic_meta import serve_spa_index
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,7 @@ def _setup_spa_routes(app: FastAPI, static_dir: Path):
             if requested.is_file() and str(requested).startswith(str(static_root)):
                 await FileResponse(requested)(scope, receive, send)
             else:
-                await FileResponse(static_dir / "index.html")(scope, receive, send)
+                await serve_spa_index(scope, receive, send, static_dir / "index.html")
 
         app.router.default = _serve_static
 

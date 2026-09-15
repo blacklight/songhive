@@ -6,10 +6,8 @@ DATA_DIR=/data
 MEDIA_DIR="$DATA_DIR/media"
 FEDERATION_DIR="$DATA_DIR/federation"
 SECRET_FILE="$DATA_DIR/secret_key"
-STATIC_SOURCE=/app/songhive/static
-STATIC_TARGET=/var/www/songhive
 
-mkdir -p "$CONFIG_DIR" "$MEDIA_DIR" "$FEDERATION_DIR" "$STATIC_TARGET"
+mkdir -p "$CONFIG_DIR" "$MEDIA_DIR" "$FEDERATION_DIR"
 
 # Generate and persist an auth secret if the caller did not provide one.
 # Multiple rootless containers (app and worker) share the /data volume, so
@@ -94,12 +92,5 @@ fi
 # or any admin CLI command. This is idempotent and stamps existing baseline
 # databases as well as creating/stamping fresh ones.
 songhive admin migrate
-
-# Only the main web server process needs to publish static assets.
-if [ "$1" = "songhive" ] && [ -z "${2:-}" ]; then
-    if [ -d "$STATIC_SOURCE" ] && [ -n "$(ls -A "$STATIC_SOURCE")" ]; then
-        cp -r "$STATIC_SOURCE/." "$STATIC_TARGET/"
-    fi
-fi
 
 exec "$@"

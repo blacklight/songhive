@@ -834,7 +834,8 @@ async def test_track_page_serves_spa_with_discovery_hints_for_browsers(
 
     object_url = "https://music.example.com/users/regular/objects/pub-page"
     assert response.headers["Link"] == f'<{object_url}>; rel="alternate"; type="{ACTIVITY_JSON}"'
-    assert f'<link rel="alternate" type="{ACTIVITY_JSON}" href="{object_url}"></head>' in response.text
+    assert f'<link rel="alternate" type="{ACTIVITY_JSON}" href="{object_url}">' in response.text
+    assert '<meta property="og:title" content="Artist - Public Track">' in response.text
 
 
 async def test_track_page_serves_plain_spa_for_unpublished_track(

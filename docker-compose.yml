@@ -47,7 +47,6 @@ services:
     volumes:
       - ./volumes/config:/etc/songhive:ro
       - ./volumes/data:/data
-      - ./volumes/static:/var/www/songhive
     depends_on:
       setup:
         condition: service_completed_successfully
@@ -120,7 +119,6 @@ services:
       - "${SONGHIVE_HTTP_PORT:-80}:80"
     volumes:
       - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./volumes/static:/usr/share/nginx/html:ro
     depends_on:
       - songhive
     restart: unless-stopped

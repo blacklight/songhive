@@ -46,10 +46,10 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Runtime directories that may be bind-mounted from the host must be writable
 # by the container user.
-RUN mkdir -p /data /etc/songhive /var/www/songhive /home/songhive/.local && \
-    chown -R songhive:songhive /data /etc/songhive /var/www/songhive /home/songhive
+RUN mkdir -p /data /etc/songhive /home/songhive/.local && \
+    chown -R songhive:songhive /data /etc/songhive /home/songhive
 
-VOLUME ["/data", "/etc/songhive", "/var/www/songhive"]
+VOLUME ["/data", "/etc/songhive"]
 EXPOSE 8000
 USER songhive
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -15,7 +15,6 @@ fi
 mkdir -p "$VOLUMES_DIR/config" \
          "$VOLUMES_DIR/data" \
          "$VOLUMES_DIR/db" \
-         "$VOLUMES_DIR/redis" \
-         "$VOLUMES_DIR/static"
+         "$VOLUMES_DIR/redis"
 
 chown -R "$PUID:$PGID" "$VOLUMES_DIR"
