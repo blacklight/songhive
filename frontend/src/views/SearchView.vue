@@ -144,6 +144,10 @@ onMounted(() => {
 watch(query, () => performSearch());
 
 const showStart = computed(() => !hasSearched.value || !query.value.trim());
+// ``#term`` is a hashtag lookup: only the tags section is searched/rendered.
+const visibleEntities = computed<SearchEntity[]>(() =>
+  query.value.trim().startsWith("#") ? ["tags"] : activeEntities.value,
+);
 </script>
 
 <template>
@@ -189,7 +193,7 @@ const showStart = computed(() => !hasSearched.value || !query.value.trim());
 
     <div v-else class="search-view__sections">
       <section
-        v-for="entity in activeEntities"
+        v-for="entity in visibleEntities"
         :key="entity"
         class="search-view__section"
       >

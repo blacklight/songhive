@@ -114,6 +114,55 @@ describe("useSearchSections", () => {
     expect(sections.tracks.total).toBe(0);
   });
 
+  it("searches only the tags section for #-prefixed queries", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/tags/")) {
+        return Promise.resolve(
+          makeResponse([{ name: "rock", item_count: 3 }], {
+            "X-Total-Count": "1",
+            "X-List-Offset": "0",
+          }),
+        );
+      }
+      return Promise.resolve(makeResponse([], { "X-Total-Count": "0" }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { searchAll, sections } = useSearchSections();
+
+    await searchAll("#rock");
+
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("/tags/");
+    expect(urls[0]).toContain("q=rock");
+    expect(sections.tags.items).toHaveLength(1);
+    expect(sections.tracks.items).toHaveLength(0);
+  });
+
+  it("lists all tags without a q param for a bare '#'", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/tags/")) {
+        return Promise.resolve(
+          makeResponse([{ name: "rock", item_count: 3 }], {
+            "X-Total-Count": "1",
+            "X-List-Offset": "0",
+          }),
+        );
+      }
+      return Promise.resolve(makeResponse([], { "X-Total-Count": "0" }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { searchAll, sections } = useSearchSections();
+
+    await searchAll("#");
+
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("/tags/");
+    expect(urls[0]).not.toContain("q=");
+    expect(sections.tags.items).toHaveLength(1);
+  });
+
   it("exposes the canonical search entity order", () => {
     expect(SEARCH_ENTITIES).toEqual([
       "tracks",

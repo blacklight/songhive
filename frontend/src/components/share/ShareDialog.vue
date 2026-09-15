@@ -388,7 +388,11 @@ async function autocompleteFetcher(
   limit: number,
 ) {
   const response = await searchPreview(query, entities, limit);
-  return response.sections;
+  // ``#term`` lookups always resolve to a tags section; this picker only
+  // accepts users, so re-apply the entity constraint.
+  return response.sections.filter((section) =>
+    entities.includes(section.entity),
+  );
 }
 
 function close() {

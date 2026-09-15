@@ -171,13 +171,16 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const trackQuery = ref("");
 const trackSearchOpen = ref(false);
 
-const mentionOpen = ref(false);
-const mentionLoading = ref(false);
-const mentionError = ref<string | null>(null);
-const mentionSections = ref<SearchResultSection[]>([]);
-// Start offset of the ``@token`` currently being completed.
-const mentionStart = ref(0);
-let mentionSeq = 0;
+type AutocompleteMode = "mention" | "hashtag";
+
+const suggestionOpen = ref(false);
+const suggestionLoading = ref(false);
+const suggestionError = ref<string | null>(null);
+const suggestionSections = ref<SearchResultSection[]>([]);
+const suggestionMode = ref<AutocompleteMode>("mention");
+// Start offset of the ``@token``/``#token`` currently being completed.
+const suggestionStart = ref(0);
+let suggestionSeq = 0;
 
 function browserLocale(): string {
   const tag = navigator.language || "";
@@ -223,88 +226,101 @@ const canAttachTrack = computed(
   () => props.allowTrackAttachments && tracks.value.length < MAX_ATTACHMENTS,
 );
 
-function closeMention() {
-  mentionOpen.value = false;
-  mentionLoading.value = false;
-  mentionError.value = null;
-  mentionSections.value = [];
+function closeSuggestion() {
+  suggestionOpen.value = false;
+  suggestionLoading.value = false;
+  suggestionError.value = null;
+  suggestionSections.value = [];
 }
 
-const debouncedMentionFetch = useDebounce(async (query: string) => {
-  const seq = ++mentionSeq;
-  mentionLoading.value = true;
-  mentionError.value = null;
-  try {
-    const response = await searchPreview(query, ["users"], 5);
-    if (seq !== mentionSeq) return;
-    mentionSections.value = response.sections;
-    mentionOpen.value = true;
-  } catch (err) {
-    if (seq !== mentionSeq) return;
-    mentionError.value = err instanceof Error ? err.message : String(err);
-    mentionSections.value = [];
-    mentionOpen.value = true;
-  } finally {
-    if (seq === mentionSeq) mentionLoading.value = false;
-  }
-}, 300);
+const debouncedSuggestionFetch = useDebounce(
+  async (mode: AutocompleteMode, query: string) => {
+    const seq = ++suggestionSeq;
+    suggestionLoading.value = true;
+    suggestionError.value = null;
+    try {
+      const response =
+        mode === "hashtag"
+          ? await searchPreview(`#${query}`, ["tags"], 5)
+          : await searchPreview(query, ["users"], 5);
+      if (seq !== suggestionSeq) return;
+      suggestionSections.value = response.sections;
+      suggestionOpen.value = true;
+    } catch (err) {
+      if (seq !== suggestionSeq) return;
+      suggestionError.value = err instanceof Error ? err.message : String(err);
+      suggestionSections.value = [];
+      suggestionOpen.value = true;
+    } finally {
+      if (seq === suggestionSeq) suggestionLoading.value = false;
+    }
+  },
+  300,
+);
 
-/** Detect an ``@token`` immediately before the caret and autocomplete it. */
-function detectMention() {
+/** Detect an ``@token`` or ``#token`` immediately before the caret. */
+function detectSuggestion() {
   const el = textareaEl.value;
   if (!el) {
-    closeMention();
+    closeSuggestion();
     return;
   }
   const caret = el.selectionStart ?? text.value.length;
   const before = text.value.slice(0, caret);
-  const match = before.match(/(^|\s)@([A-Za-z0-9_.-]*)$/);
+  const mention = before.match(/(^|\s)@([A-Za-z0-9_.-]*)$/);
+  const hashtag = before.match(/(^|\s)#([A-Za-z0-9_]*)$/);
+  const match = mention ?? hashtag;
   if (!match) {
-    mentionSeq++;
-    debouncedMentionFetch.cancel();
-    closeMention();
+    suggestionSeq++;
+    debouncedSuggestionFetch.cancel();
+    closeSuggestion();
     return;
   }
-  mentionStart.value = caret - match[2].length - 1;
+  const mode: AutocompleteMode = mention ? "mention" : "hashtag";
+  suggestionMode.value = mode;
+  suggestionStart.value = caret - match[2].length - 1;
   const query = match[2];
-  if (query.length === 0) {
-    debouncedMentionFetch.cancel();
-    closeMention();
+  // Mentions need at least one character; a bare ``#`` lists popular tags.
+  if (mode === "mention" && query.length === 0) {
+    debouncedSuggestionFetch.cancel();
+    closeSuggestion();
     return;
   }
-  debouncedMentionFetch(query);
+  debouncedSuggestionFetch(mode, query);
 }
 
 function onTextInput() {
-  detectMention();
+  detectSuggestion();
 }
 
 function onEditorKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") {
-    mentionSeq++;
-    debouncedMentionFetch.cancel();
-    closeMention();
+    suggestionSeq++;
+    debouncedSuggestionFetch.cancel();
+    closeSuggestion();
   } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
     void onSubmit();
   }
 }
 
-async function onMentionSelect(item: SearchResultItem) {
-  const username = item.name ?? item.id ?? item.title;
+async function onSuggestionSelect(item: SearchResultItem) {
   const el = textareaEl.value;
   const caret = el?.selectionStart ?? text.value.length;
-  const insertion = `@${username} `;
+  const insertion =
+    suggestionMode.value === "hashtag"
+      ? `#${item.name ?? item.title} `
+      : `@${item.name ?? item.id ?? item.title} `;
   text.value =
-    text.value.slice(0, mentionStart.value) +
+    text.value.slice(0, suggestionStart.value) +
     insertion +
     text.value.slice(caret);
-  mentionSeq++;
-  debouncedMentionFetch.cancel();
-  closeMention();
+  suggestionSeq++;
+  debouncedSuggestionFetch.cancel();
+  closeSuggestion();
   await nextTick();
   if (el) {
-    const pos = mentionStart.value + insertion.length;
+    const pos = suggestionStart.value + insertion.length;
     el.focus();
     el.setSelectionRange(pos, pos);
   }
@@ -316,11 +332,19 @@ async function trackAutocompleteFetcher(
   limit: number,
 ) {
   const response = await searchPreview(query, entities, limit);
-  return response.sections;
+  // ``#term`` lookups always resolve to a tags section; this picker only
+  // accepts tracks, so re-apply the entity constraint.
+  return response.sections.filter((section) =>
+    entities.includes(section.entity),
+  );
 }
 
 function onTrackSelect(item: SearchResultItem) {
-  if (!item.id || tracks.value.some((track) => track.id === item.id)) {
+  if (
+    item.type !== "track" ||
+    !item.id ||
+    tracks.value.some((track) => track.id === item.id)
+  ) {
     trackQuery.value = "";
     return;
   }
@@ -411,7 +435,7 @@ async function onSubmit() {
     media.value = [];
     tracks.value = [];
     trackSearchOpen.value = false;
-    closeMention();
+    closeSuggestion();
     emit("submitted", result);
   } catch (err) {
     error.value =
@@ -422,7 +446,7 @@ async function onSubmit() {
   }
 }
 
-useOnClickOutside(() => editorEl.value, closeMention);
+useOnClickOutside(() => editorEl.value, closeSuggestion);
 </script>
 
 <template>
@@ -440,11 +464,11 @@ useOnClickOutside(() => editorEl.value, closeMention);
         @keydown="onEditorKeydown"
       />
       <SearchSuggestions
-        v-if="mentionOpen"
-        :sections="mentionSections"
-        :loading="mentionLoading"
-        :error="mentionError"
-        @select="onMentionSelect"
+        v-if="suggestionOpen"
+        :sections="suggestionSections"
+        :loading="suggestionLoading"
+        :error="suggestionError"
+        @select="onSuggestionSelect"
       />
     </div>
 

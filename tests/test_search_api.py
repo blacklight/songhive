@@ -328,3 +328,67 @@ async def test_search_unknown_entities_ignored(client):
     assert response.status_code == 200
     data = response.json()
     assert [s["entity"] for s in data["sections"]] == ["tracks"]
+
+
+@pytest.mark.asyncio
+async def test_search_hashtag_prefix_searches_tags_only(client, regular_user, db_session):
+    """A ``#``-prefixed query strips the prefix and searches the tags table."""
+    artist = await _make_artist(db_session, name="Summer Artist")
+    track = await _make_track(
+        db_session,
+        artist,
+        title="Summer Song",
+        owner=regular_user,
+    )
+    tag = await _make_tag(db_session, "summer_beats")
+    db_session.add(TagTrack(tag_id=tag.id, track_id=track.id, user_id=regular_user.id))
+    await db_session.commit()
+
+    # The '#' must be percent-encoded or it is treated as a URL fragment.
+    response = client.get("/api/v1/search?q=%23summer")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["query"] == "#summer"
+    assert [s["entity"] for s in data["sections"]] == ["tags"]
+    items = data["sections"][0]["items"]
+    assert [item["id"] for item in items] == ["summer_beats"]
+    assert items[0]["url"] == "/tags/summer_beats"
+
+    # Even an explicit entity allowlist does not widen a hashtag lookup.
+    response = client.get("/api/v1/search?q=%23summer&entities=tracks")
+    assert response.status_code == 200
+    data = response.json()
+    assert [s["entity"] for s in data["sections"]] == ["tags"]
+
+
+@pytest.mark.asyncio
+async def test_search_bare_hash_lists_tags_by_popularity(client, regular_user, db_session):
+    """A bare ``#`` returns all visible tags ordered by item count."""
+    artist = await _make_artist(db_session)
+    tracks = [await _make_track(db_session, artist, title=f"Track {i}", owner=regular_user) for i in range(3)]
+    popular = await _make_tag(db_session, "popular")
+    niche = await _make_tag(db_session, "niche")
+    for track in tracks:
+        db_session.add(TagTrack(tag_id=popular.id, track_id=track.id, user_id=regular_user.id))
+    db_session.add(TagTrack(tag_id=niche.id, track_id=tracks[0].id, user_id=regular_user.id))
+    await db_session.commit()
+
+    response = client.get("/api/v1/search?q=%23")
+    assert response.status_code == 200
+    data = response.json()
+    assert [s["entity"] for s in data["sections"]] == ["tags"]
+    section = data["sections"][0]
+    assert section["total"] == 2
+    assert [item["id"] for item in section["items"]] == ["popular", "niche"]
+    assert section["items"][0]["subtitle"] == "3 items"
+
+
+@pytest.mark.asyncio
+async def test_search_hashtag_no_match_returns_empty_tags_section(client, db_session):
+    """A ``#`` query with no matching tag yields a single empty tags section."""
+    response = client.get("/api/v1/search?q=%23missing")
+    assert response.status_code == 200
+    data = response.json()
+    assert [s["entity"] for s in data["sections"]] == ["tags"]
+    assert data["sections"][0]["items"] == []
+    assert data["sections"][0]["total"] == 0

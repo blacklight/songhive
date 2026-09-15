@@ -73,7 +73,11 @@ const debouncedFetch = useDebounce(async (value: string) => {
     return;
   }
   const term = value.trim();
-  if (term.length < props.autocompleteMinLength) {
+  // ``#`` starts a hashtag lookup; it should open suggestions immediately
+  // (bare ``#`` lists popular tags) when tags are among the entities.
+  const hashtagLookup =
+    term.startsWith("#") && props.autocompleteEntities.includes("tags");
+  if (term.length < props.autocompleteMinLength && !hashtagLookup) {
     closeSuggestions();
     return;
   }

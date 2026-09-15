@@ -300,8 +300,24 @@ export function useSearchSections() {
     section.page = 0;
   }
 
+  /**
+   * Normalize the raw query: a leading ``#`` makes it a hashtag lookup —
+   * the prefix is stripped and only the tags section participates.
+   */
+  function effectiveQuery(): { term: string; hashtag: boolean } {
+    const raw = query.value.trim();
+    if (raw.startsWith("#")) {
+      return { term: raw.replace(/^#+/, "").trim(), hashtag: true };
+    }
+    return { term: raw, hashtag: false };
+  }
+
   async function searchSection(entity: SearchEntity) {
-    if (!query.value.trim() || !activeEntities.value.includes(entity)) {
+    const { term, hashtag } = effectiveQuery();
+    const participates = hashtag
+      ? entity === "tags"
+      : activeEntities.value.includes(entity);
+    if ((!hashtag && !term) || !participates) {
       resetSection(entity);
       return;
     }
@@ -311,7 +327,7 @@ export function useSearchSections() {
     section.error = null;
     try {
       const result = await SECTION_REGISTRY[entity].fetch({
-        q: query.value,
+        q: term || undefined,
         limit: section.limit,
         offset: section.offset,
         include: config.include,
@@ -334,11 +350,13 @@ export function useSearchSections() {
   ) {
     query.value = q;
     activeEntities.value = active;
+    const hashtag = q.trim().startsWith("#");
     const tasks = SEARCH_ENTITIES.map((entity) => {
       resetSection(entity);
-      return active.includes(entity)
-        ? searchSection(entity)
-        : Promise.resolve();
+      const participates = hashtag
+        ? entity === "tags"
+        : active.includes(entity);
+      return participates ? searchSection(entity) : Promise.resolve();
     });
     await Promise.all(tasks);
   }

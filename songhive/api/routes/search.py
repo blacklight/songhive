@@ -285,13 +285,17 @@ async def _tag_section(
     term: str,
     limit: int,
     user: Optional[User],
+    sort_by: str = "name",
+    sort_dir: str = "asc",
 ) -> SearchResultSection:
     summaries, total = await list_tags(
         db,
         user=user,
-        query=term,
+        query=term or None,
         limit=limit,
         offset=0,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
     return SearchResultSection(
         entity="tags",
@@ -364,8 +368,27 @@ async def search(
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
 ):
-    """Return a grouped, ACL-respecting preview for the requested entities."""
+    """
+    Return a grouped, ACL-respecting preview for the requested entities.
+
+    A ``q`` starting with ``#`` is a hashtag lookup: the prefix is stripped
+    and only the tags section is returned, sorted by popularity
+    (``item_count`` descending). A bare ``#`` lists the most used tags.
+    """
     term = (q or "").strip()
+    hashtag = term.startswith("#")
+    if hashtag:
+        section = await _tag_section(
+            db=db,
+            storage=storage,
+            term=term.lstrip("#").strip(),
+            limit=limit,
+            user=user,
+            sort_by="item_count",
+            sort_dir="desc",
+        )
+        return SearchResponse(query=term, sections=[section])
+
     if not term:
         return SearchResponse(query=term, sections=[])
 

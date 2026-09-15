@@ -242,6 +242,48 @@ describe("SearchBar", () => {
     wrapper.unmount();
   });
 
+  it("fetches suggestions for a bare '#' when tags are searchable", async () => {
+    const fetcher = vi.fn().mockResolvedValue([]);
+    const wrapper = mount(SearchBar, {
+      props: {
+        modelValue: "",
+        autocomplete: true,
+        autocompleteEntities: ["tracks", "tags"],
+        autocompleteDelay: 100,
+        autocompleteFetcher: fetcher,
+      },
+    });
+
+    const input = wrapper.find("input");
+    await input.setValue("#");
+    await nextTick();
+    vi.advanceTimersByTime(100);
+
+    expect(fetcher).toHaveBeenCalledWith("#", ["tracks", "tags"], 5);
+    wrapper.unmount();
+  });
+
+  it("does not treat '#' specially when tags are not searchable", async () => {
+    const fetcher = vi.fn().mockResolvedValue([]);
+    const wrapper = mount(SearchBar, {
+      props: {
+        modelValue: "",
+        autocomplete: true,
+        autocompleteEntities: ["tracks"],
+        autocompleteDelay: 100,
+        autocompleteFetcher: fetcher,
+      },
+    });
+
+    const input = wrapper.find("input");
+    await input.setValue("#");
+    await nextTick();
+    vi.advanceTimersByTime(100);
+
+    expect(fetcher).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it("emits autocomplete-error and shows an error state", async () => {
     const fetcher = vi.fn().mockRejectedValue(new Error("network"));
     const wrapper = mount(SearchBar, {

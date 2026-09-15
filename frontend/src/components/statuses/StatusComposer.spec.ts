@@ -174,6 +174,50 @@ describe("StatusComposer", () => {
     expect(textarea.value).toBe("hi @alice ");
   });
 
+  it("autocompletes a hashtag after typing #", async () => {
+    searchPreview.mockResolvedValue({
+      query: "#ro",
+      sections: [
+        {
+          entity: "tags",
+          total: 1,
+          items: [
+            {
+              type: "tag",
+              id: "rock",
+              name: "rock",
+              title: "rock",
+              subtitle: "3 items",
+              url: "/tags/rock",
+            },
+          ],
+        },
+      ],
+    });
+    const wrapper = mountComposer();
+    await typeText(wrapper, "now playing #ro");
+    vi.advanceTimersByTime(400);
+    await flushPromises();
+
+    expect(searchPreview).toHaveBeenCalledWith("#ro", ["tags"], 5);
+    const item = wrapper.find(".search-suggestions__item");
+    expect(item.exists()).toBe(true);
+    await item.trigger("click");
+    await flushPromises();
+
+    const textarea = wrapper.find("textarea").element as HTMLTextAreaElement;
+    expect(textarea.value).toBe("now playing #rock ");
+  });
+
+  it("queries popular hashtags when '#' is typed alone", async () => {
+    const wrapper = mountComposer();
+    await typeText(wrapper, "#");
+    vi.advanceTimersByTime(400);
+    await flushPromises();
+
+    expect(searchPreview).toHaveBeenCalledWith("#", ["tags"], 5);
+  });
+
   it("attaches a track picked from the track search", async () => {
     searchPreview.mockResolvedValue({
       query: "song",

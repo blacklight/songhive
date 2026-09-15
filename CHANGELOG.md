@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
   total duration — via a shared `CollectionStats` component loaded
   asynchronously from the new stats endpoints, and refreshed when tracks
   are removed from the collection.
+- `frontend`: Allow searching for hashtags prefixed by "#" on the search page,
+  and add tags autocomplete both to the search bar and the composer component.
 
 ## 0.1.4
 

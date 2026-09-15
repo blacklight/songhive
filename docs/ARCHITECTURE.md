@@ -1799,7 +1799,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
 | `frontend/src/components/entity/` | Reusable entity grid/list components (e.g. `BulkEditableGrid` for bulk selection and deletion) |
 | `frontend/src/components/activities/` | Activity feed components (`ActivityFeed` filter tabs + cursor pagination, `ActivityCard`, `ActivityEditModal`) backed by `stores/activities.ts` and `api/activities.ts` |
-| `frontend/src/components/statuses/` | `StatusComposer` — shared status editor (plain text or Markdown, visibility, BCP-47 language defaulting to the browser locale, `@` mention autocomplete and track-only attach search via `SearchBar`/`SearchSuggestions`, file uploads through `api/files.ts`). Posts through `api/statuses.ts` (`POST /statuses/`) by default; the share dialog's Fediverse tab injects a custom submit that calls `tracks.publishTrack` instead, and `ActivityEditModal` reuses it for edits (`initial*` props seed the existing text/format/language/attachments; attachment chips map to `songhive:fileId`/`songhive:trackId`-marked docs). |
+| `frontend/src/components/statuses/` | `StatusComposer` — shared status editor (plain text or Markdown, visibility, BCP-47 language defaulting to the browser locale, `@` mention and `#` hashtag autocomplete (hashtags sorted by popularity) plus track-only attach search via `SearchBar`/`SearchSuggestions`, file uploads through `api/files.ts`). Posts through `api/statuses.ts` (`POST /statuses/`) by default; the share dialog's Fediverse tab injects a custom submit that calls `tracks.publishTrack` instead, and `ActivityEditModal` reuses it for edits (`initial*` props seed the existing text/format/language/attachments; attachment chips map to `songhive:fileId`/`songhive:trackId`-marked docs). |
 | `frontend/src/components/user/` | Reusable user display components (`UserLink`) used across activity cards, resource owner metadata, file details, audit logs, and admin lists. `UserLink` renders local users as `RouterLink`s to `/@{username}`, remote users as external links to `actor_url`, and accepts either a full `UserSummary` owner or legacy `username`/`displayName`/`avatarUrl`/`remoteUrl` props |
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
 | `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
@@ -1896,7 +1896,10 @@ REST API under `/api/v1/`:
 ├── tracks/         # Track CRUD + search
 ├── search/         # Lightweight aggregate multi-entity search (tracks, albums, artists,
 │                   #   playlists, libraries, users, tags, genres) with normalized result
-│                   #   items; ACL-filtered like the underlying list endpoints
+│                   #   items; ACL-filtered like the underlying list endpoints.
+│                   #   A q starting with '#' is a hashtag lookup: the prefix is stripped
+│                   #   and only the tags section is returned, sorted by item_count
+│                   #   (a bare '#' lists the most used tags)
 ├── files/          # Generic file upload/list/download (StoredFile)
 ├── libraries/      # Library management + add/remove tracks/albums/artists
 ├── playlists/      # Playlist CRUD + add/remove/reorder tracks/albums/artists + list tracks
