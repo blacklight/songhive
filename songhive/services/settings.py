@@ -32,6 +32,10 @@ ALLOWED_SETTINGS: dict[str, dict[str, Any]] = {
         "default": "open",
     },
     "federation_enabled": {"type": "bool", "default": True},
+    "preview_cards_enabled": {
+        "type": "bool",
+        "default": True,
+    },
 }
 
 

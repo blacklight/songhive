@@ -124,6 +124,7 @@ songhive/
 │   ├── base.py             # DeclarativeBase, UUID PK, timestamps, async session factory
 │   ├── _enums.py           # Visibility enum (private / mentioned / local / followers / public)
 │   ├── activity.py         # Activity, ActivityMention, ActivityTarget (federation interaction layer)
+│   ├── preview_card.py     # PreviewCard — per-URL OpenGraph/<title>/domain card cache
 │   ├── user.py             # User (roles: user / moderator / admin; federation fields)
 │   ├── user_link.py        # Profile links (validated URL list)
 │   ├── invite.py           # Invite codes (max_uses, expiry)
@@ -211,6 +212,7 @@ songhive/
 │   ├── musicbrainz.py      # MusicBrainz metadata + Cover Art Archive enrichment
 │   ├── images.py           # Artist image + album cover enrichment
 │   ├── external_libraries.py # External library sync task
+│   ├── preview_cards.py    # Link-preview fetch + per-URL cache task
 │   └── storage.py          # Orphaned-file cleanup (scheduled via crontab)
 ├── ws/                     # WebSocket support
 │   └── events.py           # Tornado WebSocket handler (JWT auth, CORS origin check)
@@ -415,6 +417,33 @@ left untouched.
 `last_attempt_at` bookkeeping. Tracks already published to the fediverse
 (`federation_object_id` set) are backfilled as `create` activities by
 migration `4adb5fbea9d6`.
+
+Preview cards attach link-preview metadata to activities: when a post is
+created locally (`create_status`, `reply_to_activity`, `quote_activity`,
+`record_track_publication`) or materialized from a remote `Create`,
+`schedule_preview_card_fetch` enqueues `tasks/preview_cards.py`'s
+`fetch_preview_card`, which runs `services/preview_cards.py`'s
+`process_activity_preview_card`. The service picks the first *pure* URL —
+Mastodon-style — from the raw `content_source` of local posts (rendered
+mention/hashtag anchors never appear there) or from the anchors of the
+remote HTML `content`, skipping `mention`/`hashtag`/`u-url` classes and
+`rel="tag"` links, then fetches OpenGraph metadata with `<title>` and
+finally the URL's domain as fallbacks. Fetched cards live in the
+`preview_cards` table keyed by normalized URL and are shared across
+activities; a cached card is reused while fresher than
+`PREVIEW_CARD_MAX_AGE` (24h) and re-fetched at post time otherwise, so
+views never trigger network fetches. Activities whose object carries
+attachments get no card, and edits re-run the pipeline (`force=True`) so a
+stale link is refreshed or cleared. Fetches are guarded against SSRF —
+only `http(s)` URLs resolving to globally routable addresses are
+requested, redirects are re-validated per hop, and bodies are capped at
+`MAX_DOCUMENT_BYTES` (1 MiB). The pipeline is gated by the instance-level
+`preview_cards_enabled` runtime setting (admin UI, default on) and by the
+per-user `preview_cards_enabled` preference (profile form, default on);
+either opting out skips the enqueue, and the task re-checks both gates so
+rows created before a change are honoured. `ActivityResponse.preview_card`
+serializes the linked card and `ActivityCard.vue` renders it below the
+post content.
 
 `services/activities.py` is the domain entry point: `resolve_entity` maps an
 `(entity_type, entity_id)` pair to its model row, and
@@ -1635,6 +1664,7 @@ All background work is handled by Celery workers. Redis is the broker
 | `tasks/notifications.py`| Notification digest + seen-notification retention purge (scheduled) |
 | `tasks/musicbrainz.py`| MusicBrainz + Cover Art Archive metadata enrichment      |
 | `tasks/images.py`    | Artist image + Cover Art Archive cover enrichment         |
+| `tasks/preview_cards.py`| Fetch + cache per-URL link-preview cards for activities  |
 | `tasks/storage.py`   | Orphaned `StoredFile` GC, audio-only hash rehash (scheduled) |
 
 The `cleanup_orphaned_files_schedule` config accepts any 5-field cron

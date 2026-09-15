@@ -430,6 +430,7 @@
         "instanceContactUrl": "Contact URL",
         "registrationMode": "Registration mode",
         "federationEnabled": "Federation enabled",
+        "previewCardsEnabled": "Preview cards enabled",
         "typeString": "Text",
         "typeBoolean": "On/Off",
         "typeNumber": "Number",
@@ -742,6 +743,8 @@
     "compose": "Compose",
     "statusContentType": "Default post format",
     "statusContentTypeHint": "Format used by default when writing posts.",
+    "previewCards": "Link preview cards",
+    "previewCardsHint": "Fetch preview cards for links in your posts.",
     "followers": "No followers | {count} follower | {count} followers",
     "followersPage": {
       "title": "Followers",
@@ -1145,6 +1148,7 @@
     "repliesError": "Could not load replies.",
     "quotesError": "Could not load quotes.",
     "loginToInteract": "Log in to interact",
+    "previewCard": "Link preview",
     "actors": {
       "likes": "Liked by",
       "boosts": "Boosted by",

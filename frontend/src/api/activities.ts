@@ -26,6 +26,19 @@ export interface ActivityMentionResponse {
 }
 
 /**
+ * Link-preview card for the first bare URL in an activity — mirrors
+ * ``PreviewCardResponse`` in ``songhive/api/routes/activities.py``.
+ */
+export interface PreviewCardResponse {
+  url: string;
+  title?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  site_name?: string | null;
+  type?: string;
+}
+
+/**
  * ActivityPub ``attachment`` entry of an activity's embedded object — a
  * ``Document``/``Image`` for uploaded files and ``Audio`` for hosted tracks.
  */
@@ -75,6 +88,7 @@ export interface ActivityResponse {
   liked: boolean;
   boosted: boolean;
   can_interact: boolean;
+  preview_card?: PreviewCardResponse | null;
 }
 
 export interface ActivityListResponse {

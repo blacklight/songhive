@@ -17,6 +17,7 @@ from .library_track import LibraryTrack
 from .notification import Notification, NotificationPreference
 from .oauth_client import OAuth2Client
 from .playlist import Playlist, PlaylistTrack
+from .preview_card import PreviewCard
 from .radio import Radio
 from .report import Report
 from .setting import Setting
@@ -65,6 +66,7 @@ __all__ = [
     "OAuth2Client",
     "Playlist",
     "PlaylistTrack",
+    "PreviewCard",
     "Radio",
     "Report",
     "ShareGrant",

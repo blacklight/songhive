@@ -64,6 +64,19 @@ class ActivityMentionResponse(BaseModel):
     user_id: Optional[str] = None
 
 
+class PreviewCardResponse(BaseModel):
+    """Serialized link-preview card attached to an activity."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    url: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    site_name: Optional[str] = None
+    type: str = "link"
+
+
 class ActivityResponse(BaseModel):
     """Serialized activity."""
 
@@ -98,6 +111,7 @@ class ActivityResponse(BaseModel):
     liked: bool = False
     boosted: bool = False
     can_interact: bool = True
+    preview_card: Optional[PreviewCardResponse] = None
 
 
 class ActivityListResponse(BaseModel):

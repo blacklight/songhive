@@ -29,6 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from .base import Base, TZDateTime
 
 if TYPE_CHECKING:
+    from .preview_card import PreviewCard
     from .tag import Tag
 
 ACTIVITY_ENTITY_TYPES = ("track", "album", "artist", "playlist", "library", "user")
@@ -97,6 +98,10 @@ class Activity(Base):
         default=lambda: datetime.now(timezone.utc),
     )
     deleted_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
+    preview_card_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("preview_cards.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     retracted: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
@@ -126,6 +131,10 @@ class Activity(Base):
         "Activity",
         remote_side="Activity.id",
         backref="replies",
+        lazy="selectin",
+    )
+    preview_card: Mapped[Optional["PreviewCard"]] = relationship(
+        "PreviewCard",
         lazy="selectin",
     )
 

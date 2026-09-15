@@ -82,6 +82,7 @@ class UserResponse(BaseModel):
     email_verified: Optional[bool] = None
     role: Optional[UserRole] = None
     status_content_type: str = "text/markdown"
+    preview_cards_enabled: bool = True
     links: List[UserLinkOutput] = Field(default_factory=list)
 
 
@@ -173,6 +174,7 @@ class UserProfileUpdate(BaseModel):
     bio: Optional[str] = None
     avatar_url: Optional[str] = Field(None, max_length=512)
     status_content_type: Optional[str] = None
+    preview_cards_enabled: Optional[bool] = None
     links: Optional[List[UserLinkInput]] = None
 
     @field_validator("status_content_type")

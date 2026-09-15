@@ -56,6 +56,12 @@ class User(Base):
         default="text/markdown",
         server_default="text/markdown",
     )
+    preview_cards_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        insert_default=True,
+        default=True,
+        server_default="1",
+    )
     links: Mapped[List["UserLink"]] = relationship(
         "UserLink",
         back_populates="user",

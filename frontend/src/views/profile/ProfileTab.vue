@@ -49,6 +49,7 @@ const statusContentType = ref<StatusContentType>(
   (authStore.user?.status_content_type as StatusContentType) ||
     STATUS_CONTENT_TYPE_MARKDOWN,
 );
+const previewCardsEnabled = ref(authStore.user?.preview_cards_enabled ?? true);
 const isLoading = ref(false);
 const error = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -75,6 +76,7 @@ watch(
     statusContentType.value =
       (next.status_content_type as StatusContentType) ||
       STATUS_CONTENT_TYPE_MARKDOWN;
+    previewCardsEnabled.value = next.preview_cards_enabled ?? true;
   },
   { deep: true },
 );
@@ -227,6 +229,7 @@ async function onSubmit() {
     bio: bio.value.trim() || null,
     avatar_url: trimmedAvatar || null,
     status_content_type: statusContentType.value,
+    preview_cards_enabled: previewCardsEnabled.value,
     links: validLinks.map((l) => ({
       name: l.name.trim(),
       url: l.url.trim(),
@@ -310,6 +313,12 @@ async function onSubmit() {
       :options="statusContentTypeOptions"
       :label="t('profile.statusContentType')"
       :hint="t('profile.statusContentTypeHint')"
+    />
+
+    <AppCheckbox
+      v-model="previewCardsEnabled"
+      :label="t('profile.previewCards')"
+      :hint="t('profile.previewCardsHint')"
     />
 
     <fieldset class="profile-tab__links">

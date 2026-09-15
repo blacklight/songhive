@@ -58,7 +58,7 @@ function getControl(
   if (setting.key === "federation_enabled") return "checkbox";
 
   const type = getType(setting);
-  if (type === "boolean") return "checkbox";
+  if (type === "boolean" || type === "bool") return "checkbox";
   if (type === "number") return "number";
   if (type === "json") return "json";
   return "text";
@@ -93,6 +93,8 @@ function getLabel(setting: SettingResponse): string {
     return t("pages.admin.settings.registrationMode");
   if (setting.key === "federation_enabled")
     return t("pages.admin.settings.federationEnabled");
+  if (setting.key === "preview_cards_enabled")
+    return t("pages.admin.settings.previewCardsEnabled");
   return setting.key;
 }
 

@@ -42,6 +42,7 @@ from ..services.activities import (
     fan_out_activity_update,
     resolve_entity,
 )
+from ..services.preview_cards import schedule_preview_card_fetch
 from .notifications import strip_quote_fallback
 from .storage import get_or_create_private_key
 
@@ -363,6 +364,7 @@ async def _materialize_remote_object(
         session.add(ActivityMention(activity_id=row.id, **mention))
     await session.flush()
     await _sync_activity_tags(session, row, _remote_hashtags(obj))
+    schedule_preview_card_fetch(row)
     logger.info(
         "Materialized remote %s %s from %s on %s",
         activity_type,
@@ -559,6 +561,9 @@ async def update_remote_object(
         session.add(ActivityMention(activity_id=row.id, **mention))
     await session.flush()
     await _sync_activity_tags(session, row, _remote_hashtags(obj))
+    # The content may link a different first URL after the edit — force a
+    # pipeline re-run so a stale card is refreshed or cleared.
+    schedule_preview_card_fetch(row, force=True)
 
 
 async def retract_remote_object(session: AsyncSession, *, activity: dict) -> None:

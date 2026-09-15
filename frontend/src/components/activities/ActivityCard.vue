@@ -177,6 +177,19 @@ const fileAttachments = computed(() =>
   ),
 );
 
+// Server-generated link preview for the post's first bare URL — fetched
+// once per URL and shared across posts, never on card view.
+const previewCard = computed(() => activity.value.preview_card ?? null);
+const previewCardHost = computed(() => {
+  const url = previewCard.value?.url;
+  if (!url) return "";
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+});
+
 // Inline font formatting survived from the source markup — rendered as
 // classes rather than real tags so links/mentions keep their own elements.
 const MARK_CLASSES: Record<ContentMark, string> = {
@@ -889,6 +902,36 @@ async function copyUrl() {
       </ul>
     </div>
 
+    <a
+      v-if="previewCard"
+      :href="previewCard.url"
+      target="_blank"
+      rel="noopener"
+      class="activity-card__preview-card"
+      :aria-label="t('activities.previewCard')"
+    >
+      <img
+        v-if="previewCard.image_url"
+        :src="previewCard.image_url"
+        :alt="previewCard.title ?? ''"
+        class="activity-card__preview-card-image"
+        loading="lazy"
+      />
+      <span class="activity-card__preview-card-body">
+        <span class="activity-card__preview-card-site">{{
+          previewCard.site_name || previewCardHost
+        }}</span>
+        <span class="activity-card__preview-card-title">{{
+          previewCard.title
+        }}</span>
+        <span
+          v-if="previewCard.description"
+          class="activity-card__preview-card-description"
+          >{{ previewCard.description }}</span
+        >
+      </span>
+    </a>
+
     <div
       v-if="isQuote && activity.in_reply_to_activity_id"
       class="activity-card__quote"
@@ -1321,6 +1364,60 @@ async function copyUrl() {
 .activity-card__attachment-list a {
   color: var(--color-text-link);
   word-break: break-all;
+}
+
+.activity-card__preview-card {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-secondary);
+  text-decoration: none;
+  overflow: hidden;
+}
+
+.activity-card__preview-card:hover {
+  border-color: var(--color-text-muted);
+}
+
+.activity-card__preview-card-image {
+  width: 4rem;
+  height: 4rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.activity-card__preview-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.activity-card__preview-card-site {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.activity-card__preview-card-title {
+  font-weight: 600;
+  color: var(--color-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.activity-card__preview-card-description {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .activity-card__mention {

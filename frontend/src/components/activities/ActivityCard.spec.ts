@@ -1122,4 +1122,46 @@ describe("ActivityCard", () => {
     expect(avatar.exists()).toBe(true);
     expect(avatar.text()).toBe("A");
   });
+
+  it("renders a link preview card when the activity carries one", () => {
+    const wrapper = mountCard({
+      preview_card: {
+        url: "https://site.example/track/1",
+        title: "A great track",
+        description: "By a great band",
+        image_url: "https://cdn.example/cover.jpg",
+        site_name: "MusicSite",
+        type: "link",
+      },
+    });
+    const card = wrapper.find(".activity-card__preview-card");
+    expect(card.exists()).toBe(true);
+    expect(card.attributes("href")).toBe("https://site.example/track/1");
+    expect(card.text()).toContain("MusicSite");
+    expect(card.text()).toContain("A great track");
+    expect(card.text()).toContain("By a great band");
+    const img = card.find("img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe("https://cdn.example/cover.jpg");
+  });
+
+  it("renders no preview card when the activity has none", () => {
+    const wrapper = mountCard();
+    expect(wrapper.find(".activity-card__preview-card").exists()).toBe(false);
+  });
+
+  it("falls back to the card's domain when no site name is set", () => {
+    const wrapper = mountCard({
+      preview_card: {
+        url: "https://site.example/track/1",
+        title: "site.example",
+        type: "link",
+      },
+    });
+    const card = wrapper.find(".activity-card__preview-card");
+    expect(card.find(".activity-card__preview-card-site").text()).toBe(
+      "site.example",
+    );
+    expect(card.find("img").exists()).toBe(false);
+  });
 });

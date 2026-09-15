@@ -56,6 +56,7 @@ from .mentions import (
     process_mentions,
     tag_url_factory,
 )
+from .preview_cards import schedule_preview_card_fetch
 from .sharing import create_share_grant
 from .tags import _entity_access_predicate, get_or_create_tag, validate_tag_name
 
@@ -1612,6 +1613,10 @@ async def update_activity(
 
     if processed is not None:
         await _sync_activity_tags(session, activity, processed.tag_names)
+    if processed is not None or attachments_requested:
+        # Content/attachment edits can change the first URL — re-run the
+        # card pipeline so a stale link is refreshed or cleared.
+        schedule_preview_card_fetch(activity, force=True)
     await session.flush()
     await session.refresh(activity, ["mentions"])
     return activity
@@ -2111,6 +2116,7 @@ async def reply_to_activity(
         mentions=processed.mentions,
         skip_user_ids={str(activity.owner_user_id)} if activity.owner_user_id else set(),
     )
+    schedule_preview_card_fetch(reply, author=author)
 
     try:
         await fan_out_activity(session, reply, config, owner=author)
@@ -2375,6 +2381,7 @@ async def quote_activity(
         mentions=processed.mentions,
         skip_user_ids={str(activity.owner_user_id)} if activity.owner_user_id else set(),
     )
+    schedule_preview_card_fetch(quote, author=author)
 
     # FEP-044f order: the ``QuoteRequest`` goes first so the remote
     # authorization flow starts before the ``Create`` triggers the
@@ -3178,6 +3185,7 @@ async def create_status(
 
     await _sync_activity_tags(session, activity, processed.tag_names)
     await _notify_status_mentions(session, activity=activity, author=author, mentions=processed.mentions)
+    schedule_preview_card_fetch(activity, author=author)
 
     try:
         await fan_out_activity(session, activity, config, owner=author)
@@ -3436,6 +3444,7 @@ async def record_track_publication(
     if not tag_names and isinstance(obj, dict) and obj.get("content"):
         tag_names = _extract_hashtags(obj["content"])
     await _sync_activity_tags(session, activity, tag_names)
+    schedule_preview_card_fetch(activity, author=owner)
 
     try:
         await fan_out_activity(session, activity, config, owner=owner)

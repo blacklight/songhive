@@ -587,10 +587,10 @@ export interface paths {
      * Lookup Activity
      * @description Resolve an object URL to a stored activity.
      *
-     *   Lets clients map a federated object id — a remote note materialized as
-     *   a reply, a local ``{actor}/objects/{id}`` permalink — to the activity
-     *   row the SPA can render, instead of treating opaque remote ids as
-     *   human-facing URLs.
+     *     Lets clients map a federated object id — a remote note materialized as
+     *     a reply, a local ``{actor}/objects/{id}`` permalink — to the activity
+     *     row the SPA can render, instead of treating opaque remote ids as
+     *     human-facing URLs.
      */
     get: operations["lookup_activity_api_v1_activities_lookup_get"];
     put?: never;
@@ -752,15 +752,15 @@ export interface paths {
      * Quote Activity
      * @description Post a quote of an activity as the current user.
      *
-     *   The quote is a ``Create(Note)`` whose object references the quoted
-     *   post through the FEP-0449 ``quote``/Mastodon ``quoteUrl``/Misskey
-     *   ``_misskey_quote`` fields and inherits — unless a narrower
-     *   ``visibility`` is requested — the quoted activity's visibility. It is
-     *   attached to the same entity, federated to its audience, and notified
-     *   to the quoted author. Quoting a remote activity additionally sends a
-     *   FEP-044f ``QuoteRequest`` to the remote author's inbox; quoting a
-     *   local user's post self-issues the ``QuoteAuthorization``. A quote of
-     *   a deleted activity returns 404.
+     *     The quote is a ``Create(Note)`` whose object references the quoted
+     *     post through the FEP-0449 ``quote``/Mastodon ``quoteUrl``/Misskey
+     *     ``_misskey_quote`` fields and inherits — unless a narrower
+     *     ``visibility`` is requested — the quoted activity's visibility. It is
+     *     attached to the same entity, federated to its audience, and notified
+     *     to the quoted author. Quoting a remote activity additionally sends a
+     *     FEP-044f ``QuoteRequest`` to the remote author's inbox; quoting a
+     *     local user's post self-issues the ``QuoteAuthorization``. A quote of
+     *     a deleted activity returns 404.
      */
     post: operations["quote_activity_api_v1_activities__activity_id__quote_post"];
     delete?: never;
@@ -846,11 +846,11 @@ export interface paths {
      * List Activity Quotes
      * @description List the known quotes of an activity, oldest first.
      *
-     *   Local quotes — locally authored ones and remote quotes materialized
-     *   into ``Activity`` rows — are serialized as full activity cards;
-     *   federated quotes that were never materialized come from Pubby's
-     *   interaction storage as compact ``raw_object``-backed records carrying
-     *   ``quoted`` (the quoted object id).
+     *     Local quotes — locally authored ones and remote quotes materialized
+     *     into ``Activity`` rows — are serialized as full activity cards;
+     *     federated quotes that were never materialized come from Pubby's
+     *     interaction storage as compact ``raw_object``-backed records carrying
+     *     ``quoted`` (the quoted object id).
      */
     get: operations["list_activity_quotes_api_v1_activities__activity_id__quotes_get"];
     put?: never;
@@ -1414,14 +1414,17 @@ export interface paths {
      *     one-off post text used as the object's ``content`` instead of the track's
      *     stored ``description``; it is never persisted. ``visibility`` selects the
      *     post's audience (``public`` by default): ``public`` and ``followers``
-     *     reach the owner's follower inboxes plus remote mentioned actors,
+     *     reach the publisher's follower inboxes plus remote mentioned actors,
      *     ``mentioned`` reaches only the mentioned actors, and
      *     ``private``/``local`` record the activity without federating it.
      *
      *     ``object_type`` selects the federated object shape: ``note`` (the
      *     default) shares the track as a ``Create(Note)`` — the post body renders
      *     on every remote server — while ``audio`` republishes the canonical
-     *     ``Create(Audio)`` media object. A new ``federation_object_id`` is minted
+     *     ``Create(Audio)`` media object. Any authenticated user may share a
+     *     public track as a ``note`` under their own actor; ``audio`` republishes
+     *     the track's own object and is restricted to users who can manage the
+     *     track (its owner or an admin). A new ``federation_object_id`` is minted
      *     on every ``audio`` call so each publication is a distinct remote object
      *     unaffected by earlier ``Tombstone`` deletions; ``note`` shares mint their
      *     own per-share object id instead.
@@ -2020,9 +2023,9 @@ export interface paths {
      * Search
      * @description Return a grouped, ACL-respecting preview for the requested entities.
      *
-     *   A ``q`` starting with ``#`` is a hashtag lookup: the prefix is stripped
-     *   and only the tags section is returned, sorted by popularity
-     *   (``item_count`` descending). A bare ``#`` lists the most used tags.
+     *     A ``q`` starting with ``#`` is a hashtag lookup: the prefix is stripped
+     *     and only the tags section is returned, sorted by popularity
+     *     (``item_count`` descending). A bare ``#`` lists the most used tags.
      */
     get: operations["search_api_v1_search__get"];
     put?: never;
@@ -2235,8 +2238,8 @@ export interface paths {
      * Delete Notification
      * @description Delete one of the current user's notifications.
      *
-     *   Missing and other users' notifications both return 404 to avoid ID
-     *   enumeration.
+     *     Missing and other users' notifications both return 404 to avoid ID
+     *     enumeration.
      */
     delete: operations["delete_notification_api_v1_notifications__notification_id__delete"];
     options?: never;
@@ -3361,19 +3364,19 @@ export interface paths {
      * Upload File
      * @description Upload a file and store it in the configured backend.
      *
-     *   Content-addressable deduplication returns the canonical ``StoredFile`` when
-     *   the same bytes have already been uploaded. In that case the response
-     *   includes an ``X-Duplicate: true`` header and the caller's ``owner_id`` and
-     *   ``visibility`` are ignored; they only apply to newly created rows.
+     *     Content-addressable deduplication returns the canonical ``StoredFile`` when
+     *     the same bytes have already been uploaded. In that case the response
+     *     includes an ``X-Duplicate: true`` header and the caller's ``owner_id`` and
+     *     ``visibility`` are ignored; they only apply to newly created rows.
      *
-     *   Audio files are imported directly through ``import_audio_file`` so the
-     *   audio-only content hash is used for both the stored file and the track.
-     *   This avoids creating a second full-file ``StoredFile`` row for the same
-     *   audio upload. ``description`` is stored on the created track. When
-     *   ``publish`` is set and the instance federates, a newly created public
-     *   track is published to the owner's ActivityPub followers as a
-     *   ``Create(Audio)`` activity, if federation is enabled; otherwise the track
-     *   stays local and has no associated activity object.
+     *     Audio files are imported directly through ``import_audio_file`` so the
+     *     audio-only content hash is used for both the stored file and the track.
+     *     This avoids creating a second full-file ``StoredFile`` row for the same
+     *     audio upload. ``description`` is stored on the created track. When
+     *     ``publish`` is set and the instance federates, a newly created public
+     *     track is published to the owner's ActivityPub followers as a
+     *     ``Create(Audio)`` activity, if federation is enabled; otherwise the track
+     *     stays local and has no associated activity object.
      */
     post: operations["upload_file_api_v1_files_upload_post"];
     delete?: never;
@@ -3395,11 +3398,11 @@ export interface paths {
      * Bulk Upload Files
      * @description Upload multiple files in a single request.
      *
-     *   Audio files are imported as tracks; other files are stored as-is. The whole
-     *   request is subject to the same per-IP rate limit as ``/files/upload``, and to
-     *   per-request limits on the number of files and total request size. When
-     *   ``publish`` is set, each newly created public track is published to the
-     *   owner's ActivityPub followers, if federation is enabled on the instance.
+     *     Audio files are imported as tracks; other files are stored as-is. The whole
+     *     request is subject to the same per-IP rate limit as ``/files/upload``, and to
+     *     per-request limits on the number of files and total request size. When
+     *     ``publish`` is set, each newly created public track is published to the
+     *     owner's ActivityPub followers, if federation is enabled on the instance.
      */
     post: operations["bulk_upload_files_api_v1_files_upload_bulk_post"];
     delete?: never;
@@ -3527,7 +3530,7 @@ export interface paths {
      * List Created Shares
      * @description List every share grant and share URL token created by the current user.
      *
-     *   Revoked share tokens are hidden unless ``include_revoked`` is set.
+     *     Revoked share tokens are hidden unless ``include_revoked`` is set.
      */
     get: operations["list_created_shares_api_v1_shares_mine_get"];
     put?: never;
@@ -3552,8 +3555,8 @@ export interface paths {
      * Delete Share Grant
      * @description Revoke a share grant by id.
      *
-     *   The item owner, an admin, or the user who created the grant may revoke it.
-     *   Missing and unauthorized requests both return 404 to avoid ID enumeration.
+     *     The item owner, an admin, or the user who created the grant may revoke it.
+     *     Missing and unauthorized requests both return 404 to avoid ID enumeration.
      */
     delete: operations["delete_share_grant_api_v1_shares__share_id__delete"];
     options?: never;
@@ -3599,8 +3602,8 @@ export interface paths {
      * Delete Share Url
      * @description Revoke a share URL token by id.
      *
-     *   The item owner, an admin, or the user who created the token may revoke it.
-     *   Missing and unauthorized requests both return 404 to avoid ID enumeration.
+     *     The item owner, an admin, or the user who created the token may revoke it.
+     *     Missing and unauthorized requests both return 404 to avoid ID enumeration.
      */
     delete: operations["delete_share_url_api_v1_share_urls__token_id__delete"];
     options?: never;
@@ -3619,10 +3622,10 @@ export interface paths {
      * Resolve Share Url
      * @description Resolve a raw share token to the item it grants access to.
      *
-     *   Browser requests receive an HTML preview page. API clients that send
-     *   ``Accept: application/json`` are redirected to the item's public JSON
-     *   endpoint. Audio files and the ``?download=true`` flag redirect to the
-     *   direct download URL.
+     *     Browser requests receive an HTML preview page. API clients that send
+     *     ``Accept: application/json`` are redirected to the item's public JSON
+     *     endpoint. Audio files and the ``?download=true`` flag redirect to the
+     *     direct download URL.
      */
     get: operations["resolve_share_url_api_v1_share__token__get"];
     put?: never;
@@ -4181,6 +4184,7 @@ export interface components {
        * @default true
        */
       can_interact: boolean;
+      preview_card?: components["schemas"]["PreviewCardResponse"] | null;
     };
     /**
      * ActivityUpdate
@@ -4475,12 +4479,12 @@ export interface components {
      * ApiTokenCreateRequest
      * @description Request body for creating a new API token.
      * @example {
-     *     "expires_at": "2027-12-31T23:59:59Z",
-     *     "name": "CI/CD Pipeline"
-     *   }
+     *       "expires_at": "2027-12-31T23:59:59Z",
+     *       "name": "CI/CD Pipeline"
+     *     }
      * @example {
-     *     "name": "Mobile App"
-     *   }
+     *       "name": "Mobile App"
+     *     }
      */
     ApiTokenCreateRequest: {
       /**
@@ -4498,12 +4502,12 @@ export interface components {
      * ApiTokenCreateResponse
      * @description Response returned after a successful API token creation.
      * @example {
-     *     "created_at": "2026-08-23T12:00:00Z",
-     *     "expires_at": "2027-12-31T23:59:59Z",
-     *     "id": "550e8400-e29b-41d4-a716-446655440000",
-     *     "name": "CI/CD Pipeline",
-     *     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example"
-     *   }
+     *       "created_at": "2026-08-23T12:00:00Z",
+     *       "expires_at": "2027-12-31T23:59:59Z",
+     *       "id": "550e8400-e29b-41d4-a716-446655440000",
+     *       "name": "CI/CD Pipeline",
+     *       "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example"
+     *     }
      */
     ApiTokenCreateResponse: {
       /**
@@ -4537,25 +4541,25 @@ export interface components {
      * ApiTokenListResponse
      * @description Paginated list of API tokens.
      * @example {
-     *     "items": [
-     *     {
-     *       "created_at": "2026-08-23T12:00:00Z",
-     *       "expires_at": "2027-12-31T23:59:59Z",
-     *       "id": "550e8400-e29b-41d4-a716-446655440000",
-     *       "is_active": true,
-     *       "last_used_at": "2026-08-23T14:30:00Z",
-     *       "name": "CI/CD Pipeline"
-     *     },
-     *     {
-     *       "created_at": "2026-08-20T08:00:00Z",
-     *       "id": "660e8400-e29b-41d4-a716-446655440001",
-     *       "is_active": true,
-     *       "last_used_at": "2026-08-22T10:15:00Z",
-     *       "name": "Mobile App"
+     *       "items": [
+     *         {
+     *           "created_at": "2026-08-23T12:00:00Z",
+     *           "expires_at": "2027-12-31T23:59:59Z",
+     *           "id": "550e8400-e29b-41d4-a716-446655440000",
+     *           "is_active": true,
+     *           "last_used_at": "2026-08-23T14:30:00Z",
+     *           "name": "CI/CD Pipeline"
+     *         },
+     *         {
+     *           "created_at": "2026-08-20T08:00:00Z",
+     *           "id": "660e8400-e29b-41d4-a716-446655440001",
+     *           "is_active": true,
+     *           "last_used_at": "2026-08-22T10:15:00Z",
+     *           "name": "Mobile App"
+     *         }
+     *       ],
+     *       "total": 2
      *     }
-     *     ],
-     *     "total": 2
-     *   }
      */
     ApiTokenListResponse: {
       /**
@@ -4573,13 +4577,13 @@ export interface components {
      * ApiTokenSummary
      * @description Metadata for an API token; never includes the raw JWT.
      * @example {
-     *     "created_at": "2026-08-23T12:00:00Z",
-     *     "expires_at": "2027-12-31T23:59:59Z",
-     *     "id": "550e8400-e29b-41d4-a716-446655440000",
-     *     "is_active": true,
-     *     "last_used_at": "2026-08-23T14:30:00Z",
-     *     "name": "CI/CD Pipeline"
-     *   }
+     *       "created_at": "2026-08-23T12:00:00Z",
+     *       "expires_at": "2027-12-31T23:59:59Z",
+     *       "id": "550e8400-e29b-41d4-a716-446655440000",
+     *       "is_active": true,
+     *       "last_used_at": "2026-08-23T14:30:00Z",
+     *       "name": "CI/CD Pipeline"
+     *     }
      */
     ApiTokenSummary: {
       /**
@@ -5683,7 +5687,7 @@ export interface components {
      * LogoutRequest
      * @description Request body for revoking a refresh token.
      *
-     *   Optional like ``RefreshRequest``: browser clients rely on the cookie.
+     *     Optional like ``RefreshRequest``: browser clients rely on the cookie.
      */
     LogoutRequest: {
       /** Refresh Token */
@@ -5920,6 +5924,27 @@ export interface components {
       visibility?: components["schemas"]["Visibility"] | null;
     };
     /**
+     * PreviewCardResponse
+     * @description Serialized link-preview card attached to an activity.
+     */
+    PreviewCardResponse: {
+      /** Url */
+      url: string;
+      /** Title */
+      title?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Image Url */
+      image_url?: string | null;
+      /** Site Name */
+      site_name?: string | null;
+      /**
+       * Type
+       * @default link
+       */
+      type: string;
+    };
+    /**
      * ProvisionFederationKeysRequest
      * @description Request body for triggering federation key provisioning.
      */
@@ -6010,8 +6035,8 @@ export interface components {
      * RefreshRequest
      * @description Request body for refreshing an access token.
      *
-     *   The field is optional: browser clients send the refresh token through the
-     *   ``refresh_token`` HttpOnly cookie instead of the JSON body.
+     *     The field is optional: browser clients send the refresh token through the
+     *     ``refresh_token`` HttpOnly cookie instead of the JSON body.
      */
     RefreshRequest: {
       /** Refresh Token */
@@ -6284,18 +6309,18 @@ export interface components {
      * SessionListResponse
      * @description Paginated list of active sessions.
      * @example {
-     *     "items": [
-     *     {
-     *       "created_at": "2026-08-31T12:00:00Z",
-     *       "expires_at": "2026-09-30T12:00:00Z",
-     *       "id": "a4b5c6...",
-     *       "ip_address": "192.0.2.1",
-     *       "is_current": true,
-     *       "user_agent": "Mozilla/5.0"
+     *       "items": [
+     *         {
+     *           "created_at": "2026-08-31T12:00:00Z",
+     *           "expires_at": "2026-09-30T12:00:00Z",
+     *           "id": "a4b5c6...",
+     *           "ip_address": "192.0.2.1",
+     *           "is_current": true,
+     *           "user_agent": "Mozilla/5.0"
+     *         }
+     *       ],
+     *       "total": 1
      *     }
-     *     ],
-     *     "total": 1
-     *   }
      */
     SessionListResponse: {
       /**
@@ -6313,13 +6338,13 @@ export interface components {
      * SessionSummary
      * @description Metadata for an active refresh-token session.
      * @example {
-     *     "created_at": "2026-08-31T12:00:00Z",
-     *     "expires_at": "2026-09-30T12:00:00Z",
-     *     "id": "a4b5c6...",
-     *     "ip_address": "192.0.2.1",
-     *     "is_current": false,
-     *     "user_agent": "Mozilla/5.0"
-     *   }
+     *       "created_at": "2026-08-31T12:00:00Z",
+     *       "expires_at": "2026-09-30T12:00:00Z",
+     *       "id": "a4b5c6...",
+     *       "ip_address": "192.0.2.1",
+     *       "is_current": false,
+     *       "user_agent": "Mozilla/5.0"
+     *     }
      */
     SessionSummary: {
       /**
@@ -6827,6 +6852,8 @@ export interface components {
       avatar_url?: string | null;
       /** Status Content Type */
       status_content_type?: string | null;
+      /** Preview Cards Enabled */
+      preview_cards_enabled?: boolean | null;
       /** Links */
       links?: components["schemas"]["UserLinkInput"][] | null;
     };
@@ -6853,6 +6880,11 @@ export interface components {
        * @default text/markdown
        */
       status_content_type: string;
+      /**
+       * Preview Cards Enabled
+       * @default true
+       */
+      preview_cards_enabled: boolean;
       /** Links */
       links?: components["schemas"]["UserLinkOutput"][];
     };

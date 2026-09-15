@@ -101,6 +101,7 @@ describe("ProfileTab", () => {
       bio: "New bio",
       avatar_url: "https://example.com/avatar.png",
       status_content_type: "text/markdown",
+      preview_cards_enabled: true,
       links: [{ name: "Home", url: "https://example.com" }],
     });
   });
@@ -130,6 +131,7 @@ describe("ProfileTab", () => {
       bio: "Hello",
       avatar_url: null,
       status_content_type: "text/markdown",
+      preview_cards_enabled: true,
       links: [],
     });
   });
@@ -156,6 +158,7 @@ describe("ProfileTab", () => {
       bio: null,
       avatar_url: null,
       status_content_type: "text/markdown",
+      preview_cards_enabled: true,
       links: [{ name: "Home", url: "https://example.com" }],
     });
   });
