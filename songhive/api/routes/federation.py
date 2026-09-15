@@ -29,7 +29,7 @@ from ...tasks.federation import process_incoming
 from ..deps import get_current_user_optional, get_db, get_storage_service
 from ..semantic_meta import entity_head_tags
 from .instance import _admin_users
-from .profile_pages import _accepts_activitypub, _get_active_user, _spa_response
+from .profile_pages import _accepts_activitypub, _accepts_html, _get_active_user, _spa_response
 
 router = APIRouter(include_in_schema=False)
 
@@ -384,7 +384,9 @@ async def get_track_page(
     local share — the object-dereference route then serves that activity's
     ``Note`` document — so the track URL still resolves to a post. Tracks
     with neither a published object nor live shares answer 404, so a remote
-    fetch cannot resurrect a retracted post under a different id.
+    fetch cannot resurrect a retracted post under a different id — unless
+    the client also accepts HTML (card crawlers offer both media types),
+    in which case it receives the SPA page like any browser request.
     """
     config = _federation_config(request)
     result = await db.execute(
@@ -411,7 +413,11 @@ async def get_track_page(
         share = await _earliest_track_post(db, track_id)
         if share is not None:
             return RedirectResponse(url=share.source_id, status_code=status.HTTP_303_SEE_OTHER)
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        # Clients that also accept HTML (e.g. Mastodon's card crawler, which
+        # offers activity+json + text/html) still get the SPA page below —
+        # only pure ActivityPub dereferences 404 on an unfederated track.
+        if not _accepts_html(request):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     alternate_url = f"{owner.actor_url}/objects/{track.federation_object_id}" if track is not None else None
     og_tags = await entity_head_tags(request, db, user, storage, "track", track_id)

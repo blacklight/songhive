@@ -886,6 +886,46 @@ async def test_track_page_returns_404_for_unpublished_track(fed_client, db_sessi
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
+async def test_track_page_serves_spa_for_mixed_accept_on_unpublished_track(
+    fed_client, db_session, regular_user, tmp_path, monkeypatch
+):
+    """Card crawlers offering AP + HTML get the SPA for unfederated tracks.
+
+    Mastodon's link-card fetcher sends a combined Accept header including
+    ``application/activity+json`` and ``text/html``; a public track that was
+    never published to the fediverse has no ``Audio`` object to serve, so a
+    bare 404 used to suppress the preview card entirely.
+    """
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id=None,
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    index = tmp_path / "index.html"
+    index.write_text("<html><head></head><body></body></html>", encoding="utf-8")
+    monkeypatch.setattr("songhive.api.routes.profile_pages._spa_index_path", lambda: index)
+
+    response = fed_client.get(
+        f"/tracks/{track.id}",
+        headers={
+            "Accept": 'application/ld+json; profile="https://www.w3.org/ns/activitystreams", '
+            "application/activity+json, text/html;q=0.1"
+        },
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert "text/html" in response.headers["content-type"]
+    assert '<meta property="og:title" content="Artist - Public Track">' in response.text
+
+
 async def test_track_page_redirects_to_earliest_live_share(fed_client, db_session, regular_user):
     """AP lookups on a track without an Audio object resolve to its earliest share.
 

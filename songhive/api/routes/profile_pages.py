@@ -37,6 +37,12 @@ def _accepts_activitypub(request: Request) -> bool:
     return ACTIVITY_JSON in accept or LD_JSON in accept
 
 
+def _accepts_html(request: Request) -> bool:
+    """Return True when the client can also render an HTML page."""
+    accept = request.headers.get("accept", "")
+    return "text/html" in accept or "*/*" in accept
+
+
 async def _get_active_user(db: AsyncSession, username: str) -> Any:
     """Return an active user or raise 404."""
     user = await get_user_by_username(db, username)
