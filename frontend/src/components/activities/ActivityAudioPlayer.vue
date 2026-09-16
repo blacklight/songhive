@@ -14,7 +14,8 @@ function pauseOtherInlineAudio(current: HTMLAudioElement) {
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { ActivityAttachment } from "@/api/activities";
-import { getTrack } from "@/api/tracks";
+import { getApiErrorMessage } from "@/api/client";
+import { downloadTrack, getTrack } from "@/api/tracks";
 import { toQueueTrack } from "@/player/enrich";
 import type { QueueTrack } from "@/player/types";
 import { usePlayerStore } from "@/stores/player";
@@ -60,6 +61,7 @@ const volume = ref(1);
 const muted = ref(false);
 const imageFailed = ref(false);
 const handingOff = ref(false);
+const downloading = ref(false);
 
 const info = computed(() => audioAttachmentInfo(props.attachment));
 duration.value = info.value.duration ?? 0;
@@ -204,6 +206,26 @@ async function addToQueue() {
   });
 }
 
+// The attachment URL is the direct media link — a same-origin file
+// download for local tracks, the origin instance's media URL for
+// federated ones (songhive media endpoints allow CORS ``*``).
+async function download() {
+  if (downloading.value) return;
+  downloading.value = true;
+  try {
+    await downloadTrack(info.value.url, info.value.title);
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: t("activities.audio.downloadError", {
+        message: getApiErrorMessage(err) || t("errors.unknown"),
+      }),
+    });
+  } finally {
+    downloading.value = false;
+  }
+}
+
 onMounted(() => {
   const el = audioEl.value;
   if (el) inlineAudioElements.add(el);
@@ -340,6 +362,16 @@ onBeforeUnmount(() => {
           :title="t('activities.audio.addToQueue')"
           :aria-label="t('activities.audio.addToQueue')"
           @click="addToQueue"
+        />
+        <AppButton
+          variant="ghost"
+          size="sm"
+          class="audio-player__action"
+          icon="download"
+          :loading="downloading"
+          :title="t('common.download')"
+          :aria-label="t('common.download')"
+          @click="download"
         />
       </div>
     </div>

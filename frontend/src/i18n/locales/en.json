@@ -1200,7 +1200,8 @@
       "playInPlayer": "Play in player",
       "addToQueue": "Add to queue",
       "addedToQueue": "Added to the queue.",
-      "playError": "Could not play this audio."
+      "playError": "Could not play this audio.",
+      "downloadError": "Could not download this audio: {message}"
     }
   },
   "notifications": {

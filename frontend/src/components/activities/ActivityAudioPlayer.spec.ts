@@ -2,12 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import type { ActivityAttachment } from "@/api/activities";
-import { getTrack } from "@/api/tracks";
+import { downloadTrack, getTrack } from "@/api/tracks";
 import { usePlayerStore } from "@/stores/player";
 import ActivityAudioPlayer from "./ActivityAudioPlayer.vue";
 
-vi.mock("@/api/tracks", () => ({ getTrack: vi.fn() }));
+vi.mock("@/api/tracks", () => ({ getTrack: vi.fn(), downloadTrack: vi.fn() }));
 const getTrackMock = vi.mocked(getTrack);
+const downloadTrackMock = vi.mocked(downloadTrack);
 
 function makeAttachment(
   overrides: Partial<ActivityAttachment> = {},
@@ -57,6 +58,7 @@ async function fireMediaEvent(wrapper: VueWrapper, name: string) {
 describe("ActivityAudioPlayer", () => {
   beforeEach(() => {
     getTrackMock.mockReset();
+    downloadTrackMock.mockReset();
     document.body.innerHTML = "";
   });
 
@@ -300,6 +302,21 @@ describe("ActivityAudioPlayer", () => {
       stream_url: "https://audio.example/song.mp3",
       remote: true,
     });
+  });
+
+  it("downloads the attachment media URL", async () => {
+    downloadTrackMock.mockResolvedValue(undefined);
+    const wrapper = mountPlayer(
+      makeAttachment({ "songhive:trackTitle": "Tiger Girl" }),
+    );
+
+    await wrapper.find('button[aria-label="Download"]').trigger("click");
+    await flushPromises();
+
+    expect(downloadTrackMock).toHaveBeenCalledWith(
+      "https://audio.example/song.mp3",
+      "Tiger Girl",
+    );
   });
 
   it("pauses other embedded players when one starts", async () => {
