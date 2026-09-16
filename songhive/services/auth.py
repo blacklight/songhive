@@ -11,7 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
-from ..models.user import VALID_ROLES, User
+from ..models.user import VALID_ROLES, ProfileVisibility, User
 from ..services.federation import ensure_user_actor
 from ._common import ilike_contains
 
@@ -38,37 +38,37 @@ def verify_password(password: str, password_hash: str) -> bool:
 async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
     """Fetch a user by username."""
     result = await session.execute(select(User).where(User.username == username))
-    return cast(Optional[User], result.scalar_one_or_none())
+    return result.scalar_one_or_none()
 
 
 async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
     """Fetch a user by email."""
     result = await session.execute(select(User).where(User.email == email))
-    return cast(Optional[User], result.scalar_one_or_none())
+    return result.scalar_one_or_none()
 
 
 async def get_user_by_id(session: AsyncSession, user_id: str) -> User | None:
     """Fetch a user by primary key id."""
     result = await session.execute(select(User).where(User.id == user_id))
-    return cast(Optional[User], result.scalar_one_or_none())
+    return result.scalar_one_or_none()
 
 
 async def get_user_by_email_verification_token(session: AsyncSession, token: str) -> User | None:
     """
     Fetch a user by their raw email verification token.
 
-    The provided token is hashed before the database lookup because only a
+    The provided token is hashed before the database lookup because only an
     SHA-256 hash is stored for verification tokens.
     """
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     result = await session.execute(select(User).where(User.email_verification_token == token_hash))
-    return cast(Optional[User], result.scalar_one_or_none())
+    return result.scalar_one_or_none()
 
 
 async def get_user_by_password_reset_token(session: AsyncSession, token_hash: str) -> User | None:
     """Fetch a user by the SHA-256 hash of their password reset token."""
     result = await session.execute(select(User).where(User.password_reset_token == token_hash))
-    return cast(Optional[User], result.scalar_one_or_none())
+    return result.scalar_one_or_none()
 
 
 async def get_user_by_username_or_email(session: AsyncSession, value: str) -> Optional[User]:
@@ -119,13 +119,26 @@ async def list_public_users(
     session: AsyncSession,
     *,
     q: Optional[str] = None,
+    user: Optional[User] = None,
     limit: int = 20,
     offset: int = 0,
     sort_by: str = "username",
     sort_dir: str = "asc",
 ) -> Tuple[List[User], int]:
-    """List active public users with optional search and sorting."""
+    """
+    List active directory-visible users with optional search and sorting.
+
+    Anonymous callers only see ``public`` profiles; authenticated callers
+    additionally see ``local`` profiles. ``private`` profiles are never
+    listed.
+    """
     stmt = select(User).where(User.is_active.is_(True))
+    stmt = (
+        stmt.where(User.profile_visibility == ProfileVisibility.PUBLIC)
+        if user is None
+        else stmt.where(User.profile_visibility.in_((ProfileVisibility.PUBLIC, ProfileVisibility.LOCAL)))
+    )
+
     if q:
         stmt = stmt.where(
             or_(

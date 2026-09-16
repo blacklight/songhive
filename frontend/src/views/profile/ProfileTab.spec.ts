@@ -102,8 +102,35 @@ describe("ProfileTab", () => {
       avatar_url: "https://example.com/avatar.png",
       status_content_type: "text/markdown",
       preview_cards_enabled: true,
+      profile_visibility: "public",
       links: [{ name: "Home", url: "https://example.com" }],
     });
+  });
+
+  it("sends the selected profile visibility", async () => {
+    const router = createTestRouter();
+    await router.push("/settings");
+    await router.isReady();
+
+    const wrapper = mount(ProfileTab, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const visibilitySelect = wrapper
+      .findAll("select")
+      .find((s) =>
+        s.findAll("option").some((o) => o.attributes("value") === "private"),
+      );
+    expect(visibilitySelect).toBeDefined();
+    await visibilitySelect!.setValue("local");
+
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(usersApi.updateMe).toHaveBeenCalledWith(
+      expect.objectContaining({ profile_visibility: "local" }),
+    );
   });
 
   it("sends an empty links array when all links are removed", async () => {
@@ -132,6 +159,7 @@ describe("ProfileTab", () => {
       avatar_url: null,
       status_content_type: "text/markdown",
       preview_cards_enabled: true,
+      profile_visibility: "public",
       links: [],
     });
   });
@@ -159,6 +187,7 @@ describe("ProfileTab", () => {
       avatar_url: null,
       status_content_type: "text/markdown",
       preview_cards_enabled: true,
+      profile_visibility: "public",
       links: [{ name: "Home", url: "https://example.com" }],
     });
   });

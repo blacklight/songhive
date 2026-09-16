@@ -91,6 +91,7 @@ async def _user_section(
     db: AsyncSession,
     term: str,
     limit: int,
+    user: Optional[User] = None,
     config: Optional[SonghiveConfig] = None,
     remote_users: bool = False,
     **_,
@@ -98,18 +99,18 @@ async def _user_section(
     # A ``user@domain`` term searches local usernames on the ``user`` part;
     # the domain fragment can only narrow remote actor matches.
     local_term = term.split("@", 1)[0] or term
-    users, total = await list_public_users(db, q=local_term, limit=limit, offset=0)
+    users, total = await list_public_users(db, q=local_term, user=user, limit=limit, offset=0)
     items = [
         SearchResultItem(
             type="user",
-            id=user.username,
-            name=user.username,
-            title=user.display_name or user.username,
-            subtitle=user.username,
-            image_url=user.avatar_url,
-            url=f"/@{user.username}",
+            id=u.username,
+            name=u.username,
+            title=u.display_name or u.username,
+            subtitle=u.username,
+            image_url=u.avatar_url,
+            url=f"/@{u.username}",
         )
-        for user in users
+        for u in users
     ]
 
     if remote_users and config is not None and config.federation.enabled and config.federation.instance_domain:

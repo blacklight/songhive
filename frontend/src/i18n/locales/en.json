@@ -745,6 +745,13 @@
     "statusContentTypeHint": "Format used by default when writing posts.",
     "previewCards": "Link preview cards",
     "previewCardsHint": "Fetch preview cards for links in your posts.",
+    "profileVisibility": "Directory visibility",
+    "profileVisibilityHint": "Whether your profile appears in the users directory.",
+    "visibility": {
+      "public": "Public — listed for everyone",
+      "local": "Local — listed for logged-in users only",
+      "private": "Private — not listed"
+    },
     "followers": "No followers | {count} follower | {count} followers",
     "followersPage": {
       "title": "Followers",

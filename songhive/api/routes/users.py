@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...federation.actors import get_federation_storage, sync_user_actor
-from ...models.user import User, UserRole
+from ...models.user import ProfileVisibility, User, UserRole
 from ...models.user_link import UserLink
 from ...services import activities as activity_service
 from ...services import audit
@@ -83,6 +83,7 @@ class UserResponse(BaseModel):
     role: Optional[UserRole] = None
     status_content_type: str = "text/markdown"
     preview_cards_enabled: bool = True
+    profile_visibility: ProfileVisibility = ProfileVisibility.PUBLIC
     links: List[UserLinkOutput] = Field(default_factory=list)
 
 
@@ -175,6 +176,7 @@ class UserProfileUpdate(BaseModel):
     avatar_url: Optional[str] = Field(None, max_length=512)
     status_content_type: Optional[str] = None
     preview_cards_enabled: Optional[bool] = None
+    profile_visibility: Optional[ProfileVisibility] = None
     links: Optional[List[UserLinkInput]] = None
 
     @field_validator("status_content_type")
@@ -363,13 +365,15 @@ async def list_public_users_route(
     q: Optional[str] = Query(None, description="Search users by username or display name"),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"username", "created_at"}, "username")),
+    user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
 ):
-    """List active public users, optionally filtered and sorted."""
+    """List active directory-visible users, optionally filtered and sorted."""
     users, total = await list_public_users(
         db,
         q=q,
+        user=user,
         limit=pagination.limit,
         offset=pagination.offset,
         sort_by=sort.field,

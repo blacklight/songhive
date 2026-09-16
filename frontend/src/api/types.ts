@@ -401,7 +401,7 @@ export interface paths {
     };
     /**
      * List Public Users Route
-     * @description List active public users, optionally filtered and sorted.
+     * @description List active directory-visible users, optionally filtered and sorted.
      */
     get: operations["list_public_users_route_api_v1_users_get"];
     put?: never;
@@ -2026,6 +2026,10 @@ export interface paths {
      *     A ``q`` starting with ``#`` is a hashtag lookup: the prefix is stripped
      *     and only the tags section is returned, sorted by popularity
      *     (``item_count`` descending). A bare ``#`` lists the most used tags.
+     *
+     *     With ``remote_users`` the users section additionally lists remote
+     *     ActivityPub actors cached on the instance — followers and resolved actor
+     *     documents — so mention completion can offer ``user@domain`` handles.
      */
     get: operations["search_api_v1_search__get"];
     put?: never;
@@ -5945,6 +5949,12 @@ export interface components {
       type: string;
     };
     /**
+     * ProfileVisibility
+     * @description Directory visibility levels for user profiles.
+     * @enum {string}
+     */
+    ProfileVisibility: "public" | "local" | "private";
+    /**
      * ProvisionFederationKeysRequest
      * @description Request body for triggering federation key provisioning.
      */
@@ -6854,6 +6864,7 @@ export interface components {
       status_content_type?: string | null;
       /** Preview Cards Enabled */
       preview_cards_enabled?: boolean | null;
+      profile_visibility?: components["schemas"]["ProfileVisibility"] | null;
       /** Links */
       links?: components["schemas"]["UserLinkInput"][] | null;
     };
@@ -6885,6 +6896,8 @@ export interface components {
        * @default true
        */
       preview_cards_enabled: boolean;
+      /** @default public */
+      profile_visibility: components["schemas"]["ProfileVisibility"];
       /** Links */
       links?: components["schemas"]["UserLinkOutput"][];
     };
@@ -11331,6 +11344,8 @@ export interface operations {
         entities?: string | null;
         /** @description Per-section result limit */
         limit?: number;
+        /** @description Also match cached remote actors (followers, actor cache) in the users section */
+        remote_users?: boolean;
       };
       header?: never;
       path?: never;

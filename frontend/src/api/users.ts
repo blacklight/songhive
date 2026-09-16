@@ -1,4 +1,4 @@
-import type { paths } from "./types";
+import type { components, paths } from "./types";
 import { apiRequest, apiRequestWithHeaders } from "./client";
 
 export type UserResponse =
@@ -15,6 +15,7 @@ export type UserListResponse =
   paths["/api/v1/users"]["get"]["responses"]["200"]["content"]["application/json"];
 export type FollowerResponse =
   paths["/api/v1/users/{username}/followers"]["get"]["responses"]["200"]["content"]["application/json"][number];
+export type ProfileVisibility = components["schemas"]["ProfileVisibility"];
 
 export interface DeleteAccountRequest {
   confirmation: string;

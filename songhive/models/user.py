@@ -22,8 +22,18 @@ class UserRole(str, Enum):
     ADMIN = "admin"
 
 
+class ProfileVisibility(str, Enum):
+    """Directory visibility levels for user profiles."""
+
+    PUBLIC = "public"
+    LOCAL = "local"
+    PRIVATE = "private"
+
+
 VALID_ROLES = {r.value for r in UserRole}
+VALID_PROFILE_VISIBILITIES = {v.value for v in ProfileVisibility}
 _ROLE_CHECK = f"role IN ({', '.join(repr(r) for r in VALID_ROLES)})"
+_PROFILE_VISIBILITY_CHECK = f"profile_visibility IN ({', '.join(repr(v) for v in VALID_PROFILE_VISIBILITIES)})"
 
 
 class User(Base):
@@ -32,6 +42,10 @@ class User(Base):
         CheckConstraint(
             _ROLE_CHECK,
             name="ck_users_role",
+        ),
+        CheckConstraint(
+            _PROFILE_VISIBILITY_CHECK,
+            name="ck_users_profile_visibility",
         ),
     )
     __allow_unmapped__ = True
@@ -62,6 +76,12 @@ class User(Base):
         default=True,
         server_default="1",
     )
+    profile_visibility: Mapped[str] = mapped_column(
+        String(16),
+        insert_default="public",
+        default="public",
+        server_default="public",
+    )
     links: Mapped[List["UserLink"]] = relationship(
         "UserLink",
         back_populates="user",
@@ -84,6 +104,12 @@ class User(Base):
     def _validate_role(self, _: str, value: Optional[str]) -> Optional[str]:
         if value is not None and value not in VALID_ROLES:
             raise ValueError(f"Invalid role: {value}")
+        return value
+
+    @validates("profile_visibility")
+    def _validate_profile_visibility(self, _: str, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in VALID_PROFILE_VISIBILITIES:
+            raise ValueError(f"Invalid profile_visibility: {value}")
         return value
 
     @validates("avatar_url")

@@ -142,6 +142,12 @@
   WebSocket URLs carry no token — `StreamHandler` and `EventWebSocket` both
   accept the `access_token` cookie. Bearer auth and JSON token responses are
   kept for non-browser clients.
+- Users pick a `profile_visibility` (`public`/`local`/`private`, default
+  `public`) from `/settings`. `GET /api/v1/users` and the users section of
+  `GET /api/v1/search/` share `services.auth.list_public_users`, which shows
+  `local` profiles only to authenticated callers and never lists `private`
+  profiles (not even to their owner). Individual profile pages stay reachable
+  regardless.
 - Mention completion for remote users goes through `GET /api/v1/search/` with
   `remote_users=1`: the `users` section then merges cached remote actors via
   `services.federation.search_remote_actors`, which queries pubby's

@@ -7,7 +7,11 @@ import { useToastStore } from "@/stores/toast";
 import { resendVerificationEmail } from "@/api/auth";
 import { uploadFile } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
-import { deleteMe, type UserProfileUpdate } from "@/api/users";
+import {
+  deleteMe,
+  type ProfileVisibility,
+  type UserProfileUpdate,
+} from "@/api/users";
 import {
   STATUS_CONTENT_TYPE_MARKDOWN,
   STATUS_CONTENT_TYPES,
@@ -50,6 +54,9 @@ const statusContentType = ref<StatusContentType>(
     STATUS_CONTENT_TYPE_MARKDOWN,
 );
 const previewCardsEnabled = ref(authStore.user?.preview_cards_enabled ?? true);
+const profileVisibility = ref<ProfileVisibility>(
+  authStore.user?.profile_visibility ?? "public",
+);
 const isLoading = ref(false);
 const error = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -77,6 +84,7 @@ watch(
       (next.status_content_type as StatusContentType) ||
       STATUS_CONTENT_TYPE_MARKDOWN;
     previewCardsEnabled.value = next.preview_cards_enabled ?? true;
+    profileVisibility.value = next.profile_visibility ?? "public";
   },
   { deep: true },
 );
@@ -85,6 +93,19 @@ const statusContentTypeOptions = computed(() =>
   STATUS_CONTENT_TYPES.map((value) => ({
     value,
     label: t(`statusComposer.contentTypes.${value}`),
+  })),
+);
+
+const PROFILE_VISIBILITIES: ProfileVisibility[] = [
+  "public",
+  "local",
+  "private",
+];
+
+const profileVisibilityOptions = computed(() =>
+  PROFILE_VISIBILITIES.map((value) => ({
+    value,
+    label: t(`profile.visibility.${value}`),
   })),
 );
 
@@ -230,6 +251,7 @@ async function onSubmit() {
     avatar_url: trimmedAvatar || null,
     status_content_type: statusContentType.value,
     preview_cards_enabled: previewCardsEnabled.value,
+    profile_visibility: profileVisibility.value,
     links: validLinks.map((l) => ({
       name: l.name.trim(),
       url: l.url.trim(),
@@ -319,6 +341,13 @@ async function onSubmit() {
       v-model="previewCardsEnabled"
       :label="t('profile.previewCards')"
       :hint="t('profile.previewCardsHint')"
+    />
+
+    <AppSelect
+      v-model="profileVisibility"
+      :options="profileVisibilityOptions"
+      :label="t('profile.profileVisibility')"
+      :hint="t('profile.profileVisibilityHint')"
     />
 
     <fieldset class="profile-tab__links">

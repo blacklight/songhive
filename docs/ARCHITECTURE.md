@@ -1128,6 +1128,17 @@ alembic revision --autogenerate -m "add example column"
 
 Entity detail responses for `Track`, `Album`, `Library`, and `Playlist` include `owner_id` whenever the requester has ACL access to the entity; `?include=owner` adds a nested `UserSummary` with `actor_url`, `username`, `display_name`, and `avatar_url`. The frontend `useEntityMeta` composable returns this full owner object, and `UserLink` routes local users to `/@{username}` and remote users to their `actor_url`.
 
+### Profile visibility
+
+Each user carries a `profile_visibility` preference (`public`, `local`, or
+`private`; default `public`, editable from `/settings` via
+`PATCH /api/v1/users/me`) controlling whether their profile appears in the
+users directory. `GET /api/v1/users` and the users section of
+`GET /api/v1/search/` hide `local` profiles from anonymous callers and never
+list `private` ones — not even to their owner. Individual profile pages
+(`GET /api/v1/users/{username}`, `/@{username}`) remain reachable regardless
+of the setting.
+
 ---
 
 ## File Storage & Upload Pipeline

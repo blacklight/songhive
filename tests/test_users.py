@@ -53,6 +53,7 @@ def test_user_model_defaults():
     assert user.bio is None
     assert user.avatar_url is None
     assert user.last_login is None
+    assert user.profile_visibility is None
     assert user.actor_url is None
     assert user.private_key_pem is None
     assert user.public_key_pem is None
@@ -72,6 +73,7 @@ async def test_user_db_defaults(db_session):
     assert user.email_verification_token_raw is None
     assert user.password_reset_token is None
     assert user.password_reset_expires_at is None
+    assert user.profile_visibility == "public"
 
 
 def test_user_model_with_optional_fields():
@@ -778,6 +780,22 @@ async def test_update_profile_clears_links(db_session):
 
 
 @pytest.mark.asyncio
+async def test_update_profile_sets_profile_visibility(db_session):
+    """Test that update_profile applies a valid profile_visibility."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await update_profile(db_session, user, {"profile_visibility": "local"})
+    assert user.profile_visibility == "local"
+
+
+@pytest.mark.asyncio
+async def test_update_profile_rejects_invalid_profile_visibility(db_session):
+    """Test that update_profile rejects an unknown profile_visibility value."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    with pytest.raises(ValueError, match="Invalid profile_visibility"):
+        await update_profile(db_session, user, {"profile_visibility": "everyone"})
+
+
+@pytest.mark.asyncio
 async def test_update_profile_partial(db_session):
     """Test that update_profile only changes explicitly provided fields."""
     user = User(
@@ -961,6 +979,41 @@ async def test_patch_me_endpoint_rejects_invalid_link(client, db_session, config
                 {"name": "Bad", "url": "javascript:alert(1)"},
             ],
         },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_sets_profile_visibility(client, db_session, config):
+    """Test that PATCH /me updates profile_visibility and echoes it back."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"profile_visibility": "private"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["profile_visibility"] == "private"
+
+    result = await db_session.execute(select(User).where(User.id == user.id))
+    assert result.scalar_one().profile_visibility == "private"
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_rejects_invalid_profile_visibility(client, db_session, config):
+    """Test that PATCH /me validates profile_visibility values."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"profile_visibility": "everyone"},
     )
     assert response.status_code == 422
 
@@ -1301,3 +1354,55 @@ async def test_delete_me_endpoint_non_recursive(client, db_session, config):
     for model in (Track, Album, Library, Playlist, Radio):
         count = await db_session.scalar(select(func.count(model.id)))
         assert count == 1
+
+
+@pytest.fixture
+async def directory_users(make_user, db_session):
+    """Create one active user per profile visibility level."""
+    public = await make_user("public-alice")
+    local = await make_user("local-bob")
+    local.profile_visibility = "local"
+    private = await make_user("private-carol")
+    private.profile_visibility = "private"
+    await db_session.commit()
+    return public, local, private
+
+
+@pytest.mark.asyncio
+async def test_list_users_anonymous_sees_only_public(client, directory_users):
+    """Anonymous callers only see public profiles in the users directory."""
+    response = client.get("/api/v1/users")
+    assert response.status_code == 200
+    usernames = {u["username"] for u in response.json()}
+    assert usernames == {"public-alice"}
+    assert response.headers["X-Total-Count"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_list_users_authenticated_sees_public_and_local(client, directory_users, auth_headers):
+    """Logged-in users see public and local profiles but never private ones."""
+    _, local, _ = directory_users
+    response = client.get("/api/v1/users", headers=auth_headers(local))
+    assert response.status_code == 200
+    usernames = {u["username"] for u in response.json()}
+    assert usernames == {"public-alice", "local-bob"}
+    assert response.headers["X-Total-Count"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_list_users_private_owner_is_hidden(client, directory_users, auth_headers):
+    """A private profile is hidden from the directory even for its owner."""
+    _, _, private = directory_users
+    response = client.get("/api/v1/users", headers=auth_headers(private))
+    assert response.status_code == 200
+    usernames = {u["username"] for u in response.json()}
+    assert "private-carol" not in usernames
+
+
+@pytest.mark.asyncio
+async def test_list_users_search_respects_visibility(client, directory_users, auth_headers):
+    """The directory ``q`` filter does not bypass profile visibility."""
+    response = client.get("/api/v1/users", params={"q": "carol"})
+    assert response.status_code == 200
+    assert response.json() == []
+    assert response.headers["X-Total-Count"] == "0"

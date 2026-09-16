@@ -373,6 +373,25 @@ async def test_search_users(client, regular_user, other_user, db_session):
 
 
 @pytest.mark.asyncio
+async def test_search_users_respects_profile_visibility(client, regular_user, other_user, db_session, auth_headers):
+    """The users search section honours directory profile visibility."""
+    regular_user.profile_visibility = "local"
+    other_user.profile_visibility = "private"
+    await db_session.commit()
+
+    response = client.get("/api/v1/search?q=e&entities=users")
+    assert response.status_code == 200
+    assert _section_ids(response.json(), "users") == []
+
+    response = client.get(
+        "/api/v1/search?q=e&entities=users",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    assert _section_ids(response.json(), "users") == ["regular"]
+
+
+@pytest.mark.asyncio
 async def test_search_tags_and_genres(client, regular_user, db_session):
     """Tags and genres are returned with item counts and named links."""
     track = await _make_track(

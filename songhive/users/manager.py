@@ -274,6 +274,11 @@ async def update_profile(session: AsyncSession, user: User, updates: Dict[str, A
         if preview_cards_enabled is not None:
             user.preview_cards_enabled = bool(preview_cards_enabled)
 
+    if "profile_visibility" in updates:
+        profile_visibility = updates["profile_visibility"]
+        if profile_visibility:
+            user.profile_visibility = profile_visibility
+
     if "links" in updates:
         links = updates["links"] or []
         await session.execute(delete(UserLink).where(UserLink.user_id == user.id))
