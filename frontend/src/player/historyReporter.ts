@@ -9,7 +9,7 @@ export class HistoryReporter {
   private previousTime = 0;
   private reported = false;
 
-  load(trackId: string) {
+  load(trackId: string | null) {
     this.trackId = trackId;
     this.duration = 0;
     this.elapsed = 0;

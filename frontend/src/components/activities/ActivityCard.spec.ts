@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
+import { createRouter, createMemoryHistory } from "vue-router";
 import * as activitiesApi from "@/api/activities";
 import type { ActivityResponse } from "@/api/activities";
 import { useActivitiesStore } from "@/stores/activities";
@@ -1163,5 +1164,74 @@ describe("ActivityCard", () => {
       "site.example",
     );
     expect(card.find("img").exists()).toBe(false);
+  });
+
+  it("renders audio attachments in the activity audio player", () => {
+    const wrapper = mountCard({
+      attachments: [
+        {
+          type: "Audio",
+          mediaType: "audio/mpeg",
+          url: "https://audio.example/song.mp3",
+          name: "Artist - Song",
+          "songhive:trackTitle": "Song",
+          "songhive:artistName": "Artist",
+          "songhive:albumName": "Album",
+        },
+      ],
+    });
+    const player = wrapper.find(".audio-player");
+    expect(player.exists()).toBe(true);
+    // Vue binds ``src`` as a property; jsdom's media mock does not reflect
+    // it to a content attribute.
+    expect((player.find("audio").element as HTMLAudioElement).src).toBe(
+      "https://audio.example/song.mp3",
+    );
+    expect(player.find(".audio-player__title").text()).toBe("Song");
+    expect(player.find(".audio-player__subtitle").text()).toBe(
+      "Artist · Album",
+    );
+  });
+
+  it("does not navigate when interacting with the audio player", async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/", component: { template: "<div/>" } },
+        { path: "/activities/:id", component: { template: "<div/>" } },
+      ],
+    });
+    await router.push("/");
+    const wrapper = mount(ActivityCard, {
+      props: {
+        activity: createActivity({
+          attachments: [
+            {
+              type: "Audio",
+              mediaType: "audio/mpeg",
+              url: "https://audio.example/song.mp3",
+              name: "Some audio",
+            },
+          ],
+        }),
+      },
+      global: {
+        plugins: [router],
+        stubs: { RouterLink: true },
+        renderStubDefaultSlot: true,
+      },
+    });
+    mountedWrappers.push(wrapper);
+    const push = vi.spyOn(router, "push");
+
+    // Controls inside the player must not trigger card navigation.
+    await wrapper
+      .find('.audio-player button[aria-label="Play"]')
+      .trigger("click");
+    expect(push).not.toHaveBeenCalled();
+
+    // Clicking elsewhere on the card still navigates to the permalink.
+    await wrapper.find(".activity-card").trigger("click");
+    expect(push).toHaveBeenCalledWith("/activities/a1");
   });
 });

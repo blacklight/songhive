@@ -266,9 +266,9 @@ def fetch_card_data(url: str) -> Optional[dict]:
             if urlparse(resolved).scheme in ("http", "https"):
                 card["image_url"] = resolved[:2048]
         if card["title"] is None:
-            title = "".join(head.title_parts)
-            if title.strip():
-                card["title"] = title
+            title_text = "".join(head.title_parts)
+            if title_text.strip():
+                card["title"] = title_text
 
     title = card["title"]
     description = card["description"]

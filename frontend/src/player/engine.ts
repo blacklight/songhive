@@ -45,7 +45,9 @@ export class PlayerEngine {
 
   load(track: QueueTrack, startAt?: number) {
     this.pendingStartAt = startAt;
-    this.history.load(track.id);
+    // Remote attachment audio has no local track row — there is nothing to
+    // report listen history against.
+    this.history.load(track.remote ? null : track.id);
     this.callbacks.onStateChange?.("loading");
 
     const url = streamUrl(track);

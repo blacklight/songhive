@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { RemoteReply } from "@/api/activities";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
+import ActivityAudioPlayer from "./ActivityAudioPlayer.vue";
 import { formatDateTime } from "@/i18n";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
 import { parseActivityContent } from "@/utils/activityContent";
@@ -137,15 +138,13 @@ const fileAttachments = computed(() =>
           loading="lazy"
         />
       </a>
-      <div
+      <ActivityAudioPlayer
         v-for="(attachment, index) in audioAttachments"
         :key="`audio-${index}`"
-      >
-        <span v-if="attachment.name" class="remote-reply__attachment-name">{{
-          attachment.name
-        }}</span>
-        <audio :src="attachment.url" controls preload="none" />
-      </div>
+        :attachment="attachment"
+        :avatar-url="reply.source_actor_avatar_url ?? undefined"
+        remote
+      />
       <ul v-if="fileAttachments.length" class="remote-reply__file-list">
         <li
           v-for="(attachment, index) in fileAttachments"
@@ -230,11 +229,6 @@ const fileAttachments = computed(() =>
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   object-fit: contain;
-}
-
-.remote-reply__attachment-name {
-  font-size: 0.9rem;
-  color: var(--color-text-muted);
 }
 
 .remote-reply__file-list {

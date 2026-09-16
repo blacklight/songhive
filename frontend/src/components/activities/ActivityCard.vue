@@ -24,6 +24,7 @@ import StatusComposer, {
   type StatusComposerPayload,
 } from "@/components/statuses/StatusComposer.vue";
 import ActivityActorsModal from "./ActivityActorsModal.vue";
+import ActivityAudioPlayer from "./ActivityAudioPlayer.vue";
 import ActivityEditModal from "./ActivityEditModal.vue";
 import ActivityObjectEmbed from "./ActivityObjectEmbed.vue";
 import ActivityRemoteReply from "./ActivityRemoteReply.vue";
@@ -343,7 +344,7 @@ function onCardClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null;
   if (
     target?.closest(
-      "a, button, input, textarea, select, label, audio, video, .activity-card__reply-composer, .activity-card__quote-composer",
+      "a, button, input, textarea, select, label, audio, video, .audio-player, .activity-card__reply-composer, .activity-card__quote-composer",
     )
   ) {
     return;
@@ -874,21 +875,13 @@ async function copyUrl() {
           loading="lazy"
         />
       </a>
-      <div
+      <ActivityAudioPlayer
         v-for="(attachment, index) in audioAttachments"
         :key="`audio-${index}`"
-        class="activity-card__attachment-audio"
-      >
-        <span v-if="attachment.name" class="activity-card__attachment-name">
-          <AppIcon name="music" spacing="right" />{{ attachment.name }}
-        </span>
-        <audio
-          :src="attachment.url"
-          controls
-          preload="none"
-          class="activity-card__attachment-player"
-        />
-      </div>
+        :attachment="attachment"
+        :remote="activity.source_type === 'remote'"
+        :avatar-url="actorAvatar"
+      />
       <ul v-if="fileAttachments.length" class="activity-card__attachment-list">
         <li
           v-for="(attachment, index) in fileAttachments"
@@ -1334,22 +1327,6 @@ async function copyUrl() {
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   object-fit: contain;
-}
-
-.activity-card__attachment-audio {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.activity-card__attachment-name {
-  font-size: 0.9rem;
-  color: var(--color-text-muted);
-}
-
-.activity-card__attachment-player {
-  width: 100%;
-  max-width: 30rem;
 }
 
 .activity-card__attachment-list {

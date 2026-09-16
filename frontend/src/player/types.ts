@@ -6,6 +6,19 @@ export type QueueTrack = TrackResponse & {
   artist_name: string;
   album_title?: string;
   artwork_url?: string;
+  /**
+   * Direct stream URL for audio not stored in the local library (e.g.
+   * remote activity attachments); takes precedence over the
+   * ``/api/v1/stream/{id}`` endpoint.
+   */
+  stream_url?: string;
+  /**
+   * Attachment-only remote audio without a local track row — library links
+   * and listen-history reporting are skipped.
+   */
+  remote?: boolean;
+  /** Canonical page URL on the origin instance, for remote queue tracks. */
+  remote_url?: string;
 };
 
 export type RepeatMode = "off" | "all" | "one";

@@ -782,7 +782,15 @@ downgrades — and grants `file` shares to mentioned local users on
 `mentioned`-visibility posts) and `track_ids` reference hosted tracks the
 author may access (serialized by `track_to_attachment` as `Audio`
 attachments embedding the stream URL, or `Document` links for tracks
-without audio). Each category is capped at four attachments, and a status
+without audio). Audio attachments — on statuses and on the `Audio`/`Note`
+track objects alike — additionally carry the namespaced
+`songhive:trackId`, `songhive:trackTitle`, `songhive:artistName`,
+`songhive:albumName` and `songhive:trackUrl` keys plus a standard `image`
+entry resolving cover art (track image, then album cover file, then the
+album's remote `cover_url`, then the artist's image file or remote
+`image_url`), so music-aware consumers can render a rich
+player without parsing the flat `name` label; remote servers ignore
+unknown keys. Each category is capped at four attachments, and a status
 may be attachments-only. The resulting `Create(Note)` is built by
 `federation/activities.create_status_activity` and fanned out through
 `fan_out_activity` exactly like entity activities: it federates to the
@@ -1830,11 +1838,11 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/ui/` | Headless base components (button, input, select, avatar, table, pagination, search, context menu, entity actions) |
 | `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
 | `frontend/src/components/entity/` | Reusable entity grid/list components (e.g. `BulkEditableGrid` for bulk selection and deletion) |
-| `frontend/src/components/activities/` | Activity feed components (`ActivityFeed` filter tabs + cursor pagination, `ActivityCard`, `ActivityEditModal`) backed by `stores/activities.ts` and `api/activities.ts` |
+| `frontend/src/components/activities/` | Activity feed components (`ActivityFeed` filter tabs + cursor pagination, `ActivityCard`, `ActivityEditModal`) backed by `stores/activities.ts` and `api/activities.ts`. `ActivityAudioPlayer` renders `Audio` attachments as a styled inline player (artwork — attachment `image`, then the author's avatar, then a note icon — title/artist/album, seek and volume controls) instead of the browser-default element; its "Play in player"/"Add to queue" actions resolve local `songhive:trackId` attachments through the tracks API into `QueueTrack`s, while federated audio is synthesized as a `remote` queue track that streams its media URL directly. All embedded activity players share a module registry so starting one pauses the others and the global player, keeping a single audio source at a time |
 | `frontend/src/components/statuses/` | `StatusComposer` — shared status editor (plain text or Markdown, visibility, BCP-47 language defaulting to the browser locale, `@` mention and `#` hashtag autocomplete (hashtags sorted by popularity) plus track-only attach search via `SearchBar`/`SearchSuggestions`, file uploads through `api/files.ts`). Posts through `api/statuses.ts` (`POST /statuses/`) by default; the share dialog's Fediverse tab injects a custom submit that calls `tracks.publishTrack` instead, and `ActivityEditModal` reuses it for edits (`initial*` props seed the existing text/format/language/attachments; attachment chips map to `songhive:fileId`/`songhive:trackId`-marked docs). |
 | `frontend/src/components/user/` | Reusable user display components (`UserLink`) used across activity cards, resource owner metadata, file details, audit logs, and admin lists. `UserLink` renders local users as `RouterLink`s to `/@{username}`, remote users as external links to `actor_url`, and accepts either a full `UserSummary` owner or legacy `username`/`displayName`/`avatarUrl`/`remoteUrl` props |
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
-| `frontend/src/components/player/` | Player bar slot (Phase 3 placeholder) |
+| `frontend/src/components/player/` | Persistent player bar (`PlayerBar`, `NowPlaying`, `QueuePanel`, `VolumeControl`) mounted in `AppLayout` so playback survives route changes, backed by `stores/player.ts` and the singleton `player/engine.ts` (dual `HTMLAudioElement` primary/preload). `QueueTrack` extends `TrackResponse` with `stream_url` — a direct media URL used instead of `/api/v1/stream/{id}` for audio without a local track row — and `remote`, which suppresses library links and listen-history reporting |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
 | `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, `/settings` for the authenticated user, `UserProfileView` for `/@{username}`, `UsersDirectoryView` for `/users`, `SearchView` for the public `/search` page, plus 403/404 and placeholder views). `SearchView` renders grouped, independently sortable and paginated sections for every searchable entity via `useSearchSections`; the shared `SearchBar` supports an optional autocomplete mode backed by the aggregate `/api/v1/search/` endpoint. `UserProfileView` renders user bios through the `RichText` component, which linkifies hashtags, mentions and URLs; library, playlist, album, and track detail views render the owner through the `UserLink` component |
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |

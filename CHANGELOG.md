@@ -18,6 +18,21 @@ All notable changes to this project will be documented in this file.
   are removed from the collection.
 - `frontend`: Allow searching for hashtags prefixed by "#" on the search page,
   and add tags autocomplete both to the search bar and the composer component.
+- `api`: Link preview cards for activity posts — the first bare URL in a post
+  (mentions and hashtags excluded) is fetched in the background and cached per
+  URL, preferring OpenGraph metadata with `<title>`/domain fallbacks, and
+  rendered on the activity card. Controllable per instance and per user.
+- `federation`: Track `Audio` attachments now carry structured
+  `songhive:trackTitle`/`artistName`/`albumName`/`trackUrl` keys plus a
+  standard `image` entry with the cover art, so music-aware consumers can
+  render a rich player instead of guessing at the flat `name` label.
+- `frontend`: Audio attachments on activity cards and remote replies render in
+  a styled `ActivityAudioPlayer` — artwork, title/artist/album, seek, volume —
+  with "Play in player" and "Add to queue" actions that hand the track to the
+  persistent player bar: local attachments resolve through the tracks API,
+  federated audio streams its media URL directly as a `remote` queue track
+  (skipped in listen history, no local track links). Embedded players pause
+  each other and the global player so only one source plays at a time.
 
 ## 0.1.4
 

@@ -131,38 +131,40 @@ const backLink = computed(() => {
     <RouterLink v-if="backLink" :to="backLink.to" class="activity-view__back">
       <AppIcon name="arrow-left" spacing="right" />{{ backLink.label }}
     </RouterLink>
-    <SkeletonLoader v-if="loading" variant="card" />
-    <p
-      v-else-if="failed || !activity"
-      class="activity-view__error"
-      role="alert"
-    >
-      {{ t("activities.objectUnavailable") }}
-    </p>
-    <template v-else>
-      <div v-if="ancestors.length" class="activity-view__ancestors">
-        <ActivityCard
-          v-for="ancestor in ancestors"
-          :key="ancestor.id"
-          :activity="ancestor"
-        />
-      </div>
-      <ActivityCard :key="activity.id" :activity="activity" expand-replies />
-      <section v-if="quotes.length" class="activity-view__quotes">
-        <h2 class="activity-view__quotes-title">
-          <AppIcon name="quote-left" spacing="right" />{{
-            t("activities.quotes")
-          }}
-        </h2>
-        <template v-for="entry in quotes" :key="entry.key">
+    <div class="activity-view__list">
+      <SkeletonLoader v-if="loading" variant="card" />
+      <p
+        v-else-if="failed || !activity"
+        class="activity-view__error"
+        role="alert"
+      >
+        {{ t("activities.objectUnavailable") }}
+      </p>
+      <template v-else>
+        <div v-if="ancestors.length" class="activity-view__ancestors">
           <ActivityCard
-            v-if="entry.kind === 'local'"
-            :activity="entry.activity"
+            v-for="ancestor in ancestors"
+            :key="ancestor.id"
+            :activity="ancestor"
           />
-          <ActivityRemoteReply v-else :reply="entry.quote" />
-        </template>
-      </section>
-    </template>
+        </div>
+        <ActivityCard :key="activity.id" :activity="activity" expand-replies />
+        <section v-if="quotes.length" class="activity-view__quotes">
+          <h2 class="activity-view__quotes-title">
+            <AppIcon name="quote-left" spacing="right" />{{
+              t("activities.quotes")
+            }}
+          </h2>
+          <template v-for="entry in quotes" :key="entry.key">
+            <ActivityCard
+              v-if="entry.kind === 'local'"
+              :activity="entry.activity"
+            />
+            <ActivityRemoteReply v-else :reply="entry.quote" />
+          </template>
+        </section>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -184,26 +186,23 @@ const backLink = computed(() => {
   text-decoration: underline;
 }
 
+.activity-view__list,
+.activity-view__quotes {
+  width: 100%;
+  max-width: 75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 auto;
+  gap: var(--space-3);
+}
+
 .activity-view__ancestors {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   padding-left: var(--space-4);
   border-left: 2px solid var(--color-border);
-}
-
-.activity-view__ancestors :deep(.activity-card) {
-  width: auto;
-}
-
-.activity-view__quotes {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.activity-view__quotes :deep(.activity-card) {
-  width: auto;
 }
 
 .activity-view__quotes-title {

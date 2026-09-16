@@ -41,6 +41,10 @@ export interface PreviewCardResponse {
 /**
  * ActivityPub ``attachment`` entry of an activity's embedded object — a
  * ``Document``/``Image`` for uploaded files and ``Audio`` for hosted tracks.
+ * Track attachments may additionally carry ``songhive:*`` namespaced keys
+ * (``songhive:trackId``, ``songhive:trackTitle``, ``songhive:artistName``,
+ * ``songhive:albumName``, ``songhive:trackUrl``) and an ``image`` entry
+ * with the cover art — see ``audioAttachmentInfo`` for normalization.
  */
 export interface ActivityAttachment {
   type?: string;
@@ -49,6 +53,7 @@ export interface ActivityAttachment {
   name?: string;
   id?: string;
   duration?: string;
+  image?: unknown;
   [key: string]: unknown;
 }
 

@@ -1194,6 +1194,13 @@
       "confirm": "Delete this activity? A retraction will be sent to the Fediverse if it was published there.",
       "done": "Activity deleted.",
       "error": "Could not delete this activity."
+    },
+    "audio": {
+      "player": "Audio player",
+      "playInPlayer": "Play in player",
+      "addToQueue": "Add to queue",
+      "addedToQueue": "Added to the queue.",
+      "playError": "Could not play this audio."
     }
   },
   "notifications": {

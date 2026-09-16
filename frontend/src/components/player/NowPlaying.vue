@@ -56,7 +56,7 @@ const store = usePlayerStore();
 
     <div class="now-playing__meta">
       <RouterLink
-        v-if="store.currentTrack?.id"
+        v-if="store.currentTrack?.id && !store.currentTrack?.remote"
         :to="`/tracks/${store.currentTrack.id}`"
         class="now-playing__title now-playing__title--link"
         :title="store.currentTrack?.title"
@@ -68,6 +68,16 @@ const store = usePlayerStore();
       >
         {{ store.currentTrack?.title }}
       </RouterLink>
+      <a
+        v-else-if="store.currentTrack?.remote_url"
+        :href="store.currentTrack.remote_url"
+        target="_blank"
+        rel="noopener"
+        class="now-playing__title now-playing__title--link"
+        :title="store.currentTrack?.title"
+      >
+        {{ store.currentTrack?.title }}
+      </a>
       <p v-else class="now-playing__title" :title="store.currentTrack?.title">
         {{ store.currentTrack?.title }}
       </p>
@@ -137,12 +147,6 @@ const store = usePlayerStore();
 .now-playing__artwork--link .now-playing__artwork--placeholder {
   width: 100%;
   height: 100%;
-}
-
-.now-playing__img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 .now-playing__meta {

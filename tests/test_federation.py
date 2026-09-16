@@ -29,6 +29,7 @@ from songhive.federation.actors import (
     user_to_actor_document,
 )
 from songhive.federation.serializers import (
+    track_to_attachment,
     track_to_audio_object,
     track_to_note_object,
 )
@@ -36,6 +37,7 @@ from songhive.models import Visibility
 from songhive.models.activity import ActivityMention, ActivityTarget
 from songhive.models.album import Album  # noqa: F401
 from songhive.models.artist import Artist
+from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
@@ -357,8 +359,110 @@ def test_track_to_audio_object_media_attachment():
             "mediaType": "audio/flac",
             "url": "https://music.example.com/api/v1/files/file-1/download",
             "name": "TestTrack",
+            "songhive:trackTitle": "TestTrack",
+            "songhive:artistName": "TestArtist",
+            "songhive:trackUrl": "https://music.example.com/tracks/track-1",
         }
     ]
+
+
+def test_track_attachment_carries_structured_metadata_and_cover():
+    """Attachments carry split title/artist/album keys plus cover art."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    cover = StoredFile(
+        storage_path="files/cover",
+        storage_backend="local",
+        content_type="image/jpeg",
+    )
+    cover.id = "cover-1"
+    album = Album(title="TestAlbum", artist_id="artist-1")
+    album.id = "album-1"
+    album.cover_file = cover
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        audio_mime_type="audio/mpeg",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+    track.album = album
+
+    # The album cover file is the fallback image when the track has none.
+    attachment = track_to_attachment(track, artist, "music.example.com")
+    assert attachment["songhive:trackTitle"] == "TestTrack"
+    assert attachment["songhive:artistName"] == "TestArtist"
+    assert attachment["songhive:albumName"] == "TestAlbum"
+    assert attachment["songhive:trackUrl"] == "https://music.example.com/tracks/track-1"
+    assert attachment["image"] == {
+        "type": "Image",
+        "mediaType": "image/jpeg",
+        "url": "https://music.example.com/api/v1/files/cover-1/download",
+    }
+
+    # A track-level image wins over the album cover.
+    track_image = StoredFile(
+        storage_path="files/track-image",
+        storage_backend="local",
+        content_type="image/png",
+    )
+    track_image.id = "img-1"
+    track.image_file = track_image
+    attachment = track_to_attachment(track, artist, "music.example.com")
+    assert attachment["image"]["url"].endswith("/api/v1/files/img-1/download")
+
+    # With neither, the album's remote cover URL is used.
+    track.image_file = None
+    album.cover_file = None
+    album.cover_url = "https://covers.example.com/album-1.jpg"
+    attachment = track_to_attachment(track, artist, "music.example.com")
+    assert attachment["image"] == {
+        "type": "Image",
+        "url": "https://covers.example.com/album-1.jpg",
+    }
+
+    # With no album art at all, the artist image file is the next fallback.
+    album.cover_url = None
+    artist_image = StoredFile(
+        storage_path="files/artist-image",
+        storage_backend="local",
+        content_type="image/webp",
+    )
+    artist_image.id = "artist-img-1"
+    artist.image_file = artist_image
+    attachment = track_to_attachment(track, artist, "music.example.com")
+    assert attachment["image"] == {
+        "type": "Image",
+        "mediaType": "image/webp",
+        "url": "https://music.example.com/api/v1/files/artist-img-1/download",
+    }
+
+    # Then the artist's remote image URL as the last artwork fallback.
+    artist.image_file = None
+    artist.image_url = "https://images.example.com/artist-1.jpg"
+    attachment = track_to_attachment(track, artist, "music.example.com")
+    assert attachment["image"] == {
+        "type": "Image",
+        "url": "https://images.example.com/artist-1.jpg",
+    }
+
+
+def test_track_attachment_without_cover_omits_image():
+    """A track with no resolvable cover produces no ``image`` entry."""
+    artist = Artist(name="TestArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="TestTrack",
+        artist_id="artist-1",
+        audio_file_id="file-1",
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-1"
+
+    attachment = track_to_attachment(track, artist, "music.example.com")
+    assert "image" not in attachment
+    assert "songhive:albumName" not in attachment
 
 
 def test_create_audio_activity_renders_track_description():
@@ -459,6 +563,9 @@ def test_track_to_note_object():
             "url": "https://music.example.com/api/v1/files/file-1/download",
             "name": "TestTrack",
             "duration": "PT2M",
+            "songhive:trackTitle": "TestTrack",
+            "songhive:artistName": "TestArtist",
+            "songhive:trackUrl": "https://music.example.com/tracks/track-1",
         }
     ]
 

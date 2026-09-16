@@ -17,7 +17,7 @@ from pubby.content import (
 )
 from sqlalchemy import inspect as sa_inspect
 
-from ..models import Artist, StoredFile, Track, Visibility
+from ..models import Album, Artist, StoredFile, Track, Visibility
 from ..services.genres import extract_genres_from_track, genres_to_tags
 from ._common import get_stream_url, get_tag_url, get_track_url
 
@@ -28,6 +28,13 @@ from ._common import get_stream_url, get_tag_url, get_track_url
 # which must survive an attachment edit). Remote servers ignore them.
 ATTACHMENT_FILE_ID_KEY = "songhive:fileId"
 ATTACHMENT_TRACK_ID_KEY = "songhive:trackId"
+# Additional namespaced keys carrying the structured track metadata the
+# flat ``name`` cannot express, so music-aware consumers can render a rich
+# player without guessing at the ``{artist} - {title}`` label.
+ATTACHMENT_TITLE_KEY = "songhive:trackTitle"
+ATTACHMENT_ARTIST_KEY = "songhive:artistName"
+ATTACHMENT_ALBUM_KEY = "songhive:albumName"
+ATTACHMENT_TRACK_URL_KEY = "songhive:trackUrl"
 
 
 def set_post_content(
@@ -303,14 +310,14 @@ def track_to_audio_object(
     set_post_content(obj, getattr(track, "description", None), domain, link_href=track_url)
 
     if stream_url:
-        obj["attachment"] = [
-            {
-                "type": "Document",
-                "mediaType": media_type,
-                "url": stream_url,
-                "name": track.title,
-            }
-        ]
+        audio_attachment: dict = {
+            "type": "Document",
+            "mediaType": media_type,
+            "url": stream_url,
+            "name": track.title,
+        }
+        _enrich_track_attachment(audio_attachment, track, artist, domain)
+        obj["attachment"] = [audio_attachment]
 
     return allow_public_quotes(obj)
 
@@ -400,9 +407,101 @@ def track_to_note_object(
             attachment["id"] = audio_object_id
         if track.duration:
             attachment["duration"] = format_duration(track.duration)
+        _enrich_track_attachment(attachment, track, artist, domain)
         obj["attachment"] = [attachment]
 
     return allow_public_quotes(obj)
+
+
+def _file_download_url(file_id: str, domain: str) -> str:
+    """Return the public download URL for a stored file (relative without a domain)."""
+    path = f"/api/v1/files/{file_id}/download"
+    return f"https://{domain}{path}" if domain else path
+
+
+def _loaded_album(track: Track, unloaded: frozenset) -> Optional[Album]:
+    """Return the track's album when the relationship is already loaded."""
+    if "album" in unloaded:
+        return None
+    return getattr(track, "album", None)
+
+
+def _attachment_image(
+    track: Track,
+    album: Optional[Album],
+    artist: Optional[Artist],
+    domain: str,
+    unloaded: frozenset,
+) -> Optional[dict]:
+    """
+    Return an ActivityStreams ``Image`` for the track's cover art, if any.
+
+    Resolution order: track image, then album cover (file, then remote
+    URL), then artist image (file, then remote URL).
+    Relationships that are not already loaded are skipped rather than
+    lazily queried — these serializers run in async contexts where an
+    implicit load would raise ``MissingGreenlet``.
+    """
+    image_file = getattr(track, "image_file", None) if "image_file" not in unloaded else None
+    if image_file is None and album is not None:
+        album_unloaded: frozenset = getattr(sa_inspect(album), "unloaded", frozenset())
+        if "cover_file" not in album_unloaded:
+            image_file = getattr(album, "cover_file", None)
+    if image_file is not None:
+        image: dict = {
+            "type": "Image",
+            "url": _file_download_url(image_file.id, domain),
+        }
+        if image_file.content_type:
+            image["mediaType"] = image_file.content_type
+        return image
+    cover_url = getattr(album, "cover_url", None) if album is not None else None
+    if cover_url:
+        return {"type": "Image", "url": cover_url}
+    if artist is not None:
+        artist_unloaded: frozenset = getattr(sa_inspect(artist), "unloaded", frozenset())
+        artist_image = getattr(artist, "image_file", None) if "image_file" not in artist_unloaded else None
+        if artist_image is not None:
+            artist_file_image: dict = {
+                "type": "Image",
+                "url": _file_download_url(artist_image.id, domain),
+            }
+            if artist_image.content_type:
+                artist_file_image["mediaType"] = artist_image.content_type
+            return artist_file_image
+        if artist.image_url:
+            return {"type": "Image", "url": artist.image_url}
+    return None
+
+
+def _enrich_track_attachment(
+    attachment: dict,
+    track: Track,
+    artist: Optional[Artist],
+    domain: str,
+) -> None:
+    """
+    Stamp structured track metadata on an attachment doc.
+
+    The namespaced ``songhive:*`` keys carry the split title/artist/album
+    fields that the flat ``name`` label cannot express, plus the track page
+    URL; a standard ``image`` entry carries the cover art. Together they
+    let consumers (the Songhive web player first) render a rich audio
+    player. Remote servers ignore unknown keys.
+    """
+    unloaded = _unloaded_attrs(track)
+    album = _loaded_album(track, unloaded)
+    attachment[ATTACHMENT_TITLE_KEY] = track.title
+    if artist is not None:
+        attachment[ATTACHMENT_ARTIST_KEY] = artist.name
+    if album is not None:
+        attachment[ATTACHMENT_ALBUM_KEY] = album.title
+    attachment[ATTACHMENT_TRACK_URL_KEY] = (
+        get_track_url(track=track, domain=domain) if domain else f"/tracks/{track.id}"
+    )
+    image = _attachment_image(track, album, artist, domain, unloaded)
+    if image is not None:
+        attachment["image"] = image
 
 
 def stored_file_to_attachment(stored_file: StoredFile, domain: str = "") -> dict:
@@ -414,11 +513,10 @@ def stored_file_to_attachment(stored_file: StoredFile, domain: str = "") -> dict
     still usable by local API consumers). ``name`` carries the original
     filename for remote renderers that surface it as alt text.
     """
-    path = f"/api/v1/files/{stored_file.id}/download"
     attachment: dict = {
         "type": "Document",
         "mediaType": stored_file.content_type,
-        "url": f"https://{domain}{path}" if domain else path,
+        "url": _file_download_url(stored_file.id, domain),
         ATTACHMENT_FILE_ID_KEY: str(stored_file.id),
     }
     if stored_file.original_filename:
@@ -459,6 +557,7 @@ def track_to_attachment(
             attachment["id"] = audio_object_id
         if track.duration:
             attachment["duration"] = format_duration(track.duration)
+        _enrich_track_attachment(attachment, track, artist, domain)
         return attachment
 
     track_url = get_track_url(track=track, domain=domain) if domain else f"/tracks/{track.id}"
