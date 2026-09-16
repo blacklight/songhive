@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, ref, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
 
 import type { ActivityVisibility } from "@/api/activities";
@@ -180,6 +180,8 @@ const suggestionSections = ref<SearchResultSection[]>([]);
 const suggestionMode = ref<AutocompleteMode>("mention");
 // Start offset of the ``@token``/``#token`` currently being completed.
 const suggestionStart = ref(0);
+const suggestionsRef =
+  useTemplateRef<InstanceType<typeof SearchSuggestions>>("suggestions");
 let suggestionSeq = 0;
 
 function browserLocale(): string {
@@ -294,6 +296,9 @@ function onTextInput() {
 }
 
 function onEditorKeydown(event: KeyboardEvent) {
+  if (suggestionOpen.value && suggestionsRef.value?.handleKeydown(event)) {
+    return;
+  }
   if (event.key === "Escape") {
     suggestionSeq++;
     debouncedSuggestionFetch.cancel();
@@ -460,11 +465,13 @@ useOnClickOutside(() => editorEl.value, closeSuggestion);
         :placeholder="props.placeholder ?? t('statusComposer.placeholder')"
         :disabled="submitting"
         :autofocus="props.autofocus"
+        :aria-activedescendant="suggestionsRef?.activeDescendantId()"
         @input="onTextInput"
         @keydown="onEditorKeydown"
       />
       <SearchSuggestions
         v-if="suggestionOpen"
+        ref="suggestions"
         :sections="suggestionSections"
         :loading="suggestionLoading"
         :error="suggestionError"

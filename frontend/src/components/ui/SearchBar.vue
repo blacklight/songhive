@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, useTemplateRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { useDebounce } from "@/composables/useDebounce";
@@ -57,6 +57,8 @@ const { t } = useI18n();
 
 const localValue = ref(props.modelValue);
 const rootEl = ref<HTMLElement | null>(null);
+const suggestionsRef =
+  useTemplateRef<InstanceType<typeof SearchSuggestions>>("suggestions");
 const suggestions = ref<SearchResultSection[]>([]);
 const suggestionsOpen = ref(false);
 const suggestionsLoading = ref(false);
@@ -136,6 +138,9 @@ function onInput(event: Event) {
 }
 
 function onKeyDown(event: KeyboardEvent) {
+  if (suggestionsOpen.value && suggestionsRef.value?.handleKeydown(event)) {
+    return;
+  }
   if (event.key === "Enter") {
     debouncedEmit.cancel();
     debouncedFetch.cancel();
@@ -175,6 +180,7 @@ useOnClickOutside(() => rootEl.value, closeSuggestions);
       type="search"
       class="search-bar__input"
       :placeholder="props.placeholder"
+      :aria-activedescendant="suggestionsRef?.activeDescendantId()"
       @input="onInput"
       @keydown="onKeyDown"
     />
@@ -189,6 +195,7 @@ useOnClickOutside(() => rootEl.value, closeSuggestions);
     </button>
     <SearchSuggestions
       v-if="suggestionsOpen"
+      ref="suggestions"
       :sections="suggestions"
       :loading="suggestionsLoading"
       :error="suggestionsError"

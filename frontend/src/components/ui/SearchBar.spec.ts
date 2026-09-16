@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
 import SearchBar from "./SearchBar.vue";
 import type { SearchResultSection } from "@/api/search";
@@ -21,6 +21,57 @@ const allEntities: SearchResultSection[] = [
     ],
   },
 ];
+
+const multiEntities: SearchResultSection[] = [
+  {
+    entity: "tracks",
+    total: 2,
+    items: [
+      {
+        type: "track",
+        id: "track-1",
+        name: "Waiting Room",
+        title: "Waiting Room",
+        subtitle: "Fugazi",
+        url: "/tracks/track-1",
+        image_url: null,
+      },
+      {
+        type: "track",
+        id: "track-2",
+        name: "Merchandise",
+        title: "Merchandise",
+        subtitle: "Fugazi",
+        url: "/tracks/track-2",
+        image_url: null,
+      },
+    ],
+  },
+  {
+    entity: "artists",
+    total: 1,
+    items: [
+      {
+        type: "artist",
+        id: "artist-1",
+        name: "Fugazi",
+        title: "Fugazi",
+        subtitle: null,
+        url: "/artists/artist-1",
+        image_url: null,
+      },
+    ],
+  },
+];
+
+async function openSuggestions(wrapper: VueWrapper) {
+  const input = wrapper.find("input");
+  await input.setValue("Fug");
+  await nextTick();
+  vi.advanceTimersByTime(100);
+  await flushPromises();
+  return input;
+}
 
 describe("SearchBar", () => {
   beforeEach(() => {
@@ -281,6 +332,93 @@ describe("SearchBar", () => {
     vi.advanceTimersByTime(100);
 
     expect(fetcher).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("moves the highlight with arrow keys and selects with Enter", async () => {
+    const fetcher = vi.fn().mockResolvedValue(multiEntities);
+    const wrapper = mount(SearchBar, {
+      props: {
+        modelValue: "",
+        autocomplete: true,
+        autocompleteDelay: 100,
+        autocompleteFetcher: fetcher,
+      },
+    });
+
+    const input = await openSuggestions(wrapper);
+    const items = wrapper.findAll(".search-suggestions__item");
+    expect(items.length).toBe(3);
+
+    await input.trigger("keydown", { key: "ArrowDown" });
+    await nextTick();
+    expect(items[0].classes()).toContain("search-suggestions__item--active");
+
+    // Crosses into the next section and wraps around.
+    await input.trigger("keydown", { key: "ArrowDown" });
+    await input.trigger("keydown", { key: "ArrowDown" });
+    await nextTick();
+    expect(items[2].classes()).toContain("search-suggestions__item--active");
+    await input.trigger("keydown", { key: "ArrowDown" });
+    await nextTick();
+    expect(items[0].classes()).toContain("search-suggestions__item--active");
+
+    await input.trigger("keydown", { key: "Enter" });
+    await nextTick();
+
+    expect(wrapper.emitted("select-suggestion")?.[0]).toEqual([
+      multiEntities[0].items[0],
+    ]);
+    expect(wrapper.emitted("search")).toBeFalsy();
+    expect(wrapper.find(".search-suggestions").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("wraps the highlight to the last item on ArrowUp", async () => {
+    const fetcher = vi.fn().mockResolvedValue(multiEntities);
+    const wrapper = mount(SearchBar, {
+      props: {
+        modelValue: "",
+        autocomplete: true,
+        autocompleteDelay: 100,
+        autocompleteFetcher: fetcher,
+      },
+    });
+
+    const input = await openSuggestions(wrapper);
+    await input.trigger("keydown", { key: "ArrowUp" });
+    await nextTick();
+
+    const items = wrapper.findAll(".search-suggestions__item");
+    expect(items[2].classes()).toContain("search-suggestions__item--active");
+
+    await input.trigger("keydown", { key: "Enter" });
+    await nextTick();
+    expect(wrapper.emitted("select-suggestion")?.[0]).toEqual([
+      multiEntities[1].items[0],
+    ]);
+    wrapper.unmount();
+  });
+
+  it("still emits search on Enter when no suggestion is highlighted", async () => {
+    const fetcher = vi.fn().mockResolvedValue(multiEntities);
+    const wrapper = mount(SearchBar, {
+      props: {
+        modelValue: "",
+        autocomplete: true,
+        autocompleteDelay: 100,
+        autocompleteFetcher: fetcher,
+      },
+    });
+
+    const input = await openSuggestions(wrapper);
+    expect(wrapper.find(".search-suggestions").exists()).toBe(true);
+
+    await input.trigger("keydown", { key: "Enter" });
+    await nextTick();
+
+    expect(wrapper.emitted("select-suggestion")).toBeFalsy();
+    expect(wrapper.emitted("search")?.[0]).toEqual(["Fug"]);
     wrapper.unmount();
   });
 

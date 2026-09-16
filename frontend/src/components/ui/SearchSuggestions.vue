@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, nextTick, ref, useId, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import type { SearchResultItem, SearchResultSection } from "@/api/search";
@@ -14,10 +15,86 @@ const emit = defineEmits<{
   select: [item: SearchResultItem];
 }>();
 const { t } = useI18n();
+
+const rootEl = ref<HTMLElement | null>(null);
+const activeIndex = ref(-1);
+
+const flatItems = computed(() =>
+  props.sections.flatMap((section) => section.items),
+);
+
+const sectionOffsets = computed(() => {
+  const offsets: number[] = [];
+  let offset = 0;
+  for (const section of props.sections) {
+    offsets.push(offset);
+    offset += section.items.length;
+  }
+  return offsets;
+});
+
+const uid = useId();
+const optionIds = computed(() =>
+  flatItems.value.map((_, index) => `search-suggestion-${uid}-${index}`),
+);
+
+watch(
+  () => props.sections,
+  () => {
+    activeIndex.value = -1;
+  },
+);
+
+async function scrollActiveIntoView() {
+  await nextTick();
+  rootEl.value
+    ?.querySelector(".search-suggestions__item--active")
+    ?.scrollIntoView?.({ block: "nearest" });
+}
+
+/**
+ * Handle a keydown forwarded by the controlling input. Returns ``true`` when
+ * the event was consumed: arrows move the highlight, Enter picks it.
+ */
+function handleKeydown(event: KeyboardEvent): boolean {
+  if (event.ctrlKey || event.metaKey || event.altKey) {
+    return false;
+  }
+  const count = flatItems.value.length;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (count === 0) {
+      return false;
+    }
+    event.preventDefault();
+    if (activeIndex.value < 0) {
+      activeIndex.value = event.key === "ArrowDown" ? 0 : count - 1;
+    } else {
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      activeIndex.value = (activeIndex.value + delta + count) % count;
+    }
+    void scrollActiveIntoView();
+    return true;
+  }
+  if (event.key === "Enter" && activeIndex.value >= 0) {
+    event.preventDefault();
+    emit("select", flatItems.value[activeIndex.value]);
+    return true;
+  }
+  return false;
+}
+
+/** Id of the highlighted option, for ``aria-activedescendant`` on the input. */
+function activeDescendantId(): string | undefined {
+  return activeIndex.value >= 0
+    ? optionIds.value[activeIndex.value]
+    : undefined;
+}
+
+defineExpose({ handleKeydown, activeDescendantId });
 </script>
 
 <template>
-  <div class="search-suggestions" role="listbox">
+  <div ref="rootEl" class="search-suggestions" role="listbox">
     <div v-if="props.loading" class="search-suggestions__loading">
       {{ t("search.loading") }}
     </div>
@@ -32,7 +109,7 @@ const { t } = useI18n();
     </div>
     <template v-else>
       <div
-        v-for="section in props.sections"
+        v-for="(section, sectionIndex) in props.sections"
         :key="section.entity"
         class="search-suggestions__section"
       >
@@ -41,12 +118,21 @@ const { t } = useI18n();
           <span class="search-suggestions__count">({{ section.total }})</span>
         </div>
         <button
-          v-for="item in section.items"
+          v-for="(item, itemIndex) in section.items"
+          :id="optionIds[sectionOffsets[sectionIndex] + itemIndex]"
           :key="`${section.entity}-${item.id ?? item.name ?? item.title}`"
           type="button"
           class="search-suggestions__item"
+          :class="{
+            'search-suggestions__item--active':
+              sectionOffsets[sectionIndex] + itemIndex === activeIndex,
+          }"
           role="option"
+          :aria-selected="
+            sectionOffsets[sectionIndex] + itemIndex === activeIndex
+          "
           @click="emit('select', item)"
+          @mouseenter="activeIndex = sectionOffsets[sectionIndex] + itemIndex"
         >
           <span v-if="item.image_url" class="search-suggestions__thumb">
             <img :src="item.image_url" alt="" loading="lazy" />
@@ -125,7 +211,8 @@ const { t } = useI18n();
 }
 
 .search-suggestions__item:hover,
-.search-suggestions__item:focus-visible {
+.search-suggestions__item:focus-visible,
+.search-suggestions__item--active {
   background: var(--color-surface-hover);
   outline: none;
 }

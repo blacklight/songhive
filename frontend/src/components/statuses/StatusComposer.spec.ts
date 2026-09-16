@@ -176,6 +176,40 @@ describe("StatusComposer", () => {
     expect(textarea.value).toBe("hi @alice ");
   });
 
+  it("selects a suggestion with ArrowDown + Enter instead of a newline", async () => {
+    searchPreview.mockResolvedValue({
+      query: "al",
+      sections: [
+        {
+          entity: "users",
+          total: 1,
+          items: [
+            {
+              type: "user",
+              id: "alice",
+              name: "alice",
+              title: "Alice",
+              subtitle: "alice",
+              url: "/@alice",
+            },
+          ],
+        },
+      ],
+    });
+    const wrapper = mountComposer();
+    await typeText(wrapper, "hi @al");
+    vi.advanceTimersByTime(400);
+    await flushPromises();
+
+    const textarea = wrapper.find("textarea");
+    await textarea.trigger("keydown", { key: "ArrowDown" });
+    await textarea.trigger("keydown", { key: "Enter" });
+    await flushPromises();
+
+    expect(wrapper.find(".search-suggestions").exists()).toBe(false);
+    expect(textarea.element).toHaveProperty("value", "hi @alice ");
+  });
+
   it("inserts a full user@domain handle for remote user suggestions", async () => {
     searchPreview.mockResolvedValue({
       query: "al",
