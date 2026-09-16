@@ -485,32 +485,8 @@ async def list_user_activities(
     return activities, next_cursor
 
 
-def _actor_doc_avatar_url(actor_doc: Optional[dict]) -> Optional[str]:
-    """Extract an avatar URL from a cached ActivityPub actor document."""
-    if not actor_doc:
-        return None
-    icon = actor_doc.get("icon")
-    if isinstance(icon, dict):
-        return icon.get("url")
-    if isinstance(icon, list):
-        for item in icon:
-            if isinstance(item, dict):
-                url = item.get("url")
-                if url:
-                    return url
-    if isinstance(icon, str):
-        return icon
-    return None
-
-
-def _actor_doc_display_name(actor_doc: Optional[dict]) -> Optional[str]:
-    """Extract a display name from a cached ActivityPub actor document."""
-    if not actor_doc:
-        return None
-    name = actor_doc.get("name")
-    if isinstance(name, str) and name.strip():
-        return name.strip()
-    return None
+_actor_doc_avatar_url = federation_service._actor_doc_avatar_url
+_actor_doc_display_name = federation_service._actor_doc_display_name
 
 
 class ActorProfile(NamedTuple):

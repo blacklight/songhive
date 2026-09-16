@@ -1,18 +1,25 @@
 """Cross-entity autocomplete search endpoint."""
 
+import asyncio
+import logging
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config.schema import SonghiveConfig
+from ...federation.actors import get_federation_storage
 from ...models.user import User
+from ...services import federation as federation_service
 from ...services import music
 from ...services.auth import list_public_users
 from ...services.genres import list_genres
 from ...services.storage import StorageService
 from ...services.tags import list_tags
-from ..deps import get_current_user_optional, get_db, get_storage_service
+from ..deps import get_config, get_current_user_optional, get_db, get_storage_service
+
+logger = logging.getLogger(__name__)
 
 SearchEntity = Literal[
     "users",
@@ -84,25 +91,51 @@ async def _user_section(
     db: AsyncSession,
     term: str,
     limit: int,
+    config: Optional[SonghiveConfig] = None,
+    remote_users: bool = False,
     **_,
 ) -> SearchResultSection:
-    users, total = await list_public_users(db, q=term, limit=limit, offset=0)
-    return SearchResultSection(
-        entity="users",
-        total=total,
-        items=[
-            SearchResultItem(
-                type="user",
-                id=user.username,
-                name=user.username,
-                title=user.display_name or user.username,
-                subtitle=user.username,
-                image_url=user.avatar_url,
-                url=f"/@{user.username}",
+    # A ``user@domain`` term searches local usernames on the ``user`` part;
+    # the domain fragment can only narrow remote actor matches.
+    local_term = term.split("@", 1)[0] or term
+    users, total = await list_public_users(db, q=local_term, limit=limit, offset=0)
+    items = [
+        SearchResultItem(
+            type="user",
+            id=user.username,
+            name=user.username,
+            title=user.display_name or user.username,
+            subtitle=user.username,
+            image_url=user.avatar_url,
+            url=f"/@{user.username}",
+        )
+        for user in users
+    ]
+
+    if remote_users and config is not None and config.federation.enabled and config.federation.instance_domain:
+        try:
+            fed_storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+            remote_matches = await asyncio.to_thread(federation_service.search_remote_actors, fed_storage, term, config)
+        except Exception:
+            # The users section must not fail when the federation storage is
+            # unavailable or its tables do not exist yet.
+            logger.warning("Remote actor search failed for %r", term, exc_info=True)
+        else:
+            total += len(remote_matches)
+            items.extend(
+                SearchResultItem(
+                    type="user",
+                    id=match.actor_url,
+                    name=match.handle,
+                    title=match.display_name or match.handle,
+                    subtitle=f"@{match.handle}",
+                    image_url=match.avatar_url,
+                    url=match.profile_url or match.actor_url,
+                )
+                for match in remote_matches[:limit]
             )
-            for user in users
-        ],
-    )
+
+    return SearchResultSection(entity="users", total=total, items=items)
 
 
 async def _track_section(
@@ -111,6 +144,7 @@ async def _track_section(
     term: str,
     limit: int,
     user: Optional[User],
+    **_kwargs,
 ) -> SearchResultSection:
     from ..responses import build_track_summary
 
@@ -154,6 +188,7 @@ async def _album_section(
     term: str,
     limit: int,
     user: Optional[User],
+    **_,
 ) -> SearchResultSection:
     from ..responses import build_album_summary
 
@@ -189,6 +224,7 @@ async def _artist_section(
     term: str,
     limit: int,
     user: Optional[User],
+    **_,
 ) -> SearchResultSection:
     from ..responses import build_artist_summary
 
@@ -217,6 +253,7 @@ async def _playlist_section(
     term: str,
     limit: int,
     user: Optional[User],
+    **_,
 ) -> SearchResultSection:
     total = await music.count_playlists(db, query=term, user=user)
     rows = await music.list_playlists(
@@ -251,6 +288,7 @@ async def _library_section(
     term: str,
     limit: int,
     user: Optional[User],
+    **_,
 ) -> SearchResultSection:
     total = await music.count_libraries(db, query=term, user=user)
     rows = await music.list_libraries(
@@ -287,6 +325,7 @@ async def _tag_section(
     user: Optional[User],
     sort_by: str = "name",
     sort_dir: str = "asc",
+    **_,
 ) -> SearchResultSection:
     summaries, total = await list_tags(
         db,
@@ -321,6 +360,7 @@ async def _genre_section(
     term: str,
     limit: int,
     user: Optional[User],
+    **_,
 ) -> SearchResultSection:
     summaries, total = await list_genres(
         db,
@@ -364,9 +404,14 @@ async def search(
     q: Optional[str] = Query(None, description="Search term"),
     entities: Optional[str] = Query(None, description="Comma-separated entity allowlist"),
     limit: int = Query(5, ge=1, le=10, description="Per-section result limit"),
+    remote_users: bool = Query(
+        False,
+        description="Also match cached remote actors (followers, actor cache) in the users section",
+    ),
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    config: SonghiveConfig = Depends(get_config),
 ):
     """
     Return a grouped, ACL-respecting preview for the requested entities.
@@ -374,6 +419,10 @@ async def search(
     A ``q`` starting with ``#`` is a hashtag lookup: the prefix is stripped
     and only the tags section is returned, sorted by popularity
     (``item_count`` descending). A bare ``#`` lists the most used tags.
+
+    With ``remote_users`` the users section additionally lists remote
+    ActivityPub actors cached on the instance — followers and resolved actor
+    documents — so mention completion can offer ``user@domain`` handles.
     """
     term = (q or "").strip()
     hashtag = term.startswith("#")
@@ -396,6 +445,14 @@ async def search(
     sections: List[SearchResultSection] = []
     for entity in selected:
         sections.append(
-            await _SECTION_FETCHERS[entity](db=db, storage=storage, term=term, limit=limit, user=user)  # type: ignore
+            await _SECTION_FETCHERS[entity](  # type: ignore
+                db=db,
+                storage=storage,
+                term=term,
+                limit=limit,
+                user=user,
+                config=config,
+                remote_users=remote_users,
+            )
         )
     return SearchResponse(query=term, sections=sections)

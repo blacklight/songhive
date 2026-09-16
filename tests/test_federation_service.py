@@ -106,3 +106,117 @@ def test_get_follower_inboxes_returns_unique_inboxes_for_actor():
 
     assert inboxes == ["https://a.example/inbox", "https://b.example/shared"]
     storage.get_followers.assert_called_once_with(actor_id=actor_url)
+
+
+def _remote_actor_storage(tmp_path):
+    """A pubby storage backed by a fresh SQLite database."""
+    from songhive.federation.storage import create_activitypub_storage
+
+    return create_activitypub_storage(f"sqlite+aiosqlite:///{tmp_path / 'fed.db'}")
+
+
+def _store_remote_actors(storage):
+    """Seed one follower and one cache-only remote actor."""
+    from datetime import datetime, timezone
+
+    from pubby import Follower
+
+    storage.store_follower(
+        Follower(
+            actor_id="https://remote.example/users/bob",
+            inbox="https://remote.example/users/bob/inbox",
+            followed_at=datetime.now(timezone.utc),
+            actor_data={"preferredUsername": "bob", "name": "Bob Remote"},
+            target_actor_id="https://music.example.com/users/alice",
+        )
+    )
+    storage.cache_remote_actor(
+        "https://other.example/@carol",
+        {"preferredUsername": "carol", "name": "Carol"},
+        datetime.now(timezone.utc),
+    )
+    # The same actor in both tables must produce a single follower match.
+    storage.cache_remote_actor(
+        "https://remote.example/users/bob",
+        {"preferredUsername": "bob", "name": "Bob Remote"},
+        datetime.now(timezone.utc),
+    )
+
+
+def test_search_remote_actors_matches_followers_and_cache(config, tmp_path):
+    """Followers and cached actors both surface, deduplicated by actor URL."""
+    from songhive.services.federation import search_remote_actors
+
+    storage = _remote_actor_storage(tmp_path)
+    _store_remote_actors(storage)
+
+    matches = search_remote_actors(storage, "o", config)
+    handles = {m.handle: m for m in matches}
+    assert set(handles) == {"bob@remote.example", "carol@other.example"}
+    assert handles["bob@remote.example"].follower is True
+    assert handles["bob@remote.example"].display_name == "Bob Remote"
+    assert handles["carol@other.example"].follower is False
+
+
+def test_search_remote_actors_matches_display_name_and_url(config, tmp_path):
+    """The query matches ``name`` and the actor URL, not just the username."""
+    from songhive.services.federation import search_remote_actors
+
+    storage = _remote_actor_storage(tmp_path)
+    _store_remote_actors(storage)
+
+    assert [m.handle for m in search_remote_actors(storage, "remote", config)] == ["bob@remote.example"]
+    assert [m.handle for m in search_remote_actors(storage, "carol", config)] == ["carol@other.example"]
+
+
+def test_search_remote_actors_user_at_domain_narrows(config, tmp_path):
+    """``user@domain`` queries constrain the match to that domain."""
+    from songhive.services.federation import search_remote_actors
+
+    storage = _remote_actor_storage(tmp_path)
+    _store_remote_actors(storage)
+
+    assert [m.handle for m in search_remote_actors(storage, "o@other", config)] == ["carol@other.example"]
+    assert search_remote_actors(storage, "carol@remote", config) == []
+
+
+def test_search_remote_actors_skips_local_and_blocked(config, tmp_path):
+    """Instance-domain actors and blocked domains never match."""
+    from songhive.services.federation import search_remote_actors
+
+    storage = _remote_actor_storage(tmp_path)
+    _store_remote_actors(storage)
+    # The name contains the query letter so the row does match the SQL
+    # predicate — the local-domain check is what keeps it out.
+    storage.cache_remote_actor(
+        "https://music.example.com/users/alice",
+        {"preferredUsername": "alice", "name": "Alice Local"},
+    )
+    config.federation.blocked_instances = ["other.example"]
+
+    matches = search_remote_actors(storage, "o", config)
+    handles = [m.handle for m in matches]
+    assert "bob@remote.example" in handles
+    assert "alice@music.example.com" not in handles
+    assert "carol@other.example" not in handles
+
+
+def test_search_remote_actors_derives_username_from_url(config, tmp_path):
+    """Actors without ``preferredUsername`` fall back to the URL's last segment."""
+    from songhive.services.federation import search_remote_actors
+
+    storage = _remote_actor_storage(tmp_path)
+    storage.cache_remote_actor("https://remote.example/@dave", {})
+
+    matches = search_remote_actors(storage, "dave", config)
+    assert [m.handle for m in matches] == ["dave@remote.example"]
+
+
+def test_search_remote_actors_disabled(config, tmp_path):
+    """Federation disabled short-circuits to no matches."""
+    from songhive.services.federation import search_remote_actors
+
+    config.federation.enabled = False
+    storage = _remote_actor_storage(tmp_path)
+    _store_remote_actors(storage)
+    assert search_remote_actors(storage, "bob", config) == []

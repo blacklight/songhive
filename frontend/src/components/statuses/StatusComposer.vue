@@ -242,7 +242,7 @@ const debouncedSuggestionFetch = useDebounce(
       const response =
         mode === "hashtag"
           ? await searchPreview(`#${query}`, ["tags"], 5)
-          : await searchPreview(query, ["users"], 5);
+          : await searchPreview(query, ["users"], 5, { remoteUsers: true });
       if (seq !== suggestionSeq) return;
       suggestionSections.value = response.sections;
       suggestionOpen.value = true;
@@ -267,7 +267,7 @@ function detectSuggestion() {
   }
   const caret = el.selectionStart ?? text.value.length;
   const before = text.value.slice(0, caret);
-  const mention = before.match(/(^|\s)@([A-Za-z0-9_.-]*)$/);
+  const mention = before.match(/(^|\s)@([A-Za-z0-9_.-]*(?:@[A-Za-z0-9.-]*)?)$/);
   const hashtag = before.match(/(^|\s)#([A-Za-z0-9_]*)$/);
   const match = mention ?? hashtag;
   if (!match) {

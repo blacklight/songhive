@@ -142,6 +142,14 @@
   WebSocket URLs carry no token — `StreamHandler` and `EventWebSocket` both
   accept the `access_token` cookie. Bearer auth and JSON token responses are
   kept for non-browser clients.
+- Mention completion for remote users goes through `GET /api/v1/search/` with
+  `remote_users=1`: the `users` section then merges cached remote actors via
+  `services.federation.search_remote_actors`, which queries pubby's
+  `federation_followers` and `federation_actor_cache` tables directly through
+  `storage.session_factory`/`storage.follower_model`/`storage.actor_cache_model`
+  (sync — call via `asyncio.to_thread`). Actors on the instance domain or
+  blocked domains are excluded, and matches carry a `user@domain` `name` that
+  `services.mentions` resolves through WebFinger at post time.
 - When type-checking the Tornado + FastAPI bootstrap in `songhive/app.py`, the
   bridge through `a2wsgi.ASGIMiddleware` and `tornado.wsgi.WSGIContainer` can
   trigger structural mismatches because `FastAPI.__call__` uses Starlette's

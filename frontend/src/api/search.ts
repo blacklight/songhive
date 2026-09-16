@@ -11,6 +11,7 @@ export function searchPreview(
   q: string,
   entities?: SearchEntity[],
   limit = 5,
+  options?: { remoteUsers?: boolean },
 ): Promise<SearchResponse> {
   const params: Record<string, string | number | boolean | undefined | null> = {
     q,
@@ -18,6 +19,9 @@ export function searchPreview(
   };
   if (entities && entities.length) {
     params.entities = entities.join(",");
+  }
+  if (options?.remoteUsers) {
+    params.remote_users = true;
   }
   return apiRequest<SearchResponse>("/search/", { query: params });
 }

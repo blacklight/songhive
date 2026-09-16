@@ -1,16 +1,95 @@
 """Tests for the aggregate /api/v1/search/ endpoint."""
 
-import pytest
+from datetime import datetime, timezone
 
+import pytest
+from fastapi.testclient import TestClient
+from pubby import Follower
+
+from songhive.api.app import create_app
+from songhive.api.deps import get_db
+from songhive.federation.storage import create_activitypub_storage
 from songhive.models._enums import Visibility
 from songhive.models.album import Album
 from songhive.models.artist import Artist
+from songhive.models.base import init_db
 from songhive.models.genre import Genre, GenreTrack
 from songhive.models.library import Library
 from songhive.models.playlist import Playlist
 from songhive.models.tag import Tag, TagTrack
 from songhive.models.track import Track
 from songhive.models.user import User
+
+BOB_ACTOR = "https://remote.example/users/bob"
+CAROL_ACTOR = "https://mastodon.example/@carol"
+
+BOB_DOC = {
+    "id": BOB_ACTOR,
+    "type": "Person",
+    "preferredUsername": "bob",
+    "name": "Bob Remote",
+    "url": "https://remote.example/@bob",
+    "inbox": "https://remote.example/users/bob/inbox",
+    "icon": {"type": "Image", "url": "https://remote.example/bob.png"},
+}
+
+CAROL_DOC = {
+    "id": CAROL_ACTOR,
+    "type": "Person",
+    "preferredUsername": "carol",
+    "name": "Carol Elsewhere",
+    "inbox": "https://mastodon.example/users/carol/inbox",
+}
+
+
+@pytest.fixture
+def fed_config(config):
+    """Federation-enabled copy of the test config."""
+    fed = config.model_copy(deep=True)
+    fed.federation.enabled = True
+    fed.federation.instance_domain = "music.example.com"
+    return fed
+
+
+@pytest.fixture
+def fed_app(fed_config, engine):
+    """Create a federation-enabled test application."""
+    init_db(engine=engine, force=True)
+    return create_app(fed_config)
+
+
+@pytest.fixture
+def fed_client(fed_app, db_session, fake_redis_server, monkeypatch):
+    """Test client bound to the federation-enabled app."""
+    from fakeredis.aioredis import FakeRedis
+
+    def _get_redis_client(_):
+        return FakeRedis(server=fake_redis_server, decode_responses=True)
+
+    monkeypatch.setattr("songhive.api.app.get_redis_client", _get_redis_client)
+
+    async def _db():
+        yield db_session
+
+    with TestClient(fed_app) as client:
+        client.app.dependency_overrides[get_db] = _db  # type: ignore
+        yield client
+        client.app.dependency_overrides.pop(get_db, None)  # type: ignore
+
+
+def _seed_remote_actors(fed_config):
+    """Store a remote follower and a cached actor in the federation tables."""
+    storage = create_activitypub_storage(fed_config.database.url)
+    storage.store_follower(
+        Follower(
+            actor_id=BOB_ACTOR,
+            inbox=f"{BOB_ACTOR}/inbox",
+            followed_at=datetime.now(timezone.utc),
+            actor_data=BOB_DOC,
+            target_actor_id="https://music.example.com/users/regular",
+        )
+    )
+    storage.cache_remote_actor(CAROL_ACTOR, CAROL_DOC, datetime.now(timezone.utc))
 
 
 async def _make_artist(session, name: str = "Test Artist") -> Artist:
@@ -392,3 +471,96 @@ async def test_search_hashtag_no_match_returns_empty_tags_section(client, db_ses
     assert [s["entity"] for s in data["sections"]] == ["tags"]
     assert data["sections"][0]["items"] == []
     assert data["sections"][0]["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_search_users_includes_remote_actors(fed_client, fed_config):
+    """With ``remote_users``, followers and cached actors appear as handles."""
+    _seed_remote_actors(fed_config)
+
+    response = fed_client.get("/api/v1/search?q=bob&entities=users&remote_users=true")
+    assert response.status_code == 200
+    data = response.json()
+    section = [s for s in data["sections"] if s["entity"] == "users"][0]
+    remote_items = [i for i in section["items"] if i["id"] == BOB_ACTOR]
+    assert len(remote_items) == 1
+    item = remote_items[0]
+    assert item["name"] == "bob@remote.example"
+    assert item["title"] == "Bob Remote"
+    assert item["subtitle"] == "@bob@remote.example"
+    assert item["image_url"] == "https://remote.example/bob.png"
+    assert item["url"] == "https://remote.example/@bob"
+
+    response = fed_client.get("/api/v1/search?q=carol&entities=users&remote_users=true")
+    assert response.status_code == 200
+    data = response.json()
+    names = [i["name"] for s in data["sections"] for i in s["items"]]
+    assert "carol@mastodon.example" in names
+
+
+@pytest.mark.asyncio
+async def test_search_users_remote_flag_off_excludes_remote(fed_client, fed_config):
+    """Without ``remote_users`` the users section stays local-only."""
+    _seed_remote_actors(fed_config)
+
+    response = fed_client.get("/api/v1/search?q=bob&entities=users")
+    assert response.status_code == 200
+    data = response.json()
+    names = [i["name"] for s in data["sections"] for i in s["items"]]
+    assert "bob@remote.example" not in names
+
+
+@pytest.mark.asyncio
+async def test_search_users_remote_disabled_without_federation(client, db_session):
+    """With federation disabled the flag is a no-op and nothing breaks."""
+    response = client.get("/api/v1/search?q=bob&entities=users&remote_users=true")
+    assert response.status_code == 200
+    data = response.json()
+    section = [s for s in data["sections"] if s["entity"] == "users"][0]
+    assert section["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_search_users_remote_narrows_by_domain(fed_client, fed_config):
+    """A ``user@domain`` query filters remote matches by actor domain."""
+    _seed_remote_actors(fed_config)
+
+    response = fed_client.get("/api/v1/search?q=bob%40mastodon&entities=users&remote_users=true")
+    assert response.status_code == 200
+    data = response.json()
+    names = [i["name"] for s in data["sections"] for i in s["items"]]
+    assert "bob@remote.example" not in names
+
+    response = fed_client.get("/api/v1/search?q=carol%40mastodon&entities=users&remote_users=true")
+    assert response.status_code == 200
+    data = response.json()
+    names = [i["name"] for s in data["sections"] for i in s["items"]]
+    assert "carol@mastodon.example" in names
+
+
+@pytest.mark.asyncio
+async def test_search_users_remote_excludes_local_and_blocked(fed_client, fed_config):
+    """Cached actors on the instance domain or blocked domains are skipped."""
+    fed_config.federation.blocked_instances = ["blocked.example"]
+    storage = create_activitypub_storage(fed_config.database.url)
+    storage.cache_remote_actor(
+        "https://music.example.com/users/regular",
+        {"id": "https://music.example.com/users/regular", "preferredUsername": "regular"},
+        datetime.now(timezone.utc),
+    )
+    storage.cache_remote_actor(
+        "https://blocked.example/users/eve",
+        {"id": "https://blocked.example/users/eve", "preferredUsername": "eve"},
+        datetime.now(timezone.utc),
+    )
+
+    response = fed_client.get("/api/v1/search?q=eve&entities=users&remote_users=true")
+    assert response.status_code == 200
+    names = [i["name"] for s in response.json()["sections"] for i in s["items"]]
+    assert "eve@blocked.example" not in names
+
+    response = fed_client.get("/api/v1/search?q=regular&entities=users&remote_users=true")
+    assert response.status_code == 200
+    items = [i for s in response.json()["sections"] for i in s["items"]]
+    # Only the local account matches — not its cached actor document.
+    assert all(i["id"] != "https://music.example.com/users/regular" for i in items)

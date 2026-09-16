@@ -8,8 +8,10 @@ thread when inside an async context.
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import timezone
 from typing import Iterable, Optional
+from urllib.parse import urlparse
 
 from pubby import Follower, collect_inboxes
 from pubby import resolve_actor_inbox as _pubby_resolve_actor_inbox
@@ -21,11 +23,13 @@ from pubby.crypto import (
 from pubby.moderation import extract_domain as _pubby_extract_domain
 from pubby.moderation import is_domain_blocked as _pubby_is_domain_blocked
 from pubby.moderation import normalize_domain as _pubby_normalize_domain
+from sqlalchemy import and_, or_
 
 from ..config import SonghiveConfig, get_default_user_agent
 from ..federation import get_actor_url
 from ..federation.storage import create_activitypub_storage
 from ..models import User
+from ._common import ilike_contains
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +165,173 @@ def count_followers_by_actor(storage) -> dict[str, int]:
         key = follower.target_actor_id or ""
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def _actor_doc_avatar_url(actor_doc: Optional[dict]) -> Optional[str]:
+    """Extract an avatar URL from a cached ActivityPub actor document."""
+    if not actor_doc:
+        return None
+    icon = actor_doc.get("icon")
+    if isinstance(icon, dict):
+        return icon.get("url")
+    if isinstance(icon, list):
+        for item in icon:
+            if isinstance(item, dict):
+                url = item.get("url")
+                if url:
+                    return url
+    if isinstance(icon, str):
+        return icon
+    return None
+
+
+def _actor_doc_display_name(actor_doc: Optional[dict]) -> Optional[str]:
+    """Extract a display name from a cached ActivityPub actor document."""
+    if not actor_doc:
+        return None
+    name = actor_doc.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return None
+
+
+def _actor_doc_username(actor_doc: Optional[dict], actor_url: str) -> str:
+    """Return the actor's ``preferredUsername``, else derive one from the URL."""
+    if actor_doc:
+        preferred = actor_doc.get("preferredUsername")
+        if isinstance(preferred, str) and preferred.strip():
+            return preferred.strip()
+    path = urlparse(actor_url).path.rstrip("/")
+    if not path:
+        return ""
+    return path.rsplit("/", 1)[-1].lstrip("@")
+
+
+def _actor_doc_profile_url(actor_doc: Optional[dict], actor_url: str) -> str:
+    """Return the actor's profile page URL, falling back to the actor id."""
+    url = (actor_doc or {}).get("url")
+    if isinstance(url, str) and url.startswith(("http://", "https://")):
+        return url
+    if isinstance(url, list):
+        for item in url:
+            if isinstance(item, dict):
+                href = item.get("href")
+                if isinstance(href, str) and href.startswith(("http://", "https://")):
+                    return href
+    return actor_url
+
+
+@dataclass(frozen=True)
+class RemoteActorMatch:
+    """A cached remote actor matched by :func:`search_remote_actors`."""
+
+    actor_url: str
+    username: str
+    domain: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    profile_url: Optional[str] = None
+    follower: bool = False
+
+    @property
+    def handle(self) -> str:
+        """The ``user@domain`` handle a mention resolves through."""
+        return f"{self.username}@{self.domain}"
+
+
+def _remote_actor_query(model, term: str, domain: str):
+    """Build the match predicate for a cached-actor table (actor URL + doc)."""
+    clauses = [
+        or_(
+            ilike_contains(model.actor_id, term),
+            ilike_contains(model.actor_data["preferredUsername"].as_string(), term),
+            ilike_contains(model.actor_data["name"].as_string(), term),
+        )
+    ]
+    if domain:
+        clauses.append(ilike_contains(model.actor_id, domain))
+    return and_(*clauses)
+
+
+def search_remote_actors(
+    storage,
+    query: str,
+    config: SonghiveConfig,
+) -> list[RemoteActorMatch]:
+    """
+    Return cached remote actors matching ``query``, best matches first.
+
+    Searches pubby's ``federation_actor_cache`` and ``federation_followers``
+    tables — both keyed by actor URL and carrying the actor document in a
+    JSON ``actor_data`` column — matching on ``preferredUsername``, ``name``
+    and the actor URL itself.  A ``user@domain`` query additionally narrows
+    on the actor URL's domain.
+
+    Actors on the local instance domain or on blocked domains are excluded.
+    Followers are preferred on duplicates and rank ahead of plain cache
+    entries at equal match quality.  This is a synchronous call — invoke it
+    through ``asyncio.to_thread`` from async code.
+    """
+    query = (query or "").strip().lstrip("@")
+    if not query or not config.federation.enabled:
+        return []
+    term, _, domain_part = query.partition("@")
+    domain_part = domain_part.lower()
+    local_domain = normalize_instance_domain(config.federation.instance_domain or "")
+
+    candidates: dict[str, RemoteActorMatch] = {}
+    session = storage.session_factory()
+    try:
+        # Followers first so a duplicate cache row cannot clobber the flag.
+        for model, is_follower in (
+            (storage.follower_model, True),
+            (storage.actor_cache_model, False),
+        ):
+            for row in session.query(model).filter(_remote_actor_query(model, term, domain_part)).all():
+                actor_id = row.actor_id
+                if (
+                    actor_id in candidates
+                    or not isinstance(actor_id, str)
+                    or not actor_id.startswith(("http://", "https://"))
+                ):
+                    continue
+                domain = extract_domain(actor_id)
+                if (
+                    not domain
+                    or domain == local_domain
+                    or (domain_part and domain_part not in domain)
+                    or is_domain_blocked(domain, config)
+                ):
+                    continue
+                actor_doc = row.actor_data if isinstance(row.actor_data, dict) else {}
+                username = _actor_doc_username(actor_doc, actor_id)
+                if not username:
+                    continue
+                candidates[actor_id] = RemoteActorMatch(
+                    actor_url=actor_id,
+                    username=username,
+                    domain=domain,
+                    display_name=_actor_doc_display_name(actor_doc),
+                    avatar_url=_actor_doc_avatar_url(actor_doc),
+                    profile_url=_actor_doc_profile_url(actor_doc, actor_id),
+                    follower=is_follower,
+                )
+    finally:
+        session.close()
+
+    def _rank(match: RemoteActorMatch) -> tuple:
+        username = match.username.lower()
+        display = (match.display_name or "").lower()
+        needle = term.lower()
+        if needle in (username, display):
+            score = 0
+        elif username.startswith(needle) or display.startswith(needle):
+            score = 1
+        else:
+            score = 2
+        return score, not match.follower, username, match.domain
+
+    return sorted(candidates.values(), key=_rank)
 
 
 def resolve_actor_inbox(

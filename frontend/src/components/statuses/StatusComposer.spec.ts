@@ -164,7 +164,9 @@ describe("StatusComposer", () => {
     vi.advanceTimersByTime(400);
     await flushPromises();
 
-    expect(searchPreview).toHaveBeenCalledWith("al", ["users"], 5);
+    expect(searchPreview).toHaveBeenCalledWith("al", ["users"], 5, {
+      remoteUsers: true,
+    });
     const item = wrapper.find(".search-suggestions__item");
     expect(item.exists()).toBe(true);
     await item.trigger("click");
@@ -172,6 +174,51 @@ describe("StatusComposer", () => {
 
     const textarea = wrapper.find("textarea").element as HTMLTextAreaElement;
     expect(textarea.value).toBe("hi @alice ");
+  });
+
+  it("inserts a full user@domain handle for remote user suggestions", async () => {
+    searchPreview.mockResolvedValue({
+      query: "al",
+      sections: [
+        {
+          entity: "users",
+          total: 1,
+          items: [
+            {
+              type: "user",
+              id: "https://remote.example/users/alice",
+              name: "alice@remote.example",
+              title: "Alice Remote",
+              subtitle: "@alice@remote.example",
+              url: "https://remote.example/users/alice",
+            },
+          ],
+        },
+      ],
+    });
+    const wrapper = mountComposer();
+    await typeText(wrapper, "hi @al");
+    vi.advanceTimersByTime(400);
+    await flushPromises();
+
+    const item = wrapper.find(".search-suggestions__item");
+    expect(item.exists()).toBe(true);
+    await item.trigger("click");
+    await flushPromises();
+
+    const textarea = wrapper.find("textarea").element as HTMLTextAreaElement;
+    expect(textarea.value).toBe("hi @alice@remote.example ");
+  });
+
+  it("keeps suggesting while typing the domain part of a mention", async () => {
+    const wrapper = mountComposer();
+    await typeText(wrapper, "hi @alice@re");
+    vi.advanceTimersByTime(400);
+    await flushPromises();
+
+    expect(searchPreview).toHaveBeenCalledWith("alice@re", ["users"], 5, {
+      remoteUsers: true,
+    });
   });
 
   it("autocompletes a hashtag after typing #", async () => {
