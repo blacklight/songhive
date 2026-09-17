@@ -86,6 +86,22 @@
   FastAPI.
 - Configuration priority: env vars (SONGHIVE_*) > CLI args > config.toml > defaults.
 - The `pubby` library provides ActivityPub federation (FastAPI adapter).
+- Every remote HTTP fetch on the Webmention path (incoming source parsing,
+  outgoing endpoint discovery, outgoing delivery, outgoing source reads)
+  goes through the library's guarded fetch
+  (`webmentions.handlers._fetch.fetch_guarded`, enabled via
+  `ssrf_protection=True` in `create_webmentions_handler`) — it
+  re-validates every redirect hop against non-public addresses and caps
+  the streamed body at `webmentions.discovery_max_bytes`. This requires a
+  `webmentions` release ≥ 0.1.26 — the param is silently swallowed on
+  older versions, leaving fetches unguarded. In `tasks/webmentions.py`,
+  `requests.RequestException` must keep propagating out of
+  `process_incoming_webmention` — swallowing it disables `autoretry_for`
+  and permanently drops mentions the sender believes were accepted.
+- `create_webmentions_handler` also sets `exclude_local_targets=True` —
+  the library then drops outgoing targets whose netloc matches the
+  instance's `base_urls`, so self-delivered Webmentions never leave the
+  mention pipeline that already handles them.
 - Tests use `pytest-asyncio` for async tests and `TestClient` for API tests.
 - Frontend is a Vue.js 3 + TypeScript SPA in `frontend/`; builds to
   `songhive/static/`. The Vite build also copies `swagger-ui-dist` into

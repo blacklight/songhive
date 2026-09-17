@@ -4,6 +4,7 @@ endpoint behavior, and outgoing delivery.
 """
 
 import asyncio
+import ipaddress
 from typing import Optional
 
 import pytest
@@ -461,6 +462,9 @@ class _FakeResponse:
         self.headers = headers or {"Content-Type": "text/html"}
         self.url = "https://blog.example/post/1"
         self.encoding = "utf-8"
+        has_location = any(k.lower() == "location" for k in self.headers)
+        self.is_redirect = has_location and status_code in (301, 302, 303, 307, 308)
+        self.is_permanent_redirect = has_location and status_code in (301, 308)
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -471,6 +475,24 @@ class _FakeResponse:
 
     def close(self):
         pass
+
+
+def _stub_dns(monkeypatch, mapping: Optional[dict] = None):
+    """Stub guarded-fetch DNS so test hosts resolve as public addresses.
+
+    IP-literal hosts resolve to themselves (as real DNS would), so a URL
+    like ``http://169.254.169.254/x`` exercises the private-address guard.
+    Other hosts map through ``mapping`` or default to a public IP.
+    """
+    mapping = mapping or {}
+
+    def fake_resolve(host):
+        try:
+            return {ipaddress.ip_address(host)}
+        except ValueError:
+            return {ipaddress.ip_address(mapping.get(host, "93.184.216.34"))}
+
+    monkeypatch.setattr("webmentions.handlers._fetch._resolve_ips", fake_resolve)
 
 
 @pytest.mark.asyncio
@@ -487,6 +509,7 @@ async def test_process_incoming_materializes_and_notifies(db_session, config, re
     source = "https://blog.example/post/1"
 
     monkeypatch.setattr("songhive.tasks.webmentions.load_config", lambda *a: config)
+    _stub_dns(monkeypatch)
     monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResponse(_source_html(target)))
 
     await asyncio.to_thread(process_incoming_webmention.apply, (), {"source": source, "target": target})
@@ -529,6 +552,7 @@ async def test_process_incoming_retracts_on_gone_source(db_session, config, regu
     source = "https://blog.example/post/1"
 
     monkeypatch.setattr("songhive.tasks.webmentions.load_config", lambda *a: config)
+    _stub_dns(monkeypatch)
     monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResponse(_source_html(target)))
     await asyncio.to_thread(process_incoming_webmention.apply, (), {"source": source, "target": target})
 
@@ -582,6 +606,7 @@ async def test_process_outgoing_discovers_and_delivers(db_session, config, regul
         return _FakeResponse(status_code=202)
 
     monkeypatch.setattr("songhive.tasks.webmentions.load_config", lambda *a: config)
+    _stub_dns(monkeypatch)
     monkeypatch.setattr(requests, "get", fake_get)
     monkeypatch.setattr(requests, "post", fake_post)
 
@@ -597,6 +622,53 @@ async def test_process_outgoing_discovers_and_delivers(db_session, config, regul
 
     await db_session.refresh(activity)
     assert activity.payload.get("webmentions_sent") is True
+
+
+@pytest.mark.asyncio
+async def test_process_outgoing_skips_local_targets(db_session, config, regular_user, monkeypatch):
+    """Targets on the instance domain are dropped before discovery/delivery."""
+    from songhive.services.activities import create_status
+    from songhive.tasks.webmentions import process_outgoing_webmentions
+
+    remote_target = "https://blog.example/post/1"
+    endpoint = "https://blog.example/webmention"
+
+    activity = await create_status(
+        db_session,
+        author=regular_user,
+        config=config,
+        status_text=f"See {remote_target} and https://{DOMAIN}/tracks/t1",
+    )
+    await db_session.commit()
+
+    monkeypatch.setattr("songhive.tasks.webmentions.load_config", lambda *a: config)
+    _stub_dns(monkeypatch)
+    posts = []
+    fetches = []
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda url, **kw: fetches.append(url)
+        or _FakeResponse(f'<html><head><link rel="webmention" href="{endpoint}" /></head></html>'),
+    )
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda url, data=None, **kw: posts.append((url, data)) or _FakeResponse(status_code=202),
+    )
+
+    await asyncio.to_thread(process_outgoing_webmentions.apply, (str(activity.id),))
+
+    assert posts == [
+        (
+            endpoint,
+            {
+                "source": f"https://{DOMAIN}/webmentions/source/{activity.id}",
+                "target": remote_target,
+            },
+        )
+    ]
+    assert fetches == [remote_target]
 
 
 # ---------------------------------------------------------------------------
@@ -645,3 +717,183 @@ async def test_quote_webmention_activity_marks_quotation_of(db_session, config, 
 
     quote = await quote_activity(db_session, activity=activity, author=other_user, config=config, status_text="my take")
     assert quote.payload[WEBMENTION_PAYLOAD_KEY] == {"property": "quotation-of", "target": mention.source}
+
+
+# ---------------------------------------------------------------------------
+# SSRF guard: private addresses, redirect hops, body cap, transient retries
+# ---------------------------------------------------------------------------
+
+
+async def _no_webmention_activities(db_session) -> list:
+    rows = (await db_session.execute(select(Activity))).scalars().all()
+    return [a for a in rows if a.activity_type == "webmention"]
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_blocks_private_ip_source(db_session, config, regular_user, monkeypatch):
+    """A source on a private/link-local/loopback address is rejected before any fetch."""
+    from songhive.tasks.webmentions import process_incoming_webmention
+
+    track = await _make_track(db_session, regular_user)
+    await db_session.commit()
+    target = f"https://{DOMAIN}/tracks/{track.id}"
+
+    monkeypatch.setattr("songhive.tasks.webmentions.load_config", lambda *a: config)
+    _stub_dns(monkeypatch)
+    fetches = []
+    monkeypatch.setattr(requests, "get", lambda *a, **k: fetches.append(a))
+
+    for source in (
+        "http://169.254.169.254/latest/meta-data",
+        "http://127.0.0.1:6379/",
+        "http://10.0.0.5/internal",
+    ):
+        await asyncio.to_thread(process_incoming_webmention.apply, (), {"source": source, "target": target})
+
+    assert fetches == []
+    db_session.expire_all()
+    assert await _no_webmention_activities(db_session) == []
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_blocks_redirect_to_private(db_session, config, regular_user, monkeypatch):
+    """A public-looking source that 302s into private space is rejected at the hop."""
+    from songhive.tasks.webmentions import process_incoming_webmention
+
+    track = await _make_track(db_session, regular_user)
+    await db_session.commit()
+    target = f"https://{DOMAIN}/tracks/{track.id}"
+    source = "https://blog.example/post/1"
+
+    monkeypatch.setattr("songhive.tasks.webmentions.load_config", lambda *a: config)
+    _stub_dns(monkeypatch)
+    fetches = []
+
+    def fake_get(url, **kwargs):
+        fetches.append(url)
+        return _FakeResponse("", 302, headers={"Location": "http://169.254.169.254/x"})
+
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    await asyncio.to_thread(process_incoming_webmention.apply, (), {"source": source, "target": target})
+
+    # The first hop is fetched; the redirect target is blocked before connect.
+    assert fetches == [source]
+    db_session.expire_all()
+    assert await _no_webmention_activities(db_session) == []
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_follows_validated_redirect(db_session, config, regular_user, monkeypatch):
+    """A redirect to another public host is followed and the mention materializes."""
+    from songhive.tasks.webmentions import process_incoming_webmention
+
+    track = await _make_track(db_session, regular_user)
+    await db_session.commit()
+    target = f"https://{DOMAIN}/tracks/{track.id}"
+    source = "https://blog.example/post/1"
+
+    monkeypatch.setattr("songhive.tasks.webmentions.load_config", lambda *a: config)
+    _stub_dns(monkeypatch)
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        if "blog.example" in url:
+            return _FakeResponse("", 302, headers={"Location": "https://cdn.example/post"})
+        return _FakeResponse(_source_html(target))
+
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    await asyncio.to_thread(process_incoming_webmention.apply, (), {"source": source, "target": target})
+
+    assert calls == [source, "https://cdn.example/post"]
+    db_session.expire_all()
+    activity = (
+        await db_session.execute(
+            select(Activity).where(Activity.source_id == webmention_activity_source_id(source, target))
+        )
+    ).scalar_one_or_none()
+    assert activity is not None
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_caps_source_body(db_session, config, regular_user, monkeypatch):
+    """A source body over ``discovery_max_bytes`` is rejected, not buffered."""
+    from songhive.tasks.webmentions import process_incoming_webmention
+
+    track = await _make_track(db_session, regular_user)
+    await db_session.commit()
+    target = f"https://{DOMAIN}/tracks/{track.id}"
+    source = "https://blog.example/post/1"
+
+    config.webmentions.discovery_max_bytes = 64
+    monkeypatch.setattr("songhive.tasks.webmentions.load_config", lambda *a: config)
+    _stub_dns(monkeypatch)
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda *a, **k: _FakeResponse("x" * 4096 + f'<a href="{target}">m</a>'),
+    )
+
+    await asyncio.to_thread(process_incoming_webmention.apply, (), {"source": source, "target": target})
+
+    db_session.expire_all()
+    assert await _no_webmention_activities(db_session) == []
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_retries_transient_fetch_errors(db_session, config, regular_user, monkeypatch):
+    """A fetch failure propagates out of the task so ``autoretry_for`` can retry.
+
+    Before the fix the catch-all swallowed ``requests.RequestException`` —
+    the sender already held a 202, so the mention was permanently lost.
+    """
+    from celery.exceptions import Retry
+
+    from songhive.tasks.webmentions import process_incoming_webmention
+
+    track = await _make_track(db_session, regular_user)
+    await db_session.commit()
+    target = f"https://{DOMAIN}/tracks/{track.id}"
+    source = "https://blog.example/post/1"
+
+    monkeypatch.setattr("songhive.tasks.webmentions.load_config", lambda *a: config)
+    _stub_dns(monkeypatch)
+
+    def boom(*a, **k):
+        raise requests.ConnectionError("connection refused")
+
+    monkeypatch.setattr(requests, "get", boom)
+
+    result = await asyncio.to_thread(process_incoming_webmention.apply, (), {"source": source, "target": target})
+
+    assert result.failed()
+    assert isinstance(result.result, (Retry, requests.ConnectionError))
+
+
+@pytest.mark.asyncio
+async def test_process_outgoing_skips_private_discovery_target(db_session, config, regular_user, monkeypatch):
+    """A status linking to a private address never reaches discovery or delivery."""
+    from songhive.services.activities import create_status
+    from songhive.tasks.webmentions import process_outgoing_webmentions
+
+    activity = await create_status(
+        db_session,
+        author=regular_user,
+        config=config,
+        status_text="check http://169.254.169.254/latest/meta-data",
+    )
+    await db_session.commit()
+
+    monkeypatch.setattr("songhive.tasks.webmentions.load_config", lambda *a: config)
+    _stub_dns(monkeypatch)
+    posts = []
+    fetches = []
+    monkeypatch.setattr(requests, "get", lambda *a, **k: fetches.append(a))
+    monkeypatch.setattr(requests, "post", lambda *a, **k: posts.append(a))
+
+    await asyncio.to_thread(process_outgoing_webmentions.apply, (str(activity.id),))
+
+    assert posts == []
+    assert fetches == []

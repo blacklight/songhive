@@ -374,14 +374,10 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
 
 def _setup_webmentions(app: FastAPI, config: SonghiveConfig):
     """Initialize Webmention storage and advertise the endpoint via Link headers."""
-    try:
-        from webmentions.server.adapters._common import append_link_header, webmention_link_header_value
+    from webmentions.server.adapters._common import append_link_header, webmention_link_header_value
 
-        from ..webmentions.service import webmention_endpoint_url
-        from ..webmentions.storage import create_webmentions_storage
-    except ImportError:
-        logger.error("Webmentions are enabled but the webmentions package is not installed")
-        return
+    from ..webmentions.service import webmention_endpoint_url
+    from ..webmentions.storage import create_webmentions_storage
 
     try:
         app.state.webmentions_storage = create_webmentions_storage(config.database.url)

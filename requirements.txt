@@ -34,7 +34,7 @@ musicbrainzngs>=0.7.1
 
 # Federation
 pubby>=0.3.9
-webmentions>=0.1.25
+webmentions>=0.1.27
 beautifulsoup4>=4.12
 
 # Markdown support

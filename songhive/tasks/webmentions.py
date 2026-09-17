@@ -19,7 +19,6 @@ import logging
 from typing import Any, List
 
 import requests
-
 from webmentions import ContentTextFormat, Webmention, WebmentionDirection, WebmentionException
 
 from ..config import load_config
@@ -104,6 +103,12 @@ def process_incoming_webmention(_, source: str, target: str) -> None:
     except WebmentionException as exc:
         logger.info("Rejected webmention %s -> %s: %s", source, target, exc.message)
         return
+    except requests.RequestException:
+        # Transient fetch failures (timeouts, 5xx, DNS) must propagate so
+        # ``autoretry_for`` engages — the sender already has its 202, so a
+        # swallowed error drops the mention permanently.
+        logger.warning("Transient fetch failure for webmention %s -> %s; scheduling retry", source, target)
+        raise
     except Exception:
         logger.exception("Failed to process webmention %s -> %s", source, target)
         return
