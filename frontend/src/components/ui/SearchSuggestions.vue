@@ -4,15 +4,22 @@ import { useI18n } from "vue-i18n";
 
 import type { SearchResultItem, SearchResultSection } from "@/api/search";
 
+import AppIcon from "./AppIcon.vue";
+
 export interface Props {
   sections: SearchResultSection[];
   loading: boolean;
   error: string | null;
+  /** Raw search term — drives the "See on the Fediverse" entry. */
+  query?: string;
+  /** Whether this caller may run explicit remote lookups. */
+  remote?: boolean;
 }
 
 const props = defineProps<Props>();
 const emit = defineEmits<{
   select: [item: SearchResultItem];
+  "remote-lookup": [query: string];
 }>();
 const { t } = useI18n();
 
@@ -21,6 +28,29 @@ const activeIndex = ref(-1);
 
 const flatItems = computed(() =>
   props.sections.flatMap((section) => section.items),
+);
+
+// Potentially federated queries: an ``https://`` URL or an ``@user@domain``
+// FQN. Bare ``user@domain`` (no leading ``@``) is too ambiguous — it reads as
+// an email address — so only the explicit fediverse handle form qualifies.
+const remoteQuery = computed(() => {
+  if (!props.remote) {
+    return null;
+  }
+  const term = (props.query ?? "").trim();
+  if (
+    /^https:\/\//i.test(term) ||
+    /^@[A-Za-z0-9_.~-]+@[A-Za-z0-9.-]+(?::\d+)?$/.test(term)
+  ) {
+    return term;
+  }
+  return null;
+});
+
+// The remote entry sits one slot past the last suggestion in keyboard order.
+const remoteIndex = computed(() => flatItems.value.length);
+const itemCount = computed(
+  () => flatItems.value.length + (remoteQuery.value ? 1 : 0),
 );
 
 const sectionOffsets = computed(() => {
@@ -37,9 +67,10 @@ const uid = useId();
 const optionIds = computed(() =>
   flatItems.value.map((_, index) => `search-suggestion-${uid}-${index}`),
 );
+const remoteOptionId = computed(() => `search-suggestion-${uid}-remote`);
 
 watch(
-  () => props.sections,
+  () => [props.sections, remoteQuery.value],
   () => {
     activeIndex.value = -1;
   },
@@ -60,7 +91,7 @@ function handleKeydown(event: KeyboardEvent): boolean {
   if (event.ctrlKey || event.metaKey || event.altKey) {
     return false;
   }
-  const count = flatItems.value.length;
+  const count = itemCount.value;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     if (count === 0) {
       return false;
@@ -77,7 +108,11 @@ function handleKeydown(event: KeyboardEvent): boolean {
   }
   if (event.key === "Enter" && activeIndex.value >= 0) {
     event.preventDefault();
-    emit("select", flatItems.value[activeIndex.value]);
+    if (activeIndex.value === remoteIndex.value && remoteQuery.value) {
+      emit("remote-lookup", remoteQuery.value);
+    } else {
+      emit("select", flatItems.value[activeIndex.value]);
+    }
     return true;
   }
   return false;
@@ -85,6 +120,9 @@ function handleKeydown(event: KeyboardEvent): boolean {
 
 /** Id of the highlighted option, for ``aria-activedescendant`` on the input. */
 function activeDescendantId(): string | undefined {
+  if (activeIndex.value === remoteIndex.value && remoteQuery.value) {
+    return remoteOptionId.value;
+  }
   return activeIndex.value >= 0
     ? optionIds.value[activeIndex.value]
     : undefined;
@@ -102,7 +140,7 @@ defineExpose({ handleKeydown, activeDescendantId });
       {{ t("search.error") }}
     </div>
     <div
-      v-else-if="props.sections.length === 0"
+      v-else-if="props.sections.length === 0 && !remoteQuery"
       class="search-suggestions__empty"
     >
       {{ t("search.noResults") }}
@@ -145,6 +183,34 @@ defineExpose({ handleKeydown, activeDescendantId });
             <span class="search-suggestions__title">{{ item.title }}</span>
             <span v-if="item.subtitle" class="search-suggestions__subtitle">
               {{ item.subtitle }}
+            </span>
+          </span>
+        </button>
+      </div>
+      <div
+        v-if="remoteQuery"
+        class="search-suggestions__section search-suggestions__section--remote"
+      >
+        <button
+          :id="remoteOptionId"
+          type="button"
+          class="search-suggestions__item"
+          :class="{
+            'search-suggestions__item--active': activeIndex === remoteIndex,
+          }"
+          role="option"
+          :aria-selected="activeIndex === remoteIndex"
+          @click="emit('remote-lookup', remoteQuery)"
+          @mouseenter="activeIndex = remoteIndex"
+        >
+          <span
+            class="search-suggestions__thumb search-suggestions__thumb--remote"
+          >
+            <AppIcon name="globe" />
+          </span>
+          <span class="search-suggestions__text">
+            <span class="search-suggestions__title">
+              {{ t("remote.seeOnFediverse", { resource: remoteQuery }) }}
             </span>
           </span>
         </button>
@@ -224,6 +290,14 @@ defineExpose({ handleKeydown, activeDescendantId });
   border-radius: var(--radius-sm);
   background: var(--color-surface-raised);
   overflow: hidden;
+}
+
+.search-suggestions__thumb--remote {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  font-size: 1.25rem;
 }
 
 .search-suggestions__thumb img {

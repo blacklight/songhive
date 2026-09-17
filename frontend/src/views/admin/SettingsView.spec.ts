@@ -101,4 +101,32 @@ describe("SettingsView", () => {
       true,
     );
   });
+
+  it("coerces a number setting on save", async () => {
+    vi.mocked(adminApi.listSettings).mockResolvedValue([
+      createSetting("fetch_timeout_seconds", 20, "number"),
+    ]);
+    vi.mocked(adminApi.updateSetting).mockResolvedValue(
+      createSetting("fetch_timeout_seconds", 30, "number"),
+    );
+
+    wrapper = mount(SettingsView, { global: { plugins: [i18n] } });
+    await flushPromises();
+
+    const input = wrapper.find('input[type="number"]');
+    expect((input.element as HTMLInputElement).value).toBe("20");
+    await input.setValue("30");
+    await flushPromises();
+
+    const saveButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("pages.admin.settings.save"));
+    await saveButton?.trigger("click");
+    await flushPromises();
+
+    expect(adminApi.updateSetting).toHaveBeenCalledWith(
+      "fetch_timeout_seconds",
+      30,
+    );
+  });
 });

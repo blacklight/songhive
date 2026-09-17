@@ -273,9 +273,9 @@ describe("ActivityCard", () => {
       content_type: "text/markdown",
     });
     const content = wrapper.find(".activity-card__content");
-    const bold = content.find(".activity-card__mark--bold");
-    const italic = content.find(".activity-card__mark--italic");
-    const code = content.find(".activity-card__mark--code");
+    const bold = content.find(".rich-content__mark--bold");
+    const italic = content.find(".rich-content__mark--italic");
+    const code = content.find(".rich-content__mark--code");
     expect(bold.text()).toBe("bold");
     expect(italic.text()).toBe("italic");
     expect(code.text()).toBe("mono");
@@ -292,10 +292,10 @@ describe("ActivityCard", () => {
       content_type: "text/markdown",
     });
     const content = wrapper.find(".activity-card__content");
-    const mention = content.find(".activity-card__mention");
+    const mention = content.find(".rich-content__mention");
     const link = content.find('a[href="https://remote.example/p"]');
-    expect(mention.classes()).toContain("activity-card__mark--bold");
-    expect(link.classes()).toContain("activity-card__mark--bold");
+    expect(mention.classes()).toContain("rich-content__mark--bold");
+    expect(link.classes()).toContain("rich-content__mark--bold");
   });
 
   it("shows reply quote boost and like actions for the authenticated owner", () => {

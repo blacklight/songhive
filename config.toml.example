@@ -66,6 +66,10 @@ instance_description = "A federated music sharing service"
 allowed_instances = []
 blocked_instances = []
 
+# Timeout (seconds) for each outbound remote fetch — WebFinger resolution,
+# actor and object dereferencing. Applied per request hop.
+# fetch_timeout_seconds = 20
+
 # Examples:
 # allowed_instances = ["good.example", "friend.example"]
 # blocked_instances = ["evil.example", "spammers.example"]

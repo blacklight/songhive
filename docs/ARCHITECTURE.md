@@ -106,6 +106,7 @@ songhive/
 │   │   ├── share.py        # Public token resolver (redirects + sets cookie)
 │   │   ├── reports.py      # Content moderation reports + admin review
 │   │   ├── federation.py   # ActivityPub object endpoints (tracks, objects) + WebFinger
+│   │   ├── remote.py       # Explicit remote lookup/dereference + cached remote objects
 │   │   ├── admin.py        # Admin endpoints (settings, stats, user management)
 │   │   ├── external_libraries.py # User external library CRUD, sync, tracks
 │   │   └── admin_external_libraries.py # Admin external library management
@@ -125,6 +126,7 @@ songhive/
 │   ├── _enums.py           # Visibility enum (private / mentioned / local / followers / public)
 │   ├── activity.py         # Activity, ActivityMention, ActivityTarget (federation interaction layer)
 │   ├── preview_card.py     # PreviewCard — per-URL OpenGraph/<title>/domain card cache
+│   ├── remote_object.py    # RemoteObject — cached remote AP objects + normalized fields
 │   ├── user.py             # User (roles: user / moderator / admin; federation fields)
 │   ├── user_link.py        # Profile links (validated URL list)
 │   ├── invite.py           # Invite codes (max_uses, expiry)
@@ -161,6 +163,7 @@ songhive/
 │   ├── genres.py           # Genre validation, association and listing
 │   ├── import_.py          # Import pipeline orchestration
 │   ├── mentions.py         # @handle extraction, local/WebFinger resolution, safe HTML rendering
+│   ├── remote_content.py   # Remote lookup parser, actor/object dereference + cache, cached search
 │   ├── metadata.py         # Tag extraction coordination
 │   ├── music.py            # Music library helpers
 │   ├── musicbrainz.py      # MusicBrainz + Cover Art Archive enrichment (async httpx)
@@ -181,6 +184,7 @@ songhive/
 │   └── types.py            # Adapter dataclasses (ItemRef, TrackMetadata, etc.)
 ├── federation/             # ActivityPub per-user federation
 │   ├── _common.py          # URL builders
+│   ├── fetch.py            # SSRF-guarded remote fetch (DNS/IP checks, redirect revalidation)
 │   ├── actors.py           # Actor document generation, federation storage helpers
 │   ├── activities.py       # Activity creation (Create, Update, Delete, etc.)
 │   ├── incoming.py         # Materialize inbound remote replies into Activity rows
@@ -251,7 +255,7 @@ from songhive.streaming.handler import StreamHandler
 
 fastapi_app = create_app(config)
 wsgi_app = ASGIMiddleware(fastapi_app)
-container = WSGIContainer(wsgi_app)
+container = WSGIContainer(wsgi_app, executor=ThreadPoolExecutor(...))
 
 tornado_app = Application([
     (r"/ws/events", EventWebSocket),
@@ -263,6 +267,14 @@ tornado_app = Application([
 server = HTTPServer(tornado_app)
 server.listen(config.server.port)
 ```
+
+> **Note:** `WSGIContainer` must be given an explicit `ThreadPoolExecutor`.
+> Without one (Tornado < 7 default) the WSGI app runs on the Tornado event
+> loop thread, serializing every request — and any server-side remote fetch
+> that triggers a synchronous call-back to this instance (e.g. a remote
+> ActivityPub server resolving our `keyId` for HTTP signature verification)
+> deadlocks, since the inbound request can never be served while the loop is
+> busy inside the outbound lookup.
 
 ---
 
@@ -287,7 +299,7 @@ these subsections:
 | `redis`        | url                                                           |
 | `celery`       | broker_url, result_backend, cleanup_orphaned_files_schedule   |
 | `storage`      | backend (local/s3), local_path, s3_*, cdn_prefix, max_upload_size |
-| `federation`   | enabled, instance_domain, instance_name, contact_name/contact_email/contact_url, private_key_path, allow/block lists |
+| `federation`   | enabled, instance_domain, instance_name, contact_name/contact_email/contact_url, private_key_path, allow/block lists, remote_search_access, fetch_timeout_seconds |
 | `auth`         | registration_mode, secret_key, token TTLs, rate_limit, trusted_proxy_hops, cookie_secure, cookie_samesite, cookie_domain |
 | `email`        | smtp_host, smtp_port, smtp_user, from_address, tls settings   |
 | `musicbrainz`  | enabled, user_agent, cover_art, artist_image settings       |
@@ -363,7 +375,8 @@ The `mentioned` and `followers` levels exist for the activities layer
 `reply`, `quote`, `mention`, `update`, `delete`, `webmention`) attached to an
 entity through `(entity_type, entity_id)` — where `entity_type` is one of
 `track`, `album`, `artist`, `playlist`, `library`, `user` (the `user` entity
-hosts standalone statuses posted through `POST /api/v1/statuses`). Each row
+hosts standalone statuses posted through `POST /api/v1/statuses`), `remote`
+(remote objects dereferenced on demand — see below). Each row
 tracks its origin via `source_type` (`local` or a remote source),
 `source_actor`, and `source_id` (unique per source), with `local_object_id`
 as an optional canonical local identifier. Activities support threading
@@ -1473,6 +1486,59 @@ a `Mention` tag with `inReplyTo`/quote fields set to the remote
 - `tasks/federation.py`'s `deliver_activity` drops outbound deliveries to
   blocked domains before signing.
 
+**Remote discovery (explicit lookup):**
+
+Songhive supports explicit, bounded lookup of remote actors, activities, and
+resources — without crawling remote timelines or indexing the fediverse.
+
+- `services/remote_content.py` classifies lookup input (`@user@domain`
+  handles, actor/profile URLs, object/activity URLs, Songhive-style
+  `/tracks/{id}` resource URLs) and enforces the `remote_search_access`
+  policy (`disabled`/`authenticated`/`public`, default `authenticated`,
+  editable at runtime by admins) plus the federation domain allow/block
+  lists before any network access. Local-domain inputs never hit the
+  network: `resolve_local_target` maps them straight to their SPA route
+  (`/{kind}/{id}`, `/@{user}`, `/activities/{id}`; object permalinks
+  resolve through `Track.federation_object_id` /
+  `Activity.local_object_id`).
+- All remote dereferencing goes through `federation/fetch.py`'s
+  `guarded_fetch`: only `http(s)` URLs, DNS answers restricted to globally
+  routable addresses, every redirect target revalidated (max 3 hops),
+  bodies capped at 1 MiB, ActivityPub content types required, 404/410
+  mapped to "gone". Each outbound request hop is bounded by
+  `federation.fetch_timeout_seconds` (default 20s, 1–300;
+  `SONGHIVE_FEDERATION__FETCH_TIMEOUT_SECONDS`, also admin-editable at
+  runtime). When federation keys exist, each hop is signed with the
+  instance actor key (HTTP signatures are regenerated per hop).
+- Remote actors resolve through WebFinger and are cached in pubby's
+  `federation_actor_cache` — a fetch-on-miss cache with freshness checks
+  and tombstone markers for gone actors.
+- Remote objects are cached in the `remote_objects` table (canonical URL,
+  activity URL, domain, type, normalized resource kind, denormalized
+  name/summary/content/media URLs, ETag/Last-Modified, content hash,
+  `unavailable_at` tombstone). `Create`/`Announce`/`Update`/`Like`
+  wrappers are unwrapped, `attributedTo` is validated against the
+  publishing actor, and `Delete`/`Tombstone` documents mark the cached
+  row unavailable instead of deleting it.
+- Content objects materialize as `Activity` rows with
+  `entity_type="remote"` pointing at their `RemoteObject` row and
+  `source_type="remote"`/`source_id=<canonical URL>`; bare resource
+  documents (e.g. a dereferenced `Audio` track) are cached but never
+  become feed entries. Reply/quote parents resolve only against
+  already-cached rows — remote threads are never fetched recursively.
+- Routes: `GET /api/v1/remote/lookup` (explicit lookup → internal URL),
+  `GET /api/v1/remote/actors/{handle}` (+ `/activities` for cached
+  posts), `GET /api/v1/remote/objects/{id}` (`refresh` re-dereferences
+  the canonical URL), and `GET /api/v1/remote/{kind}/{id}` for cached
+  remote resources. Internal SPA URLs are `/@user@domain`,
+  `/activities/@user@domain/{remote_object_id}`, and
+  `/remote/{kind}/{id}` — remote URLs are never used as navigation
+  targets.
+- Aggregate search gains a cached-only `remote` section (`entities=remote`
+  or the `include_remote` flag) that never performs network access, plus
+  a `remote_available` flag telling the UI whether the caller may run an
+  explicit lookup.
+
 ---
 
 ## Content Moderation
@@ -1881,7 +1947,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
 | `frontend/src/components/player/` | Persistent player bar (`PlayerBar`, `NowPlaying`, `QueuePanel`, `VolumeControl`) mounted in `AppLayout` so playback survives route changes, backed by `stores/player.ts` and the singleton `player/engine.ts` (dual `HTMLAudioElement` primary/preload). `QueueTrack` extends `TrackResponse` with `stream_url` — a direct media URL used instead of `/api/v1/stream/{id}` for audio without a local track row — and `remote`, which suppresses library links and listen-history reporting |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
-| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, `/settings` for the authenticated user, `UserProfileView` for `/@{username}`, `UsersDirectoryView` for `/users`, `SearchView` for the public `/search` page, plus 403/404 and placeholder views). `SearchView` renders grouped, independently sortable and paginated sections for every searchable entity via `useSearchSections`; the shared `SearchBar` supports an optional autocomplete mode backed by the aggregate `/api/v1/search/` endpoint, with `SearchSuggestions` offering arrow-key navigation (Enter picks the highlighted item) via an exposed `handleKeydown` hook the controlling input forwards to. `UserProfileView` renders user bios through the `RichText` component, which linkifies hashtags, mentions and URLs; library, playlist, album, and track detail views render the owner through the `UserLink` component |
+| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, `/settings` for the authenticated user, `UserProfileView` for `/@{username}`, `UsersDirectoryView` for `/users`, `SearchView` for the public `/search` page, plus 403/404 and placeholder views). `SearchView` renders grouped, independently sortable and paginated sections for every searchable entity via `useSearchSections`; the shared `SearchBar` supports an optional autocomplete mode backed by the aggregate `/api/v1/search/` endpoint, with `SearchSuggestions` offering arrow-key navigation (Enter picks the highlighted item) via an exposed `handleKeydown` hook the controlling input forwards to. When the caller passes `remote` (the `remote_available` flag from the search response) and the query looks federated — an `https://` URL or an `@user@domain` FQN — `SearchSuggestions` appends a "See on the Fediverse" entry that emits `remote-lookup`; `SearchView` routes it to `/remote/lookup`. `UserProfileView` renders user bios through the `RichText` component, which linkifies hashtags, mentions and URLs; library, playlist, album, and track detail views render the owner through the `UserLink` component |
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |

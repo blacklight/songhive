@@ -11,6 +11,7 @@ import AppModal from "@/components/feedback/AppModal.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import RichText from "@/components/RichText.vue";
 import StatusComposer from "@/components/statuses/StatusComposer.vue";
+import RemoteProfileView from "@/views/RemoteProfileView.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useInstanceStore } from "@/stores/instance";
 import { useToastStore } from "@/stores/toast";
@@ -34,6 +35,9 @@ const instanceDomain = computed(() => {
 });
 
 const username = computed(() => String(route.params.username));
+// ``user@domain`` handles route here too — remote actors are resolved
+// through the remote lookup API and rendered by RemoteProfileView.
+const isRemoteHandle = computed(() => username.value.includes("@"));
 const profile = computed<PublicUserResponse | null>(() => data.value);
 
 // The compose button only makes sense on one's own profile — statuses are
@@ -92,6 +96,12 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 async function loadProfile() {
+  if (isRemoteHandle.value) {
+    // RemoteProfileView loads the actor itself.
+    loading.value = false;
+    error.value = null;
+    return;
+  }
   loading.value = true;
   error.value = null;
   try {
@@ -119,7 +129,8 @@ watch(username, loadProfile);
 </script>
 
 <template>
-  <div v-if="loading" class="user-profile">
+  <RemoteProfileView v-if="isRemoteHandle" :handle="username" />
+  <div v-else-if="loading" class="user-profile">
     <SkeletonLoader variant="card" />
   </div>
   <div v-else-if="error" class="user-profile__error" role="alert">

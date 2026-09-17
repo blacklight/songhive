@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- `server`: Fixed single-flight request handling under Tornado — the
+  `WSGIContainer` bridging FastAPI via `a2wsgi` now runs on an explicit
+  `ThreadPoolExecutor` instead of the Tornado event-loop thread. The
+  previous setup serialized all API requests and deadlocked outbound
+  signed federation fetches: a remote instance resolving our `keyId`
+  (e.g. during actor lookup) could never be served its fetch-back while
+  the loop was busy inside the triggering request, so lookups of remote
+  actors/objects on instances that hadn't cached our key timed out
+  unconditionally — and stalled every other request meanwhile.
+- `federation`: Explicit remote content discovery — look up remote actors
+  (`@user@domain`), activities and resources by handle or URL from the
+  search page. Lookups are dereferenced through a new SSRF-guarded fetcher
+  (`federation/fetch.py`: scheme/IP/DNS checks, per-hop redirect
+  revalidation, 1 MiB body cap, per-hop HTTP signatures), filtered by the
+  instance allow/block lists, and gated by the new `remote_search_access`
+  setting (`disabled`/`authenticated`/`public`, default `authenticated`,
+  admin-editable). Remote objects cache in the new `remote_objects` table
+  with tombstones for 404/410/Delete; content objects materialize as
+  `entity_type="remote"` activities renderable through the existing
+  activity views and interactions. New `/api/v1/remote/*` endpoints
+  (`lookup`, `actors/{handle}`, `actors/{handle}/activities`,
+  `objects/{id}`, `{kind}/{id}`) and SPA routes (`/@user@domain`,
+  `/activities/@user@domain/{id}`, `/remote/{kind}/{id}`); aggregate
+  search surfaces a cached-only `remote` section plus a
+  `remote_available` flag — it never triggers network fetches. For
+  `https://` URLs and `@user@domain` handles the search-bar suggestions
+  offer a "See … on the Fediverse" entry that runs the explicit lookup.
+  Local-domain inputs (`https://instance/…` URLs, `@user@local` handles)
+  resolve straight to their SPA route — object permalinks
+  (`/users/{u}/objects|statuses/{id}`) map through the local track and
+  activity tables — instead of being rejected.
+- `federation`: Remote fetch timeout raised from 10s to 20s and made
+  configurable via `federation.fetch_timeout_seconds` (env
+  `SONGHIVE_FEDERATION__FETCH_TIMEOUT_SECONDS`, `config.toml`, or the
+  admin settings UI; 1–300s, applied per outbound request hop to
+  WebFinger, actor and object dereferencing).
 - `federation`: Per-user follower approval policy (`accept`, `manual`,
   `reject`; default `accept`), configurable from `/settings` and PATCHed
   via `followers_approval` on `/api/v1/users/me`. `manual` holds incoming

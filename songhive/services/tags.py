@@ -28,6 +28,7 @@ from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
 from ..models.playlist import Playlist
+from ..models.remote_object import RemoteObject
 from ..models.tag import (
     Tag,
     TagAlbum,
@@ -93,6 +94,7 @@ _ACTIVITY_ENTITY_MODELS: dict[str, Type] = {
     "playlist": Playlist,
     "library": Library,
     "user": User,
+    "remote": RemoteObject,
 }
 
 # Public set of item types returned by the tag listing APIs.
@@ -200,6 +202,12 @@ def _entity_access_predicate(
     if item_type == "user":
         # Active user profiles are public containers for standalone statuses.
         return model.is_active
+    if item_type == "remote":
+        # Public remote objects are visible to everyone; non-public cached
+        # objects (inbox-delivered) only to authenticated users.
+        if user is None:
+            return model.visibility == "public"
+        return true()
     return _list_access_predicate(model, user, item_type)
 
 

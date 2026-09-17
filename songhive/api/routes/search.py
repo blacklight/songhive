@@ -12,7 +12,7 @@ from ...config.schema import SonghiveConfig
 from ...federation.actors import get_federation_storage
 from ...models.user import User
 from ...services import federation as federation_service
-from ...services import music
+from ...services import music, remote_content
 from ...services.auth import list_public_users
 from ...services.genres import list_genres
 from ...services.storage import StorageService
@@ -30,6 +30,7 @@ SearchEntity = Literal[
     "libraries",
     "tags",
     "genres",
+    "remote",
 ]
 
 _CANONICAL_ORDER: List[SearchEntity] = [
@@ -41,6 +42,7 @@ _CANONICAL_ORDER: List[SearchEntity] = [
     "users",
     "tags",
     "genres",
+    "remote",
 ]
 
 router = APIRouter(prefix="/search")
@@ -77,6 +79,9 @@ class SearchResponse(BaseModel):
 
     query: str
     sections: List[SearchResultSection]
+    # Whether this caller may run explicit remote lookups — the UI offers
+    # the "search remotely" action only when true.
+    remote_available: bool = False
 
 
 def _parse_entities(value: Optional[str]) -> List[SearchEntity]:
@@ -388,6 +393,40 @@ async def _genre_section(
     )
 
 
+async def _remote_section(
+    db: AsyncSession,
+    term: str,
+    limit: int,
+    user: Optional[User] = None,
+    config: Optional[SonghiveConfig] = None,
+    **_,
+) -> SearchResultSection:
+    """
+    Match cached remote objects — never fetches remotely.
+
+    Rows surface only when the ``remote_search_access`` policy lets this
+    caller perform remote lookups; items carry internal ``/remote/…`` and
+    ``/activities/@user@domain/…`` routes, never the remote URL itself.
+    """
+    if config is None or not remote_content.remote_lookup_allowed(user, config):
+        return SearchResultSection(entity="remote", total=0, items=[])
+
+    rows = await remote_content.search_cached_remote_objects(db, config, term, user=user, limit=limit)
+    items = [
+        SearchResultItem(
+            type=row.resource_type or "remote_object",
+            id=str(row.id),
+            name=row.name or row.domain,
+            title=row.name or row.domain,
+            subtitle=f"{remote_content.actor_handle_from_url(row.actor_url)} · {row.domain}",
+            image_url=row.image_url,
+            url=remote_content.remote_object_page_url(row),
+        )
+        for row in rows
+    ]
+    return SearchResultSection(entity="remote", total=len(items), items=items)
+
+
 _SECTION_FETCHERS = {
     "users": _user_section,
     "tracks": _track_section,
@@ -397,6 +436,7 @@ _SECTION_FETCHERS = {
     "libraries": _library_section,
     "tags": _tag_section,
     "genres": _genre_section,
+    "remote": _remote_section,
 }
 
 
@@ -408,6 +448,10 @@ async def search(
     remote_users: bool = Query(
         False,
         description="Also match cached remote actors (followers, actor cache) in the users section",
+    ),
+    include_remote: bool = Query(
+        True,
+        description="Include the cached remote objects section (never triggers remote fetches)",
     ),
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
@@ -424,6 +468,12 @@ async def search(
     With ``remote_users`` the users section additionally lists remote
     ActivityPub actors cached on the instance — followers and resolved actor
     documents — so mention completion can offer ``user@domain`` handles.
+
+    The ``remote`` section matches only *cached* remote objects — it never
+    performs network fetches, and it is empty when the
+    ``remote_search_access`` policy denies remote lookups to this caller.
+    ``remote_available`` reports whether the caller may run explicit remote
+    lookups at all (via ``/remote/lookup``).
     """
     term = (q or "").strip()
     hashtag = term.startswith("#")
@@ -443,6 +493,8 @@ async def search(
         return SearchResponse(query=term, sections=[])
 
     selected = _parse_entities(entities)
+    if not include_remote:
+        selected = [entity for entity in selected if entity != "remote"]
     sections: List[SearchResultSection] = []
     for entity in selected:
         sections.append(
@@ -456,4 +508,8 @@ async def search(
                 remote_users=remote_users,
             )
         )
-    return SearchResponse(query=term, sections=sections)
+    return SearchResponse(
+        query=term,
+        sections=sections,
+        remote_available=remote_content.remote_lookup_allowed(user, config),
+    )

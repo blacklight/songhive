@@ -32,6 +32,17 @@ ALLOWED_SETTINGS: dict[str, dict[str, Any]] = {
         "default": "open",
     },
     "federation_enabled": {"type": "bool", "default": True},
+    "remote_search_access": {
+        "type": "enum",
+        "choices": ["disabled", "authenticated", "public"],
+        "default": "authenticated",
+    },
+    "fetch_timeout_seconds": {
+        "type": "number",
+        "default": 20.0,
+        "min": 1,
+        "max": 300,
+    },
     "preview_cards_enabled": {
         "type": "bool",
         "default": True,
@@ -73,6 +84,11 @@ def _validate_value(key: str, value: Any) -> None:
         raise SettingError(f"Setting {key!r} must be a boolean")
     if value_type == "enum" and value not in meta["choices"]:
         raise SettingError(f"Setting {key!r} must be one of {meta['choices']!r}")
+    if value_type == "number":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise SettingError(f"Setting {key!r} must be a number")
+        if value < meta["min"] or value > meta["max"]:
+            raise SettingError(f"Setting {key!r} must be between {meta['min']} and {meta['max']}")
 
 
 async def get_setting(
@@ -192,6 +208,18 @@ async def apply_settings_overrides(
         fed_overrides["contact_url"] = settings["instance_contact_url"]
     if "federation_enabled" in settings:
         fed_overrides["enabled"] = settings["federation_enabled"]
+    if "remote_search_access" in settings:
+        raw_access = settings["remote_search_access"]
+        if raw_access in ("disabled", "authenticated", "public"):
+            fed_overrides["remote_search_access"] = raw_access
+        else:
+            logger.warning("Ignoring invalid remote_search_access setting: %r", raw_access)
+    if "fetch_timeout_seconds" in settings:
+        raw_timeout = settings["fetch_timeout_seconds"]
+        if isinstance(raw_timeout, (int, float)) and not isinstance(raw_timeout, bool) and 1 <= raw_timeout <= 300:
+            fed_overrides["fetch_timeout_seconds"] = float(raw_timeout)
+        else:
+            logger.warning("Ignoring invalid fetch_timeout_seconds setting: %r", raw_timeout)
 
     auth_overrides: dict[str, Any] = {}
     if "registration_mode" in settings:

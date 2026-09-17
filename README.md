@@ -59,6 +59,7 @@ federating with other instances (including Mastodon) via ActivityPub.
 - **Streaming**: Audio streaming with on-the-fly transcoding (MP3, OGG, FLAC, AAC, Opus)
 - **Metadata Enrichment**: Fetch metadata from external services
 - **Federation**: ActivityPub support via [pubby](https://github.com/blacklight/pubby) — federate with Mastodon and other AP-compatible services
+- **Remote discovery**: Explicit lookup of remote actors, posts and resources by handle or URL — SSRF-guarded, domain-moderated, cached, and gated by a per-instance access policy
 - **Playlists & Radios**: Create playlists and dynamic radio stations
 - **Multi-user**: User registration, profiles, and admin management
 - **OAuth2 Provider**: Third-party app authorization

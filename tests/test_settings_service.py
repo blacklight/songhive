@@ -51,6 +51,22 @@ async def test_validate_value_valid():
     settings_service._validate_value("instance_name", "Songhive")
     settings_service._validate_value("federation_enabled", True)
     settings_service._validate_value("registration_mode", "open")
+    settings_service._validate_value("fetch_timeout_seconds", 30)
+
+
+@pytest.mark.asyncio
+async def test_validate_value_number():
+    """_validate_value enforces number type and range."""
+    with pytest.raises(settings_service.SettingError):
+        settings_service._validate_value("fetch_timeout_seconds", "30")
+    with pytest.raises(settings_service.SettingError):
+        settings_service._validate_value("fetch_timeout_seconds", True)
+    with pytest.raises(settings_service.SettingError):
+        settings_service._validate_value("fetch_timeout_seconds", 0)
+    with pytest.raises(settings_service.SettingError):
+        settings_service._validate_value("fetch_timeout_seconds", 999)
+    settings_service._validate_value("fetch_timeout_seconds", 1)
+    settings_service._validate_value("fetch_timeout_seconds", 300)
 
 
 @pytest.mark.asyncio
@@ -188,6 +204,30 @@ async def test_apply_settings_overrides(db_session):
     assert updated.federation.contact_url == "https://example.com/jane"
     assert updated.federation.enabled is False
     assert updated.auth.registration_mode == RegistrationMode.CLOSED
+
+
+@pytest.mark.asyncio
+async def test_apply_settings_overrides_fetch_timeout(db_session):
+    """The fetch_timeout_seconds setting overlays federation config."""
+    db_session.add(Setting(key="fetch_timeout_seconds", value=json.dumps(45)))
+    await db_session.flush()
+
+    base = SonghiveConfig(auth={"secret_key": "a" * 32})
+    updated = await settings_service.apply_settings_overrides(db_session, base)
+    assert updated.federation.fetch_timeout_seconds == 45.0
+
+
+@pytest.mark.asyncio
+async def test_apply_settings_overrides_invalid_fetch_timeout(db_session, caplog):
+    """An out-of-range fetch_timeout_seconds setting is ignored with a warning."""
+    db_session.add(Setting(key="fetch_timeout_seconds", value=json.dumps(0)))
+    await db_session.flush()
+
+    base = SonghiveConfig(auth={"secret_key": "a" * 32})
+    with caplog.at_level(logging.WARNING, logger="songhive.services.settings"):
+        updated = await settings_service.apply_settings_overrides(db_session, base)
+    assert updated.federation.fetch_timeout_seconds == 20.0
+    assert "invalid fetch_timeout_seconds" in caplog.text.lower()
 
 
 @pytest.mark.asyncio

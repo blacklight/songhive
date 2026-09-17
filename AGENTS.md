@@ -75,6 +75,12 @@
   evaluated once and reused intentionally.
 - The backend uses FastAPI (ASGI) mounted inside Tornado via `a2wsgi`
   (ASGI-to-WSGI bridge). Falls back to uvicorn if `a2wsgi` is not available.
+  The `WSGIContainer` is constructed with an explicit `ThreadPoolExecutor` —
+  never drop it: without an executor (Tornado < 7 default) the WSGI app runs
+  on the Tornado event-loop thread, serializing all requests and deadlocking
+  any outbound signed federation fetch whose remote resolves our `keyId`
+  back to this instance (the fetch-back can never be served while the loop
+  is busy inside the triggering request).
 - Tornado handles WebSocket connections (`/ws/events`) and audio streaming
   (`/api/v1/stream/{track_id}`) natively; all other routes fall through to
   FastAPI.

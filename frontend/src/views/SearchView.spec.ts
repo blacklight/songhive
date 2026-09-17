@@ -47,6 +47,46 @@ function makeFetch(total: number, body: unknown[] = []) {
   });
 }
 
+function makeRemoteFetch(options: {
+  remoteAvailable: boolean;
+  remoteItems?: unknown[];
+  lookup?: unknown;
+  lookupStatus?: number;
+}) {
+  return vi.fn().mockImplementation((url: string) => {
+    if (url.includes("/remote/lookup")) {
+      if (options.lookupStatus && options.lookupStatus !== 200) {
+        return Promise.resolve({
+          status: options.lookupStatus,
+          ok: false,
+          text: () => Promise.resolve(JSON.stringify({ detail: "nope" })),
+          headers: new Headers(),
+        });
+      }
+      return Promise.resolve(
+        makeResponse(
+          options.lookup ?? {
+            kind: "actor",
+            url: "/@alice@remote.example",
+            actor: { handle: "alice@remote.example" },
+          },
+        ),
+      );
+    }
+    if (url.includes("/search/")) {
+      const items = options.remoteItems ?? [];
+      return Promise.resolve(
+        makeResponse({
+          query: "q",
+          remote_available: options.remoteAvailable,
+          sections: [{ entity: "remote", total: items.length, items }],
+        }),
+      );
+    }
+    return Promise.resolve(makeResponse([], { "X-Total-Count": "0" }));
+  });
+}
+
 async function mountView(query: Record<string, string> = {}) {
   const router = createRouter({
     history: createMemoryHistory(),
@@ -156,5 +196,64 @@ describe("SearchView", () => {
       "tracks",
       "albums",
     ]);
+  });
+
+  it("enables the fediverse suggestion entry when remote lookup is allowed", async () => {
+    vi.stubGlobal("fetch", makeRemoteFetch({ remoteAvailable: true }));
+    const wrapper = await mountView({ q: "@alice@remote.example" });
+    await flushPromises();
+
+    const searchBar = wrapper.findComponent({ name: "SearchBar" });
+    expect(searchBar.props("remote")).toBe(true);
+    const lookupCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url).includes("entities=remote"));
+    expect(lookupCall).toBeDefined();
+  });
+
+  it("navigates to the internal URL returned by the remote lookup", async () => {
+    vi.stubGlobal("fetch", makeRemoteFetch({ remoteAvailable: true }));
+    const wrapper = await mountView({ q: "@alice@remote.example" });
+    await flushPromises();
+
+    const push = vi.spyOn(wrapper.vm.$router, "push");
+    wrapper
+      .findComponent({ name: "SearchBar" })
+      .vm.$emit("remote-lookup", "@alice@remote.example");
+    await flushPromises();
+
+    const lookupCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url).includes("/remote/lookup"));
+    expect(lookupCall).toBeDefined();
+    expect(String(lookupCall![0])).toContain(
+      encodeURIComponent("@alice@remote.example"),
+    );
+    expect(push).toHaveBeenCalledWith("/@alice@remote.example");
+  });
+
+  it("disables the fediverse entry when remote lookup is not available", async () => {
+    vi.stubGlobal("fetch", makeRemoteFetch({ remoteAvailable: false }));
+    const wrapper = await mountView({ q: "@alice@remote.example" });
+    await flushPromises();
+
+    const searchBar = wrapper.findComponent({ name: "SearchBar" });
+    expect(searchBar.props("remote")).toBe(false);
+  });
+
+  it("shows the lookup error without remote internals", async () => {
+    vi.stubGlobal(
+      "fetch",
+      makeRemoteFetch({ remoteAvailable: true, lookupStatus: 404 }),
+    );
+    const wrapper = await mountView({ q: "@alice@remote.example" });
+    await flushPromises();
+
+    wrapper
+      .findComponent({ name: "SearchBar" })
+      .vm.$emit("remote-lookup", "@alice@remote.example");
+    await flushPromises();
+
+    expect(wrapper.find(".search-view__remote-error").exists()).toBe(true);
   });
 });

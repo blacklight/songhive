@@ -16,6 +16,7 @@ import os
 import signal
 import sys
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from textwrap import dedent
 from typing import Any, Awaitable, Callable, Collection, Dict, Optional, cast
 
@@ -54,7 +55,21 @@ def _build_tornado_app(config: SonghiveConfig, fastapi_app, tornado_redis=None) 
     EventWebSocket._allowed_origins = set(config.server.cors_origins)
 
     wsgi_app = ASGIMiddleware(cast(Callable[[Any, Any, Any], Awaitable[None]], fastapi_app))
-    container = WSGIContainer(cast(Callable[[dict[str, Any], Any], Iterable[bytes]], cast(object, wsgi_app)))
+    # Without an executor, WSGIContainer runs the app on the Tornado event
+    # loop thread — serializing every API request. That deadlocks remote
+    # lookups: a signed fetch makes the remote instance resolve our actor
+    # key synchronously, and that fetch-back can never be served while the
+    # loop is busy inside the lookup request. Tornado 7 defaults to a
+    # thread pool; pass one explicitly (the a2wsgi bridge is thread-safe —
+    # each worker blocks on its own responder while ASGI tasks share the
+    # dedicated bridge loop).
+    container = WSGIContainer(
+        cast(Callable[[dict[str, Any], Any], Iterable[bytes]], cast(object, wsgi_app)),
+        executor=ThreadPoolExecutor(
+            max_workers=max(8, (os.cpu_count() or 1) * 4),
+            thread_name_prefix="songhive-wsgi",
+        ),
+    )
 
     # a2wsgi runs the ASGI app in a dedicated event loop; FastAPI routes (and
     # the shared Redis client) are bound to that loop, so store a reference so

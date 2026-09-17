@@ -27,6 +27,8 @@ export interface Props {
     entities: SearchEntity[],
     limit: number,
   ) => Promise<SearchResultSection[]>;
+  /** Offer a "See on the Fediverse" suggestion for handle/URL queries. */
+  remote?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -51,6 +53,7 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
   search: [value: string];
   "select-suggestion": [item: SearchResultItem];
+  "remote-lookup": [query: string];
   "autocomplete-error": [error: unknown];
 }>();
 const { t } = useI18n();
@@ -165,6 +168,11 @@ function onSelect(item: SearchResultItem) {
   closeSuggestions();
 }
 
+function onRemoteLookup(query: string) {
+  emit("remote-lookup", query);
+  closeSuggestions();
+}
+
 useOnClickOutside(() => rootEl.value, closeSuggestions);
 </script>
 
@@ -199,7 +207,10 @@ useOnClickOutside(() => rootEl.value, closeSuggestions);
       :sections="suggestions"
       :loading="suggestionsLoading"
       :error="suggestionsError"
+      :query="localValue"
+      :remote="props.remote"
       @select="onSelect"
+      @remote-lookup="onRemoteLookup"
     />
   </div>
 </template>

@@ -162,6 +162,23 @@ class FederationConfig(BaseSettings):
         default_factory=list,
         description="ActivityPub instances that are always blocked from federation.",
     )
+    remote_search_access: Literal["disabled", "authenticated", "public"] = Field(
+        default="authenticated",
+        description=(
+            "Who may perform explicit remote (federated) lookups: 'disabled' "
+            "turns remote search off, 'authenticated' restricts it to "
+            "logged-in users, 'public' also allows anonymous lookups."
+        ),
+    )
+    fetch_timeout_seconds: float = Field(
+        default=20.0,
+        ge=1.0,
+        le=300.0,
+        description=(
+            "Timeout in seconds for each outbound remote fetch (WebFinger, "
+            "actor and object dereferencing). Applied per request hop."
+        ),
+    )
 
 
 class RegistrationMode(str, Enum):

@@ -7,7 +7,10 @@ import {
   searchPreview,
   type SearchEntity,
   type SearchResultItem,
+  type SearchResultSection,
 } from "@/api/search";
+import { remoteLookup } from "@/api/remote";
+import { getApiErrorMessage } from "@/api/client";
 import {
   SEARCH_ENTITIES,
   useSearchSections,
@@ -41,6 +44,30 @@ const {
 } = useSearchSections();
 
 const hasSearched = ref(false);
+
+// Remote discovery: the aggregate endpoint's ``remote`` section only ever
+// returns cached objects (no network fetch); the explicit lookup action —
+// a "See on the Fediverse" suggestion entry offered for handle/URL-shaped
+// queries when the policy allows it — goes through ``/remote/lookup``.
+const remoteSection = ref<SearchResultSection | null>(null);
+const remoteAvailable = ref(false);
+const remoteLookupBusy = ref(false);
+const remoteLookupError = ref<string | null>(null);
+
+async function onRemoteLookup(term: string = query.value.trim()) {
+  if (!term || remoteLookupBusy.value) return;
+  remoteLookupBusy.value = true;
+  remoteLookupError.value = null;
+  try {
+    const result = await remoteLookup(term);
+    void router.push(result.url);
+  } catch (err) {
+    remoteLookupError.value =
+      getApiErrorMessage(err) || t("remote.lookupFailed");
+  } finally {
+    remoteLookupBusy.value = false;
+  }
+}
 
 function parseEntitiesParam(value: unknown): SearchEntity[] {
   if (!value) return [];
@@ -79,7 +106,25 @@ function syncRoute() {
 async function performSearch() {
   hasSearched.value = true;
   syncRoute();
-  await searchAll(query.value, activeEntities.value);
+  remoteSection.value = null;
+  remoteLookupError.value = null;
+  const term = query.value.trim();
+  await Promise.all([
+    searchAll(query.value, activeEntities.value),
+    term && !term.startsWith("#")
+      ? searchPreview(term, ["remote"], 8)
+          .then((response) => {
+            remoteAvailable.value = response.remote_available ?? false;
+            remoteSection.value =
+              response.sections.find(
+                (s) => (s.entity as string) === "remote",
+              ) ?? null;
+          })
+          .catch(() => {
+            remoteSection.value = null;
+          })
+      : Promise.resolve(),
+  ]);
 }
 
 function onSearch() {
@@ -112,6 +157,7 @@ async function fetchPreview(
   limit: number,
 ) {
   const response = await searchPreview(term, entities, limit);
+  remoteAvailable.value = response.remote_available ?? false;
   return response.sections;
 }
 
@@ -161,8 +207,10 @@ const visibleEntities = computed<SearchEntity[]>(() =>
       :autocomplete="true"
       :autocomplete-entities="activeEntities"
       :autocomplete-fetcher="fetchPreview"
+      :remote="remoteAvailable"
       @search="onSearch"
       @select-suggestion="onSelectSuggestion"
+      @remote-lookup="onRemoteLookup"
     />
 
     <div
@@ -402,6 +450,60 @@ const visibleEntities = computed<SearchEntity[]>(() =>
           @update:page="onPageChange(entity, $event)"
         />
       </section>
+
+      <section
+        v-if="
+          remoteAvailable &&
+          (remoteSection?.items.length || remoteLookupBusy || remoteLookupError)
+        "
+        class="search-view__section"
+      >
+        <header class="search-view__section-header">
+          <h2 class="search-view__section-title">
+            {{ t("search.entities.remote") }}
+            <span v-if="remoteSection" class="search-view__section-count">
+              ({{ remoteSection.total }})
+            </span>
+          </h2>
+        </header>
+
+        <ul
+          v-if="remoteSection?.items.length"
+          class="search-view__grid search-view__grid--users"
+        >
+          <li
+            v-for="item in remoteSection.items"
+            :key="item.id ?? item.url"
+            class="search-view__item search-view__item--remote"
+          >
+            <img
+              v-if="item.image_url"
+              :src="item.image_url"
+              :alt="item.title"
+              class="search-view__thumb"
+            />
+            <span v-else class="search-view__thumb search-view__thumb--empty" />
+            <RouterLink :to="item.url" class="search-view__link">
+              {{ item.title }}
+            </RouterLink>
+            <span v-if="item.subtitle" class="search-view__meta">
+              {{ item.subtitle }}
+            </span>
+          </li>
+        </ul>
+
+        <div
+          v-if="remoteLookupBusy || remoteLookupError"
+          class="search-view__remote-status"
+        >
+          <span v-if="remoteLookupBusy" class="search-view__remote-busy">
+            {{ t("remote.lookupBusy") }}
+          </span>
+          <span v-else class="search-view__remote-error" role="alert">
+            {{ remoteLookupError }}
+          </span>
+        </div>
+      </section>
     </div>
   </main>
 </template>
@@ -502,6 +604,7 @@ const visibleEntities = computed<SearchEntity[]>(() =>
 
 .search-view__item--track,
 .search-view__item--user,
+.search-view__item--remote,
 .search-view__tag {
   display: flex;
   align-items: center;
@@ -568,6 +671,16 @@ const visibleEntities = computed<SearchEntity[]>(() =>
 
 .search-view__tag-count {
   color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.search-view__remote-busy {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.search-view__remote-error {
+  color: var(--color-danger);
   font-size: var(--font-size-sm);
 }
 </style>

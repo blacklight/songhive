@@ -36,6 +36,26 @@ const registrationOptions = [
   },
 ];
 
+const remoteSearchOptions = [
+  {
+    value: "disabled",
+    label: t("pages.admin.settings.remoteSearchOptions.disabled"),
+  },
+  {
+    value: "authenticated",
+    label: t("pages.admin.settings.remoteSearchOptions.authenticated"),
+  },
+  {
+    value: "public",
+    label: t("pages.admin.settings.remoteSearchOptions.public"),
+  },
+];
+
+function selectOptions(setting: SettingResponse) {
+  if (setting.key === "remote_search_access") return remoteSearchOptions;
+  return registrationOptions;
+}
+
 function getType(setting: SettingResponse): string {
   if (setting.type) return setting.type;
   if (setting.key === "federation_enabled") return "boolean";
@@ -55,6 +75,7 @@ function getControl(
   if (setting.key === "instance_name") return "text";
   if (setting.key === "instance_description") return "textarea";
   if (setting.key === "registration_mode") return "select";
+  if (setting.key === "remote_search_access") return "select";
   if (setting.key === "federation_enabled") return "checkbox";
 
   const type = getType(setting);
@@ -93,6 +114,10 @@ function getLabel(setting: SettingResponse): string {
     return t("pages.admin.settings.registrationMode");
   if (setting.key === "federation_enabled")
     return t("pages.admin.settings.federationEnabled");
+  if (setting.key === "remote_search_access")
+    return t("pages.admin.settings.remoteSearchAccess");
+  if (setting.key === "fetch_timeout_seconds")
+    return t("pages.admin.settings.fetchTimeoutSeconds");
   if (setting.key === "preview_cards_enabled")
     return t("pages.admin.settings.previewCardsEnabled");
   return setting.key;
@@ -278,7 +303,7 @@ onMounted(() => loadSettings());
           v-else-if="getControl(setting) === 'select'"
           :id="`setting-${setting.key}`"
           :model-value="models[setting.key] as string"
-          :options="registrationOptions"
+          :options="selectOptions(setting)"
           @update:model-value="onChange(setting.key, $event)"
         />
 

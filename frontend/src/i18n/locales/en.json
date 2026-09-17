@@ -113,7 +113,8 @@
       "libraries": "Libraries",
       "users": "Users",
       "tags": "Tags",
-      "genres": "Genres"
+      "genres": "Genres",
+      "remote": "Remote"
     }
   },
   "statusComposer": {
@@ -430,6 +431,9 @@
         "instanceContactUrl": "Contact URL",
         "registrationMode": "Registration mode",
         "federationEnabled": "Federation enabled",
+        "remoteSearchAccess": "Remote lookup access",
+        "fetchTimeoutSeconds": "Remote fetch timeout (seconds)",
+        "remoteSearchAccessHint": "Who may look up remote actors, activities, and resources: \"Disabled\" turns remote lookup off, \"Authenticated\" restricts it to logged-in users, \"Public\" also allows anonymous lookups.",
         "previewCardsEnabled": "Preview cards enabled",
         "typeString": "Text",
         "typeBoolean": "On/Off",
@@ -440,6 +444,11 @@
           "invite-only": "Invite only",
           "approval-required": "Approval required",
           "closed": "Closed"
+        },
+        "remoteSearchOptions": {
+          "disabled": "Disabled",
+          "authenticated": "Authenticated users",
+          "public": "Public"
         }
       },
       "reports": {
@@ -1320,6 +1329,26 @@
       "accepted": "Accepted",
       "rejected": "Rejected",
       "error": "Could not resolve the follow request: {message}"
+    }
+  },
+  "remote": {
+    "badge": "Remote",
+    "activityTitle": "Remote activity",
+    "resourceTitle": "Remote {kind}",
+    "viewOriginal": "View original on {domain}",
+    "actorUnavailable": "This remote profile is no longer available.",
+    "objectUnavailable": "This remote content is no longer available.",
+    "cachedActivities": "Activities",
+    "noCachedActivities": "No cached activities for this remote profile.",
+    "lookupBusy": "Looking up on the fediverse…",
+    "lookupFailed": "Remote lookup failed.",
+    "seeOnFediverse": "See {resource} on the Fediverse",
+    "kinds": {
+      "track": "track",
+      "album": "album",
+      "artist": "artist",
+      "playlist": "playlist",
+      "library": "library"
     }
   }
 }

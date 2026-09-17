@@ -20,6 +20,7 @@ from ..models.library import Library
 from ..models.library_track import LibraryTrack
 from ..models.playlist import Playlist, PlaylistTrack
 from ..models.radio import Radio
+from ..models.remote_object import RemoteObject
 from ..models.share_grant import ShareGrant
 from ..models.stored_file import StoredFile
 from ..models.track import Track
@@ -378,6 +379,22 @@ async def _can_access_user(session: AsyncSession, user: Optional[User], item_id:
     return user is not None and (user.is_admin or str(item.id) == str(user.id))
 
 
+async def _can_access_remote(session: AsyncSession, user: Optional[User], item_id: str) -> bool:
+    """Return whether ``user`` may access the ``remote`` entity ``item_id``.
+
+    Cached remote objects have no owner or share grants: public objects are
+    visible to everyone, non-public ones (inbox-delivered) to authenticated
+    users only. Activity-level visibility still applies on top through
+    ``can_view_activity``.
+    """
+    item = await session.get(RemoteObject, item_id)
+    if item is None:
+        return False
+    if item.visibility == "public":
+        return True
+    return user is not None
+
+
 async def can_access(
     session: AsyncSession,
     user: Optional[User],
@@ -394,6 +411,8 @@ async def can_access(
     """
     if item_type == "user":
         return await _can_access_user(session, user, item_id)
+    if item_type == "remote":
+        return await _can_access_remote(session, user, item_id)
     return await _can_access(session, user, item_type, item_id, share_token=share_token)
 
 
@@ -442,6 +461,10 @@ async def can_manage(
     not manageable via this helper.
     """
     if user is None:
+        return False
+
+    if item_type == "remote":
+        # Remote cache rows are read-only — nobody manages them locally.
         return False
 
     if item_type == "user":

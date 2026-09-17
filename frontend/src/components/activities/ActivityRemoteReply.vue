@@ -3,9 +3,9 @@ import { computed } from "vue";
 import type { RemoteReply } from "@/api/activities";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import ActivityAudioPlayer from "./ActivityAudioPlayer.vue";
+import RichContent from "@/components/RichContent.vue";
 import { formatDateTime } from "@/i18n";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
-import { parseActivityContent } from "@/utils/activityContent";
 
 const props = defineProps<{ reply: RemoteReply }>();
 
@@ -29,13 +29,6 @@ const displayName = computed(
 
 const profileUrl = computed(
   () => props.reply.source_actor_url || props.reply.source_actor,
-);
-
-const contentSegments = computed(() =>
-  parseActivityContent(props.reply.content ?? "", {
-    instanceDomain: instanceDomain.value,
-    mentions: [],
-  }),
 );
 
 const imageAttachments = computed(() =>
@@ -89,38 +82,11 @@ const fileAttachments = computed(() =>
     </header>
 
     <p
-      v-if="contentSegments.length"
+      v-if="reply.content"
       class="remote-reply__content"
       :lang="reply.language || undefined"
     >
-      <template v-for="(segment, index) in contentSegments" :key="index">
-        <template v-if="segment.type === 'text'">{{ segment.value }}</template>
-        <RouterLink
-          v-else-if="segment.type === 'mention' && segment.username"
-          :to="{ name: 'userProfile', params: { username: segment.username } }"
-          class="remote-reply__mention"
-          >{{ segment.handle }}</RouterLink
-        >
-        <a
-          v-else-if="segment.type === 'mention'"
-          :href="segment.url"
-          target="_blank"
-          rel="noopener"
-          class="remote-reply__mention"
-          >{{ segment.handle }}</a
-        >
-        <RouterLink
-          v-else-if="segment.type === 'tag'"
-          :to="{ name: 'tag', params: { name: segment.name } }"
-          >{{ segment.display }}</RouterLink
-        >
-        <RouterLink v-else-if="segment.to" :to="segment.to">{{
-          segment.label
-        }}</RouterLink>
-        <a v-else :href="segment.url" target="_blank" rel="noopener">{{
-          segment.label
-        }}</a>
-      </template>
+      <RichContent :html="reply.content" :instance-domain="instanceDomain" />
     </p>
 
     <div v-if="reply.attachments?.length" class="remote-reply__attachments">
@@ -207,14 +173,6 @@ const fileAttachments = computed(() =>
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.remote-reply__content a {
-  color: var(--color-text-link);
-}
-
-.remote-reply__mention {
-  font-weight: 500;
 }
 
 .remote-reply__attachments {

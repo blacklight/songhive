@@ -30,11 +30,7 @@ import ActivityObjectEmbed from "./ActivityObjectEmbed.vue";
 import ActivityRemoteReply from "./ActivityRemoteReply.vue";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
 import { parseActorRef } from "@/utils/actorRef";
-import {
-  parseActivityContent,
-  type ContentMark,
-  type ContentSegment,
-} from "@/utils/activityContent";
+import RichContent from "@/components/RichContent.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -143,16 +139,11 @@ const visibilityLabel = computed(() =>
 
 // ``content`` is sanitized HTML for local activities (produced by the
 // server-side mention pipeline) and untrusted remote-supplied HTML otherwise.
-// Both are reduced to safe segments: text, line breaks, and linkified
-// mentions, hashtags, and URLs — remote HTML is never rendered verbatim.
-const contentSegments = computed(() => {
-  const raw = activity.value.content ?? activity.value.content_source ?? "";
-  if (!raw) return [];
-  return parseActivityContent(raw, {
-    instanceDomain: instanceDomain.value,
-    mentions: activity.value.mentions,
-  });
-});
+// RichContent reduces both to safe segments — remote HTML is never rendered
+// verbatim.
+const contentHtml = computed(
+  () => activity.value.content ?? activity.value.content_source ?? "",
+);
 
 // ``attachments`` carries the ActivityPub attachment documents of the
 // activity's embedded object — ``Image``/image ``Document`` entries render
@@ -190,20 +181,6 @@ const previewCardHost = computed(() => {
     return "";
   }
 });
-
-// Inline font formatting survived from the source markup — rendered as
-// classes rather than real tags so links/mentions keep their own elements.
-const MARK_CLASSES: Record<ContentMark, string> = {
-  bold: "activity-card__mark--bold",
-  italic: "activity-card__mark--italic",
-  strikethrough: "activity-card__mark--strikethrough",
-  underline: "activity-card__mark--underline",
-  code: "activity-card__mark--code",
-};
-
-function markClasses(segment: ContentSegment): string[] {
-  return (segment.marks ?? []).map((mark) => MARK_CLASSES[mark]);
-}
 
 // ``like``/``announce`` cards are reaction wrappers: their object is a bare
 // reference rendered through ``ActivityObjectEmbed``, they carry no
@@ -811,52 +788,15 @@ async function copyUrl() {
     </div>
 
     <p
-      v-if="contentSegments.length"
+      v-if="contentHtml"
       class="activity-card__content"
       :lang="activity.language || undefined"
     >
-      <template v-for="(segment, index) in contentSegments" :key="index">
-        <template v-if="segment.type === 'text'">
-          <span v-if="segment.marks" :class="markClasses(segment)">{{
-            segment.value
-          }}</span>
-          <template v-else>{{ segment.value }}</template>
-        </template>
-        <RouterLink
-          v-else-if="segment.type === 'mention' && segment.username"
-          :to="{ name: 'userProfile', params: { username: segment.username } }"
-          :class="['activity-card__mention', ...markClasses(segment)]"
-          >{{ segment.handle }}</RouterLink
-        >
-        <a
-          v-else-if="segment.type === 'mention'"
-          :href="segment.url"
-          target="_blank"
-          rel="noopener"
-          :class="['activity-card__mention', ...markClasses(segment)]"
-          >{{ segment.handle }}</a
-        >
-        <RouterLink
-          v-else-if="segment.type === 'tag'"
-          :to="{ name: 'tag', params: { name: segment.name } }"
-          :class="markClasses(segment)"
-          >{{ segment.display }}</RouterLink
-        >
-        <RouterLink
-          v-else-if="segment.to"
-          :to="segment.to"
-          :class="markClasses(segment)"
-          >{{ segment.label }}</RouterLink
-        >
-        <a
-          v-else
-          :href="segment.url"
-          target="_blank"
-          rel="noopener"
-          :class="markClasses(segment)"
-          >{{ segment.label }}</a
-        >
-      </template>
+      <RichContent
+        :html="contentHtml"
+        :instance-domain="instanceDomain"
+        :mentions="activity.mentions"
+      />
     </p>
 
     <div v-if="attachments.length" class="activity-card__attachments">
@@ -1311,10 +1251,6 @@ async function copyUrl() {
   color: var(--color-text-muted);
 }
 
-.activity-card__content a {
-  color: var(--color-text-link);
-}
-
 .activity-card__attachments {
   display: flex;
   flex-direction: column;
@@ -1395,38 +1331,6 @@ async function copyUrl() {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-
-.activity-card__mention {
-  font-weight: 500;
-}
-
-.activity-card__mark--bold {
-  font-weight: 700;
-}
-
-.activity-card__mark--italic {
-  font-style: italic;
-}
-
-.activity-card__mark--strikethrough {
-  text-decoration: line-through;
-}
-
-.activity-card__mark--underline {
-  text-decoration: underline;
-}
-
-.activity-card__mark--strikethrough.activity-card__mark--underline {
-  text-decoration: underline line-through;
-}
-
-.activity-card__mark--code {
-  font-family: ui-monospace, monospace;
-  font-size: 0.9em;
-  padding: 0 0.2em;
-  border-radius: var(--radius-sm);
-  background-color: var(--color-surface-secondary);
 }
 
 @media (max-width: 767px) {

@@ -422,6 +422,61 @@ describe("SearchBar", () => {
     wrapper.unmount();
   });
 
+  it("offers a fediverse entry for handle queries and re-emits remote-lookup", async () => {
+    const fetcher = vi.fn().mockResolvedValue([]);
+    const wrapper = mount(SearchBar, {
+      props: {
+        modelValue: "",
+        autocomplete: true,
+        autocompleteDelay: 100,
+        autocompleteFetcher: fetcher,
+        remote: true,
+      },
+    });
+
+    const input = wrapper.find("input");
+    await input.setValue("@alice@remote.example");
+    await nextTick();
+    vi.advanceTimersByTime(100);
+    await flushPromises();
+
+    const entry = wrapper.find(".search-suggestions__section--remote button");
+    expect(entry.exists()).toBe(true);
+    expect(entry.text()).toContain("@alice@remote.example");
+
+    await entry.trigger("click");
+    await nextTick();
+
+    expect(wrapper.emitted("remote-lookup")?.[0]).toEqual([
+      "@alice@remote.example",
+    ]);
+    expect(wrapper.find(".search-suggestions").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("does not offer the fediverse entry when remote is unset", async () => {
+    const fetcher = vi.fn().mockResolvedValue([]);
+    const wrapper = mount(SearchBar, {
+      props: {
+        modelValue: "",
+        autocomplete: true,
+        autocompleteDelay: 100,
+        autocompleteFetcher: fetcher,
+      },
+    });
+
+    const input = wrapper.find("input");
+    await input.setValue("@alice@remote.example");
+    await nextTick();
+    vi.advanceTimersByTime(100);
+    await flushPromises();
+
+    expect(wrapper.find(".search-suggestions__section--remote").exists()).toBe(
+      false,
+    );
+    wrapper.unmount();
+  });
+
   it("emits autocomplete-error and shows an error state", async () => {
     const fetcher = vi.fn().mockRejectedValue(new Error("network"));
     const wrapper = mount(SearchBar, {

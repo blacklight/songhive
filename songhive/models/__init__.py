@@ -19,6 +19,7 @@ from .oauth_client import OAuth2Client
 from .playlist import Playlist, PlaylistTrack
 from .preview_card import PreviewCard
 from .radio import Radio
+from .remote_object import RemoteObject
 from .report import Report
 from .setting import Setting
 from .share_grant import ShareGrant
@@ -68,6 +69,7 @@ __all__ = [
     "PlaylistTrack",
     "PreviewCard",
     "Radio",
+    "RemoteObject",
     "Report",
     "ShareGrant",
     "Setting",

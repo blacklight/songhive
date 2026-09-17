@@ -44,6 +44,7 @@ from ..models.artist import Artist
 from ..models.library import Library
 from ..models.notification import NotificationType
 from ..models.playlist import Playlist
+from ..models.remote_object import RemoteObject
 from ..models.stored_file import StoredFile
 from ..models.tag import Tag
 from ..models.track import Track
@@ -102,6 +103,7 @@ _ENTITY_MODELS: Dict[str, Type[Any]] = {
     "playlist": Playlist,
     "library": Library,
     "user": User,
+    "remote": RemoteObject,
 }
 
 
@@ -1817,6 +1819,16 @@ def activity_page_url(entity_type: str, entity_id: str, entity: Any = None) -> s
     if entity_type == "user":
         username = getattr(entity, "username", None) or entity_id
         return f"/@{username}"
+    if entity_type == "remote":
+        # Remote objects live under ``/remote/{kind}/{id}`` (singular kind
+        # matching ``remote_objects.resource_type``); non-resource objects
+        # link to their activity permalink.
+        resource_type = getattr(entity, "resource_type", None)
+        if resource_type:
+            return f"/remote/{resource_type}/{entity_id}"
+        if entity is not None:
+            return remote_activity_page_url_from_object(entity)
+        return f"/remote/objects/{entity_id}"
     plural = get_item_plural(entity_type) or f"{entity_type}s"
     return f"/{plural}/{entity_id}/activities"
 
@@ -1857,7 +1869,12 @@ async def _entity_link_fields(session: AsyncSession, activity: Activity) -> Dict
     object_type = _activity_object_type(activity)
     if object_type:
         fields["object_type"] = object_type
-    if activity.entity_type == "user":
+    if activity.entity_type == "remote":
+        # Remote objects have no local item page — the handle-prefixed
+        # activity URL is both the entity link and the object permalink.
+        fields["object_page_url"] = remote_activity_page_url(activity)
+        fields["local_url"] = fields["object_page_url"]
+    elif activity.entity_type == "user":
         # Statuses have no item page — the author's profile is the link.
         fields["local_url"] = activity_page_url(activity.entity_type, activity.entity_id, entity)
     else:
@@ -1919,6 +1936,23 @@ def _remote_actor_handle(actor_url: str) -> str:
     parsed = urlparse(actor_url)
     name = parsed.path.rstrip("/").rsplit("/", 1)[-1] or parsed.netloc
     return f"@{name}@{parsed.netloc}" if parsed.netloc else f"@{name}"
+
+
+def remote_activity_page_url(activity: Activity) -> str:
+    """Return the ``/activities/@user@domain/{remote_object_id}`` page URL.
+
+    Remote materialized activities attach to ``remote_objects`` rows, so
+    ``entity_id`` is the remote object's UUID; the handle encodes the
+    attributed actor so the route can resolve and refresh the object.
+    """
+    handle = _remote_actor_handle(activity.source_actor).lstrip("@")
+    return f"/activities/@{handle}/{activity.entity_id}"
+
+
+def remote_activity_page_url_from_object(remote_object: RemoteObject) -> str:
+    """Return the activity permalink for a ``RemoteObject`` cache row."""
+    handle = _remote_actor_handle(remote_object.actor_url).lstrip("@")
+    return f"/activities/@{handle}/{remote_object.id}"
 
 
 async def reply_to_activity(

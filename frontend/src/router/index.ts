@@ -186,6 +186,20 @@ const routes: RouteRecordRaw[] = [
         name: "activity",
         component: () => import("@/views/ActivityView.vue"),
       },
+      // Remote object permalinks carry the attributed actor's handle so the
+      // view can link back to the remote profile.
+      {
+        path: "activities/@:handle/:id",
+        name: "remoteActivity",
+        component: () => import("@/views/RemoteActivityView.vue"),
+      },
+      // Cached remote resources render read-only — they are never copied
+      // into local resource tables.
+      {
+        path: "remote/:kind/:id",
+        name: "remoteResource",
+        component: () => import("@/views/RemoteResourceView.vue"),
+      },
       // History and favorites are Phase 5 views that require authentication.
       {
         path: "history",

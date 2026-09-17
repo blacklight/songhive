@@ -11,6 +11,14 @@ vi.mock("@/api/users", () => ({
   getPublic: vi.fn(),
 }));
 
+vi.mock("@/api/remote", () => ({
+  getRemoteActor: vi.fn(),
+  getRemoteActorActivities: vi.fn(),
+  getRemoteObject: vi.fn(),
+  getRemoteResource: vi.fn(),
+  remoteLookup: vi.fn(),
+}));
+
 vi.mock("@/api/instance", () => ({
   getInstance: vi.fn().mockResolvedValue({ uri: "https://music.example.com" }),
 }));
@@ -97,5 +105,37 @@ describe("UserProfileView", () => {
 
     const link = wrapper.find(".user-profile__followers");
     expect(link.text()).toBe(i18n.global.t("profile.followers", { count: 0 }));
+  });
+
+  it("dispatches user@domain handles to the remote profile view", async () => {
+    const { getRemoteActor, getRemoteActorActivities } =
+      await import("@/api/remote");
+    vi.mocked(getRemoteActor).mockResolvedValue({
+      handle: "bob@remote.example",
+      username: "bob",
+      domain: "remote.example",
+      actor_url: "https://remote.example/users/bob",
+      display_name: "Bob",
+      unavailable: false,
+      url: "/@bob@remote.example",
+    });
+    vi.mocked(getRemoteActorActivities).mockResolvedValue({
+      activities: [],
+      total: 0,
+    });
+
+    const router = createTestRouter();
+    await router.push("/@bob@remote.example");
+    await router.isReady();
+    wrapper = mount(UserProfileView, {
+      global: { plugins: [router, i18n], stubs: { RouterView: true } },
+    });
+    await flushPromises();
+
+    expect(getPublic).not.toHaveBeenCalled();
+    expect(getRemoteActor).toHaveBeenCalledWith("bob@remote.example");
+    expect(wrapper.find(".remote-profile__handle").text()).toBe(
+      "@bob@remote.example",
+    );
   });
 });
