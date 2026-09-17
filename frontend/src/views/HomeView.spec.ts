@@ -321,6 +321,7 @@ describe("HomeView", () => {
           track_id: "track-1",
           title: "Song One",
           artist: "The Larks",
+          image_url: "/api/v1/files/img-1/download",
           created_at: "2026-01-01T00:00:00Z",
         },
         {
@@ -328,6 +329,7 @@ describe("HomeView", () => {
           track_id: "track-1",
           title: "Song One",
           artist: "The Larks",
+          image_url: "/api/v1/files/img-1/download",
           created_at: "2026-01-02T00:00:00Z",
         },
       ],
@@ -341,5 +343,8 @@ describe("HomeView", () => {
     expect(w.text()).toContain(i18n.global.t("pages.home.shelves.jumpBackIn"));
     expect(w.findAll(".home-track-card")).toHaveLength(1);
     expect(w.text()).toContain("Song One");
+    const cover = w.find(".home-track-card img.home-track-card__cover");
+    expect(cover.exists()).toBe(true);
+    expect(cover.attributes("src")).toBe("/api/v1/files/img-1/download");
   });
 });

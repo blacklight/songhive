@@ -11,8 +11,8 @@ import AppButton from "@/components/ui/AppButton.vue";
 
 /**
  * Compact track tile for home-page shelves. Works with a bare
- * ``trackId``/``title``/``artistName`` triple (e.g. history entries, which
- * carry no artwork) as well as full track records.
+ * ``trackId``/``title``/``artistName`` triple as well as full track
+ * records; ``imageUrl`` is optional and falls back to an initial avatar.
  */
 export interface Props {
   trackId: string;

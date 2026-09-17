@@ -6,6 +6,7 @@ import pytest
 
 from songhive.models._enums import Visibility
 from songhive.models.artist import Artist
+from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 
 
@@ -37,7 +38,45 @@ async def test_record_listen(client, db_session, regular_user, auth_headers):
     assert data[0]["track_id"] == str(track.id)
     assert data[0]["title"] == "History Track"
     assert data[0]["artist"] == "Artist"
+    assert data[0]["image_url"] is None
     assert "created_at" in data[0]
+
+
+@pytest.mark.asyncio
+async def test_history_includes_track_image(client, db_session, regular_user, auth_headers):
+    """GET /history resolves each entry's cover art like track responses do."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    stored = StoredFile(
+        storage_path="images/cover.png",
+        storage_backend="local",
+        content_type="image/png",
+        size=100,
+        sha256="a" * 64,
+        owner_id=str(regular_user.id),
+    )
+    db_session.add(stored)
+    await db_session.flush()
+
+    track = Track(
+        title="Cover Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        image_file_id=str(stored.id),
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    headers = auth_headers(regular_user)
+    assert client.post(f"/api/v1/history/{track.id}", headers=headers).status_code == 201
+
+    get = client.get("/api/v1/history/", headers=headers)
+    assert get.status_code == 200
+    data = get.json()
+    assert data[0]["image_url"] == f"/api/v1/files/{stored.id}/download"
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,7 @@ interface JumpBackInItem {
   trackId: string;
   title: string;
   artistName?: string | null;
+  imageUrl?: string | null;
 }
 
 const jumpBackIn = useShelfData<JumpBackInItem>(async () => {
@@ -35,6 +36,7 @@ const jumpBackIn = useShelfData<JumpBackInItem>(async () => {
       trackId: entry.track_id,
       title: entry.title ?? t("pages.history.untitled"),
       artistName: entry.artist,
+      imageUrl: entry.image_url,
     }));
 });
 
@@ -84,6 +86,7 @@ const newAlbums = useShelfData(() =>
         :track-id="item.trackId"
         :title="item.title"
         :artist-name="item.artistName"
+        :image-url="item.imageUrl"
       />
     </HomeShelf>
 

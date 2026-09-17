@@ -5780,6 +5780,8 @@ export interface components {
       title?: string | null;
       /** Artist */
       artist?: string | null;
+      /** Image Url */
+      image_url?: string | null;
       /** Created At */
       created_at: string;
     };

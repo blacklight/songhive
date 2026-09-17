@@ -11,13 +11,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ...models.album import Album
 from ...models.history import ListeningHistory
 from ...models.track import Track
 from ...models.user import User
 from ...services import acl
+from ...services.storage import StorageService
 from ...services.streaming import record_listen as record_listen_service
 from .._common import Pagination, get_pagination
-from ..deps import get_current_user, get_db
+from ..deps import get_current_user, get_db, get_storage_service
+from ..responses import _track_image_url
 
 router = APIRouter(prefix="/history")
 
@@ -29,6 +32,7 @@ class HistoryEntry(BaseModel):
     track_id: str
     title: Optional[str] = None
     artist: Optional[str] = None
+    image_url: Optional[str] = None
     created_at: datetime
 
     @field_serializer("created_at")
@@ -43,6 +47,7 @@ async def list_history(
     pagination: Pagination = Depends(get_pagination),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
 ):
     """List listening history for the current user, newest first."""
     total = (
@@ -55,21 +60,29 @@ async def list_history(
         .order_by(ListeningHistory.created_at.desc())
         .limit(pagination.limit)
         .offset(pagination.offset)
-        .options(selectinload(ListeningHistory.track).selectinload(Track.artist))
+        .options(
+            selectinload(ListeningHistory.track).selectinload(Track.artist),
+            selectinload(ListeningHistory.track).selectinload(Track.image_file),
+            selectinload(ListeningHistory.track).selectinload(Track.album).selectinload(Album.cover_file),
+        )
     )
     rows = result.scalars().all()
     pagination.set_total(response, total)
 
-    return [
-        HistoryEntry(
-            id=str(entry.id),
-            track_id=str(entry.track_id),
-            title=entry.track.title if entry.track is not None else None,
-            artist=entry.track.artist.name if entry.track is not None and entry.track.artist is not None else None,
-            created_at=entry.created_at,
+    entries = []
+    for entry in rows:
+        track = entry.track
+        entries.append(
+            HistoryEntry(
+                id=str(entry.id),
+                track_id=str(entry.track_id),
+                title=track.title if track is not None else None,
+                artist=track.artist.name if track is not None and track.artist is not None else None,
+                image_url=await _track_image_url(track, storage) if track is not None else None,
+                created_at=entry.created_at,
+            )
         )
-        for entry in rows
-    ]
+    return entries
 
 
 @router.post("/{track_id}", status_code=status.HTTP_201_CREATED)
