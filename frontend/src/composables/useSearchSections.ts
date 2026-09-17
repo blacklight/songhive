@@ -10,8 +10,16 @@ import { listTags } from "@/api/tags";
 import { listTracksWithMeta } from "@/api/tracks";
 import { listPublicUsers } from "@/api/users";
 
+/**
+ * Entities backed by a dedicated, sortable list endpoint. ``remote`` is a
+ * valid ``entities`` section server-side but only exists on the aggregate
+ * ``/search/`` endpoint — views render it separately, outside this
+ * registry.
+ */
+export type SearchSectionEntity = Exclude<SearchEntity, "remote">;
+
 export interface SearchSectionConfig {
-  entity: SearchEntity;
+  entity: SearchSectionEntity;
   labelKey: string;
   sortable: string[];
   defaultSortBy: string;
@@ -42,7 +50,7 @@ type SearchFetcher = (
 ) => Promise<SearchSectionResult>;
 
 const SECTION_REGISTRY: Record<
-  SearchEntity,
+  SearchSectionEntity,
   { config: SearchSectionConfig; fetch: SearchFetcher }
 > = {
   tracks: {
@@ -250,7 +258,7 @@ const SECTION_REGISTRY: Record<
   },
 };
 
-export const SEARCH_ENTITIES: SearchEntity[] = [
+export const SEARCH_ENTITIES: SearchSectionEntity[] = [
   "tracks",
   "albums",
   "artists",
@@ -263,8 +271,8 @@ export const SEARCH_ENTITIES: SearchEntity[] = [
 
 export function useSearchSections() {
   const query = ref("");
-  const activeEntities = ref<SearchEntity[]>([...SEARCH_ENTITIES]);
-  const sections = reactive<Record<SearchEntity, SearchSectionState>>(
+  const activeEntities = ref<SearchSectionEntity[]>([...SEARCH_ENTITIES]);
+  const sections = reactive<Record<SearchSectionEntity, SearchSectionState>>(
     Object.fromEntries(
       SEARCH_ENTITIES.map((entity) => [
         entity,
@@ -280,14 +288,14 @@ export function useSearchSections() {
           page: 0,
         },
       ]),
-    ) as unknown as Record<SearchEntity, SearchSectionState>,
+    ) as unknown as Record<SearchSectionEntity, SearchSectionState>,
   );
 
-  function entityConfig(entity: SearchEntity) {
+  function entityConfig(entity: SearchSectionEntity) {
     return SECTION_REGISTRY[entity].config;
   }
 
-  function resetSection(entity: SearchEntity) {
+  function resetSection(entity: SearchSectionEntity) {
     const config = entityConfig(entity);
     const section = sections[entity];
     section.items = [];
@@ -312,7 +320,7 @@ export function useSearchSections() {
     return { term: raw, hashtag: false };
   }
 
-  async function searchSection(entity: SearchEntity) {
+  async function searchSection(entity: SearchSectionEntity) {
     const { term, hashtag } = effectiveQuery();
     const participates = hashtag
       ? entity === "tags"
@@ -346,7 +354,7 @@ export function useSearchSections() {
 
   async function searchAll(
     q: string,
-    active: SearchEntity[] = activeEntities.value,
+    active: SearchSectionEntity[] = activeEntities.value,
   ) {
     query.value = q;
     activeEntities.value = active;
@@ -361,7 +369,7 @@ export function useSearchSections() {
     await Promise.all(tasks);
   }
 
-  function setPage(entity: SearchEntity, page: number) {
+  function setPage(entity: SearchSectionEntity, page: number) {
     const section = sections[entity];
     section.page = page;
     section.offset = page * section.limit;
@@ -369,7 +377,7 @@ export function useSearchSections() {
   }
 
   function setSort(
-    entity: SearchEntity,
+    entity: SearchSectionEntity,
     sortBy: string,
     sortDir: "asc" | "desc",
   ) {
@@ -385,13 +393,13 @@ export function useSearchSections() {
     return searchSection(entity);
   }
 
-  function retry(entity: SearchEntity) {
+  function retry(entity: SearchSectionEntity) {
     return searchSection(entity);
   }
 
   async function preview(
     term: string,
-    entities: SearchEntity[] = activeEntities.value,
+    entities: SearchSectionEntity[] = activeEntities.value,
     limit = 5,
   ) {
     const response = await searchPreview(term, entities, limit);

@@ -676,6 +676,14 @@ async def update_setting(
     if key not in settings_service.ALLOWED_SETTINGS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown setting key")
 
+    if key == "single_user_username" and isinstance(body.value, str) and body.value:
+        target = await auth.get_user_by_username(db, body.value)
+        if target is None or not target.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="single_user_username must reference an active user",
+            )
+
     old_value = await settings_service.get_setting(db, redis, key)
     try:
         row = await settings_service.set_setting(db, redis, key, body.value, updated_by=admin.id)

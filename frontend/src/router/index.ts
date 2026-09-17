@@ -463,6 +463,17 @@ router.beforeEach(async (to) => {
   const authStore = useAuthStore();
   await authStore.bootstrap();
 
+  // Single-user mode: anonymous visitors land on the configured profile
+  // instead of the home page. Authenticated users keep the regular home
+  // view — the mode is a presentation choice for logged-out visitors.
+  if (to.name === "home" && !authStore.isAuthenticated) {
+    const instanceStore = useInstanceStore();
+    await instanceStore.load();
+    if (instanceStore.singleUser) {
+      return { path: `/@${instanceStore.singleUser}` };
+    }
+  }
+
   if (to.name === "register") {
     const instanceStore = useInstanceStore();
     await instanceStore.load();

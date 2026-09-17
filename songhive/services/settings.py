@@ -47,6 +47,11 @@ ALLOWED_SETTINGS: dict[str, dict[str, Any]] = {
         "type": "bool",
         "default": True,
     },
+    # Username whose profile becomes the landing page for anonymous
+    # visitors; an empty string disables single-user mode.
+    "single_user_username": {"type": "str", "default": ""},
+    # Expose visibility-filtered content counts on GET /api/v1/instance/stats.
+    "public_stats_enabled": {"type": "bool", "default": False},
 }
 
 

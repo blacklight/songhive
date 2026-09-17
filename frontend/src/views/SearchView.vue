@@ -14,6 +14,7 @@ import { getApiErrorMessage } from "@/api/client";
 import {
   SEARCH_ENTITIES,
   useSearchSections,
+  type SearchSectionEntity,
 } from "@/composables/useSearchSections";
 
 import AppButton from "@/components/ui/AppButton.vue";
@@ -69,7 +70,7 @@ async function onRemoteLookup(term: string = query.value.trim()) {
   }
 }
 
-function parseEntitiesParam(value: unknown): SearchEntity[] {
+function parseEntitiesParam(value: unknown): SearchSectionEntity[] {
   if (!value) return [];
   const list: string = Array.isArray(value)
     ? String(value[0] ?? "")
@@ -77,13 +78,13 @@ function parseEntitiesParam(value: unknown): SearchEntity[] {
   const parsed = list
     .split(",")
     .map((item) => item.trim().toLowerCase())
-    .filter((item): item is SearchEntity =>
+    .filter((item): item is SearchSectionEntity =>
       (SEARCH_ENTITIES as readonly string[]).includes(item),
     );
   return parsed.length ? parsed : [];
 }
 
-function sortOptions(entity: SearchEntity) {
+function sortOptions(entity: SearchSectionEntity) {
   const config = entityConfig(entity);
   return config.sortable.map((field) => ({
     value: field,
@@ -131,7 +132,7 @@ function onSearch() {
   performSearch();
 }
 
-function toggleEntity(entity: SearchEntity) {
+function toggleEntity(entity: SearchSectionEntity) {
   const index = activeEntities.value.indexOf(entity);
   if (index >= 0) {
     if (activeEntities.value.length === 1) {
@@ -167,13 +168,13 @@ function onSelectSuggestion(item: SearchResultItem) {
   }
 }
 
-function onPageChange(entity: SearchEntity, page: number) {
+function onPageChange(entity: SearchSectionEntity, page: number) {
   setPage(entity, page - 1);
   syncRoute();
 }
 
 function onSortChange(
-  entity: SearchEntity,
+  entity: SearchSectionEntity,
   field: string,
   direction: "asc" | "desc",
 ) {
@@ -191,7 +192,7 @@ watch(query, () => performSearch());
 
 const showStart = computed(() => !hasSearched.value || !query.value.trim());
 // ``#term`` is a hashtag lookup: only the tags section is searched/rendered.
-const visibleEntities = computed<SearchEntity[]>(() =>
+const visibleEntities = computed<SearchSectionEntity[]>(() =>
   query.value.trim().startsWith("#") ? ["tags"] : activeEntities.value,
 );
 </script>

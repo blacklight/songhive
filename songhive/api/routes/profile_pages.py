@@ -15,14 +15,16 @@ from typing import Any, Optional, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...federation import get_actor_url, get_mastodon_actor_url
 from ...federation.actors import user_to_actor_document
 from ...models.user import User
+from ...services import settings as settings_service
 from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor
-from ..deps import get_db
+from ..deps import get_current_user_optional, get_db, get_redis
 from ..semantic_meta import inject_head_tags, public_base_url, user_head_tags
 
 router = APIRouter(include_in_schema=False)
@@ -113,6 +115,32 @@ def _federation_enabled_config(request: Request) -> tuple[bool, Optional[str]]:
     """Return (enabled, domain) for the current app config."""
     config = request.app.state.config
     return config.federation.enabled and bool(config.federation.instance_domain), config.federation.instance_domain
+
+
+@router.get("/")
+async def get_home_page(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    Serve the SPA home page, or redirect to the single-user profile.
+
+    When the ``single_user_username`` setting names a user, anonymous
+    visitors are redirected to ``/@{username}`` so the profile becomes the
+    instance landing page. Authenticated users keep the regular home page —
+    single-user mode is a presentation choice for logged-out visitors, not
+    an ACL. ActivityPub clients are never redirected: ``/`` has no
+    ActivityPub representation, so they keep getting the SPA shell exactly
+    as the default handler served it before.
+    """
+    if user is None and not _accepts_activitypub(request):
+        username = await settings_service.get_setting(db, redis, "single_user_username")
+        if isinstance(username, str) and username:
+            return RedirectResponse(url=f"/@{username}", status_code=status.HTTP_302_FOUND)
+
+    return _spa_response()
 
 
 @router.get("/users/{username}")

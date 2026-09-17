@@ -2006,6 +2006,29 @@ share dialog's Fediverse tab reuses the same component for track
 publication, and the default post format is configurable from
 `/settings` (`profile.status_content_type`).
 
+The home page (`HomeView`, `components/home/`) is a hybrid shelf + feed
+layout that splits by audience and puts the two zones behind
+`Music | Activity` `AppTabs` (shelves first) so the feed no longer trails
+below the whole catalogue; both panels stay mounted (`v-show`) so tab
+switches never refetch. Authenticated visitors get a greeting with
+a `StatusComposer` modal, at most four "your music" shelves (Jump back in
+from `/history/` deduplicated by track, Favorites, Your uploads, New on
+this instance), and the scoped activity feed. Anonymous visitors get the
+instance hero (name, description, sign-in/register CTAs, optional
+`public_stats_enabled`-gated counts from `GET /api/v1/instance/stats`),
+public-catalogue shelves (recently added albums/tracks, public libraries,
+people), genre chips, and the public instance feed. Every shelf fetches its
+own data, renders a skeleton while loading, offers inline retry on error,
+and removes itself entirely when empty. The feed (`HomeFeed`, backed by
+`stores/timeline.ts` and `GET /api/v1/timeline`) offers a scope switch on
+its own row — `Mine | This instance | Federated` for signed-in users,
+`This instance | Federated` for anonymous visitors — and a
+`Posts | All activity` mode switch on a second row. `This instance` only
+surfaces locally sourced activities; `Federated` adds activities received
+from remote instances and webmentions. Signed-in users default to `Mine`
+when they have own activity, and the last explicit choice persists in
+`localStorage` (a stored `Mine` is ignored once logged out).
+
 The frontend is also a Progressive Web App. `/manifest.webmanifest` is served
 from the backend so the PWA name follows the configured instance name and the
 manifest `theme_color`/`background_color` react to the user's selected
@@ -2032,6 +2055,15 @@ every uploadable entity also carries `<link rel="author">`, `name="author"`
 and `fediverse:creator` tags pointing at the uploading user. Lookups go
 through the regular ACL checks so private entities never leak metadata, and
 any failure falls back to the unmodified shell.
+
+Single-user mode is configured through the `single_user_username` admin
+setting. When set, anonymous browser requests to `/` are answered with a
+302 redirect to `/@{username}` by the always-mounted `profile_pages`
+route, and the SPA router guard applies the same anonymous-only redirect
+for client-side navigations; authenticated users keep the regular home
+page and ActivityPub clients still get the SPA shell as before. The
+setting is exposed as
+`single_user` on `/api/v1/instance` and `/api/v2/instance`.
 
 The Vite build also copies the `swagger-ui-dist` bundle into
 `songhive/static/swagger-ui/` and rewrites `swagger-initializer.js` to point
@@ -2067,7 +2099,15 @@ REST API under `/api/v1/`:
 ├── favorites/      # Favorites/bookmarks
 ├── history/        # Listening history
 ├── radios/         # Dynamic radio generation
-├── instance/       # Public instance metadata (Mastodon-compatible)
+├── timeline/       # Cross-entity activity feed: scope=mine|instance (mine
+│                   #   requires auth; anonymous defaults to instance),
+│                   #   mode=posts|all with include_boosts/include_replies/
+│                   #   source_type filters, keyset cursor pagination.
+│                   #   No `following` scope — Songhive only receives follows
+├── instance/       # Public instance metadata (Mastodon-compatible);
+│                   #   `single_user` reports the single_user_username setting,
+│                   #   /instance/stats exposes visibility-filtered counts when
+│                   #   the public_stats_enabled admin setting is on (404 otherwise)
 ├── statuses/       # Standalone status posts (user-entity `create` activities with
 │                   #   content type, language, file/track attachments, and mentions)
 ├── shares/         # Share grants (owner → specific user); /shares/mine lists the

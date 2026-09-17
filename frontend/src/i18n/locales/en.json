@@ -246,6 +246,57 @@
     "placeholder": "Page {name} — coming in Phase {phase}",
     "goHome": "Go home",
     "goLogin": "Log in",
+    "home": {
+      "seeAll": "See all",
+      "playError": "Could not play this track: {message}",
+      "greeting": {
+        "morning": "Good morning, {name}",
+        "afternoon": "Good afternoon, {name}",
+        "evening": "Good evening, {name}",
+        "fallback": "Welcome back, {name}",
+        "cta": "Post something"
+      },
+      "hero": {
+        "defaultTagline": "A federated music sharing service",
+        "stats": {
+          "tracks": "{count} tracks",
+          "albums": "{count} albums",
+          "artists": "{count} artists",
+          "libraries": "{count} libraries",
+          "users": "{count} people"
+        }
+      },
+      "tabs": {
+        "music": "Music",
+        "activity": "Activity"
+      },
+      "shelves": {
+        "jumpBackIn": "Jump back in",
+        "favorites": "Your favorites",
+        "uploads": "Your uploads",
+        "newOnInstance": "New on this instance",
+        "recentAlbums": "Recently added albums",
+        "recentTracks": "Recently added tracks",
+        "publicLibraries": "Public libraries",
+        "people": "People",
+        "exploreGenres": "Explore genres"
+      },
+      "feed": {
+        "title": "Latest activity",
+        "latestOnInstance": "Latest on this instance",
+        "scopes": {
+          "mine": "Mine",
+          "instance": "This instance",
+          "federated": "Federated"
+        },
+        "modes": {
+          "posts": "Posts",
+          "all": "All activity"
+        },
+        "empty": "No activity yet.",
+        "signInCta": "Sign in to see your own activity"
+      }
+    },
     "history": {
       "title": "History",
       "searchPlaceholder": "Search history…",

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import router from "./index";
 import { useAuthStore } from "@/stores/auth";
+import { useInstanceStore } from "@/stores/instance";
 import * as instanceApi from "@/api/instance";
 import type { UserResponse } from "@/api/users";
 
@@ -84,6 +85,9 @@ describe("router guard", () => {
     vi.mocked(instanceApi.getInstance).mockResolvedValue({
       registrations: true,
     } as unknown as instanceApi.InstanceInfo);
+    // The home guard already loaded instance state during the initial
+    // push("/"), so force a refetch to pick up this test's mock.
+    useInstanceStore().status = "idle";
 
     await router.push("/register");
     expect(router.currentRoute.value.path).toBe("/register");
@@ -93,6 +97,7 @@ describe("router guard", () => {
     vi.mocked(instanceApi.getInstance).mockResolvedValue({
       registrations: false,
     } as unknown as instanceApi.InstanceInfo);
+    useInstanceStore().status = "idle";
 
     await router.push("/register");
     expect(router.currentRoute.value.path).toBe("/login");
@@ -103,6 +108,7 @@ describe("router guard", () => {
       registrations: false,
       invites_enabled: true,
     } as unknown as instanceApi.InstanceInfo);
+    useInstanceStore().status = "idle";
 
     await router.push("/register?invite_code=ABC");
     expect(router.currentRoute.value.path).toBe("/register");
@@ -113,6 +119,7 @@ describe("router guard", () => {
       registrations: false,
       invites_enabled: true,
     } as unknown as instanceApi.InstanceInfo);
+    useInstanceStore().status = "idle";
 
     await router.push("/register");
     expect(router.currentRoute.value.path).toBe("/login");
@@ -123,9 +130,57 @@ describe("router guard", () => {
       registrations: false,
       invites_enabled: false,
     } as unknown as instanceApi.InstanceInfo);
+    useInstanceStore().status = "idle";
 
     await router.push("/register?invite_code=ABC");
     expect(router.currentRoute.value.path).toBe("/login");
+  });
+
+  it("redirects anonymous / to the single-user profile", async () => {
+    vi.mocked(instanceApi.getInstance).mockResolvedValue({
+      single_user: "alice",
+    } as unknown as instanceApi.InstanceInfo);
+    const store = useAuthStore();
+    store.user = null;
+    store.status = "unauthenticated";
+    // The beforeEach push("/") already populated the instance store, so
+    // force it to refetch with the single-user payload.
+    const instanceStore = useInstanceStore();
+    instanceStore.status = "idle";
+
+    await router.push("/about");
+    await router.push("/");
+
+    expect(router.currentRoute.value.path).toBe("/@alice/posts");
+  });
+
+  it("keeps authenticated users on / in single-user mode", async () => {
+    vi.mocked(instanceApi.getInstance).mockResolvedValue({
+      single_user: "alice",
+    } as unknown as instanceApi.InstanceInfo);
+    const store = useAuthStore();
+    store.user = { id: "u1", username: "bob", links: [] } as UserResponse;
+    store.status = "authenticated";
+    const instanceStore = useInstanceStore();
+    instanceStore.status = "idle";
+
+    await router.push("/about");
+    await router.push("/");
+
+    expect(router.currentRoute.value.path).toBe("/");
+  });
+
+  it("serves / to anonymous users when single-user mode is unset", async () => {
+    vi.mocked(instanceApi.getInstance).mockResolvedValue({
+      single_user: null,
+    } as unknown as instanceApi.InstanceInfo);
+    const instanceStore = useInstanceStore();
+    instanceStore.status = "idle";
+
+    await router.push("/about");
+    await router.push("/");
+
+    expect(router.currentRoute.value.path).toBe("/");
   });
 
   it("redirects /register to / for authenticated users when public registration is closed", async () => {
@@ -136,6 +191,7 @@ describe("router guard", () => {
     vi.mocked(instanceApi.getInstance).mockResolvedValue({
       registrations: false,
     } as unknown as instanceApi.InstanceInfo);
+    useInstanceStore().status = "idle";
 
     await router.push("/register");
     expect(router.currentRoute.value.path).toBe("/");

@@ -947,6 +947,36 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/timeline": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Timeline
+     * @description List the newest visible activities across the instance.
+     *
+     *     ``scope=mine`` returns the caller's own activity timeline and requires
+     *     authentication; ``scope=instance`` returns the cross-entity feed of
+     *     local activities on entities the requester may access — anonymous
+     *     requesters see the public subset; ``scope=federated`` returns the same
+     *     feed including activities received from remote instances and
+     *     webmentions. The default scope is ``mine`` for authenticated callers
+     *     and ``instance`` otherwise. A ``following`` scope is
+     *     intentionally not implemented: Songhive does not publish outgoing
+     *     follows, so there is no remote subscription graph to feed it.
+     */
+    get: operations["get_timeline_api_v1_timeline_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/statuses/": {
     parameters: {
       query?: never;
@@ -2072,6 +2102,129 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/remote/lookup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Remote Lookup
+     * @description Resolve an explicit remote lookup to an internal URL.
+     *
+     *     ``@user@domain`` handles and actor-shaped URLs resolve through
+     *     WebFinger + the actor cache; object/activity/resource URLs are
+     *     dereferenced (one bounded fetch) into the ``remote_objects`` cache with
+     *     a materialized ``Activity``. Local-domain inputs need no fetch — they
+     *     map straight to their SPA route. Returns the internal SPA route to
+     *     navigate to.
+     */
+    get: operations["remote_lookup_api_v1_remote_lookup_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/remote/actors/{handle}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Remote Actor
+     * @description Resolve ``user@domain`` to a remote actor (fetch-on-miss).
+     *
+     *     Powers the ``/@user@domain`` SPA deep link: navigating to a remote
+     *     profile is itself the explicit lookup, so a cache miss dereferences the
+     *     actor under the policy/domain/SSRF guards.
+     */
+    get: operations["get_remote_actor_api_v1_remote_actors__handle__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/remote/actors/{handle}/activities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Remote Actor Activities
+     * @description List already-cached activities for a remote actor.
+     *
+     *     Strictly reads the local cache — remote outboxes are never fetched and
+     *     timelines are never crawled.
+     */
+    get: operations["list_remote_actor_activities_api_v1_remote_actors__handle__activities_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/remote/objects/{object_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Remote Object
+     * @description Return a cached remote object and its materialized activity.
+     *
+     *     ``object_id`` is the ``remote_objects`` row id — the same id the
+     *     ``/activities/@user@domain/{id}`` SPA route carries. With ``refresh``
+     *     the canonical URL is re-dereferenced under the usual guards to confirm
+     *     the object still exists remotely.
+     */
+    get: operations["get_remote_object_api_v1_remote_objects__object_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/remote/{kind}/{object_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Remote Resource
+     * @description Return a cached remote resource (track/album/artist/playlist/library).
+     *
+     *     ``{object_id}`` is the ``remote_objects`` row id; the ``kind`` path
+     *     segment must match the normalized ``resource_type``. Remote resources
+     *     are never copied into local resource tables.
+     */
+    get: operations["get_remote_resource_api_v1_remote__kind___object_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/search/": {
     parameters: {
       query?: never;
@@ -2090,6 +2243,12 @@ export interface paths {
      *     With ``remote_users`` the users section additionally lists remote
      *     ActivityPub actors cached on the instance — followers and resolved actor
      *     documents — so mention completion can offer ``user@domain`` handles.
+     *
+     *     The ``remote`` section matches only *cached* remote objects — it never
+     *     performs network fetches, and it is empty when the
+     *     ``remote_search_access`` policy denies remote lookups to this caller.
+     *     ``remote_available`` reports whether the caller may run explicit remote
+     *     lookups at all (via ``/remote/lookup``).
      */
     get: operations["search_api_v1_search__get"];
     put?: never;
@@ -3709,6 +3868,30 @@ export interface paths {
     };
     /** Mastodon Instance V1 */
     get: operations["mastodon_instance_v1_api_v1_instance_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/instance/stats": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Instance Stats
+     * @description Return the number of items visible to the requester.
+     *
+     *     Only available when the ``public_stats_enabled`` setting is on. Counts
+     *     are filtered by the same ACL rules as the list endpoints — anonymous
+     *     callers see the public subset — and cached briefly per caller.
+     */
+    get: operations["get_instance_stats_api_v1_instance_stats_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -5622,6 +5805,37 @@ export interface components {
       url: string;
     };
     /**
+     * InstanceStats
+     * @description Visibility-filtered content counts for the instance.
+     */
+    InstanceStats: {
+      /**
+       * Tracks
+       * @default 0
+       */
+      tracks: number;
+      /**
+       * Albums
+       * @default 0
+       */
+      albums: number;
+      /**
+       * Artists
+       * @default 0
+       */
+      artists: number;
+      /**
+       * Libraries
+       * @default 0
+       */
+      libraries: number;
+      /**
+       * Users
+       * @default 0
+       */
+      users: number;
+    };
+    /**
      * InstanceV1
      * @description Mastodon-compatible ``/api/v1/instance`` response.
      */
@@ -5668,6 +5882,8 @@ export interface components {
       staff_accounts?: components["schemas"]["StaffAccount"][];
       /** Rules */
       rules?: unknown[];
+      /** Single User */
+      single_user?: string | null;
     };
     /**
      * InstanceV2
@@ -5700,6 +5916,8 @@ export interface components {
       staff_accounts?: components["schemas"]["StaffAccount"][];
       /** Rules */
       rules?: unknown[];
+      /** Single User */
+      single_user?: string | null;
     };
     /**
      * LibraryCreate
@@ -6199,6 +6417,114 @@ export interface components {
       dry_run: boolean;
     };
     /**
+     * RemoteActorActivitiesResponse
+     * @description Cached activities materialized for a remote actor.
+     */
+    RemoteActorActivitiesResponse: {
+      /** Activities */
+      activities: components["schemas"]["ActivityResponse"][];
+      /** Total */
+      total: number;
+    };
+    /**
+     * RemoteActorResponse
+     * @description A normalized remote ActivityPub actor.
+     */
+    RemoteActorResponse: {
+      /** Handle */
+      handle: string;
+      /** Username */
+      username: string;
+      /** Domain */
+      domain: string;
+      /** Actor Url */
+      actor_url: string;
+      /** Display Name */
+      display_name?: string | null;
+      /** Summary */
+      summary?: string | null;
+      /** Avatar Url */
+      avatar_url?: string | null;
+      /** Header Url */
+      header_url?: string | null;
+      /** Profile Url */
+      profile_url?: string | null;
+      /** Fetched At */
+      fetched_at?: string | null;
+      /**
+       * Unavailable
+       * @default false
+       */
+      unavailable: boolean;
+      /** Url */
+      url: string;
+    };
+    /**
+     * RemoteLookupResponse
+     * @description Result of an explicit remote lookup (``/remote/lookup``).
+     */
+    RemoteLookupResponse: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "actor" | "object" | "resource" | "local";
+      /** Url */
+      url: string;
+      actor?: components["schemas"]["RemoteActorResponse"] | null;
+      object?: components["schemas"]["RemoteObjectResponse"] | null;
+      activity?: components["schemas"]["ActivityResponse"] | null;
+    };
+    /**
+     * RemoteObjectDetailResponse
+     * @description A cached remote object with its materialized activity, if any.
+     */
+    RemoteObjectDetailResponse: {
+      object: components["schemas"]["RemoteObjectResponse"];
+      activity?: components["schemas"]["ActivityResponse"] | null;
+    };
+    /**
+     * RemoteObjectResponse
+     * @description A cached remote object — content post or resource.
+     */
+    RemoteObjectResponse: {
+      /** Id */
+      id: string;
+      /** Canonical Url */
+      canonical_url: string;
+      /** Object Type */
+      object_type: string;
+      /** Resource Type */
+      resource_type?: string | null;
+      /** Domain */
+      domain: string;
+      /** Actor Url */
+      actor_url: string;
+      /** Actor Handle */
+      actor_handle?: string | null;
+      /** Name */
+      name?: string | null;
+      /** Summary */
+      summary?: string | null;
+      /** Content */
+      content?: string | null;
+      /** Image Url */
+      image_url?: string | null;
+      /** Audio Url */
+      audio_url?: string | null;
+      /** Visibility */
+      visibility: string;
+      /** Fetched At */
+      fetched_at?: string | null;
+      /**
+       * Unavailable
+       * @default false
+       */
+      unavailable: boolean;
+      /** Url */
+      url: string;
+    };
+    /**
      * RemoveLibraryTracksRequest
      * @description Request body for removing tracks from a library.
      */
@@ -6367,6 +6693,11 @@ export interface components {
       query: string;
       /** Sections */
       sections: components["schemas"]["SearchResultSection"][];
+      /**
+       * Remote Available
+       * @default false
+       */
+      remote_available: boolean;
     };
     /**
      * SearchResultItem
@@ -6405,7 +6736,8 @@ export interface components {
         | "playlists"
         | "libraries"
         | "tags"
-        | "genres";
+        | "genres"
+        | "remote";
       /** Total */
       total: number;
       /** Items */
@@ -8942,6 +9274,48 @@ export interface operations {
         entity_type: string;
         entity_id: string;
       };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_timeline_api_v1_timeline_get: {
+    parameters: {
+      query?: {
+        /** @description Timeline scope (mine, instance or federated) */
+        scope?: string | null;
+        /** @description Activity feed mode (posts or all) */
+        mode?: string;
+        /** @description Include boosts in posts mode */
+        include_boosts?: boolean;
+        /** @description Include replies in posts mode */
+        include_replies?: boolean;
+        /** @description Filter by source type */
+        source_type?: string | null;
+        cursor?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
       cookie?: never;
     };
     requestBody?: never;
@@ -11560,6 +11934,174 @@ export interface operations {
       };
     };
   };
+  remote_lookup_api_v1_remote_lookup_get: {
+    parameters: {
+      query: {
+        /** @description Handle, actor URL, or remote object URL */
+        input: string;
+        /** @description Bypass caches and re-fetch */
+        refresh?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RemoteLookupResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_remote_actor_api_v1_remote_actors__handle__get: {
+    parameters: {
+      query?: {
+        /** @description Bypass the actor cache and re-fetch */
+        refresh?: boolean;
+      };
+      header?: never;
+      path: {
+        handle: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RemoteActorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_remote_actor_activities_api_v1_remote_actors__handle__activities_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        handle: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RemoteActorActivitiesResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_remote_object_api_v1_remote_objects__object_id__get: {
+    parameters: {
+      query?: {
+        /** @description Re-fetch the canonical URL to confirm remote state */
+        refresh?: boolean;
+      };
+      header?: never;
+      path: {
+        object_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RemoteObjectDetailResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_remote_resource_api_v1_remote__kind___object_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: string;
+        object_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RemoteObjectResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   search_api_v1_search__get: {
     parameters: {
       query?: {
@@ -11571,6 +12113,8 @@ export interface operations {
         limit?: number;
         /** @description Also match cached remote actors (followers, actor cache) in the users section */
         remote_users?: boolean;
+        /** @description Include the cached remote objects section (never triggers remote fetches) */
+        include_remote?: boolean;
       };
       header?: never;
       path?: never;
@@ -14453,6 +14997,26 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  get_instance_stats_api_v1_instance_stats_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InstanceStats"];
         };
       };
     };

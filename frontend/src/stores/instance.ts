@@ -22,6 +22,9 @@ export const useInstanceStore = defineStore("instance", () => {
   const federationEnabled = computed(
     () => instance.value?.federation_enabled ?? false,
   );
+  // Username configured for single-user mode; ``/`` redirects anonymous
+  // visitors to ``/@{singleUser}`` when set.
+  const singleUser = computed(() => instance.value?.single_user || null);
   const loading = computed(() => status.value === "loading");
   const name = computed(() => instance.value?.title || "Songhive");
 
@@ -51,6 +54,7 @@ export const useInstanceStore = defineStore("instance", () => {
     approvalRequired,
     invitesEnabled,
     federationEnabled,
+    singleUser,
     loading,
     name,
     load,

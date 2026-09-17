@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts",
     "format": "prettier --write src/",
-    "api:gen": "openapi-typescript http://localhost:8000/openapi.json -o src/api/types.ts",
+    "api:gen": "openapi-typescript http://localhost:8000/openapi.json -o src/api/types.ts && prettier --write src/api/types.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

@@ -7,18 +7,23 @@ enabled, the same paths are registered earlier than Pubby's Mastodon binding,
 so these routes take precedence.
 """
 
+import json
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import RegistrationMode, SonghiveConfig
 from ...federation import get_actor_url
 from ...models.user import FollowersApproval, User, UserRole
+from ...services import auth as auth_service
+from ...services import music
+from ...services import settings as settings_service
 from ...version import __version__
-from ..deps import get_config, get_db
+from ..deps import get_config, get_current_user_optional, get_db, get_redis
 
 v1_router = APIRouter(prefix="/instance", tags=["instance"])
 v2_router = APIRouter(prefix="/instance", tags=["instance"])
@@ -114,6 +119,9 @@ class InstanceV1(BaseModel):
     contact: Optional[InstanceContact] = None
     staff_accounts: List[StaffAccount] = Field(default_factory=list)
     rules: List[Any] = Field(default_factory=list)
+    # Username configured for single-user mode; ``/`` redirects anonymous
+    # visitors to ``/@{single_user}`` when set.
+    single_user: Optional[str] = None
 
 
 class _V2Thumbnail(BaseModel):
@@ -205,6 +213,7 @@ class InstanceV2(BaseModel):
     contact: _V2Contact = Field(default_factory=_V2Contact)
     staff_accounts: List[StaffAccount] = Field(default_factory=list)
     rules: List[Any] = Field(default_factory=list)
+    single_user: Optional[str] = None
 
 
 def _instance_domain(request: Request, config: SonghiveConfig) -> str:
@@ -322,17 +331,25 @@ def _instance_contact(config: SonghiveConfig) -> Optional[InstanceContact]:
     return contact
 
 
+async def _single_user(db: AsyncSession, redis: Redis) -> Optional[str]:
+    """Return the configured single-user username, or ``None`` when unset."""
+    value = await settings_service.get_setting(db, redis, "single_user_username")
+    return value if isinstance(value, str) and value else None
+
+
 @v1_router.get("", response_model=InstanceV1)
 async def get_instance_v1(
     request: Request,
     config: SonghiveConfig = Depends(get_config),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     """Return Mastodon-compatible instance metadata (v1)."""
     domain = _instance_domain(request, config)
     registrations, approval_required, invites_enabled = _registration_flags(config.auth.registration_mode)
     user_count = await _user_count(db)
     admins = await _admin_users(db)
+    single_user = await _single_user(db, redis)
     version = f"Songhive {__version__} (Mastodon-compatible)"
 
     return InstanceV1(
@@ -355,6 +372,7 @@ async def get_instance_v1(
         contact_account=_user_to_mastodon_account(admins[0], request, config) if admins else None,
         contact=_instance_contact(config),
         staff_accounts=[_user_to_staff_account(admin, request, config) for admin in admins],
+        single_user=single_user,
     )
 
 
@@ -363,12 +381,14 @@ async def get_instance_v2(
     request: Request,
     config: SonghiveConfig = Depends(get_config),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     """Return Mastodon-compatible instance metadata (v2)."""
     domain = _instance_domain(request, config)
     registrations, approval_required, _ = _registration_flags(config.auth.registration_mode)
     user_count = await _user_count(db)
     admins = await _admin_users(db)
+    single_user = await _single_user(db, redis)
     version = f"Songhive {__version__} (Mastodon-compatible)"
 
     return InstanceV2(
@@ -387,7 +407,54 @@ async def get_instance_v2(
             account=_user_to_mastodon_account(admins[0], request, config) if admins else None,
         ),
         staff_accounts=[_user_to_staff_account(admin, request, config) for admin in admins],
+        single_user=single_user,
     )
+
+
+class InstanceStats(BaseModel):
+    """Visibility-filtered content counts for the instance."""
+
+    tracks: int = 0
+    albums: int = 0
+    artists: int = 0
+    libraries: int = 0
+    users: int = 0
+
+
+@v1_router.get("/stats", response_model=InstanceStats)
+async def get_instance_stats(
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    Return the number of items visible to the requester.
+
+    Only available when the ``public_stats_enabled`` setting is on. Counts
+    are filtered by the same ACL rules as the list endpoints — anonymous
+    callers see the public subset — and cached briefly per caller.
+    """
+    if not await settings_service.get_setting(db, redis, "public_stats_enabled"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    cache_key = f"instance_stats:{'anon' if user is None else user.id}"
+    cached = await redis.get(cache_key)
+    if cached is not None:
+        try:
+            return InstanceStats(**json.loads(cached))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+    _, user_count = await auth_service.list_public_users(db, user=user, limit=1)
+    stats = InstanceStats(
+        tracks=await music.count_tracks(db, user=user),
+        albums=await music.count_albums(db, user=user),
+        artists=await music.count_artists(db, user=user),
+        libraries=await music.count_libraries(db, user=user),
+        users=user_count,
+    )
+    await redis.set(cache_key, stats.model_dump_json(), ex=settings_service.SETTINGS_CACHE_TTL)
+    return stats
 
 
 @v1_router.get("/peers", response_model=List[str])

@@ -3,9 +3,6 @@ import type { components } from "./types";
 
 export type SearchEntity =
   components["schemas"]["SearchResultSection"]["entity"];
-// ``remote`` is a valid ``entities`` section server-side but not yet in the
-// generated OpenAPI types — regenerate ``api/types.ts`` to pick it up.
-export type SearchEntityInput = SearchEntity | "remote";
 export type SearchResultItem = components["schemas"]["SearchResultItem"];
 export type SearchResultSection = components["schemas"]["SearchResultSection"];
 export type SearchResponse = components["schemas"]["SearchResponse"] & {
@@ -16,7 +13,7 @@ export type SearchResponse = components["schemas"]["SearchResponse"] & {
 
 export function searchPreview(
   q: string,
-  entities?: SearchEntityInput[],
+  entities?: SearchEntity[],
   limit = 5,
   options?: { remoteUsers?: boolean; includeRemote?: boolean },
 ): Promise<SearchResponse> {

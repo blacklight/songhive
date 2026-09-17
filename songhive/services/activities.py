@@ -82,6 +82,7 @@ __all__ = [
     "like_activity",
     "list_activities",
     "list_activities_for_tag",
+    "list_timeline",
     "list_activity_interactors",
     "list_activity_quotes",
     "list_activity_replies",
@@ -301,6 +302,35 @@ def _decode_activity_cursor(cursor: str) -> Tuple[datetime, str]:
     return published_at, activity_id
 
 
+async def _fetch_activity_page(
+    session: AsyncSession,
+    stmt: Any,
+    cursor: Optional[str],
+    limit: int,
+) -> Tuple[List[Activity], Optional[str]]:
+    """Run a keyset-paginated activity query and return ``(page, next_cursor)``.
+
+    ``stmt`` must order by ``(published_at desc, id desc)``; the cursor
+    filters on rows older than the decoded ``(published_at, id)`` pair.
+    """
+    if cursor:
+        published_at, activity_id = _decode_activity_cursor(cursor)
+        stmt = stmt.where(
+            or_(
+                Activity.published_at < published_at,
+                and_(Activity.published_at == published_at, Activity.id < activity_id),
+            )
+        )
+
+    result = await session.execute(stmt.limit(limit + 1))
+    activities = list(result.scalars().all())
+    next_cursor = None
+    if len(activities) > limit:
+        activities = activities[:limit]
+        next_cursor = _encode_activity_cursor(activities[-1])
+    return activities, next_cursor
+
+
 async def list_activities(
     session: AsyncSession,
     *,
@@ -335,48 +365,35 @@ async def list_activities(
         stmt = stmt.where(Activity.activity_type == activity_type)
     if source_type is not None:
         stmt = stmt.where(Activity.source_type == source_type)
-    if cursor:
-        published_at, activity_id = _decode_activity_cursor(cursor)
-        stmt = stmt.where(
-            or_(
-                Activity.published_at < published_at,
-                and_(Activity.published_at == published_at, Activity.id < activity_id),
-            )
-        )
-
-    result = await session.execute(stmt.limit(limit + 1))
-    activities = list(result.scalars().all())
-    next_cursor = None
-    if len(activities) > limit:
-        activities = activities[:limit]
-        next_cursor = _encode_activity_cursor(activities[-1])
-    return activities, next_cursor
+    return await _fetch_activity_page(session, stmt, cursor, limit)
 
 
-def _accessible_activities_for_tag_cte(tag_name: str, user: Optional[User]) -> Any:
+def _accessible_activities_cte(user: Optional[User], tag_name: Optional[str] = None) -> Any:
     """
-    Build a CTE of activity ids that mention ``tag_name`` and are visible.
+    Build a CTE of activity ids on entities visible to ``user``.
 
     Each subquery joins ``Activity`` with the entity it belongs to and applies
-    the same list access predicate used elsewhere, so public tag pages only
-    surface activities the requester may actually view.
+    the same list access predicate used elsewhere, so callers only surface
+    activities the requester may actually view. When ``tag_name`` is given,
+    only activities that mention the tag are included.
     """
     subqueries = []
     for entity_type, model in _ENTITY_MODELS.items():
         pred = _entity_access_predicate(model, user, entity_type)
-        subq = (
-            select(Activity.id)
-            .join(ActivityTag, ActivityTag.activity_id == Activity.id)
-            .join(Tag, ActivityTag.tag_id == Tag.id)
-            .join(model, and_(Activity.entity_type == entity_type, Activity.entity_id == model.id))
-            .where(
-                Tag.name == tag_name,
-                Activity.deleted_at.is_(None),
-                _activity_visibility_filter(user),
-                pred,
-            )
+        subq = select(Activity.id).join(
+            model, and_(Activity.entity_type == entity_type, Activity.entity_id == model.id)
         )
-        subqueries.append(subq)
+        conditions = [
+            Activity.deleted_at.is_(None),
+            _activity_visibility_filter(user),
+            pred,
+        ]
+        if tag_name is not None:
+            subq = subq.join(ActivityTag, ActivityTag.activity_id == Activity.id).join(
+                Tag, ActivityTag.tag_id == Tag.id
+            )
+            conditions.append(Tag.name == tag_name)
+        subqueries.append(subq.where(*conditions))
     return union_all(*subqueries).cte("accessible_activities")
 
 
@@ -397,27 +414,11 @@ async def list_activities_for_tag(
     except ValueError:
         raise HTTPException(status_code=404, detail="Tag not found") from None
 
-    cte = _accessible_activities_for_tag_cte(tag_name, user)
+    cte = _accessible_activities_cte(user, tag_name=tag_name)
     stmt = (
         select(Activity).join(cte, Activity.id == cte.c.id).order_by(Activity.published_at.desc(), Activity.id.desc())
     )
-
-    if cursor:
-        published_at, activity_id = _decode_activity_cursor(cursor)
-        stmt = stmt.where(
-            or_(
-                Activity.published_at < published_at,
-                and_(Activity.published_at == published_at, Activity.id < activity_id),
-            )
-        )
-
-    result = await session.execute(stmt.limit(limit + 1))
-    activities = list(result.scalars().all())
-    next_cursor = None
-    if len(activities) > limit:
-        activities = activities[:limit]
-        next_cursor = _encode_activity_cursor(activities[-1])
-    return activities, next_cursor
+    return await _fetch_activity_page(session, stmt, cursor, limit)
 
 
 async def list_user_activities(
@@ -471,22 +472,84 @@ async def list_user_activities(
     if source_type is not None:
         stmt = stmt.where(Activity.source_type == source_type)
 
-    if cursor:
-        published_at, activity_id = _decode_activity_cursor(cursor)
-        stmt = stmt.where(
-            or_(
-                Activity.published_at < published_at,
-                and_(Activity.published_at == published_at, Activity.id < activity_id),
-            )
+    return await _fetch_activity_page(session, stmt, cursor, limit)
+
+
+TIMELINE_SCOPES = ("mine", "instance", "federated")
+
+
+async def list_timeline(
+    session: AsyncSession,
+    *,
+    user: Optional[User] = None,
+    scope: str = "instance",
+    mode: str = "posts",
+    include_boosts: bool = True,
+    include_replies: bool = False,
+    source_type: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 20,
+) -> Tuple[List[Activity], Optional[str]]:
+    """
+    List the newest visible activities across the instance, newest first.
+
+    ``scope="mine"`` delegates to ``list_user_activities`` for the caller's
+    own timeline and requires an authenticated user. ``scope="instance"``
+    returns the cross-entity feed restricted to local activities;
+    ``scope="federated"`` returns the same feed without the source filter,
+    including activities received from remote instances and webmentions.
+    Both are keyset-paginated on ``(published_at, id)``.
+
+    ``mode="posts"`` keeps ``create``/``quote`` activities plus ``announce``
+    when ``include_boosts`` and ``reply`` when ``include_replies``;
+    ``mode="all"`` returns every visible activity type. A ``following``
+    scope is intentionally absent — Songhive only receives follows, so there
+    is no outgoing-follow graph to feed it.
+
+    Note: ``user``-entity activities (standalone statuses) are accessible
+    when their author is active; the predicate does not consult
+    ``profile_visibility``, matching the existing tag feeds.
+    """
+    if mode not in ("posts", "all"):
+        raise HTTPException(status_code=400, detail="Invalid mode")
+    if scope not in TIMELINE_SCOPES:
+        raise HTTPException(status_code=400, detail="Invalid scope")
+
+    if scope == "mine":
+        if user is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return await list_user_activities(
+            session,
+            owner_user_id=str(user.id),
+            user=user,
+            mode=mode,
+            include_boosts=include_boosts,
+            include_replies=include_replies,
+            source_type=source_type,
+            cursor=cursor,
+            limit=limit,
         )
 
-    result = await session.execute(stmt.limit(limit + 1))
-    activities = list(result.scalars().all())
-    next_cursor = None
-    if len(activities) > limit:
-        activities = activities[:limit]
-        next_cursor = _encode_activity_cursor(activities[-1])
-    return activities, next_cursor
+    cte = _accessible_activities_cte(user)
+    stmt = (
+        select(Activity).join(cte, Activity.id == cte.c.id).order_by(Activity.published_at.desc(), Activity.id.desc())
+    )
+
+    if scope == "instance":
+        stmt = stmt.where(Activity.source_type == "local")
+
+    if mode == "posts":
+        activity_types = ["create", "quote"]
+        if include_boosts:
+            activity_types.append("announce")
+        if include_replies:
+            activity_types.append("reply")
+        stmt = stmt.where(Activity.activity_type.in_(activity_types))
+
+    if source_type is not None:
+        stmt = stmt.where(Activity.source_type == source_type)
+
+    return await _fetch_activity_page(session, stmt, cursor, limit)
 
 
 _actor_doc_avatar_url = federation_service._actor_doc_avatar_url

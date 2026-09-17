@@ -58,6 +58,7 @@ class Activity(Base):
         Index("ix_activities_entity_type_entity_id_published_at", "entity_type", "entity_id", "published_at"),
         Index("ix_activities_entity_type_entity_id_activity_type", "entity_type", "entity_id", "activity_type"),
         Index("ix_activities_owner_user_id_published_at", "owner_user_id", "published_at"),
+        Index("ix_activities_published_at", "published_at"),
         Index("ix_activities_in_reply_to_activity_id", "in_reply_to_activity_id"),
         UniqueConstraint("source_type", "source_id", name="uq_activities_source_type_source_id"),
         UniqueConstraint("local_object_id", name="uq_activities_local_object_id"),
