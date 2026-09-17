@@ -9,6 +9,7 @@ import { uploadFile } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
 import {
   deleteMe,
+  type FollowersApproval,
   type ProfileVisibility,
   type UserProfileUpdate,
 } from "@/api/users";
@@ -57,6 +58,9 @@ const previewCardsEnabled = ref(authStore.user?.preview_cards_enabled ?? true);
 const profileVisibility = ref<ProfileVisibility>(
   authStore.user?.profile_visibility ?? "public",
 );
+const followersApproval = ref<FollowersApproval>(
+  authStore.user?.followers_approval ?? "accept",
+);
 const isLoading = ref(false);
 const error = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -85,6 +89,7 @@ watch(
       STATUS_CONTENT_TYPE_MARKDOWN;
     previewCardsEnabled.value = next.preview_cards_enabled ?? true;
     profileVisibility.value = next.profile_visibility ?? "public";
+    followersApproval.value = next.followers_approval ?? "accept";
   },
   { deep: true },
 );
@@ -106,6 +111,15 @@ const profileVisibilityOptions = computed(() =>
   PROFILE_VISIBILITIES.map((value) => ({
     value,
     label: t(`profile.visibility.${value}`),
+  })),
+);
+
+const FOLLOWERS_APPROVALS: FollowersApproval[] = ["accept", "manual", "reject"];
+
+const followersApprovalOptions = computed(() =>
+  FOLLOWERS_APPROVALS.map((value) => ({
+    value,
+    label: t(`profile.followersApprovalOptions.${value}`),
   })),
 );
 
@@ -252,6 +266,7 @@ async function onSubmit() {
     status_content_type: statusContentType.value,
     preview_cards_enabled: previewCardsEnabled.value,
     profile_visibility: profileVisibility.value,
+    followers_approval: followersApproval.value,
     links: validLinks.map((l) => ({
       name: l.name.trim(),
       url: l.url.trim(),
@@ -348,6 +363,13 @@ async function onSubmit() {
       :options="profileVisibilityOptions"
       :label="t('profile.profileVisibility')"
       :hint="t('profile.profileVisibilityHint')"
+    />
+
+    <AppSelect
+      v-model="followersApproval"
+      :options="followersApprovalOptions"
+      :label="t('profile.followersApproval')"
+      :hint="t('profile.followersApprovalHint')"
     />
 
     <fieldset class="profile-tab__links">

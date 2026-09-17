@@ -279,6 +279,11 @@ async def update_profile(session: AsyncSession, user: User, updates: Dict[str, A
         if profile_visibility:
             user.profile_visibility = profile_visibility
 
+    if "followers_approval" in updates:
+        followers_approval = updates["followers_approval"]
+        if followers_approval:
+            user.followers_approval = followers_approval
+
     if "links" in updates:
         links = updates["links"] or []
         await session.execute(delete(UserLink).where(UserLink.user_id == user.id))

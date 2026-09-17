@@ -29,6 +29,7 @@ def create_activitypub_storage(database_url: str) -> DbActivityPubStorage:
     return init_db_storage(
         database_url,
         followers_table="federation_followers",
+        follow_requests_table="federation_follow_requests",
         interactions_table="federation_interactions",
         activities_table="federation_activities",
         actor_cache_table="federation_actor_cache",

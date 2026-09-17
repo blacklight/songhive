@@ -152,6 +152,25 @@ describe("notificationActionText", () => {
     );
   });
 
+  it("renders follow requests as requests while pending or rejected", () => {
+    expect(
+      notificationActionText(
+        notification("follow", { follow_request_pending: true }),
+      ),
+    ).toBe("requested to follow you");
+    expect(
+      notificationActionText(
+        notification("follow", { follow_request_status: "rejected" }),
+      ),
+    ).toBe("requested to follow you");
+    // An accepted request reads as a regular follow again.
+    expect(
+      notificationActionText(
+        notification("follow", { follow_request_status: "accepted" }),
+      ),
+    ).toBe("started following you");
+  });
+
   it("falls back for unknown types", () => {
     expect(
       notificationActionText({

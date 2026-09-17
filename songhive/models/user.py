@@ -30,10 +30,20 @@ class ProfileVisibility(str, Enum):
     PRIVATE = "private"
 
 
+class FollowersApproval(str, Enum):
+    """How new follower requests are handled."""
+
+    ACCEPT = "accept"
+    MANUAL = "manual"
+    REJECT = "reject"
+
+
 VALID_ROLES = {r.value for r in UserRole}
 VALID_PROFILE_VISIBILITIES = {v.value for v in ProfileVisibility}
+VALID_FOLLOWERS_APPROVALS = {v.value for v in FollowersApproval}
 _ROLE_CHECK = f"role IN ({', '.join(repr(r) for r in VALID_ROLES)})"
 _PROFILE_VISIBILITY_CHECK = f"profile_visibility IN ({', '.join(repr(v) for v in VALID_PROFILE_VISIBILITIES)})"
+_FOLLOWERS_APPROVAL_CHECK = f"followers_approval IN ({', '.join(repr(v) for v in VALID_FOLLOWERS_APPROVALS)})"
 
 
 class User(Base):
@@ -46,6 +56,10 @@ class User(Base):
         CheckConstraint(
             _PROFILE_VISIBILITY_CHECK,
             name="ck_users_profile_visibility",
+        ),
+        CheckConstraint(
+            _FOLLOWERS_APPROVAL_CHECK,
+            name="ck_users_followers_approval",
         ),
     )
     __allow_unmapped__ = True
@@ -82,6 +96,12 @@ class User(Base):
         default="public",
         server_default="public",
     )
+    followers_approval: Mapped[str] = mapped_column(
+        String(16),
+        insert_default="accept",
+        default="accept",
+        server_default="accept",
+    )
     links: Mapped[List["UserLink"]] = relationship(
         "UserLink",
         back_populates="user",
@@ -110,6 +130,12 @@ class User(Base):
     def _validate_profile_visibility(self, _: str, value: Optional[str]) -> Optional[str]:
         if value is not None and value not in VALID_PROFILE_VISIBILITIES:
             raise ValueError(f"Invalid profile_visibility: {value}")
+        return value
+
+    @validates("followers_approval")
+    def _validate_followers_approval(self, _: str, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in VALID_FOLLOWERS_APPROVALS:
+            raise ValueError(f"Invalid followers_approval: {value}")
         return value
 
     @validates("avatar_url")

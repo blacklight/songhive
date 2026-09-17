@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...federation.actors import get_federation_storage, sync_user_actor
-from ...models.user import ProfileVisibility, User, UserRole
+from ...models.user import FollowersApproval, ProfileVisibility, User, UserRole
 from ...models.user_link import UserLink
 from ...services import activities as activity_service
 from ...services import audit
@@ -84,6 +84,7 @@ class UserResponse(BaseModel):
     status_content_type: str = "text/markdown"
     preview_cards_enabled: bool = True
     profile_visibility: ProfileVisibility = ProfileVisibility.PUBLIC
+    followers_approval: FollowersApproval = FollowersApproval.ACCEPT
     links: List[UserLinkOutput] = Field(default_factory=list)
 
 
@@ -111,6 +112,15 @@ class FollowerResponse(BaseModel):
     followed_at: Optional[datetime] = None
 
 
+class FollowRequestResponse(BaseModel):
+    """A pending follow request, visible to the followed user only."""
+
+    actor_url: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    requested_at: Optional[datetime] = None
+
+
 def _follower_response(follower) -> FollowerResponse:
     """Map a stored pubby ``Follower`` to its public representation."""
     actor_data = follower.actor_data or {}
@@ -119,6 +129,17 @@ def _follower_response(follower) -> FollowerResponse:
         display_name=activity_service._actor_doc_display_name(actor_data),
         avatar_url=activity_service._actor_doc_avatar_url(actor_data),
         followed_at=follower.followed_at,
+    )
+
+
+def _follow_request_response(request) -> FollowRequestResponse:
+    """Map a stored pubby ``FollowRequest`` to its representation."""
+    actor_data = request.actor_data or {}
+    return FollowRequestResponse(
+        actor_url=request.actor_id,
+        display_name=activity_service._actor_doc_display_name(actor_data),
+        avatar_url=activity_service._actor_doc_avatar_url(actor_data),
+        requested_at=request.requested_at,
     )
 
 
@@ -177,6 +198,7 @@ class UserProfileUpdate(BaseModel):
     status_content_type: Optional[str] = None
     preview_cards_enabled: Optional[bool] = None
     profile_visibility: Optional[ProfileVisibility] = None
+    followers_approval: Optional[FollowersApproval] = None
     links: Optional[List[UserLinkInput]] = None
 
     @field_validator("status_content_type")
@@ -203,6 +225,12 @@ class UserProfileUpdate(BaseModel):
         if not value.startswith(("https://", "http://")):
             raise ValueError("Avatar URL must start with http:// or https://")
         return value
+
+
+class FollowRequestDecision(BaseModel):
+    """Payload for accepting or rejecting a pending follow request."""
+
+    actor_url: str = Field(..., min_length=1, max_length=1024)
 
 
 class ChangePasswordRequest(BaseModel):
@@ -254,6 +282,106 @@ async def update_current_user_profile(
         await sync_user_actor(current_user, config)
 
     return UserResponse.model_validate(current_user)
+
+
+async def _load_follow_requests(user: User, config: SonghiveConfig) -> list:
+    """
+    Return the user's pending follow requests (newest first).
+
+    Requests live in pubby's ``federation_follow_requests`` storage —
+    populated by incoming ``Follow`` activities while the user's approval
+    policy is ``manual`` — so the list is empty when federation is
+    disabled or the user has no actor URL. Blocking storage calls run in
+    a thread.
+    """
+    if not config.federation.enabled or not config.federation.instance_domain or not user.actor_url:
+        return []
+    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    try:
+        return await asyncio.to_thread(federation_service.get_actor_follow_requests, storage, user.actor_url)
+    except Exception:
+        # Broad catch is intentional: see _load_followers.
+        logger.warning("Failed to load follow requests for %s", user.username, exc_info=True)
+        return []
+
+
+@router.get("/me/follow-requests", response_model=List[FollowRequestResponse])
+async def list_my_follow_requests(
+    response: Response,
+    pagination: Pagination = Depends(get_pagination),
+    current_user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """List the current user's pending follow requests, newest first."""
+    requests = await _load_follow_requests(current_user, config)
+    pagination.set_total(response, len(requests))
+    page = requests[pagination.offset : pagination.offset + pagination.limit]
+    return [_follow_request_response(r) for r in page]
+
+
+async def _decide_follow_request(
+    body: FollowRequestDecision,
+    current_user: User,
+    db: AsyncSession,
+    config: SonghiveConfig,
+    *,
+    accept: bool,
+) -> None:
+    """Resolve a pending follow request and update its notification."""
+    from ...federation.notifications import resolve_follow_request_notification
+
+    if not config.federation.enabled or not config.federation.instance_domain or not current_user.actor_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    request = await asyncio.to_thread(
+        federation_service.get_follow_request, storage, current_user.actor_url, body.actor_url
+    )
+    if request is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    try:
+        await asyncio.to_thread(
+            federation_service.resolve_follow_request,
+            storage,
+            request,
+            current_user,
+            accept=accept,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    await resolve_follow_request_notification(
+        db,
+        recipient=current_user,
+        actor_url=body.actor_url,
+        status="accepted" if accept else "rejected",
+    )
+    await db.commit()
+
+
+@router.post("/me/follow-requests/accept", status_code=status.HTTP_204_NO_CONTENT)
+async def accept_my_follow_request(
+    body: FollowRequestDecision,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Approve a pending follow request and send the ``Accept``."""
+    await _decide_follow_request(body, current_user, db, config, accept=True)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/me/follow-requests/reject", status_code=status.HTTP_204_NO_CONTENT)
+async def reject_my_follow_request(
+    body: FollowRequestDecision,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Decline a pending follow request and send the ``Reject``."""
+    await _decide_follow_request(body, current_user, db, config, accept=False)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

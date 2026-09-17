@@ -6,6 +6,7 @@ import * as notificationsApi from "@/api/notifications";
 import type { NotificationResponse } from "@/api/notifications";
 import * as activitiesApi from "@/api/activities";
 import type { ActivityResponse } from "@/api/activities";
+import * as usersApi from "@/api/users";
 import { useNotificationsStore } from "@/stores/notifications";
 import NotificationsView from "./NotificationsView.vue";
 
@@ -50,9 +51,16 @@ vi.mock("@/api/activities", () => ({
   lookupActivity: vi.fn().mockRejectedValue(new Error("not found")),
 }));
 
+vi.mock("@/api/users", () => ({
+  acceptFollowRequest: vi.fn(),
+  rejectFollowRequest: vi.fn(),
+}));
+
 const listNotifications = vi.mocked(notificationsApi.listNotifications);
 const getActivity = vi.mocked(activitiesApi.getActivity);
 const lookupActivity = vi.mocked(activitiesApi.lookupActivity);
+const acceptFollowRequestApi = vi.mocked(usersApi.acceptFollowRequest);
+const rejectFollowRequestApi = vi.mocked(usersApi.rejectFollowRequest);
 const markSeenApi = vi.mocked(notificationsApi.markSeen);
 const markUnseenApi = vi.mocked(notificationsApi.markUnseen);
 const markAllSeenApi = vi.mocked(notificationsApi.markAllSeen);
@@ -306,6 +314,121 @@ describe("NotificationsView", () => {
     const card = wrapper.find(".actor-card");
     expect(card.exists()).toBe(true);
     expect(card.attributes("href")).toBe("/@alice");
+  });
+
+  it("shows accept/reject actions on a pending follow request", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "follow",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/users/bob",
+          payload: { actor_name: "bob", follow_request_pending: true },
+        }),
+      ],
+      total: 1,
+    });
+    const { wrapper } = await mountView();
+
+    expect(wrapper.text()).toContain("requested to follow you");
+    const actions = wrapper.find(".notifications-view__request-actions");
+    expect(actions.exists()).toBe(true);
+    expect(actions.findAll("button").some((b) => b.text() === "Accept")).toBe(
+      true,
+    );
+    expect(actions.findAll("button").some((b) => b.text() === "Reject")).toBe(
+      true,
+    );
+  });
+
+  it("accepting a pending follow request calls the API and updates the row", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "follow",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/users/bob",
+          payload: { actor_name: "bob", follow_request_pending: true },
+        }),
+      ],
+      total: 1,
+    });
+    const { wrapper } = await mountView();
+
+    const accept = wrapper
+      .findAll(".notifications-view__request-actions button")
+      .find((b) => b.text() === "Accept");
+    await accept!.trigger("click");
+    await flushPromises();
+
+    expect(acceptFollowRequestApi).toHaveBeenCalledWith(
+      "https://remote.example/users/bob",
+    );
+    expect(wrapper.find(".notifications-view__request-actions").exists()).toBe(
+      false,
+    );
+    expect(wrapper.find(".notifications-view__request-status").text()).toBe(
+      "Accepted",
+    );
+    // Once approved, the row reads as a regular follow.
+    expect(wrapper.text()).toContain("started following you");
+  });
+
+  it("rejecting a pending follow request calls the API and records the outcome", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "follow",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/users/bob",
+          payload: { actor_name: "bob", follow_request_pending: true },
+        }),
+      ],
+      total: 1,
+    });
+    const { wrapper } = await mountView();
+
+    const reject = wrapper
+      .findAll(".notifications-view__request-actions button")
+      .find((b) => b.text() === "Reject");
+    await reject!.trigger("click");
+    await flushPromises();
+
+    expect(rejectFollowRequestApi).toHaveBeenCalledWith(
+      "https://remote.example/users/bob",
+    );
+    expect(wrapper.find(".notifications-view__request-actions").exists()).toBe(
+      false,
+    );
+    expect(wrapper.find(".notifications-view__request-status").text()).toBe(
+      "Rejected",
+    );
+    expect(wrapper.text()).toContain("requested to follow you");
+  });
+
+  it("renders a resolved follow request without actions", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "follow",
+          actor_url: "https://remote.example/users/bob",
+          source_url: "https://remote.example/users/bob",
+          payload: {
+            actor_name: "bob",
+            follow_request_status: "rejected",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    const { wrapper } = await mountView();
+
+    expect(wrapper.find(".notifications-view__request-actions").exists()).toBe(
+      false,
+    );
+    expect(wrapper.find(".notifications-view__request-status").text()).toBe(
+      "Rejected",
+    );
   });
 
   it("renders mention notifications as a read-only activity card", async () => {

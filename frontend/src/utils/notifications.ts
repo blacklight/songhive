@@ -88,9 +88,13 @@ export function notificationActionText(
 ): string {
   const payload = notification.payload ?? {};
   const key =
-    notification.type === "follow" && str(payload.target_url)
-      ? "notifications.types.followObject"
-      : `notifications.types.${notification.type}`;
+    notification.type === "follow" &&
+    (payload.follow_request_pending === true ||
+      payload.follow_request_status === "rejected")
+      ? "notifications.types.followRequest"
+      : notification.type === "follow" && str(payload.target_url)
+        ? "notifications.types.followObject"
+        : `notifications.types.${notification.type}`;
   // ``share`` phrases its object with an indefinite article ("shared a
   // track with you"); the other types use the bare entity name.
   const objectsKey =

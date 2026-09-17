@@ -53,6 +53,12 @@ async def get_user_by_id(session: AsyncSession, user_id: str) -> User | None:
     return result.scalar_one_or_none()
 
 
+async def get_user_by_actor_url(session: AsyncSession, actor_url: str) -> User | None:
+    """Fetch a user by their ActivityPub actor URL."""
+    result = await session.execute(select(User).where(User.actor_url == actor_url))
+    return result.scalar_one_or_none()
+
+
 async def get_user_by_email_verification_token(session: AsyncSession, token: str) -> User | None:
     """
     Fetch a user by their raw email verification token.

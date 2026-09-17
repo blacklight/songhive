@@ -15,7 +15,12 @@ export type UserListResponse =
   paths["/api/v1/users"]["get"]["responses"]["200"]["content"]["application/json"];
 export type FollowerResponse =
   paths["/api/v1/users/{username}/followers"]["get"]["responses"]["200"]["content"]["application/json"][number];
+export type FollowRequestResponse =
+  paths["/api/v1/users/me/follow-requests"]["get"]["responses"]["200"]["content"]["application/json"][number];
+export type FollowRequestDecision =
+  components["schemas"]["FollowRequestDecision"];
 export type ProfileVisibility = components["schemas"]["ProfileVisibility"];
+export type FollowersApproval = components["schemas"]["FollowersApproval"];
 
 export interface DeleteAccountRequest {
   confirmation: string;
@@ -43,6 +48,12 @@ export interface ListFollowersParams {
 
 export interface ListFollowersResult {
   followers: FollowerResponse[];
+  offset: number;
+  total: number;
+}
+
+export interface ListFollowRequestsResult {
+  requests: FollowRequestResponse[];
   offset: number;
   total: number;
 }
@@ -103,6 +114,40 @@ export async function listFollowers(
     offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
     total: total ? parseInt(total, 10) : response.body.length,
   };
+}
+
+export async function listFollowRequests(
+  params?: ListFollowersParams,
+): Promise<ListFollowRequestsResult> {
+  const response = await apiRequestWithHeaders<FollowRequestResponse[]>(
+    "/users/me/follow-requests",
+    {
+      query: params as
+        | Record<string, string | number | boolean | undefined | null>
+        | undefined,
+    },
+  );
+  const offsetHeader = response.headers.get("X-List-Offset");
+  const total = response.headers.get("X-Total-Count");
+  return {
+    requests: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
+    total: total ? parseInt(total, 10) : response.body.length,
+  };
+}
+
+export function acceptFollowRequest(actorUrl: string): Promise<void> {
+  return apiRequest<void>("/users/me/follow-requests/accept", {
+    method: "POST",
+    body: { actor_url: actorUrl } satisfies FollowRequestDecision,
+  });
+}
+
+export function rejectFollowRequest(actorUrl: string): Promise<void> {
+  return apiRequest<void>("/users/me/follow-requests/reject", {
+    method: "POST",
+    body: { actor_url: actorUrl } satisfies FollowRequestDecision,
+  });
 }
 
 export function deleteMe(body: DeleteAccountRequest): Promise<void> {

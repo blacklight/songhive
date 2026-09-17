@@ -1349,6 +1349,32 @@ the HTTP routes.
   (distinct from the ActivityPub `OrderedCollection` served at
   `/users/{username}/followers`). The SPA shows the count on
   `/@{username}` and renders follower details at `/@{username}/followers`.
+- *Follower approval*: each user's `followers_approval` preference
+  (`accept`, `manual`, or `reject`; default `accept`, editable from
+  `/settings` via `PATCH /api/v1/users/me`) decides how incoming `Follow`
+  activities are handled. `process_incoming` passes pubby's
+  `InboxProcessor` a `follow_policy` callback that resolves the target
+  actor URL to the owning user's setting (object follows and the
+  instance actor keep the auto-accept default). `accept` stores the
+  follower and replies `Accept` as before; `manual` stores a pending
+  `FollowRequest` in pubby's `federation_follow_requests` storage, sends
+  no reply, and flags the resulting `follow` notification with
+  `follow_request_pending` so the UI can render accept/reject controls
+  in the notification body; `reject` answers with a `Reject` activity
+  and stores nothing (no notification either). Pending requests are
+  owner-only: `GET /api/v1/users/me/follow-requests` lists them and
+  `POST .../follow-requests/accept|reject` resolve them through
+  pubby's `accept_follow_request`/`reject_follow_request`, which embed
+  the original `Follow` in the response, promote approved requests to
+  `federation_followers` rows, and hand the reply to the
+  `deliver_activity` Celery task for signed delivery. Resolving a
+  request also rewrites the notification payload to
+  `follow_request_status` (`accepted`/`rejected`) and pushes a
+  `notification_updated` event. `Undo(Follow)` removes a still-pending
+  request. The SPA exposes requests as an owner-only "Requests" tab on
+  `/@{username}/followers`; the actor document advertises
+  `manuallyApprovesFollowers` (and the Mastodon-compatible account sets
+  `locked`) while the policy is `manual`.
 - *Object follows*: a `Follow` may also target a local **object** rather
   than an actor — Friendica sends `Follow` on a thread's root item
   (`parent-uri`) for conversation subscriptions, the FEP-efda

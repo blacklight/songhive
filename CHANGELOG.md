@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- `federation`: Per-user follower approval policy (`accept`, `manual`,
+  `reject`; default `accept`), configurable from `/settings` and PATCHed
+  via `followers_approval` on `/api/v1/users/me`. `manual` holds incoming
+  `Follow` activities as pending requests in pubby's
+  `federation_follow_requests` storage and flags the resulting
+  notification with `follow_request_pending`, so requests can be approved
+  or declined straight from the notification body or from the owner-only
+  "Requests" tab on `/@{username}/followers` — backed by the new
+  `GET /api/v1/users/me/follow-requests` and
+  `POST .../follow-requests/accept|reject` endpoints, whose `Accept`/
+  `Reject` replies are delivered through the `deliver_activity` task.
+  `reject` answers requests with `Reject` automatically and stores
+  nothing. Actor documents advertise `manuallyApprovesFollowers` (and the
+  Mastodon-compatible account sets `locked`) while the policy is `manual`.
+  Requires a pubby release that ships `FollowPolicy`, `FollowRequest`
+  storage and the `accept_follow_request`/`reject_follow_request`
+  helpers (local `pubby>=0.3.8` checkouts built from source include
+  them).
 - `api`: Aggregate collection statistics. New `GET
   /api/v1/artists/{id}/stats`, `/albums/{id}/stats`,
   `/playlists/{id}/stats` and `/libraries/{id}/stats` endpoints return

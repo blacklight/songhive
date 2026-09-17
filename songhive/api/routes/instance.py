@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import RegistrationMode, SonghiveConfig
 from ...federation import get_actor_url
-from ...models.user import User, UserRole
+from ...models.user import FollowersApproval, User, UserRole
 from ...version import __version__
 from ..deps import get_config, get_db
 
@@ -295,7 +295,7 @@ def _user_to_mastodon_account(user: User, request: Request, config: SonghiveConf
         "avatar_static": avatar,
         "header": "",
         "header_static": "",
-        "locked": False,
+        "locked": user.followers_approval == FollowersApproval.MANUAL.value,
         "created_at": created,
         "last_status_at": None,
         "followers_count": 0,

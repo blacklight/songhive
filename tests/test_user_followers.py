@@ -13,16 +13,21 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from pubby import Follower
+from pubby import Follower, FollowRequest
 
 from songhive.api.app import create_app
 from songhive.api.deps import get_db
+from songhive.api.middleware.auth import create_access_token
 from songhive.config.schema import SonghiveConfig
 from songhive.federation.actors import get_federation_storage
 from songhive.federation.storage import create_activitypub_storage
 from songhive.models.base import get_session, init_db
 from songhive.services.auth import create_user
-from songhive.services.federation import count_followers_by_actor, get_actor_followers
+from songhive.services.federation import (
+    count_followers_by_actor,
+    get_actor_follow_requests,
+    get_actor_followers,
+)
 from songhive.tasks.federation import process_incoming
 
 REGULAR_ACTOR = "https://music.example.com/users/regular"
@@ -233,24 +238,28 @@ def _task_config(tmp_path):
     )
 
 
-def _seed_user(engine, config, username="alice"):
+def _seed_user(engine, config, username="alice", followers_approval=None):
     """Create a local user with provisioned actor keys on the test engine."""
     init_db(engine=engine, force=True)
 
     async def _create():
         async with get_session() as session:
-            return await create_user(
+            user = await create_user(
                 session,
                 username=username,
                 email=f"{username}@example.com",
                 password="secret",
                 config=config,
             )
+            if followers_approval is not None:
+                user.followers_approval = followers_approval
+                await session.commit()
+            return user
 
     return asyncio.run(_create())
 
 
-def _run_process_incoming(engine, config, activity, username="alice"):
+def _run_process_incoming(engine, config, activity, username="alice", deliveries=None):
     """Run the incoming-activity task against the test engine."""
     from pubby.handlers._inbox import InboxProcessor
 
@@ -262,6 +271,11 @@ def _run_process_incoming(engine, config, activity, username="alice"):
         kwargs["skip_verification"] = True
         return real_process(self, *args, **kwargs)
 
+    def _deliver(*args, **kwargs):
+        if deliveries is not None:
+            deliveries.append((args, kwargs))
+        return True
+
     with (
         patch(
             "songhive.tasks.federation.init_db",
@@ -270,7 +284,7 @@ def _run_process_incoming(engine, config, activity, username="alice"):
         patch("songhive.tasks.federation.load_config", lambda *_, **__: config),
         patch(
             "pubby.handlers._inbox.InboxProcessor._deliver_to_inbox",
-            lambda *a, **k: True,
+            _deliver,
         ),
         patch.object(InboxProcessor, "process", _process_unverified),
     ):
@@ -520,3 +534,427 @@ def test_incoming_undo_follow_removes_object_subscription(engine, tmp_path):
         },
     )
     assert storage.get_followers(actor_id=object_url) == []
+
+
+def _follow_request(actor_id, target=REGULAR_ACTOR, requested_at=None, actor_data=None):
+    return FollowRequest(
+        actor_id=actor_id,
+        target_actor_id=target,
+        inbox=f"{actor_id}/inbox",
+        actor_data=actor_data or {},
+        activity={
+            "type": "Follow",
+            "id": f"{actor_id}#follow-1",
+            "actor": actor_id,
+            "object": target,
+        },
+        requested_at=requested_at or datetime.now(timezone.utc),
+    )
+
+
+def _store_request(fed_config, *requests):
+    storage = create_activitypub_storage(fed_config.database.url)
+    for request in requests:
+        storage.store_follow_request(request)
+
+
+def _requests_of(config, actor_url):
+    storage = get_federation_storage(config.database.url)
+    return storage.get_follow_requests(actor_url)
+
+
+def _notifications_for(engine, user_id):
+    """Fetch all Notification rows for a user from the test engine."""
+    from sqlalchemy import select
+
+    from songhive.models.base import reset_db
+    from songhive.models.notification import Notification
+
+    init_db(engine=engine, force=True)
+
+    async def _load():
+        async with get_session() as session:
+            result = await session.execute(select(Notification).where(Notification.user_id == user_id))
+            return list(result.scalars().all())
+
+    rows = asyncio.run(_load())
+    reset_db()
+    return rows
+
+
+def _auth(config, user):
+    return {"Authorization": f"Bearer {create_access_token(user.id, config.auth.secret_key)}"}
+
+
+def test_incoming_follow_manual_policy_stores_request(engine, tmp_path):
+    """A Follow to a ``manual`` user's inbox stores a pending request, not a follower."""
+    config = _task_config(tmp_path)
+    user = _seed_user(engine, config, followers_approval="manual")
+    actor_url = user.actor_url
+
+    storage = get_federation_storage(config.database.url)
+    storage.cache_remote_actor(BOB_ACTOR, BOB_DOC, datetime.now(timezone.utc))
+
+    deliveries = []
+    _run_process_incoming(
+        engine,
+        config,
+        {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f-manual",
+            "actor": BOB_ACTOR,
+            "object": actor_url,
+        },
+        deliveries=deliveries,
+    )
+
+    requests = _requests_of(config, actor_url)
+    assert [r.actor_id for r in requests] == [BOB_ACTOR]
+    assert requests[0].target_actor_id == actor_url
+    assert requests[0].actor_data["preferredUsername"] == "bob"
+    assert requests[0].activity["id"] == "https://remote.example/activities/f-manual"
+    # No follower is stored and no Accept is sent until approval.
+    assert _followers_of(config, actor_url) == []
+    assert deliveries == []
+
+
+def test_incoming_follow_manual_policy_flags_notification(engine, tmp_path):
+    """A held follow creates a notification carrying ``follow_request_pending``."""
+    config = _task_config(tmp_path)
+    user = _seed_user(engine, config, followers_approval="manual")
+    actor_url = user.actor_url
+
+    storage = get_federation_storage(config.database.url)
+    storage.cache_remote_actor(BOB_ACTOR, BOB_DOC, datetime.now(timezone.utc))
+
+    _run_process_incoming(
+        engine,
+        config,
+        {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f-flag",
+            "actor": BOB_ACTOR,
+            "object": actor_url,
+        },
+    )
+
+    rows = _notifications_for(engine, user.id)
+    assert len(rows) == 1
+    assert rows[0].type == "follow"
+    assert rows[0].actor_url == BOB_ACTOR
+    assert rows[0].payload["follow_request_pending"] is True
+
+
+def test_incoming_follow_accept_policy_notification_not_flagged(engine, tmp_path):
+    """An auto-accepted follow creates a plain follow notification."""
+    config = _task_config(tmp_path)
+    user = _seed_user(engine, config)
+    actor_url = user.actor_url
+
+    storage = get_federation_storage(config.database.url)
+    storage.cache_remote_actor(BOB_ACTOR, BOB_DOC, datetime.now(timezone.utc))
+
+    _run_process_incoming(
+        engine,
+        config,
+        {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f-plain",
+            "actor": BOB_ACTOR,
+            "object": actor_url,
+        },
+    )
+
+    rows = _notifications_for(engine, user.id)
+    assert len(rows) == 1
+    assert "follow_request_pending" not in (rows[0].payload or {})
+
+
+def test_incoming_follow_reject_policy_replies_reject(engine, tmp_path):
+    """A Follow to a ``reject`` user's inbox is answered with a Reject."""
+    config = _task_config(tmp_path)
+    user = _seed_user(engine, config, followers_approval="reject")
+    actor_url = user.actor_url
+
+    storage = get_federation_storage(config.database.url)
+    storage.cache_remote_actor(BOB_ACTOR, BOB_DOC, datetime.now(timezone.utc))
+
+    deliveries = []
+    _run_process_incoming(
+        engine,
+        config,
+        {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f-reject",
+            "actor": BOB_ACTOR,
+            "object": actor_url,
+        },
+        deliveries=deliveries,
+    )
+
+    assert _requests_of(config, actor_url) == []
+    assert _followers_of(config, actor_url) == []
+
+    assert len(deliveries) == 1
+    args, _ = deliveries[0]
+    inbox, activity = args[1], args[2]
+    assert inbox == f"{BOB_ACTOR}/inbox"
+    assert activity["type"] == "Reject"
+    assert activity["actor"] == actor_url
+    assert activity["object"]["id"] == "https://remote.example/activities/f-reject"
+
+    # A rejected follow produces no notification.
+    assert _notifications_for(engine, user.id) == []
+
+
+def test_incoming_undo_follow_removes_pending_request(engine, tmp_path):
+    """Undo(Follow) also clears a still-pending follow request."""
+    config = _task_config(tmp_path)
+    user = _seed_user(engine, config, followers_approval="manual")
+    actor_url = user.actor_url
+
+    storage = get_federation_storage(config.database.url)
+    storage.cache_remote_actor(BOB_ACTOR, BOB_DOC, datetime.now(timezone.utc))
+
+    _run_process_incoming(
+        engine,
+        config,
+        {
+            "type": "Follow",
+            "id": "https://remote.example/activities/f-undo",
+            "actor": BOB_ACTOR,
+            "object": actor_url,
+        },
+    )
+    assert _requests_of(config, actor_url)
+
+    _run_process_incoming(
+        engine,
+        config,
+        {
+            "type": "Undo",
+            "id": "https://remote.example/activities/u-undo",
+            "actor": BOB_ACTOR,
+            "object": {
+                "type": "Follow",
+                "id": "https://remote.example/activities/f-undo",
+                "actor": BOB_ACTOR,
+                "object": actor_url,
+            },
+        },
+    )
+    assert _requests_of(config, actor_url) == []
+
+
+def test_get_actor_follow_requests_sorts_and_filters(fed_config):
+    """get_actor_follow_requests returns only the target's requests, newest first."""
+    storage = create_activitypub_storage(fed_config.database.url)
+    now = datetime.now(timezone.utc)
+    storage.store_follow_request(_follow_request(BOB_ACTOR, requested_at=now - timedelta(days=1)))
+    storage.store_follow_request(_follow_request(CAROL_ACTOR, requested_at=now))
+    storage.store_follow_request(
+        _follow_request("https://remote.example/users/dan", target="https://other.example/users/x")
+    )
+
+    requests = get_actor_follow_requests(storage, REGULAR_ACTOR)
+    assert [r.actor_id for r in requests] == [CAROL_ACTOR, BOB_ACTOR]
+
+
+async def test_list_follow_requests_owner(fed_client, fed_config, fed_user):
+    """GET /me/follow-requests returns the user's pending requests, newest first."""
+    now = datetime.now(timezone.utc)
+    _store_request(
+        fed_config,
+        _follow_request(BOB_ACTOR, requested_at=now - timedelta(days=1), actor_data=BOB_DOC),
+        _follow_request(CAROL_ACTOR, requested_at=now),
+        # A request targeting another actor must not be listed.
+        _follow_request("https://remote.example/users/dan", target="https://music.example.com/users/other"),
+    )
+
+    response = fed_client.get("/api/v1/users/me/follow-requests", headers=_auth(fed_config, fed_user))
+    assert response.status_code == 200
+    assert response.headers["X-Total-Count"] == "2"
+
+    data = response.json()
+    assert [r["actor_url"] for r in data] == [CAROL_ACTOR, BOB_ACTOR]
+    assert data[1]["display_name"] == "Bob Remote"
+    assert data[1]["avatar_url"] == "https://remote.example/bob.png"
+    assert data[1]["requested_at"]
+
+
+async def test_list_follow_requests_pagination(fed_client, fed_config, fed_user):
+    """limit/offset paginate the pending requests list."""
+    now = datetime.now(timezone.utc)
+    _store_request(
+        fed_config,
+        *[
+            _follow_request(f"https://remote.example/users/u{i}", requested_at=now - timedelta(minutes=i))
+            for i in range(3)
+        ],
+    )
+
+    page1 = fed_client.get(
+        "/api/v1/users/me/follow-requests",
+        params={"limit": 2, "offset": 0},
+        headers=_auth(fed_config, fed_user),
+    )
+    page2 = fed_client.get(
+        "/api/v1/users/me/follow-requests",
+        params={"limit": 2, "offset": 2},
+        headers=_auth(fed_config, fed_user),
+    )
+    assert page1.status_code == 200 and page2.status_code == 200
+    assert page1.headers["X-Total-Count"] == "3"
+    assert [r["actor_url"] for r in page1.json()] == [
+        "https://remote.example/users/u0",
+        "https://remote.example/users/u1",
+    ]
+    assert [r["actor_url"] for r in page2.json()] == ["https://remote.example/users/u2"]
+
+
+async def test_list_follow_requests_unauthenticated(fed_client):
+    """The follow-requests list requires authentication."""
+    response = fed_client.get("/api/v1/users/me/follow-requests")
+    assert response.status_code == 401
+
+
+async def test_list_follow_requests_federation_disabled(client, regular_user, config):
+    """Without federation the requests list is empty."""
+    response = client.get("/api/v1/users/me/follow-requests", headers=_auth(config, regular_user))
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_accept_follow_request(fed_client, fed_config, fed_user, db_session):
+    """Accepting promotes the request to a follower and enqueues the Accept."""
+    fed_user.private_key_pem = "private-key"
+    await db_session.commit()
+
+    _store_request(fed_config, _follow_request(BOB_ACTOR, actor_data=BOB_DOC))
+
+    with patch("songhive.tasks.federation.deliver_activity") as deliver_mock:
+        response = fed_client.post(
+            "/api/v1/users/me/follow-requests/accept",
+            headers=_auth(fed_config, fed_user),
+            json={"actor_url": BOB_ACTOR},
+        )
+
+    assert response.status_code == 204
+
+    storage = get_federation_storage(fed_config.database.url)
+    assert storage.get_follow_request(BOB_ACTOR, REGULAR_ACTOR) is None
+    followers = [f for f in storage.get_followers(actor_id=REGULAR_ACTOR) if f.target_actor_id == REGULAR_ACTOR]
+    assert [f.actor_id for f in followers] == [BOB_ACTOR]
+
+    deliver_mock.delay.assert_called_once()
+    activity, inbox, key_id, _ = deliver_mock.delay.call_args.args
+    assert inbox == f"{BOB_ACTOR}/inbox"
+    assert activity["type"] == "Accept"
+    assert activity["actor"] == REGULAR_ACTOR
+    assert activity["object"]["type"] == "Follow"
+    assert activity["object"]["actor"] == BOB_ACTOR
+    assert key_id == f"{REGULAR_ACTOR}#main-key"
+
+
+async def test_reject_follow_request(fed_client, fed_config, fed_user, db_session):
+    """Rejecting drops the request and enqueues the Reject; no follower is stored."""
+    fed_user.private_key_pem = "private-key"
+    await db_session.commit()
+
+    _store_request(fed_config, _follow_request(BOB_ACTOR))
+
+    with patch("songhive.tasks.federation.deliver_activity") as deliver_mock:
+        response = fed_client.post(
+            "/api/v1/users/me/follow-requests/reject",
+            headers=_auth(fed_config, fed_user),
+            json={"actor_url": BOB_ACTOR},
+        )
+
+    assert response.status_code == 204
+
+    storage = get_federation_storage(fed_config.database.url)
+    assert storage.get_follow_request(BOB_ACTOR, REGULAR_ACTOR) is None
+    assert storage.get_followers(actor_id=REGULAR_ACTOR) == []
+
+    deliver_mock.delay.assert_called_once()
+    activity, inbox, _, _ = deliver_mock.delay.call_args.args
+    assert inbox == f"{BOB_ACTOR}/inbox"
+    assert activity["type"] == "Reject"
+    assert activity["object"]["actor"] == BOB_ACTOR
+
+
+async def test_decide_follow_request_resolves_notification(fed_client, fed_config, fed_user, db_session):
+    """Deciding a request rewrites the pending flag on its notification."""
+    from sqlalchemy import select
+
+    from songhive.models.notification import Notification
+
+    fed_user.private_key_pem = "private-key"
+    db_session.add(
+        Notification(
+            user_id=fed_user.id,
+            type="follow",
+            actor_url=BOB_ACTOR,
+            source_url=BOB_ACTOR,
+            payload={"follow_request_pending": True},
+        )
+    )
+    await db_session.commit()
+
+    _store_request(fed_config, _follow_request(BOB_ACTOR))
+
+    with patch("songhive.tasks.federation.deliver_activity"):
+        response = fed_client.post(
+            "/api/v1/users/me/follow-requests/accept",
+            headers=_auth(fed_config, fed_user),
+            json={"actor_url": BOB_ACTOR},
+        )
+    assert response.status_code == 204
+
+    result = await db_session.execute(select(Notification).where(Notification.user_id == fed_user.id))
+    notification = result.scalar_one()
+    assert notification.payload == {"follow_request_status": "accepted"}
+
+
+async def test_decide_follow_request_not_found(fed_client, fed_config, fed_user, db_session):
+    """Deciding a request that does not exist returns 404."""
+    fed_user.private_key_pem = "private-key"
+    await db_session.commit()
+
+    response = fed_client.post(
+        "/api/v1/users/me/follow-requests/accept",
+        headers=_auth(fed_config, fed_user),
+        json={"actor_url": BOB_ACTOR},
+    )
+    assert response.status_code == 404
+
+
+async def test_decide_follow_request_other_actor_not_found(fed_client, fed_config, fed_user, db_session):
+    """A request targeting another actor cannot be resolved by this user."""
+    fed_user.private_key_pem = "private-key"
+    await db_session.commit()
+
+    _store_request(
+        fed_config,
+        _follow_request(BOB_ACTOR, target="https://music.example.com/users/other"),
+    )
+
+    response = fed_client.post(
+        "/api/v1/users/me/follow-requests/accept",
+        headers=_auth(fed_config, fed_user),
+        json={"actor_url": BOB_ACTOR},
+    )
+    assert response.status_code == 404
+
+    storage = get_federation_storage(fed_config.database.url)
+    assert storage.get_follow_request(BOB_ACTOR, "https://music.example.com/users/other") is not None
+
+
+async def test_decide_follow_request_federation_disabled(client, regular_user, config):
+    """Without federation the decision endpoints return 404."""
+    response = client.post(
+        "/api/v1/users/me/follow-requests/accept",
+        headers=_auth(config, regular_user),
+        json={"actor_url": BOB_ACTOR},
+    )
+    assert response.status_code == 404

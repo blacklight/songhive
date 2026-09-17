@@ -148,6 +148,17 @@
   `local` profiles only to authenticated callers and never lists `private`
   profiles (not even to their owner). Individual profile pages stay reachable
   regardless.
+- Users pick a `followers_approval` policy (`accept`/`manual`/`reject`,
+  default `accept`) from `/settings`. `tasks/federation.process_incoming`
+  passes pubby's `InboxProcessor` a `follow_policy` callback that maps the
+  Follow target's actor URL to the owner's setting; `manual` stores a
+  pending `FollowRequest` in pubby's `federation_follow_requests` table and
+  flags the `follow` notification's payload with `follow_request_pending`.
+  Requests resolve via `POST /api/v1/users/me/follow-requests/accept|reject`
+  (owner-only), which delegates to pubby's `accept_follow_request`/
+  `reject_follow_request` and enqueues the reply on `deliver_activity`.
+  These pubby APIs only exist in the local `~/git_tree/pubby` checkout —
+  deployments need a pubby release that includes them.
 - Mention completion for remote users goes through `GET /api/v1/search/` with
   `remote_users=1`: the `users` section then merges cached remote actors via
   `services.federation.search_remote_actors`, which queries pubby's

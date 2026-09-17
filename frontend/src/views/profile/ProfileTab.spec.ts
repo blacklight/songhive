@@ -103,6 +103,7 @@ describe("ProfileTab", () => {
       status_content_type: "text/markdown",
       preview_cards_enabled: true,
       profile_visibility: "public",
+      followers_approval: "accept",
       links: [{ name: "Home", url: "https://example.com" }],
     });
   });
@@ -133,6 +134,32 @@ describe("ProfileTab", () => {
     );
   });
 
+  it("sends the selected followers approval", async () => {
+    const router = createTestRouter();
+    await router.push("/settings");
+    await router.isReady();
+
+    const wrapper = mount(ProfileTab, {
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const approvalSelect = wrapper
+      .findAll("select")
+      .find((s) =>
+        s.findAll("option").some((o) => o.attributes("value") === "reject"),
+      );
+    expect(approvalSelect).toBeDefined();
+    await approvalSelect!.setValue("manual");
+
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(usersApi.updateMe).toHaveBeenCalledWith(
+      expect.objectContaining({ followers_approval: "manual" }),
+    );
+  });
+
   it("sends an empty links array when all links are removed", async () => {
     const router = createTestRouter();
     await router.push("/settings");
@@ -160,6 +187,7 @@ describe("ProfileTab", () => {
       status_content_type: "text/markdown",
       preview_cards_enabled: true,
       profile_visibility: "public",
+      followers_approval: "accept",
       links: [],
     });
   });
@@ -188,6 +216,7 @@ describe("ProfileTab", () => {
       status_content_type: "text/markdown",
       preview_cards_enabled: true,
       profile_visibility: "public",
+      followers_approval: "accept",
       links: [{ name: "Home", url: "https://example.com" }],
     });
   });

@@ -372,6 +372,66 @@ export interface paths {
     patch: operations["update_current_user_profile_api_v1_users_me_patch"];
     trace?: never;
   };
+  "/api/v1/users/me/follow-requests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List My Follow Requests
+     * @description List the current user's pending follow requests, newest first.
+     */
+    get: operations["list_my_follow_requests_api_v1_users_me_follow_requests_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/me/follow-requests/accept": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Accept My Follow Request
+     * @description Approve a pending follow request and send the ``Accept``.
+     */
+    post: operations["accept_my_follow_request_api_v1_users_me_follow_requests_accept_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/me/follow-requests/reject": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Reject My Follow Request
+     * @description Decline a pending follow request and send the ``Reject``.
+     */
+    post: operations["reject_my_follow_request_api_v1_users_me_follow_requests_reject_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/me/password": {
     parameters: {
       query?: never;
@@ -5445,6 +5505,28 @@ export interface components {
       created_at: string;
     };
     /**
+     * FollowRequestDecision
+     * @description Payload for accepting or rejecting a pending follow request.
+     */
+    FollowRequestDecision: {
+      /** Actor Url */
+      actor_url: string;
+    };
+    /**
+     * FollowRequestResponse
+     * @description A pending follow request, visible to the followed user only.
+     */
+    FollowRequestResponse: {
+      /** Actor Url */
+      actor_url: string;
+      /** Display Name */
+      display_name?: string | null;
+      /** Avatar Url */
+      avatar_url?: string | null;
+      /** Requested At */
+      requested_at?: string | null;
+    };
+    /**
      * FollowerResponse
      * @description A follower entry on a user's public followers page.
      */
@@ -5458,6 +5540,12 @@ export interface components {
       /** Followed At */
       followed_at?: string | null;
     };
+    /**
+     * FollowersApproval
+     * @description How new follower requests are handled.
+     * @enum {string}
+     */
+    FollowersApproval: "accept" | "manual" | "reject";
     /**
      * GenreItemResponse
      * @description A single item associated with a genre.
@@ -6865,6 +6953,7 @@ export interface components {
       /** Preview Cards Enabled */
       preview_cards_enabled?: boolean | null;
       profile_visibility?: components["schemas"]["ProfileVisibility"] | null;
+      followers_approval?: components["schemas"]["FollowersApproval"] | null;
       /** Links */
       links?: components["schemas"]["UserLinkInput"][] | null;
     };
@@ -6898,6 +6987,8 @@ export interface components {
       preview_cards_enabled: boolean;
       /** @default public */
       profile_visibility: components["schemas"]["ProfileVisibility"];
+      /** @default accept */
+      followers_approval: components["schemas"]["FollowersApproval"];
       /** Links */
       links?: components["schemas"]["UserLinkOutput"][];
     };
@@ -7849,6 +7940,100 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["UserResponse"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_my_follow_requests_api_v1_users_me_follow_requests_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FollowRequestResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  accept_my_follow_request_api_v1_users_me_follow_requests_accept_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FollowRequestDecision"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  reject_my_follow_request_api_v1_users_me_follow_requests_reject_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FollowRequestDecision"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {

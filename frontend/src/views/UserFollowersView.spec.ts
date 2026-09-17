@@ -3,13 +3,22 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
-import { listFollowers } from "@/api/users";
-import type { FollowerResponse } from "@/api/users";
+import {
+  acceptFollowRequest,
+  listFollowers,
+  listFollowRequests,
+  rejectFollowRequest,
+} from "@/api/users";
+import type { FollowerResponse, FollowRequestResponse } from "@/api/users";
+import { useAuthStore } from "@/stores/auth";
 import realRouter from "@/router";
 import UserFollowersView from "./UserFollowersView.vue";
 
 vi.mock("@/api/users", () => ({
   listFollowers: vi.fn(),
+  listFollowRequests: vi.fn(),
+  acceptFollowRequest: vi.fn(),
+  rejectFollowRequest: vi.fn(),
 }));
 
 function createTestRouter() {
@@ -43,6 +52,19 @@ function createFollower(
   };
 }
 
+function createRequest(
+  actorUrl: string,
+  name: string,
+  requestedAt: string,
+): FollowRequestResponse {
+  return {
+    actor_url: actorUrl,
+    display_name: name,
+    avatar_url: null,
+    requested_at: requestedAt,
+  };
+}
+
 describe("userFollowers route", () => {
   it("resolves /@:username/followers", () => {
     const resolved = realRouter.resolve({
@@ -64,6 +86,13 @@ describe("UserFollowersView", () => {
       offset: 0,
       total: 0,
     });
+    vi.mocked(listFollowRequests).mockResolvedValue({
+      requests: [],
+      offset: 0,
+      total: 0,
+    });
+    vi.mocked(acceptFollowRequest).mockResolvedValue(undefined);
+    vi.mocked(rejectFollowRequest).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -181,5 +210,152 @@ describe("UserFollowersView", () => {
         .findAll("button")
         .find((b) => b.text() === i18n.global.t("common.loadMore")),
     ).toBeUndefined();
+  });
+
+  it("hides the requests tab for non-owners", async () => {
+    await mountView();
+
+    expect(wrapper.find(".user-followers__tabs").exists()).toBe(false);
+    expect(listFollowRequests).not.toHaveBeenCalled();
+  });
+
+  describe("as the profile owner", () => {
+    beforeEach(() => {
+      const store = useAuthStore();
+      store.user = { username: "alice" } as never;
+    });
+
+    function requestsTab() {
+      return wrapper
+        .findAll("button")
+        .find(
+          (b) =>
+            b.text() === i18n.global.t("profile.followersPage.tabs.requests"),
+        );
+    }
+
+    it("shows the requests tab only to the owner", async () => {
+      await mountView();
+
+      expect(wrapper.find(".user-followers__tabs").exists()).toBe(true);
+      expect(requestsTab()).toBeDefined();
+      // Requests are loaded lazily when the tab is opened.
+      expect(listFollowRequests).not.toHaveBeenCalled();
+    });
+
+    it("lists pending requests with accept and reject actions", async () => {
+      vi.mocked(listFollowRequests).mockResolvedValue({
+        requests: [
+          createRequest(
+            "https://remote.example/users/bob",
+            "Bob Remote",
+            "2025-01-02T00:00:00Z",
+          ),
+        ],
+        offset: 0,
+        total: 1,
+      });
+
+      await mountView();
+      await requestsTab()!.trigger("click");
+      await flushPromises();
+
+      expect(listFollowRequests).toHaveBeenCalledWith({
+        limit: 20,
+        offset: 0,
+      });
+      expect(wrapper.text()).toContain("Bob Remote");
+      expect(
+        wrapper
+          .findAll("button")
+          .some(
+            (b) => b.text() === i18n.global.t("profile.followersPage.accept"),
+          ),
+      ).toBe(true);
+      expect(
+        wrapper
+          .findAll("button")
+          .some(
+            (b) => b.text() === i18n.global.t("profile.followersPage.reject"),
+          ),
+      ).toBe(true);
+    });
+
+    it("accepting a request calls the API and removes the row", async () => {
+      vi.mocked(listFollowRequests).mockResolvedValue({
+        requests: [
+          createRequest(
+            "https://remote.example/users/bob",
+            "Bob Remote",
+            "2025-01-02T00:00:00Z",
+          ),
+        ],
+        offset: 0,
+        total: 1,
+      });
+
+      await mountView();
+      await requestsTab()!.trigger("click");
+      await flushPromises();
+
+      const accept = wrapper
+        .findAll("button")
+        .find(
+          (b) => b.text() === i18n.global.t("profile.followersPage.accept"),
+        );
+      await accept!.trigger("click");
+      await flushPromises();
+
+      expect(acceptFollowRequest).toHaveBeenCalledWith(
+        "https://remote.example/users/bob",
+      );
+      expect(wrapper.text()).not.toContain("Bob Remote");
+      expect(wrapper.text()).toContain(
+        i18n.global.t("profile.followersPage.requestsEmpty"),
+      );
+      // The followers list refreshes to pick up the new follower.
+      expect(listFollowers).toHaveBeenCalledTimes(2);
+    });
+
+    it("rejecting a request calls the API and removes the row", async () => {
+      vi.mocked(listFollowRequests).mockResolvedValue({
+        requests: [
+          createRequest(
+            "https://remote.example/users/bob",
+            "Bob Remote",
+            "2025-01-02T00:00:00Z",
+          ),
+        ],
+        offset: 0,
+        total: 1,
+      });
+
+      await mountView();
+      await requestsTab()!.trigger("click");
+      await flushPromises();
+
+      const reject = wrapper
+        .findAll("button")
+        .find(
+          (b) => b.text() === i18n.global.t("profile.followersPage.reject"),
+        );
+      await reject!.trigger("click");
+      await flushPromises();
+
+      expect(rejectFollowRequest).toHaveBeenCalledWith(
+        "https://remote.example/users/bob",
+      );
+      expect(wrapper.text()).not.toContain("Bob Remote");
+    });
+
+    it("shows the empty state for a resolved requests list", async () => {
+      await mountView();
+      await requestsTab()!.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.text()).toContain(
+        i18n.global.t("profile.followersPage.requestsEmpty"),
+      );
+    });
   });
 });

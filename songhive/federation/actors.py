@@ -17,7 +17,7 @@ from pubby.content import property_value_attachment, render_bio_html
 from pubby.storage.adapters.db import DbActivityPubStorage
 
 from ..config.schema import SonghiveConfig
-from ..models.user import User
+from ..models.user import FollowersApproval, User
 from ..services.federation import ensure_user_actor, publish_actor_update
 from ._common import get_actor_url, get_inbox_url, get_outbox_url
 from .storage import create_activitypub_storage
@@ -58,6 +58,7 @@ def user_to_actor_document(user: User, domain: str) -> dict:
         "preferredUsername": user.username,
         "name": user.display_name or user.username,
         "summary": render_bio_html(user.bio or ""),
+        "manuallyApprovesFollowers": user.followers_approval == FollowersApproval.MANUAL.value,
         "published": (user.created_at.isoformat() if user.created_at else datetime.now(timezone.utc).isoformat()),
         "inbox": get_inbox_url(domain, user.username),
         "outbox": get_outbox_url(domain, user.username),

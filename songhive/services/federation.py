@@ -13,7 +13,10 @@ from datetime import timezone
 from typing import Iterable, Optional
 from urllib.parse import urlparse
 
-from pubby import Follower, collect_inboxes
+from pubby import Follower, FollowRequest
+from pubby import accept_follow_request as _pubby_accept_follow_request
+from pubby import collect_inboxes
+from pubby import reject_follow_request as _pubby_reject_follow_request
 from pubby import resolve_actor_inbox as _pubby_resolve_actor_inbox
 from pubby.crypto import (
     export_private_key_pem,
@@ -165,6 +168,73 @@ def count_followers_by_actor(storage) -> dict[str, int]:
         key = follower.target_actor_id or ""
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def _requested_at_key(request: FollowRequest) -> float:
+    """Return a sortable timestamp for a request's ``requested_at`` stamp."""
+    requested_at = request.requested_at
+    if requested_at is None:
+        return 0.0
+    if requested_at.tzinfo is None:
+        requested_at = requested_at.replace(tzinfo=timezone.utc)
+    return requested_at.timestamp()
+
+
+def get_actor_follow_requests(storage, actor_url: str) -> list[FollowRequest]:
+    """
+    Return the pending follow requests of ``actor_url``, newest first.
+
+    Reads pubby's follow-request storage, populated by incoming ``Follow``
+    activities while the target user's approval policy is ``manual``.
+    """
+    requests = storage.get_follow_requests(actor_url)
+    return sorted(requests, key=_requested_at_key, reverse=True)
+
+
+def get_follow_request(storage, actor_url: str, requester_actor_id: str) -> Optional[FollowRequest]:
+    """Return the pending request from ``requester_actor_id`` to ``actor_url``."""
+    return storage.get_follow_request(requester_actor_id, actor_url)
+
+
+def resolve_follow_request(
+    storage,
+    request: FollowRequest,
+    user: User,
+    *,
+    accept: bool,
+) -> dict:
+    """
+    Approve or decline a pending follow request and enqueue the reply.
+
+    Delegates to pubby's ``accept_follow_request``/``reject_follow_request``
+    — approval promotes the request to a stored follower — and routes the
+    ``Accept``/``Reject`` through the ``deliver_activity`` Celery task so it
+    is signed with the user's key and retried like any other delivery.
+    Returns the delivered activity.
+    """
+    if not user.actor_url or not user.private_key_pem:
+        raise ValueError("User has no federation actor credentials")
+
+    from ..tasks.federation import deliver_activity
+
+    actor_key_id = f"{user.actor_url}#main-key"
+
+    def _deliver(inbox_url: str, activity: dict) -> None:
+        deliver_activity.delay(activity, inbox_url, actor_key_id, user.private_key_pem)  # type: ignore
+
+    if accept:
+        return _pubby_accept_follow_request(
+            storage,
+            request,
+            actor_id=user.actor_url,
+            deliver=_deliver,
+        )
+    return _pubby_reject_follow_request(
+        storage,
+        request,
+        actor_id=user.actor_url,
+        deliver=_deliver,
+    )
 
 
 def _actor_doc_avatar_url(actor_doc: Optional[dict]) -> Optional[str]:

@@ -752,11 +752,29 @@
       "local": "Local — listed for logged-in users only",
       "private": "Private — not listed"
     },
+    "followersApproval": "Follower approval",
+    "followersApprovalHint": "How new follower requests are handled.",
+    "followersApprovalOptions": {
+      "accept": "Accept — approve new followers automatically",
+      "manual": "Manual — review each follow request",
+      "reject": "Reject — decline new followers automatically"
+    },
     "followers": "No followers | {count} follower | {count} followers",
     "followersPage": {
       "title": "Followers",
       "empty": "No followers yet.",
-      "since": "Following since"
+      "since": "Following since",
+      "tabs": {
+        "followers": "Followers",
+        "requests": "Requests"
+      },
+      "requestsEmpty": "No pending follow requests.",
+      "requestsHint": "Follow requests awaiting your approval.",
+      "accept": "Accept",
+      "reject": "Reject",
+      "requestAccepted": "Follow request accepted.",
+      "requestRejected": "Follow request rejected.",
+      "requestError": "Could not resolve the follow request: {message}"
     },
     "displayName": "Display name",
     "bio": "Bio",
@@ -1239,6 +1257,7 @@
     "types": {
       "follow": "started following you",
       "followObject": "followed your {object}",
+      "followRequest": "requested to follow you",
       "like": "liked your {object}",
       "boost": "boosted your {object}",
       "quote": "quoted your {object}",
@@ -1294,6 +1313,13 @@
         "share": "Shares"
       }
     },
-    "onItem": "on {title}"
+    "onItem": "on {title}",
+    "followRequest": {
+      "accept": "Accept",
+      "reject": "Reject",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "error": "Could not resolve the follow request: {message}"
+    }
   }
 }

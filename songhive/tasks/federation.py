@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 
 import requests
-from pubby import ActivityPubError, SignatureVerificationError
+from pubby import ActivityPubError, FollowPolicy, SignatureVerificationError
 from pubby import deliver_activity as pubby_deliver_activity
 from pubby.crypto import load_private_key
 from pubby.handlers._inbox import InboxProcessor
@@ -38,6 +38,31 @@ def _load_user_actor(username: str) -> Optional[User]:
                 config = load_config([])
                 ensure_user_actor(user, config)
                 return user
+        finally:
+            await dispose_and_reset()
+
+    return asyncio.run(_load())
+
+
+def _follow_policy_for_target(target_actor_id: str, _: str) -> Optional[FollowPolicy]:
+    """
+    Resolve an incoming Follow's target to the owner's approval policy.
+
+    Only follows of a user actor consult the per-user
+    ``followers_approval`` setting — object follows (FEP-efda thread
+    subscriptions) and the instance actor return ``None`` so pubby keeps
+    its auto-accept default. ``FollowPolicy`` shares its values with
+    ``FollowersApproval``.
+    """
+    from ..services.auth import get_user_by_actor_url
+
+    async def _load():
+        try:
+            async with get_session() as session:
+                user = await get_user_by_actor_url(session, target_actor_id)
+                if user is None:
+                    return None
+                return FollowPolicy(user.followers_approval)
         finally:
             await dispose_and_reset()
 
@@ -91,6 +116,12 @@ def process_incoming(
         actor_id = user.actor_url
         private_key_pem = user.private_key_pem
 
+    # The follow-policy callback resolves Follow targets through the
+    # database even for shared-inbox deliveries (``username=None``).
+    # ``_load_user_actor`` disposes the shared engine on exit, so (re-)init
+    # unconditionally: ``init_db`` is a no-op when an engine is already set.
+    init_db(config.database.url)
+
     if not actor_id or not private_key_pem:
         logger.warning("No actor context available for incoming activity; dropping")
         return None
@@ -114,6 +145,7 @@ def process_incoming(
         # activities get an automatic Accept carrying a dereferenceable
         # QuoteAuthorization.
         auto_approve_quotes=True,
+        follow_policy=_follow_policy_for_target,
     )
 
     body: Optional[bytes] = None
@@ -306,6 +338,7 @@ def _sync_inbox_notifications(config, activity: dict, username: Optional[str], s
                         recipient=recipient,
                         actor_doc=actor_doc,
                         instance_domain=config.federation.instance_domain,
+                        storage=storage,
                     )
                     await retract_inbox_notifications(
                         session,

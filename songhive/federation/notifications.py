@@ -5,7 +5,10 @@ Maps federated interactions to user notifications:
 
 - ``Follow`` → ``follow``; an object-scoped Follow (FEP-efda thread
   subscription) notifies only the object's owner and carries
-  ``target_*`` payload fields describing the followed object
+  ``target_*`` payload fields describing the followed object. Actor
+  follows held for manual approval carry ``follow_request_pending`` so
+  clients can render accept/reject controls; rejected follows create no
+  notification at all
 - ``Like`` → ``like``
 - ``Announce`` → ``boost``
 - ``Create`` (Note): ``quote`` when the note quotes a local object URL,
@@ -36,6 +39,7 @@ notification even when it only references the original activity id:
   the updated object is the actor document itself
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -51,7 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.activity import Activity, ActivityMention
 from ..models.notification import Notification, NotificationType
 from ..models.track import Track
-from ..models.user import User
+from ..models.user import FollowersApproval, User
 from ..services import acl
 from ..services.activities import (
     _activity_object_type,
@@ -478,6 +482,7 @@ async def _create_follow_inbox_notification(
     payload: Dict[str, Any],
     obj: Optional[Any] = None,
     instance_domain: Optional[str] = None,
+    storage: Optional[Any] = None,
 ) -> None:
     """
     Create notifications for an incoming ``Follow`` activity.
@@ -488,9 +493,22 @@ async def _create_follow_inbox_notification(
     ``target_*`` fields so clients can render "followed your post", and only
     the object's owner is notified — a personal-inbox delivery to someone else
     is misaddressed.
+
+    When the recipient's approval policy held the follow as a pending
+    request, the payload carries ``follow_request_pending`` so clients can
+    render accept/reject controls. Rejected follows produce no
+    notification.
     """
     target = obj if isinstance(obj, str) else obj.get("id") if isinstance(obj, dict) else None
-    if isinstance(target, str) and target:
+    actor_follow = not (isinstance(target, str) and target) or target == recipient.actor_url
+    if actor_follow:
+        if recipient.followers_approval == FollowersApproval.REJECT.value:
+            return
+        if storage is not None:
+            request = await asyncio.to_thread(storage.get_follow_request, actor_url, recipient.actor_url or "")
+            if request is not None:
+                payload = {**payload, "follow_request_pending": True}
+    elif isinstance(target, str) and target:
         resolved = await _resolve_local_object(session, target, instance_domain)
         if resolved is not None:
             owners = await _target_owner_users(session, {target})
@@ -510,6 +528,41 @@ async def _create_follow_inbox_notification(
         source_url=actor_url,
         payload=payload,
     )
+
+
+async def resolve_follow_request_notification(
+    session: AsyncSession,
+    *,
+    recipient: User,
+    actor_url: str,
+    status: str,
+) -> Optional[Notification]:
+    """
+    Mark a pending follow-request notification as resolved.
+
+    The requester's ``follow`` notification carrying
+    ``follow_request_pending`` is rewritten with
+    ``follow_request_status`` set to ``accepted`` or ``rejected`` so
+    clients can drop the action buttons, and the change is pushed to live
+    clients. Returns the updated row, ``None`` when none is pending.
+    """
+    rows = await session.execute(
+        select(Notification).where(
+            Notification.user_id == recipient.id,
+            Notification.type == NotificationType.FOLLOW,
+            Notification.actor_url == actor_url,
+        )
+    )
+    for notification in rows.scalars():
+        payload = dict(notification.payload or {})
+        if not payload.pop("follow_request_pending", None):
+            continue
+        payload["follow_request_status"] = status
+        notification.payload = payload
+        await session.flush()
+        _push_updated({str(recipient.id): [notification]})
+        return notification
+    return None
 
 
 async def _create_quote_inbox_notification(
@@ -673,6 +726,7 @@ async def create_inbox_notifications(
     recipient: User,
     actor_doc: Optional[dict] = None,
     instance_domain: Optional[str] = None,
+    storage: Optional[Any] = None,
 ) -> None:
     """
     Create notifications for an incoming federated activity.
@@ -685,6 +739,8 @@ async def create_inbox_notifications(
     payload's ``actor_display_name``/``actor_avatar_url`` so clients can
     render a user card. ``instance_domain`` enables resolving the activity's
     object to a local item (``item_*``/``local_url`` payload fields).
+    ``storage`` is the pubby backend used to flag follow notifications
+    whose request is still pending approval.
     """
     actor_url = activity.get("actor")
     if not isinstance(actor_url, str) or not actor_url:
@@ -713,6 +769,7 @@ async def create_inbox_notifications(
             payload=payload,
             obj=obj,
             instance_domain=instance_domain,
+            storage=storage,
         )
         return
 

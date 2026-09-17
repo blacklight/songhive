@@ -19,6 +19,9 @@ import {
   type ActivityMentionResponse,
   type ActivityResponse,
 } from "@/api/activities";
+import { getApiErrorMessage } from "@/api/client";
+import { acceptFollowRequest, rejectFollowRequest } from "@/api/users";
+import { useToastStore } from "@/stores/toast";
 import { useDebounce } from "@/composables/useDebounce";
 import { formatDateTime, formatRelativeTime } from "@/i18n";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -41,6 +44,7 @@ import { notificationActionText } from "@/utils/notifications";
 
 const { t } = useI18n();
 const store = useNotificationsStore();
+const toast = useToastStore();
 
 const TYPE_ICONS: Record<string, string> = {
   follow: "user-plus",
@@ -159,6 +163,55 @@ async function toggleSeen(item: NotificationResponse) {
 
 async function dismiss(item: NotificationResponse) {
   await store.remove([item.id]);
+}
+
+// Pending follow requests are approved or declined straight from the
+// notification body. The backend also pushes a ``notification_updated``
+// event that swaps the buttons for the recorded outcome.
+const resolvingRequests = ref<Set<string>>(new Set());
+
+function followRequestPending(item: NotificationResponse): boolean {
+  return (
+    item.type === "follow" && item.payload?.follow_request_pending === true
+  );
+}
+
+function followRequestStatus(item: NotificationResponse): string | undefined {
+  return item.type === "follow"
+    ? str(item.payload?.follow_request_status)
+    : undefined;
+}
+
+async function decideFollowRequest(
+  item: NotificationResponse,
+  accept: boolean,
+) {
+  const actorUrl = item.actor_url;
+  if (!actorUrl || resolvingRequests.value.has(item.id)) return;
+  resolvingRequests.value = new Set([...resolvingRequests.value, item.id]);
+  try {
+    if (accept) {
+      await acceptFollowRequest(actorUrl);
+    } else {
+      await rejectFollowRequest(actorUrl);
+    }
+    item.payload = {
+      ...(item.payload ?? {}),
+      follow_request_pending: false,
+      follow_request_status: accept ? "accepted" : "rejected",
+    };
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: t("notifications.followRequest.error", {
+        message: getApiErrorMessage(err) || t("errors.unknown"),
+      }),
+    });
+  } finally {
+    const next = new Set(resolvingRequests.value);
+    next.delete(item.id);
+    resolvingRequests.value = next;
+  }
 }
 
 // Per-row overflow menu: mark read/unread and dismiss live behind a "…"
@@ -815,6 +868,35 @@ onBeforeUnmount(() => {
             class="notifications-view__card"
           />
 
+          <div
+            v-if="followRequestPending(item)"
+            class="notifications-view__request-actions"
+          >
+            <AppButton
+              size="sm"
+              icon="check"
+              :disabled="resolvingRequests.has(item.id)"
+              @click="decideFollowRequest(item, true)"
+            >
+              {{ t("notifications.followRequest.accept") }}
+            </AppButton>
+            <AppButton
+              size="sm"
+              variant="danger"
+              icon="xmark"
+              :disabled="resolvingRequests.has(item.id)"
+              @click="decideFollowRequest(item, false)"
+            >
+              {{ t("notifications.followRequest.reject") }}
+            </AppButton>
+          </div>
+          <span
+            v-else-if="followRequestStatus(item)"
+            class="notifications-view__request-status"
+          >
+            {{ t(`notifications.followRequest.${followRequestStatus(item)}`) }}
+          </span>
+
           <div class="notifications-view__meta">
             <RouterLink
               v-if="targetContext(item)"
@@ -1060,6 +1142,18 @@ onBeforeUnmount(() => {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+.notifications-view__request-actions {
+  width: 100%;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.notifications-view__request-status {
+  width: 100%;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
 }
 
 .notifications-view__meta {

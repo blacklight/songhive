@@ -54,6 +54,7 @@ def test_user_model_defaults():
     assert user.avatar_url is None
     assert user.last_login is None
     assert user.profile_visibility is None
+    assert user.followers_approval is None
     assert user.actor_url is None
     assert user.private_key_pem is None
     assert user.public_key_pem is None
@@ -74,6 +75,7 @@ async def test_user_db_defaults(db_session):
     assert user.password_reset_token is None
     assert user.password_reset_expires_at is None
     assert user.profile_visibility == "public"
+    assert user.followers_approval == "accept"
 
 
 def test_user_model_with_optional_fields():
@@ -796,6 +798,22 @@ async def test_update_profile_rejects_invalid_profile_visibility(db_session):
 
 
 @pytest.mark.asyncio
+async def test_update_profile_sets_followers_approval(db_session):
+    """Test that update_profile applies a valid followers_approval."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await update_profile(db_session, user, {"followers_approval": "manual"})
+    assert user.followers_approval == "manual"
+
+
+@pytest.mark.asyncio
+async def test_update_profile_rejects_invalid_followers_approval(db_session):
+    """Test that update_profile rejects an unknown followers_approval value."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    with pytest.raises(ValueError, match="Invalid followers_approval"):
+        await update_profile(db_session, user, {"followers_approval": "ask"})
+
+
+@pytest.mark.asyncio
 async def test_update_profile_partial(db_session):
     """Test that update_profile only changes explicitly provided fields."""
     user = User(
@@ -1014,6 +1032,41 @@ async def test_patch_me_endpoint_rejects_invalid_profile_visibility(client, db_s
         "/api/v1/users/me",
         headers={"Authorization": f"Bearer {token}"},
         json={"profile_visibility": "everyone"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_sets_followers_approval(client, db_session, config):
+    """Test that PATCH /me updates followers_approval and echoes it back."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"followers_approval": "manual"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["followers_approval"] == "manual"
+
+    result = await db_session.execute(select(User).where(User.id == user.id))
+    assert result.scalar_one().followers_approval == "manual"
+
+
+@pytest.mark.asyncio
+async def test_patch_me_endpoint_rejects_invalid_followers_approval(client, db_session, config):
+    """Test that PATCH /me validates followers_approval values."""
+    user = await create_user(db_session, "alice", "alice@example.com", "secret")
+    await db_session.flush()
+
+    token = create_access_token(user.id, config.auth.secret_key)
+    response = client.patch(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"followers_approval": "ask"},
     )
     assert response.status_code == 422
 
