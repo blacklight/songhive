@@ -4,6 +4,7 @@ FastAPI application factory.
 
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator, MutableMapping
@@ -57,6 +58,7 @@ from .routes import (
     tags,
     tracks,
     users,
+    webmentions,
 )
 from .semantic_meta import serve_spa_index
 
@@ -309,6 +311,12 @@ def create_app(config: SonghiveConfig) -> FastAPI:
         app.include_router(federation.router)
         _setup_federation(app, config)
 
+    # Webmention endpoint + discovery (independent of ActivityPub federation,
+    # but it also needs the instance's public domain to validate targets).
+    if config.webmentions.enabled and config.federation.instance_domain:
+        app.include_router(webmentions.router)
+        _setup_webmentions(app, config)
+
     _setup_static_routes(app)
 
     return app
@@ -360,3 +368,37 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
         )
     except ImportError:
         logger.error("Federation is enabled but pubby is not installed")
+
+
+def _setup_webmentions(app: FastAPI, config: SonghiveConfig):
+    """Initialize Webmention storage and advertise the endpoint via Link headers."""
+    try:
+        from webmentions.server.adapters._common import append_link_header, webmention_link_header_value
+
+        from ..webmentions.service import webmention_endpoint_url
+        from ..webmentions.storage import create_webmentions_storage
+    except ImportError:
+        logger.error("Webmentions are enabled but the webmentions package is not installed")
+        return
+
+    try:
+        app.state.webmentions_storage = create_webmentions_storage(config.database.url)
+    except Exception:
+        logger.exception("Failed to initialize Webmention storage")
+        app.state.webmentions_storage = None
+
+    endpoint = webmention_endpoint_url(config)
+
+    # Media URLs are mentionable targets too — a non-HTML resource can only
+    # advertise its endpoint through the Link header.
+    _media_path_re = re.compile(r"^/api/v1/(files|tracks|stream)/")
+
+    @app.middleware("http")
+    async def _webmention_link_header(request: Request, call_next):
+        response = await call_next(request)
+        content_type = response.headers.get("content-type", "")
+        if content_type.startswith("text/") or _media_path_re.match(request.url.path):
+            response.headers["Link"] = append_link_header(
+                response.headers.get("link"), webmention_link_header_value(endpoint)
+            )
+        return response

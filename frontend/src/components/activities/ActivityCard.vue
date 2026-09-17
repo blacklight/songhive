@@ -28,9 +28,9 @@ import ActivityAudioPlayer from "./ActivityAudioPlayer.vue";
 import ActivityEditModal from "./ActivityEditModal.vue";
 import ActivityObjectEmbed from "./ActivityObjectEmbed.vue";
 import ActivityRemoteReply from "./ActivityRemoteReply.vue";
+import RichContent from "@/components/RichContent.vue";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
 import { parseActorRef } from "@/utils/actorRef";
-import RichContent from "@/components/RichContent.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -41,7 +41,7 @@ const props = withDefaults(
   { readonly: false, expandReplies: false },
 );
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const router = useRouter();
 const store = useActivitiesStore();
 const authStore = useAuthStore();
@@ -98,8 +98,31 @@ const actorShortName = computed(
   () => parseActor(activity.value.source_actor).shortName,
 );
 
+// Webmention cards surface the remote site's author directly — there is no
+// ActivityPub actor, so the handle is derived from the author's site URL.
+const isWebmention = computed(
+  () => activity.value.source_type === "webmention",
+);
+const webmention = computed(() => activity.value.webmention ?? null);
+const webmentionHost = computed(() => {
+  const source = webmention.value?.source;
+  if (!source) return "";
+  try {
+    return new URL(source).hostname;
+  } catch {
+    return "";
+  }
+});
+
 const actorName = computed(() => {
   const { shortName, host } = parseActor(activity.value.source_actor);
+  if (isWebmention.value) {
+    // Webmention authors are site URLs, not fediverse accounts — a bare
+    // domain renders as ``example.com``, and only a URL whose path names
+    // an author keeps the ``name@example.com`` handle shape.
+    if (!host) return `@${shortName}`;
+    return shortName === host ? host : `@${shortName}@${host}`;
+  }
   if (host && activity.value.source_type === "remote") {
     return `@${shortName}@${host}`;
   }
@@ -107,6 +130,9 @@ const actorName = computed(() => {
 });
 
 const actorUrl = computed(() => {
+  if (isWebmention.value) {
+    return webmention.value?.author_url || webmention.value?.source || "";
+  }
   const { shortName, host } = parseActor(activity.value.source_actor);
   if (host && activity.value.source_type === "remote") {
     return `https://${host}/@${shortName}`;
@@ -124,11 +150,17 @@ const actorAvatar = computed(
 );
 
 const typeIcon = computed(() => TYPE_ICONS[activity.value.activity_type] ?? "");
-const typeLabel = computed(() =>
-  activity.value.activity_type === "create"
-    ? ""
-    : t(`activities.types.${activity.value.activity_type}`),
-);
+const typeLabel = computed(() => {
+  if (activity.value.activity_type === "create") return "";
+  if (isWebmention.value) {
+    // The badge names the mention kind (replied, liked, reposted, …) and
+    // keeps "Webmention" for plain or unrecognized mentions.
+    const kind = webmention.value?.mention_type || "mention";
+    const key = `activities.webmentionTypes.${kind}`;
+    return te(key) ? t(key) : t("activities.types.webmention");
+  }
+  return t(`activities.types.${activity.value.activity_type}`);
+});
 
 const visibilityIcon = computed(
   () => VISIBILITY_ICONS[activity.value.visibility] ?? "globe",
@@ -608,7 +640,13 @@ const replyInitialStatus = computed(() => {
     activity.value.source_actor,
     instanceDomain.value,
   );
-  if (!isOwner.value && author.username?.toLowerCase() !== selfName) {
+  // Webmention authors are plain site URLs — not fediverse handles — so
+  // they are never prefilled as mentions.
+  if (
+    !isWebmention.value &&
+    !isOwner.value &&
+    author.username?.toLowerCase() !== selfName
+  ) {
     push(author.handle, activity.value.source_actor);
   }
   for (const mention of activity.value.mentions ?? []) {
@@ -705,17 +743,21 @@ async function copyUrl() {
   <article
     v-if="!removed"
     class="activity-card"
-    :class="{ 'activity-card--link': canNavigate }"
+    :class="{
+      'activity-card--link': canNavigate,
+      'activity-card--webmention': isWebmention,
+    }"
     @click="onCardClick"
   >
     <header class="activity-card__header">
       <AppAvatar :src="actorAvatar" :name="actorDisplayName" size="sm" />
       <div class="activity-card__meta">
         <a
-          v-if="activity.source_type === 'remote'"
+          v-if="activity.source_type === 'remote' || isWebmention"
           :href="actorUrl"
           class="activity-card__actor"
           target="_blank"
+          rel="noopener"
         >
           <span class="activity-card__display-name">{{
             actorDisplayName
@@ -751,7 +793,12 @@ async function copyUrl() {
         }}</span>
       </div>
       <div class="activity-card__badges">
-        <span v-if="typeLabel" class="activity-card__type" :title="typeLabel">
+        <span
+          v-if="typeLabel"
+          class="activity-card__type"
+          :class="{ 'activity-card__type--webmention': isWebmention }"
+          :title="typeLabel"
+        >
           <AppIcon v-if="typeIcon" :name="typeIcon" spacing="right" />
           <span class="activity-card__type-label">{{ typeLabel }}</span>
         </span>
@@ -787,8 +834,47 @@ async function copyUrl() {
       </p>
     </div>
 
+    <div v-if="isWebmention && webmention" class="activity-card__webmention">
+      <a
+        v-if="webmention.title"
+        :href="webmention.source"
+        target="_blank"
+        rel="noopener"
+        class="activity-card__webmention-title"
+        >{{ webmention.title }}</a
+      >
+      <p v-if="webmention.excerpt" class="activity-card__webmention-excerpt">
+        <RichContent
+          :html="webmention.excerpt"
+          :instance-domain="instanceDomain"
+        />
+      </p>
+      <div
+        v-if="webmention.tags?.length"
+        class="activity-card__webmention-tags"
+      >
+        <RouterLink
+          v-for="tag in webmention.tags"
+          :key="tag"
+          :to="{ name: 'tag', params: { name: tag } }"
+          class="activity-card__webmention-tag"
+          >#{{ tag }}</RouterLink
+        >
+      </div>
+      <a
+        :href="webmention.source"
+        target="_blank"
+        rel="noopener"
+        class="activity-card__webmention-source"
+      >
+        <AppIcon name="arrow-up-right-from-square" spacing="right" />{{
+          webmentionHost || webmention.source
+        }}
+      </a>
+    </div>
+
     <p
-      v-if="contentHtml"
+      v-else-if="contentHtml"
       class="activity-card__content"
       :lang="activity.language || undefined"
     >
@@ -1251,6 +1337,68 @@ async function copyUrl() {
   color: var(--color-text-muted);
 }
 
+.activity-card__content a {
+  color: var(--color-text-link);
+}
+
+/* Webmention cards get an accent left border and badge so remote-site
+   mentions read differently from ActivityPub interactions. */
+.activity-card--webmention {
+  border-left: 3px solid var(--color-accent);
+}
+
+.activity-card__type--webmention {
+  color: var(--color-text-muted);
+}
+
+.activity-card__webmention {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-secondary);
+}
+
+.activity-card__webmention a {
+  text-decoration: none;
+}
+
+.activity-card__webmention a:hover {
+  text-decoration: underline;
+}
+
+.activity-card__webmention-title {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.activity-card__webmention-excerpt {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.activity-card__webmention-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.activity-card__webmention-tag {
+  color: var(--color-text-link);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.activity-card__webmention-source {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  text-decoration: none;
+  word-break: break-all;
+}
+
 .activity-card__attachments {
   display: flex;
   flex-direction: column;
@@ -1331,6 +1479,38 @@ async function copyUrl() {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.activity-card__mention {
+  font-weight: 500;
+}
+
+.activity-card__mark--bold {
+  font-weight: 700;
+}
+
+.activity-card__mark--italic {
+  font-style: italic;
+}
+
+.activity-card__mark--strikethrough {
+  text-decoration: line-through;
+}
+
+.activity-card__mark--underline {
+  text-decoration: underline;
+}
+
+.activity-card__mark--strikethrough.activity-card__mark--underline {
+  text-decoration: underline line-through;
+}
+
+.activity-card__mark--code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  padding: 0 0.2em;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-secondary);
 }
 
 @media (max-width: 767px) {

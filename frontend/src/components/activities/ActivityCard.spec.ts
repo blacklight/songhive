@@ -1234,4 +1234,82 @@ describe("ActivityCard", () => {
     await wrapper.find(".activity-card").trigger("click");
     expect(push).toHaveBeenCalledWith("/activities/a1");
   });
+
+  describe("webmention cards", () => {
+    function webmentionActivity(
+      overrides: Partial<ActivityResponse> = {},
+      webmentionOverrides: Record<string, unknown> = {},
+    ): Partial<ActivityResponse> {
+      return {
+        activity_type: "webmention",
+        source_type: "webmention",
+        source_actor: "https://blog.example",
+        content: null,
+        content_source: null,
+        content_type: "text/plain",
+        webmention: {
+          source: "https://blog.example/posts/1",
+          target: "https://test.example/tracks/t1",
+          title: "A post",
+          excerpt: null,
+          author_name: "Alice",
+          author_url: "https://blog.example",
+          mention_type: "mention",
+          tags: [],
+          ...webmentionOverrides,
+        } as ActivityResponse["webmention"],
+        ...overrides,
+      };
+    }
+
+    it("renders a bare-domain author URL as the bare hostname", () => {
+      const wrapper = mountCard(webmentionActivity());
+      expect(wrapper.find(".activity-card__handle").text()).toBe(
+        "blog.example",
+      );
+    });
+
+    it("renders a path-bearing author URL as name@host", () => {
+      const wrapper = mountCard(
+        webmentionActivity({ source_actor: "https://blog.example/alice" }),
+      );
+      expect(wrapper.find(".activity-card__handle").text()).toBe(
+        "@alice@blog.example",
+      );
+    });
+
+    it("renders the summary as rich content with clickable links", () => {
+      const wrapper = mountCard(
+        webmentionActivity(
+          { content: "Check https://example.com for details" },
+          { excerpt: "Check https://example.com for details" },
+        ),
+      );
+      const excerpt = wrapper.find(".activity-card__webmention-excerpt");
+      expect(excerpt.text()).toContain("Check example.com for details");
+      const link = excerpt.find("a");
+      expect(link.attributes("href")).toBe("https://example.com");
+      // The summary is rendered inside the webmention block only — the
+      // activity's own content does not duplicate it below the card.
+      expect(wrapper.find(".activity-card__content").exists()).toBe(false);
+    });
+
+    it("renders only title and source link when no summary exists", () => {
+      const wrapper = mountCard(
+        webmentionActivity(
+          { content: null },
+          { excerpt: null, title: "Title only" },
+        ),
+      );
+      expect(wrapper.find(".activity-card__webmention-title").text()).toBe(
+        "Title only",
+      );
+      expect(wrapper.find(".activity-card__webmention-excerpt").exists()).toBe(
+        false,
+      );
+      expect(
+        wrapper.find(".activity-card__webmention-source").text(),
+      ).toContain("blog.example");
+    });
+  });
 });

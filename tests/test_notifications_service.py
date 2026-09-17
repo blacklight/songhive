@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 import sqlalchemy as sa
 
-from songhive.models.notification import Notification, NotificationPreference
+from songhive.models.notification import Notification, NotificationPreference, NotificationType
 from songhive.services import notifications
 
 
@@ -236,7 +236,7 @@ async def test_mark_all_seen(db_session, regular_user, other_user):
 async def test_get_and_set_preferences(db_session, regular_user):
     """Preferences merge stored rows with defaults for the remaining types."""
     prefs = await notifications.get_preferences(db_session, regular_user.id)
-    assert len(prefs) == 7
+    assert len(prefs) == len(NotificationType)
     assert all(p["in_app"] is True and p["email"] is False and p["email_digest"] is False for p in prefs)
 
     await notifications.set_preference(db_session, regular_user.id, "like", in_app=False, email=True, email_digest=True)

@@ -9,7 +9,14 @@ export type NotificationPreferencesResponse =
   components["schemas"]["NotificationPreferencesResponse"];
 
 export type NotificationType =
-  "follow" | "like" | "boost" | "quote" | "reply" | "mention" | "share";
+  | "follow"
+  | "like"
+  | "boost"
+  | "quote"
+  | "reply"
+  | "mention"
+  | "share"
+  | "webmention";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "follow",
@@ -19,6 +26,7 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "reply",
   "mention",
   "share",
+  "webmention",
 ];
 
 export interface NotificationListPage {

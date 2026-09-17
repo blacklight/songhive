@@ -17,7 +17,7 @@ export type ActivityType =
   | "delete"
   | "webmention";
 
-export type ActivitySourceType = "local" | "remote";
+export type ActivitySourceType = "local" | "remote" | "webmention";
 
 export interface ActivityMentionResponse {
   handle: string;
@@ -57,6 +57,26 @@ export interface ActivityAttachment {
   [key: string]: unknown;
 }
 
+/**
+ * Parsed metadata of an incoming Webmention — mirrors
+ * ``WebmentionResponse`` in ``songhive/api/routes/activities.py``.
+ * ``tags`` carries the source document's mf2 categories (rendered as
+ * Songhive tag links); ``mention_type`` is the mf2 interaction kind
+ * (``mention``, ``reply``, ``like``, ``repost``, …).
+ */
+export interface WebmentionResponse {
+  source: string;
+  target: string;
+  title?: string | null;
+  excerpt?: string | null;
+  author_name?: string | null;
+  author_url?: string | null;
+  author_photo?: string | null;
+  published?: string | null;
+  mention_type?: string;
+  tags: string[];
+}
+
 export interface ActivityResponse {
   id: string;
   entity_type: string;
@@ -94,6 +114,7 @@ export interface ActivityResponse {
   boosted: boolean;
   can_interact: boolean;
   preview_card?: PreviewCardResponse | null;
+  webmention?: WebmentionResponse | null;
 }
 
 export interface ActivityListResponse {

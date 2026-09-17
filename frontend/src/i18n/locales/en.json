@@ -1236,6 +1236,15 @@
       "addedToQueue": "Added to the queue.",
       "playError": "Could not play this audio.",
       "downloadError": "Could not download this audio: {message}"
+    },
+    "webmentionTypes": {
+      "mention": "Webmention",
+      "reply": "Replied via Webmention",
+      "like": "Liked via Webmention",
+      "repost": "Reposted via Webmention",
+      "bookmark": "Bookmarked via Webmention",
+      "rsvp": "RSVP’d via Webmention",
+      "follow": "Followed via Webmention"
     }
   },
   "notifications": {
@@ -1273,7 +1282,8 @@
       "reply": "replied to your {object}",
       "mention": "mentioned you",
       "share": "shared {object} with you",
-      "unknown": "sent you a notification"
+      "unknown": "sent you a notification",
+      "webmention": "mentioned your {object}"
     },
     "objects": {
       "post": "post",
@@ -1319,7 +1329,8 @@
         "quote": "Quotes",
         "reply": "Replies",
         "mention": "Mentions",
-        "share": "Shares"
+        "share": "Shares",
+        "webmention": "Webmentions"
       }
     },
     "onItem": "on {title}",

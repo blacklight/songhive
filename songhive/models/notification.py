@@ -2,7 +2,7 @@
 Notification and notification-preference models.
 
 A ``Notification`` row records a single user-facing event (follow, like,
-boost, quote, reply, mention, share) addressed to a local user.  The delivery
+boost, quote, reply, mention, share, webmention) addressed to a local user.  The delivery
 targets enabled at creation time are snapshotted on ``delivered_targets`` so
 later rendering/reporting does not depend on preference changes.  ``seen_at``
 drives the read/unread state and ``digest_sent_at`` tracks inclusion in the
@@ -40,6 +40,7 @@ class NotificationType(str, Enum):
     REPLY = "reply"
     MENTION = "mention"
     SHARE = "share"
+    WEBMENTION = "webmention"
 
 
 NOTIFICATION_TYPES = tuple(t.value for t in NotificationType)

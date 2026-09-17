@@ -44,6 +44,7 @@ from ..models.artist import Artist
 from ..models.library import Library
 from ..models.notification import NotificationType
 from ..models.playlist import Playlist
+from ..models.radio import Radio
 from ..models.remote_object import RemoteObject
 from ..models.stored_file import StoredFile
 from ..models.tag import Tag
@@ -102,6 +103,7 @@ _ENTITY_MODELS: Dict[str, Type[Any]] = {
     "artist": Artist,
     "playlist": Playlist,
     "library": Library,
+    "radio": Radio,
     "user": User,
     "remote": RemoteObject,
 }
@@ -553,6 +555,20 @@ async def resolve_source_actor_profiles(
                             avatar_url=avatar_url,
                             display_name=display_name or username,
                         )
+
+    # Webmention activities carry their author metadata in the payload —
+    # no local user or remote actor lookup applies.
+    for activity in activities:
+        if activity.source_type != "webmention":
+            continue
+        mention = activity.payload.get("webmention") if isinstance(activity.payload, dict) else None
+        if not isinstance(mention, dict):
+            continue
+        display_name = mention.get("author_name") or urlparse(activity.source_actor).hostname
+        result[str(activity.id)] = ActorProfile(
+            avatar_url=mention.get("author_photo"),
+            display_name=display_name,
+        )
 
     if not config.federation.enabled or not config.federation.instance_domain:
         return result
@@ -1597,6 +1613,11 @@ async def update_activity(
         schedule_preview_card_fetch(activity, force=True)
     await session.flush()
     await session.refresh(activity, ["mentions"])
+
+    # Content edits may add or remove Webmention targets — re-deliver.
+    from ..webmentions.service import enqueue_outgoing_webmentions
+
+    enqueue_outgoing_webmentions(activity, config)
     return activity
 
 
@@ -1705,7 +1726,20 @@ async def like_activity(
         mention_actor_urls=sorted(addressed),
         activity_id=like.source_id,
     )
+
+    # Liking a Webmention maps 1:1 to a ``like-of`` mention of its source.
+    from ..webmentions.service import (
+        enqueue_outgoing_webmentions,
+        set_webmention_marker,
+        webmention_interaction_target,
+    )
+
+    webmention_target = webmention_interaction_target(activity)
+    if webmention_target:
+        set_webmention_marker(like, "like-of", webmention_target)
+
     await session.flush()
+    enqueue_outgoing_webmentions(like)
     await _notify_reaction(session, activity=activity, interaction=like, author=author, type=NotificationType.LIKE)
     return like
 
@@ -1763,7 +1797,20 @@ async def boost_activity(
         mention_actor_urls=sorted(addressed),
         activity_id=boost.source_id,
     )
+
+    # Boosting a Webmention maps to a ``repost-of`` mention of its source.
+    from ..webmentions.service import (
+        enqueue_outgoing_webmentions,
+        set_webmention_marker,
+        webmention_interaction_target,
+    )
+
+    webmention_target = webmention_interaction_target(activity)
+    if webmention_target:
+        set_webmention_marker(boost, "repost-of", webmention_target)
+
     await session.flush()
+    enqueue_outgoing_webmentions(boost)
     await _notify_reaction(session, activity=activity, interaction=boost, author=author, type=NotificationType.BOOST)
     return boost
 
@@ -1799,6 +1846,10 @@ async def unreact_activity(
     reaction.deleted_at = datetime.now(timezone.utc)
     await session.flush()
 
+    from ..webmentions.service import enqueue_outgoing_webmentions
+
+    enqueue_outgoing_webmentions(reaction)
+
     if reaction.source_id:
         from . import notifications as notifications_service
 
@@ -1819,16 +1870,6 @@ def activity_page_url(entity_type: str, entity_id: str, entity: Any = None) -> s
     if entity_type == "user":
         username = getattr(entity, "username", None) or entity_id
         return f"/@{username}"
-    if entity_type == "remote":
-        # Remote objects live under ``/remote/{kind}/{id}`` (singular kind
-        # matching ``remote_objects.resource_type``); non-resource objects
-        # link to their activity permalink.
-        resource_type = getattr(entity, "resource_type", None)
-        if resource_type:
-            return f"/remote/{resource_type}/{entity_id}"
-        if entity is not None:
-            return remote_activity_page_url_from_object(entity)
-        return f"/remote/objects/{entity_id}"
     plural = get_item_plural(entity_type) or f"{entity_type}s"
     return f"/{plural}/{entity_id}/activities"
 
@@ -1869,12 +1910,7 @@ async def _entity_link_fields(session: AsyncSession, activity: Activity) -> Dict
     object_type = _activity_object_type(activity)
     if object_type:
         fields["object_type"] = object_type
-    if activity.entity_type == "remote":
-        # Remote objects have no local item page — the handle-prefixed
-        # activity URL is both the entity link and the object permalink.
-        fields["object_page_url"] = remote_activity_page_url(activity)
-        fields["local_url"] = fields["object_page_url"]
-    elif activity.entity_type == "user":
+    if activity.entity_type == "user":
         # Statuses have no item page — the author's profile is the link.
         fields["local_url"] = activity_page_url(activity.entity_type, activity.entity_id, entity)
     else:
@@ -1936,23 +1972,6 @@ def _remote_actor_handle(actor_url: str) -> str:
     parsed = urlparse(actor_url)
     name = parsed.path.rstrip("/").rsplit("/", 1)[-1] or parsed.netloc
     return f"@{name}@{parsed.netloc}" if parsed.netloc else f"@{name}"
-
-
-def remote_activity_page_url(activity: Activity) -> str:
-    """Return the ``/activities/@user@domain/{remote_object_id}`` page URL.
-
-    Remote materialized activities attach to ``remote_objects`` rows, so
-    ``entity_id`` is the remote object's UUID; the handle encodes the
-    attributed actor so the route can resolve and refresh the object.
-    """
-    handle = _remote_actor_handle(activity.source_actor).lstrip("@")
-    return f"/activities/@{handle}/{activity.entity_id}"
-
-
-def remote_activity_page_url_from_object(remote_object: RemoteObject) -> str:
-    """Return the activity permalink for a ``RemoteObject`` cache row."""
-    handle = _remote_actor_handle(remote_object.actor_url).lstrip("@")
-    return f"/activities/@{handle}/{remote_object.id}"
 
 
 async def reply_to_activity(
@@ -2117,6 +2136,18 @@ async def reply_to_activity(
         session.add(ActivityMention(activity_id=reply.id, **mention))
     await session.flush()
 
+    # Replying to a Webmention maps to an ``in-reply-to`` mention of its source.
+    from ..webmentions.service import (
+        enqueue_outgoing_webmentions,
+        set_webmention_marker,
+        webmention_interaction_target,
+    )
+
+    webmention_target = webmention_interaction_target(activity)
+    if webmention_target:
+        set_webmention_marker(reply, "in-reply-to", webmention_target)
+        await session.flush()
+
     await _sync_activity_tags(session, reply, processed.tag_names)
     await _notify_reply(session, activity=activity, reply=reply, author=author)
     await _notify_status_mentions(
@@ -2134,6 +2165,7 @@ async def reply_to_activity(
         # Fan-out is best-effort: a broker or resolution failure must not
         # fail the reply itself — the activity row still records it.
         logger.exception("Failed to fan out reply for activity %s: %s: %s", activity.id, type(e), e)
+    enqueue_outgoing_webmentions(reply, config)
     return reply
 
 
@@ -2382,6 +2414,19 @@ async def quote_activity(
         session.add(ActivityMention(activity_id=quote.id, **mention))
     await session.flush()
 
+    # Quoting a Webmention maps to a ``quotation-of`` mention carrying the
+    # post text as the summary (rendered by the outgoing source page).
+    from ..webmentions.service import (
+        enqueue_outgoing_webmentions,
+        set_webmention_marker,
+        webmention_interaction_target,
+    )
+
+    webmention_target = webmention_interaction_target(activity)
+    if webmention_target:
+        set_webmention_marker(quote, "quotation-of", webmention_target)
+        await session.flush()
+
     await _sync_activity_tags(session, quote, processed.tag_names)
     await _notify_quote(session, activity=activity, quote=quote, author=author)
     await _notify_status_mentions(
@@ -2408,6 +2453,7 @@ async def quote_activity(
         # Fan-out is best-effort: a broker or resolution failure must not
         # fail the quote itself — the activity row still records it.
         logger.exception("Failed to fan out quote for activity %s: %s: %s", activity.id, type(e), e)
+    enqueue_outgoing_webmentions(quote, config)
     return quote
 
 
@@ -3203,6 +3249,11 @@ async def create_status(
         # Fan-out is best-effort: a broker or resolution failure must not
         # fail the post itself — the activity row still records it.
         logger.exception("Failed to fan out status for user %s: %s: %s", author.id, type(e), e)
+
+    # URLs in the post may be Webmention targets — discover their endpoints.
+    from ..webmentions.service import enqueue_outgoing_webmentions
+
+    enqueue_outgoing_webmentions(activity, config)
     return activity
 
 
@@ -3462,6 +3513,10 @@ async def record_track_publication(
         # Fan-out is best-effort: a broker or resolution failure must not
         # fail the publication itself — the activity row still records it.
         logger.exception("Failed to fan out publication for track %s: %s: %s", track.id, type(e), e)
+
+    from ..webmentions.service import enqueue_outgoing_webmentions
+
+    enqueue_outgoing_webmentions(activity, config)
     return activity
 
 
@@ -3722,4 +3777,10 @@ async def retract_activity(session: AsyncSession, activity: Activity) -> None:
         else:
             payload = create_tombstone_delete_activity(info.actor_url, info.source_id)
         enqueue_activity_delivery(info, owner, payload)
+
+    # Targets that previously received a Webmention from this activity get a
+    # re-verification request resolving to a gone source page.
+    from ..webmentions.service import enqueue_outgoing_webmentions
+
+    enqueue_outgoing_webmentions(activity)
     await session.flush()

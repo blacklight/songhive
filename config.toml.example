@@ -74,6 +74,17 @@ blocked_instances = []
 # allowed_instances = ["good.example", "friend.example"]
 # blocked_instances = ["evil.example", "spammers.example"]
 
+[webmentions]
+# Enable Webmention support: incoming mentions are accepted at /webmentions and
+# outgoing mentions are sent for URLs found in public local activities. Requires
+# federation.instance_domain to be set so URLs can be built and validated.
+enabled = true
+# Timeout in seconds for outgoing Webmention HTTP requests
+# request_timeout = 15
+# Maximum response body size (in bytes) fetched for endpoint discovery and
+# source parsing
+# discovery_max_bytes = 1048576
+
 [musicbrainz]
 # Enable MusicBrainz metadata + Cover Art Archive enrichment for uploaded tracks.
 enabled = true

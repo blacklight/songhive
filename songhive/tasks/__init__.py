@@ -11,6 +11,7 @@ from . import (
     storage,
     tags,
     transcoding,
+    webmentions,
 )
 from .celery import celery_app
 
@@ -28,4 +29,5 @@ __all__ = [
     "storage",
     "tags",
     "transcoding",
+    "webmentions",
 ]

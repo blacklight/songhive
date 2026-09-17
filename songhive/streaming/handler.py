@@ -94,6 +94,23 @@ class StreamHandler(tornado.web.RequestHandler):
             "Accept-Ranges, Content-Range, Content-Length, Content-Type",
         )
         self.add_header("Vary", "Origin")
+        self._webmention_link_header()
+
+    def _webmention_link_header(self) -> None:
+        """Advertise the Webmention endpoint on this non-HTML resource.
+
+        Streams are mentionable targets, and for non-HTML responses the
+        ``Link`` header is the only endpoint-discovery mechanism. This
+        handler bypasses the FastAPI middleware that sets it elsewhere.
+        """
+        try:
+            from webmentions.server.adapters._common import webmention_link_header_value
+
+            from ..webmentions.service import webmention_endpoint_url, webmentions_enabled
+        except ImportError:
+            return
+        if webmentions_enabled(self._config):
+            self.set_header("Link", webmention_link_header_value(webmention_endpoint_url(self._config)))
 
     async def options(self, *_, **__) -> None:
         """Answer CORS preflights so fetch-based players can send ``Range``."""

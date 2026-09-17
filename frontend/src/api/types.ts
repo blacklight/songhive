@@ -4249,6 +4249,7 @@ export interface components {
        */
       can_interact: boolean;
       preview_card?: components["schemas"]["PreviewCardResponse"] | null;
+      webmention?: components["schemas"]["WebmentionResponse"] | null;
     };
     /**
      * ActivityUpdate
@@ -5868,7 +5869,14 @@ export interface components {
      * @enum {string}
      */
     NotificationType:
-      "follow" | "like" | "boost" | "quote" | "reply" | "mention" | "share";
+      | "follow"
+      | "like"
+      | "boost"
+      | "quote"
+      | "reply"
+      | "mention"
+      | "share"
+      | "webmention";
     /**
      * NotificationsPurgeResponse
      * @description Result of a notification purge run.
@@ -7052,6 +7060,38 @@ export interface components {
      * @enum {string}
      */
     Visibility: "private" | "mentioned" | "local" | "followers" | "public";
+    /**
+     * WebmentionResponse
+     * @description Serialized Webmention metadata attached to a ``webmention`` activity.
+     */
+    WebmentionResponse: {
+      /** Source */
+      source: string;
+      /** Target */
+      target: string;
+      /** Title */
+      title?: string | null;
+      /** Excerpt */
+      excerpt?: string | null;
+      /** Author Name */
+      author_name?: string | null;
+      /** Author Url */
+      author_url?: string | null;
+      /** Author Photo */
+      author_photo?: string | null;
+      /** Published */
+      published?: string | null;
+      /**
+       * Mention Type
+       * @default mention
+       */
+      mention_type: string;
+      /**
+       * Tags
+       * @default []
+       */
+      tags: string[];
+    };
     /** _Stats */
     _Stats: {
       /**

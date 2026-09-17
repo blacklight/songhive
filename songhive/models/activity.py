@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from .preview_card import PreviewCard
     from .tag import Tag
 
-ACTIVITY_ENTITY_TYPES = ("track", "album", "artist", "playlist", "library", "user", "remote")
+ACTIVITY_ENTITY_TYPES = ("track", "album", "artist", "playlist", "library", "user", "radio", "remote")
 ACTIVITY_TYPES = (
     "create",
     "announce",

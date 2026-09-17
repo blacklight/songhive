@@ -833,7 +833,10 @@ async def test_track_page_serves_spa_with_discovery_hints_for_browsers(
     assert "text/html" in response.headers["content-type"]
 
     object_url = "https://music.example.com/users/regular/objects/pub-page"
-    assert response.headers["Link"] == f'<{object_url}>; rel="alternate"; type="{ACTIVITY_JSON}"'
+    assert response.headers["Link"] == (
+        f'<{object_url}>; rel="alternate"; type="{ACTIVITY_JSON}", '
+        '<https://music.example.com/webmentions>; rel="webmention"'
+    )
     assert f'<link rel="alternate" type="{ACTIVITY_JSON}" href="{object_url}">' in response.text
     assert '<meta property="og:title" content="Artist - Public Track">' in response.text
 
@@ -862,7 +865,7 @@ async def test_track_page_serves_plain_spa_for_unpublished_track(
 
     response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": "text/html"})
     assert response.status_code == status.HTTP_200_OK
-    assert "Link" not in response.headers
+    assert 'rel="alternate"' not in response.headers.get("Link", "")
     assert 'rel="alternate"' not in response.text
 
 
@@ -1232,7 +1235,10 @@ async def test_activity_page_serves_spa_with_discovery_hints_for_browsers(
     assert "text/html" in response.headers["content-type"]
 
     object_url = "https://music.example.com/users/regular/objects/page-1"
-    assert response.headers["Link"] == f'<{object_url}>; rel="alternate"; type="{ACTIVITY_JSON}"'
+    assert response.headers["Link"] == (
+        f'<{object_url}>; rel="alternate"; type="{ACTIVITY_JSON}", '
+        '<https://music.example.com/webmentions>; rel="webmention"'
+    )
     assert f'<link rel="alternate" type="{ACTIVITY_JSON}" href="{object_url}"></head>' in response.text
 
 
@@ -1250,7 +1256,7 @@ async def test_activity_page_serves_plain_spa_for_non_federated_activity(
 
     response = fed_client.get(f"/activities/{activity.id}", headers={"Accept": "text/html"})
     assert response.status_code == status.HTTP_200_OK
-    assert "Link" not in response.headers
+    assert 'rel="alternate"' not in response.headers.get("Link", "")
     assert 'rel="alternate"' not in response.text
 
 

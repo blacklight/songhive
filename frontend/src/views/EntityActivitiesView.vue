@@ -16,6 +16,7 @@ const ENTITY_ROUTES: Record<string, string> = {
   artist: "artists",
   playlist: "playlists",
   library: "libraries",
+  radio: "radios",
 };
 
 const entityRoute = computed(

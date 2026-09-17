@@ -22,6 +22,7 @@ from ...services import activities as activity_service
 from ...services import audit
 from ...services.federation import ensure_user_actor
 from ...services.mentions import CONTENT_TYPE_MARKDOWN
+from ...webmentions.service import webmention_display_excerpt
 from .._common import client_ip
 from ..deps import get_config, get_current_user, get_current_user_optional, get_db
 from ..middleware.rate_limit import rate_limit_account
@@ -77,6 +78,21 @@ class PreviewCardResponse(BaseModel):
     type: str = "link"
 
 
+class WebmentionResponse(BaseModel):
+    """Serialized Webmention metadata attached to a ``webmention`` activity."""
+
+    source: str
+    target: str
+    title: Optional[str] = None
+    excerpt: Optional[str] = None
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+    author_photo: Optional[str] = None
+    published: Optional[datetime] = None
+    mention_type: str = "mention"
+    tags: List[str] = []
+
+
 class ActivityResponse(BaseModel):
     """Serialized activity."""
 
@@ -112,6 +128,7 @@ class ActivityResponse(BaseModel):
     boosted: bool = False
     can_interact: bool = True
     preview_card: Optional[PreviewCardResponse] = None
+    webmention: Optional[WebmentionResponse] = None
 
 
 class ActivityListResponse(BaseModel):
@@ -230,6 +247,35 @@ def _activity_object_url(activity: Activity) -> Optional[str]:
     return None
 
 
+def _activity_webmention(activity: Activity) -> Optional[WebmentionResponse]:
+    """Return the stored Webmention metadata of a ``webmention`` activity."""
+    payload = activity.payload
+    if not isinstance(payload, dict):
+        return None
+    mention = payload.get("webmention")
+    if not isinstance(mention, dict):
+        return None
+    raw_metadata = mention.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    raw_mf2 = metadata.get("mf2")
+    mf2 = raw_mf2 if isinstance(raw_mf2, dict) else {}
+    raw_categories = mf2.get("category")
+    categories = raw_categories if isinstance(raw_categories, list) else []
+    published = mention.get("published")
+    return WebmentionResponse(
+        source=mention.get("source") or "",
+        target=mention.get("target") or "",
+        title=mention.get("title"),
+        excerpt=webmention_display_excerpt(mention.get("excerpt"), mention.get("content")),
+        author_name=mention.get("author_name"),
+        author_url=mention.get("author_url"),
+        author_photo=mention.get("author_photo"),
+        published=datetime.fromisoformat(published) if isinstance(published, str) else None,
+        mention_type=mention.get("mention_type") or "mention",
+        tags=[str(name) for name in categories if isinstance(name, str) and name],
+    )
+
+
 def _build_activity_response(
     activity: Activity,
     profile: Optional[activity_service.ActorProfile],
@@ -249,6 +295,7 @@ def _build_activity_response(
         response.boosted = summary.boosted
     response.object_url = _activity_object_url(activity)
     response.object_type = activity_service._activity_object_type(activity)
+    response.webmention = _activity_webmention(activity)
     # Interactions target content activities — reacting to a reaction (or a
     # tombstone) is meaningless, so cards for those types render no action
     # bar; the embedded object's card carries its own.
@@ -379,8 +426,9 @@ async def update_activity(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
 
     # Reactions carry no editable content — the object is a bare reference
-    # and the visibility is inherited from the reacted activity.
-    if activity.activity_type in ("like", "announce"):
+    # and the visibility is inherited from the reacted activity — and
+    # Webmentions mirror remote content owned by the source site.
+    if activity.activity_type in ("like", "announce", "webmention"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Reaction activities are not editable",

@@ -181,6 +181,30 @@ class FederationConfig(BaseSettings):
     )
 
 
+class WebmentionsConfig(BaseSettings):
+    """Webmention (W3C recommendation) configuration."""
+
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable Webmention support: incoming mentions are accepted at "
+            "/webmentions and outgoing mentions are sent for URLs found in "
+            "public local activities. Requires federation.instance_domain to "
+            "be set so URLs can be built and validated."
+        ),
+    )
+    request_timeout: float = Field(
+        default=15.0,
+        ge=1.0,
+        description="Timeout in seconds for outgoing Webmention HTTP requests",
+    )
+    discovery_max_bytes: int = Field(
+        default=1024 * 1024,
+        ge=1024,
+        description="Maximum response body size fetched for endpoint discovery and source parsing",
+    )
+
+
 class RegistrationMode(str, Enum):
     """Allowed user registration modes."""
 
@@ -561,6 +585,7 @@ class SonghiveConfig(BaseSettings):
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     federation: FederationConfig = Field(default_factory=FederationConfig)
+    webmentions: WebmentionsConfig = Field(default_factory=WebmentionsConfig)
     auth: AuthConfig = Field(default_factory=_require_auth_secret_key)
     email: EmailConfig = Field(default_factory=EmailConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)

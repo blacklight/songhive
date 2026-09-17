@@ -94,6 +94,7 @@ def test_activity_entity_types_contract():
         "playlist",
         "library",
         "user",
+        "radio",
         "remote",
     )
     assert ACTIVITY_TYPES == (

@@ -69,6 +69,12 @@ export function notificationObjectKind(
   notification: Pick<NotificationResponse, "type" | "payload">,
 ): NotificationObjectKind {
   const payload = notification.payload ?? {};
+  // Webmention ``object_*`` fields snapshot the remote mention document —
+  // the mentioned entity is what ``item_*`` carries (absent for profile
+  // mentions, which read as post mentions).
+  if (notification.type === "webmention") {
+    return itemKind(payload.item_type) ?? "post";
+  }
   const prefix =
     notification.type === "reply" ||
     notification.type === "quote" ||

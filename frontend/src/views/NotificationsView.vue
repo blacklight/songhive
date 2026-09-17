@@ -54,6 +54,7 @@ const TYPE_ICONS: Record<string, string> = {
   reply: "reply",
   mention: "at",
   share: "share-nodes",
+  webmention: "link",
 };
 
 const filters = [
@@ -360,7 +361,7 @@ function actorName(item: NotificationResponse): string {
 }
 
 const URN_PREFIX = "urn:songhive:user:";
-const NOTE_TYPES = new Set(["mention", "reply", "quote"]);
+const NOTE_TYPES = new Set(["mention", "reply", "quote", "webmention"]);
 // ``/users/{name}/objects/{id}`` permalinks are backend endpoints that
 // redirect browsers to the right page — they must reach the server rather
 // than the SPA router, which has no such route.
@@ -433,7 +434,7 @@ function rawLinkFor(item: NotificationResponse): string | undefined {
       undefined
     );
   }
-  if (item.type === "mention") {
+  if (item.type === "mention" || item.type === "webmention") {
     const activityId =
       str(payload.object_activity_id) ?? noteActivityIds.value[item.id];
     if (activityId) return `/activities/${activityId}`;
@@ -1074,6 +1075,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   width: 1.25rem;
   text-align: center;
+  margin-right: var(--space-2);
 }
 
 .notifications-view__row--unseen .notifications-view__icon {

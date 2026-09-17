@@ -179,6 +179,15 @@ const routes: RouteRecordRaw[] = [
           entityId: String(route.params.id),
         }),
       },
+      {
+        path: "radios/:id/activities",
+        name: "radioActivities",
+        component: () => import("@/views/EntityActivitiesView.vue"),
+        props: (route) => ({
+          entityType: "radio",
+          entityId: String(route.params.id),
+        }),
+      },
       // Single-activity permalinks are public reads too: the endpoint
       // applies the same visibility rules as the entity feeds.
       {
