@@ -3,9 +3,11 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
+import { useAuthStore } from "@/stores/auth";
 import * as tracksApi from "@/api/tracks";
 import type { TrackResponse, ListTracksResult } from "@/api/tracks";
 import TracksView from "./TracksView.vue";
+import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
 
 vi.mock("@/api/tracks", () => ({
   listTracksWithMeta: vi.fn(),
@@ -70,6 +72,12 @@ function createListResult(
     offset: 0,
     total: total ?? tracks.length,
   };
+}
+
+function setAuthenticated() {
+  const authStore = useAuthStore();
+  authStore.status = "authenticated";
+  authStore.user = { id: "user-1", username: "alice" } as never;
 }
 
 describe("TracksView", () => {
@@ -246,5 +254,37 @@ describe("TracksView", () => {
     });
     expect(wrapper.text()).toContain("Song 19");
     expect(wrapper.text()).toContain("Song 20");
+  });
+
+  it("hides the only-mine toggle when signed out", async () => {
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const toggle = wrapper.findComponent(OnlyMineToggle);
+    expect(toggle.find('input[type="checkbox"]').exists()).toBe(false);
+  });
+
+  it("filters by the current user when the only-mine toggle is enabled", async () => {
+    setAuthenticated();
+    const fetcher = vi.mocked(tracksApi.listTracksWithMeta);
+
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const checkbox = wrapper
+      .findComponent(OnlyMineToggle)
+      .find('input[type="checkbox"]');
+    expect(checkbox.exists()).toBe(true);
+
+    await checkbox.setValue(true);
+    await flushPromises();
+
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ owner_username: "alice" }),
+    );
   });
 });

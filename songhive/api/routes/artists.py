@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.user import User
 from ...services import acl, audit, deletion, music
+from ...services.auth import get_user_by_username
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from ...services.tags import (
@@ -154,6 +155,7 @@ async def _build_artist_response(
 async def list_artists(
     response: Response,
     q: Optional[str] = Query(None, description="Search query"),
+    owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
@@ -162,11 +164,20 @@ async def list_artists(
     include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
 ):
     """List or search artists visible to the requester."""
-    total = await music.count_artists(db, query=q, user=user)
+    if owner_username:
+        owner = await get_user_by_username(db, owner_username)
+        if owner is None or not owner.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        owner_id = str(owner.id)
+    else:
+        owner_id = None
+
+    total = await music.count_artists(db, query=q, user=user, owner_id=owner_id)
     rows = await music.list_artists(
         db,
         query=q,
         user=user,
+        owner_id=owner_id,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),

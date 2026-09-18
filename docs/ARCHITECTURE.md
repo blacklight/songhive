@@ -1116,7 +1116,10 @@ alembic revision --autogenerate -m "add example column"
   own, so artist listings (`GET /api/v1/artists/` and the artists section of
   `GET /api/v1/search/`) instead require at least one track or album the
   requester can access; artists whose content is entirely private or unshared
-  are hidden. Admins bypass the filter. `StoredFile` rows inherit access from
+  are hidden. Admins bypass the filter. `GET /api/v1/artists/` also accepts
+  `owner_username` (like the album/track/library/playlist listings) to keep
+  only artists with at least one track or album owned by that user, on top of
+  the requester's ACL. `StoredFile` rows inherit access from
   the entities referencing them: a file attached to a track, album, playlist,
   or library is downloadable by anyone who can access that entity (directly,
   via a `ShareGrant`, or via a `ShareToken`). Album covers are also reachable

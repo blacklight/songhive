@@ -148,6 +148,7 @@ function onSort(field: string, direction: "asc" | "desc") {
 
 defineSlots<{
   "header-actions"?: (props: { bulkMode: boolean }) => unknown;
+  filters?: () => unknown;
   card?: (props: { item: T; bulkMode: boolean }) => unknown;
   empty?: () => unknown;
 }>();
@@ -203,14 +204,19 @@ defineSlots<{
       </div>
     </div>
 
-    <div v-if="firstSortOption" class="bulk-editable-grid__sort">
+    <div
+      v-if="firstSortOption || $slots.filters"
+      class="bulk-editable-grid__sort"
+    >
       <SortControl
+        v-if="firstSortOption"
         :model-value="currentSortField"
         :direction="currentSortDir"
         :options="props.sortOptions ?? []"
         @update:model-value="(field) => onSort(field, currentSortDir)"
         @update:direction="(dir) => onSort(currentSortField, dir)"
       />
+      <slot name="filters" />
     </div>
 
     <SearchBar
@@ -385,7 +391,10 @@ defineSlots<{
 
 .bulk-editable-grid__sort {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-start;
+  gap: var(--space-3);
 }
 
 .bulk-editable-grid__skeleton--grid {

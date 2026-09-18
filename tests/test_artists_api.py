@@ -292,6 +292,90 @@ async def test_list_artists_local_tracks_require_auth(client, db_session, regula
 
 
 @pytest.mark.asyncio
+async def test_list_artists_owner_username_filter(client, db_session, regular_user, other_user):
+    """``owner_username`` restricts the list to artists with content owned by that user."""
+    track_artist = Artist(name="Track Owner Artist")
+    album_artist = Artist(name="Album Owner Artist")
+    other_artist = Artist(name="Other Artist")
+    db_session.add_all([track_artist, album_artist, other_artist])
+    await db_session.flush()
+
+    db_session.add(
+        Album(
+            title="Owned Album",
+            artist_id=album_artist.id,
+            owner_id=regular_user.id,
+            visibility=Visibility.PUBLIC.value,
+        )
+    )
+    db_session.add_all(
+        [
+            Track(
+                title="Owned Track",
+                artist_id=track_artist.id,
+                owner_id=regular_user.id,
+                visibility=Visibility.PUBLIC.value,
+            ),
+            Track(
+                title="Other Track",
+                artist_id=other_artist.id,
+                owner_id=other_user.id,
+                visibility=Visibility.PUBLIC.value,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    names = await _artist_names(client.get(f"/api/v1/artists/?owner_username={regular_user.username}"))
+    assert names == {"Track Owner Artist", "Album Owner Artist"}
+
+    names = await _artist_names(client.get(f"/api/v1/artists/?owner_username={other_user.username}"))
+    assert names == {"Other Artist"}
+
+
+@pytest.mark.asyncio
+async def test_list_artists_owner_username_respects_acl(client, db_session, regular_user, other_user, auth_headers):
+    """The owner filter does not bypass visibility: private content stays owner-only."""
+    artist = Artist(name="Private Owner Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    db_session.add(
+        Track(
+            title="Secret Track",
+            artist_id=artist.id,
+            owner_id=regular_user.id,
+            visibility=Visibility.PRIVATE.value,
+        )
+    )
+    await db_session.commit()
+
+    names = await _artist_names(client.get(f"/api/v1/artists/?owner_username={regular_user.username}"))
+    assert names == set()
+
+    names = await _artist_names(
+        client.get(
+            f"/api/v1/artists/?owner_username={regular_user.username}",
+            headers=auth_headers(other_user),
+        )
+    )
+    assert names == set()
+
+    names = await _artist_names(
+        client.get(
+            f"/api/v1/artists/?owner_username={regular_user.username}",
+            headers=auth_headers(regular_user),
+        )
+    )
+    assert names == {"Private Owner Artist"}
+
+
+def test_list_artists_owner_username_unknown_user(client):
+    """Filtering by an unknown owner returns 404."""
+    response = client.get("/api/v1/artists/?owner_username=nobody")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_artist_stats_counts_accessible_content(client, db_session, regular_user, auth_headers):
     """Artist stats aggregate over the requester's accessible tracks and albums."""
     artist = Artist(name="Stats Artist")

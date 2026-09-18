@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useChunkList } from "@/composables/useChunkList";
 import { useShareDialog } from "@/composables/useShareDialog";
@@ -14,10 +14,12 @@ import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import SortControl from "@/components/ui/SortControl.vue";
+import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
 const player = usePlayerStore();
+const onlyMine = ref(false);
 const {
   items,
   loading,
@@ -42,6 +44,7 @@ const {
     const result = await listTracksWithMeta({
       ...params,
       include: "artist,album",
+      owner_username: onlyMine.value ? authStore.user?.username : undefined,
     });
     return { items: result.tracks, offset: result.offset, total: result.total };
   },
@@ -74,6 +77,11 @@ function onTrackShare(track: QueueTrack) {
 
 async function onRemoved() {
   await refresh();
+}
+
+function onOnlyMineChange(value: boolean) {
+  onlyMine.value = value;
+  void refresh();
 }
 
 onMounted(() => {
@@ -109,6 +117,11 @@ watch(
         :options="sortOptions"
         @update:model-value="(field) => setSort(field, sortDir)"
         @update:direction="(dir) => setSort(sortBy, dir)"
+      />
+
+      <OnlyMineToggle
+        :model-value="onlyMine"
+        @update:model-value="onOnlyMineChange"
       />
 
       <!--
@@ -202,7 +215,7 @@ watch(
 .tracks-view__controls {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: last baseline;
   gap: var(--space-3);
 }
 

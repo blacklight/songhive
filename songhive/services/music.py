@@ -197,15 +197,28 @@ def _apply_sort(
 def _build_artists_stmt(
     query: Optional[str] = None,
     user: Optional[User] = None,
+    owner_id: Optional[str] = None,
 ) -> Select[Any]:
     """Build a statement for listing/counting artists.
 
     Artists carry no ACL of their own, so non-admin requesters only see
-    artists that have at least one track or album they can access.
+    artists that have at least one track or album they can access. When
+    ``owner_id`` is set, artists must additionally have at least one track
+    or album owned by that user.
     """
     stmt = select(Artist)
     if query:
         stmt = stmt.where(ilike_contains(Artist.name, query))
+    if owner_id:
+        owned_tracks = select(Track.id).where(
+            Track.artist_id == Artist.id,
+            Track.owner_id == owner_id,
+        )
+        owned_albums = select(Album.id).where(
+            Album.artist_id == Artist.id,
+            Album.owner_id == owner_id,
+        )
+        stmt = stmt.where(or_(exists(owned_tracks), exists(owned_albums)))
     if user is None or not user.is_admin:
         accessible_tracks = apply_access_filter(
             select(Track.id).where(Track.artist_id == Artist.id),
@@ -227,6 +240,7 @@ async def list_artists(
     session: AsyncSession,
     query: Optional[str] = None,
     user: Optional[User] = None,
+    owner_id: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
@@ -235,7 +249,7 @@ async def list_artists(
 ) -> List[Artist]:
     """List artists with optional search and sorting, honouring the requester's ACL."""
     field = getattr(Artist, sort_by)
-    stmt = _build_artists_stmt(query=query, user=user).options(*_artist_selectin_options(include))
+    stmt = _build_artists_stmt(query=query, user=user, owner_id=owner_id).options(*_artist_selectin_options(include))
     stmt = _apply_sort(stmt, field, sort_dir, Artist.id)
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -246,9 +260,10 @@ async def count_artists(
     session: AsyncSession,
     query: Optional[str] = None,
     user: Optional[User] = None,
+    owner_id: Optional[str] = None,
 ) -> int:
     """Return the total number of artists matching the optional search and ACL."""
-    stmt = _build_artists_stmt(query=query, user=user)
+    stmt = _build_artists_stmt(query=query, user=user, owner_id=owner_id)
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
 

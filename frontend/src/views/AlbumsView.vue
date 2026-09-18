@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useEntityList } from "@/composables/useEntityList";
 import { listAlbums, deleteAlbum, type AlbumResponse } from "@/api/albums";
+import { useAuthStore } from "@/stores/auth";
 import AlbumCard from "@/components/library/AlbumCard.vue";
 import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
+import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
 
 const { t } = useI18n();
+const authStore = useAuthStore();
+const onlyMine = ref(false);
 const {
   items,
   loading,
@@ -22,7 +26,12 @@ const {
   retry,
   refresh,
 } = useEntityList<AlbumResponse>(
-  (params) => listAlbums({ ...params, include: "artist" }),
+  (params) =>
+    listAlbums({
+      ...params,
+      include: "artist",
+      owner_username: onlyMine.value ? authStore.user?.username : undefined,
+    }),
   {
     defaultSortBy: "title",
     syncQuery: true,
@@ -39,6 +48,11 @@ const sortOptions = computed(() => [
 
 function onSort(field: string, direction: "asc" | "desc") {
   void setSort(field, direction);
+}
+
+function onOnlyMineChange(value: boolean) {
+  onlyMine.value = value;
+  void refresh();
 }
 
 onMounted(() => load());
@@ -71,6 +85,13 @@ onMounted(() => load());
       "
       @sort="onSort"
     >
+      <template #filters>
+        <OnlyMineToggle
+          :model-value="onlyMine"
+          @update:model-value="onOnlyMineChange"
+        />
+      </template>
+
       <template #card="{ item, bulkMode }">
         <AlbumCard
           class="albums-view__card"

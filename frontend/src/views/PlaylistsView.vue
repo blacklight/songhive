@@ -18,11 +18,13 @@ import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import PlaylistCard from "@/components/library/PlaylistCard.vue";
 import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
+import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
 import type { Visibility } from "@/api/playlists";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
 const toastStore = useToastStore();
+const onlyMine = ref(false);
 const {
   items,
   loading,
@@ -37,10 +39,17 @@ const {
   setSort,
   retry,
   refresh,
-} = useEntityList<PlaylistResponse>(listPlaylists, {
-  defaultSortBy: "name",
-  syncQuery: true,
-});
+} = useEntityList<PlaylistResponse>(
+  (params) =>
+    listPlaylists({
+      ...params,
+      owner_username: onlyMine.value ? authStore.user?.username : undefined,
+    }),
+  {
+    defaultSortBy: "name",
+    syncQuery: true,
+  },
+);
 
 const isCreateOpen = ref(false);
 const name = ref("");
@@ -65,6 +74,11 @@ const sortOptions = computed(() => [
 
 function onSort(field: string, direction: "asc" | "desc") {
   void setSort(field, direction);
+}
+
+function onOnlyMineChange(value: boolean) {
+  onlyMine.value = value;
+  void refresh();
 }
 
 onMounted(() => load());
@@ -143,6 +157,13 @@ async function onCreate() {
         >
           {{ t("browse.list.createPlaylist") }}
         </AppButton>
+      </template>
+
+      <template #filters>
+        <OnlyMineToggle
+          :model-value="onlyMine"
+          @update:model-value="onOnlyMineChange"
+        />
       </template>
 
       <template #card="{ item, bulkMode }">

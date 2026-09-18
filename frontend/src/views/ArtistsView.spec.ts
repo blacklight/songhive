@@ -3,9 +3,11 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
+import { useAuthStore } from "@/stores/auth";
 import * as artistsApi from "@/api/artists";
 import type { ArtistResponse } from "@/api/artists";
 import ArtistsView from "./ArtistsView.vue";
+import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
 
 vi.mock("@/api/artists", () => ({
   listArtists: vi.fn(),
@@ -29,6 +31,12 @@ function createArtist(id: string, name: string): ArtistResponse {
     bio: null,
     image_url: null,
   };
+}
+
+function setAuthenticated() {
+  const authStore = useAuthStore();
+  authStore.status = "authenticated";
+  authStore.user = { id: "user-1", username: "alice" } as never;
 }
 
 describe("ArtistsView", () => {
@@ -162,5 +170,37 @@ describe("ArtistsView", () => {
     });
     expect(wrapper.text()).toContain("Artist 19");
     expect(wrapper.text()).toContain("Artist 20");
+  });
+
+  it("hides the only-mine toggle when signed out", async () => {
+    wrapper = mount(ArtistsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const toggle = wrapper.findComponent(OnlyMineToggle);
+    expect(toggle.find('input[type="checkbox"]').exists()).toBe(false);
+  });
+
+  it("filters by the current user when the only-mine toggle is enabled", async () => {
+    setAuthenticated();
+    const fetcher = vi.mocked(artistsApi.listArtists);
+
+    wrapper = mount(ArtistsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const checkbox = wrapper
+      .findComponent(OnlyMineToggle)
+      .find('input[type="checkbox"]');
+    expect(checkbox.exists()).toBe(true);
+
+    await checkbox.setValue(true);
+    await flushPromises();
+
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ owner_username: "alice" }),
+    );
   });
 });

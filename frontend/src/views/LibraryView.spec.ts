@@ -12,6 +12,7 @@ import type {
   Visibility,
 } from "@/api/libraries";
 import LibraryView from "./LibraryView.vue";
+import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
 
 vi.mock("@/api/libraries", () => ({
   listLibraries: vi.fn(),
@@ -264,5 +265,37 @@ describe("LibraryView", () => {
     await flushPromises();
 
     expect(document.body.textContent).toContain("create failed");
+  });
+
+  it("hides the only-mine toggle when signed out", async () => {
+    wrapper = mount(LibraryView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const toggle = wrapper.findComponent(OnlyMineToggle);
+    expect(toggle.find('input[type="checkbox"]').exists()).toBe(false);
+  });
+
+  it("filters by the current user when the only-mine toggle is enabled", async () => {
+    setAuthenticated();
+    const fetcher = vi.mocked(librariesApi.listLibraries);
+
+    wrapper = mount(LibraryView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const checkbox = wrapper
+      .findComponent(OnlyMineToggle)
+      .find('input[type="checkbox"]');
+    expect(checkbox.exists()).toBe(true);
+
+    await checkbox.setValue(true);
+    await flushPromises();
+
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ owner_username: "alice" }),
+    );
   });
 });
