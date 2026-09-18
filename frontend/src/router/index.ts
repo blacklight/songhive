@@ -385,6 +385,13 @@ const routes: RouteRecordRaw[] = [
     component: AuthLayout,
     children: authChildren,
   },
+  // Standalone embeddable pages served in <iframe>/<script> embeds on
+  // third-party sites: no app chrome, no auth requirement.
+  {
+    path: "/embed/:type(track|album|artist|playlist|library)/:id",
+    name: "embed",
+    component: () => import("@/views/EmbedView.vue"),
+  },
   {
     path: "/admin",
     component: AdminLayout,

@@ -9,6 +9,10 @@ import { useConfirmStore } from "@/stores/confirm";
 import { useInstanceStore } from "@/stores/instance";
 import * as sharesApi from "@/api/shares";
 import * as tracksApi from "@/api/tracks";
+import * as albumsApi from "@/api/albums";
+import * as artistsApi from "@/api/artists";
+import * as playlistsApi from "@/api/playlists";
+import * as librariesApi from "@/api/libraries";
 import * as usersApi from "@/api/users";
 import * as searchApi from "@/api/search";
 import ConfirmDialog from "@/components/feedback/ConfirmDialog.vue";
@@ -25,6 +29,30 @@ vi.mock("@/api/shares", () => ({
 
 vi.mock("@/api/tracks", () => ({
   publishTrack: vi.fn(),
+  getTrack: vi.fn(),
+  listTracks: vi.fn(),
+}));
+
+vi.mock("@/api/albums", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/api/albums")>()),
+  getAlbumStats: vi.fn(),
+}));
+
+vi.mock("@/api/artists", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/api/artists")>()),
+  getArtistStats: vi.fn(),
+}));
+
+vi.mock("@/api/playlists", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/api/playlists")>()),
+  getPlaylistStats: vi.fn(),
+  listPlaylistTracks: vi.fn(),
+}));
+
+vi.mock("@/api/libraries", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/api/libraries")>()),
+  getLibraryStats: vi.fn(),
+  listLibraryTracks: vi.fn(),
 }));
 
 vi.mock("@/api/users", async (importOriginal) => {
@@ -110,6 +138,22 @@ describe("ShareDialog", () => {
     vi.mocked(searchApi.searchPreview).mockResolvedValue({
       query: "",
       sections: [],
+    });
+    vi.mocked(tracksApi.getTrack).mockResolvedValue({} as never);
+    vi.mocked(albumsApi.getAlbumStats).mockResolvedValue({
+      track_count: 0,
+      total_duration: 0,
+    });
+    vi.mocked(artistsApi.getArtistStats).mockResolvedValue({
+      track_count: 0,
+      album_count: 0,
+    });
+    vi.mocked(playlistsApi.getPlaylistStats).mockResolvedValue({
+      track_count: 0,
+      total_duration: 0,
+    });
+    vi.mocked(librariesApi.getLibraryStats).mockResolvedValue({
+      track_count: 0,
     });
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: vi.fn() },
@@ -924,7 +968,7 @@ describe("ShareDialog", () => {
     expect(document.body.querySelector("textarea")).toBeNull();
   });
 
-  it("shows all three tabs for the owner of a public item", async () => {
+  it("shows all four tabs for the owner of a public item", async () => {
     setAuthenticated("user-1");
     wrapper = mountOpen({
       ownerId: "user-1",
@@ -932,8 +976,8 @@ describe("ShareDialog", () => {
     });
     await flushPromises();
 
-    const tabLabels = ["shareGrants", "shareUrls", "publicUrl"].map((key) =>
-      i18n.global.t(`browse.share.${key}`),
+    const tabLabels = ["shareGrants", "shareUrls", "embed", "publicUrl"].map(
+      (key) => i18n.global.t(`browse.share.${key}`),
     );
     for (const label of tabLabels) {
       expect(
@@ -942,6 +986,54 @@ describe("ShareDialog", () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it("shows the embed tab with the not-public hint to the owner of a private item", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      ownerId: "user-1",
+      visibility: "private",
+    });
+    await flushPromises();
+
+    const embedTab = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("browse.share.embed"),
+    );
+    expect(embedTab).toBeDefined();
+    await embedTab?.click();
+    await flushPromises();
+
+    expect(document.body.textContent).toContain(
+      i18n.global.t("browse.share.embedNotPublic"),
+    );
+  });
+
+  it("shows the embed tab to non-owners of a public item", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      ownerId: "user-2",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const embedTab = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("browse.share.embed"),
+    );
+    expect(embedTab).toBeDefined();
+  });
+
+  it("hides the embed tab from non-owners of a non-public item", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      ownerId: "user-2",
+      visibility: "private",
+    });
+    await flushPromises();
+
+    const embedTab = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("browse.share.embed"),
+    );
+    expect(embedTab).toBeUndefined();
   });
 
   it("renders the confirm dialog above the share modal when revoking", async () => {

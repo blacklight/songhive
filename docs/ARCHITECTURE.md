@@ -1721,6 +1721,32 @@ The URL resolver is content-negotiated:
 The ACL service (`services/acl.py`) checks grants and tokens transparently
 via the `require_access` FastAPI dependency used by resource routes.
 
+### Embeddables
+
+Public entities can also be embedded into third-party pages from the share
+dialog's "Embed" tab (`components/share/EmbedPanel.vue`). Four snippet
+formats are generated client-side (`utils/embed.ts`):
+
+- Tracks default to a standalone `<audio>` tag wrapped in a `<p>` with the
+  track metadata linked back to the Songhive page. For albums, artists,
+  playlists, and libraries this is replaced by a `<div>` listing one
+  `<audio>` element per track — only offered when the collection holds
+  fewer than 250 elements, and limited to public tracks with a playable
+  `audio_url`.
+- A Markdown link `[{artist} - {title}]({url})` (title or filename
+  fallbacks for tracks, the entity name for collections).
+- A `<script>` embed: a `data-songhive-embed` placeholder rendered by
+  `frontend/public/embed.js` (served as `/embed.js`) into an iframe of the
+  SPA's standalone `/embed/{type}/{id}` route (`views/EmbedView.vue`) — a
+  compact track player for tracks and an expandable tracklist for
+  collections. The embed page reports its content height via `postMessage`
+  and the script resizes the iframe to match.
+- A no-JS `<iframe>` fallback pointing at the same `/embed/{type}/{id}`
+  route with fixed heights.
+
+Embed URLs load anonymously, so the tab only offers snippets for public
+items (owners see a publish-first hint otherwise).
+
 ---
 
 ## Notifications

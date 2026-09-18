@@ -153,6 +153,16 @@
   `cors_origins` are passed through so credentialed CORS keeps working. The
   Tornado `StreamHandler` sets the same headers itself via
   `set_default_headers` (it bypasses FastAPI middleware entirely).
+- Public entities can be embedded on third-party pages via the share
+  dialog's "Embed" tab (`components/share/EmbedPanel.vue` + snippet builders
+  in `utils/embed.ts`): `<audio>`/`<div>` HTML, Markdown link, `<script>`
+  widget, or `<iframe>`. The `<script>` and `<iframe>` formats render the
+  SPA's standalone `/embed/{type}/{id}` route (`views/EmbedView.vue`) —
+  `frontend/public/embed.js` is served verbatim as `/embed.js`, turns
+  `data-songhive-embed` placeholders into iframes, and resizes them from
+  the `songhive-embed` `postMessage` protocol the view emits. Collection
+  `<audio>`-list embeds are only offered below 250 elements and always
+  filter to public tracks with a playable `audio_url`.
 - Browser sessions use server-managed cookies, not JS-readable tokens:
   login/refresh set `HttpOnly` `access_token` + `refresh_token` cookies
   (refresh scoped to `Path=/api/v1/auth`) plus a readable `csrf_token`

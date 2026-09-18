@@ -36,6 +36,7 @@ import AppSelect from "@/components/ui/AppSelect.vue";
 import AppTable from "@/components/ui/AppTable.vue";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import StatusComposer from "@/components/statuses/StatusComposer.vue";
+import EmbedPanel from "@/components/share/EmbedPanel.vue";
 
 export interface Props {
   open: boolean;
@@ -60,7 +61,7 @@ const instanceStore = useInstanceStore();
 const { isOwner } = useOwnership(computed(() => props.ownerId ?? null));
 const { canManage } = useCanManage(computed(() => props.ownerId ?? null));
 
-type TabKey = "grants" | "urls" | "fediverse" | "public";
+type TabKey = "grants" | "urls" | "fediverse" | "embed" | "public";
 
 const activeTab = ref<TabKey>("grants");
 
@@ -108,6 +109,16 @@ const availableTabs = computed(() => {
       key: "fediverse",
       label: t("browse.share.fediverse"),
       icon: "paper-plane",
+    });
+  }
+  // Embeds load anonymously on third-party pages, so they need a public
+  // resource; the owner/admin still gets the tab on non-public items so the
+  // hint can tell them to publish it first.
+  if (canManage.value || isPublic.value) {
+    tabs.push({
+      key: "embed",
+      label: t("browse.share.embed"),
+      icon: "code",
     });
   }
   if (publicUrl.value) {
@@ -609,6 +620,16 @@ watch(
       </p>
     </div>
 
+    <div v-else-if="activeTab === 'embed'" class="share-dialog__panel">
+      <EmbedPanel
+        :item-type="props.itemType"
+        :item-id="props.itemId"
+        :title="props.title"
+        :download-url="props.downloadUrl"
+        :is-public="isPublic"
+      />
+    </div>
+
     <div v-else-if="activeTab === 'public'" class="share-dialog__panel">
       <div v-if="publicUrl" class="share-dialog__new-url">
         <AppInput
@@ -648,6 +669,7 @@ watch(
   display: flex;
   gap: var(--space-2);
   margin-bottom: var(--space-4);
+  overflow: auto;
 }
 
 .share-dialog__panel {

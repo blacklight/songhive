@@ -139,7 +139,7 @@ useFocusTrap(
   color: var(--color-text);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  max-width: 32rem;
+  max-width: 40rem;
   width: 100%;
   max-height: calc(100vh - var(--space-8));
   overflow-y: auto;

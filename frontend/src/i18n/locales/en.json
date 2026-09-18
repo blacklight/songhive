@@ -1111,7 +1111,17 @@
       "fediverseTypeAudioHint": "Publishes the track as a federated audio object. Some servers (e.g. Mastodon) only show the track title and link — the post text is not displayed.",
       "fediversePublish": "Publish",
       "fediversePublished": "Track published to the fediverse.",
-      "fediverseNotPublic": "Only public tracks can be published to the fediverse. Change the track's visibility to public first."
+      "fediverseNotPublic": "Only public tracks can be published to the fediverse. Change the track's visibility to public first.",
+      "embed": "Embed",
+      "embedHint": "Paste this snippet into a web page to embed this item.",
+      "embedFormat": "Embed format",
+      "embedFormatAudio": "HTML audio element",
+      "embedFormatHtmlList": "HTML track list",
+      "embedFormatMarkdown": "Markdown link",
+      "embedFormatScript": "JavaScript widget",
+      "embedFormatIframe": "HTML iframe",
+      "embedLoading": "Loading embed details…",
+      "embedNotPublic": "Only public items can be embedded. Change the visibility to public first."
     },
     "contextMenu": {
       "playNext": "Play next",
@@ -1467,5 +1477,9 @@
       "playlist": "playlist",
       "library": "library"
     }
+  },
+  "embed": {
+    "unavailable": "This content is not available.",
+    "openIn": "Open in {name}"
   }
 }
