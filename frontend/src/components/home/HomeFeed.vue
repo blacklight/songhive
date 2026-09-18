@@ -138,7 +138,6 @@ onMounted(() => void store.init(props.authenticated));
 .home-feed__controls {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
   gap: var(--space-2);
 }
 
@@ -146,8 +145,18 @@ onMounted(() => void store.init(props.authenticated));
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  margin: 0 auto;
+  margin: 0 calc(-1 * var(--space-3));
   gap: var(--space-3);
+}
+
+@media (min-width: 768px) {
+  .home-feed__controls {
+    align-items: flex-end;
+  }
+
+  .home-feed__list {
+    margin: 0 auto;
+  }
 }
 
 .home-feed__empty {
