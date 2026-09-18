@@ -5,12 +5,46 @@ Records administrative and security-relevant actions with an actor, target,
 and arbitrary JSON details.
 """
 
+from enum import Enum
 from typing import Optional
 
 from sqlalchemy import JSON, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
+
+
+class AuditTargetType(str, Enum):
+    """
+    Canonical audit log target types.
+
+    This is the single source of truth for ``AuditLog.target_type`` values:
+    ``services.audit.log_action`` only accepts members of this enum, and the
+    admin API exposes them so the frontend filter dropdown stays in sync.
+    """
+
+    ACTIVITY = "activity"
+    ALBUM = "album"
+    API_TOKEN = "api_token"
+    ARTIST = "artist"
+    CELERY = "celery"
+    EXTERNAL_LIBRARY = "external_library"
+    EXTERNAL_TRACK = "external_track"
+    FEDERATION = "federation"
+    FILE = "file"
+    GENRE = "genre"
+    IMAGES = "images"
+    INVITE = "invite"
+    LIBRARY = "library"
+    OAUTH_CLIENT = "oauth_client"
+    PLAYLIST = "playlist"
+    REPORT = "report"
+    SETTING = "setting"
+    STORAGE = "storage"
+    TAG = "tag"
+    TRACK = "track"
+    USER = "user"
+    USER_SESSION = "user_session"
 
 
 class AuditLog(Base):

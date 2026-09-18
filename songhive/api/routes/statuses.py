@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...models import Visibility
+from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import activities as activity_service
 from ...services import audit
@@ -90,7 +91,7 @@ async def create_status(
         db,
         actor_id=current_user.id,
         action="status.create",
-        target_type="activity",
+        target_type=AuditTargetType.ACTIVITY,
         target_id=str(activity.id),
         details={"visibility": activity.visibility},
         ip_address=client_ip(request),

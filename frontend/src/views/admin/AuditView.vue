@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
 import { useEntityList } from "@/composables/useEntityList";
 import { useMediaQuery } from "@/composables/useMediaQuery";
 import { useDebounce } from "@/composables/useDebounce";
 import { formatDateTime } from "@/i18n";
-import { listAuditLogs, type AuditLogResponse } from "@/api/admin";
+import {
+  listAuditLogs,
+  listAuditTargetTypes,
+  type AuditLogResponse,
+} from "@/api/admin";
+import { getApiErrorMessage } from "@/api/client";
+import { useToastStore } from "@/stores/toast";
 import type { components } from "@/api/types";
 
 type UserSummary = components["schemas"]["UserSummary"];
@@ -20,6 +26,7 @@ import AppTable from "@/components/ui/AppTable.vue";
 import UserLink from "@/components/user/UserLink.vue";
 
 const { t } = useI18n();
+const toastStore = useToastStore();
 const isWide = useMediaQuery("(min-width: 1280px)", true);
 
 const actionFilter = ref("");
@@ -35,23 +42,15 @@ const TARGET_ROUTE_NAMES: Record<string, string> = {
   track: "track",
 };
 
-const targetTypeOptions = [
+const targetTypes = ref<string[]>([]);
+
+const targetTypeOptions = computed(() => [
   { value: "", label: t("pages.admin.audit.allTargetTypes") },
-  { value: "user", label: t("pages.admin.audit.targetTypes.user") },
-  { value: "track", label: t("pages.admin.audit.targetTypes.track") },
-  { value: "playlist", label: t("pages.admin.audit.targetTypes.playlist") },
-  { value: "album", label: t("pages.admin.audit.targetTypes.album") },
-  { value: "artist", label: t("pages.admin.audit.targetTypes.artist") },
-  { value: "library", label: t("pages.admin.audit.targetTypes.library") },
-  { value: "tag", label: t("pages.admin.audit.targetTypes.tag") },
-  { value: "report", label: t("pages.admin.audit.targetTypes.report") },
-  { value: "file", label: t("pages.admin.audit.targetTypes.file") },
-  { value: "invite", label: t("pages.admin.audit.targetTypes.invite") },
-  {
-    value: "oauth_client",
-    label: t("pages.admin.audit.targetTypes.oauth_client"),
-  },
-];
+  ...targetTypes.value.map((value) => ({
+    value,
+    label: targetTypeLabel(value),
+  })),
+]);
 
 const { items, loading, error, hasMore, load, loadMore, refresh } =
   useEntityList<AuditLogResponse>(
@@ -148,7 +147,23 @@ async function onTargetTypeChange() {
   await refresh();
 }
 
-onMounted(() => load());
+async function loadTargetTypes() {
+  try {
+    targetTypes.value = await listAuditTargetTypes();
+  } catch (err) {
+    toastStore.push({
+      type: "error",
+      message: t("pages.admin.audit.targetTypesLoadError", {
+        message: getApiErrorMessage(err) || t("errors.unknown"),
+      }),
+    });
+  }
+}
+
+onMounted(() => {
+  void loadTargetTypes();
+  load();
+});
 </script>
 
 <template>

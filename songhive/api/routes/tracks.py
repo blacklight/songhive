@@ -33,6 +33,7 @@ from ...external.registry import get_external_adapter
 from ...external.types import ExternalItemRef
 from ...models import Track, Visibility
 from ...models.album import Album
+from ...models.audit_log import AuditTargetType
 from ...models.external_track import ExternalTrack
 from ...models.stored_file import StoredFile
 from ...models.user import User
@@ -793,7 +794,7 @@ async def update_track(
         db,
         actor_id=current_user.id,
         action="track.update",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details=details,
         ip_address=client_ip(request),
@@ -876,7 +877,7 @@ async def upload_track_image(
         db,
         actor_id=current_user.id,
         action="track.update",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details={"image_file_id": stored.id},
         ip_address=client_ip(request),
@@ -913,7 +914,7 @@ async def delete_track_image(
         db,
         actor_id=current_user.id,
         action="track.update",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details={"image_file_id": None},
         ip_address=client_ip(request),
@@ -948,7 +949,7 @@ async def delete_tracks_bulk_route(
         db,
         actor_id=current_user.id,
         action="track.bulk_delete",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=None,
         details={
             "count": len(deleted_ids),
@@ -999,7 +1000,7 @@ async def delete_track(
         db,
         actor_id=current_user.id,
         action="track.admin_delete" if admin_deletion else "track.delete",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details={"title": track.title, "owner_id": track.owner_id},
         ip_address=client_ip(request),
@@ -1055,7 +1056,7 @@ async def enrich_track_route(
         db,
         actor_id=current_user.id,
         action="track.enrich",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details={"title": track.title, "musicbrainz_id": track.musicbrainz_id},
         ip_address=client_ip(request),
@@ -1147,7 +1148,7 @@ async def publish_track(
         db,
         actor_id=current_user.id,
         action="track.publish",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details={
             "title": track.title,
@@ -1220,7 +1221,7 @@ async def add_track_tags(
         db,
         actor_id=current_user.id,
         action="tag.add",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details={"tags": [validate_tag_name(h) for h in body.tags]},
         ip_address=client_ip(request),
@@ -1264,7 +1265,7 @@ async def remove_track_tag(
         db,
         actor_id=current_user.id,
         action="tag.remove",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details={"tag": validate_tag_name(tag)},
         ip_address=client_ip(request),
@@ -1328,7 +1329,7 @@ async def set_track_genres(
         db,
         actor_id=current_user.id,
         action="genre.set",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details={"genres": [validate_genre_name(g) for g in body.genres]},
         ip_address=client_ip(request),
@@ -1393,7 +1394,7 @@ async def remove_track_genre(
         db,
         actor_id=current_user.id,
         action="genre.remove",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details={"genre": validate_genre_name(genre)},
         ip_address=client_ip(request),

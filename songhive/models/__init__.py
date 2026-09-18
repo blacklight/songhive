@@ -3,7 +3,7 @@ from .activity import Activity, ActivityMention, ActivityTag, ActivityTarget
 from .album import Album
 from .api_token import ApiToken
 from .artist import Artist
-from .audit_log import AuditLog
+from .audit_log import AuditLog, AuditTargetType
 from .base import Base, get_session, init_db, reset_db
 from .external_library import ExternalLibrary
 from .external_sync_run import ExternalSyncRun
@@ -44,6 +44,7 @@ __all__ = [
     "ApiToken",
     "Artist",
     "AuditLog",
+    "AuditTargetType",
     "Base",
     "ExternalLibrary",
     "ExternalSyncRun",

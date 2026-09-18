@@ -33,6 +33,7 @@ from ...config.schema import SonghiveConfig
 from ...models._enums import Visibility
 from ...models.album import Album
 from ...models.artist import Artist
+from ...models.audit_log import AuditTargetType
 from ...models.favorite import Favorite
 from ...models.playlist import Playlist, PlaylistTrack
 from ...models.track import Track
@@ -922,7 +923,7 @@ async def _create_playlist(ctx: _Ctx) -> Dict[str, Any]:
         ctx.db,
         actor_id=ctx.user.id,
         action=action,
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=str(playlist.id),
         details={"name": playlist.name, "song_ids": song_ids, "via": "subsonic"},
         ip_address=client_ip(ctx.request),
@@ -972,7 +973,7 @@ async def _update_playlist(ctx: _Ctx) -> Dict[str, Any]:
         ctx.db,
         actor_id=ctx.user.id,
         action="playlist.update",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=str(playlist.id),
         details={
             "name": playlist.name,
@@ -995,7 +996,7 @@ async def _delete_playlist(ctx: _Ctx) -> Dict[str, Any]:
         ctx.db,
         actor_id=ctx.user.id,
         action="playlist.delete",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=str(playlist.id),
         details={"name": playlist.name, "via": "subsonic"},
         ip_address=client_ip(ctx.request),

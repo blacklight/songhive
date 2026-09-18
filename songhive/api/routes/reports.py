@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import audit
 from ...services import reports as report_service
@@ -133,7 +134,7 @@ async def update_report(
         db,
         actor_id=admin.id,
         action="report.update",
-        target_type="report",
+        target_type=AuditTargetType.REPORT,
         target_id=report_id,
         details={
             "old_status": old_status,

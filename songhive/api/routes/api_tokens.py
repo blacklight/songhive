@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
+from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import audit
 from ...users.api_tokens import (
@@ -187,7 +188,7 @@ async def create_api_token(
         db,
         actor_id=user.id,
         action="api_token.create",
-        target_type="api_token",
+        target_type=AuditTargetType.API_TOKEN,
         target_id=api_token.id,
         details={
             "name": api_token.name,
@@ -246,7 +247,7 @@ async def delete_api_token(
         db,
         actor_id=user.id,
         action="api_token.revoke",
-        target_type="api_token",
+        target_type=AuditTargetType.API_TOKEN,
         target_id=token_id,
         details={},
         ip_address=client_ip(request),

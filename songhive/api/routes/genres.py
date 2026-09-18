@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import audit
 from ...services.genres import (
@@ -144,7 +145,7 @@ async def delete_global_genre(
         db,
         actor_id=admin.id,
         action="genre.delete",
-        target_type="genre",
+        target_type=AuditTargetType.GENRE,
         target_id=deleted.id,
         details={"name": genre},
         ip_address=client_ip(request),

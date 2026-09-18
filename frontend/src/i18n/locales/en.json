@@ -593,9 +593,21 @@
           "file": "File",
           "report": "Report",
           "invite": "Invite",
-          "oauth_client": "OAuth client"
+          "oauth_client": "OAuth client",
+          "activity": "Activity",
+          "api_token": "API token",
+          "celery": "Celery task",
+          "external_library": "External library",
+          "external_track": "External track",
+          "federation": "Federation",
+          "genre": "Genre",
+          "images": "Images",
+          "setting": "Setting",
+          "storage": "Storage",
+          "user_session": "User session"
         },
-        "allTargetTypes": "All target types"
+        "allTargetTypes": "All target types",
+        "targetTypesLoadError": "Could not load target types: {message}"
       },
       "tasks": {
         "title": "Tasks",

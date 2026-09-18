@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config.schema import SonghiveConfig
 from ...models import Visibility
 from ...models.activity import Activity
+from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import acl
 from ...services import activities as activity_service
@@ -521,7 +522,7 @@ async def update_activity(
         db,
         actor_id=current_user.id,
         action="activity.update",
-        target_type="activity",
+        target_type=AuditTargetType.ACTIVITY,
         target_id=str(activity.id),
         details=details,
         ip_address=client_ip(request),
@@ -568,7 +569,7 @@ async def delete_activity(
         db,
         actor_id=current_user.id,
         action="activity.delete",
-        target_type="activity",
+        target_type=AuditTargetType.ACTIVITY,
         target_id=str(activity.id),
         details={
             "entity_type": activity.entity_type,
@@ -606,7 +607,7 @@ async def like_activity(
         db,
         actor_id=current_user.id,
         action="activity.like",
-        target_type="activity",
+        target_type=AuditTargetType.ACTIVITY,
         target_id=str(activity.id),
         details={
             "entity_type": activity.entity_type,
@@ -663,7 +664,7 @@ async def boost_activity(
         db,
         actor_id=current_user.id,
         action="activity.boost",
-        target_type="activity",
+        target_type=AuditTargetType.ACTIVITY,
         target_id=str(activity.id),
         details={
             "entity_type": activity.entity_type,
@@ -716,7 +717,7 @@ async def _unreact(
         db,
         actor_id=current_user.id,
         action=audit_action,
-        target_type="activity",
+        target_type=AuditTargetType.ACTIVITY,
         target_id=str(activity.id),
         details={
             "entity_type": activity.entity_type,
@@ -832,7 +833,7 @@ async def reply_activity(
         db,
         actor_id=current_user.id,
         action="activity.reply",
-        target_type="activity",
+        target_type=AuditTargetType.ACTIVITY,
         target_id=str(activity.id),
         details={
             "entity_type": activity.entity_type,
@@ -909,7 +910,7 @@ async def quote_activity(
         db,
         actor_id=current_user.id,
         action="activity.quote",
-        target_type="activity",
+        target_type=AuditTargetType.ACTIVITY,
         target_id=str(activity.id),
         details={
             "entity_type": activity.entity_type,

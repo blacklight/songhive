@@ -39,6 +39,7 @@ from ...external.sync import (
 from ...external.types import ExternalItemRef, ExternalMutationResult
 from ...models import ExternalLibrary, ExternalSyncRun, ExternalTrack, Library
 from ...models._enums import Visibility
+from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import acl, audit, deletion
 from ...services.federation import unpublish_track_activity
@@ -507,7 +508,7 @@ async def _create_external_library(
         db,
         actor_id=user.id,
         action=audit_action,
-        target_type="external_library",
+        target_type=AuditTargetType.EXTERNAL_LIBRARY,
         target_id=str(external_library.id),
         details=details,
         ip_address=client_ip(request),
@@ -700,7 +701,7 @@ async def update_external_library(
         db,
         actor_id=current_user.id,
         action="external_library.update",
-        target_type="external_library",
+        target_type=AuditTargetType.EXTERNAL_LIBRARY,
         target_id=external_library_id,
         details=changes,
         ip_address=client_ip(request),
@@ -735,7 +736,7 @@ async def delete_external_library(
         db,
         actor_id=current_user.id,
         action="external_library.delete",
-        target_type="external_library",
+        target_type=AuditTargetType.EXTERNAL_LIBRARY,
         target_id=external_library_id,
         details={"provider_type": external_library.provider_type},
         ip_address=client_ip(request),
@@ -801,7 +802,7 @@ async def sync_external_library_route(
         db,
         actor_id=current_user.id,
         action="external_library.sync",
-        target_type="external_library",
+        target_type=AuditTargetType.EXTERNAL_LIBRARY,
         target_id=external_library_id,
         details={"include_tombstones": body.include_tombstones},
         ip_address=client_ip(request),
@@ -1125,7 +1126,7 @@ async def restore_external_track(
         db,
         actor_id=current_user.id,
         action="external_track.restore",
-        target_type="external_track",
+        target_type=AuditTargetType.EXTERNAL_TRACK,
         target_id=external_track_id,
         details={
             "provider_key": external_track.provider_key,
@@ -1169,7 +1170,7 @@ async def delete_external_track(
             db,
             actor_id=current_user.id,
             action="external_track.tombstone",
-            target_type="external_track",
+            target_type=AuditTargetType.EXTERNAL_TRACK,
             target_id=external_track_id,
             details=details,
             ip_address=client_ip(request),
@@ -1200,7 +1201,7 @@ async def delete_external_track(
             db,
             actor_id=current_user.id,
             action="external_track.delete_source",
-            target_type="external_track",
+            target_type=AuditTargetType.EXTERNAL_TRACK,
             target_id=external_track_id,
             details=details,
             ip_address=client_ip(request),
@@ -1224,7 +1225,7 @@ async def delete_external_track(
         db,
         actor_id=current_user.id,
         action="external_track.delete_source",
-        target_type="external_track",
+        target_type=AuditTargetType.EXTERNAL_TRACK,
         target_id=external_track_id,
         details=details,
         ip_address=client_ip(request),

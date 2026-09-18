@@ -1717,7 +1717,10 @@ resources — without crawling remote timelines or indexing the fediverse.
 - Public submission: `POST /api/v1/reports`.
 - Admin review: `GET/PATCH /api/v1/admin/reports`.
 - `AuditLog` records administrative and security-relevant actions (actor, target
-  type/id, IP address, JSON details).
+  type/id, IP address, JSON details). `target_type` values are defined by the
+  `AuditTargetType` enum (`models/audit_log.py`) — `log_action` only accepts
+  enum members, and `GET /api/v1/admin/audit/target-types` exposes them to the
+  admin UI's target-type filter.
 
 ---
 

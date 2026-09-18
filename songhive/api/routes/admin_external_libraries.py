@@ -27,6 +27,7 @@ from ...external.registry import (
 )
 from ...external.sync import _find_or_create_library_track
 from ...models import ExternalLibrary, ExternalSyncRun, ExternalTrack
+from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import audit, deletion
 from ...services.federation import unpublish_track_activity
@@ -218,7 +219,7 @@ async def update_admin_external_library(
         db,
         actor_id=admin.id,
         action="external_library.admin_update",
-        target_type="external_library",
+        target_type=AuditTargetType.EXTERNAL_LIBRARY,
         target_id=external_library_id,
         details=changes,
         ip_address=client_ip(request),
@@ -251,7 +252,7 @@ async def delete_admin_external_library(
         db,
         actor_id=admin.id,
         action="external_library.admin_delete",
-        target_type="external_library",
+        target_type=AuditTargetType.EXTERNAL_LIBRARY,
         target_id=external_library_id,
         details={"provider_type": external_library.provider_type, "scope": external_library.scope},
         ip_address=client_ip(request),
@@ -309,7 +310,7 @@ async def sync_admin_external_library(
         db,
         actor_id=admin.id,
         action="external_library.admin_sync",
-        target_type="external_library",
+        target_type=AuditTargetType.EXTERNAL_LIBRARY,
         target_id=external_library_id,
         details={"include_tombstones": body.include_tombstones},
         ip_address=client_ip(request),
@@ -459,7 +460,7 @@ async def restore_admin_external_track(
         db,
         actor_id=admin.id,
         action="external_track.admin_restore",
-        target_type="external_track",
+        target_type=AuditTargetType.EXTERNAL_TRACK,
         target_id=external_track_id,
         details={
             "provider_key": external_track.provider_key,
@@ -500,7 +501,7 @@ async def delete_admin_external_track(
             db,
             actor_id=admin.id,
             action="external_track.admin_tombstone",
-            target_type="external_track",
+            target_type=AuditTargetType.EXTERNAL_TRACK,
             target_id=external_track_id,
             details=details,
             ip_address=client_ip(request),
@@ -531,7 +532,7 @@ async def delete_admin_external_track(
             db,
             actor_id=admin.id,
             action="external_track.admin_delete_source",
-            target_type="external_track",
+            target_type=AuditTargetType.EXTERNAL_TRACK,
             target_id=external_track_id,
             details=details,
             ip_address=client_ip(request),
@@ -555,7 +556,7 @@ async def delete_admin_external_track(
         db,
         actor_id=admin.id,
         action="external_track.admin_delete_source",
-        target_type="external_track",
+        target_type=AuditTargetType.EXTERNAL_TRACK,
         target_id=external_track_id,
         details=details,
         ip_address=client_ip(request),
@@ -643,7 +644,7 @@ async def bulk_delete_admin_external_tracks(
             db,
             actor_id=admin.id,
             action="external_track.bulk_delete_source",
-            target_type="external_library",
+            target_type=AuditTargetType.EXTERNAL_LIBRARY,
             target_id=external_library_id,
             details=details,
             ip_address=client_ip(request),
@@ -668,7 +669,7 @@ async def bulk_delete_admin_external_tracks(
         db,
         actor_id=admin.id,
         action="external_track.bulk_tombstone",
-        target_type="external_library",
+        target_type=AuditTargetType.EXTERNAL_LIBRARY,
         target_id=external_library_id,
         details=details,
         ip_address=client_ip(request),

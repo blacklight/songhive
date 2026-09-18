@@ -24,6 +24,7 @@ function createTestRouter() {
 
 vi.mock("@/api/admin", () => ({
   listAuditLogs: vi.fn(),
+  listAuditTargetTypes: vi.fn(),
 }));
 
 function createAuditLog(
@@ -66,6 +67,11 @@ describe("AuditView", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     vi.mocked(adminApi.listAuditLogs).mockResolvedValue([]);
+    vi.mocked(adminApi.listAuditTargetTypes).mockResolvedValue([
+      "user",
+      "track",
+      "external_library",
+    ]);
   });
 
   afterEach(() => {
@@ -109,6 +115,46 @@ describe("AuditView", () => {
     expect(adminApi.listAuditLogs).toHaveBeenLastCalledWith({
       action: "user.update",
       target_type: undefined,
+      limit: 25,
+      offset: 0,
+    });
+  });
+
+  it("populates the target type filter from the API", async () => {
+    wrapper = mount(AuditView, {
+      global: { plugins: [i18n, createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(adminApi.listAuditTargetTypes).toHaveBeenCalled();
+
+    const options = wrapper.findAll("option");
+    const values = options.map((o) => o.attributes("value"));
+    const labels = options.map((o) => o.text());
+    expect(values).toEqual(["", "user", "track", "external_library"]);
+    expect(labels).toContain(i18n.global.t("pages.admin.audit.allTargetTypes"));
+    expect(labels).toContain(
+      i18n.global.t("pages.admin.audit.targetTypes.external_library"),
+    );
+  });
+
+  it("filters by target type when an option is selected", async () => {
+    vi.mocked(adminApi.listAuditLogs)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([createAuditLog("a1")]);
+
+    wrapper = mount(AuditView, {
+      global: { plugins: [i18n, createTestRouter()] },
+    });
+    await flushPromises();
+
+    const select = wrapper.find("select");
+    await select.setValue("external_library");
+    await flushPromises();
+
+    expect(adminApi.listAuditLogs).toHaveBeenLastCalledWith({
+      action: undefined,
+      target_type: "external_library",
       limit: 25,
       offset: 0,
     });

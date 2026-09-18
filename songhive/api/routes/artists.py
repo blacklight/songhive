@@ -19,6 +19,7 @@ from fastapi import (
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import acl, audit, deletion, music
 from ...services.auth import get_user_by_username
@@ -247,7 +248,7 @@ async def update_artist(
         db,
         actor_id=current_user.id,
         action="artist.update",
-        target_type="artist",
+        target_type=AuditTargetType.ARTIST,
         target_id=artist_id,
         details={
             "name": artist.name,
@@ -300,7 +301,7 @@ async def upload_artist_image(
         db,
         actor_id=current_user.id,
         action="artist.update",
-        target_type="artist",
+        target_type=AuditTargetType.ARTIST,
         target_id=artist_id,
         details={"image_file_id": stored.id},
         ip_address=client_ip(request),
@@ -344,7 +345,7 @@ async def upload_artist_cover(
         db,
         actor_id=current_user.id,
         action="artist.update",
-        target_type="artist",
+        target_type=AuditTargetType.ARTIST,
         target_id=artist_id,
         details={"cover_file_id": stored.id},
         ip_address=client_ip(request),
@@ -380,7 +381,7 @@ async def delete_artist_image(
         db,
         actor_id=current_user.id,
         action="artist.update",
-        target_type="artist",
+        target_type=AuditTargetType.ARTIST,
         target_id=artist_id,
         details={"image_file_id": None},
         ip_address=client_ip(request),
@@ -416,7 +417,7 @@ async def delete_artist_cover(
         db,
         actor_id=current_user.id,
         action="artist.update",
-        target_type="artist",
+        target_type=AuditTargetType.ARTIST,
         target_id=artist_id,
         details={"cover_file_id": None},
         ip_address=client_ip(request),
@@ -451,7 +452,7 @@ async def delete_artist(
         db,
         actor_id=current_user.id,
         action="artist.delete",
-        target_type="artist",
+        target_type=AuditTargetType.ARTIST,
         target_id=artist_id,
         details={
             "name": artist.name,
@@ -528,7 +529,7 @@ async def add_artist_tags(
         db,
         actor_id=current_user.id,
         action="tag.add",
-        target_type="artist",
+        target_type=AuditTargetType.ARTIST,
         target_id=artist_id,
         details={"tags": [validate_tag_name(h) for h in body.tags]},
         ip_address=client_ip(request),
@@ -571,7 +572,7 @@ async def remove_artist_tag(
         db,
         actor_id=current_user.id,
         action="tag.remove",
-        target_type="artist",
+        target_type=AuditTargetType.ARTIST,
         target_id=artist_id,
         details={"tag": validate_tag_name(tag)},
         ip_address=client_ip(request),

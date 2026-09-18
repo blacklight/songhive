@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
+from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import activities as activity_service
 from ...services import audit
@@ -187,7 +188,7 @@ async def delete_global_tag(
         db,
         actor_id=admin.id,
         action="tag.delete",
-        target_type="tag",
+        target_type=AuditTargetType.TAG,
         target_id=deleted.id,
         details={"name": tag},
         ip_address=client_ip(request),

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...federation.actors import get_federation_storage, sync_user_actor
+from ...models.audit_log import AuditTargetType
 from ...models.follow import FOLLOW_STATE_ACCEPTED, Follow
 from ...models.user import FollowersApproval, ProfileVisibility, User, UserRole
 from ...models.user_link import UserLink
@@ -550,7 +551,7 @@ async def change_my_password(
         db,
         actor_id=current_user.id,
         action="user.change_password",
-        target_type="user",
+        target_type=AuditTargetType.USER,
         target_id=current_user.id,
         details={},
         ip_address=client_ip(request),
@@ -585,7 +586,7 @@ async def delete_current_user(
         db,
         actor_id=current_user.id,
         action="user.delete",
-        target_type="user",
+        target_type=AuditTargetType.USER,
         target_id=str(current_user.id),
         details={
             "recursive": body.recursive,

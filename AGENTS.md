@@ -394,12 +394,20 @@ record an audit log entry with `songhive.services.audit.log_action`.
   - `report.resolve`, `invite.create`, `invite.revoke`
 - Always include a `target_type` and `target_id` when one exists, and put
   relevant before/after values in `details`.
+- `target_type` values come from the `AuditTargetType` enum in
+  `songhive/models/audit_log.py` — pass a member, not a raw string.
+  `log_action` rejects unknown values, and
+  `GET /api/v1/admin/audit/target-types` exposes the enum so the admin
+  audit page's target-type dropdown stays in sync automatically. Add a
+  member there (plus an `pages.admin.audit.targetTypes.*` label in
+  `frontend/src/i18n/locales/en.json`) when a new target type is needed.
 
 Example:
 
 ```python
 from .._common import client_ip
 from ..deps import get_db, require_admin
+from ...models.audit_log import AuditTargetType
 from ...services import audit
 
 @router.post("/libraries/{library_id}", ...)
@@ -415,7 +423,7 @@ async def update_library(
         db,
         actor_id=admin.id,
         action="library.update",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library.id,
         details={"name": library.name, "visibility": library.visibility},
         ip_address=client_ip(request),

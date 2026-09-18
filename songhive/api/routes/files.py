@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config.schema import SonghiveConfig
 from ...models._enums import Visibility
 from ...models.artist import Artist
+from ...models.audit_log import AuditTargetType
 from ...models.library import Library
 from ...models.stored_file import StoredFile
 from ...models.track import Track
@@ -861,7 +862,7 @@ async def delete_file(
         db,
         actor_id=current_user.id,
         action="file.admin_delete" if admin_deletion else "file.delete",
-        target_type="file",
+        target_type=AuditTargetType.FILE,
         target_id=file_id,
         details={
             "sha256": stored_file.sha256,

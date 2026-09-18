@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.album import Album
 from ..models.artist import Artist
-from ..models.audit_log import AuditLog
+from ..models.audit_log import AuditLog, AuditTargetType
 from ..models.invite import Invite
 from ..models.library import Library
 from ..models.oauth_client import OAuth2Client
@@ -32,7 +32,7 @@ async def log_action(
     *,
     actor_id: Optional[str],
     action: str,
-    target_type: Optional[str] = None,
+    target_type: Optional[AuditTargetType] = None,
     target_id: Optional[str] = None,
     details: Optional[dict] = None,
     ip_address: Optional[str] = None,
@@ -41,7 +41,7 @@ async def log_action(
     log = AuditLog(
         actor_id=actor_id,
         action=action,
-        target_type=target_type,
+        target_type=AuditTargetType(target_type).value if target_type else None,
         target_id=target_id,
         details=details,
         ip_address=ip_address,
@@ -228,7 +228,7 @@ async def _load_all_target_names(
     """Load names for all non-user targets referenced in the logs."""
     targets_by_type: dict[str, set[str]] = defaultdict(set)
     for log in logs:
-        if log.target_id and log.target_type and log.target_type != "user":
+        if log.target_id and log.target_type and log.target_type != AuditTargetType.USER:
             targets_by_type[log.target_type].add(log.target_id)
 
     results = await asyncio.gather(
@@ -278,7 +278,7 @@ async def enrich_audit_logs(
         target_name: Optional[str] = None
         target_username: Optional[str] = None
         if log.target_id and log.target_type:
-            if log.target_type == "user":
+            if log.target_type == AuditTargetType.USER:
                 if log.target_id in user_info:
                     info = user_info[log.target_id]
                     target_username = info["username"]

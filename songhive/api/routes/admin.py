@@ -14,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
+from ...models.audit_log import AuditTargetType
 from ...models.user import User, UserRole
 from ...services import audit, auth, deletion, music
 from ...services import notifications as notifications_service
@@ -115,7 +116,7 @@ async def promote_user(
         db,
         actor_id=admin.id,
         action="user.promote",
-        target_type="user",
+        target_type=AuditTargetType.USER,
         target_id=user_id,
         details={"old_role": old_role, "new_role": user.role},
         ip_address=client_ip(request),
@@ -146,7 +147,7 @@ async def demote_user(
         db,
         actor_id=admin.id,
         action="user.demote",
-        target_type="user",
+        target_type=AuditTargetType.USER,
         target_id=user_id,
         details={"old_role": old_role, "new_role": user.role},
         ip_address=client_ip(request),
@@ -175,7 +176,7 @@ async def approve_user(
         db,
         actor_id=admin.id,
         action="user.approve",
-        target_type="user",
+        target_type=AuditTargetType.USER,
         target_id=user_id,
         details={"is_active": user.is_active},
         ip_address=client_ip(request),
@@ -204,7 +205,7 @@ async def activate_user(
         db,
         actor_id=admin.id,
         action="user.activate",
-        target_type="user",
+        target_type=AuditTargetType.USER,
         target_id=user_id,
         details={"is_active": user.is_active},
         ip_address=client_ip(request),
@@ -236,7 +237,7 @@ async def deactivate_user(
         db,
         actor_id=admin.id,
         action="user.deactivate",
-        target_type="user",
+        target_type=AuditTargetType.USER,
         target_id=user_id,
         details={"is_active": user.is_active, "tokens_revoked": True},
         ip_address=client_ip(request),
@@ -269,7 +270,7 @@ async def delete_user(
         db,
         actor_id=admin.id,
         action="user.delete",
-        target_type="user",
+        target_type=AuditTargetType.USER,
         target_id=user_id,
         details={
             "recursive": recursive,
@@ -321,7 +322,7 @@ async def delete_track(
         db,
         actor_id=admin.id,
         action="track.admin_delete",
-        target_type="track",
+        target_type=AuditTargetType.TRACK,
         target_id=track_id,
         details={"title": track.title, "owner_id": track.owner_id},
         ip_address=client_ip(request),
@@ -373,6 +374,16 @@ async def list_audit_logs(
     enriched = await audit.enrich_audit_logs(db, logs)
     Pagination(limit=limit, offset=offset).set_total(response, total)
     return [AuditLogResponse.model_validate(data) for data in enriched]
+
+
+@router.get(
+    "/audit/target-types",
+    response_model=List[AuditTargetType],
+    dependencies=[Depends(require_admin)],
+)
+async def list_audit_target_types():
+    """List the canonical audit log target types (admin only)."""
+    return list(AuditTargetType)
 
 
 class AdminInviteResponse(BaseModel):
@@ -440,7 +451,7 @@ async def create_invite(
         db,
         actor_id=admin.id,
         action="invite.create",
-        target_type="invite",
+        target_type=AuditTargetType.INVITE,
         target_id=invite.id,
         details={
             "code": invite.code,
@@ -474,7 +485,7 @@ async def delete_invite(
         db,
         actor_id=admin.id,
         action="invite.delete",
-        target_type="invite",
+        target_type=AuditTargetType.INVITE,
         target_id=invite.id,
         details={"code": invite.code},
         ip_address=client_ip(request),
@@ -585,7 +596,7 @@ async def create_oauth_client(
         db,
         actor_id=admin.id,
         action="oauth_client.create",
-        target_type="oauth_client",
+        target_type=AuditTargetType.OAUTH_CLIENT,
         target_id=client.id,
         details={"client_id": client.client_id, "name": client.name},
         ip_address=client_ip(request),
@@ -618,7 +629,7 @@ async def delete_oauth_client(
         db,
         actor_id=admin.id,
         action="oauth_client.delete",
-        target_type="oauth_client",
+        target_type=AuditTargetType.OAUTH_CLIENT,
         target_id=client.id,
         details={"client_id": client.client_id, "name": client.name},
         ip_address=client_ip(request),
@@ -694,7 +705,7 @@ async def update_setting(
         db,
         actor_id=admin.id,
         action="settings.update",
-        target_type="setting",
+        target_type=AuditTargetType.SETTING,
         target_id=key,
         details={"old_value": old_value, "new_value": body.value},
         ip_address=client_ip(request),
@@ -790,7 +801,7 @@ async def bulk_user_action(
             db,
             actor_id=admin.id,
             action=f"user.bulk_{body.action}",
-            target_type="user",
+            target_type=AuditTargetType.USER,
             target_id=user_id,
             details={"recursive": body.recursive} if body.action == "delete" else {},
             ip_address=client_ip(request),
@@ -837,7 +848,7 @@ async def storage_cleanup(
         db,
         actor_id=admin.id,
         action="storage.cleanup_trigger",
-        target_type="storage",
+        target_type=AuditTargetType.STORAGE,
         target_id=None,
         details={},
         ip_address=client_ip(request),
@@ -915,7 +926,7 @@ async def sync_tags(
         db,
         actor_id=admin.id,
         action="tags.sync",
-        target_type="storage",
+        target_type=AuditTargetType.STORAGE,
         target_id=None,
         details={"scope": scope, "enqueued": enqueued, "dry_run": body.dry_run},
         ip_address=client_ip(request),
@@ -1000,7 +1011,7 @@ async def enrich_images(
         db,
         actor_id=admin.id,
         action="images.enrich",
-        target_type="images",
+        target_type=AuditTargetType.IMAGES,
         target_id=None,
         details={
             "scope": scope,
@@ -1059,7 +1070,7 @@ async def rehash_audio(
         db,
         actor_id=admin.id,
         action="storage.rehash_audio",
-        target_type="storage",
+        target_type=AuditTargetType.STORAGE,
         target_id=None,
         details={"dry_run": body.dry_run},
         ip_address=client_ip(request),
@@ -1100,7 +1111,7 @@ async def provision_federation_keys_endpoint(
         db,
         actor_id=admin.id,
         action="federation.provision_keys",
-        target_type="federation",
+        target_type=AuditTargetType.FEDERATION,
         target_id=None,
         details={"dry_run": body.dry_run},
         ip_address=client_ip(request),
@@ -1146,7 +1157,7 @@ async def prune_remote_activities_endpoint(
         db,
         actor_id=admin.id,
         action="federation.prune_remote_activities",
-        target_type="federation",
+        target_type=AuditTargetType.FEDERATION,
         target_id=None,
         details={"older_than_days": body.older_than_days, "dry_run": body.dry_run},
         ip_address=client_ip(request),
@@ -1225,7 +1236,7 @@ async def terminate_celery_tasks_endpoint(
         db,
         actor_id=admin.id,
         action="celery.terminate",
-        target_type="celery",
+        target_type=AuditTargetType.CELERY,
         target_id=None,
         details={"task_ids": body.task_ids, "count": terminated},
         ip_address=client_ip(request),

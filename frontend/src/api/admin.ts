@@ -214,6 +214,10 @@ export function listAuditLogs(params?: {
   return apiRequest<AuditLogResponse[]>("/admin/audit", { query: params });
 }
 
+export function listAuditTargetTypes(): Promise<string[]> {
+  return apiRequest<string[]>("/admin/audit/target-types");
+}
+
 export function triggerStorageCleanup(): Promise<unknown> {
   return apiRequest<unknown>("/admin/storage/cleanup", { method: "POST" });
 }

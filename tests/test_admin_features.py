@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 from songhive.models._enums import Visibility
 from songhive.models.album import Album
 from songhive.models.artist import Artist
-from songhive.models.audit_log import AuditLog
+from songhive.models.audit_log import AuditLog, AuditTargetType
 from songhive.models.library import Library
 from songhive.models.library_track import LibraryTrack
 from songhive.models.playlist import Playlist, PlaylistTrack
@@ -94,6 +94,41 @@ async def test_admin_audit_filtering(client, db_session, make_user, auth_headers
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert all(log["action"] == "user.activate" for log in data)
+
+
+@pytest.mark.asyncio
+async def test_admin_audit_target_types(client, db_session, make_user, auth_headers):
+    """The target-types endpoint lists every supported audit target type."""
+    admin = await make_user("admin", role="admin")
+    headers = auth_headers(admin)
+
+    response = client.get("/api/v1/admin/audit/target-types", headers=headers)
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert sorted(data) == sorted(t.value for t in AuditTargetType)
+    assert "user" in data
+
+
+@pytest.mark.asyncio
+async def test_admin_audit_target_types_requires_admin(client, db_session, make_user, auth_headers):
+    """Non-admins cannot list audit target types."""
+    user = await make_user("alice")
+    headers = auth_headers(user)
+
+    response = client.get("/api/v1/admin/audit/target-types", headers=headers)
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_audit_log_rejects_unknown_target_type(db_session):
+    """log_action rejects target types outside the AuditTargetType enum."""
+    with pytest.raises(ValueError):
+        await audit_service.log_action(
+            db_session,
+            actor_id="actor-1",
+            action="user.login",
+            target_type="bogus",
+        )
 
 
 @pytest.mark.asyncio

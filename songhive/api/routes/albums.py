@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models._enums import Visibility
+from ...models.audit_log import AuditTargetType
 from ...models.track import Track
 from ...models.user import User
 from ...services import acl, audit, deletion, music
@@ -320,7 +321,7 @@ async def update_album(
         db,
         actor_id=current_user.id,
         action="album.update",
-        target_type="album",
+        target_type=AuditTargetType.ALBUM,
         target_id=album_id,
         details={
             "title": album.title,
@@ -386,7 +387,7 @@ async def upload_album_cover(
         db,
         actor_id=current_user.id,
         action="album.update",
-        target_type="album",
+        target_type=AuditTargetType.ALBUM,
         target_id=album_id,
         details={"cover_file_id": stored.id},
         ip_address=client_ip(request),
@@ -425,7 +426,7 @@ async def delete_album_cover(
         db,
         actor_id=current_user.id,
         action="album.update",
-        target_type="album",
+        target_type=AuditTargetType.ALBUM,
         target_id=album_id,
         details={"cover_file_id": None},
         ip_address=client_ip(request),
@@ -464,7 +465,7 @@ async def delete_album(
         db,
         actor_id=current_user.id,
         action="album.admin_delete" if admin_deletion else "album.delete",
-        target_type="album",
+        target_type=AuditTargetType.ALBUM,
         target_id=album_id,
         details={
             "title": album.title,
@@ -536,7 +537,7 @@ async def enrich_album(
         db,
         actor_id=current_user.id,
         action="album.enrich",
-        target_type="album",
+        target_type=AuditTargetType.ALBUM,
         target_id=album_id,
         details={"title": album.title, "enqueued": enqueued},
         ip_address=client_ip(request),
@@ -586,7 +587,7 @@ async def add_album_tags(
         db,
         actor_id=current_user.id,
         action="tag.add",
-        target_type="album",
+        target_type=AuditTargetType.ALBUM,
         target_id=album_id,
         details={"tags": [validate_tag_name(h) for h in body.tags]},
         ip_address=client_ip(request),
@@ -629,7 +630,7 @@ async def remove_album_tag(
         db,
         actor_id=current_user.id,
         action="tag.remove",
-        target_type="album",
+        target_type=AuditTargetType.ALBUM,
         target_id=album_id,
         details={"tag": validate_tag_name(tag)},
         ip_address=client_ip(request),
@@ -687,7 +688,7 @@ async def set_album_genres(
         db,
         actor_id=current_user.id,
         action="genre.set",
-        target_type="album",
+        target_type=AuditTargetType.ALBUM,
         target_id=album_id,
         details={"genres": [validate_genre_name(g) for g in body.genres]},
         ip_address=client_ip(request),
@@ -743,7 +744,7 @@ async def remove_album_genre(
         db,
         actor_id=current_user.id,
         action="genre.remove",
-        target_type="album",
+        target_type=AuditTargetType.ALBUM,
         target_id=album_id,
         details={"genre": validate_genre_name(genre)},
         ip_address=client_ip(request),

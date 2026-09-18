@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models._enums import Visibility
+from ...models.audit_log import AuditTargetType
 from ...models.playlist import Playlist
 from ...models.user import User
 from ...services import acl, audit, deletion, music
@@ -318,7 +319,7 @@ async def update_playlist(
         db,
         actor_id=current_user.id,
         action="playlist.update",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={
             "name": playlist.name,
@@ -368,7 +369,7 @@ async def upload_playlist_image(
         db,
         actor_id=current_user.id,
         action="playlist.update",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={"image_file_id": stored.id},
         ip_address=client_ip(request),
@@ -413,7 +414,7 @@ async def upload_playlist_cover(
         db,
         actor_id=current_user.id,
         action="playlist.update",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={"cover_file_id": stored.id},
         ip_address=client_ip(request),
@@ -449,7 +450,7 @@ async def delete_playlist_image(
         db,
         actor_id=current_user.id,
         action="playlist.update",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={"image_file_id": None},
         ip_address=client_ip(request),
@@ -485,7 +486,7 @@ async def delete_playlist_cover(
         db,
         actor_id=current_user.id,
         action="playlist.update",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={"cover_file_id": None},
         ip_address=client_ip(request),
@@ -572,7 +573,7 @@ async def add_tracks_to_playlist(
         db,
         actor_id=current_user.id,
         action="playlist_track.add",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={
             "source": body.model_dump(exclude_unset=True),
@@ -671,7 +672,7 @@ async def remove_tracks_from_playlist(
         db,
         actor_id=current_user.id,
         action="playlist_track.remove",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={
             "track_ids": removed_ids,
@@ -720,7 +721,7 @@ async def reorder_playlist_tracks_route(
         db,
         actor_id=current_user.id,
         action="playlist_track.reorder",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={
             "track_ids": moved,
@@ -760,7 +761,7 @@ async def delete_playlist(
         db,
         actor_id=current_user.id,
         action="playlist.admin_delete" if admin_deletion else "playlist.delete",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={
             "name": playlist.name,
@@ -840,7 +841,7 @@ async def add_playlist_tags(
         db,
         actor_id=current_user.id,
         action="tag.add",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={"tags": [validate_tag_name(h) for h in body.tags]},
         ip_address=client_ip(request),
@@ -885,7 +886,7 @@ async def remove_playlist_tag(
         db,
         actor_id=current_user.id,
         action="tag.remove",
-        target_type="playlist",
+        target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={"tag": validate_tag_name(tag)},
         ip_address=client_ip(request),

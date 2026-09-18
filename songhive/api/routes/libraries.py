@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config.schema import SonghiveConfig
 from ...models._enums import Visibility
 from ...models.artist import Artist
+from ...models.audit_log import AuditTargetType
 from ...models.library import Library
 from ...models.user import User
 from ...services import acl, activities, audit, deletion, music
@@ -667,7 +668,7 @@ async def add_tracks_to_library(
         db,
         actor_id=current_user.id,
         action="library_track.add",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library_id,
         details={
             "source": body.model_dump(exclude_unset=True),
@@ -711,7 +712,7 @@ async def remove_tracks_from_library(
         db,
         actor_id=current_user.id,
         action="library_track.remove",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library_id,
         details={
             "track_ids": removed_ids,
@@ -849,7 +850,7 @@ async def update_library(
         db,
         actor_id=current_user.id,
         action="library.update",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library_id,
         details={
             "name": library.name,
@@ -899,7 +900,7 @@ async def upload_library_image(
         db,
         actor_id=current_user.id,
         action="library.update",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library_id,
         details={"image_file_id": stored.id},
         ip_address=client_ip(request),
@@ -944,7 +945,7 @@ async def upload_library_cover(
         db,
         actor_id=current_user.id,
         action="library.update",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library_id,
         details={"cover_file_id": stored.id},
         ip_address=client_ip(request),
@@ -980,7 +981,7 @@ async def delete_library_image(
         db,
         actor_id=current_user.id,
         action="library.update",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library_id,
         details={"image_file_id": None},
         ip_address=client_ip(request),
@@ -1016,7 +1017,7 @@ async def delete_library_cover(
         db,
         actor_id=current_user.id,
         action="library.update",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library_id,
         details={"cover_file_id": None},
         ip_address=client_ip(request),
@@ -1052,7 +1053,7 @@ async def delete_library(
         db,
         actor_id=current_user.id,
         action="library.admin_delete" if admin_deletion else "library.delete",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library_id,
         details={
             "name": library.name,
@@ -1132,7 +1133,7 @@ async def add_library_tags(
         db,
         actor_id=current_user.id,
         action="tag.add",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library_id,
         details={"tags": [validate_tag_name(h) for h in body.tags]},
         ip_address=client_ip(request),
@@ -1177,7 +1178,7 @@ async def remove_library_tag(
         db,
         actor_id=current_user.id,
         action="tag.remove",
-        target_type="library",
+        target_type=AuditTargetType.LIBRARY,
         target_id=library_id,
         details={"tag": validate_tag_name(tag)},
         ip_address=client_ip(request),

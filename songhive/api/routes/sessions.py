@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
+from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import audit
 from ...users.tokens import _hash_token, list_user_sessions, revoke_session
@@ -147,7 +148,7 @@ async def delete_session(
         db,
         actor_id=user.id,
         action="user.session.revoke",
-        target_type="user_session",
+        target_type=AuditTargetType.USER_SESSION,
         target_id=session_id,
         details={},
         ip_address=client_ip(request),
