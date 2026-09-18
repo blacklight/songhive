@@ -810,7 +810,23 @@ may be attachments-only. The resulting `Create(Note)` is built by
 visibility audience when federation is enabled, and stays local otherwise.
 The manual track publish endpoint accepts the same `content_type`,
 `language`, and `media_ids` fields, so the composer can also drive
-`POST /api/v1/tracks/{id}/publish`. Users pick their default post format
+`POST /api/v1/tracks/{id}/publish`. Statuses, replies, quotes, activity
+edits and track publications also accept an `audio_import` object
+(`upload_to_library`, default `true`; `fetch_metadata`, default `false`;
+`library_id`, default the author's lazily-created private "Uploads"
+library): when enabled, each `audio/*` file attachment is imported into
+the target library as a track after the post is saved, via
+`plan_audio_import`/`apply_audio_import` (`api/routes/files.py`) and
+`services/import_.import_stored_audio_files`, which reuses the file's
+existing `Track` when it already backs one of the author's tracks and
+treats external duplicates as `keep_local`. The import plan is validated
+before the activity fans out so a bad `library_id` fails the request
+without enqueued deliveries; per-file import failures are logged and
+skipped so the post always succeeds. To keep the choice effective at
+post time, the composer uploads browser files with
+`import_audio=false`, which stores `audio/*` uploads as plain
+`StoredFile`s (still audio-hashed, so the post-time import dedupes)
+instead of auto-importing them. Users pick their default post format
 through the `status_content_type` profile field (`PATCH
 /api/v1/users/me`), defaulting to `text/markdown`.
 

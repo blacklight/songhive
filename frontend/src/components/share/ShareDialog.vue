@@ -365,6 +365,7 @@ async function submitFediverse(payload: StatusComposerPayload) {
     content_type: payload.content_type,
     language: payload.language,
     media_ids: payload.media_ids,
+    audio_import: payload.audio_import,
   });
 }
 

@@ -638,6 +638,56 @@ def test_upload_audio_file_imports_as_track(files_client, regular_user, auth_hea
     assert "Uploads" in library_names
 
 
+async def test_upload_audio_with_import_disabled_stores_plain_file(
+    files_client, regular_user, auth_headers, db_session
+):
+    """``import_audio=false`` stores an audio upload without creating a track."""
+    headers = auth_headers(regular_user)
+
+    response = files_client.post(
+        "/api/v1/files/upload?import_audio=false",
+        files={"file": ("song.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["content_type"] == "audio/mpeg"
+    assert "X-Track-Id" not in response.headers
+
+    track = (await db_session.execute(select(Track).where(Track.audio_file_id == data["id"]))).scalar_one_or_none()
+    assert track is None
+
+    # No "Uploads" library is lazily created when nothing is imported.
+    libraries = files_client.get("/api/v1/libraries/", headers=headers)
+    assert libraries.status_code == 200
+    assert all(lib["name"] != "Uploads" for lib in libraries.json())
+
+
+async def test_bulk_upload_audio_with_import_disabled(files_client, regular_user, auth_headers, db_session):
+    """Bulk upload honors ``import_audio=false`` for audio entries."""
+    headers = auth_headers(regular_user)
+    files = [
+        ("files", ("one.mp3", io.BytesIO(b"bulk audio one"), "audio/mpeg")),
+        ("files", ("two.mp3", io.BytesIO(b"bulk audio two"), "audio/mpeg")),
+    ]
+
+    response = files_client.post(
+        "/api/v1/files/upload/bulk?import_audio=false",
+        files=files,
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    assert all(item["stored_file"] for item in data)
+    assert all(item["track_id"] is None for item in data)
+
+    tracks = (await db_session.execute(select(Track))).scalars().all()
+    assert list(tracks) == []
+
+
 def test_upload_audio_with_description_stores_it(files_client, regular_user, auth_headers, monkeypatch):
     """A ``description`` form field is stored on the created track."""
     monkeypatch.setattr(

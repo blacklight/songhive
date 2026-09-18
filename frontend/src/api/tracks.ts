@@ -1,5 +1,5 @@
 import { ApiError, apiRequest, apiRequestWithHeaders } from "./client";
-import type { ActivityVisibility } from "./activities";
+import type { ActivityVisibility, AudioImportOptions } from "./activities";
 import { buildUrl } from "./config";
 import type { components } from "./types";
 
@@ -126,6 +126,8 @@ export interface TrackPublishRequest {
   language?: string | null;
   /** Previously uploaded file ids to attach to the post. */
   media_ids?: string[];
+  /** How attached audio files are imported into the publisher's library. */
+  audio_import?: AudioImportOptions | null;
 }
 
 export interface TrackPublishResponse {

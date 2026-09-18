@@ -132,7 +132,14 @@
     "attachFile": "Attach a file",
     "attachTrack": "Attach a track",
     "trackSearchPlaceholder": "Search tracks to attach…",
-    "uploadError": "Could not upload attachment: {message}"
+    "uploadError": "Could not upload attachment: {message}",
+    "audioImport": {
+      "uploadToLibrary": "Also add audio attachments to your library",
+      "fetchMetadata": "Fetch track metadata (MusicBrainz)",
+      "fetchMetadataHint": "Looks up artist, album and title online after import.",
+      "targetLibrary": "Library",
+      "defaultLibrary": "Uploads (default)"
+    }
   },
   "theme": {
     "light": "Light",

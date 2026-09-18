@@ -22,10 +22,19 @@ from ...services import activities as activity_service
 from ...services import audit
 from ...services.federation import ensure_user_actor
 from ...services.mentions import CONTENT_TYPE_MARKDOWN
+from ...services.storage import StorageService
 from ...webmentions.service import webmention_display_excerpt
 from .._common import client_ip
-from ..deps import get_config, get_current_user, get_current_user_optional, get_db
+from ..deps import (
+    get_config,
+    get_current_user,
+    get_current_user_optional,
+    get_db,
+    get_storage_service,
+)
 from ..middleware.rate_limit import rate_limit_account
+from ._common import AudioImportOptions
+from .files import apply_audio_import, plan_audio_import
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +51,7 @@ class ActivityUpdate(BaseModel):
     language: Optional[str] = None
     media_ids: Optional[List[str]] = None
     track_ids: Optional[List[str]] = None
+    audio_import: Optional[AudioImportOptions] = None
 
 
 class ActivityReplyRequest(BaseModel):
@@ -53,6 +63,7 @@ class ActivityReplyRequest(BaseModel):
     language: Optional[str] = Field(None, max_length=35)
     media_ids: List[str] = Field(default_factory=list)
     track_ids: List[str] = Field(default_factory=list)
+    audio_import: AudioImportOptions = Field(default_factory=AudioImportOptions)
 
 
 class ActivityMentionResponse(BaseModel):
@@ -404,6 +415,7 @@ async def update_activity(
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
 ):
     """
     Update an activity's content, format, language, attachments and/or
@@ -446,6 +458,20 @@ async def update_activity(
     old_visibility = activity.visibility
     fields = body.model_fields_set
     content_fields = {"content", "content_type", "language", "media_ids", "track_ids"}
+
+    # ``audio_import`` imports the post's audio file attachments into the
+    # editor's library; it applies to the edited ``media_ids`` when given,
+    # else the activity's current file attachments. The plan is validated
+    # up front so a bad ``library_id`` fails before the activity mutates.
+    import_plan = None
+    if body.audio_import is not None:
+        if "media_ids" in fields:
+            import_media_ids = body.media_ids or []
+        else:
+            obj = activity.payload.get("object") if isinstance(activity.payload, dict) else None
+            import_media_ids, _ = activity_service._attachment_source_ids(obj) if isinstance(obj, dict) else ([], [])
+        import_plan = await plan_audio_import(db, current_user, import_media_ids, body.audio_import)
+
     if fields & content_fields:
         update_kwargs: dict = {
             "config": config,
@@ -476,6 +502,8 @@ async def update_activity(
             # Fan-out is best-effort: a broker or resolution failure must not
             # fail the edit itself.
             logger.exception("Failed to fan out update for activity %s: %s: %s", activity_id, type(e), e)
+
+    await apply_audio_import(db, storage, current_user, import_plan)
 
     details: dict = {"entity_type": activity.entity_type, "entity_id": activity.entity_id}
     if body.visibility is not None:
@@ -764,6 +792,7 @@ async def reply_activity(
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
 ):
     """Post a reply to an activity as the current user.
 
@@ -785,6 +814,7 @@ async def reply_activity(
 
     config = get_config(request)
     ensure_user_actor(current_user, config)
+    import_plan = await plan_audio_import(db, current_user, body.media_ids, body.audio_import)
     reply = await activity_service.reply_to_activity(
         db,
         activity=activity,
@@ -797,6 +827,7 @@ async def reply_activity(
         media_ids=body.media_ids,
         track_ids=body.track_ids,
     )
+    await apply_audio_import(db, storage, current_user, import_plan)
     await audit.log_action(
         db,
         actor_id=current_user.id,
@@ -834,6 +865,7 @@ async def quote_activity(
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
 ):
     """Post a quote of an activity as the current user.
 
@@ -859,6 +891,7 @@ async def quote_activity(
 
     config = get_config(request)
     ensure_user_actor(current_user, config)
+    import_plan = await plan_audio_import(db, current_user, body.media_ids, body.audio_import)
     quote = await activity_service.quote_activity(
         db,
         activity=activity,
@@ -871,6 +904,7 @@ async def quote_activity(
         media_ids=body.media_ids,
         track_ids=body.track_ids,
     )
+    await apply_audio_import(db, storage, current_user, import_plan)
     await audit.log_action(
         db,
         actor_id=current_user.id,

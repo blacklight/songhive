@@ -53,6 +53,7 @@ export async function uploadFile(
   abortSignal?: AbortSignal,
   description?: string,
   publish?: boolean,
+  importAudio?: boolean,
 ): Promise<FileUploadResult> {
   // XHR same-origin requests carry the HttpOnly auth cookies automatically;
   // the readable csrf_token cookie doubles as the session indicator and the
@@ -66,6 +67,9 @@ export async function uploadFile(
     visibility,
     library_id: libraryId,
     publish: publish || undefined,
+    // ``false`` keeps audio uploads as plain stored files — the library
+    // import is deferred to post creation (``audio_import`` options).
+    import_audio: importAudio === false ? false : undefined,
   });
 
   return new Promise((resolve, reject) => {

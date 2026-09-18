@@ -28,7 +28,12 @@ function attachmentName(attachment: ActivityAttachment): string {
 const initialMedia = computed(() =>
   (props.activity.attachments ?? [])
     .filter((a) => typeof a[FILE_ID_KEY] === "string")
-    .map((a) => ({ id: a[FILE_ID_KEY] as string, name: attachmentName(a) })),
+    .map((a) => ({
+      id: a[FILE_ID_KEY] as string,
+      name: attachmentName(a),
+      isAudio:
+        typeof a.mediaType === "string" && a.mediaType.startsWith("audio/"),
+    })),
 );
 
 const initialTracks = computed(() =>
@@ -45,6 +50,7 @@ async function save(payload: StatusComposerPayload) {
     language: payload.language,
     media_ids: payload.media_ids,
     track_ids: payload.track_ids,
+    audio_import: payload.audio_import,
   });
 }
 </script>

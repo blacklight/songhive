@@ -1,5 +1,11 @@
 import { apiRequest } from "./client";
-import type { ActivityResponse, ActivityVisibility } from "./activities";
+import type {
+  ActivityResponse,
+  ActivityVisibility,
+  AudioImportOptions,
+} from "./activities";
+
+export type { AudioImportOptions };
 
 // Mirror ``songhive/services/mentions.py`` — the two source formats the
 // mention pipeline can render into an activity's HTML ``content``.
@@ -20,6 +26,7 @@ export interface StatusCreateRequest {
   language?: string | null;
   media_ids?: string[];
   track_ids?: string[];
+  audio_import?: AudioImportOptions | null;
 }
 
 export function createStatus(

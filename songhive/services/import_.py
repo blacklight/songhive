@@ -509,6 +509,98 @@ def _maybe_enqueue_enrichment(track: Track, enrich: bool) -> None:
         pass
 
 
+async def _track_for_stored_file(
+    session: AsyncSession,
+    stored_file: StoredFile,
+    owner_id: Optional[str],
+) -> Optional[Track]:
+    """Return the owner's track already backed by ``stored_file``, if any."""
+    predicates = [Track.audio_file_id == stored_file.id]
+    if owner_id is not None:
+        predicates.append(Track.owner_id == owner_id)
+    result = await session.execute(select(Track).where(*predicates).limit(1))
+    return cast(Optional[Track], result.scalar_one_or_none())
+
+
+async def _ensure_library_track(
+    session: AsyncSession,
+    library_id: str,
+    track: Track,
+    owner_id: Optional[str],
+) -> None:
+    """Link ``track`` to ``library_id`` when it is not already a member."""
+    existing = await session.execute(
+        select(LibraryTrack).where(
+            LibraryTrack.library_id == library_id,
+            LibraryTrack.track_id == str(track.id),
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        return
+    session.add(LibraryTrack(library_id=library_id, track_id=str(track.id), added_by_id=owner_id))
+    await session.flush()
+
+
+async def import_stored_audio_files(
+    session: AsyncSession,
+    storage_service: StorageService,
+    *,
+    stored_files: List[StoredFile],
+    library_id: str,
+    owner_id: Optional[str] = None,
+    enrich: bool = False,
+    source: str = "upload",
+) -> List[Track]:
+    """
+    Import already-stored audio files into a library, best-effort.
+
+    Non-audio files are skipped. A file already backing one of the owner's
+    tracks is linked to the library instead of duplicating the track.
+    External duplicates resolve as ``keep_local`` — the user explicitly
+    attached the file. Per-file failures are logged and skipped so a batch
+    never aborts the caller's operation; the caller owns the transaction.
+
+    :param session: Async SQLAlchemy session.
+    :param storage_service: Configured storage service.
+    :param stored_files: StoredFile rows to import.
+    :param library_id: Library to add the tracks to.
+    :param owner_id: Owner for created tracks and library links.
+    :param enrich: Whether to enqueue MusicBrainz enrichment per new track.
+    :param source: Track source recorded on newly created tracks.
+    :returns: The tracks now present in the library.
+    """
+    tracks: List[Track] = []
+    for stored_file in stored_files:
+        if not _is_audio_content_type(stored_file.content_type or ""):
+            continue
+        try:
+            track = await _track_for_stored_file(session, stored_file, owner_id)
+            if track is not None:
+                await _ensure_library_track(session, library_id, track, owner_id)
+                tracks.append(track)
+                continue
+            result = await import_audio_file(
+                session,
+                storage_service=storage_service,
+                stored_file=stored_file,
+                library_id=library_id,
+                owner_id=owner_id,
+                visibility=stored_file.visibility,
+                enrich=enrich,
+                source=source,
+                external_duplicate_action="keep_local",
+            )
+            tracks.append(result.track)
+        except Exception as exc:
+            logger.warning(
+                "Could not import stored file %s into library %s: %s",
+                stored_file.id,
+                library_id,
+                exc,
+            )
+    return tracks
+
+
 async def _store_duplicate_token(
     redis: Redis,
     sha256: str,

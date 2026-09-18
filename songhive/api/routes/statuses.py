@@ -19,10 +19,13 @@ from ...services import activities as activity_service
 from ...services import audit
 from ...services.federation import ensure_user_actor
 from ...services.mentions import CONTENT_TYPE_MARKDOWN
+from ...services.storage import StorageService
 from .._common import client_ip
-from ..deps import get_config, get_current_user, get_db
+from ..deps import get_config, get_current_user, get_db, get_storage_service
 from ..middleware.rate_limit import rate_limit_account
+from ._common import AudioImportOptions
 from .activities import ActivityResponse, _build_activity_response
+from .files import apply_audio_import, plan_audio_import
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,7 @@ class StatusCreateRequest(BaseModel):
     language: Optional[str] = Field(None, max_length=35)
     media_ids: List[str] = Field(default_factory=list)
     track_ids: List[str] = Field(default_factory=list)
+    audio_import: AudioImportOptions = Field(default_factory=AudioImportOptions)
 
 
 @router.post(
@@ -52,17 +56,24 @@ async def create_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
+    storage: StorageService = Depends(get_storage_service),
 ):
     """Post a standalone status.
 
     ``status`` is the raw source text — Markdown when ``content_type`` is
     ``text/markdown`` (the default), escaped plain text otherwise. ``media_ids``
     attach previously uploaded files and ``track_ids`` attach hosted tracks;
-    a status may carry attachments without text. The status is recorded as a
+    a status may carry attachments without text. ``audio_import`` controls
+    whether attached ``audio/*`` files are also imported into the author's
+    library as tracks — imported to their "Uploads" library by default, with
+    optional MusicBrainz metadata fetch. The status is recorded as a
     ``create`` activity on the author's profile and federated to the
     ``visibility`` audience when federation is enabled.
     """
     ensure_user_actor(current_user, config)
+    # Validated before the status fans out so a bad ``library_id`` fails the
+    # request without leaving enqueued deliveries behind.
+    import_plan = await plan_audio_import(db, current_user, body.media_ids, body.audio_import)
     activity = await activity_service.create_status(
         db,
         author=current_user,
@@ -74,6 +85,7 @@ async def create_status(
         media_ids=body.media_ids,
         track_ids=body.track_ids,
     )
+    await apply_audio_import(db, storage, current_user, import_plan)
     await audit.log_action(
         db,
         actor_id=current_user.id,

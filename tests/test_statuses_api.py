@@ -5,7 +5,9 @@ rendering, mentions, language, and file/track attachments.
 """
 
 import hashlib
+import io
 import secrets
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -13,11 +15,14 @@ from sqlalchemy import select
 from songhive.models import Visibility
 from songhive.models.activity import Activity, ActivityMention
 from songhive.models.artist import Artist
+from songhive.models.library import Library
+from songhive.models.library_track import LibraryTrack
 from songhive.models.notification import Notification
 from songhive.models.share_grant import ShareGrant
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 from songhive.models.user import User
+from songhive.services.metadata import AudioMetadata
 
 
 async def _make_artist(session, name: str = "Test Artist") -> Artist:
@@ -506,3 +511,229 @@ async def test_update_status_preserves_entity_attachment(client, db_session, reg
     assert attachments[0]["name"] == "Track"
     assert attachments[0].get("songhive:fileId") is None
     assert attachments[1]["songhive:fileId"] == new_file.id
+
+
+# ---------------------------------------------------------------------------
+# Audio attachment library import (``audio_import`` options)
+# ---------------------------------------------------------------------------
+
+
+def _upload_audio(client, user, auth_headers, tmp_path, content=b"fake audio"):
+    """Upload a fake audio file as a plain stored file and return its id."""
+    client.app.state.config.storage.local_path = tmp_path / "media"
+    resp = client.post(
+        "/api/v1/files/upload?import_audio=false",
+        files={"file": ("song.mp3", io.BytesIO(content), "audio/mpeg")},
+        headers=auth_headers(user),
+    )
+    assert resp.status_code == 200
+    assert "X-Track-Id" not in resp.headers
+    return resp.json()["id"]
+
+
+def _mock_metadata(monkeypatch, title="Posted Song"):
+    monkeypatch.setattr(
+        "songhive.services.import_.extract_metadata",
+        lambda _: AudioMetadata(title=title, artist="Poster", mimetype="audio/mpeg"),
+    )
+
+
+async def _track_for_file(db_session, file_id: str) -> Track | None:
+    return (await db_session.execute(select(Track).where(Track.audio_file_id == file_id))).scalar_one_or_none()
+
+
+async def _library_track(db_session, library: Library, track: Track) -> LibraryTrack | None:
+    return (
+        await db_session.execute(
+            select(LibraryTrack).where(
+                LibraryTrack.library_id == library.id,
+                LibraryTrack.track_id == str(track.id),
+            )
+        )
+    ).scalar_one_or_none()
+
+
+@pytest.mark.asyncio
+async def test_create_status_audio_attachment_imports_to_uploads(
+    client, db_session, regular_user, auth_headers, monkeypatch, tmp_path
+):
+    """An attached audio file is imported into the Uploads library by default."""
+    _mock_metadata(monkeypatch)
+    file_id = _upload_audio(client, regular_user, auth_headers, tmp_path)
+
+    resp = _post(client, regular_user, auth_headers, status="new track", media_ids=[file_id])
+    assert resp.status_code == 201
+
+    track = await _track_for_file(db_session, file_id)
+    assert track is not None
+    assert track.title == "Posted Song"
+    assert track.owner_id == regular_user.id
+
+    library = (
+        await db_session.execute(
+            select(Library).where(
+                Library.owner_id == regular_user.id,
+                Library.name == "Uploads",
+            )
+        )
+    ).scalar_one()
+    assert await _library_track(db_session, library, track) is not None
+
+
+@pytest.mark.asyncio
+async def test_create_status_audio_import_disabled(
+    client, db_session, regular_user, auth_headers, monkeypatch, tmp_path
+):
+    """``upload_to_library: false`` keeps the file a plain attachment."""
+    _mock_metadata(monkeypatch)
+    file_id = _upload_audio(client, regular_user, auth_headers, tmp_path)
+
+    resp = _post(
+        client,
+        regular_user,
+        auth_headers,
+        status="attach only",
+        media_ids=[file_id],
+        audio_import={"upload_to_library": False},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["attachments"]
+
+    assert await _track_for_file(db_session, file_id) is None
+    libraries = (await db_session.execute(select(Library).where(Library.owner_id == regular_user.id))).scalars().all()
+    assert list(libraries) == []
+
+
+@pytest.mark.asyncio
+async def test_create_status_audio_import_custom_library(
+    client, db_session, regular_user, auth_headers, monkeypatch, tmp_path
+):
+    """``library_id`` imports into the named library instead of Uploads."""
+    _mock_metadata(monkeypatch)
+    library = Library(name="Collection", owner_id=regular_user.id)
+    db_session.add(library)
+    await db_session.flush()
+    file_id = _upload_audio(client, regular_user, auth_headers, tmp_path)
+
+    resp = _post(
+        client,
+        regular_user,
+        auth_headers,
+        status="to collection",
+        media_ids=[file_id],
+        audio_import={"library_id": library.id},
+    )
+    assert resp.status_code == 201
+
+    track = await _track_for_file(db_session, file_id)
+    assert track is not None
+    assert await _library_track(db_session, library, track) is not None
+
+
+@pytest.mark.asyncio
+async def test_create_status_audio_import_unknown_library_rejected(
+    client, db_session, regular_user, auth_headers, monkeypatch, tmp_path
+):
+    """An unknown ``library_id`` fails the request before the status is created."""
+    _mock_metadata(monkeypatch)
+    file_id = _upload_audio(client, regular_user, auth_headers, tmp_path)
+
+    resp = _post(
+        client,
+        regular_user,
+        auth_headers,
+        status="bad library",
+        media_ids=[file_id],
+        audio_import={"library_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert resp.status_code == 404
+    assert await _track_for_file(db_session, file_id) is None
+
+
+@pytest.mark.asyncio
+async def test_create_status_audio_import_fetch_metadata_enqueues_enrichment(
+    client, db_session, regular_user, auth_headers, monkeypatch, tmp_path
+):
+    """``fetch_metadata: true`` enqueues MusicBrainz enrichment for the track."""
+    _mock_metadata(monkeypatch)
+    enrich_mock = MagicMock()
+    monkeypatch.setattr("songhive.tasks.musicbrainz.enrich_track", enrich_mock)
+    file_id = _upload_audio(client, regular_user, auth_headers, tmp_path)
+
+    resp = _post(
+        client,
+        regular_user,
+        auth_headers,
+        status="enrich me",
+        media_ids=[file_id],
+        audio_import={"fetch_metadata": True},
+    )
+    assert resp.status_code == 201
+
+    track = await _track_for_file(db_session, file_id)
+    assert track is not None
+    enrich_mock.delay.assert_called_once_with(str(track.id))
+
+
+@pytest.mark.asyncio
+async def test_create_status_non_audio_attachment_not_imported(client, db_session, regular_user, auth_headers):
+    """Non-audio attachments never trigger a library import."""
+    stored = await _make_file(db_session, owner=regular_user)
+
+    resp = _post(client, regular_user, auth_headers, status="pic", media_ids=[stored.id])
+    assert resp.status_code == 201
+
+    assert await _track_for_file(db_session, stored.id) is None
+    libraries = (await db_session.execute(select(Library).where(Library.owner_id == regular_user.id))).scalars().all()
+    assert list(libraries) == []
+
+
+@pytest.mark.asyncio
+async def test_reply_audio_attachment_imports(client, db_session, regular_user, auth_headers, monkeypatch, tmp_path):
+    """Replies honour ``audio_import`` for their own audio attachments."""
+    _mock_metadata(monkeypatch)
+    file_id = _upload_audio(client, regular_user, auth_headers, tmp_path)
+    parent = _post(client, regular_user, auth_headers, status="parent")
+
+    resp = client.post(
+        f"/api/v1/activities/{parent.json()['id']}/reply",
+        json={"status": "with audio", "media_ids": [file_id]},
+        headers=auth_headers(regular_user),
+    )
+    assert resp.status_code == 201
+
+    track = await _track_for_file(db_session, file_id)
+    assert track is not None
+
+
+@pytest.mark.asyncio
+async def test_update_status_audio_import_uses_current_attachments(
+    client, db_session, regular_user, auth_headers, monkeypatch, tmp_path
+):
+    """PATCH ``audio_import`` applies to the activity's current file attachments."""
+    _mock_metadata(monkeypatch)
+    file_id = _upload_audio(client, regular_user, auth_headers, tmp_path)
+
+    created = _post(
+        client,
+        regular_user,
+        auth_headers,
+        status="with audio",
+        media_ids=[file_id],
+        audio_import={"upload_to_library": False},
+    )
+    assert created.status_code == 201
+    assert await _track_for_file(db_session, file_id) is None
+
+    resp = _patch(
+        client,
+        regular_user,
+        auth_headers,
+        created.json()["id"],
+        content="edited",
+        audio_import={"upload_to_library": True},
+    )
+    assert resp.status_code == 200
+
+    track = await _track_for_file(db_session, file_id)
+    assert track is not None

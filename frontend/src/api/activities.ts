@@ -179,6 +179,20 @@ export interface QuoteActivityListResponse {
   remote_quotes: RemoteQuote[];
 }
 
+/**
+ * How a post's audio file attachments are imported into the author's
+ * library — mirrors ``AudioImportOptions`` in
+ * ``songhive/api/routes/_common.py``.
+ */
+export interface AudioImportOptions {
+  /** Import each attached audio file as a library track (default true). */
+  upload_to_library?: boolean;
+  /** Enqueue MusicBrainz enrichment for the new tracks (default false). */
+  fetch_metadata?: boolean;
+  /** Target library id; ``null``/omitted resolves to "Uploads". */
+  library_id?: string | null;
+}
+
 export interface ActivityReplyRequest {
   status?: string | null;
   content_type?: string;
@@ -186,6 +200,7 @@ export interface ActivityReplyRequest {
   language?: string | null;
   media_ids?: string[];
   track_ids?: string[];
+  audio_import?: AudioImportOptions | null;
 }
 
 export interface ActivityUpdate {
@@ -195,6 +210,7 @@ export interface ActivityUpdate {
   language?: string | null;
   media_ids?: string[];
   track_ids?: string[];
+  audio_import?: AudioImportOptions | null;
 }
 
 export type ListActivitiesParams = {

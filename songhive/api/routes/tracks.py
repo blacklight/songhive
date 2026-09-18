@@ -86,8 +86,10 @@ from ..routes.files import (
     _download_stored_file_response,
     _sanitize_content_disposition,
     _sanitize_filename,
+    apply_audio_import,
+    plan_audio_import,
 )
-from ._common import GenreListRequest, TagListRequest
+from ._common import AudioImportOptions, GenreListRequest, TagListRequest
 from ._images import remove_entity_image, upload_entity_image
 
 router = APIRouter(prefix="/tracks")
@@ -142,6 +144,7 @@ class TrackPublishRequest(BaseModel):
     content_type: Optional[str] = None
     language: Optional[str] = None
     media_ids: List[str] = Field(default_factory=list)
+    audio_import: AudioImportOptions = Field(default_factory=AudioImportOptions)
 
 
 class TrackPublishResponse(BaseModel):
@@ -1074,6 +1077,7 @@ async def publish_track(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
+    storage: StorageService = Depends(get_storage_service),
 ):
     """
     Publish a public track to the fediverse as the current user's post.
@@ -1135,6 +1139,10 @@ async def publish_track(
         # publisher is someone else so the URL resolves.
         ensure_user_actor(track.owner, config)
 
+    # Validated before the publication fans out so a bad ``library_id``
+    # fails the request without leaving enqueued deliveries behind.
+    import_plan = await plan_audio_import(db, current_user, body.media_ids, body.audio_import)
+
     await audit.log_action(
         db,
         actor_id=current_user.id,
@@ -1162,6 +1170,7 @@ async def publish_track(
         language=body.language,
         media_ids=body.media_ids,
     )
+    await apply_audio_import(db, storage, current_user, import_plan)
     await db.commit()
 
     return TrackPublishResponse(

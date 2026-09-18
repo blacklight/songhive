@@ -10,6 +10,20 @@ from ...models.user import User
 from ...services import acl
 
 
+class AudioImportOptions(BaseModel):
+    """How a post's audio file attachments are imported into the library.
+
+    ``upload_to_library`` imports each attached audio file as a track;
+    ``fetch_metadata`` additionally enqueues MusicBrainz enrichment for the
+    new tracks, and ``library_id`` selects the target library (``null``
+    resolves to the author's default "Uploads" library).
+    """
+
+    upload_to_library: bool = True
+    fetch_metadata: bool = False
+    library_id: Optional[str] = None
+
+
 class TagListRequest(BaseModel):
     """Add/remove tags on a resource."""
 

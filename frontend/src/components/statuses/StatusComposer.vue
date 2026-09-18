@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useTemplateRef } from "vue";
+import { computed, nextTick, ref, useTemplateRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
-import type { ActivityVisibility } from "@/api/activities";
+import type { ActivityVisibility, AudioImportOptions } from "@/api/activities";
 import { getApiErrorMessage } from "@/api/client";
 import { uploadFile } from "@/api/files";
+import { listLibraries, type LibraryResponse } from "@/api/libraries";
 import {
   searchPreview,
   type SearchEntity,
@@ -21,6 +22,7 @@ import { useDebounce } from "@/composables/useDebounce";
 import { useOnClickOutside } from "@/composables/useOnClickOutside";
 import { useAuthStore } from "@/stores/auth";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import SearchBar from "@/components/ui/SearchBar.vue";
@@ -33,6 +35,7 @@ export interface StatusComposerPayload {
   language: string | null;
   media_ids: string[];
   track_ids: string[];
+  audio_import?: AudioImportOptions | null;
 }
 
 interface AttachedMedia {
@@ -40,6 +43,7 @@ interface AttachedMedia {
   name: string;
   uploading: boolean;
   progress: number;
+  isAudio: boolean;
 }
 
 interface AttachedTrack {
@@ -52,6 +56,8 @@ interface AttachedTrack {
 export interface InitialMedia {
   id: string;
   name: string;
+  /** Whether the attachment is an ``audio/*`` file (edit dialogs). */
+  isAudio?: boolean;
 }
 
 export interface InitialTrack {
@@ -152,6 +158,7 @@ const media = ref<AttachedMedia[]>(
     name: m.name,
     uploading: false,
     progress: 100,
+    isAudio: m.isAudio ?? false,
   })),
 );
 const tracks = ref<AttachedTrack[]>(
@@ -226,6 +233,39 @@ const canAttachMedia = computed(
 );
 const canAttachTrack = computed(
   () => props.allowTrackAttachments && tracks.value.length < MAX_ATTACHMENTS,
+);
+
+// Audio file attachments can additionally be imported into the author's
+// library at post time (``audio_import`` request field). The options apply
+// to every audio attachment of the post.
+const hasAudioAttachments = computed(() => media.value.some((m) => m.isAudio));
+const audioToLibrary = ref(true);
+const audioFetchMetadata = ref(false);
+// Empty string resolves to the author's default "Uploads" library.
+const audioLibraryId = ref("");
+const libraries = ref<LibraryResponse[]>([]);
+const librariesLoaded = ref(false);
+
+const audioLibraryOptions = computed(() => [
+  { value: "", label: t("statusComposer.audioImport.defaultLibrary") },
+  ...libraries.value
+    .filter((library) => library.can_write)
+    .map((library) => ({ value: library.id, label: library.name })),
+]);
+
+watch(
+  hasAudioAttachments,
+  async (present) => {
+    if (!present || librariesLoaded.value) return;
+    librariesLoaded.value = true;
+    try {
+      libraries.value = await listLibraries({ limit: 100 });
+    } catch {
+      libraries.value = [];
+    }
+  },
+  // ``immediate`` covers edit dialogs opening with audio already attached.
+  { immediate: true },
 );
 
 function closeSuggestion() {
@@ -382,6 +422,7 @@ async function onFileChange(event: Event) {
     name: file.name,
     uploading: true,
     progress: 0,
+    isAudio: file.type.startsWith("audio/"),
   });
   // Mutate through the reactive array element — writes on the raw object
   // pushed above would not invalidate the ``uploading`` computed.
@@ -389,7 +430,9 @@ async function onFileChange(event: Event) {
   error.value = null;
   try {
     // Uploaded as private; ``create_status`` escalates the file's visibility
-    // to whatever the posted status's audience requires.
+    // to whatever the posted status's audience requires. ``importAudio:
+    // false`` keeps audio files as plain stored files — the post's
+    // ``audio_import`` options decide whether a track is imported.
     const uploaded = await uploadFile(
       file,
       "private",
@@ -399,6 +442,7 @@ async function onFileChange(event: Event) {
       undefined,
       undefined,
       undefined,
+      false,
       false,
     );
     entry.id = uploaded.id;
@@ -417,6 +461,9 @@ function removeMedia(entry: AttachedMedia) {
 }
 
 function buildPayload(): StatusComposerPayload {
+  const audioIds = media.value
+    .filter((m) => m.isAudio && m.id)
+    .map((m) => m.id);
   return {
     status: text.value.trim(),
     content_type: contentType.value,
@@ -424,6 +471,13 @@ function buildPayload(): StatusComposerPayload {
     language: language.value.trim() || null,
     media_ids: media.value.filter((m) => m.id).map((m) => m.id),
     track_ids: tracks.value.map((track) => track.id),
+    audio_import: audioIds.length
+      ? {
+          upload_to_library: audioToLibrary.value,
+          fetch_metadata: audioFetchMetadata.value,
+          library_id: audioLibraryId.value || null,
+        }
+      : undefined,
   };
 }
 
@@ -521,6 +575,29 @@ useOnClickOutside(() => editorEl.value, closeSuggestion);
         />
       </li>
     </ul>
+
+    <fieldset
+      v-if="hasAudioAttachments"
+      class="status-composer__audio-import"
+      :disabled="submitting"
+    >
+      <AppCheckbox
+        v-model="audioToLibrary"
+        :label="t('statusComposer.audioImport.uploadToLibrary')"
+      />
+      <template v-if="audioToLibrary">
+        <AppCheckbox
+          v-model="audioFetchMetadata"
+          :label="t('statusComposer.audioImport.fetchMetadata')"
+          :hint="t('statusComposer.audioImport.fetchMetadataHint')"
+        />
+        <AppSelect
+          v-model="audioLibraryId"
+          :options="audioLibraryOptions"
+          :label="t('statusComposer.audioImport.targetLibrary')"
+        />
+      </template>
+    </fieldset>
 
     <div class="status-composer__toolbar">
       <AppButton
@@ -673,6 +750,17 @@ useOnClickOutside(() => editorEl.value, closeSuggestion);
 .status-composer__progress {
   color: var(--color-text-muted);
   font-size: 0.875rem;
+}
+
+.status-composer__audio-import {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-secondary);
 }
 
 .status-composer__toolbar {

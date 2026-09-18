@@ -3,6 +3,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import * as statusesApi from "@/api/statuses";
 import * as searchApi from "@/api/search";
 import * as filesApi from "@/api/files";
+import * as librariesApi from "@/api/libraries";
 import { useAuthStore } from "@/stores/auth";
 import StatusComposer from "./StatusComposer.vue";
 
@@ -19,9 +20,14 @@ vi.mock("@/api/files", () => ({
   uploadFile: vi.fn(),
 }));
 
+vi.mock("@/api/libraries", () => ({
+  listLibraries: vi.fn(),
+}));
+
 const createStatus = vi.mocked(statusesApi.createStatus);
 const searchPreview = vi.mocked(searchApi.searchPreview);
 const uploadFile = vi.mocked(filesApi.uploadFile);
+const listLibraries = vi.mocked(librariesApi.listLibraries);
 
 function createActivity() {
   return {
@@ -365,6 +371,7 @@ describe("StatusComposer", () => {
       undefined,
       undefined,
       false,
+      false,
     );
     expect(wrapper.text()).toContain("pic.png");
 
@@ -373,6 +380,99 @@ describe("StatusComposer", () => {
     expect(createStatus).toHaveBeenCalledWith(
       expect.objectContaining({ media_ids: ["file-1"] }),
     );
+  });
+
+  it("sends default audio_import options for audio attachments", async () => {
+    vi.useRealTimers();
+    uploadFile.mockResolvedValue({ id: "file-1" } as never);
+    listLibraries.mockResolvedValue([] as never);
+    const wrapper = mountComposer();
+    await typeText(wrapper, "with audio");
+
+    const file = new File(["data"], "song.mp3", { type: "audio/mpeg" });
+    const input = wrapper.find('input[type="file"]');
+    Object.defineProperty(input.element, "files", { value: [file] });
+    await input.trigger("change");
+    await flushPromises();
+    await flushPromises();
+
+    expect(uploadFile).toHaveBeenCalledWith(
+      file,
+      "private",
+      expect.any(Function),
+      undefined,
+      undefined,
+      undefined,
+      false,
+      false,
+    );
+    expect(listLibraries).toHaveBeenCalled();
+
+    // The audio import fieldset defaults to "add to library" checked.
+    const fieldset = wrapper.find(".status-composer__audio-import");
+    expect(fieldset.exists()).toBe(true);
+
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(createStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        media_ids: ["file-1"],
+        audio_import: {
+          upload_to_library: true,
+          fetch_metadata: false,
+          library_id: null,
+        },
+      }),
+    );
+  });
+
+  it("sends upload_to_library=false when the audio option is unchecked", async () => {
+    vi.useRealTimers();
+    uploadFile.mockResolvedValue({ id: "file-1" } as never);
+    listLibraries.mockResolvedValue([] as never);
+    const wrapper = mountComposer();
+    await typeText(wrapper, "attach only");
+
+    const file = new File(["data"], "song.mp3", { type: "audio/mpeg" });
+    const input = wrapper.find('input[type="file"]');
+    Object.defineProperty(input.element, "files", { value: [file] });
+    await input.trigger("change");
+    await flushPromises();
+    await flushPromises();
+
+    const checkbox = wrapper
+      .find(".status-composer__audio-import")
+      .find('input[type="checkbox"]');
+    await checkbox.setValue(false);
+
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(createStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audio_import: expect.objectContaining({ upload_to_library: false }),
+      }),
+    );
+  });
+
+  it("omits audio_import for non-audio attachments", async () => {
+    vi.useRealTimers();
+    uploadFile.mockResolvedValue({ id: "file-1" } as never);
+    const wrapper = mountComposer();
+    await typeText(wrapper, "with a file");
+
+    const file = new File(["data"], "pic.png", { type: "image/png" });
+    const input = wrapper.find('input[type="file"]');
+    Object.defineProperty(input.element, "files", { value: [file] });
+    await input.trigger("change");
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find(".status-composer__audio-import").exists()).toBe(false);
+
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    const payload = createStatus.mock.calls[0][0];
+    expect(payload.audio_import).toBeUndefined();
   });
 
   it("uses the custom submit handler when provided", async () => {

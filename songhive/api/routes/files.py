@@ -42,7 +42,9 @@ from ...services.import_ import (
     ExternalDuplicateError,
     ExternalDuplicatePermissionError,
     ExternalDuplicateTokenError,
+    _store_uploaded_file,
     import_audio_file,
+    import_stored_audio_files,
     resolve_external_duplicate,
 )
 from ...services.storage import StorageService, count_files, list_files
@@ -60,7 +62,7 @@ from ..deps import (
 )
 from ..middleware.rate_limit import rate_limit, rate_limit_account
 from ..responses import TrackResponse, TrackSummary, build_track_summary
-from ._common import HasOwnerId, redact_owner
+from ._common import AudioImportOptions, HasOwnerId, redact_owner
 from .external_libraries import (
     ExternalDuplicateResolutionRequest,
     ExternalDuplicateWarning,
@@ -191,6 +193,7 @@ async def _process_single_upload(
     redis: Optional[Redis] = None,
     description: Optional[str] = None,
     publish: bool = False,
+    import_audio: bool = True,
 ) -> _UploadOutcome:
     """Store or import a single uploaded file and return the outcome."""
     content_type = file.content_type or "application/octet-stream"
@@ -199,7 +202,7 @@ async def _process_single_upload(
     track_id: Optional[str] = None
     track: Optional[Track] = None
 
-    if content_type.startswith("audio/"):
+    if import_audio and content_type.startswith("audio/"):
         if library is None:
             library = await _get_or_create_uploads_library(db, current_user)
         try:
@@ -250,14 +253,17 @@ async def _process_single_upload(
     if stored_file is None and track_id is None:
         storage._rewind(file.file)
         try:
-            stored_file, is_duplicate = await storage.store_file(
+            # ``_store_uploaded_file`` stores audio under the audio-only
+            # stream hash — matching imported tracks — so a later library
+            # import dedupes correctly; other types use the full-file hash.
+            stored_file, is_duplicate = await _store_uploaded_file(
                 db,
+                storage,
                 file.file,
-                content_type=content_type,
-                original_filename=file.filename,
-                owner_id=current_user.id,
-                visibility=visibility,
-                return_duplicate=True,
+                content_type,
+                file.filename or "file",
+                str(current_user.id),
+                visibility,
             )
         except FileSizeLimitExceededError:
             return _UploadOutcome(error="File too large")
@@ -267,6 +273,65 @@ async def _process_single_upload(
         track_id=track_id,
         track=track,
         is_duplicate=is_duplicate,
+    )
+
+
+@dataclass
+class AudioImportPlan:
+    """A validated audio-attachment import to apply after a post is saved."""
+
+    library: Library
+    files: List[StoredFile]
+    enrich: bool
+
+
+async def plan_audio_import(
+    db: AsyncSession,
+    user: User,
+    media_ids: List[str],
+    options: "AudioImportOptions | None",
+) -> Optional[AudioImportPlan]:
+    """Resolve and validate the library import of a post's audio attachments.
+
+    Returns ``None`` when ``options`` disables the import or no ``media_ids``
+    entry is an ``audio/*`` file; otherwise resolves the target library —
+    the user's default "Uploads" library when ``library_id`` is unset — so
+    an unknown or unmanageable ``library_id`` fails the request (404/403)
+    before the post is created and fanned out.
+    """
+    if options is None or not options.upload_to_library:
+        return None
+    files: List[StoredFile] = []
+    for file_id in dict.fromkeys(media_ids):
+        stored = await db.get(StoredFile, file_id)
+        if stored is not None and (stored.content_type or "").startswith("audio/"):
+            files.append(stored)
+    if not files:
+        return None
+    library = await _get_target_library(db, user, options.library_id)
+    return AudioImportPlan(library=library, files=files, enrich=options.fetch_metadata)
+
+
+async def apply_audio_import(
+    db: AsyncSession,
+    storage: StorageService,
+    user: User,
+    plan: Optional[AudioImportPlan],
+) -> None:
+    """Execute a planned audio-attachment import after the post is saved.
+
+    Import failures never fail the request — the files stay attached to the
+    post; ``plan.enrich`` enqueues MusicBrainz enrichment per new track.
+    """
+    if plan is None:
+        return
+    await import_stored_audio_files(
+        db,
+        storage,
+        stored_files=plan.files,
+        library_id=str(plan.library.id),
+        owner_id=str(user.id),
+        enrich=plan.enrich,
     )
 
 
@@ -312,6 +377,7 @@ async def upload_file(
     library_id: Optional[str] = Query(None),
     external_duplicate_action: Optional[Literal["keep_local", "discard_upload"]] = Query(None),
     publish: bool = Query(False),
+    import_audio: bool = Query(True),
     description: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     storage: StorageService = Depends(get_storage_service),
@@ -334,6 +400,10 @@ async def upload_file(
     track is published to the owner's ActivityPub followers as a
     ``Create(Audio)`` activity, if federation is enabled; otherwise the track
     stays local and has no associated activity object.
+
+    ``import_audio=false`` stores ``audio/*`` uploads as plain files instead
+    of importing them as tracks — used by the post composer, which defers
+    the library import to post creation via its ``audio_import`` options.
     """
     library: Optional[Library] = None
     if library_id is not None:
@@ -350,6 +420,7 @@ async def upload_file(
         redis=redis,
         description=description,
         publish=publish,
+        import_audio=import_audio,
     )
     if outcome.error == "File too large":
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
@@ -405,6 +476,7 @@ async def bulk_upload_files(
     library_id: Optional[str] = Query(None),
     external_duplicate_action: Optional[Literal["keep_local", "discard_upload"]] = Query(None),
     publish: bool = Query(False),
+    import_audio: bool = Query(True),
     description: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     storage: StorageService = Depends(get_storage_service),
@@ -442,7 +514,7 @@ async def bulk_upload_files(
     library: Optional[Library] = None
     if library_id is not None:
         library = await _get_target_library(db, current_user, library_id)
-    elif any((f.content_type or "").startswith("audio/") for f in files):
+    elif import_audio and any((f.content_type or "").startswith("audio/") for f in files):
         library = await _get_or_create_uploads_library(db, current_user)
 
     results: List[BulkFileUploadResult] = []
@@ -460,6 +532,7 @@ async def bulk_upload_files(
                 redis=redis,
                 description=description,
                 publish=publish,
+                import_audio=import_audio,
             )
             if outcome.track is not None:
                 created_tracks.append(outcome.track)

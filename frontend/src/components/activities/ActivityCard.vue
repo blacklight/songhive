@@ -663,6 +663,7 @@ async function submitReply(payload: StatusComposerPayload) {
     language: payload.language,
     media_ids: payload.media_ids,
     track_ids: payload.track_ids,
+    audio_import: payload.audio_import,
   });
   if (repliesLoaded.value) {
     localReplies.value = [...localReplies.value, created];
@@ -680,6 +681,7 @@ async function submitQuote(payload: StatusComposerPayload) {
     language: payload.language,
     media_ids: payload.media_ids,
     track_ids: payload.track_ids,
+    audio_import: payload.audio_import,
   });
   if (quotesLoaded.value) {
     localQuotes.value = [...localQuotes.value, created];
