@@ -336,9 +336,10 @@ def test_process_incoming_shared_inbox_object_follow_notifies_owner(engine, tmp_
 
 
 def test_process_incoming_like_and_announce(engine, tmp_path, monkeypatch):
-    """Federated Like and Announce create like/boost notifications."""
+    """Federated Like and Announce create like/boost notifications for the owner."""
     config = _make_config(tmp_path)
     user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
 
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
 
@@ -361,6 +362,60 @@ def test_process_incoming_like_and_announce(engine, tmp_path, monkeypatch):
     assert {r.type for r in rows} == {"like", "boost"}
     for row in rows:
         assert row.source_url == "https://music.example.com/users/alice/objects/t1"
+
+
+def test_process_incoming_like_announce_skip_non_owner(engine, tmp_path, monkeypatch):
+    """A Like/Announce of someone else's post does not notify the addressee."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    carol = _seed_alice(engine, config, username="carol")
+    _seed_local_object(engine, carol, object_id="c1")
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    for activity_type in ("Like", "Announce"):
+        with (
+            patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+            patch("songhive.tasks.federation.get_federation_storage"),
+            _patch_db(engine),
+        ):
+            mock_processor.return_value.process.return_value = {"ok": True}
+            activity = {
+                "type": activity_type,
+                "id": f"https://remote.example/activities/{activity_type}",
+                "actor": "https://remote.example/users/bob",
+                "object": "https://music.example.com/users/carol/objects/c1",
+            }
+            process_incoming(activity, username="alice")
+
+    assert _notifications_for(engine, user.id) == []
+
+
+def test_process_incoming_shared_inbox_announce_remote_object_notifies_nobody(engine, tmp_path, monkeypatch):
+    """A followed actor boosting an unrelated remote post notifies nobody."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    actor = "https://remote.example/users/bob"
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        activity = {
+            "type": "Announce",
+            "id": "https://remote.example/activities/a1",
+            "actor": actor,
+            "object": "https://elsewhere.example/users/kali/statuses/1",
+            "to": ["https://www.w3.org/ns/activitystreams#Public"],
+            "cc": [f"{actor}/followers"],
+        }
+        process_incoming(activity, username=None)
+
+    assert _notifications_for(engine, user.id) == []
 
 
 def test_process_incoming_no_username_creates_nothing(engine, tmp_path, monkeypatch):
@@ -1032,6 +1087,8 @@ def test_process_incoming_undo_like_retracts_notification(engine, tmp_path, monk
     """An Undo(Like) removes the like notification for the undone object."""
     config = _make_config(tmp_path)
     user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
+    _seed_local_object(engine, user, object_id="t2")
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
 
     actor = "https://remote.example/users/bob"
@@ -1108,6 +1165,7 @@ def test_process_incoming_delete_actor_retracts_all(engine, tmp_path, monkeypatc
     """A Delete of the actor itself removes every notification they produced."""
     config = _make_config(tmp_path)
     user = _seed_alice(engine, config)
+    _seed_local_object(engine, user)
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
 
     actor = "https://remote.example/users/bob"
@@ -1416,27 +1474,29 @@ def test_process_incoming_note_snapshot_truncates_content(engine, tmp_path, monk
     ]
 
 
-def test_process_incoming_like_on_remote_object_stays_unresolved(engine, tmp_path, monkeypatch):
-    """A Like on a non-local object keeps only the source URL."""
+def test_process_incoming_like_and_announce_on_remote_object_notify_nobody(engine, tmp_path, monkeypatch):
+    """A Like/Announce of a non-local object notifies nobody.
+
+    A followed remote actor boosting or liking a post the instance does
+    not host does not concern the recipient — the interaction stays in
+    pubby's ``federation_interactions`` records only.
+    """
     config = _make_config(tmp_path)
     user = _seed_alice(engine, config)
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
 
-    _process(
-        engine,
-        {
-            "type": "Like",
-            "id": "https://remote.example/activities/l2",
-            "actor": "https://remote.example/users/bob",
-            "object": "https://other.example/objects/nope",
-        },
-    )
+    for activity_type in ("Like", "Announce"):
+        _process(
+            engine,
+            {
+                "type": activity_type,
+                "id": f"https://remote.example/activities/{activity_type.lower()}2",
+                "actor": "https://remote.example/users/bob",
+                "object": "https://other.example/objects/nope",
+            },
+        )
 
-    rows = _notifications_for(engine, user.id)
-    assert [r.type for r in rows] == ["like"]
-    payload = rows[0].payload
-    assert "item_type" not in payload
-    assert "local_url" not in payload
+    assert _notifications_for(engine, user.id) == []
 
 
 def test_process_incoming_update_note_refreshes_snapshot(engine, tmp_path, monkeypatch):

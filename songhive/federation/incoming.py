@@ -9,9 +9,13 @@ local one. A ``Create`` targeting no known activity — a standalone post,
 or a reply/quote whose parent was never cached — is stored through
 ``services.remote_content.materialize_remote_post`` as a
 ``remote_objects`` row mirrored by an ``entity_type="remote"``
-``Activity``. Inbound ``Update`` and ``Delete`` activities revise or
-retract materialized rows, and an ``Accept`` of a ``QuoteRequest`` we
-sent stamps the returned ``QuoteAuthorization`` onto our quoting post.
+``Activity``. An inbound ``Announce`` from a followed actor is stored as
+a remote ``announce`` row pointing at the boosted activity — which is
+dereferenced and cached first when it is not known locally — and an
+``Undo`` of it retracts the row. Inbound ``Update`` and ``Delete``
+activities revise or retract materialized rows, and an ``Accept`` of a
+``QuoteRequest`` we sent stamps the returned ``QuoteAuthorization``
+onto our quoting post.
 
 Publicly addressed objects are stored with the entity-clamped ``public``
 visibility. Non-public ones (direct messages, followers-only) are stored
@@ -28,6 +32,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
+from fastapi import HTTPException
 from pubby import AttributionMismatch, validate_attribution
 from pubby.audience import addressees, is_public, mentioned_actors
 from pubby.quotes import extract_quote_target
@@ -49,6 +54,7 @@ from ..services.activities import (
     resolve_entity,
 )
 from ..services.preview_cards import schedule_preview_card_fetch
+from .fetch import FetchError
 from .notifications import strip_quote_fallback
 from .storage import get_or_create_private_key
 
@@ -507,6 +513,103 @@ async def materialize_remote_quote(
     )
 
 
+async def materialize_remote_announce(
+    session: AsyncSession,
+    *,
+    activity: dict,
+    config: Optional[SonghiveConfig] = None,
+) -> Optional[Activity]:
+    """
+    Store an inbound ``Announce`` as a ``source_type="remote"`` activity.
+
+    The boost row mirrors a local ``boost_activity`` row: it attaches to
+    the boosted activity's entity, links to it through
+    ``in_reply_to_activity_id`` — so timelines render it as an "X boosted"
+    card — and inherits the target's visibility when publicly addressed
+    (``mentioned`` otherwise, provided it addresses a local user).
+
+    A boosted object unknown locally is dereferenced through
+    ``remote_content.dereference_remote_object`` — the guarded fetch
+    caches it in ``remote_objects``, materializes its mirror activity,
+    and resolves (and caches) its author actor. The boosting actor is
+    cached through ``lookup_remote_actor`` as well so the card renders a
+    profile. Re-delivery is idempotent on ``(source_type, source_id)``
+    keyed by the Announce's own ``id``. Returns ``None`` when the
+    activity is malformed, the object cannot be resolved or fetched, or
+    a non-public Announce addresses no local user.
+    """
+    if activity.get("type") != "Announce":
+        return None
+    actor = activity.get("actor")
+    if not isinstance(actor, str) or not actor.startswith(("http://", "https://")):
+        return None
+    obj = activity.get("object")
+    object_uri = obj if isinstance(obj, str) else obj.get("id") if isinstance(obj, dict) else None
+    if not isinstance(object_uri, str) or not object_uri.startswith(("http://", "https://")):
+        return None
+    announce_id = activity.get("id")
+    if not isinstance(announce_id, str) or not announce_id:
+        return None
+
+    existing = await session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == announce_id,
+        )
+    )
+    if existing is not None:
+        return existing
+
+    target = await _resolve_object_activity(session, object_uri)
+    if target is None and config is not None:
+        try:
+            result = await remote_content_service.dereference_remote_object(session, config, object_uri)
+        except (FetchError, HTTPException, AttributionMismatch) as exc:
+            logger.info("Cannot dereference boosted object %s: %s", object_uri, exc)
+            return None
+        if result.status != "gone":
+            target = result.activity
+    if target is None or target.deleted_at is not None:
+        return None
+
+    if config is not None:
+        # The boosting actor is normally cached already by the inbox's
+        # signature verification; refresh-on-miss keeps the card's
+        # profile fields populated regardless.
+        try:
+            await remote_content_service.lookup_remote_actor(session, config, actor)
+        except Exception as exc:
+            logger.debug("Could not cache boosting actor %s: %s", actor, exc)
+
+    public = is_public(activity)
+    mentions = await _remote_mentions(session, activity)
+    if not public and not any(m["user_id"] for m in mentions):
+        # A non-public boost addressing no local user has no audience here.
+        return None
+
+    row = Activity(
+        entity_type=target.entity_type,
+        entity_id=target.entity_id,
+        activity_type="announce",
+        source_type="remote",
+        source_actor=actor,
+        source_id=announce_id,
+        owner_user_id=None,
+        visibility=target.visibility if public else Visibility.MENTIONED.value,
+        in_reply_to_activity_id=str(target.id),
+        payload=activity,
+        published_at=_parse_published(activity.get("published")) or datetime.now(timezone.utc),
+    )
+    session.add(row)
+    await session.flush()
+
+    for mention in mentions:
+        session.add(ActivityMention(activity_id=row.id, **mention))
+    await session.flush()
+    logger.info("Materialized remote announce %s of %s from %s", announce_id, object_uri, actor)
+    return row
+
+
 async def update_remote_object(
     session: AsyncSession,
     *,
@@ -617,13 +720,47 @@ async def retract_remote_object(session: AsyncSession, *, activity: dict) -> Non
         row.deleted_at = datetime.now(timezone.utc)
         # Standalone posts mirror a ``remote_objects`` row — tombstone it
         # too so the object page reports the object as gone instead of
-        # serving the cached copy.
+        # serving the cached copy. Reaction rows (e.g. announces) share
+        # the entity but point at it through ``in_reply_to_activity_id``
+        # rather than mirroring it — retracting them must not tombstone
+        # the boosted object's cache row.
         if row.entity_type == "remote":
             remote_object = await remote_content_service.get_cached_remote_object(session, row.entity_id)
-            if remote_object is not None:
+            if remote_object is not None and remote_object.canonical_url == target:
                 remote_object.unavailable_at = row.deleted_at
         await session.flush()
         logger.info("Retracted remote %s %s from %s", row.activity_type, target, actor)
+
+
+async def retract_remote_undo(session: AsyncSession, *, activity: dict) -> None:
+    """
+    Apply an inbound ``Undo`` to a materialized remote ``announce`` row.
+
+    The ``Undo`` may wrap the whole ``Announce`` or carry only its id —
+    either way the stored row is matched on ``(source_id, source_actor)``
+    and soft-deleted, mirroring how ``retract_remote_object`` treats a
+    ``Delete``. Other undone types are ignored: only announces are
+    materialized as remote reaction rows.
+    """
+    if activity.get("type") != "Undo":
+        return
+    actor = activity.get("actor")
+    inner = activity.get("object")
+    if isinstance(inner, dict):
+        inner_id = inner.get("id")
+        inner_type = inner.get("type")
+    else:
+        inner_id, inner_type = inner, None
+    if not isinstance(inner_id, str) or not inner_id or not isinstance(actor, str):
+        return
+    if inner_type is not None and inner_type != "Announce":
+        return
+
+    row = await _find_remote_object(session, inner_id, actor)
+    if row is not None and row.activity_type == "announce" and row.deleted_at is None:
+        row.deleted_at = datetime.now(timezone.utc)
+        await session.flush()
+        logger.info("Retracted remote announce %s from %s", inner_id, actor)
 
 
 async def apply_quote_authorization(
@@ -728,8 +865,11 @@ async def sync_remote_activity(
     ``QuoteAuthorization`` onto the quoting post. Newly materialized
     public replies and quotes are relayed to remote actors following an
     object in the thread — object-scoped follows (e.g. Friendica thread
-    subscriptions) — signed by the nearest local ancestor's owner. Other
-    activity types are ignored — likes and boosts stay interaction-only.
+    subscriptions) — signed by the nearest local ancestor's owner.
+    ``Announce`` from a followed actor materializes as a remote
+    ``announce`` row — dereferencing the boosted object first when it is
+    not cached — and an ``Undo`` of one retracts it. Other activity types
+    are ignored — likes stay interaction-only.
     """
     activity_type = activity.get("type")
     if activity_type == "Create":
@@ -766,8 +906,16 @@ async def sync_remote_activity(
         ):
             return
         await update_remote_object(session, activity=activity, config=config)
+    elif activity_type == "Announce":
+        actor = activity.get("actor")
+        # Boosts are only stored for actors some local user follows —
+        # the same admission rule as inbound ``Create`` objects.
+        if isinstance(actor, str) and await follows_service.actor_is_followed(session, actor):
+            await materialize_remote_announce(session, activity=activity, config=config)
     elif activity_type == "Delete":
         await retract_remote_object(session, activity=activity)
+    elif activity_type == "Undo":
+        await retract_remote_undo(session, activity=activity)
     elif activity_type == "Accept":
         await apply_quote_authorization(session, activity=activity, config=config)
         await follows_service.apply_follow_decision(session, activity=activity)

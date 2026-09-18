@@ -269,10 +269,12 @@ def _sync_remote_activities(config, activity: dict) -> None:
     accept interactions; ``Update``/``Delete`` revise or retract them, and
     an ``Accept`` answering a ``QuoteRequest`` we sent stamps the issued
     authorization onto the quoting post. ``Accept``/``Reject`` activities
-    answering a ``Follow`` we sent resolve the local follow row. Likes and
-    boosts stay interaction-only.
+    answering a ``Follow`` we sent resolve the local follow row. An
+    ``Announce`` from a followed actor materializes as a remote
+    ``announce`` row — the boosted object is dereferenced and cached when
+    unknown — and an ``Undo`` retracts it. Likes stay interaction-only.
     """
-    if activity.get("type") not in ("Create", "Update", "Delete", "Accept", "Reject"):
+    if activity.get("type") not in ("Create", "Update", "Delete", "Accept", "Reject", "Announce", "Undo"):
         return
 
     from ..federation.incoming import sync_remote_activity
@@ -331,7 +333,11 @@ def _sync_inbox_notifications(config, activity: dict, username: Optional[str], s
                     user = await get_user_by_username(session, username)
                     recipients = [user] if user is not None else []
                 else:
-                    recipients = await resolve_inbox_recipients(session, activity=activity)
+                    recipients = await resolve_inbox_recipients(
+                        session,
+                        activity=activity,
+                        instance_domain=config.federation.instance_domain,
+                    )
                 for recipient in recipients:
                     await create_inbox_notifications(
                         session,

@@ -9,8 +9,9 @@ Maps federated interactions to user notifications:
   follows held for manual approval carry ``follow_request_pending`` so
   clients can render accept/reject controls; rejected follows create no
   notification at all
-- ``Like`` → ``like``
-- ``Announce`` → ``boost``
+- ``Like`` → ``like``; ``Announce`` → ``boost`` — only when the target
+  resolves to a local object owned by the recipient (a like/boost
+  delivered to a follower inbox does not concern them)
 - ``Create`` (Note): ``quote`` when the note quotes a local object URL,
   otherwise ``reply`` when it has ``inReplyTo`` (a note that is both emits
   only ``quote``), plus ``mention`` whenever the note's ``tag`` entries
@@ -456,20 +457,26 @@ def _activity_audience_urls(activity: dict) -> set:
     return {url for url in candidates if isinstance(url, str) and url.startswith(("http://", "https://"))}
 
 
-async def _target_owner_users(session: AsyncSession, urls: set) -> List[User]:
+async def _target_owner_users(
+    session: AsyncSession,
+    urls: set,
+    instance_domain: Optional[str] = None,
+) -> List[User]:
     """
     Resolve object URLs to the local users owning them.
 
     Activity targets are matched by ``source_id`` (or ``local_object_id``
     for the ``/objects/{id}`` permalink form); track ``Audio`` objects are
-    matched by ``federation_object_id``. Each distinct owner is returned
-    once.
+    matched by ``federation_object_id``; ``/{plural}/{id}`` page URLs on
+    the instance domain resolve to their entity's ``owner_id``. Each
+    distinct owner is returned once.
     """
     users: List[User] = []
     seen = set()
     for url in urls:
         conditions = [Activity.source_id == url]
-        match = re.search(r"/objects/([^/?#]+)/?$", urlparse(url).path or "")
+        parsed = urlparse(url)
+        match = re.search(r"/objects/([^/?#]+)/?$", parsed.path or "")
         if match:
             object_id = match.group(1)
             conditions += [Activity.local_object_id == object_id, Activity.source_id == object_id]
@@ -479,6 +486,12 @@ async def _target_owner_users(session: AsyncSession, urls: set) -> List[User]:
                 select(Track.owner_id).where(Track.federation_object_id == match.group(1)).limit(1)
             )
             owner_id = track
+        if owner_id is None and instance_domain and parsed.netloc == instance_domain:
+            parts = [p for p in parsed.path.split("/") if p]
+            item_type = _PLURAL_TO_ITEM_TYPE.get(parts[0]) if len(parts) == 2 else None
+            if item_type is not None:
+                item = await acl.get_item(session, item_type, parts[1])
+                owner_id = getattr(item, "owner_id", None) if item is not None else None
         if owner_id and str(owner_id) not in seen:
             user = await session.get(User, owner_id)
             if user is not None:
@@ -494,7 +507,12 @@ def _object_is_public(obj: Any) -> bool:
     return is_public(obj)
 
 
-async def resolve_inbox_recipients(session: AsyncSession, *, activity: dict) -> List[User]:
+async def resolve_inbox_recipients(
+    session: AsyncSession,
+    *,
+    activity: dict,
+    instance_domain: Optional[str] = None,
+) -> List[User]:
     """
     Return the local users an inbound activity addresses or targets.
 
@@ -516,7 +534,7 @@ async def resolve_inbox_recipients(session: AsyncSession, *, activity: dict) -> 
     obj = activity.get("object")
     resolve_target_owners = activity.get("type") != "Create" or _object_is_public(obj)
     if resolve_target_owners:
-        for user in await _target_owner_users(session, candidates):
+        for user in await _target_owner_users(session, candidates, instance_domain=instance_domain):
             if str(user.id) not in seen:
                 seen.add(str(user.id))
                 recipients.append(user)
@@ -560,7 +578,7 @@ async def _create_follow_inbox_notification(
     elif isinstance(target, str) and target:
         resolved = await _resolve_local_object(session, target, instance_domain)
         if resolved is not None:
-            owners = await _target_owner_users(session, {target})
+            owners = await _target_owner_users(session, {target}, instance_domain=instance_domain)
             if not any(str(owner.id) == str(recipient.id) for owner in owners):
                 return
             payload = {
@@ -644,7 +662,7 @@ async def _create_quote_inbox_notification(
         # The quoted object is unknown — the request does not concern
         # a local post of this recipient.
         return
-    owners = await _target_owner_users(session, {quoted_uri})
+    owners = await _target_owner_users(session, {quoted_uri}, instance_domain=instance_domain)
     if not any(str(owner.id) == str(recipient.id) for owner in owners):
         # The quoted object is local but belongs to someone else — the
         # request was misaddressed to this recipient's inbox.
@@ -691,7 +709,7 @@ async def _process_incoming_quote_notification(
     stays unseen.
     """
     resolved = await _resolve_local_object(session, quote_target, instance_domain)
-    owners = await _target_owner_users(session, {quote_target})
+    owners = await _target_owner_users(session, {quote_target}, instance_domain=instance_domain)
     if resolved is not None and any(str(owner.id) == str(recipient.id) for owner in owners):
         # Only the quoted post's owner gets "quoted your post" — a
         # quote of someone else's post that merely tags the recipient
@@ -741,7 +759,7 @@ async def _process_incoming_reply_notification(
     """
 
     resolved = await _resolve_local_object(session, in_reply_to, instance_domain)
-    owners = await _target_owner_users(session, {in_reply_to})
+    owners = await _target_owner_users(session, {in_reply_to}, instance_domain=instance_domain)
     if resolved is not None and any(str(owner.id) == str(recipient.id) for owner in owners):
         # Only the replied-to post's owner gets "replied to your
         # post" — a reply to someone else's post that merely tags
@@ -825,13 +843,20 @@ async def create_inbox_notifications(
     if activity_type in ("Like", "Announce"):
         source_url = obj if isinstance(obj, str) else None
         resolved = await _resolve_local_object(session, source_url, instance_domain)
+        owners = await _target_owner_users(session, {source_url}, instance_domain=instance_domain) if source_url else []
+        if resolved is None or not any(str(owner.id) == str(recipient.id) for owner in owners):
+            # Only the target's owner gets "liked/boosted your post" — a
+            # like/boost delivered to a follower inbox (e.g. a followed
+            # actor relaying a remote post) does not concern the recipient,
+            # matching ``_notify_reaction`` on the local path.
+            return
         await create_notification(
             session,
             user_id=recipient.id,
             type=NotificationType.LIKE if activity_type == "Like" else NotificationType.BOOST,
             actor_url=actor_url,
             source_url=source_url,
-            payload={**payload, **(resolved or {})},
+            payload={**payload, **resolved},
         )
         return
 

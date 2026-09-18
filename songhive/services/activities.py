@@ -21,7 +21,7 @@ from fastapi import HTTPException
 from pubby import InteractionType, allow_public_quotes, set_quote_target
 from pubby.content import render_post_html, set_object_content
 from pydantic import BaseModel, field_validator
-from sqlalchemy import and_, delete, func
+from sqlalchemy import and_, delete
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -838,16 +838,20 @@ async def resolve_interaction_summaries(
     ids = [str(a.id) for a in activities]
     counts: Dict[str, Dict[str, int]] = {i: {"like": 0, "announce": 0, "reply": 0, "quote": 0} for i in ids}
     rows = await session.execute(
-        select(Activity.in_reply_to_activity_id, Activity.activity_type, func.count())
-        .where(
+        select(Activity.in_reply_to_activity_id, Activity.activity_type, Activity.source_id).where(
             Activity.in_reply_to_activity_id.in_(ids),
             Activity.activity_type.in_(("like", "announce")),
             Activity.deleted_at.is_(None),
         )
-        .group_by(Activity.in_reply_to_activity_id, Activity.activity_type)
     )
-    for target_id, activity_type, count in rows.all():
-        counts[str(target_id)][activity_type] += count
+    # ``materialized`` tracks the reaction activity ids already backed by a
+    # row — a remote announce materialized into an ``Activity`` row is also
+    # recorded by pubby as a BOOST interaction, so its record is skipped in
+    # the remote pass to avoid counting it twice.
+    materialized: Dict[str, Set[str]] = {}
+    for target_id, activity_type, source_id in rows.all():
+        counts[str(target_id)][activity_type] += 1
+        materialized.setdefault(str(target_id), set()).add(source_id)
 
     reacted: Dict[str, Set[str]] = {"like": set(), "announce": set()}
     if user is not None:
@@ -864,11 +868,14 @@ async def resolve_interaction_summaries(
 
     remote = await _remote_interactions(config, {a.source_id for a in activities})
     for activity in activities:
+        seen = materialized.get(str(activity.id), set())
         for interaction in remote.get(activity.source_id, []):
             for activity_type, interaction_type in _REMOTE_INTERACTION_TYPES.items():
                 if activity_type == "reply":
                     continue
                 if interaction.interaction_type == interaction_type:
+                    if getattr(interaction, "activity_id", None) in seen:
+                        continue
                     counts[str(activity.id)][activity_type] += 1
 
     await _add_threaded_reply_counts(session, activities, counts, config, user)
@@ -1113,8 +1120,14 @@ async def list_activity_interactors(
             )
         )
 
+    # Remote interactions already materialized into ``Activity`` rows
+    # (e.g. a followed actor's announce) are skipped so the actor is not
+    # listed twice — the row pass above already credited them.
+    materialized = {row.source_id for row in rows}
     remote = await _remote_interactions(config, [activity.source_id], _REMOTE_INTERACTION_TYPES[interaction_type])
     for interaction in remote.get(activity.source_id, []):
+        if getattr(interaction, "activity_id", None) in materialized:
+            continue
         actors.append(
             InteractionActor(
                 actor=interaction.source_actor_id,

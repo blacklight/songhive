@@ -185,9 +185,13 @@
   `federation_followers`/`federation_follow_requests` tables only track the
   inbound side. `services/follows.py` resolves targets, delivers
   `Follow`/`Undo(Follow)`, and folds inbound `Accept`/`Reject` back into the
-  row. Inbound `Create` activities are only materialized when the actor is
-  followed by a local user (`actor_is_followed`); explicit remote-URL lookups
-  are the other admission path. Stale remote activities are pruned by
+  row. Inbound `Create` and `Announce` activities are only materialized when
+  the actor is followed by a local user (`actor_is_followed`); explicit
+  remote-URL lookups are the other admission path. An `Announce` of an
+  object unknown locally is dereferenced through
+  `remote_content.dereference_remote_object` (guarded fetch →
+  `remote_objects` row + mirror `Activity`) before the `announce` row is
+  stored; `Undo(Announce)` retracts it. Stale remote activities are pruned by
   `tasks.federation.prune_remote_activities` / `songhive admin
   prune-remote-activities` / `POST /api/v1/admin/federation/prune-remote-activities`,
   gated on `federation.remote_activity_retention_days` and scheduled via

@@ -1540,9 +1540,10 @@ remote-actor endpoint reports `follow_state` for authenticated callers.
 The SPA renders the list at `/@{username}/follows` (pending badges for
 the owner) and follow/unfollow buttons on local and remote profiles.
 
-**Inbound remote replies and quotes** are materialized into `Activity`
-rows by `federation/incoming.py`, invoked from `tasks/federation.py`'s
-`process_incoming` for `Create`/`Update`/`Delete`/`Accept`/`Reject`
+**Inbound remote replies, quotes and announces** are materialized into
+`Activity` rows by `federation/incoming.py`, invoked from
+`tasks/federation.py`'s `process_incoming` for
+`Create`/`Update`/`Delete`/`Accept`/`Reject`/`Announce`/`Undo`
 activities after pubby's `InboxProcessor` has run. Admission is gated on
 the outbound-follow graph: a `Create` is only stored when its
 `activity.actor` is followed by at least one local user
@@ -1592,7 +1593,10 @@ payload — and fans out an `Update` — but only when the accepting actor is
 the quoted post's author and the `instrument`/`object` match the recorded
 quote and target. Because the Pubby `federation_interactions` record
 is kept alongside the row, reply/quote counts and listings deduplicate on
-`object_id`. Materialized replies and quotes render as regular activity
+`object_id`; boosts (stored `announce` rows vs. recorded `BOOST`
+interactions) deduplicate on `activity_id` — the announce's own id —
+since the interaction record has no separate object id. Materialized
+replies and quotes render as regular activity
 cards and
 accept the same interactions as local ones: likes and boosts federate
 to the remote author's inbox through `fan_out_like_activity`/
@@ -1600,6 +1604,24 @@ to the remote author's inbox through `fan_out_like_activity`/
 author via
 a `Mention` tag with `inReplyTo`/quote fields set to the remote
 `source_id`.
+
+An inbound `Announce` from a followed actor
+(`materialize_remote_announce`) is stored as a `source_type="remote"`
+`announce` row attached to the boosted activity's entity through
+`in_reply_to_activity_id` — the same shape `boost_activity` produces
+locally — so the boost surfaces in timelines as an "X boosted" card. A
+boosted object unknown locally is first fetched through
+`remote_content.dereference_remote_object` — the guarded remote fetch
+that upserts the `remote_objects` cache row, materializes the object's
+mirror `Activity`, and caches its author actor — and the boosting actor
+is refreshed through `lookup_remote_actor` so the card renders a
+profile. Publicly addressed announces inherit the target's visibility;
+non-public ones are stored with `mentioned` visibility only when they
+address a local user. `Undo(Announce)` — whether it wraps the full
+announce or only its id — soft-deletes the row, and `Delete` of an
+announce retracts it without tombstoning the boosted object's cache row
+(only rows mirroring the deleted object itself tombstone their
+`remote_objects` row). Likes stay interaction-only.
 
 **Instance-level actor:**
 
@@ -1826,11 +1848,15 @@ share grant (`api/routes/shares.py` via `services/sharing.py`'s
 Announce/Create/QuoteRequest activities for each resolved local recipient
 — the addressed user for per-user inboxes, `resolve_inbox_recipients`'
 audience resolution for shared-inbox deliveries — `quote` wins over
-`reply` when a Create is both, and only the target's owner gets the
+`reply` when a Create is both, only the target's owner gets the
 `reply`/`quote` notification (a reply or quote of someone else's post
 that merely tags the recipient stays a `mention`, which is otherwise
-suppressed once a reply/quote notification for the same note fired) —
-and stamps matching `ActivityMention.notified_at` rows. A FEP-044f
+suppressed once a reply/quote notification for the same note fired),
+and a `Like`/`Announce` likewise only notifies the target's owner (a
+followed actor's like or boost of somebody else's — or a remote — post
+notifies nobody: the interaction is pubby's `federation_interactions`
+record plus, for followed actors' announces, a materialized `announce`
+row) — and stamps matching `ActivityMention.notified_at` rows. A FEP-044f
 `QuoteRequest` (auto-approved by pubby, which stores a dereferenceable
 `QuoteAuthorization` and answers `Accept`) also yields a `quote`
 notification when its `object` resolves to a local post owned by the

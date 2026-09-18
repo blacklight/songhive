@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 
 from songhive.config.schema import SonghiveConfig
 from songhive.federation.incoming import (
+    materialize_remote_announce,
     materialize_remote_quote,
     materialize_remote_reply,
     sync_remote_activity,
@@ -32,6 +33,7 @@ from songhive.services import remote_content as remote_content_service
 from songhive.services.activities import (
     boost_activity,
     like_activity,
+    list_activity_interactors,
     list_activity_quotes,
     list_activity_replies,
     quote_activity,
@@ -1313,6 +1315,389 @@ async def test_remote_quote_counts_and_lists_once(db_session, regular_user, conf
     local, remote = await list_activity_quotes(db_session, activity=target, user=regular_user, config=config)
     assert [a.id for a in local] == [quote.id]
     assert [i.object_id for i in remote] == ["https://remote.example/notes/q2"]
+
+
+# ---------------------------------------------------------------------------
+# materialize_remote_announce
+# ---------------------------------------------------------------------------
+
+
+def _announce(
+    object_uri: str,
+    *,
+    actor: str = "https://remote.example/users/bob",
+    announce_id: str = "https://remote.example/activities/a1",
+    public: bool = True,
+    published: str = "2026-09-15T12:00:00Z",
+) -> dict:
+    """Build an inbound ``Announce`` boosting ``object_uri``."""
+    return {
+        "type": "Announce",
+        "id": announce_id,
+        "actor": actor,
+        "object": object_uri,
+        "published": published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"] if public else [f"{actor}/followers"],
+        "cc": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_materialize_remote_announce_known_target(db_session, regular_user):
+    """An announce of a known activity becomes a remote announce row."""
+    track = await _make_track(db_session, regular_user)
+    target = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(target)
+    await db_session.flush()
+
+    announce = await materialize_remote_announce(db_session, activity=_announce(target.source_id))
+
+    assert announce is not None
+    assert announce.source_type == "remote"
+    assert announce.activity_type == "announce"
+    assert announce.source_actor == "https://remote.example/users/bob"
+    assert announce.source_id == "https://remote.example/activities/a1"
+    assert announce.in_reply_to_activity_id == str(target.id)
+    assert announce.entity_type == "track"
+    assert announce.entity_id == str(track.id)
+    assert announce.owner_user_id is None
+    assert announce.visibility == Visibility.PUBLIC.value
+    assert announce.published_at.isoformat().startswith("2026-09-15")
+
+
+@pytest.mark.asyncio
+async def test_materialize_remote_announce_via_sync_requires_follow(db_session, regular_user, config):
+    """``sync_remote_activity`` stores announces only from followed actors."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    target = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(target)
+    await db_session.flush()
+
+    activity = _announce(target.source_id)
+    await sync_remote_activity(db_session, activity=activity, config=config)
+    await db_session.flush()
+    assert await db_session.scalar(select(func.count(Activity.id)).where(Activity.activity_type == "announce")) == 0
+
+    db_session.add(_follow_row(regular_user, "https://remote.example/users/bob"))
+    await db_session.flush()
+    await sync_remote_activity(db_session, activity=activity, config=config)
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/activities/a1",
+        )
+    )
+    assert row is not None
+    assert row.activity_type == "announce"
+    assert row.in_reply_to_activity_id == str(target.id)
+
+
+@pytest.mark.asyncio
+async def test_materialize_remote_announce_dereferences_unknown_target(db_session, regular_user, config, monkeypatch):
+    """An unknown boosted object is fetched, cached and mirrored first."""
+    config = _fed_config(config)
+    boosted_url = "https://elsewhere.example/users/kali/statuses/1"
+    calls = []
+
+    async def _fake_dereference(session, cfg, url, *, refresh=False):
+        calls.append(url)
+        remote_object = remote_content_service.RemoteObject(
+            canonical_url=url,
+            domain="elsewhere.example",
+            object_type="Note",
+            actor_url="https://elsewhere.example/users/kali",
+            visibility="public",
+            content="<p>boosted post</p>",
+        )
+        session.add(remote_object)
+        await session.flush()
+        boosted = _make_activity(
+            "remote",
+            remote_object.id,
+            owner_user_id=None,
+            source_type="remote",
+            source_actor="https://elsewhere.example/users/kali",
+            source_id=url,
+        )
+        session.add(boosted)
+        await session.flush()
+        return remote_content_service.RemoteObjectResult(remote_object=remote_object, activity=boosted)
+
+    actor_lookups = []
+
+    async def _fake_lookup(session, cfg, actor_url):
+        actor_lookups.append(actor_url)
+        return None
+
+    monkeypatch.setattr(remote_content_service, "dereference_remote_object", _fake_dereference)
+    monkeypatch.setattr(remote_content_service, "lookup_remote_actor", _fake_lookup)
+
+    announce = await materialize_remote_announce(
+        db_session,
+        activity=_announce(boosted_url),
+        config=config,
+    )
+
+    assert calls == [boosted_url]
+    assert actor_lookups == ["https://remote.example/users/bob"]
+    assert announce is not None
+    assert announce.entity_type == "remote"
+    assert announce.in_reply_to_activity_id is not None
+    # The row attaches to the mirror the dereference materialized.
+    target = await db_session.get(Activity, announce.in_reply_to_activity_id)
+    assert target is not None
+    assert target.source_id == boosted_url
+
+
+@pytest.mark.asyncio
+async def test_materialize_remote_announce_fetch_failure_skips(db_session, regular_user, config, monkeypatch):
+    """A boosted object that cannot be fetched leaves no row."""
+    from songhive.federation.fetch import FetchError
+
+    config = _fed_config(config)
+
+    async def _boom(session, cfg, url, *, refresh=False):
+        raise FetchError("unreachable", status_code=502, url=url)
+
+    monkeypatch.setattr(remote_content_service, "dereference_remote_object", _boom)
+
+    async def _fake_lookup(session, cfg, actor_url):
+        return None
+
+    monkeypatch.setattr(remote_content_service, "lookup_remote_actor", _fake_lookup)
+
+    announce = await materialize_remote_announce(
+        db_session,
+        activity=_announce("https://elsewhere.example/statuses/gone"),
+        config=config,
+    )
+
+    assert announce is None
+    assert await db_session.scalar(select(func.count(Activity.id)).where(Activity.activity_type == "announce")) == 0
+
+
+@pytest.mark.asyncio
+async def test_materialize_remote_announce_unknown_target_without_config(db_session, regular_user):
+    """Without a config the unknown boosted object cannot be fetched."""
+    announce = await materialize_remote_announce(
+        db_session,
+        activity=_announce("https://elsewhere.example/statuses/unknown"),
+    )
+
+    assert announce is None
+
+
+@pytest.mark.asyncio
+async def test_materialize_remote_announce_idempotent(db_session, regular_user):
+    """Re-delivering the same Announce returns the existing row."""
+    track = await _make_track(db_session, regular_user)
+    target = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(target)
+    await db_session.flush()
+
+    first = await materialize_remote_announce(db_session, activity=_announce(target.source_id))
+    second = await materialize_remote_announce(db_session, activity=_announce(target.source_id))
+
+    assert first is not None and second is not None
+    assert second.id == first.id
+    assert (await db_session.scalar(select(func.count(Activity.id)).where(Activity.activity_type == "announce"))) == 1
+
+
+@pytest.mark.asyncio
+async def test_materialize_remote_announce_skips_non_public_without_local_audience(db_session, regular_user):
+    """A followers-only announce addressing no local user is not stored."""
+    track = await _make_track(db_session, regular_user)
+    target = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(target)
+    await db_session.flush()
+
+    announce = await materialize_remote_announce(
+        db_session,
+        activity=_announce(target.source_id, public=False),
+    )
+
+    assert announce is None
+
+
+@pytest.mark.asyncio
+async def test_materialize_remote_announce_non_public_to_local_user(db_session, regular_user):
+    """A non-public announce addressing a local user stores ``mentioned``."""
+    regular_user.actor_url = "https://local.example/users/regular"
+    track = await _make_track(db_session, regular_user)
+    target = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(target)
+    await db_session.flush()
+
+    activity = _announce(target.source_id, public=False)
+    activity["to"] = [regular_user.actor_url]
+    announce = await materialize_remote_announce(db_session, activity=activity)
+
+    assert announce is not None
+    assert announce.visibility == Visibility.MENTIONED.value
+
+
+@pytest.mark.asyncio
+async def test_undo_announce_retracts(db_session, regular_user, config):
+    """An Undo(Announce) soft-deletes the materialized row."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    target = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(target)
+    await db_session.flush()
+    announce = await materialize_remote_announce(db_session, activity=_announce(target.source_id))
+    assert announce is not None
+
+    await sync_remote_activity(
+        db_session,
+        activity={
+            "type": "Undo",
+            "id": "https://remote.example/activities/u1",
+            "actor": "https://remote.example/users/bob",
+            "object": _announce(target.source_id),
+        },
+        config=config,
+    )
+    await db_session.flush()
+
+    assert announce.deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_undo_announce_bare_id_retracts(db_session, regular_user, config):
+    """An Undo carrying only the announce id still retracts the row."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    target = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(target)
+    await db_session.flush()
+    announce = await materialize_remote_announce(db_session, activity=_announce(target.source_id))
+    assert announce is not None
+
+    await sync_remote_activity(
+        db_session,
+        activity={
+            "type": "Undo",
+            "id": "https://remote.example/activities/u1",
+            "actor": "https://remote.example/users/bob",
+            "object": "https://remote.example/activities/a1",
+        },
+        config=config,
+    )
+    await db_session.flush()
+
+    assert announce.deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_undo_announce_wrong_actor_keeps_row(db_session, regular_user, config):
+    """An Undo only retracts announces by its own actor."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    target = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(target)
+    await db_session.flush()
+    announce = await materialize_remote_announce(db_session, activity=_announce(target.source_id))
+    assert announce is not None
+
+    await sync_remote_activity(
+        db_session,
+        activity={
+            "type": "Undo",
+            "id": "https://remote.example/activities/u1",
+            "actor": "https://remote.example/users/mallory",
+            "object": _announce(target.source_id),
+        },
+        config=config,
+    )
+    await db_session.flush()
+
+    assert announce.deleted_at is None
+
+
+@pytest.mark.asyncio
+async def test_delete_announce_keeps_boosted_cache_row(db_session, regular_user, config):
+    """Deleting an announce does not tombstone the boosted object's cache."""
+    config = _fed_config(config)
+    boosted_url = "https://elsewhere.example/users/kali/statuses/1"
+    remote_object = remote_content_service.RemoteObject(
+        canonical_url=boosted_url,
+        domain="elsewhere.example",
+        object_type="Note",
+        actor_url="https://elsewhere.example/users/kali",
+        visibility="public",
+    )
+    db_session.add(remote_object)
+    await db_session.flush()
+    boosted = _make_activity(
+        "remote",
+        remote_object.id,
+        owner_user_id=None,
+        source_type="remote",
+        source_actor="https://elsewhere.example/users/kali",
+        source_id=boosted_url,
+    )
+    db_session.add(boosted)
+    await db_session.flush()
+    announce = await materialize_remote_announce(db_session, activity=_announce(boosted_url))
+    assert announce is not None
+
+    await sync_remote_activity(
+        db_session,
+        activity={
+            "type": "Delete",
+            "actor": "https://remote.example/users/bob",
+            "object": {"type": "Tombstone", "id": "https://remote.example/activities/a1"},
+        },
+        config=config,
+    )
+    await db_session.flush()
+
+    assert announce.deleted_at is not None
+    assert boosted.deleted_at is None
+    assert remote_object.unavailable_at is None
+
+
+@pytest.mark.asyncio
+async def test_remote_announce_counts_and_lists_once(db_session, regular_user, config, monkeypatch):
+    """A boost backed by a row and a BOOST interaction counts/lists once."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    target = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(target)
+    await db_session.flush()
+    announce = await materialize_remote_announce(db_session, activity=_announce(target.source_id))
+    assert announce is not None
+
+    # Pubby records the same inbound Announce as a BOOST interaction whose
+    # ``activity_id`` is the announce's own id — the row and the record are
+    # the same boost, so it must not count or list twice.
+    same_boost = Interaction(
+        source_actor_id="https://remote.example/users/bob",
+        target_resource=target.source_id,
+        interaction_type=InteractionType.BOOST,
+        activity_id=announce.source_id,
+        published=datetime.now(timezone.utc),
+    )
+    other_boost = Interaction(
+        source_actor_id="https://remote.example/users/carol",
+        target_resource=target.source_id,
+        interaction_type=InteractionType.BOOST,
+        activity_id="https://remote.example/activities/a9",
+        published=datetime.now(timezone.utc),
+    )
+    _patch_interactions(monkeypatch, [same_boost, other_boost])
+
+    summaries = await resolve_interaction_summaries(db_session, [target], regular_user, config)
+    assert summaries[str(target.id)].boost_count == 2
+
+    actors = await list_activity_interactors(db_session, activity=target, interaction_type="announce", config=config)
+    assert [a.actor for a in actors] == [
+        "https://remote.example/users/carol",
+        "https://remote.example/users/bob",
+    ]
 
 
 # ---------------------------------------------------------------------------
