@@ -1055,6 +1055,78 @@ local Songhive track and keep the uploaded file) or `action=discard_upload`
 
 ---
 
+## API Adapters (Subsonic)
+
+Besides the native `/api/v1` surface, Songhive can expose *foreign* media APIs
+so third-party clients can browse and stream its content. These integrations
+live in `songhive/adapters/` — a different adapter family from
+`songhive/external/` (which *imports* remote libraries into Songhive). API
+adapters map Songhive's services and ACLs onto an external protocol; the
+first implementation is Subsonic/OpenSubsonic, and the registry is designed
+for future Icecast/Mopidy/Jellyfin adapters.
+
+Framework (`songhive/adapters/`):
+
+- `base.py` — `APIAdapter` interface: `name`, `is_enabled(config)`,
+  `router()` (FastAPI routes), `tornado_routes()` (native handlers for
+  streaming), `include(app, config)`.
+- `registry.py` — name-keyed registry (`register_adapter`, `get_adapter`,
+  `list_adapters`), `mount_adapters(app, config)` invoked from `create_app`,
+  and `adapter_tornado_routes(config)` consumed by `_build_tornado_app`
+  ahead of the WSGI fallback.
+- Each adapter owns its complete URL namespace (Subsonic owns `/rest`).
+
+Subsonic adapter (`songhive/adapters/subsonic/`):
+
+- **Namespace** — `/rest/*.view`, the path Subsonic clients hard-code.
+  `ping`, `getLicense`, `getMusicFolders`, browsing (`getIndexes`,
+  `getArtists`, `getArtist`, `getAlbum`, `getSong`, `getMusicDirectory`,
+  `getArtistInfo*`, `getAlbumInfo*`), `getAlbumList*`, `getGenres`,
+  `getSongsByGenre`, `getRandomSongs`, `search*` variants, playlists
+  (`getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`,
+  `deletePlaylist`), starring (`getStarred*`, `star`, `unstar`),
+  `scrobble`, `nowPlaying`, `getNowPlaying`, `stream`, `download`,
+  `getCoverArt`, `getAvatar`, plus an OpenSubsonic
+  `getOpenSubsonicExtensions` advertisement and a `/rest/{method}.view`
+  catch-all that returns a protocol error for unimplemented methods.
+- **Envelope** — every endpoint answers with the `subsonic-response`
+  envelope (protocol `1.16.1`, `type=songhive`, `openSubsonic=true`) in XML
+  by default, JSON via `f=json`, or JSONP via `f=jsonp`+`callback`. JSONP
+  callbacks are restricted to safe identifier paths to prevent script
+  injection.
+- **Authentication** — per-request `u`+`p` (plain, `enc:`-hex, or a Songhive
+  API token in `p`), `u`+`apiKey` (OpenSubsonic), and `u`+`t`/`s`
+  salted-token auth. Salted tokens (`md5(password + salt)`) can only be
+  verified against credentials the server can reconstruct, so the real
+  password is `p`-only — but API tokens work: HS256 JWTs are deterministic
+  given their claims, and every claim is recoverable from the `api_tokens`
+  row (`user_id`, `jti`, `expires_at`, plus `created_at` which
+  `issue_api_token` pins to the `iat` claim). `auth.py` rebuilds each
+  candidate JWT byte-for-byte (trying `created_at` ±1s for tokens issued
+  before the pin) and compares `md5(jwt + s)` to `t`, so salted-token
+  clients work with an API token as the password while no usable
+  credential is stored. Because credentials ride in request parameters
+  rather than cookies, `/rest/` is exempt from the CSRF middleware.
+- **ACL mapping** — every browse/stream path goes through the same
+  `services.acl` checks as `/api/v1`: anonymous users see public content,
+  authenticated users see public/local/owned/shared content, inaccessible
+  items map to error 50 (or 70 where the spec calls for not-found).
+- **Streaming** — under the Tornado bootstrap `/rest/stream.view` and
+  `/rest/download.view` are served natively by
+  `handlers.py` (subclasses of `StreamHandler`, reusing its range,
+  transcoding and external-stream logic with Subsonic auth/error mapping).
+  `media.py` registers the same endpoints on the FastAPI router as the
+  uvicorn fallback; `getCoverArt`/`getAvatar` are FastAPI-only.
+- **Playback reporting** — `scrobble` records listens via
+  `services.streaming.record_listen`; `nowPlaying`/`getNowPlaying` share an
+  in-process `now_playing.py` registry (also populated when tracks are
+  streamed). Mutating playlist endpoints write `AuditLog` rows through
+  `services.audit.log_action`.
+- **Config** — `subsonic.enabled` (default `true`) gates mounting; nginx
+  proxies `/rest/` with `proxy_buffering off` for streaming.
+
+---
+
 ## Database Migrations
 
 Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/).  The

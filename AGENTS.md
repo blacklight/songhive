@@ -214,11 +214,22 @@
   loose `MutableMapping`/`dict` ASGI types while `a2wsgi` uses strict TypedDict
   types. Cast to generic `Callable` signatures (e.g. with `typing.cast`) rather
   than suppressing with `# type: ignore`.
+- Foreign media APIs (Subsonic today; Icecast/Mopidy/Jellyfin planned) plug in
+  through `songhive/adapters/`: `APIAdapter` declares `is_enabled`, `router()`
+  (FastAPI routes mounted at app creation) and `tornado_routes()` (native
+  handlers installed before the WSGI fallback). The Subsonic adapter owns the
+  `/rest` namespace — `/rest/` is exempt from `CsrfMiddleware` because
+  Subsonic clients authenticate via `u`/`p`/`apiKey` request params, not
+  cookies. FastAPI matches routes in registration order, so the
+  `/rest/{method}.view` catch-all is registered last via
+  `routes.register_fallback_route()` (called from `SubsonicAdapter.router()`
+  after `media.py` registers its binary endpoints on the same router).
 
 ## Project Structure
 
 ```
 songhive/          # Python backend package
+├── adapters/      # Foreign API adapters (Subsonic at /rest, registry + base)
 ├── api/           # FastAPI app + routes
 ├── cli/           # Admin CLI
 ├── config/        # Configuration (Pydantic settings + TOML loader)

@@ -36,6 +36,7 @@
     + [Docker installation](#docker-installation-1)
     + [pip installation](#pip-installation-1)
 - [Testing the installation](#testing-the-installation)
+- [Subsonic-compatible clients](#subsonic-compatible-clients)
 - [Development](#development)
   * [Frontend](#frontend)
 - [API](#api)
@@ -63,7 +64,8 @@ federating with other instances (including Mastodon) via ActivityPub.
 - **Playlists & Radios**: Create playlists and dynamic radio stations
 - **Multi-user**: User registration, profiles, and admin management
 - **OAuth2 Provider**: Third-party app authorization
-- **Subsonic API**: Compatibility layer for Subsonic clients
+- **Subsonic API**: Compatibility layer for Subsonic clients (see
+  [Subsonic-compatible clients](#subsonic-compatible-clients))
 - **Flexible Storage**: Local filesystem or S3-compatible object storage
 - **External Libraries**: Attach external music storage (e.g. cloud adapters) to
   Songhive libraries; index, stream, and write metadata back to the provider.
@@ -351,6 +353,40 @@ Open:
 - **Web UI**: http://localhost:8000/
 - **Swagger UI**: http://localhost:8000/swagger-ui/
 - **OpenAPI spec**: http://localhost:8000/openapi.json
+
+## Subsonic-compatible clients
+
+Songhive implements the
+[Subsonic API](http://www.subsonic.org/pages/api.jsp) under the
+`/rest/*.view` namespace (with the OpenSubsonic `apiKeyAuthentication`
+extension advertised through `getOpenSubsonicExtensions`), so any
+Subsonic-compatible client can browse and stream the instance's library.
+
+To connect a client:
+
+1. Enter the base URL of your instance (e.g. `https://music.example.com`)
+   as the server address.
+2. Log in with your Songhive username and an API token generated under
+   **Settings → API tokens**. Using a token rather than your account
+   password is recommended — it keeps the real password out of third-party
+   apps and works with every authentication scheme clients may use
+   (`p`, OpenSubsonic `apiKey`, and salted `t`/`s` tokens). Your account
+   password also works, but only with clients that send it via `p`:
+   salted `t`/`s` tokens cannot be verified against bcrypt-hashed
+   passwords, while an API token can be reconstructed and verified.
+
+Some Subsonic-compatible clients:
+
+- [Substreamer](https://substreamer.org) — iOS and Android
+- [Tempus](https://github.com/eddyizm/tempo) — Android (actively
+  maintained fork of Tempo)
+- [Ultrasonic](https://gitlab.com/ultrasonic/ultrasonic) — Android
+- [Symfonium](https://symfonium.app) — Android
+- [Supersonic](https://github.com/supersonic-app/supersonic) — Windows,
+  macOS and Linux
+
+The adapter is enabled by default; set `subsonic.enabled = false` in
+`config.toml` to disable it.
 
 ## Development
 

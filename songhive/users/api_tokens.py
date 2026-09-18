@@ -46,12 +46,16 @@ async def issue_api_token(
 ) -> tuple[ApiToken, str]:
     """Create and persist a new API token, returning the row and raw JWT."""
     jti = secrets.token_urlsafe(32)
-    raw_jwt = create_api_token_jwt(user.id, config.auth.secret_key, jti, expires_at)
+    # ``created_at`` is pinned to the JWT ``iat`` claim so the Subsonic
+    # adapter can reconstruct this exact JWT for salted-token verification.
+    iat = datetime.now(timezone.utc)
+    raw_jwt = create_api_token_jwt(user.id, config.auth.secret_key, jti, expires_at, iat=iat)
     api_token = ApiToken(
         user_id=user.id,
         jti=jti,
         name=name,
         expires_at=expires_at,
+        created_at=iat,
     )
     db.add(api_token)
 

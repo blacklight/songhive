@@ -548,6 +548,18 @@ class ExternalLibrariesConfig(BaseSettings):
         return value
 
 
+class SubsonicConfig(BaseSettings):
+    """Subsonic API adapter configuration."""
+
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Expose a Subsonic-compatible API under /rest so Subsonic/"
+            "OpenSubsonic clients can browse and stream the instance's library"
+        ),
+    )
+
+
 def _bitrate_to_bits(value: str) -> int:
     """Parse a bitrate string such as '192k' or '1.5M' into bits per second.
 
@@ -611,3 +623,4 @@ class SonghiveConfig(BaseSettings):
     imports: ImportConfig = Field(default_factory=ImportConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     external_libraries: ExternalLibrariesConfig = Field(default_factory=ExternalLibrariesConfig)
+    subsonic: SubsonicConfig = Field(default_factory=SubsonicConfig)

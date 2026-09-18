@@ -86,13 +86,20 @@ def create_api_token_jwt(
     secret_key: str,
     jti: str,
     expires_at: Optional[datetime],
+    iat: Optional[datetime] = None,
 ) -> str:
-    """Create a long-lived API-token JWT."""
+    """Create a long-lived API-token JWT.
+
+    ``iat`` is injectable because HS256 encoding is deterministic given the
+    same claims: ``adapters.subsonic.auth`` reconstructs a stored token
+    byte-for-byte to verify salted-token (``t``/``s``) authentication without
+    persisting the raw JWT.
+    """
     payload = {
         "sub": user_id,
         "jti": jti,
         "token_type": "api_token",
-        "iat": datetime.now(timezone.utc),
+        "iat": iat if iat is not None else datetime.now(timezone.utc),
     }
     if expires_at is not None:
         payload["exp"] = expires_at

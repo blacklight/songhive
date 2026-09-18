@@ -80,13 +80,20 @@ def _build_tornado_app(config: SonghiveConfig, fastapi_app, tornado_redis=None) 
 
     redis = tornado_redis if tornado_redis is not None else fastapi_app.state.redis
 
+    # API adapters may contribute Tornado-native routes (e.g. Subsonic
+    # /rest/stream.view) that must sit ahead of the WSGI fallback.
+    from .adapters import adapter_tornado_routes
+
+    handlers: list[Any] = [
+        (r"/ws/events", EventWebSocket),
+        (r"/ws/", EventWebSocket),
+        (r"/api/v1/stream/(?P<track_id>[^/]+)", StreamHandler),
+        *adapter_tornado_routes(config),
+        (r".*", FallbackHandler, {"fallback": container}),
+    ]
+
     return Application(
-        [
-            (r"/ws/events", EventWebSocket),
-            (r"/ws/", EventWebSocket),
-            (r"/api/v1/stream/(?P<track_id>[^/]+)", StreamHandler),
-            (r".*", FallbackHandler, {"fallback": container}),
-        ],
+        handlers,
         debug=config.server.debug,
         config=config,
         redis=redis,

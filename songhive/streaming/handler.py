@@ -217,6 +217,30 @@ class StreamHandler(tornado.web.RequestHandler):
 
         return True
 
+    def _request_aborted(self) -> bool:
+        """Return True when an error response has already been emitted.
+
+        Subclasses that authenticate via non-Bearer schemes signal failure
+        either through a non-200 status (the default) or by finishing the
+        request after writing a protocol-specific error body.
+        """
+        return self._finished or self.get_status() != 200
+
+    def _requested_format(self) -> tuple[Optional[str], Optional[str]]:
+        """Return the ``(format, bitrate)`` request arguments for transcoding.
+
+        Subclasses may override to map protocol-specific parameter names
+        (e.g. Subsonic's ``maxBitRate``).
+        """
+        return self.get_argument("format", None), self.get_argument("bitrate", None)
+
+    async def _prepare_response(self, track: Track) -> None:
+        """Hook for subclasses to set entity-dependent response headers."""
+
+    def _client_name(self) -> Optional[str]:
+        """Return a display name for the requesting client, when known."""
+        return None
+
     async def _require_local_path(self, storage_backend: StorageBackend, stored_file: StoredFile) -> Optional[Path]:
         """Retrieve the local path for a stored file, returning 404 on failure."""
         try:
@@ -618,7 +642,7 @@ class StreamHandler(tornado.web.RequestHandler):
 
         async with get_session() as session:
             user = await self._authenticate(session)
-            if self.get_status() != 200:
+            if self._request_aborted():
                 return
 
             track_and_file = await self._resolve_track(session, track_id)
@@ -649,14 +673,17 @@ class StreamHandler(tornado.web.RequestHandler):
                 return
 
             self._broadcast_now_playing(track_id, user)
+            await self._prepare_response(track)
+
+            if self._request_aborted():
+                return
 
             if stored_file is not None:
                 local_path = await self._require_local_path(storage_backend, stored_file)
                 if local_path is None:
                     return
 
-                fmt = self.get_argument("format", None)
-                bitrate = self.get_argument("bitrate", None)
+                fmt, bitrate = self._requested_format()
                 parsed = self._parse_format(stored_file, fmt, bitrate)
                 if parsed is None:
                     return

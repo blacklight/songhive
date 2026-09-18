@@ -44,6 +44,13 @@ _EXEMPT_PATHS = frozenset(
     }
 )
 
+# Path prefixes exempt from the CSRF check. Subsonic clients authenticate
+# exclusively through u/p/apiKey request parameters — never through the
+# browser session cookies — so cookie-based forgery cannot produce an
+# authenticated request; rejecting them would only break POST-capable
+# clients running in cookie-bearing environments.
+_EXEMPT_PREFIXES = ("/rest/",)
+
 
 class CsrfMiddleware:
     """Reject unsafe cookie-authenticated requests lacking a matching CSRF token."""
@@ -52,7 +59,12 @@ class CsrfMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["method"] not in _UNSAFE_METHODS or scope["path"] in _EXEMPT_PATHS:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope["path"]
+        if scope["method"] not in _UNSAFE_METHODS or path in _EXEMPT_PATHS or path.startswith(_EXEMPT_PREFIXES):
             await self.app(scope, receive, send)
             return
 

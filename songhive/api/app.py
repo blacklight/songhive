@@ -145,7 +145,7 @@ def _setup_spa_routes(app: FastAPI, static_dir: Path):
                 raise HTTPException(status_code=404)
 
             path = scope["path"].lstrip("/")
-            if path.startswith("api/") or path.startswith("ws/") or path.startswith("stream/"):
+            if path.startswith(("api/", "ws/", "stream/", "rest/")):
                 raise HTTPException(status_code=404)
 
             # Federation/ActivityPub requests to disabled endpoints should 404,
@@ -320,6 +320,13 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     if config.webmentions.enabled and config.federation.instance_domain:
         app.include_router(webmentions.router)
         _setup_webmentions(app, config)
+
+    # Third-party API adapters (Subsonic under /rest, and future Icecast/
+    # Mopidy/Jellyfin adapters). Each adapter owns its whole namespace and
+    # decides from config whether it mounts.
+    from ..adapters import mount_adapters
+
+    mount_adapters(app, config)
 
     _setup_static_routes(app)
 
