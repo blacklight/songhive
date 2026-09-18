@@ -236,6 +236,7 @@ describe("AppLayout", () => {
       "Search",
       "Users",
       "Notifications",
+      "Mentions",
       "Library",
       "Artists",
       "Albums",

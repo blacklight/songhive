@@ -21,6 +21,7 @@ from songhive.models.audit_log import AuditLog  # noqa: F401
 from songhive.models.base import Base, init_db, reset_db
 from songhive.models.invite import Invite  # noqa: F401
 from songhive.models.library import Library  # noqa: F401
+from songhive.models.mention_record import MentionRecord  # noqa: F401
 from songhive.models.notification import Notification, NotificationPreference  # noqa: F401
 from songhive.models.oauth_client import OAuth2Client  # noqa: F401
 from songhive.models.playlist import Playlist  # noqa: F401

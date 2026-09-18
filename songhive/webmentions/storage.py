@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.pool import NullPool
-
 from webmentions import Webmention
 from webmentions.storage.adapters.db import DbWebmentionsStorage, init_db_storage
 

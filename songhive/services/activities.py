@@ -42,6 +42,7 @@ from ..models.activity import (
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
+from ..models.mention_record import MentionSource
 from ..models.notification import NotificationType
 from ..models.playlist import Playlist
 from ..models.radio import Radio
@@ -1366,6 +1367,13 @@ class VisibilityRules:
                 obj["cc"] = cc
             flag_modified(activity, "payload")
 
+        # Mention archive records carry the object's audience so the
+        # ``private`` filter keeps classifying them correctly.
+        if activity.source_id:
+            from . import mention_records as mention_records_service
+
+            await mention_records_service.update_mentions_visibility(session, activity.source_id, new_value.value)
+
         await session.flush()
 
 
@@ -1455,6 +1463,7 @@ async def create_local_activity(
         )
 
     await session.flush()
+    await _record_activity_mentions(session, activity=activity, author=author, mention_dicts=mentions or [])
 
     source_text = content_source if content_source is not None else content
     await _sync_activity_tags(session, activity, _extract_hashtags(source_text))
@@ -1599,6 +1608,26 @@ async def update_activity(
         for mention in processed.mentions:
             session.add(ActivityMention(activity_id=activity.id, **mention.as_dict()))
         session.expire(activity, ["mentions"])
+
+        # Sync the permanent mention archive: refreshed records for the
+        # still-mentioned, removal for recipients the edit dropped.
+        mention_dicts = [m.as_dict() for m in processed.mentions]
+        owner = await session.get(User, activity.owner_user_id) if activity.owner_user_id else None
+        if owner is not None:
+            await _record_activity_mentions(
+                session,
+                activity=activity,
+                author=owner,
+                mention_dicts=mention_dicts,
+            )
+        from . import mention_records as mention_records_service
+
+        await mention_records_service.delete_mentions(
+            session,
+            source=MentionSource.LOCAL,
+            source_url=activity.source_id,
+            exclude_user_ids=[m["user_id"] for m in mention_dicts if m.get("user_id")],
+        )
 
     if language is not _UNSET:
         activity.language = _validate_status_language(language)
@@ -2198,6 +2227,7 @@ async def reply_to_activity(
     for mention in mention_dicts:
         session.add(ActivityMention(activity_id=reply.id, **mention))
     await session.flush()
+    await _record_activity_mentions(session, activity=reply, author=author, mention_dicts=mention_dicts)
 
     # Replying to a Webmention maps to an ``in-reply-to`` mention of its source.
     from ..webmentions.service import (
@@ -2476,6 +2506,7 @@ async def quote_activity(
     for mention in mention_dicts:
         session.add(ActivityMention(activity_id=quote.id, **mention))
     await session.flush()
+    await _record_activity_mentions(session, activity=quote, author=author, mention_dicts=mention_dicts)
 
     # Quoting a Webmention maps to a ``quotation-of`` mention carrying the
     # post text as the summary (rendered by the outgoing source page).
@@ -3301,6 +3332,12 @@ async def create_status(
     for mention in processed.mentions:
         session.add(ActivityMention(activity_id=activity.id, **mention.as_dict()))
     await session.flush()
+    await _record_activity_mentions(
+        session,
+        activity=activity,
+        author=author,
+        mention_dicts=[m.as_dict() for m in processed.mentions],
+    )
 
     await _sync_activity_tags(session, activity, processed.tag_names)
     await _notify_status_mentions(session, activity=activity, author=author, mentions=processed.mentions)
@@ -3318,6 +3355,53 @@ async def create_status(
 
     enqueue_outgoing_webmentions(activity, config)
     return activity
+
+
+async def _record_activity_mentions(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    author: User,
+    mention_dicts: Iterable[dict],
+) -> None:
+    """Archive permanent mention records for the local users an activity mentions.
+
+    Unlike the dismissible mention notification, the ``MentionRecord`` is
+    written for every mentioned local user — including self-mentions and
+    recipients a reply/quote notification already covered — so the
+    ``/mentions`` archive lists every activity that ever addressed them.
+    Failures never fail the post.
+    """
+    from ..federation.notifications import _note_snapshot
+    from . import mention_records as mention_records_service
+
+    note = activity.payload.get("object") if isinstance(activity.payload, dict) else {}
+    snapshot = _note_snapshot(note) if isinstance(note, dict) else {}
+    # The activity's own link fields let clients render its real card and
+    # link to its page rather than its object URL.
+    object_fields = await _entity_link_fields(session, activity)
+    for mention in mention_dicts:
+        user_id = mention.get("user_id")
+        if not user_id:
+            continue
+        try:
+            await mention_records_service.upsert_mention(
+                session,
+                user_id=str(user_id),
+                source=MentionSource.LOCAL,
+                source_url=activity.source_id,
+                actor_url=activity.source_actor,
+                activity_id=str(activity.id),
+                visibility=activity.visibility,
+                payload={
+                    "actor_name": author.display_name or author.username,
+                    "actor_avatar_url": author.avatar_url,
+                    **snapshot,
+                    **object_fields,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to record mention for activity %s: %s", activity.id, exc)
 
 
 async def _notify_status_mentions(
@@ -3811,6 +3895,7 @@ async def retract_activity(session: AsyncSession, activity: Activity) -> None:
     Flushes without committing; the caller owns the transaction.
     """
     from ..federation.activities import create_tombstone_delete_activity, create_undo_activity
+    from . import mention_records as mention_records_service
     from . import notifications as notifications_service
     from .deletion import enqueue_activity_delivery, get_activity_unpublish_info
 
@@ -3821,6 +3906,9 @@ async def retract_activity(session: AsyncSession, activity: Activity) -> None:
     # replies and quotes targeting it) are no longer applicable.
     if activity.source_id:
         await notifications_service.retract_notifications_referencing(session, [activity.source_id])
+        # Mention archive records for — or delivered by — this activity
+        # retract with it.
+        await mention_records_service.delete_mentions_referencing(session, [activity.source_id])
 
     if activity.source_type != "local":
         activity.deleted_at = datetime.now(timezone.utc)

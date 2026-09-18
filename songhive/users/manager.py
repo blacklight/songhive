@@ -23,6 +23,7 @@ from ..models.history import ListeningHistory
 from ..models.invite import Invite
 from ..models.library import Library
 from ..models.library_track import LibraryTrack
+from ..models.mention_record import MentionRecord
 from ..models.notification import Notification, NotificationPreference
 from ..models.oauth_client import OAuth2Client
 from ..models.playlist import Playlist
@@ -412,10 +413,26 @@ async def _remove_user_references(session: AsyncSession, user: User) -> None:
     await session.execute(delete(ApiToken).where(ApiToken.user_id == user.id))
     await session.execute(delete(Favorite).where(Favorite.user_id == user.id))
     await session.execute(delete(ListeningHistory).where(ListeningHistory.user_id == user.id))
+    await session.execute(delete(MentionRecord).where(MentionRecord.user_id == user.id))
     await session.execute(delete(Notification).where(Notification.user_id == user.id))
     await session.execute(delete(NotificationPreference).where(NotificationPreference.user_id == user.id))
-    # Notifications the user produced on other accounts (likes, shares,
-    # follows) are no longer applicable once the actor is gone.
+    # Notifications and mention records the user produced on other accounts
+    # (likes, shares, follows, mentions) are no longer applicable once the
+    # actor is gone.
+    from ..services import mention_records as mention_records_service
+
+    await mention_records_service.delete_mentions(
+        session,
+        actor_urls=[  # type: ignore
+            u
+            for u in (
+                user.actor_url,
+                f"/users/{user.username}",
+                f"urn:songhive:user:{user.username}",
+            )
+            if u
+        ],
+    )
     await notifications_service.retract_notifications(
         session,
         actor_urls=[  # type: ignore

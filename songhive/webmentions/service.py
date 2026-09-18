@@ -30,6 +30,7 @@ from webmentions import Webmention
 from ..config.schema import SonghiveConfig
 from ..models import Visibility
 from ..models.activity import Activity, ActivityTag
+from ..models.mention_record import MentionSource
 from ..models.notification import NotificationType
 from ..models.tag import Tag
 from ..models.track import Track
@@ -418,6 +419,52 @@ async def _webmention_recipient(session: AsyncSession, target: ResolvedWebmentio
     return await session.get(User, owner_id) if owner_id else None
 
 
+async def _record_webmention(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    mention: Webmention,
+    recipient: User,
+) -> None:
+    """Upsert ``recipient``'s permanent mention record for the Webmention.
+
+    Mirrors the notification's payload so the archive card renders like the
+    notification did; unlike the notification the record is written for
+    self-mentions too — the archive lists every mention, not just the
+    noteworthy ones. Never fails the materialization.
+    """
+    try:
+        from ..services import mention_records as mention_records_service
+        from ..services.activities import _entity_link_fields
+
+        actor_name = mention.author_name or urlparse(mention.author_url or mention.source).hostname
+        payload = {
+            "activity_id": activity.source_id,
+            "object_url": mention.source,
+            "object_name": mention.title,
+            "object_content": webmention_display_excerpt(mention.excerpt, mention.content),
+            "published": mention.published.isoformat() if mention.published else None,
+            "webmention_type": mention.mention_type.value,
+            "actor_name": actor_name,
+            "actor_avatar_url": mention.author_photo,
+            **(await _entity_link_fields(session, activity)),
+        }
+        if mention.author_name:
+            payload["actor_display_name"] = mention.author_name
+        await mention_records_service.upsert_mention(
+            session,
+            user_id=str(recipient.id),
+            source=MentionSource.WEBMENTION,
+            source_url=activity.source_id,
+            actor_url=mention.author_url or mention.source,
+            activity_id=str(activity.id),
+            visibility=activity.visibility,
+            payload=payload,
+        )
+    except Exception as exc:
+        logger.warning("Failed to record webmention for activity %s: %s", activity.id, exc)
+
+
 async def _notify_webmention(
     session: AsyncSession,
     *,
@@ -505,9 +552,13 @@ async def materialize_webmention(
 
     await _sync_activity_tags(session, activity, _mention_categories(mention))
 
-    if is_new:
-        recipient = await _webmention_recipient(session, target)
-        if recipient is not None:
+    recipient = await _webmention_recipient(session, target)
+    if recipient is not None:
+        # The permanent archive records every materialized mention —
+        # re-sent mentions refresh the row; retraction deletes it through
+        # ``retract_activity`` since its source_url is the activity's.
+        await _record_webmention(session, activity=activity, mention=mention, recipient=recipient)
+        if is_new:
             await _notify_webmention(session, activity=activity, mention=mention, recipient=recipient, domain=domain)
     return activity
 

@@ -52,11 +52,14 @@ from pubby.quotes import extract_quote_target
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..models import Visibility
 from ..models.activity import Activity, ActivityMention
+from ..models.mention_record import MentionSource
 from ..models.notification import Notification, NotificationType
 from ..models.track import Track
 from ..models.user import FollowersApproval, User
 from ..services import acl
+from ..services import mention_records as mention_records_service
 from ..services.activities import (
     _activity_object_type,
     _actor_doc_avatar_url,
@@ -321,6 +324,52 @@ async def _stamp_mention_rows(session: AsyncSession, recipient: User) -> None:
             ActivityMention.notified_at.is_(None),
         )
         .values(notified_at=datetime.now(timezone.utc))
+    )
+
+
+def _mention_visibility(obj: dict, actor_url: str) -> str:
+    """Classify a remote object's audience for the mention archive."""
+    if is_public(obj):
+        return Visibility.PUBLIC.value
+    if f"{actor_url}/followers" in addressees(obj):
+        return Visibility.FOLLOWERS.value
+    return Visibility.MENTIONED.value
+
+
+async def _record_inbox_mention(
+    session: AsyncSession,
+    *,
+    recipient: User,
+    actor_url: str,
+    source_url: str,
+    obj: dict,
+    payload: Dict[str, Any],
+    self_fields: Optional[Dict[str, Any]] = None,
+    merge_payload: bool = False,
+) -> None:
+    """Upsert the recipient's permanent mention record for a remote note.
+
+    Runs even when the mention notification was suppressed (a reply/quote
+    notification already covered the note) or the recipient's delivery
+    preferences drop in-app rows — the ``/mentions`` archive is a record
+    of every object that addressed the user, not of what was delivered.
+    ``self_fields`` carries ``object_activity_id`` when the note was
+    materialized into a local ``Activity`` row. With ``merge_payload``
+    the given fields merge into the stored snapshot — the path an
+    ``Update`` takes so actor/activity fields recorded at ``Create`` are
+    preserved.
+    """
+    fields = self_fields or {}
+    await mention_records_service.upsert_mention(
+        session,
+        user_id=str(recipient.id),
+        source=MentionSource.ACTIVITYPUB,
+        source_url=source_url,
+        actor_url=actor_url,
+        activity_id=fields.get("object_activity_id"),
+        visibility=_mention_visibility(obj, actor_url),
+        payload=payload,
+        merge_payload=merge_payload,
     )
 
 
@@ -859,6 +908,19 @@ async def create_inbox_notifications(
         # ``ActivityMention`` rows are still marked as notified.
         await _stamp_mention_rows(session, recipient)
 
+    # The permanent archive records the mention even when its
+    # notification was suppressed as redundant or undelivered.
+    if mentioned and source_url:
+        await _record_inbox_mention(
+            session,
+            recipient=recipient,
+            actor_url=actor_url,
+            source_url=source_url,
+            obj=obj,
+            payload={**payload, **note, **self_fields},
+            self_fields=self_fields,
+        )
+
 
 async def retract_inbox_notifications(
     session: AsyncSession,
@@ -910,6 +972,10 @@ async def _retract_undo(
         removed += await retract_notifications_referencing(
             session, [inner_id], user_id=recipient.id, actor_url=actor_url
         )
+        # An undone ``Create`` also removes the mention archive record.
+        await mention_records_service.delete_mentions_referencing(
+            session, [inner_id], user_id=recipient.id, actor_url=actor_url
+        )
 
     if inner_type == "Follow":
         removed += await retract_notifications(
@@ -952,12 +1018,16 @@ async def _retract_delete(
 
     if target == actor_url or target_type in _ACTOR_TYPES:
         # The actor itself was deleted: every notification they produced for
-        # the recipient is now dangling.
+        # the recipient is now dangling — as is every mention record.
+        await mention_records_service.delete_mentions(session, user_id=recipient.id, actor_urls=[actor_url])
         return await retract_notifications(session, user_id=recipient.id, actor_urls=[actor_url])
 
     # Delete may reference either the object itself (a deleted note, which is
     # a quote/reply/mention's source_url) or the activity that created it.
     assert target  # for mypy
+    await mention_records_service.delete_mentions_referencing(
+        session, [target], user_id=recipient.id, actor_url=actor_url
+    )
     return await retract_notifications_referencing(session, [target], user_id=recipient.id, actor_url=actor_url)
 
 
@@ -1017,7 +1087,11 @@ async def _update_actor_notifications(
         "actor_display_name": _actor_doc_display_name(obj),
         "actor_avatar_url": _actor_doc_avatar_url(obj),
     }
-    return await update_notifications_from_actor(session, actor_url, fields=fields, user_id=recipient.id)
+    updated = await update_notifications_from_actor(session, actor_url, fields=fields, user_id=recipient.id)
+    updated += await mention_records_service.update_mentions_from_actor(
+        session, actor_url, fields=fields, user_id=recipient.id
+    )
+    return updated
 
 
 async def _update_object_notifications(
@@ -1095,4 +1169,27 @@ async def _update_object_notifications(
     removed = 0
     if retract_ids:
         removed = await delete_notifications(session, recipient.id, retract_ids)
+
+    # Sync the permanent mention archive the same way: a mention that
+    # survived the edit refreshes its snapshot — merged so the actor and
+    # activity fields recorded at ``Create`` are preserved — while one
+    # the edit removed drops its record.
+    if _mentions_recipient(obj, recipient.actor_url):
+        await _record_inbox_mention(
+            session,
+            recipient=recipient,
+            actor_url=actor_url,
+            source_url=obj_id,
+            obj=obj,
+            payload={**base, **self_fields},
+            self_fields=self_fields,
+            merge_payload=True,
+        )
+    else:
+        await mention_records_service.delete_mentions(
+            session,
+            user_id=recipient.id,
+            source=MentionSource.ACTIVITYPUB,
+            source_url=obj_id,
+        )
     return updated + removed

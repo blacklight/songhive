@@ -2347,6 +2347,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mentions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Mentions
+     * @description List the current user's mention records, newest first.
+     */
+    get: operations["list_mentions_api_v1_mentions__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/notifications/": {
     parameters: {
       query?: never;
@@ -6017,6 +6037,35 @@ export interface components {
        */
       success: boolean;
     };
+    /**
+     * MentionResponse
+     * @description A single archived mention.
+     */
+    MentionResponse: {
+      /** Id */
+      id: string;
+      source: components["schemas"]["MentionSource"];
+      /** Actor Url */
+      actor_url?: string | null;
+      /** Source Url */
+      source_url?: string | null;
+      /** Activity Id */
+      activity_id?: string | null;
+      /** Visibility */
+      visibility?: string | null;
+      /** Payload */
+      payload?: {
+        [key: string]: unknown;
+      } | null;
+      /** Created At */
+      created_at?: string | null;
+    };
+    /**
+     * MentionSource
+     * @description Pipelines a mention record can originate from.
+     * @enum {string}
+     */
+    MentionSource: "local" | "activitypub" | "webmention";
     /**
      * NotificationIdsDeleteRequest
      * @description Payload for bulk deletion.
@@ -12331,6 +12380,42 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_mentions_api_v1_mentions__get: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated source allowlist */
+        source?: string | null;
+        /** @description ``private`` restricts to non-public mentions */
+        visibility?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MentionResponse"][];
+        };
       };
       /** @description Validation Error */
       422: {

@@ -240,6 +240,7 @@
     "externalLibraries": "External libraries",
     "login": "Log in",
     "notifications": "Notifications",
+    "mentions": "Mentions",
     "unreadNotifications": "{count} unread notifications"
   },
   "errors": {
@@ -1308,6 +1309,27 @@
       "bookmark": "Bookmarked via Webmention",
       "rsvp": "RSVP’d via Webmention",
       "follow": "Followed via Webmention"
+    }
+  },
+  "mentions": {
+    "title": "Mentions",
+    "empty": "No mentions yet.",
+    "emptyFiltered": "No mentions match the selected filters.",
+    "loadMore": "Load more",
+    "private": "Private",
+    "filters": {
+      "all": "All",
+      "private": "Private only",
+      "sources": "Filter by source",
+      "visibility": "Filter by visibility"
+    },
+    "sources": {
+      "local": "Local",
+      "activitypub": "ActivityPub",
+      "webmention": "Webmentions"
+    },
+    "errors": {
+      "loadFailed": "Could not load mentions: {message}"
     }
   },
   "notifications": {

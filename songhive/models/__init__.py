@@ -14,6 +14,7 @@ from .history import ListeningHistory
 from .invite import Invite
 from .library import Library
 from .library_track import LibraryTrack
+from .mention_record import MentionRecord
 from .notification import Notification, NotificationPreference
 from .oauth_client import OAuth2Client
 from .playlist import Playlist, PlaylistTrack
@@ -62,6 +63,7 @@ __all__ = [
     "Library",
     "LibraryTrack",
     "ListeningHistory",
+    "MentionRecord",
     "Notification",
     "NotificationPreference",
     "OAuth2Client",

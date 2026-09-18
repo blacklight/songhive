@@ -1778,6 +1778,77 @@ profile tab (`views/profile/NotificationSettings.vue`) edits the per-type
 in-app/email/digest matrix; the email columns are disabled until the
 account email is verified.
 
+### Mentions archive
+
+Mention notifications are dismissible and purged by retention, and they
+are never created at all when the recipient's delivery preferences drop
+in-app rows or a reply/quote notification already covered the note — so
+they cannot answer "which activities ever mentioned me". The mention
+archive closes that gap: `models/mention_record.py` defines
+`MentionRecord` (recipient `user_id`, `source`, `source_url`,
+`activity_id`, `actor_url`, `visibility`, JSON `payload`), a permanent
+per-user record of every activity that addressed them, backed by
+`services/mention_records.py`. Rows are keyed on
+`(user_id, source, source_url)` so re-delivery and edits upsert instead
+of duplicating, and `payload` snapshots the same render fields the
+matching notification carries (actor identity, `object_*` snapshot,
+`target_*`/`item_*`/`local_url` link fields) so records stay renderable
+after the source object disappears.
+
+`source` identifies the pipeline that produced the mention and each one
+writes records independently of notification delivery:
+
+- `local` — activities authored on this instance
+  (`services/activities.py`'s `_record_activity_mentions`, run by
+  `create_local_activity`, `create_status`, `reply_to_activity`, and
+  `quote_activity`). Every mentioned local user is recorded — including
+  self-mentions and recipients already covered by a reply/quote
+  notification — with the activity's `source_id` as `source_url`, its
+  materialized `activity_id`, and its stored `visibility`.
+- `activitypub` — objects received through the federated inbox
+  (`federation/notifications.py`'s `_record_inbox_mention`, called from
+  `create_inbox_notifications` whenever the note's `Mention` tags
+  address the recipient). Visibility is classified from the object's
+  addressing: `public` when it addresses the public collection,
+  `followers` when the author's followers collection is addressed,
+  `mentioned` otherwise.
+- `webmention` — incoming Webmentions materialized into activities
+  (`webmentions/service.py`'s `_record_webmention`, called from
+  `materialize_webmention` for the target's owner). The deterministic
+  `urn:songhive:webmention:<hash>` activity `source_id` keys the record,
+  so re-sent mentions refresh it and the target's visibility is
+  mirrored.
+
+The lifecycle mirrors the notification one so records don't outlive
+their event: local edits (`update_activity`) re-resolve mentions and
+delete records for recipients the edit dropped, `retract_activity` and
+`cascade_visibility_update` remove or reclassify records with the
+activity, federated `Undo`/`Delete` retractions
+(`retract_inbox_notifications`) remove records referencing the undone or
+deleted object/activity — or every record a deleted actor produced —
+and `Update` handling (`update_inbox_notifications`) merges the revised
+snapshot into surviving records, drops records whose `Mention` tag was
+edited out, and refreshes `actor_*` fields when the actor document
+itself is updated. Webmention retractions flow through
+`retract_activity`. Deleting a user removes their archive and the
+records their actor URL produced (`users/manager.py`'s
+`_remove_user_references`).
+
+REST API (`api/routes/mentions.py`): `GET /api/v1/mentions/` is
+authenticated and scoped to the current user, newest-first, with
+`limit`/`offset` + `X-Total-Count` pagination, a `source` CSV allowlist
+(`local`, `activitypub`, `webmention`; unknown values ignored), and
+`visibility=private` restricting to non-public records.
+
+The frontend `/mentions` route (`views/MentionsView.vue`, authenticated)
+lists the archive with source and all/private filter button groups and
+load-more pagination. Each row reuses the notification card pipeline —
+a real `ActivityCard` through `NotificationActivityCard` when
+`activity_id`/`object_activity_id` resolves to a stored activity, a
+read-only snapshot `ActivityCard` for unmaterialized remote notes, then
+`NotificationItemCard`/`NotificationActorCard` fallbacks — and badges
+the source, the Webmention type, and a lock for non-public records.
+
 ---
 
 ## Task Queue (Celery)

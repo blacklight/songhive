@@ -104,6 +104,12 @@ const navItems = computed<NavItem[]>(() => [
     icon: "bell",
   },
   {
+    name: t("nav.mentions"),
+    to: "/mentions",
+    requiresAuth: true,
+    icon: "at",
+  },
+  {
     name: t("nav.library"),
     to: "/libraries",
     requiresAuth: false,
