@@ -6,6 +6,7 @@ import * as notificationsApi from "@/api/notifications";
 import type { NotificationResponse } from "@/api/notifications";
 import * as activitiesApi from "@/api/activities";
 import type { ActivityResponse } from "@/api/activities";
+import { clearActivityCache } from "@/utils/activityFetch";
 import * as usersApi from "@/api/users";
 import { useNotificationsStore } from "@/stores/notifications";
 import NotificationsView from "./NotificationsView.vue";
@@ -19,6 +20,8 @@ vi.mock("@/api/notifications", () => ({
     "reply",
     "mention",
     "share",
+    "webmention",
+    "activity",
   ],
   listNotifications: vi.fn(),
   getUnreadCount: vi.fn().mockResolvedValue(0),
@@ -183,6 +186,7 @@ describe("NotificationsView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    clearActivityCache();
     observed = new Set();
     observerCallback = null;
     window.IntersectionObserver =
@@ -523,6 +527,87 @@ describe("NotificationsView", () => {
     const action = wrapper.find("a.notifications-view__action");
     expect(action.attributes("href")).toBe("/activities/act-target-1");
     expect(action.text()).toBe("replied to your post");
+  });
+
+  it("links activity notifications to the authored activity page", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "activity",
+          actor_url: "urn:songhive:user:bob",
+          source_url: "https://example.com/users/bob/objects/s-1",
+          payload: {
+            actor_name: "bob",
+            activity_type: "create",
+            object_activity_id: "act-9",
+            object_type: "Note",
+            object_page_url: "/activities/act-9",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    getActivity.mockResolvedValueOnce(createActivity({ id: "act-9" }));
+    const { wrapper } = await mountView();
+    await flushPromises();
+    const action = wrapper.find("a.notifications-view__action");
+    expect(action.attributes("href")).toBe("/activities/act-9");
+    expect(action.text()).toBe("shared a post");
+  });
+
+  it("phrases authored likes on activity notifications", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "activity",
+          actor_url: "urn:songhive:user:bob",
+          source_url: "https://example.com/users/bob/likes/l-1",
+          payload: {
+            actor_name: "bob",
+            activity_type: "like",
+            object_activity_id: "act-9",
+            object_type: "Note",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    getActivity.mockResolvedValueOnce(createActivity({ id: "act-9" }));
+    const { wrapper } = await mountView();
+    await flushPromises();
+    const action = wrapper.find("a.notifications-view__action");
+    expect(action.text()).toBe("liked a post");
+  });
+
+  it("renders a real card for activity notifications", async () => {
+    listNotifications.mockResolvedValueOnce({
+      items: [
+        createNotification("n1", {
+          type: "activity",
+          actor_url: "urn:songhive:user:bob",
+          source_url: "https://example.com/users/bob/objects/s-1",
+          payload: {
+            actor_name: "bob",
+            activity_type: "create",
+            object_activity_id: "act-note-9",
+            object_type: "Note",
+          },
+        }),
+      ],
+      total: 1,
+    });
+    getActivity.mockResolvedValueOnce(
+      createActivity({
+        id: "act-note-9",
+        content: "<p>the post</p>",
+      }),
+    );
+    const { wrapper } = await mountView();
+    await flushPromises();
+    expect(getActivity).toHaveBeenCalledWith("act-note-9");
+    const card = wrapper.find(".activity-card");
+    expect(card.exists()).toBe(true);
+    expect(card.text()).toContain("the post");
   });
 
   it("renders a real card for mentions that resolve to a stored activity", async () => {
@@ -1008,7 +1093,7 @@ describe("NotificationsView", () => {
     listNotifications.mockResolvedValue({ items: [], total: 0 });
     const { wrapper } = await mountView();
     const pills = wrapper.findAll(".notifications-view__filters--types button");
-    expect(pills).toHaveLength(7);
+    expect(pills).toHaveLength(9);
     expect(pills.map((b) => b.text())).toEqual([
       "Follows",
       "Likes",
@@ -1017,6 +1102,8 @@ describe("NotificationsView", () => {
       "Replies",
       "Mentions",
       "Shares",
+      "Webmentions",
+      "User activity",
     ]);
 
     await pills[0].trigger("click");

@@ -171,6 +171,37 @@ describe("notificationActionText", () => {
     ).toBe("started following you");
   });
 
+  it("phrases authored activities by their own activity type", () => {
+    expect(
+      notificationActionText(
+        notification("activity", {
+          activity_type: "create",
+          object_type: "Note",
+        }),
+      ),
+    ).toBe("shared a post");
+    expect(
+      notificationActionText(
+        notification("activity", {
+          activity_type: "like",
+          object_type: "Audio",
+        }),
+      ),
+    ).toBe("liked a track");
+    expect(
+      notificationActionText(
+        notification("activity", {
+          activity_type: "reply",
+          target_item_type: "playlist",
+        }),
+      ),
+    ).toBe("replied to a playlist");
+    // An unknown authored type falls back to the generic text.
+    expect(
+      notificationActionText(notification("activity", { item_type: "track" })),
+    ).toBe("shared a track");
+  });
+
   it("falls back for unknown types", () => {
     expect(
       notificationActionText({

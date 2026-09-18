@@ -3,12 +3,21 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
-import { getPublic } from "@/api/users";
-import type { PublicUserResponse } from "@/api/users";
+import {
+  getPublic,
+  subscribeToUserActivity,
+  unsubscribeFromUserActivity,
+} from "@/api/users";
+import type { PublicUserResponse, UserResponse } from "@/api/users";
+import { useAuthStore } from "@/stores/auth";
 import UserProfileView from "./UserProfileView.vue";
 
 vi.mock("@/api/users", () => ({
   getPublic: vi.fn(),
+  followActor: vi.fn(),
+  unfollowActor: vi.fn(),
+  subscribeToUserActivity: vi.fn(),
+  unsubscribeFromUserActivity: vi.fn(),
 }));
 
 vi.mock("@/api/remote", () => ({
@@ -69,6 +78,7 @@ function createProfile(overrides?: Partial<PublicUserResponse>) {
     role: "user",
     created_at: "2025-01-01T00:00:00Z",
     followers_count: 0,
+    activity_subscribed: false,
     ...overrides,
   } as PublicUserResponse;
 }
@@ -142,5 +152,69 @@ describe("UserProfileView", () => {
     expect(wrapper.find(".remote-profile__handle").text()).toBe(
       "@bob@remote.example",
     );
+  });
+
+  function signInAs(username: string) {
+    const authStore = useAuthStore();
+    authStore.user = {
+      id: "viewer-1",
+      username,
+      role: "user",
+    } as UserResponse;
+  }
+
+  it("hides the activity bell for anonymous visitors", async () => {
+    await mountView(createProfile());
+    expect(wrapper.find(".user-profile__activity-bell").exists()).toBe(false);
+  });
+
+  it("hides the activity bell on the viewer's own profile", async () => {
+    signInAs("alice");
+    await mountView(createProfile());
+    expect(wrapper.find(".user-profile__activity-bell").exists()).toBe(false);
+  });
+
+  it("shows the activity bell to signed-in visitors on another profile", async () => {
+    signInAs("viewer");
+    await mountView(createProfile());
+
+    const bell = wrapper.find(".user-profile__activity-bell");
+    expect(bell.exists()).toBe(true);
+    expect(bell.attributes("aria-pressed")).toBe("false");
+    expect(bell.attributes("title")).toBe(
+      i18n.global.t("profile.activityNotifications.subscribe"),
+    );
+  });
+
+  it("reflects the subscribed state on the activity bell", async () => {
+    signInAs("viewer");
+    await mountView(createProfile({ activity_subscribed: true }));
+
+    const bell = wrapper.find(".user-profile__activity-bell");
+    expect(bell.attributes("aria-pressed")).toBe("true");
+    expect(bell.attributes("title")).toBe(
+      i18n.global.t("profile.activityNotifications.unsubscribe"),
+    );
+  });
+
+  it("toggles the activity subscription through the bell", async () => {
+    signInAs("viewer");
+    vi.mocked(subscribeToUserActivity).mockResolvedValue({
+      activity_subscribed: true,
+    });
+    await mountView(createProfile());
+
+    const bell = wrapper.find(".user-profile__activity-bell");
+    await bell.trigger("click");
+    await flushPromises();
+
+    expect(subscribeToUserActivity).toHaveBeenCalledWith("alice");
+    expect(bell.attributes("aria-pressed")).toBe("true");
+
+    await bell.trigger("click");
+    await flushPromises();
+
+    expect(unsubscribeFromUserActivity).toHaveBeenCalledWith("alice");
+    expect(bell.attributes("aria-pressed")).toBe("false");
   });
 });

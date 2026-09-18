@@ -1480,6 +1480,10 @@ async def create_local_activity(
 
     source_text = content_source if content_source is not None else content
     await _sync_activity_tags(session, activity, _extract_hashtags(source_text))
+    if activity_type == "create":
+        # Interaction types (like/announce) are notified by their callers
+        # once the reaction payload is built.
+        await _notify_activity_subscribers(session, activity=activity, author=author)
     return activity
 
 
@@ -1733,11 +1737,11 @@ async def _refresh_notifications_for_object(
 ) -> None:
     """Rewrite notification snapshots of ``object_doc`` after an edit.
 
-    ``mention``/``reply``/``quote`` notifications denormalize the object's
-    renderable fields at creation (``object_*`` payload keys); when the
-    object is edited, rows sourced from it are patched so they keep
-    rendering current content. Flushes without committing; the caller owns
-    the transaction.
+    ``mention``/``reply``/``quote``/``activity`` notifications denormalize
+    the object's renderable fields at creation (``object_*`` payload keys);
+    when the object is edited, rows sourced from it are patched so they
+    keep rendering current content. Flushes without committing; the caller
+    owns the transaction.
     """
     if not object_id:
         return
@@ -1749,7 +1753,11 @@ async def _refresh_notifications_for_object(
     await notifications_service.update_notifications_referencing(
         session,
         [object_id],
-        fields_for=(lambda notification: dict(fields) if notification.type in ("mention", "reply", "quote") else None),
+        fields_for=(
+            lambda notification: (
+                dict(fields) if notification.type in ("mention", "reply", "quote", "activity") else None
+            )
+        ),
     )
 
 
@@ -1846,6 +1854,7 @@ async def like_activity(
     await session.flush()
     enqueue_outgoing_webmentions(like)
     await _notify_reaction(session, activity=activity, interaction=like, author=author, type=NotificationType.LIKE)
+    await _notify_activity_subscribers(session, activity=like, author=author, target=activity)
     return like
 
 
@@ -1917,6 +1926,7 @@ async def boost_activity(
     await session.flush()
     enqueue_outgoing_webmentions(boost)
     await _notify_reaction(session, activity=activity, interaction=boost, author=author, type=NotificationType.BOOST)
+    await _notify_activity_subscribers(session, activity=boost, author=author, target=activity)
     return boost
 
 
@@ -2272,6 +2282,13 @@ async def reply_to_activity(
         # fail the reply itself — the activity row still records it.
         logger.exception("Failed to fan out reply for activity %s: %s: %s", activity.id, type(e), e)
     enqueue_outgoing_webmentions(reply, config)
+    await _notify_activity_subscribers(
+        session,
+        activity=reply,
+        author=author,
+        target=activity,
+        skip_user_ids=[m.user_id for m in processed.mentions if m.user_id],
+    )
     return reply
 
 
@@ -2561,6 +2578,13 @@ async def quote_activity(
         # fail the quote itself — the activity row still records it.
         logger.exception("Failed to fan out quote for activity %s: %s: %s", activity.id, type(e), e)
     enqueue_outgoing_webmentions(quote, config)
+    await _notify_activity_subscribers(
+        session,
+        activity=quote,
+        author=author,
+        target=activity,
+        skip_user_ids=[m.user_id for m in processed.mentions if m.user_id],
+    )
     return quote
 
 
@@ -2687,6 +2711,230 @@ async def _notify_quote(
         )
     except Exception as exc:
         logger.warning("Failed to create quote notification for activity %s: %s", activity.id, exc)
+
+
+async def _activity_link_fields(session: AsyncSession, activity: Activity) -> Dict[str, Any]:
+    """
+    Return ``_entity_link_fields`` for ``activity``, falling back to the
+    activity's own page when it has no resolvable entity.
+
+    Remote standalone posts use ``entity_type="remote"``, which resolves no
+    local entity — the local activity page still renders them, so it stands
+    in as the object link.
+    """
+    fields = await _entity_link_fields(session, activity)
+    fields.setdefault("object_activity_id", str(activity.id))
+    fields.setdefault("object_page_url", f"/activities/{activity.id}")
+    return fields
+
+
+async def _activity_subscription_object_fields(
+    session: AsyncSession,
+    activity: Activity,
+) -> Dict[str, Any]:
+    """Return the snapshot and link fields describing ``activity``'s object."""
+    from ..federation.notifications import _note_snapshot
+
+    fields: Dict[str, Any] = {}
+    note = activity.payload.get("object") if isinstance(activity.payload, dict) else {}
+    if isinstance(note, dict):
+        fields.update(_note_snapshot(note))
+    fields.update(await _activity_link_fields(session, activity))
+    return fields
+
+
+async def _dispatch_activity_notifications(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    subscriber_ids: List[str],
+    payload: Dict[str, Any],
+) -> None:
+    """Create an ``activity`` notification for each view-allowed subscriber."""
+    from . import notifications as notifications_service
+
+    result = await session.execute(select(User).where(User.id.in_(subscriber_ids), User.is_active.is_(True)))
+    for subscriber in result.scalars().all():
+        try:
+            if not await can_view_activity(session, subscriber, activity):
+                continue
+            await notifications_service.create_notification(
+                session,
+                user_id=str(subscriber.id),
+                type=NotificationType.ACTIVITY,
+                actor_url=activity.source_actor,
+                source_url=activity.source_id,
+                payload=dict(payload),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to create activity notification for %s on activity %s: %s",
+                subscriber.id,
+                activity.id,
+                exc,
+            )
+
+
+async def _notify_activity_subscribers(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    author: User,
+    target: Optional[Activity] = None,
+    skip_user_ids: Iterable[str] = (),
+) -> None:
+    """Notify local users subscribed to ``author``'s activity, never failing.
+
+    ``activity`` is the just-authored local activity (status, track
+    publication, entity post, reply, quote, like or boost); ``target`` is
+    the activity it reacts to or threads under for the interaction types.
+    Every subscriber allowed to view the activity (``can_view_activity`` —
+    ``mentioned``/``private`` posts and inaccessible entities never leak)
+    gets an ``activity`` notification deduplicated on the activity's
+    ``source_id``. ``skip_user_ids`` plus the target's owner are excluded —
+    they are already covered by the mention/reply/quote/like/boost
+    notifications the producer path issues, so the subscription stays a
+    fallback rather than a second notification for the same event.
+
+    ``source_url``/``payload.activity_id`` point at the authored activity
+    and ``target_url`` at its interaction target, so retracting either
+    removes the row through ``retract_notifications_referencing``.
+    """
+    if activity.owner_user_id is None or str(activity.owner_user_id) != str(author.id):
+        return
+    try:
+        from . import notifications as notifications_service
+
+        skip = {str(author.id), *(str(uid) for uid in skip_user_ids)}
+        if target is not None and target.owner_user_id is not None:
+            skip.add(str(target.owner_user_id))
+        subscriber_ids = [
+            user_id
+            for user_id in await notifications_service.list_activity_subscriber_ids(session, str(author.id))
+            if user_id not in skip
+        ]
+        if not subscriber_ids:
+            return
+
+        payload: Dict[str, Any] = {
+            "activity_id": activity.source_id,
+            "activity_type": activity.activity_type,
+            "actor_name": author.display_name or author.username,
+            "actor_avatar_url": author.avatar_url,
+        }
+        if author.display_name:
+            payload["actor_display_name"] = author.display_name
+
+        if activity.activity_type in ("like", "announce"):
+            # As in like/boost notifications, the card and the action link
+            # describe the reacted activity rather than the reaction.
+            if target is not None:
+                payload.update(await _activity_subscription_object_fields(session, target))
+                payload["target_url"] = target.source_id
+        else:
+            payload.update(await _activity_subscription_object_fields(session, activity))
+            if target is not None:
+                payload["target_url"] = target.source_id
+                payload.update(
+                    {f"target_{key}": value for key, value in (await _activity_link_fields(session, target)).items()}
+                )
+
+        await _dispatch_activity_notifications(
+            session,
+            activity=activity,
+            subscriber_ids=subscriber_ids,
+            payload=payload,
+        )
+    except Exception as exc:
+        logger.warning("Failed to notify activity subscribers of activity %s: %s", activity.id, exc)
+
+
+async def notify_remote_activity_subscribers(
+    session: AsyncSession,
+    *,
+    activity: Activity,
+    config: Optional[SonghiveConfig] = None,
+) -> None:
+    """Notify local users subscribed to the remote actor behind ``activity``.
+
+    Remote counterpart of ``_notify_activity_subscribers`` for materialized
+    remote rows (posts, replies, quotes, announces). Subscriptions key on
+    ``source_actor`` — remote authors have no ``users`` row — and the actor
+    fields come from the federation actor cache, falling back to the actor's
+    ``user@domain`` handle. Subscribers already covered by the specific
+    mention/reply/quote notification (named local users, the target's local
+    owner) are skipped so the subscription stays a fallback. Never raises.
+    """
+    if activity.source_type != "remote" or not activity.source_actor:
+        return
+    try:
+        from . import notifications as notifications_service
+        from .remote_content import actor_handle_from_url
+
+        mentioned = await session.execute(
+            select(ActivityMention.user_id).where(
+                ActivityMention.activity_id == activity.id,
+                ActivityMention.user_id.is_not(None),
+            )
+        )
+        skip = {str(user_id) for (user_id,) in mentioned.all()}
+        target: Optional[Activity] = None
+        if activity.in_reply_to_activity_id is not None:
+            target = await session.get(Activity, activity.in_reply_to_activity_id)
+            if target is not None and target.owner_user_id is not None:
+                skip.add(str(target.owner_user_id))
+        subscriber_ids = [
+            user_id
+            for user_id in await notifications_service.list_actor_activity_subscriber_ids(
+                session, activity.source_actor
+            )
+            if user_id not in skip
+        ]
+        if not subscriber_ids:
+            return
+
+        actor_name: Optional[str] = None
+        actor_display_name: Optional[str] = None
+        actor_avatar_url: Optional[str] = None
+        if config is not None:
+            profiles = await resolve_source_actor_profiles(session, [activity], config)
+            profile = profiles.get(str(activity.id))
+            if profile is not None:
+                actor_display_name = profile.display_name
+                actor_avatar_url = profile.avatar_url
+        actor_name = actor_display_name or actor_handle_from_url(activity.source_actor)
+
+        payload: Dict[str, Any] = {
+            "activity_id": activity.source_id,
+            "activity_type": activity.activity_type,
+            "actor_name": actor_name,
+        }
+        if actor_display_name:
+            payload["actor_display_name"] = actor_display_name
+        if actor_avatar_url:
+            payload["actor_avatar_url"] = actor_avatar_url
+
+        if activity.activity_type == "announce":
+            # The card and the action link describe the boosted activity.
+            if target is not None:
+                payload.update(await _activity_subscription_object_fields(session, target))
+                payload["target_url"] = target.source_id
+        else:
+            payload.update(await _activity_subscription_object_fields(session, activity))
+            if target is not None:
+                payload["target_url"] = target.source_id
+                payload.update(
+                    {f"target_{key}": value for key, value in (await _activity_link_fields(session, target)).items()}
+                )
+
+        await _dispatch_activity_notifications(
+            session,
+            activity=activity,
+            subscriber_ids=subscriber_ids,
+            payload=payload,
+        )
+    except Exception as exc:
+        logger.warning("Failed to notify activity subscribers of remote activity %s: %s", activity.id, exc)
 
 
 async def _remote_mention_actor_urls(
@@ -3367,6 +3615,12 @@ async def create_status(
     from ..webmentions.service import enqueue_outgoing_webmentions
 
     enqueue_outgoing_webmentions(activity, config)
+    await _notify_activity_subscribers(
+        session,
+        activity=activity,
+        author=author,
+        skip_user_ids=[m.user_id for m in processed.mentions if m.user_id],
+    )
     return activity
 
 
@@ -3677,6 +3931,10 @@ async def record_track_publication(
     from ..webmentions.service import enqueue_outgoing_webmentions
 
     enqueue_outgoing_webmentions(activity, config)
+    # Track publications issue no direct mention notifications, so every
+    # subscriber is eligible — ``can_view_activity`` still filters out those
+    # who cannot see the track.
+    await _notify_activity_subscribers(session, activity=activity, author=owner)
     return activity
 
 

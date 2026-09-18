@@ -1,8 +1,9 @@
 """
-Notification and notification-preference models.
+Notification, notification-preference, and activity-subscription models.
 
 A ``Notification`` row records a single user-facing event (follow, like,
-boost, quote, reply, mention, share, webmention) addressed to a local user.  The delivery
+boost, quote, reply, mention, share, webmention, activity) addressed to a
+local user.  The delivery
 targets enabled at creation time are snapshotted on ``delivered_targets`` so
 later rendering/reporting does not depend on preference changes.  ``seen_at``
 drives the read/unread state and ``digest_sent_at`` tracks inclusion in the
@@ -10,6 +11,10 @@ daily email digest.
 
 ``NotificationPreference`` stores per-(user, type) delivery targets.  A
 missing row means the defaults: in-app enabled, email and digest disabled.
+
+``ActivitySubscription`` records that a local user wants an ``activity``
+notification for every activity a local user or a remote actor authors —
+the "bell" toggle on a user profile.
 """
 
 from datetime import datetime
@@ -41,6 +46,7 @@ class NotificationType(str, Enum):
     MENTION = "mention"
     SHARE = "share"
     WEBMENTION = "webmention"
+    ACTIVITY = "activity"
 
 
 NOTIFICATION_TYPES = tuple(t.value for t in NotificationType)
@@ -114,3 +120,44 @@ class NotificationPreference(Base):
     @validates("type")
     def _check_type(self, key: str, value: str) -> str:
         return _validate_notification_type(value)
+
+
+class ActivitySubscription(Base):
+    """
+    A local user's subscription to another actor's activity.
+
+    Each row produces an ``activity`` notification for ``user_id`` whenever
+    the target authors a new activity the subscriber may view. Local users
+    are referenced through ``target_user_id``; remote actors — which have
+    no ``users`` row — through ``target_actor_url``. Exactly one of the
+    two is set per row.
+    """
+
+    __tablename__ = "activity_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "target_user_id", name="uq_activity_subscriptions_user_id_target_user_id"),
+        UniqueConstraint("user_id", "target_actor_url", name="uq_activity_subscriptions_user_id_target_actor_url"),
+        CheckConstraint("user_id <> target_user_id", name="ck_activity_subscriptions_no_self"),
+        CheckConstraint(
+            "(target_user_id IS NULL) <> (target_actor_url IS NULL)",
+            name="ck_activity_subscriptions_one_target",
+        ),
+        Index("ix_activity_subscriptions_target_user_id", "target_user_id"),
+        Index("ix_activity_subscriptions_target_actor_url", "target_actor_url"),
+    )
+
+    # The local user receiving the notifications.
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
+    # The local user whose authored activities trigger the notifications.
+    target_user_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    # The remote actor whose materialized activities trigger the notifications.
+    target_actor_url: Mapped[Optional[str]] = mapped_column(
+        String(512),
+        nullable=True,
+    )

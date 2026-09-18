@@ -60,7 +60,9 @@ function objectKind(
  *
  * Likes and boosts name the reacted object, shares the granted item;
  * replies and quotes name the ``target_*`` object — their ``object_*``
- * fields snapshot the reply or quote note itself. Object-scoped follows
+ * fields snapshot the reply or quote note itself. Activity-subscription
+ * notifications name the reacted object for authored likes/boosts and the
+ * ``target_*`` object for authored replies/quotes. Object-scoped follows
  * (thread subscriptions) also name their ``target_*`` object; plain
  * follows and mentions name no object (their texts ignore the
  * parameter).
@@ -74,6 +76,13 @@ export function notificationObjectKind(
   // mentions, which read as post mentions).
   if (notification.type === "webmention") {
     return itemKind(payload.item_type) ?? "post";
+  }
+  if (notification.type === "activity") {
+    const authored = str(payload.activity_type);
+    return objectKind(
+      payload,
+      authored === "reply" || authored === "quote" ? "target_" : "",
+    );
   }
   const prefix =
     notification.type === "reply" ||
@@ -93,23 +102,42 @@ export function notificationActionText(
   notification: Pick<NotificationResponse, "type" | "payload">,
 ): string {
   const payload = notification.payload ?? {};
-  const key =
-    notification.type === "follow" &&
-    (payload.follow_request_pending === true ||
-      payload.follow_request_status === "rejected")
-      ? "notifications.types.followRequest"
-      : notification.type === "follow" && str(payload.target_url)
-        ? "notifications.types.followObject"
-        : `notifications.types.${notification.type}`;
-  // ``share`` phrases its object with an indefinite article ("shared a
-  // track with you"); the other types use the bare entity name.
+  // ``activity`` notifications phrase the authored activity's own type
+  // ("liked a post", "shared a track", …) — ``activity_type`` selects the
+  // key, with the generic ``activity`` text as fallback.
+  const keys: string[] = [];
+  if (notification.type === "activity") {
+    const authored = str(payload.activity_type);
+    if (authored) {
+      keys.push(
+        `notifications.types.activity${authored[0].toUpperCase()}${authored.slice(1)}`,
+      );
+    }
+    keys.push("notifications.types.activity");
+  } else {
+    keys.push(
+      notification.type === "follow" &&
+        (payload.follow_request_pending === true ||
+          payload.follow_request_status === "rejected")
+        ? "notifications.types.followRequest"
+        : notification.type === "follow" && str(payload.target_url)
+          ? "notifications.types.followObject"
+          : `notifications.types.${notification.type}`,
+    );
+  }
+  // ``share`` and ``activity`` phrase their object with an indefinite
+  // article ("shared a track with you", "liked a post"); the other types
+  // use the bare entity name.
   const objectsKey =
-    notification.type === "share" ? "objectsWithArticle" : "objects";
+    notification.type === "share" || notification.type === "activity"
+      ? "objectsWithArticle"
+      : "objects";
   const object = i18n.global.t(
     `notifications.${objectsKey}.${notificationObjectKind(notification)}`,
   );
-  const translated = i18n.global.t(key, { object });
-  return translated === key
-    ? i18n.global.t("notifications.types.unknown")
-    : translated;
+  for (const key of keys) {
+    const translated = i18n.global.t(key, { object });
+    if (translated !== key) return translated;
+  }
+  return i18n.global.t("notifications.types.unknown");
 }

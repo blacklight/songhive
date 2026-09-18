@@ -628,6 +628,38 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/users/{username}/activity-subscription": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Subscribe To User Activity
+     * @description Subscribe to a local user's activity notifications (the profile bell).
+     *
+     *     Subscribed users receive an ``activity`` notification — delivered per
+     *     their notification preferences — for every activity the target authors
+     *     that they may view. Subscribing is idempotent and also follows the
+     *     target on a best-effort basis: being notified of every activity of a
+     *     user one does not follow makes little sense. A failed follow (e.g. the
+     *     target rejects followers, or federation is off) does not fail the
+     *     subscription.
+     */
+    post: operations["subscribe_to_user_activity_api_v1_users__username__activity_subscription_post"];
+    /**
+     * Unsubscribe From User Activity
+     * @description Remove the authenticated user's activity subscription on a user.
+     */
+    delete: operations["unsubscribe_from_user_activity_api_v1_users__username__activity_subscription_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/tags/": {
     parameters: {
       query?: never;
@@ -1049,7 +1081,10 @@ export interface paths {
      *     ``status`` is the raw source text — Markdown when ``content_type`` is
      *     ``text/markdown`` (the default), escaped plain text otherwise. ``media_ids``
      *     attach previously uploaded files and ``track_ids`` attach hosted tracks;
-     *     a status may carry attachments without text. The status is recorded as a
+     *     a status may carry attachments without text. ``audio_import`` controls
+     *     whether attached ``audio/*`` files are also imported into the author's
+     *     library as tracks — imported to their "Uploads" library by default, with
+     *     optional MusicBrainz metadata fetch. The status is recorded as a
      *     ``create`` activity on the author's profile and federated to the
      *     ``visibility`` audience when federation is enabled.
      */
@@ -2209,6 +2244,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/remote/actors/{handle}/activity-subscription": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Subscribe To Remote Actor Activity
+     * @description Subscribe to a remote actor's activity notifications (the profile bell).
+     *
+     *     Resolves ``user@domain`` fetch-on-miss like the profile endpoint, then
+     *     records an ``ActivitySubscription`` keyed on the actor URL. Subscribing
+     *     also follows the actor on a best-effort basis: remote activities only
+     *     reach the instance while a local user follows the actor, and a failed
+     *     follow does not fail the subscription. Actor URLs belonging to a local
+     *     user subscribe through the local target instead. Idempotent.
+     */
+    post: operations["subscribe_to_remote_actor_activity_api_v1_remote_actors__handle__activity_subscription_post"];
+    /**
+     * Unsubscribe From Remote Actor Activity
+     * @description Remove the caller's activity subscription on a remote actor.
+     *
+     *     The follow is intentionally kept — it may predate the bell — so
+     *     unfollowing stays an explicit action on the follow button.
+     */
+    delete: operations["unsubscribe_from_remote_actor_activity_api_v1_remote_actors__handle__activity_subscription_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/remote/actors/{handle}/activities": {
     parameters: {
       query?: never;
@@ -2403,26 +2472,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/mentions/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * List Mentions
-     * @description List the current user's mention records, newest first.
-     */
-    get: operations["list_mentions_api_v1_mentions__get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/notifications/": {
     parameters: {
       query?: never;
@@ -2603,6 +2652,26 @@ export interface paths {
      * @description Upsert per-type delivery preferences and return the merged view.
      */
     put: operations["update_preferences_api_v1_notifications_preferences_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mentions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Mentions
+     * @description List the current user's mention records, newest first.
+     */
+    get: operations["list_mentions_api_v1_mentions__get"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -3696,6 +3765,10 @@ export interface paths {
      *     track is published to the owner's ActivityPub followers as a
      *     ``Create(Audio)`` activity, if federation is enabled; otherwise the track
      *     stays local and has no associated activity object.
+     *
+     *     ``import_audio=false`` stores ``audio/*`` uploads as plain files instead
+     *     of importing them as tracks — used by the post composer, which defers
+     *     the library import to post creation via its ``audio_import`` options.
      */
     post: operations["upload_file_api_v1_files_upload_post"];
     delete?: never;
@@ -4432,6 +4505,7 @@ export interface components {
       media_ids?: string[];
       /** Track Ids */
       track_ids?: string[];
+      audio_import?: components["schemas"]["AudioImportOptions"];
     };
     /**
      * ActivityResponse
@@ -4531,6 +4605,16 @@ export interface components {
       webmention?: components["schemas"]["WebmentionResponse"] | null;
     };
     /**
+     * ActivitySubscriptionState
+     * @description The authenticated user's activity-subscription state on a profile.
+     */
+    ActivitySubscriptionState: {
+      /** Activity Subscribed */
+      activity_subscribed: boolean;
+      /** Follow State */
+      follow_state?: string | null;
+    };
+    /**
      * ActivityUpdate
      * @description Activity partial update.
      */
@@ -4546,6 +4630,7 @@ export interface components {
       media_ids?: string[] | null;
       /** Track Ids */
       track_ids?: string[] | null;
+      audio_import?: components["schemas"]["AudioImportOptions"] | null;
     };
     /**
      * AddLibraryTracksRequest
@@ -5024,6 +5109,29 @@ export interface components {
       name?: string | null;
       /** Bio */
       bio?: string | null;
+    };
+    /**
+     * AudioImportOptions
+     * @description How a post's audio file attachments are imported into the library.
+     *
+     *     ``upload_to_library`` imports each attached audio file as a track;
+     *     ``fetch_metadata`` additionally enqueues MusicBrainz enrichment for the
+     *     new tracks, and ``library_id`` selects the target library (``null``
+     *     resolves to the author's default "Uploads" library).
+     */
+    AudioImportOptions: {
+      /**
+       * Upload To Library
+       * @default true
+       */
+      upload_to_library: boolean;
+      /**
+       * Fetch Metadata
+       * @default false
+       */
+      fetch_metadata: boolean;
+      /** Library Id */
+      library_id?: string | null;
     };
     /**
      * AuditLogResponse
@@ -6249,7 +6357,8 @@ export interface components {
       | "reply"
       | "mention"
       | "share"
-      | "webmention";
+      | "webmention"
+      | "activity";
     /**
      * NotificationsPurgeResponse
      * @description Result of a notification purge run.
@@ -6480,6 +6589,11 @@ export interface components {
       follows_count: number;
       /** Follow State */
       follow_state?: string | null;
+      /**
+       * Activity Subscribed
+       * @default false
+       */
+      activity_subscribed: boolean;
     };
     /**
      * QuoteActivityListResponse
@@ -6635,6 +6749,11 @@ export interface components {
       url: string;
       /** Follow State */
       follow_state?: string | null;
+      /**
+       * Activity Subscribed
+       * @default false
+       */
+      activity_subscribed: boolean;
     };
     /**
      * RemoteLookupResponse
@@ -7130,6 +7249,7 @@ export interface components {
       media_ids?: string[];
       /** Track Ids */
       track_ids?: string[];
+      audio_import?: components["schemas"]["AudioImportOptions"];
     };
     /**
      * StoredFileResponse
@@ -7271,6 +7391,7 @@ export interface components {
       language?: string | null;
       /** Media Ids */
       media_ids?: string[];
+      audio_import?: components["schemas"]["AudioImportOptions"];
     };
     /**
      * TrackPublishResponse
@@ -8968,6 +9089,66 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["PublicUserResponse"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  subscribe_to_user_activity_api_v1_users__username__activity_subscription_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        username: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivitySubscriptionState"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unsubscribe_from_user_activity_api_v1_users__username__activity_subscription_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        username: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {
@@ -12311,6 +12492,66 @@ export interface operations {
       };
     };
   };
+  subscribe_to_remote_actor_activity_api_v1_remote_actors__handle__activity_subscription_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        handle: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivitySubscriptionState"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unsubscribe_from_remote_actor_activity_api_v1_remote_actors__handle__activity_subscription_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        handle: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_remote_actor_activities_api_v1_remote_actors__handle__activities_get: {
     parameters: {
       query?: {
@@ -12650,42 +12891,6 @@ export interface operations {
       };
     };
   };
-  list_mentions_api_v1_mentions__get: {
-    parameters: {
-      query?: {
-        /** @description Comma-separated source allowlist */
-        source?: string | null;
-        /** @description ``private`` restricts to non-public mentions */
-        visibility?: string | null;
-        limit?: number;
-        offset?: number;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MentionResponse"][];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   list_notifications_api_v1_notifications__get: {
     parameters: {
       query?: {
@@ -12949,6 +13154,42 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["NotificationPreferencesResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_mentions_api_v1_mentions__get: {
+    parameters: {
+      query?: {
+        /** @description Comma-separated source allowlist */
+        source?: string | null;
+        /** @description ``private`` restricts to non-public mentions */
+        visibility?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MentionResponse"][];
         };
       };
       /** @description Validation Error */
@@ -14868,6 +15109,7 @@ export interface operations {
         library_id?: string | null;
         external_duplicate_action?: ("keep_local" | "discard_upload") | null;
         publish?: boolean;
+        import_audio?: boolean;
       };
       header?: never;
       path?: never;
@@ -14908,6 +15150,7 @@ export interface operations {
         library_id?: string | null;
         external_duplicate_action?: ("keep_local" | "discard_upload") | null;
         publish?: boolean;
+        import_audio?: boolean;
       };
       header?: never;
       path?: never;

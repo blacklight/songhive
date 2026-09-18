@@ -16,7 +16,8 @@ export type NotificationType =
   | "reply"
   | "mention"
   | "share"
-  | "webmention";
+  | "webmention"
+  | "activity";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "follow",
@@ -27,6 +28,7 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "mention",
   "share",
   "webmention",
+  "activity",
 ];
 
 export interface NotificationListPage {

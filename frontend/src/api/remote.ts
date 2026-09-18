@@ -1,5 +1,6 @@
 import { apiRequest } from "./client";
 import type { ActivityResponse } from "./activities";
+import type { ActivitySubscriptionState } from "./users";
 
 // These interfaces mirror the Pydantic response models in
 // ``songhive/api/routes/remote.py``. Regenerate ``api/types.ts`` with
@@ -21,6 +22,8 @@ export interface RemoteActor {
   url: string;
   /** Viewer-relative follow state (``pending``/``accepted``), when authenticated. */
   follow_state?: string | null;
+  /** Whether the viewer subscribed to this actor's activity notifications (the profile bell). */
+  activity_subscribed?: boolean;
 }
 
 export type RemoteResourceKind =
@@ -99,6 +102,31 @@ export function getRemoteActorActivities(
   return apiRequest<RemoteActorActivities>(
     `/remote/actors/${encodeURIComponent(handle)}/activities`,
     { query: { limit: options?.limit, offset: options?.offset } },
+  );
+}
+
+/**
+ * Subscribe to a remote actor's activity notifications (the profile
+ * bell). Also follows the actor on a best-effort basis — remote
+ * activities only arrive while a local user follows them — so the
+ * returned ``follow_state`` reflects the resulting follow.
+ */
+export function subscribeToRemoteActorActivity(
+  handle: string,
+): Promise<ActivitySubscriptionState> {
+  return apiRequest<ActivitySubscriptionState>(
+    `/remote/actors/${encodeURIComponent(handle)}/activity-subscription`,
+    { method: "POST" },
+  );
+}
+
+/** Remove the activity subscription on a remote actor (keeps the follow). */
+export function unsubscribeFromRemoteActorActivity(
+  handle: string,
+): Promise<void> {
+  return apiRequest<void>(
+    `/remote/actors/${encodeURIComponent(handle)}/activity-subscription`,
+    { method: "DELETE" },
   );
 }
 

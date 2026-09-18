@@ -1825,8 +1825,14 @@ user profiles).
 `type`, optional `actor_url`/`source_url`, JSON `payload`,
 `delivered_targets`, `seen_at`, `digest_sent_at`) and
 `NotificationPreference` (unique per `(user_id, type)` with `in_app`,
-`email`, and `email_digest` toggles). The seven notification types are
-`follow`, `like`, `boost`, `quote`, `reply`, `mention`, and `share`.
+`email`, and `email_digest` toggles). The notification types are
+`follow`, `like`, `boost`, `quote`, `reply`, `mention`, `share`,
+`webmention`, and `activity`. `ActivitySubscription` rows
+record that a local user wants an `activity` notification for every
+activity another actor authors — the "bell" toggle on a user profile.
+Local users are referenced through `target_user_id`, remote actors through
+`target_actor_url` (exactly one is set per row, each unique per
+`(user_id, target)` pair, no self-subscriptions).
 
 `services/notifications.py` creates notifications: it resolves the
 recipient's per-type targets (defaults when no preference row exists are
@@ -1915,6 +1921,44 @@ the first row may already be seen, `quote` notifications deduplicate and
 merge payloads on `(recipient, actor, quoting object)` regardless of
 seen state, preserving the existing row and its read marker
 (`_create_or_update_quote_notification`).
+
+Activity subscriptions fan out through
+`services/activities.py`'s `_notify_activity_subscribers`, invoked by every
+local producer path (`create_local_activity` for `create` types,
+`create_status`, `record_track_publication`, `like_activity`,
+`boost_activity`, `reply_to_activity`, `quote_activity`). Each subscriber
+is filtered through `can_view_activity` — `mentioned`/`private` posts and
+inaccessible entities never leak — and the author, the interaction
+target's owner, and already-mentioned users are skipped so the `activity`
+row stays a fallback rather than a second notification for an event a
+specific `reply`/`quote`/`like`/`boost`/`mention` row already covers.
+The payload snapshots the authored activity (or, for authored
+likes/boosts, the reacted one) with the same `object_*`/`target_*`/
+`item_*` fields the other hooks produce, plus `activity_type` so clients
+can phrase the action ("shared a post", "liked a track").
+
+Remote actors fan out the same way through
+`notify_remote_activity_subscribers`, keyed on the materialized row's
+`source_actor`: it is invoked by the inbox materializers —
+`_materialize_remote_object` (replies and quotes),
+`materialize_remote_announce`, and `materialize_remote_post` via a
+`notify_subscribers` flag on `_materialize_remote_activity`, so only
+inbox-delivered activities notify while explicit remote-object lookups do
+not. Actor display fields come from the federation actor cache
+(`resolve_source_actor_profiles`) with a `user@domain` handle fallback,
+and `remote`-entity rows link the local `/activities/{id}` page since they
+resolve no local entity. A remote actor `Delete` drops the subscriptions
+targeting them.
+
+Subscription state is toggled via
+`POST`/`DELETE /api/v1/users/{username}/activity-subscription` for local
+users and `POST`/`DELETE /api/v1/remote/actors/{handle}/activity-subscription`
+for remote actors; subscribing also follows the target on a best-effort
+basis (a failed follow does not fail the subscription) and the response
+reports the resulting `follow_state`. The viewer's state is surfaced as
+`activity_subscribed` on the public profile and remote-actor responses;
+account deletion drops the rows in both directions, including any keyed on
+the deleted user's actor URL.
 
 Notification `payload`s are denormalized at creation so rows stay renderable
 after the source object disappears. Every hook records the actor's

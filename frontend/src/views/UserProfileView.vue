@@ -5,7 +5,9 @@ import { useRoute, RouterView, RouterLink } from "vue-router";
 import {
   followActor,
   getPublic,
+  subscribeToUserActivity,
   unfollowActor,
+  unsubscribeFromUserActivity,
   type PublicUserResponse,
 } from "@/api/users";
 import { getApiErrorMessage } from "@/api/client";
@@ -108,10 +110,12 @@ const data = ref<PublicUserResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const followBusy = ref(false);
+const activityBusy = ref(false);
 
-// The follow button only appears to logged-in visitors on someone else's
-// profile — the viewer-relative ``follow_state`` drives its label.
-const showFollowButton = computed(
+// The follow button and the activity bell only appear to logged-in
+// visitors on someone else's local profile — the viewer-relative
+// ``follow_state``/``activity_subscribed`` fields drive their state.
+const showProfileActions = computed(
   () =>
     !!authStore.user &&
     !isOwnProfile.value &&
@@ -138,6 +142,34 @@ async function toggleFollow() {
     });
   } finally {
     followBusy.value = false;
+  }
+}
+
+async function toggleActivitySubscription() {
+  if (!data.value || activityBusy.value) return;
+  activityBusy.value = true;
+  try {
+    if (data.value.activity_subscribed) {
+      await unsubscribeFromUserActivity(username.value);
+      data.value.activity_subscribed = false;
+    } else {
+      const state = await subscribeToUserActivity(username.value);
+      data.value.activity_subscribed = state.activity_subscribed;
+      // Subscribing also follows the user — reflect it on the follow
+      // button without a reload.
+      if (state.follow_state) {
+        data.value.follow_state = state.follow_state;
+      }
+    }
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: t("profile.activityNotifications.error", {
+        message: getApiErrorMessage(err) || t("errors.unknown"),
+      }),
+    });
+  } finally {
+    activityBusy.value = false;
   }
 }
 
@@ -212,7 +244,7 @@ watch(username, loadProfile);
 
         <div class="user-profile__actions">
           <AppButton
-            v-if="showFollowButton"
+            v-if="showProfileActions"
             size="sm"
             :variant="profile.follow_state ? 'secondary' : 'primary'"
             :disabled="followBusy"
@@ -228,6 +260,22 @@ watch(username, loadProfile);
             }}
           </AppButton>
           <FeedButton v-if="feedUrls" :urls="feedUrls" />
+          <AppButton
+            v-if="showProfileActions"
+            size="sm"
+            variant="secondary"
+            icon="bell"
+            :icon-variant="profile.activity_subscribed ? 'solid' : 'regular'"
+            :loading="activityBusy"
+            :aria-pressed="profile.activity_subscribed"
+            :title="
+              profile.activity_subscribed
+                ? t('profile.activityNotifications.unsubscribe')
+                : t('profile.activityNotifications.subscribe')
+            "
+            class="user-profile__activity-bell"
+            @click="toggleActivitySubscription"
+          />
         </div>
 
         <div class="user-profile__counts">
@@ -408,6 +456,11 @@ watch(username, loadProfile);
 
 .user-profile__follow {
   align-self: flex-start;
+}
+
+.user-profile__activity-bell[aria-pressed="true"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 .user-profile__followers {

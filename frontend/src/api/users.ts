@@ -22,6 +22,8 @@ export type FollowRequestDecision =
 export type FollowingResponse =
   paths["/api/v1/users/{username}/follows"]["get"]["responses"]["200"]["content"]["application/json"][number];
 export type FollowTargetRequest = components["schemas"]["FollowTargetRequest"];
+export type ActivitySubscriptionState =
+  components["schemas"]["ActivitySubscriptionState"];
 export type ProfileVisibility = components["schemas"]["ProfileVisibility"];
 export type FollowersApproval = components["schemas"]["FollowersApproval"];
 
@@ -211,6 +213,21 @@ export function unfollowActor(actorUrl: string): Promise<void> {
   return apiRequest<void>("/users/me/follows", {
     method: "DELETE",
     body: { actor_url: actorUrl } satisfies FollowTargetRequest,
+  });
+}
+
+export function subscribeToUserActivity(
+  username: string,
+): Promise<ActivitySubscriptionState> {
+  return apiRequest<ActivitySubscriptionState>(
+    `/users/${username}/activity-subscription`,
+    { method: "POST" },
+  );
+}
+
+export function unsubscribeFromUserActivity(username: string): Promise<void> {
+  return apiRequest<void>(`/users/${username}/activity-subscription`, {
+    method: "DELETE",
   });
 }
 

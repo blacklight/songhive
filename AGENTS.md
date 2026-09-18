@@ -124,11 +124,28 @@
   `visibility`/`owner_id` columns and are treated as public containers
   everywhere, including `acl.can_access`.
 - User notifications live in `models/notification.py` (`Notification`,
-  `NotificationPreference`), `services/notifications.py`, and
-  `api/routes/notifications.py`. `EventWebSocket.send_to_user`
-  (`ws/events.py`) delivers targeted `notification` events; the frontend
-  store is `frontend/src/stores/notifications.ts` on the shared `eventBus`
-  from `frontend/src/api/ws.ts`.
+  `NotificationPreference`, `ActivitySubscription`),
+  `services/notifications.py`, and `api/routes/notifications.py`.
+  `EventWebSocket.send_to_user` (`ws/events.py`) delivers targeted
+  `notification` events; the frontend store is
+  `frontend/src/stores/notifications.ts` on the shared `eventBus` from
+  `frontend/src/api/ws.ts`. The profile "bell" is an
+  `ActivitySubscription` (`POST`/`DELETE
+  /api/v1/users/{username}/activity-subscription` for local users,
+  `/api/v1/remote/actors/{handle}/activity-subscription` for remote
+  actors, keyed on `target_actor_url`); subscribing also follows the
+  target so remote activities keep arriving. Every local activity
+  producer calls `_notify_activity_subscribers`
+  (`services/activities.py`), which fans out `activity` notifications to
+  subscribers after a `can_view_activity` check; the remote counterpart
+  `notify_remote_activity_subscribers` is invoked by the inbox
+  materializers (`_materialize_remote_object`,
+  `materialize_remote_announce`, `materialize_remote_post` via the
+  `notify_subscribers` flag on `_materialize_remote_activity`).
+- Frontend specs that mount `NotificationActivityCard` must reset the
+  module-level `fetchActivityCached` map with `clearActivityCache()`
+  (`utils/activityFetch.ts`) in `beforeEach`, or cached fetches leak
+  across tests and leave `getActivity` once-mocks unconsumed.
 - Audio file storage uses audio-only SHA-256 hashing (via ffmpeg `streamhash`)
   so that tags and cover art can be rewritten without changing the stored path
   or invalidating the content hash. Run `songhive admin rehash-audio` once to

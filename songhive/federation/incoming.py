@@ -51,6 +51,7 @@ from ..services.activities import (
     _remote_actor_handle,
     _sync_activity_tags,
     fan_out_activity_update,
+    notify_remote_activity_subscribers,
     resolve_entity,
 )
 from ..services.preview_cards import schedule_preview_card_fetch
@@ -384,6 +385,7 @@ async def _materialize_remote_object(
         actor,
         target.source_id,
     )
+    await notify_remote_activity_subscribers(session, activity=row, config=config)
     try:
         await _relay_thread_activity(session, activity=activity, obj=obj, target=target, config=config)
     except Exception as exc:
@@ -607,6 +609,7 @@ async def materialize_remote_announce(
         session.add(ActivityMention(activity_id=row.id, **mention))
     await session.flush()
     logger.info("Materialized remote announce %s of %s from %s", announce_id, object_uri, actor)
+    await notify_remote_activity_subscribers(session, activity=row, config=config)
     return row
 
 
@@ -714,6 +717,15 @@ async def retract_remote_object(session: AsyncSession, *, activity: dict) -> Non
     target = obj.get("id") if isinstance(obj, dict) else obj if isinstance(obj, str) else None
     if not isinstance(target, str) or not target or not isinstance(actor, str):
         return
+
+    if target == actor:
+        # An actor deleting themselves also removes the activity
+        # subscriptions local users hold on them.
+        from ..services import notifications as notifications_service
+
+        removed = await notifications_service.unsubscribe_actor_activity_subscriptions(session, actor)
+        if removed:
+            logger.info("Removed %d activity subscriptions for deleted actor %s", removed, actor)
 
     row = await _find_remote_object(session, target, actor)
     if row is not None and row.deleted_at is None:

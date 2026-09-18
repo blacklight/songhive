@@ -13,9 +13,10 @@ import logging
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pubby import AttributionMismatch
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
@@ -24,13 +25,16 @@ from ...models.user import User
 from ...services import acl
 from ...services import activities as activity_service
 from ...services import follows as follows_service
+from ...services import notifications as notifications_service
 from ...services import remote_content
-from ..deps import get_config, get_current_user_optional, get_db
+from ..deps import get_config, get_current_user, get_current_user_optional, get_db
+from ..middleware.rate_limit import rate_limit_account
 from .activities import (
     ActivityResponse,
     _build_activity_response,
     _viewable_activity_response,
 )
+from .users import ActivitySubscriptionState
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +61,9 @@ class RemoteActorResponse(BaseModel):
     # Viewer-relative follow state (``pending``/``accepted``) when the
     # caller is authenticated and follows this actor.
     follow_state: Optional[str] = None
+    # Whether the caller subscribed to this actor's activity notifications
+    # (the profile bell).
+    activity_subscribed: bool = False
 
 
 class RemoteObjectResponse(BaseModel):
@@ -109,7 +116,11 @@ def _remote_policy(config: SonghiveConfig, user: Optional[User]) -> None:
     remote_content.check_remote_access(user, remote_content.remote_search_policy(config))
 
 
-def _actor_response(actor: remote_content.RemoteActorResult, follow_state: Optional[str] = None) -> RemoteActorResponse:
+def _actor_response(
+    actor: remote_content.RemoteActorResult,
+    follow_state: Optional[str] = None,
+    activity_subscribed: bool = False,
+) -> RemoteActorResponse:
     return RemoteActorResponse(
         handle=actor.handle,
         username=actor.username,
@@ -124,6 +135,7 @@ def _actor_response(actor: remote_content.RemoteActorResult, follow_state: Optio
         unavailable=actor.unavailable,
         url=f"/@{actor.handle}",
         follow_state=follow_state,
+        activity_subscribed=activity_subscribed,
     )
 
 
@@ -133,6 +145,16 @@ async def _viewer_follow_state(db: AsyncSession, user: Optional[User], actor_url
         return None
     states = await follows_service.follow_states_for(db, user.id, [actor_url])
     return states.get(actor_url)
+
+
+async def _viewer_activity_subscribed(db: AsyncSession, user: Optional[User], actor_url: str) -> bool:
+    """Return whether the caller subscribed to ``actor_url``'s activity."""
+    if user is None:
+        return False
+    local_id = await db.scalar(select(User.id).where(User.actor_url == actor_url))
+    if local_id is not None:
+        return await notifications_service.is_subscribed_to_user_activity(db, str(user.id), str(local_id))
+    return await notifications_service.is_subscribed_to_actor_activity(db, str(user.id), actor_url)
 
 
 def _object_response(row) -> RemoteObjectResponse:
@@ -211,10 +233,11 @@ async def remote_lookup(
                 raise _fetch_error(exc) from exc
         else:
             follow_state = await _viewer_follow_state(db, user, actor.actor_url)
+            activity_subscribed = await _viewer_activity_subscribed(db, user, actor.actor_url)
             return RemoteLookupResponse(
                 kind="actor",
                 url=f"/@{actor.handle}",
-                actor=_actor_response(actor, follow_state),
+                actor=_actor_response(actor, follow_state, activity_subscribed),
             )
 
     if target.kind in (
@@ -277,7 +300,88 @@ async def get_remote_actor(
     except FetchError as exc:
         raise _fetch_error(exc) from exc
     follow_state = await _viewer_follow_state(db, user, actor.actor_url)
-    return _actor_response(actor, follow_state)
+    activity_subscribed = await _viewer_activity_subscribed(db, user, actor.actor_url)
+    return _actor_response(actor, follow_state, activity_subscribed)
+
+
+@router.post(
+    "/actors/{handle}/activity-subscription",
+    response_model=ActivitySubscriptionState,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def subscribe_to_remote_actor_activity(
+    handle: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Subscribe to a remote actor's activity notifications (the profile bell).
+
+    Resolves ``user@domain`` fetch-on-miss like the profile endpoint, then
+    records an ``ActivitySubscription`` keyed on the actor URL. Subscribing
+    also follows the actor on a best-effort basis: remote activities only
+    reach the instance while a local user follows the actor, and a failed
+    follow does not fail the subscription. Actor URLs belonging to a local
+    user subscribe through the local target instead. Idempotent.
+    """
+    _remote_policy(config, user)
+    try:
+        actor = await remote_content.lookup_remote_actor(db, config, handle)
+    except FetchError as exc:
+        raise _fetch_error(exc) from exc
+
+    local_id = await db.scalar(select(User.id).where(User.actor_url == actor.actor_url))
+    if (local_id is not None and str(local_id) == str(user.id)) or (
+        local_id is None and user.actor_url == actor.actor_url
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot subscribe to your own activity",
+        )
+    # The follow runs first: ``_follow_local`` writes through pubby's sync
+    # storage, which must happen before the session accumulates writes.
+    try:
+        await follows_service.follow_user(db, config, user, actor.actor_url)
+    except Exception as exc:
+        logger.info("Follow alongside activity subscription on %s failed: %s", actor.actor_url, exc)
+    if local_id is not None:
+        await notifications_service.subscribe_to_user_activity(db, str(user.id), str(local_id))
+    else:
+        await notifications_service.subscribe_to_actor_activity(db, str(user.id), actor.actor_url)
+    await db.commit()
+    states = await follows_service.follow_states_for(db, user.id, [actor.actor_url])
+    return ActivitySubscriptionState(activity_subscribed=True, follow_state=states.get(actor.actor_url))
+
+
+@router.delete(
+    "/actors/{handle}/activity-subscription",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def unsubscribe_from_remote_actor_activity(
+    handle: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Remove the caller's activity subscription on a remote actor.
+
+    The follow is intentionally kept — it may predate the bell — so
+    unfollowing stays an explicit action on the follow button.
+    """
+    _remote_policy(config, user)
+    try:
+        actor = await remote_content.lookup_remote_actor(db, config, handle)
+    except FetchError as exc:
+        raise _fetch_error(exc) from exc
+
+    local_id = await db.scalar(select(User.id).where(User.actor_url == actor.actor_url))
+    if local_id is not None:
+        await notifications_service.unsubscribe_from_user_activity(db, str(user.id), str(local_id))
+    else:
+        await notifications_service.unsubscribe_from_actor_activity(db, str(user.id), actor.actor_url)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/actors/{handle}/activities", response_model=RemoteActorActivitiesResponse)

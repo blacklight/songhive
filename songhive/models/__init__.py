@@ -16,7 +16,7 @@ from .invite import Invite
 from .library import Library
 from .library_track import LibraryTrack
 from .mention_record import MentionRecord
-from .notification import Notification, NotificationPreference
+from .notification import ActivitySubscription, Notification, NotificationPreference
 from .oauth_client import OAuth2Client
 from .playlist import Playlist, PlaylistTrack
 from .preview_card import PreviewCard
@@ -37,6 +37,7 @@ from .user_link import UserLink
 __all__ = [
     "Activity",
     "ActivityMention",
+    "ActivitySubscription",
     "ActivityTag",
     "ActivityTarget",
     "Album",

@@ -1,8 +1,10 @@
 """
-Notification service: creation, listing, preferences, and retention.
+Notification service: creation, listing, preferences, subscriptions, and
+retention.
 
 Notifications are created for follows, likes, boosts, quotes, replies,
-mentions, and share grants.  Delivery targets are resolved per (user, type)
+mentions, share grants, webmentions, and activity by subscribed-to users.
+Delivery targets are resolved per (user, type)
 from ``NotificationPreference`` rows; a missing row means the defaults
 (in-app enabled, email and digest disabled).  The enabled targets are
 snapshotted on ``delivered_targets`` at creation time.
@@ -12,6 +14,12 @@ connections.  Individual email delivery is delegated to the
 ``send_notification_email`` Celery task and only queued for recipients with a
 verified email address.  Digest delivery is deferred to the daily
 ``send_notification_digests`` task.
+
+``ActivitySubscription`` rows — toggled through the bell on a user profile —
+subscribe a local user to another actor's authored activity (a local user
+through ``target_user_id``, a remote actor through ``target_actor_url``);
+each new activity produces an ``activity`` notification for every
+subscriber allowed to view it.
 """
 
 import logging
@@ -25,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..models.notification import (
+    ActivitySubscription,
     Notification,
     NotificationPreference,
     NotificationType,
@@ -273,6 +282,208 @@ async def set_preference(
         pref.email_digest = email_digest
         await session.flush()
     return pref
+
+
+async def get_activity_subscription(
+    session: AsyncSession,
+    user_id: str,
+    target_user_id: Optional[str] = None,
+    *,
+    target_actor_url: Optional[str] = None,
+) -> Optional[ActivitySubscription]:
+    """Return ``user_id``'s activity subscription on the given target, if any."""
+    filters: List[ColumnElement[bool]] = [ActivitySubscription.user_id == user_id]
+    if target_user_id is not None:
+        filters.append(ActivitySubscription.target_user_id == target_user_id)
+    if target_actor_url is not None:
+        filters.append(ActivitySubscription.target_actor_url == target_actor_url)
+    result = await session.execute(select(ActivitySubscription).where(*filters))
+    return result.scalar_one_or_none()
+
+
+async def is_subscribed_to_user_activity(
+    session: AsyncSession,
+    user_id: str,
+    target_user_id: str,
+) -> bool:
+    """Return whether ``user_id`` is subscribed to ``target_user_id``'s activity."""
+    return await get_activity_subscription(session, user_id, target_user_id) is not None
+
+
+async def is_subscribed_to_actor_activity(
+    session: AsyncSession,
+    user_id: str,
+    target_actor_url: str,
+) -> bool:
+    """Return whether ``user_id`` is subscribed to a remote actor's activity."""
+    return await get_activity_subscription(session, user_id, target_actor_url=target_actor_url) is not None
+
+
+async def _insert_activity_subscription(
+    session: AsyncSession,
+    row: ActivitySubscription,
+    target_user_id: Optional[str] = None,
+    *,
+    target_actor_url: Optional[str] = None,
+) -> ActivitySubscription:
+    """Insert ``row``, returning the existing row when a concurrent insert wins."""
+    try:
+        async with session.begin_nested():
+            session.add(row)
+            await session.flush()
+    except IntegrityError:
+        # A concurrent insert won the race; return the existing row.
+        existing = await get_activity_subscription(
+            session,
+            row.user_id,
+            target_user_id,
+            target_actor_url=target_actor_url,
+        )
+        assert existing is not None
+        return existing
+    return row
+
+
+async def subscribe_to_user_activity(
+    session: AsyncSession,
+    user_id: str,
+    target_user_id: str,
+) -> ActivitySubscription:
+    """Subscribe ``user_id`` to ``target_user_id``'s activity notifications.
+
+    Idempotent: an existing row is returned unchanged. Raises ``ValueError``
+    when both ids are the same user. Flushes without committing; the caller
+    owns the transaction.
+    """
+    if str(user_id) == str(target_user_id):
+        raise ValueError("Cannot subscribe to your own activity")
+    existing = await get_activity_subscription(session, user_id, target_user_id)
+    if existing is not None:
+        return existing
+    row = ActivitySubscription(user_id=user_id, target_user_id=target_user_id)
+    return await _insert_activity_subscription(session, row, target_user_id)
+
+
+async def subscribe_to_actor_activity(
+    session: AsyncSession,
+    user_id: str,
+    target_actor_url: str,
+) -> ActivitySubscription:
+    """Subscribe ``user_id`` to a remote actor's activity notifications.
+
+    Idempotent: an existing row is returned unchanged. Raises ``ValueError``
+    when the actor URL is the subscriber's own. Flushes without committing;
+    the caller owns the transaction.
+    """
+    result = await session.execute(select(User.actor_url).where(User.id == user_id))
+    own_actor_url = result.scalar_one_or_none()
+    if own_actor_url is not None and own_actor_url == target_actor_url:
+        raise ValueError("Cannot subscribe to your own activity")
+    existing = await get_activity_subscription(session, user_id, target_actor_url=target_actor_url)
+    if existing is not None:
+        return existing
+    row = ActivitySubscription(user_id=user_id, target_actor_url=target_actor_url)
+    return await _insert_activity_subscription(session, row, target_actor_url=target_actor_url)
+
+
+async def unsubscribe_from_user_activity(
+    session: AsyncSession,
+    user_id: str,
+    target_user_id: str,
+) -> int:
+    """Remove ``user_id``'s activity subscription on ``target_user_id``.
+
+    Returns the number of rows removed (0 or 1). Flushes without committing;
+    the caller owns the transaction.
+    """
+    result = cast(
+        CursorResult,
+        await session.execute(
+            delete(ActivitySubscription).where(
+                ActivitySubscription.user_id == user_id,
+                ActivitySubscription.target_user_id == target_user_id,
+            )
+        ),
+    )
+    return result.rowcount or 0
+
+
+async def unsubscribe_from_actor_activity(
+    session: AsyncSession,
+    user_id: str,
+    target_actor_url: str,
+) -> int:
+    """Remove ``user_id``'s activity subscription on a remote actor.
+
+    Returns the number of rows removed (0 or 1). Flushes without committing;
+    the caller owns the transaction.
+    """
+    result = cast(
+        CursorResult,
+        await session.execute(
+            delete(ActivitySubscription).where(
+                ActivitySubscription.user_id == user_id,
+                ActivitySubscription.target_actor_url == target_actor_url,
+            )
+        ),
+    )
+    return result.rowcount or 0
+
+
+async def unsubscribe_actor_activity_subscriptions(
+    session: AsyncSession,
+    target_actor_url: str,
+) -> int:
+    """Remove every subscription targeting ``target_actor_url``.
+
+    Used when a remote actor retracts themselves (``Delete`` of their own
+    actor). Returns the number of rows removed. Flushes without committing;
+    the caller owns the transaction.
+    """
+    result = cast(
+        CursorResult,
+        await session.execute(
+            delete(ActivitySubscription).where(
+                ActivitySubscription.target_actor_url == target_actor_url,
+            )
+        ),
+    )
+    return result.rowcount or 0
+
+
+async def list_activity_subscriptions(
+    session: AsyncSession,
+    user_id: str,
+) -> List[ActivitySubscription]:
+    """Return ``user_id``'s activity subscriptions (newest first)."""
+    result = await session.execute(
+        select(ActivitySubscription)
+        .where(ActivitySubscription.user_id == user_id)
+        .order_by(ActivitySubscription.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def list_activity_subscriber_ids(
+    session: AsyncSession,
+    target_user_id: str,
+) -> List[str]:
+    """Return the ids of the local users subscribed to ``target_user_id``."""
+    result = await session.execute(
+        select(ActivitySubscription.user_id).where(ActivitySubscription.target_user_id == target_user_id)
+    )
+    return [str(user_id) for (user_id,) in result.all()]
+
+
+async def list_actor_activity_subscriber_ids(
+    session: AsyncSession,
+    target_actor_url: str,
+) -> List[str]:
+    """Return the ids of the local users subscribed to a remote actor's activity."""
+    result = await session.execute(
+        select(ActivitySubscription.user_id).where(ActivitySubscription.target_actor_url == target_actor_url)
+    )
+    return [str(user_id) for (user_id,) in result.all()]
 
 
 async def mark_seen(session: AsyncSession, user_id: str, ids: List[str]) -> int:

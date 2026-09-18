@@ -55,6 +55,7 @@ const TYPE_ICONS: Record<string, string> = {
   mention: "at",
   share: "share-nodes",
   webmention: "link",
+  activity: "bell",
 };
 
 const filters = [
@@ -361,7 +362,16 @@ function actorName(item: NotificationResponse): string {
 }
 
 const URN_PREFIX = "urn:songhive:user:";
-const NOTE_TYPES = new Set(["mention", "reply", "quote", "webmention"]);
+// ``activity`` notifications snapshot the authored activity's object (or,
+// for authored likes/boosts, the reacted object) with the same
+// ``object_*``/``target_*`` fields the note types carry.
+const NOTE_TYPES = new Set([
+  "mention",
+  "reply",
+  "quote",
+  "webmention",
+  "activity",
+]);
 // ``/users/{name}/objects/{id}`` permalinks are backend endpoints that
 // redirect browsers to the right page — they must reach the server rather
 // than the SPA router, which has no such route.
@@ -440,6 +450,20 @@ function rawLinkFor(item: NotificationResponse): string | undefined {
     if (activityId) return `/activities/${activityId}`;
     return str(payload.object_url) ?? item.source_url ?? undefined;
   }
+  if (item.type === "activity") {
+    // The authored activity's own page — for authored likes/boosts the
+    // ``object_*`` fields resolve the reacted activity instead.
+    const activityId =
+      str(payload.object_activity_id) ?? noteActivityIds.value[item.id];
+    if (activityId) return `/activities/${activityId}`;
+    return (
+      str(payload.object_page_url) ??
+      str(payload.local_url) ??
+      str(payload.object_url) ??
+      item.source_url ??
+      undefined
+    );
+  }
   return item.source_url ?? undefined;
 }
 
@@ -494,7 +518,9 @@ function noteActivity(item: NotificationResponse): ActivityResponse | null {
   const payload = item.payload ?? {};
   const sourceId = str(payload.object_url) ?? item.source_url ?? "";
   if (!sourceId && !str(payload.object_content)) return null;
-  const isQuote = item.type === "quote";
+  const isQuote =
+    item.type === "quote" ||
+    (item.type === "activity" && str(payload.activity_type) === "quote");
   return {
     id: item.id,
     entity_type: "",
@@ -589,18 +615,26 @@ function activityRefFor(item: NotificationResponse): string | null {
 }
 
 function itemCardFor(item: NotificationResponse): ItemContext | null {
-  if (item.type === "share" || item.type === "like" || item.type === "boost") {
+  if (
+    item.type === "share" ||
+    item.type === "like" ||
+    item.type === "boost" ||
+    item.type === "activity"
+  ) {
     return itemContext(item);
   }
   return null;
 }
 
 function actorCardFor(item: NotificationResponse): boolean {
-  // Follows always surface the actor; likes/boosts fall back to the actor
-  // card when neither the reacted activity nor a local item resolves.
+  // Follows always surface the actor; likes/boosts/activity fall back to
+  // the actor card when neither the reacted activity nor a local item
+  // resolves.
   if (item.type === "follow") return true;
   return (
-    (item.type === "like" || item.type === "boost") &&
+    (item.type === "like" ||
+      item.type === "boost" ||
+      item.type === "activity") &&
     activityRefFor(item) === null &&
     itemContext(item) === null
   );

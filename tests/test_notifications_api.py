@@ -232,11 +232,11 @@ async def test_clear_notifications(client, db_session, regular_user, other_user,
 
 
 def test_get_preferences_defaults(client, regular_user, auth_headers):
-    """GET preferences returns all eight types with defaults."""
+    """GET preferences returns all nine types with defaults."""
     response = client.get("/api/v1/notifications/preferences", headers=auth_headers(regular_user))
     assert response.status_code == 200
     prefs = response.json()["preferences"]
-    assert len(prefs) == 8
+    assert len(prefs) == 9
     assert {p["type"] for p in prefs} == {
         "follow",
         "like",
@@ -246,6 +246,7 @@ def test_get_preferences_defaults(client, regular_user, auth_headers):
         "mention",
         "share",
         "webmention",
+        "activity",
     }
     assert all(p["in_app"] and not p["email"] and not p["email_digest"] for p in prefs)
 

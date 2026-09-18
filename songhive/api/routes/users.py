@@ -22,6 +22,7 @@ from ...services import activities as activity_service
 from ...services import audit
 from ...services import federation as federation_service
 from ...services import follows as follows_service
+from ...services import notifications as notifications_service
 from ...services.auth import get_user_by_username, list_public_users
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
@@ -108,6 +109,10 @@ class PublicUserResponse(BaseModel):
     # Viewer-relative follow state on this user (``pending``/``accepted``),
     # only set for authenticated viewers other than the user themself.
     follow_state: Optional[str] = None
+    # Whether the authenticated viewer receives ``activity`` notifications
+    # for this user (the profile bell); always ``false`` for anonymous
+    # viewers and for the user themself.
+    activity_subscribed: bool = False
 
 
 class FollowerResponse(BaseModel):
@@ -147,6 +152,16 @@ class FollowTargetRequest(BaseModel):
 
     # A local username, ``@user@domain`` handle, or actor/profile URL.
     actor_url: str = Field(..., min_length=1, max_length=1024)
+
+
+class ActivitySubscriptionState(BaseModel):
+    """The authenticated user's activity-subscription state on a profile."""
+
+    activity_subscribed: bool
+    # The viewer's resulting follow state on the target (``pending`` /
+    # ``accepted``) — subscribing also follows the actor so their
+    # activities are delivered. ``None`` when no follow exists.
+    follow_state: Optional[str] = None
 
 
 def _follower_response(follower) -> FollowerResponse:
@@ -823,7 +838,80 @@ async def get_user(
     result = PublicUserResponse.model_validate(user)
     counts = await _followers_count_map(config)
     result.follows_count = await follows_service.count_user_follows(db, user.id, states=(FOLLOW_STATE_ACCEPTED,))
-    if viewer is not None and viewer.id != user.id and user.actor_url:
-        states = await follows_service.follow_states_for(db, viewer.id, [user.actor_url])
-        result.follow_state = states.get(user.actor_url)
+    if viewer is not None and viewer.id != user.id:
+        result.activity_subscribed = await notifications_service.is_subscribed_to_user_activity(
+            db, str(viewer.id), str(user.id)
+        )
+        if user.actor_url:
+            states = await follows_service.follow_states_for(db, viewer.id, [user.actor_url])
+            result.follow_state = states.get(user.actor_url)
     return _with_followers_count(result, counts, user.actor_url)
+
+
+@router.post(
+    "/{username}/activity-subscription",
+    response_model=ActivitySubscriptionState,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def subscribe_to_user_activity(
+    username: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Subscribe to a local user's activity notifications (the profile bell).
+
+    Subscribed users receive an ``activity`` notification — delivered per
+    their notification preferences — for every activity the target authors
+    that they may view. Subscribing is idempotent and also follows the
+    target on a best-effort basis: being notified of every activity of a
+    user one does not follow makes little sense. A failed follow (e.g. the
+    target rejects followers, or federation is off) does not fail the
+    subscription.
+    """
+    target = await get_user_by_username(db, username)
+    if target is None or not target.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    if target.id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot subscribe to your own activity",
+        )
+    # The follow runs first: ``_follow_local`` writes through pubby's sync
+    # storage, which must happen before the session accumulates writes.
+    try:
+        await follows_service.follow_user(db, config, current_user, target.actor_url or target.username)
+    except Exception as exc:
+        logger.info("Follow alongside activity subscription on %s failed: %s", username, exc)
+    await notifications_service.subscribe_to_user_activity(db, str(current_user.id), str(target.id))
+    await db.commit()
+    follow_state = None
+    if target.actor_url:
+        states = await follows_service.follow_states_for(db, current_user.id, [target.actor_url])
+        follow_state = states.get(target.actor_url)
+    return ActivitySubscriptionState(activity_subscribed=True, follow_state=follow_state)
+
+
+@router.delete(
+    "/{username}/activity-subscription",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def unsubscribe_from_user_activity(
+    username: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the authenticated user's activity subscription on a user."""
+    target = await get_user_by_username(db, username)
+    if target is None or not target.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    await notifications_service.unsubscribe_from_user_activity(db, str(current_user.id), str(target.id))
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

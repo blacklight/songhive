@@ -820,13 +820,18 @@ async def _materialize_remote_activity(
     obj: dict,
     actor_url: str,
     kind: str,
+    notify_subscribers: bool = False,
+    config: Optional[SonghiveConfig] = None,
 ) -> Activity:
     """
     Upsert the ``Activity`` row mirroring a cached remote object.
 
     Remote rows are ``source_type="remote"`` keyed by the canonical object
     URL, attach to the ``remote_objects`` row through ``entity_type=
-    "remote"``, and link to a cached parent only — never fetched.
+    "remote"``, and link to a cached parent only — never fetched. When
+    ``notify_subscribers`` is set, a newly created row fans out an
+    ``activity`` notification to the actor's subscribers — the inbox
+    materialization path uses it; explicit lookups do not.
     """
     from ..federation.incoming import (
         _object_language,
@@ -897,6 +902,10 @@ async def _materialize_remote_activity(
     await _sync_activity_tags(session, row, _remote_hashtags(obj))
     if row.preview_card_id is None:
         schedule_preview_card_fetch(row)
+    if existing is None and notify_subscribers:
+        from .activities import notify_remote_activity_subscribers
+
+        await notify_remote_activity_subscribers(session, activity=row, config=config)
     return row
 
 
@@ -1015,6 +1024,8 @@ async def materialize_remote_post(
         obj=obj,
         actor_url=actor,
         kind="Create",
+        notify_subscribers=True,
+        config=config,
     )
 
 

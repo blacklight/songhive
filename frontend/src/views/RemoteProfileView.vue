@@ -4,6 +4,8 @@ import { useI18n } from "vue-i18n";
 import {
   getRemoteActor,
   getRemoteActorActivities,
+  subscribeToRemoteActorActivity,
+  unsubscribeFromRemoteActorActivity,
   type RemoteActor,
 } from "@/api/remote";
 import { followActor, unfollowActor } from "@/api/users";
@@ -34,6 +36,37 @@ const activities = ref<ActivityResponse[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 const followBusy = ref(false);
+const activityBusy = ref(false);
+
+async function toggleActivitySubscription() {
+  if (!actor.value || activityBusy.value) return;
+  activityBusy.value = true;
+  try {
+    if (actor.value.activity_subscribed) {
+      await unsubscribeFromRemoteActorActivity(normalizedHandle.value);
+      actor.value.activity_subscribed = false;
+    } else {
+      const state = await subscribeToRemoteActorActivity(
+        normalizedHandle.value,
+      );
+      actor.value.activity_subscribed = state.activity_subscribed;
+      // Subscribing also follows the actor — reflect it on the follow
+      // button without a reload.
+      if (state.follow_state) {
+        actor.value.follow_state = state.follow_state;
+      }
+    }
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: t("profile.activityNotifications.error", {
+        message: getApiErrorMessage(err) || t("errors.unknown"),
+      }),
+    });
+  } finally {
+    activityBusy.value = false;
+  }
+}
 
 async function toggleFollow() {
   if (!actor.value || followBusy.value) return;
@@ -104,22 +137,38 @@ watch(normalizedHandle, load, { immediate: true });
           </span>
         </div>
         <p class="remote-profile__handle">@{{ actor.handle }}</p>
-        <AppButton
-          v-if="authStore.user"
-          size="sm"
-          :variant="actor.follow_state ? 'secondary' : 'primary'"
-          :disabled="followBusy"
-          class="remote-profile__follow"
-          @click="toggleFollow"
-        >
-          {{
-            actor.follow_state === "accepted"
-              ? t("profile.unfollow")
-              : actor.follow_state === "pending"
-                ? t("profile.followRequested")
-                : t("profile.follow")
-          }}
-        </AppButton>
+        <div v-if="authStore.user" class="remote-profile__actions">
+          <AppButton
+            size="sm"
+            :variant="actor.follow_state ? 'secondary' : 'primary'"
+            :disabled="followBusy"
+            class="remote-profile__follow"
+            @click="toggleFollow"
+          >
+            {{
+              actor.follow_state === "accepted"
+                ? t("profile.unfollow")
+                : actor.follow_state === "pending"
+                  ? t("profile.followRequested")
+                  : t("profile.follow")
+            }}
+          </AppButton>
+          <AppButton
+            size="sm"
+            variant="secondary"
+            icon="bell"
+            :icon-variant="actor.activity_subscribed ? 'solid' : 'regular'"
+            :loading="activityBusy"
+            :aria-pressed="actor.activity_subscribed"
+            :title="
+              actor.activity_subscribed
+                ? t('profile.activityNotifications.unsubscribe')
+                : t('profile.activityNotifications.subscribe')
+            "
+            class="remote-profile__activity-bell"
+            @click="toggleActivitySubscription"
+          />
+        </div>
         <p v-if="actor.unavailable" class="remote-profile__unavailable">
           {{ t("remote.actorUnavailable") }}
         </p>
@@ -216,8 +265,20 @@ watch(normalizedHandle, load, { immediate: true });
   color: var(--color-text-muted);
 }
 
+.remote-profile__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
 .remote-profile__follow {
   align-self: flex-start;
+}
+
+.remote-profile__activity-bell[aria-pressed="true"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 .remote-profile__unavailable {

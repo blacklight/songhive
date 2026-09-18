@@ -24,7 +24,7 @@ from ..models.invite import Invite
 from ..models.library import Library
 from ..models.library_track import LibraryTrack
 from ..models.mention_record import MentionRecord
-from ..models.notification import Notification, NotificationPreference
+from ..models.notification import ActivitySubscription, Notification, NotificationPreference
 from ..models.oauth_client import OAuth2Client
 from ..models.playlist import Playlist
 from ..models.radio import Radio
@@ -416,6 +416,15 @@ async def _remove_user_references(session: AsyncSession, user: User) -> None:
     await session.execute(delete(MentionRecord).where(MentionRecord.user_id == user.id))
     await session.execute(delete(Notification).where(Notification.user_id == user.id))
     await session.execute(delete(NotificationPreference).where(NotificationPreference.user_id == user.id))
+    # Subscriptions in both directions: ones the user made and ones
+    # targeting them — including any keyed on their actor URL.
+    conditions = [
+        ActivitySubscription.user_id == user.id,
+        ActivitySubscription.target_user_id == user.id,
+    ]
+    if user.actor_url:
+        conditions.append(ActivitySubscription.target_actor_url == user.actor_url)
+    await session.execute(delete(ActivitySubscription).where(or_(*conditions)))
     # Notifications and mention records the user produced on other accounts
     # (likes, shares, follows, mentions) are no longer applicable once the
     # actor is gone.

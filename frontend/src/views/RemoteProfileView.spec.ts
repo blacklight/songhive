@@ -4,6 +4,8 @@ import { i18n } from "@/i18n";
 import {
   getRemoteActor,
   getRemoteActorActivities,
+  subscribeToRemoteActorActivity,
+  unsubscribeFromRemoteActorActivity,
   type RemoteActor,
 } from "@/api/remote";
 import { followActor, unfollowActor } from "@/api/users";
@@ -14,6 +16,8 @@ import RemoteProfileView from "./RemoteProfileView.vue";
 vi.mock("@/api/remote", () => ({
   getRemoteActor: vi.fn(),
   getRemoteActorActivities: vi.fn(),
+  subscribeToRemoteActorActivity: vi.fn(),
+  unsubscribeFromRemoteActorActivity: vi.fn(),
 }));
 
 vi.mock("@/api/users", () => ({
@@ -33,6 +37,7 @@ function createActor(overrides?: Partial<RemoteActor>): RemoteActor {
     profile_url: "https://remote.example/@alice",
     unavailable: false,
     url: "/@alice@remote.example",
+    activity_subscribed: false,
     ...overrides,
   };
 }
@@ -146,6 +151,72 @@ describe("RemoteProfileView", () => {
     vi.mocked(getRemoteActor).mockResolvedValue(createActor());
     await mountView();
     expect(wrapper.find(".remote-profile__follow").exists()).toBe(false);
+    expect(wrapper.find(".remote-profile__activity-bell").exists()).toBe(false);
+  });
+
+  it("shows the activity bell to authenticated viewers", async () => {
+    const auth = useAuthStore();
+    auth.user = { id: "u1", username: "me" } as never;
+    vi.mocked(getRemoteActor).mockResolvedValue(createActor());
+    await mountView();
+
+    const bell = wrapper.find(".remote-profile__activity-bell");
+    expect(bell.exists()).toBe(true);
+    expect(bell.attributes("aria-pressed")).toBe("false");
+  });
+
+  it("subscribes and unsubscribes to the actor's activity", async () => {
+    const auth = useAuthStore();
+    auth.user = { id: "u1", username: "me" } as never;
+    vi.mocked(getRemoteActor).mockResolvedValue(createActor());
+    vi.mocked(subscribeToRemoteActorActivity).mockResolvedValue({
+      activity_subscribed: true,
+      follow_state: "pending",
+    });
+    await mountView();
+
+    const bell = wrapper.find(".remote-profile__activity-bell");
+    await bell.trigger("click");
+    await flushPromises();
+
+    expect(subscribeToRemoteActorActivity).toHaveBeenCalledWith(
+      "alice@remote.example",
+    );
+    expect(
+      wrapper.find(".remote-profile__activity-bell").attributes("aria-pressed"),
+    ).toBe("true");
+    // Subscribing also follows — the follow button reflects the new state.
+    expect(wrapper.find(".remote-profile__follow").text()).toContain(
+      "Requested",
+    );
+
+    vi.mocked(unsubscribeFromRemoteActorActivity).mockResolvedValue(undefined);
+    await wrapper.find(".remote-profile__activity-bell").trigger("click");
+    await flushPromises();
+
+    expect(unsubscribeFromRemoteActorActivity).toHaveBeenCalledWith(
+      "alice@remote.example",
+    );
+    expect(
+      wrapper.find(".remote-profile__activity-bell").attributes("aria-pressed"),
+    ).toBe("false");
+    // Unsubscribing keeps the follow.
+    expect(wrapper.find(".remote-profile__follow").text()).toContain(
+      "Requested",
+    );
+  });
+
+  it("renders the bell pressed when already subscribed", async () => {
+    const auth = useAuthStore();
+    auth.user = { id: "u1", username: "me" } as never;
+    vi.mocked(getRemoteActor).mockResolvedValue(
+      createActor({ activity_subscribed: true }),
+    );
+    await mountView();
+
+    expect(
+      wrapper.find(".remote-profile__activity-bell").attributes("aria-pressed"),
+    ).toBe("true");
   });
 
   it("follows and unfollows a remote actor", async () => {

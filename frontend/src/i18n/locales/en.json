@@ -850,6 +850,11 @@
     "follow": "Follow",
     "unfollow": "Unfollow",
     "followRequested": "Requested",
+    "activityNotifications": {
+      "subscribe": "Notify me about activity",
+      "unsubscribe": "Stop activity notifications",
+      "error": "Could not update activity notifications: {message}"
+    },
     "followsPage": {
       "title": "Follows",
       "empty": "Not following anyone yet.",
@@ -1404,7 +1409,13 @@
       "mention": "mentioned you",
       "share": "shared {object} with you",
       "unknown": "sent you a notification",
-      "webmention": "mentioned your {object}"
+      "webmention": "mentioned your {object}",
+      "activity": "shared {object}",
+      "activityCreate": "shared {object}",
+      "activityLike": "liked {object}",
+      "activityAnnounce": "boosted {object}",
+      "activityReply": "replied to {object}",
+      "activityQuote": "quoted {object}"
     },
     "objects": {
       "post": "post",
@@ -1451,7 +1462,8 @@
         "reply": "Replies",
         "mention": "Mentions",
         "share": "Shares",
-        "webmention": "Webmentions"
+        "webmention": "Webmentions",
+        "activity": "User activity"
       }
     },
     "onItem": "on {title}",

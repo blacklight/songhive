@@ -19,7 +19,9 @@ from ...config.schema import SonghiveConfig
 from ...models.genre import Genre
 from ...models.tag import Tag
 from ...models.user import User
-from ...services import acl, feeds as feeds_service, music as music_service
+from ...services import acl
+from ...services import feeds as feeds_service
+from ...services import music as music_service
 from ...services.activities import resolve_entity
 from ...services.auth import get_user_by_username
 from ...services.genres import validate_genre_name
