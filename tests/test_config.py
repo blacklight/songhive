@@ -318,6 +318,38 @@ def test_config_dump_masks_secrets():
     assert data["database"]["url"] == "postgresql://user:***@localhost:5432/songhive"
 
 
+def test_feeds_config_defaults():
+    """Feed configuration is enabled with a sensible default item limit."""
+    config = SonghiveConfig()
+    assert config.feeds.enabled is True
+    assert config.feeds.max_items == 20
+
+
+def test_feeds_config_from_toml(tmp_path):
+    """Feed settings are loaded from a TOML file."""
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text("\n".join(["[feeds]", "enabled = false", "max_items = 50"]))
+    config = load_config(["--config", str(toml_file)])
+    assert config.feeds.enabled is False
+    assert config.feeds.max_items == 50
+
+
+def test_feeds_config_from_env(monkeypatch):
+    """SONGHIVE_FEEDS__* environment variables override feed config."""
+    monkeypatch.setenv("SONGHIVE_FEEDS__ENABLED", "false")
+    monkeypatch.setenv("SONGHIVE_FEEDS__MAX_ITEMS", "100")
+    config = SonghiveConfig()
+    assert config.feeds.enabled is False
+    assert config.feeds.max_items == 100
+
+
+@pytest.mark.parametrize("value", [0, 501])
+def test_feeds_config_max_items_bounds(value):
+    """The feed item limit is constrained to a sensible range."""
+    with pytest.raises(ValidationError):
+        SonghiveConfig(feeds={"max_items": value})
+
+
 def test_streaming_config_defaults():
     """Streaming configuration has the expected defaults."""
     config = SonghiveConfig(auth={"secret_key": "a" * 64})

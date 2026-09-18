@@ -11,9 +11,11 @@ import {
 import TagDetailView, {
   type ListParams,
 } from "@/components/tags/TagDetailView.vue";
+import { tagFeedUrls } from "@/utils/feeds";
 
 const route = useRoute();
 const tagName = computed(() => String(route.params.name));
+const feedUrls = computed(() => tagFeedUrls(tagName.value));
 const availableTypes: string[] = [
   "artist",
   "album",
@@ -43,5 +45,6 @@ function loadTagActivities(
     :load-items="loadTagItems"
     :activity-loader="loadTagActivities"
     :delete-item="deleteTag"
+    :feed-urls="feedUrls"
   />
 </template>

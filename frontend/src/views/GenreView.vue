@@ -10,9 +10,11 @@ import {
 import TagDetailView, {
   type ListParams,
 } from "@/components/tags/TagDetailView.vue";
+import { genreFeedUrls } from "@/utils/feeds";
 
 const route = useRoute();
 const genreName = computed(() => String(route.params.name));
+const feedUrls = computed(() => genreFeedUrls(genreName.value));
 const availableTypes: GenreItemType[] = ["album", "track"];
 
 function loadGenreItems(name: string, params: ListParams) {
@@ -27,5 +29,6 @@ function loadGenreItems(name: string, params: ListParams) {
     :available-types="availableTypes"
     :load-items="loadGenreItems"
     :delete-item="deleteGenre"
+    :feed-urls="feedUrls"
   />
 </template>

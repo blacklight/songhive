@@ -26,7 +26,7 @@ from ...services import settings as settings_service
 from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor
 from ..deps import get_current_user_optional, get_db, get_redis
-from ..semantic_meta import inject_head_tags, public_base_url, user_head_tags
+from ..semantic_meta import feed_link_tags, inject_head_tags, public_base_url, user_head_tags
 
 router = APIRouter(include_in_schema=False)
 
@@ -108,7 +108,10 @@ def _user_spa_response(
         if domain:
             me_urls.append(get_mastodon_actor_url(domain, user.username))
     config = request.app.state.config
-    og_tags = user_head_tags(user, public_base_url(request, config), config.federation.instance_name)
+    base_url = public_base_url(request, config)
+    og_tags = user_head_tags(user, base_url, config.federation.instance_name)
+    if config.feeds.enabled:
+        og_tags += feed_link_tags("user", user.username, base_url)
     return _spa_response(alternate_url=alternate_url, me_urls=me_urls, extra_tags=og_tags)
 
 

@@ -199,6 +199,21 @@ class FederationConfig(BaseSettings):
     )
 
 
+class FeedsConfig(BaseSettings):
+    """RSS/Atom feed configuration."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable RSS/Atom feeds under /feeds and <link> feed discovery on object pages",
+    )
+    max_items: int = Field(
+        default=20,
+        ge=1,
+        le=500,
+        description="Maximum number of items returned in a feed",
+    )
+
+
 class WebmentionsConfig(BaseSettings):
     """Webmention (W3C recommendation) configuration."""
 
@@ -616,6 +631,7 @@ class SonghiveConfig(BaseSettings):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     federation: FederationConfig = Field(default_factory=FederationConfig)
     webmentions: WebmentionsConfig = Field(default_factory=WebmentionsConfig)
+    feeds: FeedsConfig = Field(default_factory=FeedsConfig)
     auth: AuthConfig = Field(default_factory=_require_auth_secret_key)
     email: EmailConfig = Field(default_factory=EmailConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)

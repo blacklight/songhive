@@ -43,6 +43,11 @@
     "deleteError": "Could not delete genre: {message}",
     "saveError": "Could not save genres: {message}"
   },
+  "feeds": {
+    "subscribe": "Feed",
+    "rss": "RSS feed",
+    "atom": "Atom feed"
+  },
   "common": {
     "save": "Save",
     "cancel": "Cancel",

@@ -114,6 +114,15 @@
 - Celery tasks are organized by domain: `tasks/import_.py`,
   `tasks/federation.py`, `tasks/tags.py`, `tasks/transcoding.py`,
   `tasks/notifications.py` (daily digest + seen-notification purge).
+- RSS/Atom feeds live under `/feeds` (outside `/api/v1`):
+  `api/routes/feeds.py` + `services/feeds.py` render the XML, and
+  `api/semantic_meta.py` / `api/routes/profile_pages.py` inject the
+  `<link rel="alternate">` discovery tags into served pages;
+  `frontend/src/composables/useFeedLinks.ts` keeps them in sync after
+  client-side navigation. Feed queries must keep honouring the requester
+  ACL — anonymous readers only see `public` content. Artists have no
+  `visibility`/`owner_id` columns and are treated as public containers
+  everywhere, including `acl.can_access`.
 - User notifications live in `models/notification.py` (`Notification`,
   `NotificationPreference`), `services/notifications.py`, and
   `api/routes/notifications.py`. `EventWebSocket.send_to_user`

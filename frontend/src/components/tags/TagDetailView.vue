@@ -14,6 +14,9 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppPagination from "@/components/ui/AppPagination.vue";
 import AppTabs from "@/components/ui/AppTabs.vue";
 import SortControl from "@/components/ui/SortControl.vue";
+import FeedButton from "@/components/ui/FeedButton.vue";
+import type { FeedUrls } from "@/utils/feeds";
+import { useFeedLinks } from "@/composables/useFeedLinks";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ActivityCard from "@/components/activities/ActivityCard.vue";
 import TaggedItemCard from "@/components/tags/TaggedItemCard.vue";
@@ -55,9 +58,12 @@ export interface Props {
     name: string,
     params: ActivityListParams,
   ) => Promise<ActivityListResponse>;
+  feedUrls?: FeedUrls;
 }
 
 const props = defineProps<Props>();
+
+useFeedLinks(() => props.feedUrls);
 
 const { t } = useI18n();
 const route = useRoute();
@@ -382,16 +388,19 @@ onMounted(() => loadVisibleTypes());
           {{ name }}
         </AppPageTitle>
 
-        <AppButton
-          v-if="authStore.isAdmin"
-          variant="danger"
-          size="sm"
-          icon="trash"
-          :loading="deleting"
-          @click="onDelete"
-        >
-          {{ t("common.delete") }}
-        </AppButton>
+        <div class="tag-detail-view__title-actions">
+          <FeedButton v-if="props.feedUrls" :urls="props.feedUrls" />
+          <AppButton
+            v-if="authStore.isAdmin"
+            variant="danger"
+            size="sm"
+            icon="trash"
+            :loading="deleting"
+            @click="onDelete"
+          >
+            {{ t("common.delete") }}
+          </AppButton>
+        </div>
       </div>
 
       <div class="tag-detail-view__controls">
@@ -526,6 +535,13 @@ onMounted(() => loadVisibleTypes());
   margin: 0;
   font-size: 2rem;
   word-break: break-word;
+}
+
+.tag-detail-view__title-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .tag-detail-view__controls {

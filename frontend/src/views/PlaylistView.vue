@@ -23,11 +23,14 @@ import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
+import { useFeedLinks } from "@/composables/useFeedLinks";
 import type { QueueTrack } from "@/player/types";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
+import FeedButton from "@/components/ui/FeedButton.vue";
+import { playlistFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import CollectionStats from "@/components/library/CollectionStats.vue";
 import TrackList from "@/components/library/TrackList.vue";
@@ -43,6 +46,8 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const playlistId = computed(() => String(route.params.id));
+const feedUrls = computed(() => playlistFeedUrls(playlistId.value));
+useFeedLinks(feedUrls);
 
 const playlist = ref<PlaylistResponse | null>(null);
 const stats = ref<PlaylistStats | null>(null);
@@ -341,11 +346,10 @@ watch(
           />
         </div>
 
-        <EntityActions
-          class="playlist-view__header-actions"
-          :actions="actions"
-          @select="onAction"
-        />
+        <div class="playlist-view__header-actions">
+          <FeedButton :urls="feedUrls" />
+          <EntityActions :actions="actions" @select="onAction" />
+        </div>
       </div>
 
       <section
@@ -542,6 +546,10 @@ watch(
 
 .playlist-view__header-actions {
   margin-top: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
 }
 
 .playlist-view__section {

@@ -17,6 +17,7 @@ import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
+import { useFeedLinks } from "@/composables/useFeedLinks";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
@@ -28,6 +29,8 @@ import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
+import FeedButton from "@/components/ui/FeedButton.vue";
+import { activityFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import ExternalTrackBadge from "@/components/external-libraries/ExternalTrackBadge.vue";
@@ -39,6 +42,8 @@ const router = useRouter();
 const player = usePlayerStore();
 const authStore = useAuthStore();
 const trackId = computed(() => String(route.params.id));
+const feedUrls = computed(() => activityFeedUrls("tracks", trackId.value));
+useFeedLinks(feedUrls);
 
 const addDialogOpen = ref(false);
 const addDialogMode = ref<"library" | "playlist">("library");
@@ -380,12 +385,10 @@ watch(
           </p>
         </div>
 
-        <EntityActions
-          class="track-view__header-actions"
-          :actions="actions"
-          size="lg"
-          @select="onAction"
-        />
+        <div class="track-view__header-actions">
+          <FeedButton :urls="feedUrls" size="lg" />
+          <EntityActions :actions="actions" size="lg" @select="onAction" />
+        </div>
       </div>
     </template>
 
@@ -467,6 +470,13 @@ watch(
   gap: var(--space-3);
   flex: 1;
   min-width: 16rem;
+}
+
+.track-view__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
 }
 
 .track-view__title {

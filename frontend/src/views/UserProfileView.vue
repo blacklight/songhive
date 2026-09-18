@@ -12,6 +12,9 @@ import { getApiErrorMessage } from "@/api/client";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
+import FeedButton from "@/components/ui/FeedButton.vue";
+import { userFeedUrls } from "@/utils/feeds";
+import { useFeedLinks } from "@/composables/useFeedLinks";
 import AppModal from "@/components/feedback/AppModal.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import RichText from "@/components/RichText.vue";
@@ -43,6 +46,11 @@ const username = computed(() => String(route.params.username));
 // ``user@domain`` handles route here too — remote actors are resolved
 // through the remote lookup API and rendered by RemoteProfileView.
 const isRemoteHandle = computed(() => username.value.includes("@"));
+// Remote actors have no local feed — only local profiles get feed links.
+const feedUrls = computed(() =>
+  isRemoteHandle.value ? undefined : userFeedUrls(username.value),
+);
+useFeedLinks(feedUrls);
 const profile = computed<PublicUserResponse | null>(() => data.value);
 
 // The compose button only makes sense on one's own profile — statuses are
@@ -202,22 +210,25 @@ watch(username, loadProfile);
           />
         </p>
 
-        <AppButton
-          v-if="showFollowButton"
-          size="sm"
-          :variant="profile.follow_state ? 'secondary' : 'primary'"
-          :disabled="followBusy"
-          class="user-profile__follow"
-          @click="toggleFollow"
-        >
-          {{
-            profile.follow_state === "accepted"
-              ? t("profile.unfollow")
-              : profile.follow_state === "pending"
-                ? t("profile.followRequested")
-                : t("profile.follow")
-          }}
-        </AppButton>
+        <div class="user-profile__actions">
+          <AppButton
+            v-if="showFollowButton"
+            size="sm"
+            :variant="profile.follow_state ? 'secondary' : 'primary'"
+            :disabled="followBusy"
+            class="user-profile__follow"
+            @click="toggleFollow"
+          >
+            {{
+              profile.follow_state === "accepted"
+                ? t("profile.unfollow")
+                : profile.follow_state === "pending"
+                  ? t("profile.followRequested")
+                  : t("profile.follow")
+            }}
+          </AppButton>
+          <FeedButton v-if="feedUrls" :urls="feedUrls" />
+        </div>
 
         <div class="user-profile__counts">
           <RouterLink
@@ -386,6 +397,13 @@ watch(username, loadProfile);
 .user-profile__counts {
   display: flex;
   gap: var(--space-4);
+}
+
+.user-profile__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .user-profile__follow {

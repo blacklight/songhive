@@ -24,11 +24,14 @@ import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
+import { useFeedLinks } from "@/composables/useFeedLinks";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
+import FeedButton from "@/components/ui/FeedButton.vue";
+import { activityFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import CollectionStats from "@/components/library/CollectionStats.vue";
 import TrackList from "@/components/library/TrackList.vue";
@@ -45,6 +48,8 @@ const router = useRouter();
 const authStore = useAuthStore();
 const toastStore = useToastStore();
 const albumId = computed(() => String(route.params.id));
+const feedUrls = computed(() => activityFeedUrls("albums", albumId.value));
+useFeedLinks(feedUrls);
 
 const addDialogOpen = ref(false);
 const addDialogMode = ref<"library" | "playlist">("library");
@@ -363,11 +368,10 @@ watch(
             {{ album.description }}
           </p>
 
-          <EntityActions
-            class="album-view__header-actions"
-            :actions="actions"
-            @select="onAction"
-          />
+          <div class="album-view__header-actions">
+            <FeedButton :urls="feedUrls" />
+            <EntityActions :actions="actions" @select="onAction" />
+          </div>
         </div>
       </div>
 
@@ -545,6 +549,10 @@ watch(
 
 .album-view__header-actions {
   margin-top: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
 }
 
 .album-view__tags {

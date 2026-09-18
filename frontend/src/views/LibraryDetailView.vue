@@ -21,11 +21,14 @@ import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
+import { useFeedLinks } from "@/composables/useFeedLinks";
 import type { QueueTrack } from "@/player/types";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
+import FeedButton from "@/components/ui/FeedButton.vue";
+import { libraryFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import CollectionStats from "@/components/library/CollectionStats.vue";
 import TrackList from "@/components/library/TrackList.vue";
@@ -39,6 +42,8 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const libraryId = computed(() => String(route.params.id));
+const feedUrls = computed(() => libraryFeedUrls(libraryId.value));
+useFeedLinks(feedUrls);
 
 const library = ref<LibraryResponse | null>(null);
 const stats = ref<LibraryStats | null>(null);
@@ -305,11 +310,10 @@ watch(
           <CollectionStats v-if="stats" :track-count="stats.track_count" />
         </div>
 
-        <EntityActions
-          class="library-detail-view__header-actions"
-          :actions="actions"
-          @select="onAction"
-        />
+        <div class="library-detail-view__header-actions">
+          <FeedButton :urls="feedUrls" />
+          <EntityActions :actions="actions" @select="onAction" />
+        </div>
       </div>
 
       <section
@@ -499,6 +503,10 @@ watch(
 
 .library-detail-view__header-actions {
   margin-top: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
 }
 
 .library-detail-view__section {

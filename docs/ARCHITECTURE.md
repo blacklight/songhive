@@ -105,6 +105,7 @@ songhive/
 │   │   ├── share_urls.py   # Share URL tokens (revocable short links)
 │   │   ├── share.py        # Public token resolver (redirects + sets cookie)
 │   │   ├── reports.py      # Content moderation reports + admin review
+│   │   ├── feeds.py        # RSS/Atom feeds under /feeds (users, entities, tags, genres)
 │   │   ├── federation.py   # ActivityPub object endpoints (tracks, objects) + WebFinger
 │   │   ├── remote.py       # Explicit remote lookup/dereference + cached remote objects
 │   │   ├── admin.py        # Admin endpoints (settings, stats, user management)
@@ -161,6 +162,7 @@ songhive/
 │   ├── deletion.py         # Cascade deletion + activity retraction fan-out
 │   ├── email.py            # SMTP email (verification, password reset)
 │   ├── federation.py       # Actor provisioning, domain allow/block, inbox dispatch
+│   ├── feeds.py            # RSS 2.0/Atom feed documents + per-entity feed queries
 │   ├── follows.py          # Outbound follow/unfollow, decision folding, follow listings
 │   ├── genres.py           # Genre validation, association and listing
 │   ├── import_.py          # Import pipeline orchestration
@@ -1768,6 +1770,52 @@ formats are generated client-side (`utils/embed.ts`):
 
 Embed URLs load anonymously, so the tab only offers snippets for public
 items (owners see a publish-first hint otherwise).
+
+---
+
+## Feeds
+
+`api/routes/feeds.py` serves RSS 2.0 and Atom 1.0 documents under `/feeds`
+(outside `/api/v1`, like `/webmentions` and `/ap`), rendered by
+`services/feeds.py` with standard-library XML escaping — no feed library is
+involved. Each feed is available in both formats by swapping the URL suffix:
+
+| Feed URL                                        | Content                                             |
+|-------------------------------------------------|-----------------------------------------------------|
+| `/feeds/users/{username}.{fmt}`                 | The user's latest posts (`mode="posts"` timeline)   |
+| `/feeds/{plural}/{id}/activities.{fmt}`         | Activities attached to a track, album, artist, playlist, library or radio |
+| `/feeds/artists/{id}.{fmt}`                     | Latest releases: albums plus standalone tracks merged by date |
+| `/feeds/playlists/{id}.{fmt}`                   | Tracks most recently added to the playlist          |
+| `/feeds/libraries/{id}.{fmt}`                   | Tracks most recently added to the library           |
+| `/feeds/tags/{name}.{fmt}`                      | Newest entities and activities carrying the tag     |
+| `/feeds/genres/{name}.{fmt}`                    | Newest tracks and albums in the genre               |
+
+`{fmt}` is `rss` or `atom` (served as `application/rss+xml` /
+`application/atom+xml`); `?limit=` may reduce the page size but never
+exceed `feeds.max_items` (default 20, range 1–500). The whole subsystem is
+gated on `feeds.enabled`. Feed queries reuse the same ACL predicates as the
+JSON API, so anonymous readers only see public content and authenticated
+requests also cover `local` visibility and share grants; a valid share
+token still grants access to a private collection's feed. For the artist
+releases feed, a track that belongs to an album visible to the requester is
+not listed separately — the album entry already represents it. Track items
+carry an `<enclosure>`/Atom `rel="enclosure"` link pointing at the public
+`/api/v1/stream/{id}` URL when the track has audio.
+
+Feed discovery happens server-side so non-browser clients can find the
+URLs: `api/semantic_meta.py` appends
+`<link rel="alternate" type="application/rss+xml|atom+xml">` tags to the
+semantic `<head>` tags it injects into the SPA shell for object pages (and
+`profile_pages` does the same for `/@{username}`), mirroring whatever feed
+the page exposes — track and album pages advertise their activities feed,
+`/activities` sub-pages of artists/playlists/libraries switch to the
+activities variant. On the frontend, `utils/feeds.ts` builds the same URLs,
+`composables/useFeedLinks.ts` keeps `document.head`'s feed alternates in
+sync after client-side navigation (replacing the tags the server injected
+for the landing page and removing them on feed-less pages), and
+`components/ui/FeedButton.vue` renders an RSS/Atom menu on every
+feed-backed page (entity headers, activity pages, tag/genre detail and
+user profiles).
 
 ---
 

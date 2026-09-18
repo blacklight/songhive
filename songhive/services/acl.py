@@ -413,6 +413,14 @@ async def can_access(
         return await _can_access_user(session, user, item_id)
     if item_type == "remote":
         return await _can_access_remote(session, user, item_id)
+    if item_type == "artist":
+        # Artists have no visibility/owner fields and are treated as public
+        # containers, matching the list-query predicate and the JSON API.
+        # This must stay in the public wrapper: ``_can_access`` is also the
+        # derived-file path, where an "artist" entry intentionally returns
+        # False so artist images are only revealed through accessible
+        # tracks/albums.
+        return await session.get(Artist, item_id) is not None
     return await _can_access(session, user, item_type, item_id, share_token=share_token)
 
 

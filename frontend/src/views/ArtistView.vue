@@ -18,6 +18,7 @@ import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useShareDialog } from "@/composables/useShareDialog";
+import { useFeedLinks } from "@/composables/useFeedLinks";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useCanManage } from "@/composables/useCanManage";
 import type { QueueTrack } from "@/player/types";
@@ -25,6 +26,8 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
+import FeedButton from "@/components/ui/FeedButton.vue";
+import { artistFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AlbumCard from "@/components/library/AlbumCard.vue";
 import CollectionStats from "@/components/library/CollectionStats.vue";
@@ -40,6 +43,8 @@ const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 const artistId = computed(() => String(route.params.id));
+const feedUrls = computed(() => artistFeedUrls(artistId.value));
+useFeedLinks(feedUrls);
 
 const addDialogOpen = ref(false);
 const addDialogMode = ref<"library" | "playlist">("library");
@@ -324,11 +329,10 @@ watch(
             <TagList :tags="artist.tags" />
           </div>
         </div>
-        <EntityActions
-          class="artist-view__header-actions"
-          :actions="actions"
-          @select="onAction"
-        />
+        <div class="artist-view__header-actions">
+          <FeedButton :urls="feedUrls" />
+          <EntityActions :actions="actions" @select="onAction" />
+        </div>
       </div>
 
       <section
@@ -558,6 +562,10 @@ watch(
 
 .artist-view__header-actions {
   grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
 }
 
 @media (max-width: 767px) {

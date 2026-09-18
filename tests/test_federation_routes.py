@@ -865,8 +865,9 @@ async def test_track_page_serves_plain_spa_for_unpublished_track(
 
     response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": "text/html"})
     assert response.status_code == status.HTTP_200_OK
-    assert 'rel="alternate"' not in response.headers.get("Link", "")
-    assert 'rel="alternate"' not in response.text
+    # No ActivityStreams discovery hints — RSS/Atom feed alternates are fine.
+    assert "application/activity+json" not in response.headers.get("Link", "")
+    assert "application/activity+json" not in response.text
 
 
 async def test_track_page_returns_404_for_unpublished_track(fed_client, db_session, regular_user):

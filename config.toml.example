@@ -98,6 +98,13 @@ enabled = true
 # source parsing
 # discovery_max_bytes = 1048576
 
+[feeds]
+# Enable RSS/Atom feeds under /feeds and the <link rel="alternate"> feed
+# discovery tags injected into object pages.
+enabled = true
+# Maximum number of items returned in a feed (1-500).
+# max_items = 20
+
 [musicbrainz]
 # Enable MusicBrainz metadata + Cover Art Archive enrichment for uploaded tracks.
 enabled = true

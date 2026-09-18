@@ -28,7 +28,9 @@ from ..models.base import get_session
 from ..models.genre import Genre
 from ..models.tag import Tag
 from ..models.user import User
-from ..services import acl, music
+from ..services import acl
+from ..services import feeds as feeds_service
+from ..services import music
 from ..services.auth import get_user_by_username
 from ..services.genres import validate_genre_name
 from ..services.storage import StorageService
@@ -399,6 +401,24 @@ def user_head_tags(user: User, base_url: str, site_name: str) -> list[str]:
     )
 
 
+def feed_link_tags(kind: str, key: str, base_url: str, *, activities: bool = False) -> list[str]:
+    """Build ``<link rel="alternate">`` tags advertising the entity's feeds.
+
+    ``kind``/``key`` follow ``match_object_path``. ``activities`` selects the
+    activities feed for kinds that also have a content feed (artists,
+    playlists, libraries); track and album pages always advertise their
+    activities feed since they have no feed of their own.
+    """
+    if kind in ("user", "tag", "genre") or (kind in ("artist", "playlist", "library") and not activities):
+        build = lambda fmt: feeds_service.feed_path(kind, key, fmt)  # noqa: E731
+    else:
+        build = lambda fmt: feeds_service.activities_feed_path(kind, key, fmt)  # noqa: E731
+    return [
+        f'<link rel="alternate" type="application/rss+xml" href="{_h(base_url + build("rss"))}" title="RSS feed">',
+        f'<link rel="alternate" type="application/atom+xml" href="{_h(base_url + build("atom"))}" title="Atom feed">',
+    ]
+
+
 async def _user_tags(
     session: AsyncSession,
     user: Optional[User],
@@ -458,6 +478,9 @@ async def entity_head_tags(
         tags = await _user_tags(session, user, key, base_url, site_name)
     else:
         tags = None
+    if tags and config.feeds.enabled:
+        activities = request.url.path.rstrip("/").endswith("/activities")
+        tags += feed_link_tags(kind, key, base_url, activities=activities)
     return tags or []
 
 

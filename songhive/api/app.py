@@ -37,6 +37,7 @@ from .routes import (
     external_libraries,
     favorites,
     federation,
+    feeds,
     files,
     genres,
     history,
@@ -309,6 +310,9 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     # User profile / ActivityPub actor routes (always mounted, even when
     # federation is disabled, so browser profile pages keep working).
     app.include_router(profile_pages.router)
+
+    # RSS/Atom feeds are public protocol endpoints outside /api/v1.
+    app.include_router(feeds.router)
 
     # Federation routes
     if config.federation.enabled and config.federation.instance_domain:
