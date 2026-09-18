@@ -561,6 +561,7 @@ onMounted(() => loadVisibleTypes());
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  margin: 0 auto;
 }
 
 .tag-detail-view__more {
