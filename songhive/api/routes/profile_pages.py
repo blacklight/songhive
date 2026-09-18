@@ -12,6 +12,7 @@ from __future__ import annotations
 from html import escape
 from pathlib import Path
 from typing import Any, Optional, Sequence
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -134,11 +135,27 @@ async def get_home_page(
     an ACL. ActivityPub clients are never redirected: ``/`` has no
     ActivityPub representation, so they keep getting the SPA shell exactly
     as the default handler served it before.
+
+    In single-user mode every ``/`` response also advertises ``rel="me"``
+    links pointing at the user's profile — in both the ``/@{username}`` and
+    ``/users/{username}`` forms — in the body and the ``Link`` header, so
+    link verification (e.g. on Mastodon) works even when only the instance
+    base URL is referenced.
     """
-    if user is None and not _accepts_activitypub(request):
-        username = await settings_service.get_setting(db, redis, "single_user_username")
-        if isinstance(username, str) and username:
-            return RedirectResponse(url=f"/@{username}", status_code=status.HTTP_302_FOUND)
+    username = await settings_service.get_setting(db, redis, "single_user_username")
+    if isinstance(username, str) and username:
+        base_url = public_base_url(request, request.app.state.config)
+        me_urls = [f"{base_url}/@{quote(username)}", f"{base_url}/users/{quote(username)}"]
+        link_header = ", ".join(f'<{url}>; rel="me"' for url in me_urls)
+        if user is None and not _accepts_activitypub(request):
+            return RedirectResponse(
+                url=f"/@{username}",
+                status_code=status.HTTP_302_FOUND,
+                headers={"Link": link_header},
+            )
+        response = _spa_response(me_urls=me_urls)
+        response.headers["Link"] = link_header
+        return response
 
     return _spa_response()
 

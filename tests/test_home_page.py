@@ -171,6 +171,56 @@ async def test_home_no_redirect_for_activitypub(client, db_session, regular_user
         assert response.headers["content-type"].startswith("text/html")
 
 
+@pytest.mark.asyncio
+async def test_home_redirect_advertises_rel_me(client, db_session, regular_user):
+    """The single-user redirect advertises ``rel="me"`` in the ``Link`` header."""
+    await _set_setting(db_session, "single_user_username", "regular")
+
+    response = client.get("/", headers={"Accept": "text/html"}, follow_redirects=False)
+    assert response.status_code == status.HTTP_302_FOUND
+    link = response.headers["Link"]
+    assert '<http://testserver/@regular>; rel="me"' in link
+    assert '<http://testserver/users/regular>; rel="me"' in link
+
+
+@pytest.mark.asyncio
+async def test_home_spa_advertises_rel_me_for_authenticated(client, db_session, regular_user, auth_headers):
+    """Authenticated visitors get ``rel="me"`` links in the body and ``Link`` header."""
+    await _set_setting(db_session, "single_user_username", "regular")
+
+    response = client.get(
+        "/",
+        headers={"Accept": "text/html", **auth_headers(regular_user)},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert '<link rel="me" href="http://testserver/@regular">' in response.text
+    assert '<link rel="me" href="http://testserver/users/regular">' in response.text
+    link = response.headers["Link"]
+    assert '<http://testserver/@regular>; rel="me"' in link
+    assert '<http://testserver/users/regular>; rel="me"' in link
+
+
+@pytest.mark.asyncio
+async def test_home_spa_advertises_rel_me_for_activitypub(client, db_session, regular_user):
+    """ActivityPub clients get the SPA shell with ``rel="me"`` hints as well."""
+    await _set_setting(db_session, "single_user_username", "regular")
+
+    response = client.get("/", headers={"Accept": "application/activity+json"})
+    assert response.status_code == status.HTTP_200_OK
+    assert '<link rel="me" href="http://testserver/@regular">' in response.text
+    assert '<link rel="me" href="http://testserver/users/regular">' in response.text
+    assert 'rel="me"' in response.headers["Link"]
+
+
+@pytest.mark.asyncio
+async def test_home_no_rel_me_without_single_user(client):
+    """Without the setting, ``/`` serves the SPA with no ``rel="me"`` hints."""
+    response = client.get("/")
+    assert response.status_code == status.HTTP_200_OK
+    assert 'rel="me"' not in response.text
+    assert "Link" not in response.headers
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/instance/stats
 # ---------------------------------------------------------------------------

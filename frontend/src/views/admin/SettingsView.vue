@@ -120,6 +120,10 @@ function getLabel(setting: SettingResponse): string {
     return t("pages.admin.settings.fetchTimeoutSeconds");
   if (setting.key === "preview_cards_enabled")
     return t("pages.admin.settings.previewCardsEnabled");
+  if (setting.key === "single_user_username")
+    return t("pages.admin.settings.singleUserUsername");
+  if (setting.key === "public_stats_enabled")
+    return t("pages.admin.settings.publicStatsEnabled");
   return setting.key;
 }
 

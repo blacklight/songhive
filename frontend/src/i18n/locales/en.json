@@ -500,7 +500,9 @@
           "disabled": "Disabled",
           "authenticated": "Authenticated users",
           "public": "Public"
-        }
+        },
+        "singleUserUsername": "Enable single-user mode for this instance: show the timeline of this user by default on the home page",
+        "publicStatsEnabled": "Enable public stats for this instance"
       },
       "reports": {
         "title": "Reports",

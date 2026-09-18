@@ -2064,8 +2064,13 @@ setting. When set, anonymous browser requests to `/` are answered with a
 302 redirect to `/@{username}` by the always-mounted `profile_pages`
 route, and the SPA router guard applies the same anonymous-only redirect
 for client-side navigations; authenticated users keep the regular home
-page and ActivityPub clients still get the SPA shell as before. The
-setting is exposed as
+page and ActivityPub clients still get the SPA shell as before. Every
+`/` response in this mode also advertises `rel="me"` links to the
+single-user profile — both the `/@{username}` and `/users/{username}`
+forms, injected into the SPA `<head>` and the `Link` header (the header
+is the only channel on the redirect, which has no body) — so link
+verification (e.g. on Mastodon) succeeds even when only the instance
+base URL is referenced. The setting is exposed as
 `single_user` on `/api/v1/instance` and `/api/v2/instance`.
 
 The Vite build also copies the `swagger-ui-dist` bundle into
