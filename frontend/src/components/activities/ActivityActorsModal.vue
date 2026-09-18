@@ -24,6 +24,14 @@ const actors = ref<ActivityActorResponse[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
+// Remote actors open the internal ``/@name@host`` profile — the stored
+// handle already carries the ``@name@host`` form; the route param drops
+// the leading ``@``. Handles without a host part keep the external link.
+function remoteRouteName(actor: ActivityActorResponse): string | null {
+  const route = actor.handle.replace(/^@/, "");
+  return route.includes("@") ? route : null;
+}
+
 async function fetchActors() {
   loading.value = true;
   error.value = null;
@@ -71,6 +79,27 @@ watch(
           <RouterLink
             v-if="actor.username"
             :to="{ name: 'userProfile', params: { username: actor.username } }"
+            class="activity-actors__actor"
+            @click="emit('close')"
+          >
+            <AppAvatar
+              :src="actor.avatar_url ?? undefined"
+              :name="actor.display_name || actor.handle"
+              size="sm"
+            />
+            <span class="activity-actors__names">
+              <span class="activity-actors__display-name">{{
+                actor.display_name || actor.handle
+              }}</span>
+              <span class="activity-actors__handle">{{ actor.handle }}</span>
+            </span>
+          </RouterLink>
+          <RouterLink
+            v-else-if="remoteRouteName(actor)"
+            :to="{
+              name: 'userProfile',
+              params: { username: remoteRouteName(actor) },
+            }"
             class="activity-actors__actor"
             @click="emit('close')"
           >

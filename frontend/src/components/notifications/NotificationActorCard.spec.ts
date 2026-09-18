@@ -35,7 +35,7 @@ describe("NotificationActorCard", () => {
     setActivePinia(createPinia());
   });
 
-  it("links remote actor URLs externally with the full handle", async () => {
+  it("routes remote actor URLs to the internal remote profile", async () => {
     const wrapper = mountCard({
       actorUrl: "https://remote.example/users/bob",
       displayName: "Bob Rocker",
@@ -44,8 +44,7 @@ describe("NotificationActorCard", () => {
     await flushPromises();
 
     const card = wrapper.find("a.actor-card");
-    expect(card.attributes("href")).toBe("https://remote.example/users/bob");
-    expect(card.attributes("target")).toBe("_blank");
+    expect(card.attributes("href")).toBe("/@bob@remote.example");
     expect(card.text()).toContain("Bob Rocker");
     expect(card.text()).toContain("@bob@remote.example");
     expect(card.find("img").attributes("src")).toBe(

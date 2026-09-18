@@ -28,7 +28,7 @@ def _parse_crontab(expr: str) -> crontab:
     )
 
 
-def _load_celery_config() -> tuple[str, str, str, int, int]:
+def _load_celery_config() -> tuple[str, str, str, int, int, Optional[str]]:
     """Load Celery-relevant configuration, falling back to sensible defaults."""
     try:
         from ..config import load_config
@@ -40,6 +40,7 @@ def _load_celery_config() -> tuple[str, str, str, int, int]:
             config.celery.cleanup_orphaned_files_schedule,
             config.notifications.digest_hour,
             config.notifications.purge_hour,
+            config.federation.remote_activity_prune_schedule or None,
         )
     except Exception as exc:
         logger.info("Could not load Songhive config for Celery, using defaults: %s", type(exc).__name__)
@@ -49,6 +50,7 @@ def _load_celery_config() -> tuple[str, str, str, int, int]:
             "0 3 * * *",
             8,
             3,
+            None,
         )
 
 
@@ -58,6 +60,7 @@ def make_celery(
     cleanup_orphaned_files_schedule: Optional[str] = None,
     notification_digest_hour: int = 8,
     notification_purge_hour: int = 3,
+    remote_activity_prune_schedule: Optional[str] = None,
 ) -> Celery:
     """Create and configure a Celery application."""
     if cleanup_orphaned_files_schedule is None:
@@ -96,15 +99,28 @@ def make_celery(
             },
         },
     )
+    if remote_activity_prune_schedule:
+        app.conf.beat_schedule["prune-remote-activities"] = {
+            "task": "songhive.tasks.federation.prune_remote_activities",
+            "schedule": _parse_crontab(remote_activity_prune_schedule),
+        }
     app.autodiscover_tasks(["songhive.tasks"])
     return app
 
 
-_broker_url, _result_backend, _cleanup_schedule, _digest_hour, _purge_hour = _load_celery_config()
+(
+    _broker_url,
+    _result_backend,
+    _cleanup_schedule,
+    _digest_hour,
+    _purge_hour,
+    _remote_prune_schedule,
+) = _load_celery_config()
 celery_app = make_celery(
     broker_url=_broker_url,
     result_backend=_result_backend,
     cleanup_orphaned_files_schedule=_cleanup_schedule,
     notification_digest_hour=_digest_hour,
     notification_purge_hour=_purge_hour,
+    remote_activity_prune_schedule=_remote_prune_schedule,
 )

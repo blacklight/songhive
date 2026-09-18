@@ -33,19 +33,17 @@ const tokens = computed<RichTextToken[]>(() =>
       >
 
       <RouterLink
-        v-else-if="token.type === 'mention' && !token.remote"
-        :to="{ name: 'userProfile', params: { username: token.username } }"
+        v-else-if="token.type === 'mention'"
+        :to="{
+          name: 'userProfile',
+          params: {
+            username: token.remote
+              ? `${token.username}@${token.domain}`
+              : token.username,
+          },
+        }"
         class="rich-text__mention"
         >{{ token.handle }}</RouterLink
-      >
-
-      <a
-        v-else-if="token.type === 'mention' && token.remote"
-        :href="token.url"
-        target="_blank"
-        rel="noopener"
-        class="rich-text__mention rich-text__mention--remote"
-        >{{ token.handle }}</a
       >
 
       <RouterLink

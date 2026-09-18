@@ -10,15 +10,18 @@ from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...federation.actors import get_federation_storage, sync_user_actor
+from ...models.follow import FOLLOW_STATE_ACCEPTED, Follow
 from ...models.user import FollowersApproval, ProfileVisibility, User, UserRole
 from ...models.user_link import UserLink
 from ...services import activities as activity_service
 from ...services import audit
 from ...services import federation as federation_service
+from ...services import follows as follows_service
 from ...services.auth import get_user_by_username, list_public_users
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
@@ -101,6 +104,10 @@ class PublicUserResponse(BaseModel):
     created_at: datetime
     links: List[UserLinkOutput] = Field(default_factory=list)
     followers_count: int = 0
+    follows_count: int = 0
+    # Viewer-relative follow state on this user (``pending``/``accepted``),
+    # only set for authenticated viewers other than the user themself.
+    follow_state: Optional[str] = None
 
 
 class FollowerResponse(BaseModel):
@@ -119,6 +126,27 @@ class FollowRequestResponse(BaseModel):
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     requested_at: Optional[datetime] = None
+
+
+class FollowingResponse(BaseModel):
+    """An actor followed by a user, local or remote."""
+
+    actor_url: str
+    handle: Optional[str] = None
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    # ``pending`` while the target has not approved the follow yet.
+    state: str
+    followed_at: Optional[datetime] = None
+    # Set when the followed actor is a user on this instance.
+    local_username: Optional[str] = None
+
+
+class FollowTargetRequest(BaseModel):
+    """Payload identifying the actor to follow or unfollow."""
+
+    # A local username, ``@user@domain`` handle, or actor/profile URL.
+    actor_url: str = Field(..., min_length=1, max_length=1024)
 
 
 def _follower_response(follower) -> FollowerResponse:
@@ -141,6 +169,31 @@ def _follow_request_response(request) -> FollowRequestResponse:
         avatar_url=activity_service._actor_doc_avatar_url(actor_data),
         requested_at=request.requested_at,
     )
+
+
+def _following_response(row: Follow, local_users: dict) -> FollowingResponse:
+    """Map a stored ``Follow`` row to its representation."""
+    actor_data = row.actor_data or {}
+    local = local_users.get(row.target_user_id) if row.target_user_id else None
+    return FollowingResponse(
+        actor_url=row.target_actor_url,
+        handle=follows_service.follow_row_handle(row),
+        display_name=(local.display_name if local else None) or activity_service._actor_doc_display_name(actor_data),
+        avatar_url=(local.avatar_url if local else None) or activity_service._actor_doc_avatar_url(actor_data),
+        state=row.state,
+        followed_at=row.created_at,
+        local_username=local.username if local else None,
+    )
+
+
+async def _following_responses(db: AsyncSession, rows: list) -> List[FollowingResponse]:
+    """Serialize follow rows, bulk-loading their local target users."""
+    ids = [row.target_user_id for row in rows if row.target_user_id]
+    local_users = {}
+    if ids:
+        result = await db.execute(select(User).where(User.id.in_(ids)))
+        local_users = {user.id: user for user in result.scalars()}
+    return [_following_response(row, local_users) for row in rows]
 
 
 async def _load_followers(user: User, config: SonghiveConfig) -> list:
@@ -351,6 +404,16 @@ async def _decide_follow_request(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    # When the requester is a local user their stored ``Follow`` row tracks
+    # the decision directly — the enqueued ``Accept``/``Reject`` only
+    # reaches remote requesters' instances.
+    await follows_service.apply_local_follow_decision(
+        db,
+        actor_url=body.actor_url,
+        target_actor_url=current_user.actor_url or "",
+        accept=accept,
+    )
+
     await resolve_follow_request_notification(
         db,
         recipient=current_user,
@@ -381,6 +444,64 @@ async def reject_my_follow_request(
 ):
     """Decline a pending follow request and send the ``Reject``."""
     await _decide_follow_request(body, current_user, db, config, accept=False)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/me/follows", response_model=List[FollowingResponse])
+async def list_my_follows(
+    response: Response,
+    pagination: Pagination = Depends(get_pagination),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List actors the current user follows, newest first — all states."""
+    rows = await follows_service.list_user_follows(db, current_user.id)
+    pagination.set_total(response, len(rows))
+    page = rows[pagination.offset : pagination.offset + pagination.limit]
+    return await _following_responses(db, page)
+
+
+@router.post(
+    "/me/follows",
+    response_model=FollowingResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def follow_actor(
+    body: FollowTargetRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """
+    Follow a local or remote actor.
+
+    The target may be a local username, a ``@user@domain`` handle or an
+    actor/profile URL. Remote follows stay ``pending`` until the remote
+    instance answers the delivered ``Follow`` activity; local follows
+    resolve immediately per the target's approval policy.
+    """
+    row = await follows_service.follow_user(db, config, current_user, body.actor_url)
+    await db.commit()
+    rows = await _following_responses(db, [row])
+    return rows[0]
+
+
+@router.delete(
+    "/me/follows",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def unfollow_actor(
+    body: FollowTargetRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Unfollow an actor — delivers ``Undo(Follow)`` for remote targets."""
+    target_url = await follows_service.resolve_unfollow_target(db, config, body.actor_url)
+    await follows_service.unfollow_user(db, config, current_user, target_url)
+    await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -510,7 +631,13 @@ async def list_public_users_route(
     pagination.set_total(response, total)
 
     counts = await _followers_count_map(config)
-    return [_with_followers_count(PublicUserResponse.model_validate(u), counts, u.actor_url) for u in users]
+    follows_counts = await follows_service.follows_count_map(db, [str(u.id) for u in users])
+    items = []
+    for u in users:
+        item = _with_followers_count(PublicUserResponse.model_validate(u), counts, u.actor_url)
+        item.follows_count = follows_counts.get(str(u.id), 0)
+        items.append(item)
+    return items
 
 
 @router.get("/{user_id}/tags", response_model=List[TagSummaryResponse])
@@ -651,11 +778,40 @@ async def list_user_followers(
     return [_follower_response(f) for f in page]
 
 
+@router.get("/{username}/follows", response_model=List[FollowingResponse])
+async def list_user_follows(
+    response: Response,
+    username: str,
+    pagination: Pagination = Depends(get_pagination),
+    db: AsyncSession = Depends(get_db),
+    viewer: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    List the actors a user follows, newest first.
+
+    Only ``accepted`` follows are listed publicly; the owner additionally
+    sees their ``pending`` outbound requests.
+    """
+    user = await get_user_by_username(db, username)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    states = None if viewer is not None and viewer.id == user.id else (FOLLOW_STATE_ACCEPTED,)
+    rows = await follows_service.list_user_follows(db, user.id, states=states)
+    pagination.set_total(response, len(rows))
+    page = rows[pagination.offset : pagination.offset + pagination.limit]
+    return await _following_responses(db, page)
+
+
 @router.get("/{username}", response_model=PublicUserResponse)
 async def get_user(
     username: str,
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
+    viewer: Optional[User] = Depends(get_current_user_optional),
 ):
     """Get a user profile by username."""
     user = await get_user_by_username(db, username)
@@ -666,4 +822,8 @@ async def get_user(
         )
     result = PublicUserResponse.model_validate(user)
     counts = await _followers_count_map(config)
+    result.follows_count = await follows_service.count_user_follows(db, user.id, states=(FOLLOW_STATE_ACCEPTED,))
+    if viewer is not None and viewer.id != user.id and user.actor_url:
+        states = await follows_service.follow_states_for(db, viewer.id, [user.actor_url])
+        result.follow_state = states.get(user.actor_url)
     return _with_followers_count(result, counts, user.actor_url)

@@ -463,8 +463,7 @@ function actorLinkFor(
   item: NotificationResponse,
 ): NotificationLink | undefined {
   const parsed = parseActorRef(item.actor_url ?? "", instanceDomain.value);
-  if (parsed.username) return { to: `/@${parsed.username}` };
-  if (parsed.remoteUrl) return { href: parsed.remoteUrl };
+  if (parsed.routeUsername) return { to: `/@${parsed.routeUsername}` };
   return undefined;
 }
 
@@ -795,14 +794,6 @@ onBeforeUnmount(() => {
                   :to="actorLinkFor(item)!.to!"
                   class="notifications-view__actor"
                   ><strong>{{ actorName(item) }}</strong></RouterLink
-                >
-                <a
-                  v-else-if="actorLinkFor(item)?.href"
-                  :href="actorLinkFor(item)!.href"
-                  target="_blank"
-                  rel="noopener"
-                  class="notifications-view__actor"
-                  ><strong>{{ actorName(item) }}</strong></a
                 >
                 <strong v-else>{{ actorName(item) }}</strong>
                 {{ " " }}

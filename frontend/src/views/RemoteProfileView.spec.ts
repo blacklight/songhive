@@ -6,12 +6,19 @@ import {
   getRemoteActorActivities,
   type RemoteActor,
 } from "@/api/remote";
+import { followActor, unfollowActor } from "@/api/users";
 import { ApiError } from "@/api/client";
+import { useAuthStore } from "@/stores/auth";
 import RemoteProfileView from "./RemoteProfileView.vue";
 
 vi.mock("@/api/remote", () => ({
   getRemoteActor: vi.fn(),
   getRemoteActorActivities: vi.fn(),
+}));
+
+vi.mock("@/api/users", () => ({
+  followActor: vi.fn(),
+  unfollowActor: vi.fn(),
 }));
 
 function createActor(overrides?: Partial<RemoteActor>): RemoteActor {
@@ -133,5 +140,43 @@ describe("RemoteProfileView", () => {
     );
     await mountView();
     expect(wrapper.find(".remote-profile__error").exists()).toBe(true);
+  });
+
+  it("hides the follow button for anonymous viewers", async () => {
+    vi.mocked(getRemoteActor).mockResolvedValue(createActor());
+    await mountView();
+    expect(wrapper.find(".remote-profile__follow").exists()).toBe(false);
+  });
+
+  it("follows and unfollows a remote actor", async () => {
+    const auth = useAuthStore();
+    auth.user = { id: "u1", username: "me" } as never;
+    vi.mocked(getRemoteActor).mockResolvedValue(createActor());
+    vi.mocked(followActor).mockResolvedValue({
+      actor_url: "https://remote.example/users/alice",
+      state: "pending",
+    } as never);
+    await mountView();
+
+    const button = wrapper.find(".remote-profile__follow");
+    expect(button.exists()).toBe(true);
+    expect(button.text()).toContain("Follow");
+
+    await button.trigger("click");
+    await flushPromises();
+    expect(followActor).toHaveBeenCalledWith(
+      "https://remote.example/users/alice",
+    );
+    expect(wrapper.find(".remote-profile__follow").text()).toContain(
+      "Requested",
+    );
+
+    vi.mocked(unfollowActor).mockResolvedValue(undefined);
+    await wrapper.find(".remote-profile__follow").trigger("click");
+    await flushPromises();
+    expect(unfollowActor).toHaveBeenCalledWith(
+      "https://remote.example/users/alice",
+    );
+    expect(wrapper.find(".remote-profile__follow").text()).toContain("Follow");
   });
 });

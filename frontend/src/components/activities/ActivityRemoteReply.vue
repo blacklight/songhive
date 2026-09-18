@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { RouterLink } from "vue-router";
 import type { RemoteReply } from "@/api/activities";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import ActivityAudioPlayer from "./ActivityAudioPlayer.vue";
 import RichContent from "@/components/RichContent.vue";
 import { formatDateTime } from "@/i18n";
+import { useI18n } from "vue-i18n";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
 
 const props = defineProps<{ reply: RemoteReply }>();
 
+const { t } = useI18n();
 const instanceDomain = useInstanceDomain();
 
 const actorName = computed(() => {
@@ -30,6 +34,23 @@ const displayName = computed(
 const profileUrl = computed(
   () => props.reply.source_actor_url || props.reply.source_actor,
 );
+
+// The author routes to the internal ``/@name@host`` remote profile; the
+// small icon link keeps a direct path to the origin site.
+const profileRoute = computed(() => {
+  const handle = actorName.value.replace(/^@/, "");
+  return handle.includes("@")
+    ? { name: "userProfile", params: { username: handle } }
+    : null;
+});
+
+const profileDomain = computed(() => {
+  try {
+    return new URL(profileUrl.value).hostname;
+  } catch {
+    return "";
+  }
+});
 
 const imageAttachments = computed(() =>
   (props.reply.attachments ?? []).filter(
@@ -61,15 +82,35 @@ const fileAttachments = computed(() =>
         size="sm"
       />
       <div class="remote-reply__meta">
-        <a
-          :href="profileUrl"
-          target="_blank"
-          rel="noopener"
-          class="remote-reply__actor"
-        >
-          <span class="remote-reply__display-name">{{ displayName }}</span>
-          <span class="remote-reply__handle">{{ actorName }}</span>
-        </a>
+        <span class="remote-reply__author">
+          <RouterLink
+            v-if="profileRoute"
+            :to="profileRoute"
+            class="remote-reply__actor"
+          >
+            <span class="remote-reply__display-name">{{ displayName }}</span>
+            <span class="remote-reply__handle">{{ actorName }}</span>
+          </RouterLink>
+          <a
+            v-else
+            :href="profileUrl"
+            target="_blank"
+            rel="noopener"
+            class="remote-reply__actor"
+          >
+            <span class="remote-reply__display-name">{{ displayName }}</span>
+            <span class="remote-reply__handle">{{ actorName }}</span>
+          </a>
+          <a
+            :href="profileUrl"
+            target="_blank"
+            rel="noopener"
+            class="remote-reply__external"
+            :title="t('remote.viewOriginal', { domain: profileDomain })"
+          >
+            <AppIcon name="arrow-up-right-from-square" />
+          </a>
+        </span>
         <a
           v-if="reply.published_at"
           :href="reply.url ?? reply.object_id ?? undefined"
@@ -145,6 +186,23 @@ const fileAttachments = computed(() =>
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.remote-reply__author {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.remote-reply__external {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.remote-reply__external:hover {
+  color: var(--color-text-link);
 }
 
 .remote-reply__actor {

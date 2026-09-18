@@ -1,7 +1,9 @@
 """
 Remote reply materialization tests — inbound ``Create`` replies become
 ``source_type="remote"`` ``Activity`` rows that can be listed, counted and
-interacted with, while ``Update``/``Delete`` revise or retract them.
+interacted with, standalone posts from followed actors are cached as
+``remote_objects`` mirrors, and ``Update``/``Delete`` revise or retract
+them.
 """
 
 import asyncio
@@ -22,9 +24,11 @@ from songhive.models._enums import Visibility
 from songhive.models.activity import Activity, ActivityMention
 from songhive.models.artist import Artist
 from songhive.models.base import get_session, init_db, reset_db
+from songhive.models.follow import Follow
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.services import activities as activity_service
+from songhive.services import remote_content as remote_content_service
 from songhive.services.activities import (
     boost_activity,
     like_activity,
@@ -109,6 +113,16 @@ def _create_activity(
         "to": note["to"],
         "cc": note["cc"],
     }
+
+
+def _follow_row(user: User, target_actor_url: str) -> Follow:
+    """An accepted outbound follow — admits the actor's inbound activities."""
+    return Follow(
+        user_id=str(user.id),
+        actor_url=user.actor_url or "https://local.example/users/regular",
+        target_actor_url=target_actor_url,
+        state="accepted",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +437,8 @@ async def test_update_unknown_reply_materializes(db_session, regular_user):
     track = await _make_track(db_session, regular_user)
     parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
     db_session.add(parent)
+    # The update replays a missed Create — admitted because bob is followed.
+    db_session.add(_follow_row(regular_user, "https://remote.example/users/bob"))
     await db_session.flush()
 
     update = _create_activity(parent)
@@ -787,6 +803,8 @@ def test_process_incoming_materializes_remote_reply(engine, tmp_path, monkeypatc
                 visibility="public",
             )
             session.add(parent)
+            # alice follows bob, so his inbound activities are admitted.
+            session.add(_follow_row(user, "https://remote.example/users/bob"))
             await session.commit()
             return parent.source_id
 
@@ -900,6 +918,8 @@ def test_process_incoming_shared_inbox_notifies_and_materializes(engine, tmp_pat
                 visibility="public",
             )
             session.add(parent)
+            # alice follows bob, so his inbound activities are admitted.
+            session.add(_follow_row(user, "https://remote.example/users/bob"))
             await session.commit()
             return user.id, user.actor_url, parent.source_id
 
@@ -1202,6 +1222,7 @@ async def test_quote_takes_precedence_over_reply(db_session, regular_user):
     track = await _make_track(db_session, regular_user)
     target = _make_activity("track", track.id, owner_user_id=regular_user.id)
     db_session.add(target)
+    db_session.add(_follow_row(regular_user, "https://remote.example/users/bob"))
     await db_session.flush()
 
     activity = _create_quote(target)
@@ -1513,3 +1534,217 @@ async def test_non_public_reply_not_relayed_to_object_followers(db_session, regu
 
     assert reply is not None
     deliver.delay.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Standalone remote posts (no local thread target)
+# ---------------------------------------------------------------------------
+
+
+def _create_post(
+    *,
+    object_id: str = "https://remote.example/notes/p1",
+    actor: str = "https://remote.example/users/bob",
+    content: str = "<p>remote post</p>",
+    public: bool = True,
+    in_reply_to: str | None = None,
+) -> dict:
+    """Build an inbound ``Create(Note)`` with no local thread target."""
+    note = {
+        "type": "Note",
+        "id": object_id,
+        "attributedTo": actor,
+        "content": content,
+        "published": "2026-09-18T10:00:00Z",
+        "to": ["https://www.w3.org/ns/activitystreams#Public"] if public else [f"{actor}/followers"],
+        "cc": [],
+    }
+    if in_reply_to:
+        note["inReplyTo"] = in_reply_to
+    return {
+        "type": "Create",
+        "id": f"{object_id}#create",
+        "actor": actor,
+        "object": note,
+        "to": note["to"],
+        "cc": note["cc"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_standalone_remote_post_materializes(db_session, regular_user, config):
+    """A followed actor's top-level post is cached and mirrored remotely."""
+    config = _fed_config(config)
+    db_session.add(_follow_row(regular_user, "https://remote.example/users/bob"))
+    await db_session.flush()
+
+    await sync_remote_activity(db_session, activity=_create_post(), config=config)
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/notes/p1",
+        )
+    )
+    assert row is not None
+    assert row.entity_type == "remote"
+    assert row.activity_type == "create"
+    assert row.source_actor == "https://remote.example/users/bob"
+    assert row.visibility == Visibility.PUBLIC.value
+    assert row.content == "<p>remote post</p>"
+    assert row.in_reply_to_activity_id is None
+
+    remote_object = await db_session.scalar(
+        select(remote_content_service.RemoteObject).where(
+            remote_content_service.RemoteObject.canonical_url == "https://remote.example/notes/p1"
+        )
+    )
+    assert remote_object is not None
+    assert remote_object.actor_url == "https://remote.example/users/bob"
+    assert remote_object.visibility == "public"
+    assert row.entity_id == str(remote_object.id)
+
+    listed, _ = await remote_content_service.list_cached_actor_activities(
+        db_session, "https://remote.example/users/bob", user=regular_user
+    )
+    assert [a.id for a in listed] == [row.id]
+
+
+@pytest.mark.asyncio
+async def test_standalone_remote_post_requires_follow(db_session, config):
+    """A top-level post from an actor nobody follows is not stored."""
+    config = _fed_config(config)
+
+    await sync_remote_activity(db_session, activity=_create_post(), config=config)
+    await db_session.flush()
+
+    assert await db_session.scalar(select(func.count(Activity.id)).where(Activity.source_type == "remote")) == 0
+    assert await db_session.scalar(select(func.count(remote_content_service.RemoteObject.id))) == 0
+
+
+@pytest.mark.asyncio
+async def test_reply_to_uncached_parent_materializes_standalone(db_session, regular_user, config):
+    """A reply whose parent is not cached still becomes a remote post."""
+    config = _fed_config(config)
+    db_session.add(_follow_row(regular_user, "https://remote.example/users/bob"))
+    await db_session.flush()
+
+    await sync_remote_activity(
+        db_session,
+        activity=_create_post(in_reply_to="https://elsewhere.example/notes/x1"),
+        config=config,
+    )
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/notes/p1",
+        )
+    )
+    assert row is not None
+    assert row.entity_type == "remote"
+    assert row.activity_type == "reply"
+    assert row.in_reply_to_activity_id is None
+
+
+@pytest.mark.asyncio
+async def test_update_standalone_remote_post_revises(db_session, regular_user, config):
+    """An inbound Update refreshes the mirrored post and its cache row."""
+    config = _fed_config(config)
+    db_session.add(_follow_row(regular_user, "https://remote.example/users/bob"))
+    await db_session.flush()
+
+    await sync_remote_activity(db_session, activity=_create_post(), config=config)
+    await db_session.flush()
+
+    update = _create_post(content="<p>edited post</p>")
+    update["type"] = "Update"
+    await sync_remote_activity(db_session, activity=update, config=config)
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/notes/p1",
+        )
+    )
+    assert row is not None
+    assert row.content == "<p>edited post</p>"
+    assert row.payload["type"] == "Update"
+
+    remote_object = await db_session.scalar(
+        select(remote_content_service.RemoteObject).where(
+            remote_content_service.RemoteObject.canonical_url == "https://remote.example/notes/p1"
+        )
+    )
+    assert remote_object is not None
+    assert remote_object.content == "<p>edited post</p>"
+
+
+@pytest.mark.asyncio
+async def test_delete_standalone_remote_post_retracts(db_session, regular_user, config):
+    """An inbound Delete retracts the post and tombstones the cache row."""
+    config = _fed_config(config)
+    db_session.add(_follow_row(regular_user, "https://remote.example/users/bob"))
+    await db_session.flush()
+
+    await sync_remote_activity(db_session, activity=_create_post(), config=config)
+    await db_session.flush()
+
+    await sync_remote_activity(
+        db_session,
+        activity={
+            "type": "Delete",
+            "actor": "https://remote.example/users/bob",
+            "object": "https://remote.example/notes/p1",
+        },
+        config=config,
+    )
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/notes/p1",
+        )
+    )
+    assert row is not None
+    assert row.deleted_at is not None
+
+    remote_object = await db_session.scalar(
+        select(remote_content_service.RemoteObject).where(
+            remote_content_service.RemoteObject.canonical_url == "https://remote.example/notes/p1"
+        )
+    )
+    assert remote_object is not None
+    assert remote_object.unavailable_at is not None
+
+
+@pytest.mark.asyncio
+async def test_non_public_standalone_post_is_stored_limited(db_session, regular_user, config):
+    """A followers-only post from a followed actor is stored non-public."""
+    config = _fed_config(config)
+    db_session.add(_follow_row(regular_user, "https://remote.example/users/bob"))
+    await db_session.flush()
+
+    await sync_remote_activity(db_session, activity=_create_post(public=False), config=config)
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/notes/p1",
+        )
+    )
+    assert row is not None
+    assert row.visibility == "local"
+
+    remote_object = await db_session.scalar(
+        select(remote_content_service.RemoteObject).where(
+            remote_content_service.RemoteObject.canonical_url == "https://remote.example/notes/p1"
+        )
+    )
+    assert remote_object is not None
+    assert remote_object.visibility == "private"

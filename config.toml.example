@@ -70,6 +70,19 @@ blocked_instances = []
 # actor and object dereferencing. Applied per request hop.
 # fetch_timeout_seconds = 20
 
+# Remote activities (posts received from remote actors) older than this many
+# days are pruned by the prune-remote-activities task when no local user has
+# interacted with them. Pruned objects can always be retrieved again through
+# remote URL search. Only activities from followed actors are stored in the
+# first place, so this bounds the cache of followed feeds.
+# remote_activity_retention_days = 30
+
+# Optional 5-field cron expression scheduling automatic remote-activity
+# pruning (e.g. "0 4 * * *" for a daily 04:00 run). When unset, pruning only
+# runs manually via `songhive admin prune-remote-activities`, the admin API,
+# or the admin Tasks page.
+# remote_activity_prune_schedule = "0 4 * * *"
+
 # Examples:
 # allowed_instances = ["good.example", "friend.example"]
 # blocked_instances = ["evil.example", "spammers.example"]

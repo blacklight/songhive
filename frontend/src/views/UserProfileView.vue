@@ -2,7 +2,12 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, RouterView, RouterLink } from "vue-router";
-import { getPublic, type PublicUserResponse } from "@/api/users";
+import {
+  followActor,
+  getPublic,
+  unfollowActor,
+  type PublicUserResponse,
+} from "@/api/users";
 import { getApiErrorMessage } from "@/api/client";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -94,6 +99,39 @@ const TABS = [
 const data = ref<PublicUserResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
+const followBusy = ref(false);
+
+// The follow button only appears to logged-in visitors on someone else's
+// profile — the viewer-relative ``follow_state`` drives its label.
+const showFollowButton = computed(
+  () =>
+    !!authStore.user &&
+    !isOwnProfile.value &&
+    !isRemoteHandle.value &&
+    !!profile.value,
+);
+
+async function toggleFollow() {
+  if (!data.value || followBusy.value) return;
+  followBusy.value = true;
+  try {
+    if (data.value.follow_state) {
+      // Local targets resolve through the username.
+      await unfollowActor(username.value);
+      data.value.follow_state = null;
+    } else {
+      const row = await followActor(username.value);
+      data.value.follow_state = row.state;
+    }
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: getApiErrorMessage(err) || t("common.error"),
+    });
+  } finally {
+    followBusy.value = false;
+  }
+}
 
 async function loadProfile() {
   if (isRemoteHandle.value) {
@@ -164,13 +202,39 @@ watch(username, loadProfile);
           />
         </p>
 
-        <RouterLink
-          :to="{ name: 'userFollowers', params: { username } }"
-          class="user-profile__followers"
+        <AppButton
+          v-if="showFollowButton"
+          size="sm"
+          :variant="profile.follow_state ? 'secondary' : 'primary'"
+          :disabled="followBusy"
+          class="user-profile__follow"
+          @click="toggleFollow"
         >
-          <AppIcon name="users" />
-          {{ t("profile.followers", profile.followers_count ?? 0) }}
-        </RouterLink>
+          {{
+            profile.follow_state === "accepted"
+              ? t("profile.unfollow")
+              : profile.follow_state === "pending"
+                ? t("profile.followRequested")
+                : t("profile.follow")
+          }}
+        </AppButton>
+
+        <div class="user-profile__counts">
+          <RouterLink
+            :to="{ name: 'userFollowers', params: { username } }"
+            class="user-profile__followers"
+          >
+            <AppIcon name="users" />
+            {{ t("profile.followers", profile.followers_count ?? 0) }}
+          </RouterLink>
+          <RouterLink
+            :to="{ name: 'userFollows', params: { username } }"
+            class="user-profile__followers"
+          >
+            <AppIcon name="user-plus" />
+            {{ t("profile.following", profile.follows_count ?? 0) }}
+          </RouterLink>
+        </div>
 
         <p v-if="profile.bio" class="user-profile__bio">
           <RichText
@@ -317,6 +381,15 @@ watch(username, loadProfile);
 
 .user-profile__joined {
   font-size: 0.9em;
+}
+
+.user-profile__counts {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.user-profile__follow {
+  align-self: flex-start;
 }
 
 .user-profile__followers {

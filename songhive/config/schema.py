@@ -179,6 +179,24 @@ class FederationConfig(BaseSettings):
             "actor and object dereferencing). Applied per request hop."
         ),
     )
+    remote_activity_retention_days: int = Field(
+        default=30,
+        ge=1,
+        description=(
+            "Remote activities older than this many days are pruned by the "
+            "prune-remote-activities task when no local user has interacted "
+            "with them. Pruned objects can always be retrieved again through "
+            "explicit remote URL lookup."
+        ),
+    )
+    remote_activity_prune_schedule: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional 5-field cron expression (e.g. '0 4 * * *') scheduling "
+            "automatic remote-activity pruning. Empty/unset means the prune "
+            "task only runs manually (admin endpoint, CLI, or task call)."
+        ),
+    )
 
 
 class WebmentionsConfig(BaseSettings):

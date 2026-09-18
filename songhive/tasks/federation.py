@@ -268,10 +268,11 @@ def _sync_remote_activities(config, activity: dict) -> None:
     when they address a local user — so they render as full cards and
     accept interactions; ``Update``/``Delete`` revise or retract them, and
     an ``Accept`` answering a ``QuoteRequest`` we sent stamps the issued
-    authorization onto the quoting post. Likes and boosts stay
-    interaction-only.
+    authorization onto the quoting post. ``Accept``/``Reject`` activities
+    answering a ``Follow`` we sent resolve the local follow row. Likes and
+    boosts stay interaction-only.
     """
-    if activity.get("type") not in ("Create", "Update", "Delete", "Accept"):
+    if activity.get("type") not in ("Create", "Update", "Delete", "Accept", "Reject"):
         return
 
     from ..federation.incoming import sync_remote_activity
@@ -437,6 +438,40 @@ def provision_federation_keys(dry_run: bool = False) -> int:
                 count = await _provision_federation_keys(session, config, dry_run=dry_run)
                 await session.commit()
                 return count
+        finally:
+            await dispose_and_reset()
+
+    return asyncio.run(_run())
+
+
+@celery_app.task(name="songhive.tasks.federation.prune_remote_activities")
+def prune_remote_activities(
+    older_than_days: Optional[int] = None,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Prune stale remote activities and their cached ``remote_objects`` rows.
+
+    ``older_than_days`` overrides the configured
+    ``federation.remote_activity_retention_days`` default. Scheduled runs
+    (``federation.remote_activity_prune_schedule``) call it without
+    arguments; the admin endpoint and CLI may pass an explicit threshold or
+    ``dry_run``.
+    """
+    from ..services.remote_content import prune_stale_remote_activities
+
+    config = load_config([])
+    days = older_than_days or config.federation.remote_activity_retention_days
+    logger.info("Pruning remote activities older than %s days (dry_run=%s)", days, dry_run)
+
+    init_db(config.database.url)
+
+    async def _run() -> dict:
+        try:
+            async with get_session() as session:
+                result = await prune_stale_remote_activities(session, older_than_days=days, dry_run=dry_run)
+                await session.commit()
+                return result
         finally:
             await dispose_and_reset()
 

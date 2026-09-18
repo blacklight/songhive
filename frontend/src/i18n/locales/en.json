@@ -660,6 +660,17 @@
           "trigger": "Purge notifications",
           "triggered": "Purged {count} notification(s).",
           "triggerError": "Could not purge notifications: {message}"
+        },
+        "remoteActivityPurge": {
+          "title": "Prune remote activities",
+          "description": "Delete cached remote activities and objects older than the configured retention period that no local user has interacted with. Pruned objects can be fetched again via remote URL search.",
+          "daysLabel": "Older than (days)",
+          "daysHint": "Optional. Leave blank to use the configured retention period.",
+          "dryRun": "Dry run",
+          "trigger": "Prune remote activities",
+          "triggered": "Remote activity pruning queued.",
+          "dryRunTriggered": "Remote activity pruning dry run queued.",
+          "triggerError": "Could not queue remote activity pruning: {message}"
         }
       },
       "celery": {
@@ -830,6 +841,16 @@
       "reject": "Reject — decline new followers automatically"
     },
     "followers": "No followers | {count} follower | {count} followers",
+    "following": "No follows | {count} follow | {count} follows",
+    "follow": "Follow",
+    "unfollow": "Unfollow",
+    "followRequested": "Requested",
+    "followsPage": {
+      "title": "Follows",
+      "empty": "Not following anyone yet.",
+      "pending": "Requested",
+      "pendingHint": "Follow request pending approval."
+    },
     "followersPage": {
       "title": "Followers",
       "empty": "No followers yet.",

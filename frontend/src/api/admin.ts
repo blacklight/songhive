@@ -21,6 +21,8 @@ export type SyncTagsResponse = components["schemas"]["SyncTagsResponse"];
 export type RehashAudioRequest = components["schemas"]["RehashAudioRequest"];
 export type ProvisionFederationKeysRequest =
   components["schemas"]["ProvisionFederationKeysRequest"];
+export type PruneRemoteActivitiesRequest =
+  components["schemas"]["PruneRemoteActivitiesRequest"];
 export type EnrichImagesRequest = components["schemas"]["EnrichImagesRequest"];
 export type EnrichImagesResponse =
   components["schemas"]["EnrichImagesResponse"];
@@ -237,6 +239,18 @@ export function provisionFederationKeys(
 ): Promise<AdminTaskQueuedResponse> {
   return apiRequest<AdminTaskQueuedResponse>(
     "/admin/provision-federation-keys",
+    {
+      method: "POST",
+      body,
+    },
+  );
+}
+
+export function pruneRemoteActivities(
+  body: PruneRemoteActivitiesRequest = { dry_run: false },
+): Promise<AdminTaskQueuedResponse> {
+  return apiRequest<AdminTaskQueuedResponse>(
+    "/admin/federation/prune-remote-activities",
     {
       method: "POST",
       body,

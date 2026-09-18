@@ -519,3 +519,34 @@ def create_update_actor_activity(actor_url: str, actor_document: dict) -> dict:
         "cc": [f"{actor_url}/followers"],
         "object": actor_document,
     }
+
+
+def create_follow_activity(
+    actor_url: str,
+    target_actor_url: str,
+    *,
+    activity_id: Optional[str] = None,
+    published: Optional[datetime] = None,
+) -> dict:
+    """
+    Create a ``Follow`` activity targeting ``target_actor_url``.
+
+    Addressed to the followed actor only — a Follow is a private handshake,
+    not a public post, so it is never sent to the ActivityStreams public
+    collection. ``activity_id`` may be supplied so the stored ``Follow`` row
+    and the federated document share the same id, which lets the remote
+    server correlate a later ``Undo(Follow)`` embedding this payload.
+    """
+    if published is None:
+        published = datetime.now(timezone.utc)
+
+    return {
+        "@context": AS_CONTEXT,
+        "id": activity_id or f"{actor_url}/activities/{uuid.uuid4()}",
+        "type": "Follow",
+        "actor": actor_url,
+        "published": published.isoformat(),
+        "to": [target_actor_url],
+        "cc": [],
+        "object": target_actor_url,
+    }

@@ -98,6 +98,16 @@ const actorShortName = computed(
   () => parseActor(activity.value.source_actor).shortName,
 );
 
+// Route param for the ``/@…`` profile link — local username, or
+// ``name@host`` so remote actors open the internal remote profile view.
+const actorRouteName = computed(() => {
+  const { shortName, host } = parseActor(activity.value.source_actor);
+  if (host && activity.value.source_type === "remote") {
+    return `${shortName}@${host}`;
+  }
+  return shortName;
+});
+
 // Webmention cards surface the remote site's author directly — there is no
 // ActivityPub actor, so the handle is derived from the author's site URL.
 const isWebmention = computed(
@@ -129,15 +139,14 @@ const actorName = computed(() => {
   return `@${shortName}`;
 });
 
+// Webmention authors have no fediverse profile — they keep linking out to
+// the origin site. Remote ActivityPub actors route internally through
+// ``actorRouteName``.
 const actorUrl = computed(() => {
   if (isWebmention.value) {
     return webmention.value?.author_url || webmention.value?.source || "";
   }
-  const { shortName, host } = parseActor(activity.value.source_actor);
-  if (host && activity.value.source_type === "remote") {
-    return `https://${host}/@${shortName}`;
-  }
-  return `/@${shortName}`;
+  return "";
 });
 
 const actorDisplayName = computed(
@@ -755,7 +764,7 @@ async function copyUrl() {
       <AppAvatar :src="actorAvatar" :name="actorDisplayName" size="sm" />
       <div class="activity-card__meta">
         <a
-          v-if="activity.source_type === 'remote' || isWebmention"
+          v-if="isWebmention"
           :href="actorUrl"
           class="activity-card__actor"
           target="_blank"
@@ -768,7 +777,7 @@ async function copyUrl() {
         </a>
         <RouterLink
           v-else
-          :to="'/@' + actorShortName"
+          :to="'/@' + actorRouteName"
           class="activity-card__actor"
         >
           <span class="activity-card__display-name">{{

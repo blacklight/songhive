@@ -9,6 +9,7 @@ from .external_library import ExternalLibrary
 from .external_sync_run import ExternalSyncRun
 from .external_track import ExternalTrack
 from .favorite import Favorite
+from .follow import Follow
 from .genre import Genre, GenreAlbum, GenreTrack
 from .history import ListeningHistory
 from .invite import Invite
@@ -47,6 +48,7 @@ __all__ = [
     "ExternalSyncRun",
     "ExternalTrack",
     "Favorite",
+    "Follow",
     "Genre",
     "GenreAlbum",
     "GenreTrack",

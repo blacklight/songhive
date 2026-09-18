@@ -37,6 +37,11 @@ function createTestRouter() {
         name: "userFollowers",
         component: { template: "<div/>" },
       },
+      {
+        path: "/@:username/follows",
+        name: "userFollows",
+        component: { template: "<div/>" },
+      },
       ...[
         "userProfilePosts",
         "userProfileActivity",

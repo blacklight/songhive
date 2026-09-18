@@ -140,6 +140,7 @@ songhive/
 │   ├── library_track.py    # Library ↔ Track join table
 │   ├── playlist.py
 │   ├── favorite.py
+│   ├── follow.py           # Outbound follow relationships (local users → local/remote actors)
 │   ├── genre.py            # Genre and GenreTrack/GenreAlbum associations
 │   ├── history.py          # Listening history entries
 │   ├── radio.py
@@ -160,6 +161,7 @@ songhive/
 │   ├── deletion.py         # Cascade deletion + activity retraction fan-out
 │   ├── email.py            # SMTP email (verification, password reset)
 │   ├── federation.py       # Actor provisioning, domain allow/block, inbox dispatch
+│   ├── follows.py          # Outbound follow/unfollow, decision folding, follow listings
 │   ├── genres.py           # Genre validation, association and listing
 │   ├── import_.py          # Import pipeline orchestration
 │   ├── mentions.py         # @handle extraction, local/WebFinger resolution, safe HTML rendering
@@ -299,7 +301,7 @@ these subsections:
 | `redis`        | url                                                           |
 | `celery`       | broker_url, result_backend, cleanup_orphaned_files_schedule   |
 | `storage`      | backend (local/s3), local_path, s3_*, cdn_prefix, max_upload_size |
-| `federation`   | enabled, instance_domain, instance_name, contact_name/contact_email/contact_url, private_key_path, allow/block lists, remote_search_access, fetch_timeout_seconds |
+| `federation`   | enabled, instance_domain, instance_name, contact_name/contact_email/contact_url, private_key_path, allow/block lists, remote_search_access, fetch_timeout_seconds, remote_activity_retention_days, remote_activity_prune_schedule |
 | `auth`         | registration_mode, secret_key, token TTLs, rate_limit, trusted_proxy_hops, cookie_secure, cookie_samesite, cookie_domain |
 | `email`        | smtp_host, smtp_port, smtp_user, from_address, tls settings   |
 | `musicbrainz`  | enabled, user_agent, cover_art, artist_image settings       |
@@ -1433,10 +1435,53 @@ the HTTP routes.
   skipped — with `target_*` payload fields describing the followed
   object, matching the reply/quote payload convention.
 
+**Outbound follows** — a local user following a local or remote actor —
+are owned by `services/follows.py` and persisted in the `follows` table
+(`models/follow.py`), which is the mirroring *outbound* side of pubby's
+inbound follower/request tables. `POST /api/v1/users/me/follows` accepts a
+bare local username, a `@user@domain` handle, or an actor/profile URL
+(`remote_content.parse_remote_target` splits local from remote inputs,
+`lookup_remote_actor` resolves remote actors through the guarded fetch
+and actor cache). Local targets apply the owner's `followers_approval`
+policy immediately — `accept` writes the pubby follower row and stores an
+`accepted` follow, `manual` writes a pending `FollowRequest` and keeps
+the row `pending`, `reject` fails with 403 — and the target gets the
+usual `follow` notification. Remote targets store a `pending` row whose
+`activity_id` matches the `Follow` activity's own id, enqueue it signed
+on `deliver_activity`, and stay pending until the remote server answers:
+`process_incoming` folds inbound `Accept`/`Reject` activities back into
+the row via `apply_follow_decision` (matched on the deciding actor being
+the follow target plus the wrapped activity id or follower actor URL;
+`Accept` marks the row `accepted`, `Reject` drops it). `DELETE
+/api/v1/users/me/follows` reverses the relationship: local targets drop
+the pubby follower/request rows and retract the notification, remote
+targets get a signed `Undo(Follow)` embedding the original activity
+(rebuilt from the stored `activity_id`) delivered to the recorded inbox.
+When a local owner resolves a pending request, the accept/reject
+endpoint also updates the local requester's row directly through
+`apply_local_follow_decision` — the federated reply only reaches remote
+requesters. `GET /api/v1/users/me/follows` lists the caller's follows in
+all states; `GET /api/v1/users/{username}/follows` lists `accepted`
+follows publicly and includes `pending` rows for the owner. Profiles
+expose `follows_count` plus the viewer-relative `follow_state`, and the
+remote-actor endpoint reports `follow_state` for authenticated callers.
+The SPA renders the list at `/@{username}/follows` (pending badges for
+the owner) and follow/unfollow buttons on local and remote profiles.
+
 **Inbound remote replies and quotes** are materialized into `Activity`
 rows by `federation/incoming.py`, invoked from `tasks/federation.py`'s
-`process_incoming` for `Create`/`Update`/`Delete`/`Accept` activities
-after pubby's `InboxProcessor` has run. A `Create` whose object replies
+`process_incoming` for `Create`/`Update`/`Delete`/`Accept`/`Reject`
+activities after pubby's `InboxProcessor` has run. Admission is gated on
+the outbound-follow graph: a `Create` is only stored when its
+`activity.actor` is followed by at least one local user
+(`follows_service.actor_is_followed`) — objects fetched explicitly
+through remote URL lookup arrive through the dereference path instead,
+so nothing from unfollowed actors accumulates locally. `Update`s to
+already-stored objects always apply (the row was admitted by the Create
+gate or explicit lookup); an `Update` for an unknown object — replaying
+a missed `Create` — is subject to the same followed-actor rule, and
+`Accept`/`Reject` activities additionally answer outbound `Follow`s and
+`QuoteRequest`s. A `Create` whose object replies
 to — or quotes — a known activity (matched by `source_id` or the
 `/objects/{id}` permalink form) becomes a `source_type="remote"`
 `reply`/`quote` row attached to the parent's entity, linked through
@@ -1450,16 +1495,25 @@ visibility when they address at least one local user — through
 `to`/`cc`/`bto`/`bcc` addressees or `Mention` tags — each resolved local
 addressee getting an `ActivityMention` row so only that audience sees the
 post in the listing. Non-public objects addressing no local user are not
-materialized. Attribution is enforced by pubby's `attribution.validate`:
+materialized. A `Create` whose object targets no known activity — a
+standalone post, or a reply/quote whose parent was never cached — is
+instead stored through `remote_content.materialize_remote_post`: the
+object is upserted into `remote_objects` (same shape as explicit URL
+lookup, minus the fetch) and mirrored as an `entity_type="remote"`
+`Activity`, so a followed actor's outbox shows up on their remote
+profile's posts tab. Non-public standalone posts keep `private` cache
+visibility and `local` activity visibility. `Update` revises
+content, payload, mentions, hashtags and visibility (materializing
+posts whose `Create` was missed, degrading rows that lose their
+public audience to `mentioned`, and refreshing the mirrored
+`remote_objects` row for standalone posts); `Delete` soft-deletes the
+row and tombstones the cache row's `unavailable_at`, but only for the
+recorded `source_actor`. Attribution is enforced by pubby's `attribution.validate`:
 `process_incoming` enables `strict_attribution` on the `InboxProcessor`,
 and materialization/update re-apply `pubby.validate_attribution` to the
 raw activity since the sync runs regardless of the processor's verdict —
 the delivering actor must match `attributedTo` and share the object's
-host. `Update` revises
-content, payload, mentions, hashtags and visibility (materializing
-posts whose `Create` was missed, and degrading rows that lose their
-public audience to `mentioned`); `Delete` soft-deletes the row, but only
-for the recorded `source_actor`. An `Accept` answering a `QuoteRequest`
+host. An `Accept` answering a `QuoteRequest`
 we sent (`apply_quote_authorization`) stamps the issued
 `QuoteAuthorization` id onto the local `quote` row's stored `Create`
 payload — and fans out an `Update` — but only when the accepting actor is
@@ -1754,7 +1808,8 @@ rows seen via a debounced `IntersectionObserver` batch that defers to rows
 the user just toggled back to unseen, and offers per-row dismissal plus a
 TrackList-style selection mode for bulk delete/read/unread and a
 confirmation-protected "Clear all". Each row's header links the actor name
-to the actor's profile (or remote actor URL) and the action text separately
+to the actor's internal profile (local or remote `/@name@host`) and the
+action text separately
 to the referenced object — for likes/boosts the `object_page_url` of the
 reacted activity. The action text names the interacted entity
 (`utils/notifications.ts`, shared with the WebSocket toast): likes/boosts
@@ -1764,8 +1819,10 @@ fields, and shares name the granted item ("shared an album with you"),
 while `Note` objects and unresolved remote objects keep the
 generic "post" wording. Rows render context cards from the
 payload: follows (and unresolved likes/boosts) show
-`components/notifications/NotificationActorCard.vue` (local actors route to
-`/@name`, remote actors link out), mentions/replies/quotes embed a
+`components/notifications/NotificationActorCard.vue` (all actors route to
+the internal profile — `/@name` locally, `/@name@host` for remote actors,
+whose profile keeps the link out to the origin site),
+mentions/replies/quotes embed a
 read-only `ActivityCard` fed by the note snapshot (remote HTML reduced to
 plain text), likes/boosts on `Note` objects fetch and embed the real
 `ActivityCard` through `NotificationActivityCard.vue` (`GET
@@ -1859,7 +1916,7 @@ All background work is handled by Celery workers. Redis is the broker
 | Task module          | Responsibilities                                          |
 |----------------------|-----------------------------------------------------------|
 | `tasks/import_.py`   | File processing, tag extraction, track/album/artist upsert|
-| `tasks/federation.py`| Activity delivery, inbox processing, key provisioning       |
+| `tasks/federation.py`| Activity delivery, inbox processing, key provisioning, remote-activity pruning |
 | `tasks/transcoding.py`| Pre-transcode to common formats, cache result            |
 | `tasks/email.py`     | Verification, password-reset, notification emails          |
 | `tasks/notifications.py`| Notification digest + seen-notification retention purge (scheduled) |
@@ -1872,6 +1929,24 @@ The `cleanup_orphaned_files_schedule` config accepts any 5-field cron
 expression. The notification digest and retention purge run on fixed daily
 crontabs at `notifications.digest_hour` (default 8 AM) and
 `notifications.purge_hour` (default 3 AM).
+
+`songhive.tasks.federation.prune_remote_activities` removes stale remote
+content through `services.remote_content.prune_stale_remote_activities`:
+`source_type="remote"` activities whose `published_at` is older than
+`federation.remote_activity_retention_days` (default 30, overridable via
+the task's `older_than_days` argument) and that no local user has
+interacted with — a live like/boost/reply/quote child reached through
+`in_reply_to_activity_id` protects the whole thread, so the eligible set
+is computed to a fixpoint. Mirrored `remote_objects` cache rows are
+removed with their activities and can always be re-fetched via remote
+URL search; bare remote resources without an activity row are never
+touched. The task runs manually via `POST
+/api/v1/admin/federation/prune-remote-activities` (audited as
+`federation.prune_remote_activities`), `songhive admin
+prune-remote-activities`, or the admin Tasks page — all with dry-run
+support — and only joins the beat schedule when
+`federation.remote_activity_prune_schedule` holds a 5-field cron
+expression.
 
 Each task's async work is executed with ``asyncio.run(...)``. Because
 ``asyncpg`` connections are bound to the event loop that created them, every

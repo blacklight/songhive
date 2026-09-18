@@ -5,9 +5,13 @@ An inbound ``Create`` whose object replies to — or quotes — a known
 activity is stored as a ``source_type="remote"`` ``reply``/``quote`` row
 — alongside the Pubby interaction record — so the post can be listed,
 counted, and interacted with (liked, boosted, replied to) exactly like a
-local one. Inbound ``Update`` and ``Delete`` activities revise or retract
-materialized rows, and an ``Accept`` of a ``QuoteRequest`` we sent stamps
-the returned ``QuoteAuthorization`` onto our quoting post.
+local one. A ``Create`` targeting no known activity — a standalone post,
+or a reply/quote whose parent was never cached — is stored through
+``services.remote_content.materialize_remote_post`` as a
+``remote_objects`` row mirrored by an ``entity_type="remote"``
+``Activity``. Inbound ``Update`` and ``Delete`` activities revise or
+retract materialized rows, and an ``Accept`` of a ``QuoteRequest`` we
+sent stamps the returned ``QuoteAuthorization`` onto our quoting post.
 
 Publicly addressed objects are stored with the entity-clamped ``public``
 visibility. Non-public ones (direct messages, followers-only) are stored
@@ -35,6 +39,8 @@ from ..config.schema import SonghiveConfig
 from ..models import User, Visibility
 from ..models.activity import _MENTION_HANDLE_RE, Activity, ActivityMention
 from ..services import federation as federation_service
+from ..services import follows as follows_service
+from ..services import remote_content as remote_content_service
 from ..services.activities import (
     _entity_visibility,
     _remote_actor_handle,
@@ -537,16 +543,40 @@ async def update_remote_object(
     if row is None:
         # A missed ``Create`` is replayed through the matching
         # materializer — quote fields take precedence over ``inReplyTo``,
-        # mirroring Pubby's interaction typing.
+        # mirroring Pubby's interaction typing; standalone posts (and
+        # replies/quotes whose targets are not cached) land on the
+        # ``remote_objects`` path.
+        materialized = None
         if extract_quote_target(obj):
-            await materialize_remote_quote(session, activity={**activity, "type": "Create"}, config=config)
+            materialized = await materialize_remote_quote(
+                session, activity={**activity, "type": "Create"}, config=config
+            )
         elif isinstance(obj.get("inReplyTo"), str) and obj["inReplyTo"]:
-            await materialize_remote_reply(session, activity={**activity, "type": "Create"}, config=config)
+            materialized = await materialize_remote_reply(
+                session, activity={**activity, "type": "Create"}, config=config
+            )
+        if materialized is None:
+            await remote_content_service.materialize_remote_post(
+                session, activity={**activity, "type": "Create"}, config=config
+            )
         return
 
-    entity = await resolve_entity(session, row.entity_type, row.entity_id)
-    if entity is not None:
-        row.visibility = _materialized_visibility(obj, entity).value
+    if row.entity_type == "remote":
+        # Standalone posts mirror a ``remote_objects`` row — refresh it
+        # from the update and recompute visibility the same way the
+        # materialization path does.
+        remote_object = await remote_content_service._upsert_remote_object_row(
+            session,
+            canonical_url=object_id,
+            activity=activity,
+            obj=obj,
+            actor_url=actor,
+        )
+        row.visibility = "public" if remote_object.visibility == "public" else "local"
+    else:
+        entity = await resolve_entity(session, row.entity_type, row.entity_id)
+        if entity is not None:
+            row.visibility = _materialized_visibility(obj, entity).value
 
     content = strip_quote_fallback(obj.get("content"), extract_quote_target(obj))
     row.content = content if isinstance(content, str) and content else None
@@ -585,6 +615,13 @@ async def retract_remote_object(session: AsyncSession, *, activity: dict) -> Non
     row = await _find_remote_object(session, target, actor)
     if row is not None and row.deleted_at is None:
         row.deleted_at = datetime.now(timezone.utc)
+        # Standalone posts mirror a ``remote_objects`` row — tombstone it
+        # too so the object page reports the object as gone instead of
+        # serving the cached copy.
+        if row.entity_type == "remote":
+            remote_object = await remote_content_service.get_cached_remote_object(session, row.entity_id)
+            if remote_object is not None:
+                remote_object.unavailable_at = row.deleted_at
         await session.flush()
         logger.info("Retracted remote %s %s from %s", row.activity_type, target, actor)
 
@@ -684,8 +721,9 @@ async def sync_remote_activity(
     """
     Reflect an inbound remote activity onto materialized ``Activity`` rows.
 
-    ``Create`` materializes replies to — and quotes of — known activities;
-    ``Update`` revises and ``Delete`` retracts materialized rows; an
+    ``Create`` materializes replies to — and quotes of — known activities,
+    and standalone posts from followed actors as ``remote_objects``
+    mirrors; ``Update`` revises and ``Delete`` retracts materialized rows; an
     ``Accept`` answering a ``QuoteRequest`` we sent stamps the issued
     ``QuoteAuthorization`` onto the quoting post. Newly materialized
     public replies and quotes are relayed to remote actors following an
@@ -696,15 +734,42 @@ async def sync_remote_activity(
     activity_type = activity.get("type")
     if activity_type == "Create":
         obj = activity.get("object")
+        actor = activity.get("actor")
+        # Inbound objects are only stored for actors some local user
+        # follows; objects fetched explicitly through URL lookup arrive
+        # through the dereference path instead.
+        if not isinstance(actor, str) or not await follows_service.actor_is_followed(session, actor):
+            return
         # Quote fields take precedence over ``inReplyTo`` — mirroring
         # Pubby, which records a note carrying both as a QUOTE interaction.
         if isinstance(obj, dict) and extract_quote_target(obj):
-            await materialize_remote_quote(session, activity=activity, config=config)
+            materialized = await materialize_remote_quote(session, activity=activity, config=config)
         else:
-            await materialize_remote_reply(session, activity=activity, config=config)
+            materialized = await materialize_remote_reply(session, activity=activity, config=config)
+        # Standalone posts — and replies/quotes whose targets are not
+        # cached — still materialize as ``remote_objects`` rows so a
+        # followed actor's outbox shows up on their remote profile.
+        if materialized is None:
+            await remote_content_service.materialize_remote_post(session, activity=activity, config=config)
     elif activity_type == "Update":
+        obj = activity.get("object")
+        actor = activity.get("actor")
+        object_id = obj.get("id") if isinstance(obj, dict) else None
+        if not isinstance(object_id, str) or not isinstance(actor, str):
+            return
+        # Revisions to already-stored objects always apply — the row was
+        # admitted by the Create gate or explicit lookup. Replaying a
+        # missed ``Create`` through the update is subject to the same
+        # followed-actor admission as a fresh ``Create``.
+        if await _find_remote_object(session, object_id, actor) is None and not await follows_service.actor_is_followed(
+            session, actor
+        ):
+            return
         await update_remote_object(session, activity=activity, config=config)
     elif activity_type == "Delete":
         await retract_remote_object(session, activity=activity)
     elif activity_type == "Accept":
         await apply_quote_authorization(session, activity=activity, config=config)
+        await follows_service.apply_follow_decision(session, activity=activity)
+    elif activity_type == "Reject":
+        await follows_service.apply_follow_decision(session, activity=activity)

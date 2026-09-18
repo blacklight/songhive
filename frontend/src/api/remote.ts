@@ -19,6 +19,8 @@ export interface RemoteActor {
   unavailable: boolean;
   /** Internal SPA route (``/@user@domain``). */
   url: string;
+  /** Viewer-relative follow state (``pending``/``accepted``), when authenticated. */
+  follow_state?: string | null;
 }
 
 export type RemoteResourceKind =

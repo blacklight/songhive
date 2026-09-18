@@ -164,12 +164,27 @@ describe("ActivityCard", () => {
   });
 
   it("renders content links as anchors", () => {
-    const wrapper = mountCard();
+    const wrapper = mountCard({
+      content: '<p>Hello <a href="https://example.com/page">a page</a></p>',
+    });
     const content = wrapper.find(".activity-card__content");
     const link = content.find("a");
     expect(link.exists()).toBe(true);
-    expect(link.attributes("href")).toBe("https://example.com/users/bob");
-    expect(link.text()).toBe("@bob");
+    expect(link.attributes("href")).toBe("https://example.com/page");
+    expect(link.text()).toBe("a page");
+  });
+
+  it("routes remote actor links to the internal remote profile", () => {
+    const wrapper = mountCard();
+    const links = wrapper.findAllComponents({ name: "RouterLink" });
+    const mention = links.find(
+      (link) => link.props("to")?.name === "userProfile",
+    );
+    expect(mention?.props("to")).toEqual({
+      name: "userProfile",
+      params: { username: "bob@example.com" },
+    });
+    expect(mention?.text()).toBe("@bob");
   });
 
   it("routes local mention anchors to the profile route", () => {
@@ -199,20 +214,25 @@ describe("ActivityCard", () => {
     ).toEqual({ name: "userProfile", params: { username: "bob" } });
   });
 
-  it("renders remote mention anchors as external links", () => {
+  it("routes remote mention anchors to the internal remote profile", () => {
     const wrapper = mountCard({
       source_type: "remote",
       content:
         '<p>hi <a href="https://remote.example/@bob" class="u-url mention">@bob</a></p>',
       content_type: "text/html",
     });
-    const link = wrapper.find(".activity-card__content a");
-    expect(link.attributes("href")).toBe("https://remote.example/@bob");
-    expect(link.attributes("target")).toBe("_blank");
-    expect(link.text()).toBe("@bob");
+    const links = wrapper.findAllComponents({ name: "RouterLink" });
+    const mention = links.find(
+      (link) => link.props("to")?.name === "userProfile",
+    );
+    expect(mention?.props("to")).toEqual({
+      name: "userProfile",
+      params: { username: "bob@remote.example" },
+    });
+    expect(mention?.text()).toBe("@bob");
   });
 
-  it("linkifies bare remote handles using the mentions list", () => {
+  it("linkifies bare remote handles to the internal remote profile", () => {
     const wrapper = mountCard({
       source_type: "remote",
       content: "hi @bob@remote.example",
@@ -223,9 +243,15 @@ describe("ActivityCard", () => {
         },
       ],
     });
-    const link = wrapper.find(".activity-card__content a");
-    expect(link.attributes("href")).toBe("https://remote.example/users/bob");
-    expect(link.text()).toBe("@bob@remote.example");
+    const links = wrapper.findAllComponents({ name: "RouterLink" });
+    const mention = links.find(
+      (link) => link.props("to")?.name === "userProfile",
+    );
+    expect(mention?.props("to")).toEqual({
+      name: "userProfile",
+      params: { username: "bob@remote.example" },
+    });
+    expect(mention?.text()).toBe("@bob@remote.example");
   });
 
   it("linkifies bare local handles to the profile route", () => {

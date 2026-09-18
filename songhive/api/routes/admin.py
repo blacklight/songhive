@@ -23,7 +23,7 @@ from ...services.admin_tasks import resolve_image_enrichment_targets
 from ...services.celery_admin import CeleryAdminError, list_active_celery_tasks, terminate_celery_tasks
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
-from ...tasks.federation import provision_federation_keys
+from ...tasks.federation import provision_federation_keys, prune_remote_activities
 from ...tasks.images import bulk_enrich_images
 from ...tasks.storage import cleanup_orphaned_files, rehash_audio_files
 from ...tasks.tags import sync_track_tags
@@ -1103,6 +1103,52 @@ async def provision_federation_keys_endpoint(
         target_type="federation",
         target_id=None,
         details={"dry_run": body.dry_run},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return {"task_id": result.id, "status": "queued"}
+
+
+class PruneRemoteActivitiesRequest(BaseModel):
+    """Request body for triggering remote-activity pruning."""
+
+    # Overrides ``federation.remote_activity_retention_days`` when set.
+    older_than_days: Optional[int] = Field(default=None, ge=1)
+    dry_run: bool = False
+
+
+@router.post(
+    "/federation/prune-remote-activities",
+    response_model=AdminTaskQueuedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def prune_remote_activities_endpoint(
+    body: PruneRemoteActivitiesRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Trigger the stale remote-activity pruning Celery task (admin only)."""
+    try:
+        result = prune_remote_activities.delay(  # type: ignore
+            older_than_days=body.older_than_days,
+            dry_run=body.dry_run,
+        )
+    except (KombuOperationalError, RedisConnectionError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Celery broker unavailable",
+        ) from exc
+
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="federation.prune_remote_activities",
+        target_type="federation",
+        target_id=None,
+        details={"older_than_days": body.older_than_days, "dry_run": body.dry_run},
         ip_address=client_ip(request),
     )
     await db.commit()

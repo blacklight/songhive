@@ -6,10 +6,14 @@ import {
   getRemoteActorActivities,
   type RemoteActor,
 } from "@/api/remote";
+import { followActor, unfollowActor } from "@/api/users";
 import type { ActivityResponse } from "@/api/activities";
 import { getApiErrorMessage } from "@/api/client";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
+import { useAuthStore } from "@/stores/auth";
+import { useToastStore } from "@/stores/toast";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
+import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import RichContent from "@/components/RichContent.vue";
@@ -17,17 +21,40 @@ import ActivityCard from "@/components/activities/ActivityCard.vue";
 
 // Remote (federated) actor profile for ``/@user@domain`` routes. The actor
 // is resolved — and cached — through ``/remote/actors/{handle}``; the
-// activity list only ever shows already-cached materialized posts. Remote
-// profiles are read-only locally: no compose, edit, or follow controls.
+// activity list only ever shows already-cached materialized posts.
 const props = defineProps<{ handle: string }>();
 const { t } = useI18n();
 const instanceDomain = useInstanceDomain();
+const authStore = useAuthStore();
+const toast = useToastStore();
 
 const normalizedHandle = computed(() => props.handle.replace(/^@/, ""));
 const actor = ref<RemoteActor | null>(null);
 const activities = ref<ActivityResponse[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
+const followBusy = ref(false);
+
+async function toggleFollow() {
+  if (!actor.value || followBusy.value) return;
+  followBusy.value = true;
+  try {
+    if (actor.value.follow_state) {
+      await unfollowActor(actor.value.actor_url);
+      actor.value.follow_state = null;
+    } else {
+      const row = await followActor(actor.value.actor_url);
+      actor.value.follow_state = row.state;
+    }
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: getApiErrorMessage(err) || t("common.error"),
+    });
+  } finally {
+    followBusy.value = false;
+  }
+}
 
 async function load() {
   loading.value = true;
@@ -77,6 +104,22 @@ watch(normalizedHandle, load, { immediate: true });
           </span>
         </div>
         <p class="remote-profile__handle">@{{ actor.handle }}</p>
+        <AppButton
+          v-if="authStore.user"
+          size="sm"
+          :variant="actor.follow_state ? 'secondary' : 'primary'"
+          :disabled="followBusy"
+          class="remote-profile__follow"
+          @click="toggleFollow"
+        >
+          {{
+            actor.follow_state === "accepted"
+              ? t("profile.unfollow")
+              : actor.follow_state === "pending"
+                ? t("profile.followRequested")
+                : t("profile.follow")
+          }}
+        </AppButton>
         <p v-if="actor.unavailable" class="remote-profile__unavailable">
           {{ t("remote.actorUnavailable") }}
         </p>
@@ -171,6 +214,10 @@ watch(normalizedHandle, load, { immediate: true });
 .remote-profile__handle {
   margin: 0;
   color: var(--color-text-muted);
+}
+
+.remote-profile__follow {
+  align-self: flex-start;
 }
 
 .remote-profile__unavailable {

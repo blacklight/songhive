@@ -170,6 +170,25 @@
   `local` profiles only to authenticated callers and never lists `private`
   profiles (not even to their owner). Individual profile pages stay reachable
   regardless.
+- Outbound follows (a local user following a local or remote actor) live in
+  the `follows` table (`models/follow.py`) — pubby's
+  `federation_followers`/`federation_follow_requests` tables only track the
+  inbound side. `services/follows.py` resolves targets, delivers
+  `Follow`/`Undo(Follow)`, and folds inbound `Accept`/`Reject` back into the
+  row. Inbound `Create` activities are only materialized when the actor is
+  followed by a local user (`actor_is_followed`); explicit remote-URL lookups
+  are the other admission path. Stale remote activities are pruned by
+  `tasks.federation.prune_remote_activities` / `songhive admin
+  prune-remote-activities` / `POST /api/v1/admin/federation/prune-remote-activities`,
+  gated on `federation.remote_activity_retention_days` and scheduled via
+  `federation.remote_activity_prune_schedule`.
+- Pubby's storage is synchronous and writes on its own connection while a
+  request's async session may still hold an open transaction. On SQLite this
+  deadlocks into "database is locked": any code path that writes through
+  pubby storage mid-request (e.g. `_follow_local`, follow-request accept)
+  must run before the session accumulates uncommitted writes. Provision
+  actor keys up front (`ensure_user_actor` is a no-op for users created
+  with federation enabled) rather than lazily inside such paths.
 - Users pick a `followers_approval` policy (`accept`/`manual`/`reject`,
   default `accept`) from `/settings`. `tasks/federation.process_incoming`
   passes pubby's `InboxProcessor` a `follow_policy` callback that maps the

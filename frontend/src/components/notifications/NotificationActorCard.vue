@@ -26,8 +26,8 @@ const name = computed(
 
 <template>
   <RouterLink
-    v-if="parsed.username"
-    :to="{ name: 'userProfile', params: { username: parsed.username } }"
+    v-if="parsed.routeUsername"
+    :to="{ name: 'userProfile', params: { username: parsed.routeUsername } }"
     class="actor-card"
   >
     <AppAvatar :src="avatarUrl || ''" :name="name" size="sm" />
@@ -37,20 +37,6 @@ const name = computed(
     </span>
     <AppIcon name="chevron-right" class="actor-card__chevron" />
   </RouterLink>
-  <a
-    v-else-if="parsed.remoteUrl"
-    :href="parsed.remoteUrl"
-    target="_blank"
-    rel="noopener"
-    class="actor-card"
-  >
-    <AppAvatar :src="avatarUrl || ''" :name="name" size="sm" />
-    <span class="actor-card__meta">
-      <span class="actor-card__name">{{ name }}</span>
-      <span class="actor-card__handle">{{ parsed.handle }}</span>
-    </span>
-    <AppIcon name="arrow-up-right-from-square" class="actor-card__chevron" />
-  </a>
   <div v-else class="actor-card actor-card--plain">
     <AppAvatar :src="avatarUrl || ''" :name="name" size="sm" />
     <span class="actor-card__meta">

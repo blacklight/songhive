@@ -7,6 +7,7 @@ import { useToastStore } from "@/stores/toast";
 import {
   enrichImages,
   provisionFederationKeys,
+  pruneRemoteActivities,
   purgeNotifications,
   rehashAudio,
   syncTags,
@@ -32,6 +33,7 @@ type LoadingTask =
   | "provisionFederationKeys"
   | "enrichImages"
   | "purgeNotifications"
+  | "pruneRemoteActivities"
   | null;
 
 const loadingTask = ref<LoadingTask>(null);
@@ -50,6 +52,8 @@ const scopeOptions = computed(() => [
 
 const rehashDryRun = ref(false);
 const provisionDryRun = ref(false);
+const pruneDays = ref("");
+const pruneDryRun = ref(false);
 
 const enrichImagesScope = ref<"all" | "artist" | "album">("all");
 const enrichImagesTargetId = ref("");
@@ -279,6 +283,38 @@ async function onPurgeNotifications() {
     showError("pages.admin.tasks.notificationPurge.triggerError", err);
   }
 }
+
+async function onPruneRemoteActivities() {
+  if (!pruneDryRun.value) {
+    const ok = await confirm({
+      title: t("common.confirm"),
+      message: t("pages.admin.tasks.remoteActivityPurge.description"),
+      danger: true,
+    });
+    if (!ok) return;
+  }
+
+  try {
+    await runWithLoading("pruneRemoteActivities", async () => {
+      const parsed = parseInt(pruneDays.value, 10);
+      await pruneRemoteActivities({
+        older_than_days:
+          pruneDays.value.trim() && !Number.isNaN(parsed) ? parsed : undefined,
+        dry_run: pruneDryRun.value,
+      });
+      toastStore.push({
+        type: "success",
+        message: t(
+          pruneDryRun.value
+            ? "pages.admin.tasks.remoteActivityPurge.dryRunTriggered"
+            : "pages.admin.tasks.remoteActivityPurge.triggered",
+        ),
+      });
+    });
+  } catch (err) {
+    showError("pages.admin.tasks.remoteActivityPurge.triggerError", err);
+  }
+}
 </script>
 
 <template>
@@ -451,6 +487,37 @@ async function onPurgeNotifications() {
         @click="onPurgeNotifications"
       >
         {{ t("pages.admin.tasks.notificationPurge.trigger") }}
+      </AppButton>
+    </section>
+
+    <section class="tasks-view__card">
+      <h2 class="tasks-view__card-title">
+        <AppIcon name="cloud" spacing="right" />
+        {{ t("pages.admin.tasks.remoteActivityPurge.title") }}
+      </h2>
+      <p class="tasks-view__description">
+        {{ t("pages.admin.tasks.remoteActivityPurge.description") }}
+      </p>
+      <div class="tasks-view__controls">
+        <AppInput
+          v-model="pruneDays"
+          :label="t('pages.admin.tasks.remoteActivityPurge.daysLabel')"
+          :hint="t('pages.admin.tasks.remoteActivityPurge.daysHint')"
+          :disabled="loadingTask !== null"
+        />
+        <AppCheckbox
+          v-model="pruneDryRun"
+          :label="t('pages.admin.tasks.remoteActivityPurge.dryRun')"
+          :disabled="loadingTask !== null"
+        />
+      </div>
+      <AppButton
+        :loading="loadingTask === 'pruneRemoteActivities'"
+        :disabled="loadingTask !== null"
+        icon="cloud"
+        @click="onPruneRemoteActivities"
+      >
+        {{ t("pages.admin.tasks.remoteActivityPurge.trigger") }}
       </AppButton>
     </section>
   </div>

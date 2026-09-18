@@ -52,7 +52,7 @@ describe("UserLink", () => {
     expect(link.attributes("href")).toBe("/@alice");
   });
 
-  it("renders a remote external link when given an owner with a remote actor_url", async () => {
+  it("routes remote actor URLs to the internal remote profile", async () => {
     const wrapper = await mountUserLink({
       owner: {
         id: "user-2",
@@ -67,10 +67,9 @@ describe("UserLink", () => {
 
     const link = wrapper.find("a.user-link--remote");
     expect(link.exists()).toBe(true);
-    expect(link.attributes("href")).toBe("https://remote.example/users/bob");
-    expect(link.attributes("target")).toBe("_blank");
+    expect(link.attributes("href")).toBe("/@bob@remote.example");
     expect(link.text()).toContain("Bob");
-    expect(link.text()).not.toContain("@bob");
+    expect(link.text()).toContain("@bob@remote.example");
   });
 
   it("hides the username handle at small size", async () => {

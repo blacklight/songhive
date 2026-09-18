@@ -17,17 +17,17 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
-from pubby import validate_attribution
+from pubby import AttributionMismatch, validate_attribution
 from pubby.audience import is_public
 from pubby.client import extract_actor_inbox
 from pubby.quotes import extract_quote_target
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
@@ -900,6 +900,124 @@ async def _materialize_remote_activity(
     return row
 
 
+async def _upsert_remote_object_row(
+    session: AsyncSession,
+    *,
+    canonical_url: str,
+    activity: dict,
+    obj: dict,
+    actor_url: str,
+    target: Optional[RemoteTarget] = None,
+    etag: Optional[str] = None,
+    last_modified: Optional[str] = None,
+) -> RemoteObject:
+    """
+    Create or refresh the ``remote_objects`` cache row for ``canonical_url``.
+
+    ``activity`` is the wrapping activity document — or the fetched
+    document itself for bare objects. Shared by the explicit-dereference
+    path and the inbox materialization of standalone posts from followed
+    actors; fresh data always marks the row available again.
+    """
+    row = await _cached_remote_object(session, canonical_url)
+    if row is None:
+        row = RemoteObject(canonical_url=canonical_url, domain="", object_type="", actor_url="")
+        session.add(row)
+
+    activity_url = activity.get("id")
+    row.canonical_url = canonical_url
+    row.activity_url = activity_url if isinstance(activity_url, str) and activity_url != canonical_url else None
+    row.domain = federation_service.extract_domain(canonical_url)
+    row.object_type = str(obj.get("type") or "Object")
+    row.resource_type = _detect_resource_type(obj, target)
+    row.actor_url = actor_url
+    row.visibility = "public" if is_public(obj) or is_public(activity) else "private"
+    row.payload = obj
+    row.name = _object_name(obj)
+    row.summary = obj.get("summary") if isinstance(obj.get("summary"), str) else None
+    row.content = obj.get("content") if isinstance(obj.get("content"), str) else None
+    row.image_url = _media_url(obj.get("image"), "image/")
+    row.audio_url = _media_url(obj.get("url"), "audio/")
+    row.content_hash = content_hash(obj)
+    row.etag = etag
+    row.last_modified = last_modified
+    row.fetched_at = datetime.now(timezone.utc)
+    row.unavailable_at = None
+    await session.flush()
+    return row
+
+
+async def materialize_remote_post(
+    session: AsyncSession,
+    *,
+    activity: dict,
+    config: Optional[SonghiveConfig] = None,
+) -> Optional[Activity]:
+    """
+    Store an inbound ``Create`` object with no local thread target as a
+    cached remote post.
+
+    Standalone posts — and replies/quotes whose targets are not cached —
+    from actors followed by a local user arrive through the inbox rather
+    than explicit lookup. They get the same ``remote_objects`` +
+    ``entity_type="remote"`` mirror shape ``dereference_remote_object``
+    produces, so they appear on the remote profile's posts tab and stay
+    re-fetchable by URL. Returns ``None`` for non-content objects,
+    tombstones, attribution failures and disallowed domains; the object
+    cache row is still upserted for content documents whose mirror is
+    skipped.
+    """
+    if activity.get("type") != "Create":
+        return None
+    obj = activity.get("object")
+    actor = activity.get("actor")
+    if not isinstance(obj, dict) or not isinstance(actor, str):
+        return None
+    object_id = obj.get("id")
+    if (
+        not actor.startswith(("http://", "https://"))
+        or not isinstance(object_id, str)
+        or not object_id.startswith(("http://", "https://"))
+        or obj.get("type") in _TOMBSTONE_TYPES
+    ):
+        return None
+
+    # Attribution sanity is owned by pubby (``strict_attribution`` on the
+    # inbox processor) — but this sync runs on the raw activity even when
+    # the processor dropped it, so the same guard is applied here.
+    try:
+        validate_attribution(actor, obj)
+    except AttributionMismatch:
+        return None
+    if config is not None:
+        try:
+            require_remote_domain(object_id, config)
+            require_remote_domain(actor, config)
+        except FetchError:
+            return None
+
+    row = await _upsert_remote_object_row(
+        session,
+        canonical_url=object_id,
+        activity=activity,
+        obj=obj,
+        actor_url=actor,
+    )
+    # Content objects become feed activities — matching the wrapped-object
+    # rule in ``dereference_remote_object``, so e.g. a ``Create(Audio)``
+    # track post mirrors as an activity as well as a browsable resource.
+    if obj.get("type") not in _CONTENT_OBJECT_TYPES:
+        return None
+    return await _materialize_remote_activity(
+        session,
+        remote_object=row,
+        wrapper=activity,
+        obj=obj,
+        actor_url=actor,
+        kind="Create",
+    )
+
+
 async def _mark_remote_gone(
     session: AsyncSession,
     cached: Optional[RemoteObject],
@@ -1005,36 +1123,16 @@ async def dereference_remote_object(
     if kind not in ("Create", "Announce", "Update", "Object") or obj.get("type") in _TOMBSTONE_TYPES:
         raise HTTPException(status_code=422, detail=f"Unsupported remote activity type: {kind}")
 
-    now = datetime.now(timezone.utc)
-    canonical_url = object_id
-    row = cached if cached is not None and cached.canonical_url == canonical_url else None
-    if row is None:
-        row = await _cached_remote_object(session, canonical_url)
-    if row is None:
-        row = RemoteObject(canonical_url=canonical_url, domain="", object_type="", actor_url="")
-        session.add(row)
-
-    row.canonical_url = canonical_url
-    row.activity_url = (wrapper or doc).get("id") if isinstance((wrapper or doc).get("id"), str) else None
-    if row.activity_url == canonical_url:
-        row.activity_url = None
-    row.domain = federation_service.extract_domain(canonical_url)
-    row.object_type = str(obj.get("type") or "Object")
-    row.resource_type = _detect_resource_type(obj, target)
-    row.actor_url = actor.actor_url
-    row.visibility = "public" if is_public(obj) or is_public(wrapper or obj) else "private"
-    row.payload = obj
-    row.name = _object_name(obj)
-    row.summary = obj.get("summary") if isinstance(obj.get("summary"), str) else None
-    row.content = obj.get("content") if isinstance(obj.get("content"), str) else None
-    row.image_url = _media_url(obj.get("image"), "image/")
-    row.audio_url = _media_url(obj.get("url"), "audio/")
-    row.content_hash = content_hash(obj)
-    row.etag = result.headers.get("etag")
-    row.last_modified = result.headers.get("last_modified")
-    row.fetched_at = now
-    row.unavailable_at = None
-    await session.flush()
+    row = await _upsert_remote_object_row(
+        session,
+        canonical_url=object_id,
+        activity=wrapper or doc,
+        obj=obj,
+        actor_url=actor.actor_url,
+        target=target,
+        etag=result.headers.get("etag"),
+        last_modified=result.headers.get("last_modified"),
+    )
 
     # Wrapped objects (Create/Announce/…) and bare content objects become
     # feed activities; a bare resource (e.g. a dereferenced ``Audio`` track)
@@ -1137,3 +1235,93 @@ async def list_cached_actor_activities(
     rows = (await session.execute(stmt)).scalars().all()
     visible = [row for row in rows if await can_view_activity(session, user, row)]
     return visible[offset : offset + limit], len(visible)
+
+
+async def prune_stale_remote_activities(
+    session: AsyncSession,
+    *,
+    older_than_days: int,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Prune stale remote activities and their ``remote_objects`` cache rows.
+
+    A remote activity is stale when its ``published_at`` is older than
+    ``older_than_days`` and no *live* activity (local or remote) replies to
+    or quotes it — a local like/boost/reply/quote row therefore protects the
+    thread it hangs from, since those interactions attach through
+    ``in_reply_to_activity_id``. Because remote descendants may themselves
+    be prunable, the eligible set is computed to a fixpoint: stale parents
+    whose only live children are also being pruned collapse in the same
+    run, while a thread carrying any live child keeps its ancestors.
+
+    ``remote_objects`` rows mirrored by a pruned activity (matched on
+    ``canonical_url == source_id``) are removed with it — they are always
+    retrievable again through explicit remote URL lookup. Bare remote
+    resources (tracks/albums/…) without an activity row are never touched.
+
+    Returns counters describing what was (or, for ``dry_run``, would be)
+    pruned. The caller owns the transaction.
+    """
+    from collections import defaultdict
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+
+    stale_rows = (
+        await session.execute(
+            select(Activity.id, Activity.in_reply_to_activity_id).where(
+                Activity.source_type == "remote",
+                Activity.deleted_at.is_(None),
+                Activity.published_at < cutoff,
+            )
+        )
+    ).all()
+    stale = {row.id: row.in_reply_to_activity_id for row in stale_rows}
+    result = {
+        "older_than_days": older_than_days,
+        "cutoff": cutoff.isoformat(),
+        "dry_run": dry_run,
+        "candidates": 0,
+        "pruned_activities": 0,
+        "pruned_remote_objects": 0,
+    }
+    if not stale:
+        return result
+
+    live_child_rows = (
+        await session.execute(
+            select(Activity.id, Activity.in_reply_to_activity_id).where(
+                Activity.in_reply_to_activity_id.in_(stale.keys()),
+                Activity.deleted_at.is_(None),
+            )
+        )
+    ).all()
+    children: dict = defaultdict(list)
+    for child_id, parent_id in live_child_rows:
+        children[parent_id].append(child_id)
+
+    deletion: set = set()
+    progressed = True
+    while progressed:
+        progressed = False
+        for activity_id in stale:
+            if activity_id in deletion:
+                continue
+            if all(child in deletion for child in children.get(activity_id, [])):
+                deletion.add(activity_id)
+                progressed = True
+
+    result["candidates"] = len(deletion)
+    if dry_run or not deletion:
+        return result
+
+    source_ids = (await session.execute(select(Activity.source_id).where(Activity.id.in_(deletion)))).scalars().all()
+    deleted_objects = await session.execute(
+        delete(RemoteObject).where(RemoteObject.canonical_url.in_([sid for sid in source_ids if sid]))
+    )
+    await session.execute(delete(Activity).where(Activity.id.in_(deletion)))
+    await session.flush()
+
+    result["pruned_activities"] = len(deletion)
+    result["pruned_remote_objects"] = int(getattr(deleted_objects, "rowcount", 0) or 0)
+    return result

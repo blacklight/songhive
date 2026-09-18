@@ -16,6 +16,12 @@ export interface ActorRef {
   remoteUrl: string | null;
   /** Display handle: ``@user`` or ``@user@domain``. */
   handle: string;
+  /**
+   * ``userProfile`` route param for the internal profile page — the local
+   * username, or ``name@host`` for remote actors (``/@name@host`` renders
+   * the remote profile view).
+   */
+  routeUsername: string | null;
 }
 
 export function parseActorRef(
@@ -24,7 +30,12 @@ export function parseActorRef(
 ): ActorRef {
   if (actorUrl.startsWith(ACTOR_URN_PREFIX)) {
     const username = actorUrl.slice(ACTOR_URN_PREFIX.length);
-    return { username, remoteUrl: null, handle: `@${username}` };
+    return {
+      username,
+      remoteUrl: null,
+      handle: `@${username}`,
+      routeUsername: username,
+    };
   }
 
   const localPath = actorUrl.match(/^\/(?:users\/|@)([^/]+)\/?$/);
@@ -33,6 +44,7 @@ export function parseActorRef(
       username: localPath[1],
       remoteUrl: null,
       handle: `@${localPath[1]}`,
+      routeUsername: localPath[1],
     };
   }
 
@@ -41,7 +53,12 @@ export function parseActorRef(
     if (url.host === instanceDomain) {
       const match = url.pathname.match(/^\/(?:users\/|@)([^/]+)\/?$/);
       if (match) {
-        return { username: match[1], remoteUrl: null, handle: `@${match[1]}` };
+        return {
+          username: match[1],
+          remoteUrl: null,
+          handle: `@${match[1]}`,
+          routeUsername: match[1],
+        };
       }
     }
     const shortName = (
@@ -51,8 +68,14 @@ export function parseActorRef(
       username: null,
       remoteUrl: actorUrl,
       handle: `@${shortName}@${url.hostname}`,
+      routeUsername: `${shortName}@${url.hostname}`,
     };
   } catch {
-    return { username: null, remoteUrl: null, handle: actorUrl };
+    return {
+      username: null,
+      remoteUrl: null,
+      handle: actorUrl,
+      routeUsername: null,
+    };
   }
 }

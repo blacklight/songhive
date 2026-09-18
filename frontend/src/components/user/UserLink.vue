@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import { useInstanceStore } from "@/stores/instance";
+import { parseActorRef } from "@/utils/actorRef";
 import type { components } from "@/api/types";
 
 type UserSummary = components["schemas"]["UserSummary"];
@@ -66,6 +67,12 @@ const remoteUrl = computed(() => {
   return null;
 });
 
+// Remote actors open the internal ``/@name@host`` profile by default; the
+// remote profile view keeps the link out to the origin site.
+const remoteRef = computed(() =>
+  remoteUrl.value ? parseActorRef(remoteUrl.value, instanceDomain.value) : null,
+);
+
 const label = computed(
   () =>
     resolved.value?.display_name ||
@@ -76,8 +83,25 @@ const label = computed(
 </script>
 
 <template>
+  <RouterLink
+    v-if="remoteRef?.routeUsername"
+    :to="{ name: 'userProfile', params: { username: remoteRef.routeUsername } }"
+    class="user-link user-link--remote"
+    :class="`user-link--${size}`"
+  >
+    <AppAvatar
+      v-if="showAvatar"
+      :src="resolved?.avatar_url || ''"
+      :name="label"
+      size="sm"
+    />
+    <span class="user-link__name">{{ label }}</span>
+    <span v-if="size !== 'sm'" class="user-link__handle">{{
+      remoteRef.handle
+    }}</span>
+  </RouterLink>
   <a
-    v-if="remoteUrl"
+    v-else-if="remoteUrl"
     :href="remoteUrl"
     target="_blank"
     rel="noopener"
@@ -130,7 +154,6 @@ const label = computed(
   font-weight: 500;
 }
 
-.user-link--remote,
 .user-link--plain {
   cursor: default;
 }

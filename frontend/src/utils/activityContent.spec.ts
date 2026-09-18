@@ -10,6 +10,7 @@ describe("parseActorRef", () => {
       username: "alice",
       remoteUrl: null,
       handle: "@alice",
+      routeUsername: "alice",
     });
   });
 
@@ -29,11 +30,12 @@ describe("parseActorRef", () => {
     expect(ref.username).toBeNull();
     expect(ref.remoteUrl).toBe("https://remote.example/users/bob");
     expect(ref.handle).toBe("@bob@remote.example");
+    expect(ref.routeUsername).toBe("bob@remote.example");
   });
 });
 
 describe("parseActivityContent", () => {
-  it("keeps mention anchors as remote links with their real href", () => {
+  it("routes mention anchors to the internal remote profile", () => {
     const segments = parseActivityContent(
       '<p>hi <a href="https://remote.example/@bob" class="u-url mention">@bob</a></p>',
       { instanceDomain: DOMAIN },
@@ -43,6 +45,7 @@ describe("parseActivityContent", () => {
       {
         type: "mention",
         handle: "@bob",
+        username: "bob@remote.example",
         url: "https://remote.example/@bob",
       },
     ]);
@@ -77,7 +80,7 @@ describe("parseActivityContent", () => {
       {
         type: "mention",
         handle: "@bob@remote.example",
-        username: undefined,
+        username: "bob@remote.example",
         url: "https://remote.example/@bob",
       },
     ]);
@@ -108,6 +111,7 @@ describe("parseActivityContent", () => {
     expect(segments[1]).toEqual({
       type: "mention",
       handle: "@bob@remote.example",
+      username: "bob@remote.example",
       url: "https://remote.example/users/bob",
     });
   });

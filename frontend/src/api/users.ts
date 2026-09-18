@@ -19,6 +19,9 @@ export type FollowRequestResponse =
   paths["/api/v1/users/me/follow-requests"]["get"]["responses"]["200"]["content"]["application/json"][number];
 export type FollowRequestDecision =
   components["schemas"]["FollowRequestDecision"];
+export type FollowingResponse =
+  paths["/api/v1/users/{username}/follows"]["get"]["responses"]["200"]["content"]["application/json"][number];
+export type FollowTargetRequest = components["schemas"]["FollowTargetRequest"];
 export type ProfileVisibility = components["schemas"]["ProfileVisibility"];
 export type FollowersApproval = components["schemas"]["FollowersApproval"];
 
@@ -54,6 +57,12 @@ export interface ListFollowersResult {
 
 export interface ListFollowRequestsResult {
   requests: FollowRequestResponse[];
+  offset: number;
+  total: number;
+}
+
+export interface ListFollowsResult {
+  follows: FollowingResponse[];
   offset: number;
   total: number;
 }
@@ -147,6 +156,61 @@ export function rejectFollowRequest(actorUrl: string): Promise<void> {
   return apiRequest<void>("/users/me/follow-requests/reject", {
     method: "POST",
     body: { actor_url: actorUrl } satisfies FollowRequestDecision,
+  });
+}
+
+export async function listFollows(
+  username: string,
+  params?: ListFollowersParams,
+): Promise<ListFollowsResult> {
+  const response = await apiRequestWithHeaders<FollowingResponse[]>(
+    `/users/${username}/follows`,
+    {
+      query: params as
+        | Record<string, string | number | boolean | undefined | null>
+        | undefined,
+    },
+  );
+  const offsetHeader = response.headers.get("X-List-Offset");
+  const total = response.headers.get("X-Total-Count");
+  return {
+    follows: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
+    total: total ? parseInt(total, 10) : response.body.length,
+  };
+}
+
+export async function listMyFollows(
+  params?: ListFollowersParams,
+): Promise<ListFollowsResult> {
+  const response = await apiRequestWithHeaders<FollowingResponse[]>(
+    "/users/me/follows",
+    {
+      query: params as
+        | Record<string, string | number | boolean | undefined | null>
+        | undefined,
+    },
+  );
+  const offsetHeader = response.headers.get("X-List-Offset");
+  const total = response.headers.get("X-Total-Count");
+  return {
+    follows: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
+    total: total ? parseInt(total, 10) : response.body.length,
+  };
+}
+
+export function followActor(actorUrl: string): Promise<FollowingResponse> {
+  return apiRequest<FollowingResponse>("/users/me/follows", {
+    method: "POST",
+    body: { actor_url: actorUrl } satisfies FollowTargetRequest,
+  });
+}
+
+export function unfollowActor(actorUrl: string): Promise<void> {
+  return apiRequest<void>("/users/me/follows", {
+    method: "DELETE",
+    body: { actor_url: actorUrl } satisfies FollowTargetRequest,
   });
 }
 

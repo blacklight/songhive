@@ -432,6 +432,39 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/users/me/follows": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List My Follows
+     * @description List actors the current user follows, newest first — all states.
+     */
+    get: operations["list_my_follows_api_v1_users_me_follows_get"];
+    put?: never;
+    /**
+     * Follow Actor
+     * @description Follow a local or remote actor.
+     *
+     *     The target may be a local username, a ``@user@domain`` handle or an
+     *     actor/profile URL. Remote follows stay ``pending`` until the remote
+     *     instance answers the delivered ``Follow`` activity; local follows
+     *     resolve immediately per the target's approval policy.
+     */
+    post: operations["follow_actor_api_v1_users_me_follows_post"];
+    /**
+     * Unfollow Actor
+     * @description Unfollow an actor — delivers ``Undo(Follow)`` for remote targets.
+     */
+    delete: operations["unfollow_actor_api_v1_users_me_follows_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/me/password": {
     parameters: {
       query?: never;
@@ -544,6 +577,29 @@ export interface paths {
      * @description List a user's followers, newest first.
      */
     get: operations["list_user_followers_api_v1_users__username__followers_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/{username}/follows": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List User Follows
+     * @description List the actors a user follows, newest first.
+     *
+     *     Only ``accepted`` follows are listed publicly; the owner additionally
+     *     sees their ``pending`` outbound requests.
+     */
+    get: operations["list_user_follows_api_v1_users__username__follows_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -3170,6 +3226,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/federation/prune-remote-activities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Prune Remote Activities Endpoint
+     * @description Trigger the stale remote-activity pruning Celery task (admin only).
+     */
+    post: operations["prune_remote_activities_endpoint_api_v1_admin_federation_prune_remote_activities_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/celery/tasks": {
     parameters: {
       query?: never;
@@ -5731,6 +5807,14 @@ export interface components {
       requested_at?: string | null;
     };
     /**
+     * FollowTargetRequest
+     * @description Payload identifying the actor to follow or unfollow.
+     */
+    FollowTargetRequest: {
+      /** Actor Url */
+      actor_url: string;
+    };
+    /**
      * FollowerResponse
      * @description A follower entry on a user's public followers page.
      */
@@ -5750,6 +5834,26 @@ export interface components {
      * @enum {string}
      */
     FollowersApproval: "accept" | "manual" | "reject";
+    /**
+     * FollowingResponse
+     * @description An actor followed by a user, local or remote.
+     */
+    FollowingResponse: {
+      /** Actor Url */
+      actor_url: string;
+      /** Handle */
+      handle?: string | null;
+      /** Display Name */
+      display_name?: string | null;
+      /** Avatar Url */
+      avatar_url?: string | null;
+      /** State */
+      state: string;
+      /** Followed At */
+      followed_at?: string | null;
+      /** Local Username */
+      local_username?: string | null;
+    };
     /**
      * GenreItemResponse
      * @description A single item associated with a genre.
@@ -6331,6 +6435,19 @@ export interface components {
       dry_run: boolean;
     };
     /**
+     * PruneRemoteActivitiesRequest
+     * @description Request body for triggering remote-activity pruning.
+     */
+    PruneRemoteActivitiesRequest: {
+      /** Older Than Days */
+      older_than_days?: number | null;
+      /**
+       * Dry Run
+       * @default false
+       */
+      dry_run: boolean;
+    };
+    /**
      * PublicUserResponse
      * @description Public user profile response (internal id excluded).
      */
@@ -6356,6 +6473,13 @@ export interface components {
        * @default 0
        */
       followers_count: number;
+      /**
+       * Follows Count
+       * @default 0
+       */
+      follows_count: number;
+      /** Follow State */
+      follow_state?: string | null;
     };
     /**
      * QuoteActivityListResponse
@@ -6509,6 +6633,8 @@ export interface components {
       unavailable: boolean;
       /** Url */
       url: string;
+      /** Follow State */
+      follow_state?: string | null;
     };
     /**
      * RemoteLookupResponse
@@ -8469,6 +8595,102 @@ export interface operations {
       };
     };
   };
+  list_my_follows_api_v1_users_me_follows_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FollowingResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  follow_actor_api_v1_users_me_follows_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FollowTargetRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FollowingResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unfollow_actor_api_v1_users_me_follows_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FollowTargetRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   change_my_password_api_v1_users_me_password_post: {
     parameters: {
       query?: never;
@@ -8680,6 +8902,40 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FollowerResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_user_follows_api_v1_users__username__follows_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        username: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FollowingResponse"][];
         };
       };
       /** @description Validation Error */
@@ -9429,6 +9685,8 @@ export interface operations {
       query?: {
         /** @description Search query */
         q?: string | null;
+        /** @description Filter by owner's username */
+        owner_username?: string | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
@@ -13740,6 +13998,39 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["ProvisionFederationKeysRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminTaskQueuedResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  prune_remote_activities_endpoint_api_v1_admin_federation_prune_remote_activities_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PruneRemoteActivitiesRequest"];
       };
     };
     responses: {

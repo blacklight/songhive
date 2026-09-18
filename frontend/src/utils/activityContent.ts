@@ -35,7 +35,10 @@ interface Marked {
 
 export type ContentSegment =
   | (Marked & { type: "text"; value: string })
-  /** ``username`` routes to the local profile; ``url`` links out remotely. */
+  /**
+   * ``username`` routes to the internal profile (a local name or
+   * ``name@host`` for remote actors); ``url`` is the remote actor URL.
+   */
   | (Marked & {
       type: "mention";
       handle: string;
@@ -202,8 +205,8 @@ function classifyAnchor(
     return [tagSegment(label || `#${tagMatch?.[1] ?? ""}`, href)];
   }
 
-  // Mentions: local actor references route to the profile page; remote ones
-  // (or anchors the activity's ``mentions`` list identifies) link out.
+  // Mentions route to the internal profile — local actor references by
+  // username, remote ones by their ``name@host`` route param.
   const actor = parseActorRef(href, instanceDomain ?? "");
   if (actor.username) {
     return [
@@ -220,7 +223,14 @@ function classifyAnchor(
     anchor.classList.contains("u-url") ||
     label.startsWith("@");
   if (isMention) {
-    return [{ type: "mention", handle: label || actor.handle, url: href }];
+    return [
+      {
+        type: "mention",
+        handle: label || actor.handle,
+        username: actor.routeUsername ?? undefined,
+        url: href,
+      },
+    ];
   }
   if (localPath) {
     return [{ type: "link", label: label || localPath, to: localPath }];
@@ -271,8 +281,16 @@ export function parseActivityContent(
         ? parseActorRef(entry.actor_url, instanceDomain ?? "")
         : null;
       if (actor?.username) username = actor.username;
-      else if (entry.actor_url) url = entry.actor_url;
-      else if (entry.user_id) username = handle.replace(/^@/, "").split("@")[0];
+      else if (entry.actor_url) {
+        url = entry.actor_url;
+        username = actor?.routeUsername ?? undefined;
+      } else if (entry.user_id)
+        username = handle.replace(/^@/, "").split("@")[0];
+    }
+    // Remote ``@name@host`` handles without a resolvable entry still open
+    // the internal remote profile — the route param drops the leading ``@``.
+    if (!username && handle.slice(1).includes("@")) {
+      username = handle.replace(/^@/, "");
     }
     return { type: "mention", handle, username, url };
   };

@@ -237,8 +237,7 @@ describe("NotificationsView", () => {
     });
     const { wrapper } = await mountView();
     const link = wrapper.find("a.notifications-view__actor");
-    expect(link.attributes("href")).toBe("https://remote.example/users/bob");
-    expect(link.attributes("target")).toBe("_blank");
+    expect(link.attributes("href")).toBe("/@bob@remote.example");
   });
 
   it("links object-scoped follow notifications to the followed object", async () => {
@@ -290,7 +289,7 @@ describe("NotificationsView", () => {
     const { wrapper } = await mountView();
     const card = wrapper.find(".actor-card");
     expect(card.exists()).toBe(true);
-    expect(card.attributes("href")).toBe("https://remote.example/users/bob");
+    expect(card.attributes("href")).toBe("/@bob@remote.example");
     expect(card.text()).toContain("Bob Rocker");
     expect(card.text()).toContain("@bob@remote.example");
     expect(card.find("img").attributes("src")).toBe(
@@ -494,9 +493,7 @@ describe("NotificationsView", () => {
     });
     const { wrapper } = await mountView();
     const link = wrapper.find(".activity-card__content a");
-    expect(link.attributes("href")).toBe(
-      "https://elsewhere.example/users/carol",
-    );
+    expect(link.attributes("href")).toBe("/@carol@elsewhere.example");
     expect(link.text()).toBe("@carol@elsewhere.example");
   });
 
@@ -783,7 +780,7 @@ describe("NotificationsView", () => {
     expect(wrapper.find(".item-card").exists()).toBe(false);
     const card = wrapper.find(".actor-card");
     expect(card.exists()).toBe(true);
-    expect(card.attributes("href")).toBe("https://remote.example/users/bob");
+    expect(card.attributes("href")).toBe("/@bob@remote.example");
   });
 
   it("links the actor name and the action text separately for likes", async () => {

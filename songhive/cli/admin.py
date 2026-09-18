@@ -145,6 +145,25 @@ def _add_purge_notifications_command(subparsers: argparse._SubParsersAction) -> 
     )
 
 
+def _add_prune_remote_activities_command(subparsers: argparse._SubParsersAction) -> None:
+    prune_parser = subparsers.add_parser(
+        "prune-remote-activities",
+        help="Prune stale remote activities that no local user has interacted with",
+    )
+    prune_parser.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Prune remote activities older than N days (defaults to federation.remote_activity_retention_days)",
+    )
+    prune_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report the number of activities that would be pruned without deleting",
+    )
+
+
 def _add_sync_tags_command(subparsers: argparse._SubParsersAction) -> None:
     sync_tags_parser = subparsers.add_parser(
         "sync-tags",
@@ -202,6 +221,7 @@ def _create_admin_parser() -> argparse.ArgumentParser:
     _add_provision_federation_keys_command(subparsers)
     _add_rehash_audio_command(subparsers)
     _add_purge_notifications_command(subparsers)
+    _add_prune_remote_activities_command(subparsers)
     _add_sync_tags_command(subparsers)
     _add_enrich_image_parser(subparsers)
     return parser
@@ -497,6 +517,36 @@ async def _handle_purge_notifications(args):
     print(f"Deleted {deleted} notification(s)")
 
 
+async def _handle_prune_remote_activities(args):
+    """Prune stale remote activities no local user has interacted with."""
+    from ..services.remote_content import prune_stale_remote_activities
+
+    config = load_config([])
+    init_db(config.database.url)
+
+    days = getattr(args, "days", None) or config.federation.remote_activity_retention_days
+    dry_run = getattr(args, "dry_run", False)
+
+    async with get_session() as session:
+        result = await prune_stale_remote_activities(
+            session,
+            older_than_days=days,
+            dry_run=dry_run,
+        )
+        await session.commit()
+
+    if dry_run:
+        print(
+            f"Would prune {result['candidates']} remote activity(ies) older than {days} day(s) "
+            f"(remote objects re-fetchable via URL lookup)."
+        )
+    else:
+        print(
+            f"Pruned {result['pruned_activities']} remote activity(ies) and "
+            f"{result['pruned_remote_objects']} cached remote object(s) older than {days} day(s)."
+        )
+
+
 async def _handle_sync_tags(args):
     """Enqueue tag sync for the requested scope of tracks."""
     from ..tasks.tags import sync_track_tags
@@ -622,6 +672,7 @@ def admin_main(argv=None):
         "provision-federation-keys": _handle_provision_federation_keys,
         "rehash-audio": _handle_rehash_audio,
         "purge-notifications": _handle_purge_notifications,
+        "prune-remote-activities": _handle_prune_remote_activities,
         "sync-tags": _handle_sync_tags,
         "enrich-images": _handle_enrich_images,
     }

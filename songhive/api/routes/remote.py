@@ -23,6 +23,7 @@ from ...federation.fetch import FetchError, FetchNotFound
 from ...models.user import User
 from ...services import acl
 from ...services import activities as activity_service
+from ...services import follows as follows_service
 from ...services import remote_content
 from ..deps import get_config, get_current_user_optional, get_db
 from .activities import (
@@ -53,6 +54,9 @@ class RemoteActorResponse(BaseModel):
     fetched_at: Optional[datetime] = None
     unavailable: bool = False
     url: str  # internal SPA route
+    # Viewer-relative follow state (``pending``/``accepted``) when the
+    # caller is authenticated and follows this actor.
+    follow_state: Optional[str] = None
 
 
 class RemoteObjectResponse(BaseModel):
@@ -105,7 +109,7 @@ def _remote_policy(config: SonghiveConfig, user: Optional[User]) -> None:
     remote_content.check_remote_access(user, remote_content.remote_search_policy(config))
 
 
-def _actor_response(actor: remote_content.RemoteActorResult) -> RemoteActorResponse:
+def _actor_response(actor: remote_content.RemoteActorResult, follow_state: Optional[str] = None) -> RemoteActorResponse:
     return RemoteActorResponse(
         handle=actor.handle,
         username=actor.username,
@@ -119,7 +123,16 @@ def _actor_response(actor: remote_content.RemoteActorResult) -> RemoteActorRespo
         fetched_at=actor.fetched_at,
         unavailable=actor.unavailable,
         url=f"/@{actor.handle}",
+        follow_state=follow_state,
     )
+
+
+async def _viewer_follow_state(db: AsyncSession, user: Optional[User], actor_url: str) -> Optional[str]:
+    """Return the caller's follow state on ``actor_url``, if authenticated."""
+    if user is None:
+        return None
+    states = await follows_service.follow_states_for(db, user.id, [actor_url])
+    return states.get(actor_url)
 
 
 def _object_response(row) -> RemoteObjectResponse:
@@ -197,7 +210,12 @@ async def remote_lookup(
             if target.kind != remote_content.RemoteTargetKind.ACTOR_URL or exc.status_code != 422:
                 raise _fetch_error(exc) from exc
         else:
-            return RemoteLookupResponse(kind="actor", url=f"/@{actor.handle}", actor=_actor_response(actor))
+            follow_state = await _viewer_follow_state(db, user, actor.actor_url)
+            return RemoteLookupResponse(
+                kind="actor",
+                url=f"/@{actor.handle}",
+                actor=_actor_response(actor, follow_state),
+            )
 
     if target.kind in (
         remote_content.RemoteTargetKind.ACTOR_URL,
@@ -258,7 +276,8 @@ async def get_remote_actor(
         actor = await remote_content.lookup_remote_actor(db, config, handle, refresh=refresh)
     except FetchError as exc:
         raise _fetch_error(exc) from exc
-    return _actor_response(actor)
+    follow_state = await _viewer_follow_state(db, user, actor.actor_url)
+    return _actor_response(actor, follow_state)
 
 
 @router.get("/actors/{handle}/activities", response_model=RemoteActorActivitiesResponse)
