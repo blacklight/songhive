@@ -40,4 +40,13 @@ a:where(:any-link) {
 main section.boxed {
   border: 1px solid var(--color-border);
 }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover {
+  scrollbar-color: color-mix(in srgb, currentColor 30%, transparent) transparent;
+}
 </style>
