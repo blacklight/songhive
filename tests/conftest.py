@@ -4,6 +4,7 @@ Shared test fixtures.
 
 import asyncio
 from typing import Optional
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,6 +91,29 @@ def _fake_sync_redis(monkeypatch, fake_redis_server):
         "songhive.services.redis.get_sync_redis_client",
         lambda config=None: FakeRedis(server=fake_redis_server),
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_celery_broker(monkeypatch):
+    """
+    Keep tests from publishing messages to the configured Celery broker.
+
+    Several services enqueue follow-up work with ``task.delay()`` before the
+    request transaction commits. Without this stub those messages land on the
+    real broker and a running dev worker consumes them against the real
+    database, where the test-only rows never exist — producing endless
+    "not found"/"not committed yet" retries. ``send_task`` is what
+    ``Task.apply_async`` delegates to for every task on this app, so stubbing
+    it here intercepts all ``.delay()``/``.apply_async()`` calls without
+    executing task code (unlike ``task_always_eager``, which would run tasks
+    against the real config). Returns the mock so tests can assert on
+    enqueues when needed.
+    """
+    from songhive.tasks.celery import celery_app
+
+    send_task = MagicMock(name="celery_app.send_task")
+    monkeypatch.setattr(celery_app, "send_task", send_task)
+    return send_task
 
 
 @pytest.fixture

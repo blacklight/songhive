@@ -103,6 +103,15 @@
   instance's `base_urls`, so self-delivered Webmentions never leave the
   mention pipeline that already handles them.
 - Tests use `pytest-asyncio` for async tests and `TestClient` for API tests.
+- The autouse `_no_real_celery_broker` fixture in `tests/conftest.py` stubs
+  `celery_app.send_task` so test `.delay()`/`.apply_async()` calls never reach
+  the configured broker. Without it, tests publish real messages that a running
+  dev worker consumes against the real DB — where the test-only rows never
+  exist — producing endless "not found"/"not committed yet" retry storms
+  (`enrich_track`, `process_outgoing`, `fetch_preview_card`, `sync_track_tags`).
+  Do NOT switch to `task_always_eager`: eager tasks call `load_config([])` and
+  would hit the real database. Tests needing to assert enqueues can request the
+  fixture by name and inspect the returned mock.
 - Frontend is a Vue.js 3 + TypeScript SPA in `frontend/`; builds to
   `songhive/static/`. The Vite build also copies `swagger-ui-dist` into
   `songhive/static/swagger-ui/` (rewriting `swagger-initializer.js` to point
