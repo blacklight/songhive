@@ -50,6 +50,17 @@ export function getPublicUrl(
 }
 
 /**
+ * Return ``url`` as an absolute URL, resolving relative paths (e.g.
+ * ``/api/v1/files/{id}/download``) against the current origin. Absolute URLs
+ * are returned unchanged.
+ */
+export function toAbsoluteUrl(url: string): string {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+/**
  * Return whether a resource should be considered publicly shareable by URL.
  * Artists have no visibility field and are treated as public by default.
  */

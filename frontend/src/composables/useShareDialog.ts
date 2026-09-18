@@ -7,6 +7,8 @@ export interface ShareTarget {
   title: string;
   ownerId: string | null;
   visibility: string | null;
+  /** Direct media download URL for tracks (the track ``audio_url``). */
+  downloadUrl: string | null;
 }
 
 export function useShareDialog() {
@@ -19,6 +21,7 @@ export function useShareDialog() {
     title: string,
     ownerId?: string | null,
     visibility?: string | null,
+    downloadUrl?: string | null,
   ) {
     shareTarget.value = {
       itemType,
@@ -26,6 +29,7 @@ export function useShareDialog() {
       title,
       ownerId: ownerId ?? null,
       visibility: visibility ?? null,
+      downloadUrl: downloadUrl ?? null,
     };
     shareOpen.value = true;
   }

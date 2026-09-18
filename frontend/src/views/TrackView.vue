@@ -162,6 +162,7 @@ async function onAction(key: string) {
         track.value.title,
         track.value.owner_id,
         track.value.visibility,
+        track.value.audio_url,
       );
       break;
     case "activities":
@@ -406,6 +407,7 @@ watch(
       :title="shareTarget.title"
       :owner-id="shareTarget.ownerId"
       :visibility="shareTarget.visibility"
+      :download-url="shareTarget.downloadUrl"
       @close="closeShare"
     />
 

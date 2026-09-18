@@ -27,7 +27,7 @@ import { useConfirmStore } from "@/stores/confirm";
 import { useInstanceStore } from "@/stores/instance";
 import { useSearchSections } from "@/composables/useSearchSections";
 import { useToastStore } from "@/stores/toast";
-import { getPublicUrl, isPublicResource } from "@/utils/share";
+import { getPublicUrl, isPublicResource, toAbsoluteUrl } from "@/utils/share";
 import { formatDateTime } from "@/i18n";
 import AppModal from "@/components/feedback/AppModal.vue";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -44,6 +44,8 @@ export interface Props {
   title: string;
   ownerId?: string | null;
   visibility?: string | null;
+  /** Direct media download URL for tracks (the track ``audio_url``). */
+  downloadUrl?: string | null;
 }
 
 const { searchAll } = useSearchSections();
@@ -68,6 +70,15 @@ const isPublic = computed(() =>
 
 const publicUrl = computed(() =>
   isPublic.value ? getPublicUrl(props.itemType, props.itemId) : null,
+);
+
+// Tracks also expose the direct media download link (the track ``audio_url``,
+// i.e. /api/v1/files/{id}/download for local files) so it can be copied for
+// remote players or fediverse embeds.
+const publicDownloadUrl = computed(() =>
+  isPublic.value && props.itemType === "track" && props.downloadUrl
+    ? toAbsoluteUrl(props.downloadUrl)
+    : null,
 );
 
 const availableTabs = computed(() => {
@@ -601,10 +612,29 @@ watch(
       <div v-if="publicUrl" class="share-dialog__new-url">
         <AppInput
           :model-value="publicUrl"
-          :label="t('browse.share.publicUrl')"
+          :label="
+            publicDownloadUrl
+              ? t('browse.share.webUrl')
+              : t('browse.share.publicUrl')
+          "
           disabled
         />
         <AppButton size="sm" icon="copy" @click="copyToClipboard(publicUrl)">
+          {{ t("common.copy") }}
+        </AppButton>
+      </div>
+
+      <div v-if="publicDownloadUrl" class="share-dialog__new-url">
+        <AppInput
+          :model-value="publicDownloadUrl"
+          :label="t('browse.share.downloadUrl')"
+          disabled
+        />
+        <AppButton
+          size="sm"
+          icon="copy"
+          @click="copyToClipboard(publicDownloadUrl)"
+        >
           {{ t("common.copy") }}
         </AppButton>
       </div>

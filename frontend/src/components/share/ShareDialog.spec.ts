@@ -450,6 +450,122 @@ describe("ShareDialog", () => {
     );
   });
 
+  it("shows web and direct download URLs for a public track", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      title: "My Song",
+      ownerId: "user-2",
+      visibility: "public",
+      downloadUrl: "/api/v1/files/f1/download",
+    });
+    await flushPromises();
+
+    const publicTab = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("browse.share.publicUrl"),
+    );
+    expect(publicTab).toBeDefined();
+    await publicTab?.click();
+    await flushPromises();
+
+    const inputs = Array.from(
+      document.body.querySelectorAll('input[type="text"]'),
+    ) as HTMLInputElement[];
+    const values = inputs.map((i) => i.value);
+    expect(values).toContain("http://localhost:3000/tracks/track-1");
+    expect(values).toContain("http://localhost:3000/api/v1/files/f1/download");
+
+    expect(document.body.textContent).toContain(
+      i18n.global.t("browse.share.webUrl"),
+    );
+    expect(document.body.textContent).toContain(
+      i18n.global.t("browse.share.downloadUrl"),
+    );
+  });
+
+  it("copies the direct download URL for a public track", async () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-2",
+      visibility: "public",
+      downloadUrl: "/api/v1/files/f1/download",
+    });
+    await flushPromises();
+
+    const publicTab = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("browse.share.publicUrl"),
+    );
+    await publicTab?.click();
+    await flushPromises();
+
+    const copyButtons = Array.from(
+      document.body.querySelectorAll("button"),
+    ).filter((b) => b.textContent === i18n.global.t("common.copy"));
+    expect(copyButtons.length).toBe(2);
+    await copyButtons[1]?.click();
+    await flushPromises();
+
+    expect(writeText).toHaveBeenCalledWith(
+      "http://localhost:3000/api/v1/files/f1/download",
+    );
+  });
+
+  it("shows only the public page URL for a track without a download URL", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-2",
+      visibility: "public",
+    });
+    await flushPromises();
+
+    const publicTab = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("browse.share.publicUrl"),
+    );
+    await publicTab?.click();
+    await flushPromises();
+
+    const inputs = Array.from(
+      document.body.querySelectorAll('input[type="text"]'),
+    ) as HTMLInputElement[];
+    expect(inputs.map((i) => i.value)).toEqual([
+      "http://localhost:3000/tracks/track-1",
+    ]);
+    expect(document.body.textContent).toContain(
+      i18n.global.t("browse.share.publicUrl"),
+    );
+    expect(document.body.textContent).not.toContain(
+      i18n.global.t("browse.share.downloadUrl"),
+    );
+  });
+
+  it("hides the direct download URL for a non-public track", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "track",
+      itemId: "track-1",
+      ownerId: "user-1",
+      visibility: "private",
+      downloadUrl: "/api/v1/files/f1/download",
+    });
+    await flushPromises();
+
+    const publicTab = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("browse.share.publicUrl"),
+    );
+    expect(publicTab).toBeUndefined();
+  });
+
   it("publishes a track to the fediverse with a status", async () => {
     vi.mocked(tracksApi.publishTrack).mockResolvedValue({
       track_id: "track-1",

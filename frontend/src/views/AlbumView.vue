@@ -121,6 +121,7 @@ function onTrackShare(track: QueueTrack) {
     track.title,
     track.owner_id ?? null,
     track.visibility,
+    track.audio_url,
   );
 }
 
@@ -435,6 +436,7 @@ watch(
       :title="shareTarget.title"
       :owner-id="shareTarget.ownerId"
       :visibility="shareTarget.visibility"
+      :download-url="shareTarget.downloadUrl"
       @close="closeShare"
     />
 
