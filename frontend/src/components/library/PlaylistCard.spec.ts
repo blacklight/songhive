@@ -95,4 +95,27 @@ describe("PlaylistCard", () => {
     expect(wrapper.text()).toContain("Alice");
     expect(wrapper.text()).not.toContain("user-1");
   });
+
+  it("shows the response owner for playlists owned by other users", async () => {
+    const playlist = {
+      ...createPlaylist(),
+      owner_id: "user-2",
+      owner: {
+        id: "user-2",
+        username: "bob",
+        display_name: "Bob",
+        avatar_url: null,
+      },
+    };
+
+    const wrapper = mount(PlaylistCard, {
+      props: { playlist },
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const owner = wrapper.find(".playlist-card__owner");
+    expect(owner.exists()).toBe(true);
+    expect(owner.text()).toContain("Bob");
+  });
 });

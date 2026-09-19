@@ -43,6 +43,7 @@ const {
   (params) =>
     listPlaylists({
       ...params,
+      include: "owner",
       owner_username: onlyMine.value ? authStore.user?.username : undefined,
     }),
   {

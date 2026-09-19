@@ -96,4 +96,27 @@ describe("LibraryCard", () => {
     expect(wrapper.text()).toContain("Alice");
     expect(wrapper.text()).not.toContain("user-1");
   });
+
+  it("shows the response owner for libraries owned by other users", async () => {
+    const library = {
+      ...createLibrary(),
+      owner_id: "user-2",
+      owner: {
+        id: "user-2",
+        username: "bob",
+        display_name: "Bob",
+        avatar_url: null,
+      },
+    };
+
+    const wrapper = mount(LibraryCard, {
+      props: { library },
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const owner = wrapper.find(".library-card__owner");
+    expect(owner.exists()).toBe(true);
+    expect(owner.text()).toContain("Bob");
+  });
 });

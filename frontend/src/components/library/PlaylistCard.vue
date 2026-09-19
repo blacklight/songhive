@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
-import { useAuthStore } from "@/stores/auth";
+import { useEntityMeta } from "@/composables/useEntityMeta";
 import type { PlaylistResponse } from "@/api/playlists";
 import UserLink from "@/components/user/UserLink.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
@@ -13,37 +12,9 @@ export interface Props {
 
 const props = defineProps<Props>();
 const emit = defineEmits<{ click: [playlist: PlaylistResponse] }>();
-const { t } = useI18n();
-const authStore = useAuthStore();
-
-const owner = computed(() => {
-  const ownerId = props.playlist.owner_id;
-  if (!ownerId) return null;
-  if (authStore.user?.id === ownerId) {
-    return authStore.user;
-  }
-  // The backend only returns owner_id for other users; resolving their
-  // display names requires a denormalized field or a user lookup.
-  return null;
-});
-
-const visibilityText = computed(() => {
-  const labels: Record<string, string> = {
-    private: t("browse.visibility.private"),
-    local: t("browse.visibility.local"),
-    public: t("browse.visibility.public"),
-  };
-  return labels[props.playlist.visibility] ?? props.playlist.visibility;
-});
-
-const visibilityIcon = computed(() => {
-  const icons: Record<string, string> = {
-    private: "fas fa-lock",
-    local: "fas fa-home",
-    public: "fas fa-globe",
-  };
-  return icons[props.playlist.visibility] ?? "mdi-help-circle";
-});
+const { owner, visibilityText, visibilityIcon } = useEntityMeta(
+  computed(() => props.playlist),
+);
 </script>
 
 <template>
@@ -73,9 +44,7 @@ const visibilityIcon = computed(() => {
         v-if="owner"
         class="playlist-card__owner"
         size="sm"
-        :username="owner.username"
-        :display-name="owner.display_name"
-        :avatar-url="owner.avatar_url"
+        :owner="owner"
       />
       <span :title="visibilityText" class="playlist-card__visibility">
         <i :class="visibilityIcon" />

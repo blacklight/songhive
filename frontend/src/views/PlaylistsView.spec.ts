@@ -87,6 +87,7 @@ describe("PlaylistsView", () => {
       offset: 0,
       sort_by: "name",
       sort_dir: "asc",
+      include: "owner",
     });
     expect(wrapper.text()).toContain("Road Trip");
   });
@@ -132,6 +133,7 @@ describe("PlaylistsView", () => {
       offset: 0,
       sort_by: "name",
       sort_dir: "asc",
+      include: "owner",
     });
     expect(wrapper.text()).toContain("Searched Playlist");
     expect(wrapper.text()).not.toContain("First Playlist");
@@ -167,6 +169,7 @@ describe("PlaylistsView", () => {
       offset: 20,
       sort_by: "name",
       sort_dir: "asc",
+      include: "owner",
     });
     expect(wrapper.text()).toContain("Playlist 19");
     expect(wrapper.text()).toContain("Playlist 20");
