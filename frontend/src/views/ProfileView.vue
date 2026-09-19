@@ -112,7 +112,6 @@ const currentComponent = computed(() => {
 
 <style scoped>
 .profile-view {
-  max-width: 800px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -149,6 +148,8 @@ const currentComponent = computed(() => {
 }
 
 .profile-view__panel {
+  margin: 0 auto;
   padding: var(--space-4) 0;
+  max-width: 1000px;
 }
 </style>
