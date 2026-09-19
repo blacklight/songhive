@@ -135,4 +135,31 @@ describe("EntityActions", () => {
     expect(wrapper.find(".entity-actions__more").exists()).toBe(false);
     expect(wrapper.findAll(".entity-actions__item").length).toBe(2);
   });
+
+  it("menuOnly collapses every action under the More menu", async () => {
+    wrapper = mount(EntityActions, {
+      props: {
+        actions: makeActions(),
+        primaryCount: 3,
+        menuOnly: true,
+      },
+      attachTo: document.body,
+    });
+
+    expect(wrapper.findAll(".entity-actions__item").length).toBe(0);
+
+    const more = wrapper.find(".entity-actions__more");
+    expect(more.exists()).toBe(true);
+
+    await more.trigger("click");
+    await flushPromises();
+
+    const menuItems = document.body.querySelectorAll('[role="menuitem"]');
+    expect(menuItems.length).toBe(3);
+    expect(menuItems[0]!.textContent).toContain("Share");
+    expect(menuItems[2]!.textContent).toContain("Delete");
+
+    await menuItems[2]!.dispatchEvent(new MouseEvent("click"));
+    expect(wrapper.emitted("select")?.[0]).toEqual(["delete"]);
+  });
 });

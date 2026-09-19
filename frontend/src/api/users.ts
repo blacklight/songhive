@@ -7,6 +7,12 @@ export type UserProfileUpdate =
   paths["/api/v1/users/me"]["patch"]["requestBody"]["content"]["application/json"];
 export type PublicUserResponse =
   paths["/api/v1/users/{username}"]["get"]["responses"]["200"]["content"]["application/json"];
+/**
+ * Public profile including the viewer/admin moderation flags
+ * (``muted``/``blocked``/``limited``/``suspended``) carried by
+ * ``PublicUserResponse``.
+ */
+export type PublicUserWithModeration = PublicUserResponse;
 export type ChangePasswordRequest =
   paths["/api/v1/users/me/password"]["post"]["requestBody"]["content"]["application/json"];
 export type ChangePasswordResponse =
@@ -30,6 +36,15 @@ export type FollowersApproval = components["schemas"]["FollowersApproval"];
 export interface DeleteAccountRequest {
   confirmation: string;
   recursive: boolean;
+}
+
+/** An actor muted or blocked by the current user. */
+export type ModeratedActor = components["schemas"]["ModeratedActorResponse"];
+
+export interface ListModeratedActorsResult {
+  actors: ModeratedActor[];
+  offset: number;
+  total: number;
 }
 
 export interface ListUsersParams {
@@ -86,8 +101,8 @@ export function changePassword(
   });
 }
 
-export function getPublic(username: string): Promise<PublicUserResponse> {
-  return apiRequest<PublicUserResponse>(`/users/${username}`);
+export function getPublic(username: string): Promise<PublicUserWithModeration> {
+  return apiRequest<PublicUserWithModeration>(`/users/${username}`);
 }
 
 export async function listPublicUsers(
@@ -233,4 +248,67 @@ export function unsubscribeFromUserActivity(username: string): Promise<void> {
 
 export function deleteMe(body: DeleteAccountRequest): Promise<void> {
   return apiRequest<void>("/users/me", { method: "DELETE", body });
+}
+
+async function listModeratedActors(
+  path: string,
+  params?: ListFollowersParams,
+): Promise<ListModeratedActorsResult> {
+  const response = await apiRequestWithHeaders<ModeratedActor[]>(path, {
+    query: params as
+      Record<string, string | number | boolean | undefined | null> | undefined,
+  });
+  const offsetHeader = response.headers.get("X-List-Offset");
+  const total = response.headers.get("X-Total-Count");
+  return {
+    actors: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
+    total: total ? parseInt(total, 10) : response.body.length,
+  };
+}
+
+/** List actors muted by the current user. */
+export function listMutes(
+  params?: ListFollowersParams,
+): Promise<ListModeratedActorsResult> {
+  return listModeratedActors("/users/me/mutes", params);
+}
+
+/** Mute a local or remote actor (one-way: their activity leaves your feeds). */
+export function muteActor(actorUrl: string): Promise<ModeratedActor> {
+  return apiRequest<ModeratedActor>("/users/me/mutes", {
+    method: "POST",
+    body: { actor_url: actorUrl } satisfies FollowTargetRequest,
+  });
+}
+
+/** Remove a mute recorded by the current user. */
+export function unmuteActor(actorUrl: string): Promise<void> {
+  return apiRequest<void>("/users/me/mutes", {
+    method: "DELETE",
+    body: { actor_url: actorUrl } satisfies FollowTargetRequest,
+  });
+}
+
+/** List actors blocked by the current user. */
+export function listBlocks(
+  params?: ListFollowersParams,
+): Promise<ListModeratedActorsResult> {
+  return listModeratedActors("/users/me/blocks", params);
+}
+
+/** Block a local or remote actor (cuts the relationship both ways). */
+export function blockActor(actorUrl: string): Promise<ModeratedActor> {
+  return apiRequest<ModeratedActor>("/users/me/blocks", {
+    method: "POST",
+    body: { actor_url: actorUrl } satisfies FollowTargetRequest,
+  });
+}
+
+/** Remove a block recorded by the current user. */
+export function unblockActor(actorUrl: string): Promise<void> {
+  return apiRequest<void>("/users/me/blocks", {
+    method: "DELETE",
+    body: { actor_url: actorUrl } satisfies FollowTargetRequest,
+  });
 }

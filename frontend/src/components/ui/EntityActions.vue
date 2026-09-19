@@ -20,11 +20,17 @@ interface Props {
   actions: ActionItem[];
   primaryCount?: number;
   size?: "sm" | "md" | "lg";
+  /**
+   * Always collapse every action into the overflow menu, regardless of
+   * viewport size (Mastodon-style ``···`` dropdown).
+   */
+  menuOnly?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   primaryCount: 2,
   size: "sm",
+  menuOnly: false,
 });
 
 const emit = defineEmits<{ select: [key: string] }>();
@@ -36,11 +42,11 @@ const visibleActions = computed(() =>
 );
 
 const primaryActions = computed(() =>
-  visibleActions.value.slice(0, props.primaryCount),
+  props.menuOnly ? [] : visibleActions.value.slice(0, props.primaryCount),
 );
 
 const menuActions = computed(() =>
-  visibleActions.value.slice(props.primaryCount),
+  visibleActions.value.slice(props.menuOnly ? 0 : props.primaryCount),
 );
 
 const menuOpen = ref(false);
@@ -80,7 +86,10 @@ function onMenuSelect(key: string) {
 </script>
 
 <template>
-  <div class="entity-actions">
+  <div
+    class="entity-actions"
+    :class="{ 'entity-actions--menu-only': props.menuOnly }"
+  >
     <AppButton
       v-for="action in primaryActions"
       :key="action.key"
@@ -95,19 +104,21 @@ function onMenuSelect(key: string) {
       {{ action.label }}
     </AppButton>
 
-    <AppButton
-      v-for="action in menuActions"
-      :key="action.key"
-      :size="props.size"
-      :icon="action.icon"
-      :variant="action.variant"
-      :disabled="action.disabled"
-      :loading="action.loading"
-      class="entity-actions__item entity-actions__item--menu"
-      @click="emit('select', action.key)"
-    >
-      {{ action.label }}
-    </AppButton>
+    <template v-if="!props.menuOnly">
+      <AppButton
+        v-for="action in menuActions"
+        :key="action.key"
+        :size="props.size"
+        :icon="action.icon"
+        :variant="action.variant"
+        :disabled="action.disabled"
+        :loading="action.loading"
+        class="entity-actions__item entity-actions__item--menu"
+        @click="emit('select', action.key)"
+      >
+        {{ action.label }}
+      </AppButton>
+    </template>
 
     <AppButton
       v-if="menuItems.length > 0"
@@ -140,6 +151,10 @@ function onMenuSelect(key: string) {
 
 .entity-actions__more {
   display: none;
+}
+
+.entity-actions--menu-only .entity-actions__more {
+  display: inline-flex;
 }
 
 @media (max-width: 767px) {

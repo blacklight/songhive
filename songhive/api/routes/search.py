@@ -12,6 +12,7 @@ from ...config.schema import SonghiveConfig
 from ...federation.actors import get_federation_storage
 from ...models.user import User
 from ...services import federation as federation_service
+from ...services import moderation as moderation_service
 from ...services import music, remote_content
 from ...services.auth import list_public_users
 from ...services.genres import list_genres
@@ -120,6 +121,8 @@ async def _user_section(
 
     if remote_users and config is not None and config.federation.enabled and config.federation.instance_domain:
         try:
+            # Refresh the policy snapshot so defederated domains are excluded.
+            await moderation_service.load_instance_policies(db)
             fed_storage = await asyncio.to_thread(get_federation_storage, config.database.url)
             remote_matches = await asyncio.to_thread(federation_service.search_remote_actors, fed_storage, term, config)
         except Exception:

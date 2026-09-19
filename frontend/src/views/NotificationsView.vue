@@ -56,6 +56,7 @@ const TYPE_ICONS: Record<string, string> = {
   share: "share-nodes",
   webmention: "link",
   activity: "bell",
+  report: "flag",
 };
 
 const filters = [
@@ -406,6 +407,10 @@ function onActivityCardError(notificationId: string) {
 
 function rawLinkFor(item: NotificationResponse): string | undefined {
   const payload = item.payload ?? {};
+  if (item.type === "report") {
+    // Admin-only notifications — link straight to the reports queue.
+    return "/admin/reports";
+  }
   if (item.type === "follow") {
     // Object-scoped follows (thread subscriptions) link to the followed
     // object; plain actor follows link to the follower's profile.

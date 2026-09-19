@@ -237,6 +237,7 @@ export function listUserActivities(
     mode?: "posts" | "all";
     include_boosts?: boolean;
     include_replies?: boolean;
+    reveal?: boolean;
   },
 ): Promise<ActivityListResponse> {
   return apiRequest<ActivityListResponse>(`/users/${username}/activities`, {

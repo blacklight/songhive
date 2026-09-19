@@ -52,6 +52,7 @@ from ..models.tag import Tag
 from ..models.track import Track
 from ..models.user import User
 from . import federation as federation_service
+from . import moderation as moderation_service
 from .acl import _activity_visibility_filter, can_access, can_manage, get_item_plural
 from .mentions import (
     CONTENT_TYPE_MARKDOWN,
@@ -227,6 +228,7 @@ async def can_view_activity(
     session: AsyncSession,
     user: Optional[User],
     activity: Activity,
+    reveal_actor_url: Optional[str] = None,
 ) -> bool:
     """
     Return whether ``user`` may view ``activity``.
@@ -240,7 +242,12 @@ async def can_view_activity(
     mentions; ``private`` is limited to the owner. Admins get no extra
     reach over other authenticated users — ``mentioned`` and ``private``
     replies stay confined to their audience. Retracted (soft-deleted)
-    activities are never viewable.
+    activities are never viewable. Moderation additionally hides the
+    activity: suspended actors are invisible to everyone, muted/blocked
+    actors and actors who blocked the viewer are hidden for that viewer,
+    defederated-domain content is cut, and followers-only-gated actors
+    only reach the viewers who follow them — unless ``reveal_actor_url``
+    explicitly lifts the gate for that actor's own activities.
     """
     if activity.deleted_at is not None:
         return False
@@ -251,6 +258,10 @@ async def can_view_activity(
         return False
 
     if not await can_access(session, user, activity.entity_type, activity.entity_id):
+        return False
+
+    moderation_ctx = await moderation_service.moderation_context(session, user)
+    if moderation_service.activity_hidden(moderation_ctx, activity, reveal_actor_url):
         return False
 
     if visibility == Visibility.PUBLIC:
@@ -352,6 +363,7 @@ async def list_activities(
     fetch the next page. ``activity_type`` and ``source_type`` filter on
     exact matches. Raises ``HTTPException`` 400 for a malformed ``cursor``.
     """
+    moderation_ctx = await moderation_service.moderation_context(session, user)
     stmt = (
         select(Activity)
         .where(
@@ -359,6 +371,7 @@ async def list_activities(
             Activity.entity_id == str(entity_id),
             Activity.deleted_at.is_(None),
             _activity_visibility_filter(user),
+            moderation_service.moderation_filter(moderation_ctx),
         )
         .order_by(Activity.published_at.desc(), Activity.id.desc())
     )
@@ -369,14 +382,19 @@ async def list_activities(
     return await _fetch_activity_page(session, stmt, cursor, limit)
 
 
-def _accessible_activities_cte(user: Optional[User], tag_name: Optional[str] = None) -> Any:
+def _accessible_activities_cte(
+    user: Optional[User],
+    tag_name: Optional[str] = None,
+    extra_filter: Any = None,
+) -> Any:
     """
     Build a CTE of activity ids on entities visible to ``user``.
 
     Each subquery joins ``Activity`` with the entity it belongs to and applies
     the same list access predicate used elsewhere, so callers only surface
     activities the requester may actually view. When ``tag_name`` is given,
-    only activities that mention the tag are included.
+    only activities that mention the tag are included. ``extra_filter`` — the
+    moderation predicate — is appended to every subquery.
     """
     subqueries = []
     for entity_type, model in _ENTITY_MODELS.items():
@@ -389,6 +407,8 @@ def _accessible_activities_cte(user: Optional[User], tag_name: Optional[str] = N
             _activity_visibility_filter(user),
             pred,
         ]
+        if extra_filter is not None:
+            conditions.append(extra_filter)
         if tag_name is not None:
             subq = subq.join(ActivityTag, ActivityTag.activity_id == Activity.id).join(
                 Tag, ActivityTag.tag_id == Tag.id
@@ -415,7 +435,10 @@ async def list_activities_for_tag(
     except ValueError:
         raise HTTPException(status_code=404, detail="Tag not found") from None
 
-    cte = _accessible_activities_cte(user, tag_name=tag_name)
+    moderation_ctx = await moderation_service.moderation_context(session, user)
+    cte = _accessible_activities_cte(
+        user, tag_name=tag_name, extra_filter=moderation_service.moderation_filter(moderation_ctx)
+    )
     stmt = (
         select(Activity).join(cte, Activity.id == cte.c.id).order_by(Activity.published_at.desc(), Activity.id.desc())
     )
@@ -433,6 +456,7 @@ async def list_user_activities(
     source_type: Optional[str] = None,
     cursor: Optional[str] = None,
     limit: int = 20,
+    reveal_actor_url: Optional[str] = None,
 ) -> Tuple[List[Activity], Optional[str]]:
     """
     List activities by a user, newest first.
@@ -444,17 +468,21 @@ async def list_user_activities(
     activities (hidden by default). ``mode="all"`` returns every visible
     activity they authored or relayed (create, announce, like, reply,
     quote, ...) and ignores the include flags. Visibility is applied
-    through ``_activity_visibility_filter``.
+    through ``_activity_visibility_filter``. ``reveal_actor_url`` lifts
+    the followers-only gate for that actor's own activities (the explicit
+    "show anyway" opt-in on limited profiles).
     """
     if mode not in ("posts", "all"):
         raise HTTPException(status_code=400, detail="Invalid mode")
 
+    moderation_ctx = await moderation_service.moderation_context(session, user)
     stmt = (
         select(Activity)
         .where(
             Activity.owner_user_id == owner_user_id,
             Activity.deleted_at.is_(None),
             _activity_visibility_filter(user),
+            moderation_service.moderation_filter(moderation_ctx, reveal_actor_url),
         )
         .order_by(Activity.published_at.desc(), Activity.id.desc())
     )
@@ -531,7 +559,8 @@ async def list_timeline(
             limit=limit,
         )
 
-    cte = _accessible_activities_cte(user)
+    moderation_ctx = await moderation_service.moderation_context(session, user)
+    cte = _accessible_activities_cte(user, extra_filter=moderation_service.moderation_filter(moderation_ctx))
     stmt = (
         select(Activity).join(cte, Activity.id == cte.c.id).order_by(Activity.published_at.desc(), Activity.id.desc())
     )
@@ -1427,6 +1456,9 @@ async def create_local_activity(
     if activity_type not in ACTIVITY_TYPES:
         raise HTTPException(422, detail=f"Invalid activity_type: {activity_type}")
 
+    # A suspended author cannot produce any activity on the platform.
+    await moderation_service.assert_not_suspended(session, author)
+
     entity = await resolve_entity(session, entity_type, entity_id)
     if entity is None:
         raise HTTPException(404, detail="Entity not found")
@@ -1805,6 +1837,8 @@ async def like_activity(
     if activity.deleted_at is not None:
         raise HTTPException(404, detail="Activity not found")
 
+    await moderation_service.assert_interaction_allowed(session, author, activity)
+
     source_actor = _local_actor_url(author)
     if await _find_live_reaction(session, activity=activity, author=author, activity_type="like") is not None:
         raise HTTPException(400, detail="Already liked")
@@ -1876,6 +1910,8 @@ async def boost_activity(
     """
     if activity.deleted_at is not None:
         raise HTTPException(404, detail="Activity not found")
+
+    await moderation_service.assert_interaction_allowed(session, author, activity)
 
     source_actor = _local_actor_url(author)
     if await _find_live_reaction(session, activity=activity, author=author, activity_type="announce") is not None:
@@ -2130,6 +2166,8 @@ async def reply_to_activity(
 
     if activity.deleted_at is not None:
         raise HTTPException(404, detail="Activity not found")
+
+    await moderation_service.assert_interaction_allowed(session, author, activity)
 
     text = (status_text or "").strip()
     media_ids = list(media_ids or [])
@@ -2391,6 +2429,8 @@ async def quote_activity(
 
     if activity.deleted_at is not None:
         raise HTTPException(404, detail="Activity not found")
+
+    await moderation_service.assert_interaction_allowed(session, author, activity)
 
     text = (status_text or "").strip()
     media_ids = list(media_ids or [])
@@ -3039,6 +3079,15 @@ async def resolve_audience(
     if not Visibility.federates(visibility):
         return set()
 
+    # A suspended author's activities are never delivered; a limited
+    # author's activities only reach the remote actors who follow them.
+    if signer is not None:
+        if await moderation_service.user_is_suspended(session, signer.id):
+            return set()
+        owner_limited = await moderation_service.user_is_limited(session, signer.id)
+    else:
+        owner_limited = False
+
     inboxes: Set[str] = set()
     if visibility in (Visibility.PUBLIC, Visibility.FOLLOWERS) and activity.source_actor.startswith(
         ("http://", "https://")
@@ -3051,7 +3100,7 @@ async def resolve_audience(
             )
         )
 
-    if visibility == Visibility.PUBLIC:
+    if visibility == Visibility.PUBLIC and not owner_limited:
         # Remote actors may follow local objects (thread subscriptions):
         # the activity's own object id and its ancestors' cover the cases
         # where the followed object is updated or a new reply joins the
@@ -3066,7 +3115,12 @@ async def resolve_audience(
         )
 
     actor_urls = await _remote_mention_actor_urls(session, activity, config)
-    if actor_urls:
+    if actor_urls and signer is not None:
+        # A block between the author and a mentioned actor cuts delivery
+        # in either direction.
+        blocked = await moderation_service.blocked_actor_urls(session, signer)
+        actor_urls = [url for url in actor_urls if url not in blocked]
+    if actor_urls and not owner_limited:
         key_id = f"{signer.actor_url}#main-key" if signer and signer.actor_url else None
         private_key_pem = signer.private_key_pem if signer else None
         resolved = await asyncio.gather(
@@ -3130,6 +3184,9 @@ async def fan_out_activity(
         owner = await session.get(User, activity.owner_user_id)
     if owner is None or not owner.private_key_pem:
         return 0
+    # Refresh the instance-policy snapshot so ``is_domain_blocked`` marks
+    # defederated inboxes ``skipped`` below.
+    await moderation_service.load_instance_policies(session)
 
     inboxes = {inbox for inbox in extra_inboxes if inbox}
     inboxes.update(await resolve_audience(session, activity, config, signer=owner))

@@ -16,6 +16,7 @@ from .invite import Invite
 from .library import Library
 from .library_track import LibraryTrack
 from .mention_record import MentionRecord
+from .moderation import AdminUserModeration, InstanceModeration, UserModeration
 from .notification import ActivitySubscription, Notification, NotificationPreference
 from .oauth_client import OAuth2Client
 from .playlist import Playlist, PlaylistTrack
@@ -40,6 +41,7 @@ __all__ = [
     "ActivitySubscription",
     "ActivityTag",
     "ActivityTarget",
+    "AdminUserModeration",
     "Album",
     "ApiToken",
     "Artist",
@@ -63,6 +65,7 @@ __all__ = [
     "TagTrack",
     "init_db",
     "reset_db",
+    "InstanceModeration",
     "Invite",
     "Library",
     "LibraryTrack",
@@ -86,5 +89,6 @@ __all__ = [
     "Upload",
     "User",
     "UserLink",
+    "UserModeration",
     "Visibility",
 ]

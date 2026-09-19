@@ -178,11 +178,9 @@ export function updateReport(
   });
 }
 
-export function createReport(
-  body: ReportCreateRequest,
-): Promise<ReportResponse> {
-  return apiRequest<ReportResponse>("/reports", { method: "POST", body });
-}
+// ``createReport`` lives in ``./reports`` (user-facing, not admin-only);
+// re-exported here so existing imports keep working.
+export { createReport } from "./reports";
 
 export function listInvites(params?: {
   limit?: number;
@@ -287,5 +285,75 @@ export function enrichImages(
 export function purgeNotifications(): Promise<NotificationsPurgeResponse> {
   return apiRequest<NotificationsPurgeResponse>("/admin/notifications/purge", {
     method: "POST",
+  });
+}
+
+export type AdminUserModerationAction = "limit" | "suspend";
+export type AdminInstanceModerationAction = "defederate" | "followers_only";
+
+export type AdminModeratedActor =
+  components["schemas"]["AdminModeratedActorResponse"];
+export type AdminModeratedInstance =
+  components["schemas"]["AdminModeratedInstanceResponse"];
+
+/** List actors under an admin limit/suspend action. */
+export function listModeratedUsers(params?: {
+  action?: AdminUserModerationAction;
+  limit?: number;
+  offset?: number;
+}): Promise<AdminModeratedActor[]> {
+  return apiRequest<AdminModeratedActor[]>("/admin/moderation/users", {
+    query: params,
+  });
+}
+
+/** Limit or suspend a local user or remote actor. */
+export function moderateUser(body: {
+  actor_url: string;
+  action: AdminUserModerationAction;
+  reason?: string | null;
+}): Promise<AdminModeratedActor> {
+  return apiRequest<AdminModeratedActor>("/admin/moderation/users", {
+    method: "POST",
+    body,
+  });
+}
+
+/** Remove an admin limit/suspend on an actor. */
+export function unmoderateUser(actorUrl: string): Promise<void> {
+  return apiRequest<void>("/admin/moderation/users", {
+    method: "DELETE",
+    body: { actor_url: actorUrl },
+  });
+}
+
+/** List domains under an admin moderation policy. */
+export function listModeratedInstances(params?: {
+  action?: AdminInstanceModerationAction;
+  limit?: number;
+  offset?: number;
+}): Promise<AdminModeratedInstance[]> {
+  return apiRequest<AdminModeratedInstance[]>("/admin/moderation/instances", {
+    query: params,
+  });
+}
+
+/** Defederate or followers-only-limit a remote domain. */
+export function moderateInstance(body: {
+  domain: string;
+  action: AdminInstanceModerationAction;
+  reason?: string | null;
+}): Promise<AdminModeratedInstance> {
+  return apiRequest<AdminModeratedInstance>("/admin/moderation/instances", {
+    method: "POST",
+    body,
+  });
+}
+
+/** Remove an admin domain moderation policy. */
+export function unmoderateInstance(domain: string): Promise<void> {
+  return apiRequest<void>("/admin/moderation/instances", {
+    method: "DELETE",
+    body: { domain },
   });
 }

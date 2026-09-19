@@ -75,6 +75,19 @@ RESOURCE_KIND_PLURALS = {
 _PLURAL_TO_RESOURCE_KIND = {v: k for k, v in RESOURCE_KIND_PLURALS.items()}
 
 
+async def _refresh_instance_policies(session: AsyncSession) -> None:
+    """
+    Reload the database instance policies into the sync snapshot.
+
+    The domain guards below run synchronous pubby checks; refreshing the
+    snapshot here keeps them in step with the admin-set defederation and
+    followers-only rows.
+    """
+    from . import moderation as moderation_service
+
+    await moderation_service.load_instance_policies(session)
+
+
 class RemoteTargetKind(str, Enum):
     """Classification of a raw remote lookup input."""
 
@@ -563,6 +576,7 @@ async def lookup_remote_actor(
     ``FetchNotFound`` when the remote confirms the actor is gone, and
     ``HTTPException`` 400/422 for unparsable input or non-actor documents.
     """
+    await _refresh_instance_policies(session)
     target = parse_remote_target(raw, config)
     if target.kind == RemoteTargetKind.LOCAL:
         raise HTTPException(status_code=400, detail="Local actors are served by the local user API")
@@ -626,6 +640,7 @@ async def get_cached_remote_actor(
     Used by the stable deep-link endpoint; ``None`` when the actor was never
     cached or the handle is local/disallowed.
     """
+    await _refresh_instance_policies(session)
     target = parse_remote_target(handle if handle.startswith("@") else f"@{handle}", config)
     if target.kind != RemoteTargetKind.HANDLE or not target.username or not target.domain:
         return None
@@ -733,6 +748,7 @@ async def _cached_remote_object(session: AsyncSession, url: str) -> Optional[Rem
 
 async def get_cached_remote_object(session: AsyncSession, object_id: str) -> Optional[RemoteObject]:
     """Return the ``remote_objects`` row for its local id, or ``None``."""
+    await _refresh_instance_policies(session)
     return await session.get(RemoteObject, object_id)
 
 
@@ -1071,6 +1087,7 @@ async def dereference_remote_object(
     failures and remote-gone objects without a cached copy, and
     ``HTTPException`` 422 for unsupported document shapes.
     """
+    await _refresh_instance_policies(session)
     require_remote_domain(url, config)
     target = parse_remote_target(url, config)
 
@@ -1194,6 +1211,7 @@ async def search_cached_remote_objects(
     content addressed to the instance). Rows on domains that are no longer
     allowed are always filtered out.
     """
+    await _refresh_instance_policies(session)
     like = f"%{term}%"
     stmt = (
         select(RemoteObject)
@@ -1222,13 +1240,16 @@ async def list_cached_actor_activities(
     user: Optional[User],
     limit: int = 20,
     offset: int = 0,
+    reveal: bool = False,
 ) -> tuple[List[Activity], int]:
     """
     List activities materialized for ``actor_url`` — cache only.
 
     Powers the remote profile's activity tab: strictly already-cached
     objects, no outbox crawling. Non-public rows are filtered through
-    ``can_view_activity``.
+    ``can_view_activity``. ``reveal`` lifts the followers-only
+    moderation gate for this actor (the "show anyway" opt-in on
+    limited profiles).
     """
     from .activities import can_view_activity
 
@@ -1244,7 +1265,8 @@ async def list_cached_actor_activities(
         .limit(limit * 4 + offset)
     )
     rows = (await session.execute(stmt)).scalars().all()
-    visible = [row for row in rows if await can_view_activity(session, user, row)]
+    reveal_actor_url = actor_url if reveal else None
+    visible = [row for row in rows if await can_view_activity(session, user, row, reveal_actor_url)]
     return visible[offset : offset + limit], len(visible)
 
 

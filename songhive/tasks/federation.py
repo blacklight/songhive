@@ -44,7 +44,7 @@ def _load_user_actor(username: str) -> Optional[User]:
     return asyncio.run(_load())
 
 
-def _follow_policy_for_target(target_actor_id: str, _: str) -> Optional[FollowPolicy]:
+def _follow_policy_for_target(target_actor_id: str, requester_actor_id: str) -> Optional[FollowPolicy]:
     """
     Resolve an incoming Follow's target to the owner's approval policy.
 
@@ -53,7 +53,12 @@ def _follow_policy_for_target(target_actor_id: str, _: str) -> Optional[FollowPo
     subscriptions) and the instance actor return ``None`` so pubby keeps
     its auto-accept default. ``FollowPolicy`` shares its values with
     ``FollowersApproval``.
+
+    Moderation applies on the requester: a suspended requester is
+    rejected outright, a blocked requester is rejected, and a limited
+    requester always lands as a pending request for manual approval.
     """
+    from ..services import moderation as moderation_service
     from ..services.auth import get_user_by_actor_url
 
     async def _load():
@@ -62,7 +67,59 @@ def _follow_policy_for_target(target_actor_id: str, _: str) -> Optional[FollowPo
                 user = await get_user_by_actor_url(session, target_actor_id)
                 if user is None:
                     return None
+                if await moderation_service.actor_is_suspended(session, requester_actor_id):
+                    return FollowPolicy.REJECT
+                if await moderation_service.actor_blocked_by_local(session, user.id, requester_actor_id):
+                    return FollowPolicy.REJECT
+                if await moderation_service.actor_is_limited(session, requester_actor_id):
+                    return FollowPolicy.MANUAL
                 return FollowPolicy(user.followers_approval)
+        finally:
+            await dispose_and_reset()
+
+    return asyncio.run(_load())
+
+
+def _load_incoming_moderation(actor: str, username: Optional[str]) -> tuple:
+    """
+    Load moderation state for an incoming activity — synchronous wrapper.
+
+    Returns ``(instance_policies, actor_suspended, recipient_suspended)``.
+    Refreshing the policy snapshot here keeps every sync domain check in
+    this task — including the ``InboxProcessor`` allow/block lists — in
+    step with the database moderation rows.
+    """
+    from ..services import moderation as moderation_service
+    from ..services.auth import get_user_by_username
+
+    async def _load():
+        try:
+            async with get_session() as session:
+                policies = await moderation_service.load_instance_policies(session)
+                actor_suspended = await moderation_service.actor_is_suspended(session, actor)
+                recipient_suspended = False
+                if username is not None:
+                    user = await get_user_by_username(session, username)
+                    recipient_suspended = user is not None and await moderation_service.user_is_suspended(
+                        session, user.id
+                    )
+                return policies, actor_suspended, recipient_suspended
+        finally:
+            await dispose_and_reset()
+
+    return asyncio.run(_load())
+
+
+def _refresh_instance_policies(database_url: str) -> dict:
+    """Reload the database instance policies into the sync snapshot."""
+    from ..services import moderation as moderation_service
+
+    init_db(database_url)
+
+    async def _load():
+        try:
+            async with get_session() as session:
+                return await moderation_service.load_instance_policies(session)
         finally:
             await dispose_and_reset()
 
@@ -101,6 +158,19 @@ def process_incoming(
     storage = get_federation_storage(config.database.url)
     domain = config.federation.instance_domain
 
+    init_db(config.database.url)
+    db_policies, actor_suspended, recipient_suspended = _load_incoming_moderation(actor, username)
+    if actor_suspended:
+        logger.info("Dropping incoming %s from suspended actor %s", activity.get("type"), actor)
+        return None
+    if recipient_suspended:
+        logger.info("Dropping incoming %s for suspended user %s", activity.get("type"), username)
+        return None
+
+    # ``_load_incoming_moderation`` disposes the shared engine on exit, so
+    # (re-)init unconditionally before the next session user.
+    init_db(config.database.url)
+
     actor_id: Optional[str]
     private_key_pem: Optional[str]
     if username is None:
@@ -108,7 +178,6 @@ def process_incoming(
         private_key_path = get_or_create_private_key(config.federation.private_key_path)
         private_key_pem = private_key_path.read_text(encoding="utf-8")
     else:
-        init_db(config.database.url)
         user = _load_user_actor(username)
         if user is None:
             logger.warning("Local user %r not found; dropping incoming activity", username)
@@ -128,13 +197,17 @@ def process_incoming(
 
     key_id = f"{actor_id}#main-key"
     private_key = load_private_key(private_key_pem)
+    # Database defederation layers over the configured block list.
+    blocked_instances = list(config.federation.blocked_instances) + [
+        domain for domain, action in db_policies.items() if action == "defederate"
+    ]
     processor = InboxProcessor(
         storage=storage,
         actor_id=actor_id,
         private_key=private_key,
         key_id=key_id,
         allowed_instances=config.federation.allowed_instances,
-        blocked_instances=config.federation.blocked_instances,
+        blocked_instances=blocked_instances,
         # Object-scoped Follows (thread subscriptions) target URLs under
         # the instance domain that share no path prefix with the actor, so
         # the domain is declared explicitly rather than relying on the
@@ -388,6 +461,10 @@ def deliver_activity(
     if not config.federation.enabled or not config.federation.instance_domain:
         logger.debug("Federation disabled or no instance domain; skipping delivery")
         return None
+
+    # Refresh the database instance policies so defederation applies on
+    # top of the configured allow/block lists.
+    _refresh_instance_policies(config.database.url)
 
     inbox_domain = extract_domain(inbox_url)
     if is_domain_blocked(inbox_domain, config):

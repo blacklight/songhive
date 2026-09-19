@@ -168,13 +168,31 @@ onMounted(() => load());
             <dt>{{ t("pages.admin.reports.targetId") }}</dt>
             <dd>{{ selectedReport.target_id }}</dd>
           </div>
+          <div v-if="selectedReport.target_actor_url">
+            <dt>{{ t("pages.admin.reports.actorUrl") }}</dt>
+            <dd>{{ selectedReport.target_actor_url }}</dd>
+          </div>
           <div>
             <dt>{{ t("pages.admin.reports.reason") }}</dt>
             <dd>{{ selectedReport.reason }}</dd>
           </div>
           <div>
             <dt>{{ t("pages.admin.reports.reporter") }}</dt>
-            <dd>{{ selectedReport.reporter_id }}</dd>
+            <dd>
+              {{
+                selectedReport.reporter_username ?? selectedReport.reporter_id
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt>{{ t("pages.admin.reports.forwarded") }}</dt>
+            <dd>
+              {{
+                selectedReport.forwarded
+                  ? t("pages.admin.reports.forwardedYes")
+                  : t("common.no")
+              }}
+            </dd>
           </div>
           <div v-if="selectedReport.description">
             <dt>{{ t("pages.admin.reports.description") }}</dt>

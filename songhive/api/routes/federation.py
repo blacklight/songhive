@@ -22,6 +22,8 @@ from ...federation.activities import (
 from ...federation.actors import get_federation_storage
 from ...federation.serializers import track_to_audio_object
 from ...models import Activity, Track, User, Visibility
+from ...models.moderation import ADMIN_ACTION_SUSPEND, AdminUserModeration
+from ...services import moderation as moderation_service
 from ...services.auth import get_user_by_id, get_user_by_username
 from ...services.federation import ensure_user_actor, extract_domain, is_domain_allowed
 from ...services.storage import StorageService
@@ -88,6 +90,14 @@ def _activity_object_response(activity: Activity) -> JSONResponse:
     return JSONResponse(content=build_activity_object(activity), media_type=ACTIVITY_JSON)
 
 
+async def _get_federating_user(db: AsyncSession, username: str) -> Any:
+    """Return an active, non-suspended user or raise 404."""
+    user = await _get_active_user(db, username)
+    if await moderation_service.user_is_suspended(db, str(user.id)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
 async def _earliest_track_post(db: AsyncSession, track_id: str) -> Optional[Activity]:
     """
     Return the oldest live local ``create`` activity attached to a track.
@@ -105,6 +115,12 @@ async def _earliest_track_post(db: AsyncSession, track_id: str) -> Optional[Acti
             Activity.source_type == "local",
             Activity.deleted_at.is_(None),
             Activity.visibility.in_(_FEDERATING_VISIBILITIES),
+            ~Activity.owner_user_id.in_(
+                select(AdminUserModeration.target_user_id).where(
+                    AdminUserModeration.action == ADMIN_ACTION_SUSPEND,
+                    AdminUserModeration.target_user_id.is_not(None),
+                )
+            ),
         )
         .order_by(Activity.published_at.asc(), Activity.id.asc())
         .limit(1)
@@ -176,7 +192,7 @@ async def get_object(
     activity's own ``/activities/{id}`` page.
     """
     config = _federation_config(request)
-    user = await _get_active_user(db, username)
+    user = await _get_federating_user(db, username)
     ensure_user_actor(user, config)
     result = await db.execute(
         select(Track)
@@ -243,7 +259,7 @@ async def get_object_followers(
     collection follows the object's own dereferenceability.
     """
     config = _federation_config(request)
-    user = await _get_active_user(db, username)
+    user = await _get_federating_user(db, username)
     ensure_user_actor(user, config)
     object_url = f"{user.actor_url}/objects/{object_id}"
     wanted = {object_url}
@@ -299,7 +315,7 @@ async def get_quote_authorization(
     route (``/ap/actor/quote_authorizations/{id}``).
     """
     config = _federation_config(request)
-    user = await _get_active_user(db, username)
+    user = await _get_federating_user(db, username)
     ensure_user_actor(user, config)
     storage = await asyncio.to_thread(get_federation_storage, config.database.url)
     document = await asyncio.to_thread(
@@ -344,7 +360,8 @@ async def get_activity_page(
     owner = None
     if activity is not None and not remote and activity.owner_user_id:
         owner = await get_user_by_id(db, activity.owner_user_id)
-    dereferenceable = remote or (owner is not None and owner.is_active)
+    owner_suspended = owner is not None and await moderation_service.user_is_suspended(db, str(owner.id))
+    dereferenceable = remote or (owner is not None and owner.is_active and not owner_suspended)
     federates = remote or (activity is not None and _visibility_federates(activity.visibility))
 
     if _accepts_activitypub(request):
@@ -400,7 +417,13 @@ async def get_track_page(
     )
     track = result.scalar_one_or_none()
     owner: Any = track.owner if track is not None else None
-    if track is None or track.artist is None or owner is None or not owner.is_active:
+    if (
+        track is None
+        or track.artist is None
+        or owner is None
+        or not owner.is_active
+        or await moderation_service.user_is_suspended(db, str(owner.id))
+    ):
         track = None
         owner = None
     else:
@@ -497,7 +520,7 @@ async def get_outbox(
 ):
     """Return the user's outbox collection."""
     config = _federation_config(request)
-    await _get_active_user(db, username)
+    await _get_federating_user(db, username)
     actor_url = get_actor_url(config.federation.instance_domain, username)
     return JSONResponse(
         content=_ordered_collection(f"{actor_url}/outbox", []),
@@ -513,7 +536,7 @@ async def get_followers(
 ):
     """Return the user's followers collection."""
     config = _federation_config(request)
-    await _get_active_user(db, username)
+    await _get_federating_user(db, username)
     storage = await asyncio.to_thread(get_federation_storage, config.database.url)
     actor_url = get_actor_url(config.federation.instance_domain, username)
     followers = await asyncio.to_thread(storage.get_followers, actor_id=actor_url)
@@ -534,7 +557,7 @@ async def get_following(
 ):
     """Return the user's following collection."""
     config = _federation_config(request)
-    await _get_active_user(db, username)
+    await _get_federating_user(db, username)
     actor_url = get_actor_url(config.federation.instance_domain, username)
     return JSONResponse(
         content=_ordered_collection(f"{actor_url}/following", []),
@@ -645,6 +668,8 @@ async def webfinger(
 
     user = await get_user_by_username(db, name.lower())
     if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if await moderation_service.user_is_suspended(db, str(user.id)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     actor_url = get_actor_url(domain, user.username)

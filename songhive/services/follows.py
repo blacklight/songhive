@@ -41,6 +41,7 @@ from ..federation.actors import get_federation_storage, user_to_actor_document
 from ..models.follow import FOLLOW_STATE_ACCEPTED, FOLLOW_STATE_PENDING, Follow
 from ..models.user import FollowersApproval, User
 from . import federation as federation_service
+from . import moderation as moderation_service
 from . import remote_content
 from .auth import get_user_by_username
 from .remote_content import RemoteActorResult
@@ -247,8 +248,15 @@ async def _follow_local(
     config: SonghiveConfig,
     user: User,
     target: User,
+    *,
+    force_manual: bool = False,
 ) -> Follow:
-    """Record a local-to-local follow honoring the target's approval policy."""
+    """Record a local-to-local follow honoring the target's approval policy.
+
+    ``force_manual`` — set when the follower is admin-limited — degrades
+    an ``accept`` policy to ``manual`` so the follow lands as a pending
+    approval request.
+    """
     policy = target.followers_approval
     if policy == FollowersApproval.REJECT.value:
         raise FollowError(status_code=403, detail="This user is not accepting followers")
@@ -260,7 +268,7 @@ async def _follow_local(
     actor_data = await _local_actor_data(user, config)
     inbox_url = get_inbox_url(config.federation.instance_domain or "", user.username)
 
-    if policy == FollowersApproval.MANUAL.value:
+    if force_manual or policy == FollowersApproval.MANUAL.value:
         state = FOLLOW_STATE_PENDING
         await asyncio.to_thread(
             storage.store_follow_request,
@@ -371,13 +379,32 @@ async def follow_user(
     """
     if not config.federation.enabled or not config.federation.instance_domain:
         raise FollowError(status_code=400, detail="Federation is not enabled")
+    await moderation_service.assert_not_suspended(session, user)
     federation_service.ensure_user_actor(user, config)
     if not user.actor_url or not user.private_key_pem:
         raise FollowError(status_code=400, detail="User has no federation actor credentials")
 
+    # Refresh the instance-policy snapshot so remote target resolution
+    # honors database defederation.
+    await moderation_service.load_instance_policies(session)
+
     target = await _resolve_target(session, config, raw_target)
     if target.actor_url == user.actor_url:
         raise FollowError(status_code=400, detail="Cannot follow yourself")
+
+    target_user_id = str(target.local_user.id) if target.local_user is not None else None
+    if target_user_id is not None:
+        if await moderation_service.user_is_suspended(session, target_user_id):
+            raise FollowError(status_code=403, detail="This account is suspended")
+    elif await moderation_service.actor_is_suspended(session, target.actor_url):
+        raise FollowError(status_code=403, detail="This account is suspended")
+    if await moderation_service.block_exists_between(
+        session,
+        user,
+        target_actor_url=target.actor_url,
+        target_user_id=target_user_id,
+    ):
+        raise FollowError(status_code=403, detail="Cannot follow this actor")
 
     existing = await get_follow(session, user.id, target.actor_url)
     if existing is not None:
@@ -385,7 +412,13 @@ async def follow_user(
 
     if target.is_local:
         assert target.local_user is not None
-        return await _follow_local(session, config, user, target.local_user)
+        return await _follow_local(
+            session,
+            config,
+            user,
+            target.local_user,
+            force_manual=await moderation_service.user_is_limited(session, user.id),
+        )
     assert target.remote_actor is not None
     return await _follow_remote(session, config, user, target.remote_actor)
 

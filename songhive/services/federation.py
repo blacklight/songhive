@@ -52,6 +52,28 @@ def extract_domain(url_or_actor: str) -> str:
     return _pubby_extract_domain(url_or_actor)
 
 
+# Database-backed instance moderation policies (``{normalized_domain:
+# action}``), layered on top of the configured allow/block lists. The
+# snapshot lives here so synchronous callers — the Celery delivery path,
+# pubby inbox-resolution adapters — can apply it without an async
+# session. ``services.moderation.load_instance_policies`` refreshes it;
+# ``set_db_instance_policies`` installs it directly.
+_db_instance_policies: dict[str, str] = {}
+
+
+def set_db_instance_policies(policies: dict[str, str]) -> None:
+    """Install the database-backed per-domain moderation policies."""
+    global _db_instance_policies
+    _db_instance_policies = {normalize_instance_domain(d): a for d, a in policies.items()}
+
+
+def db_domain_policy(domain: str) -> Optional[str]:
+    """Return the database-backed moderation action for ``domain``, if any."""
+    if not domain:
+        return None
+    return _db_instance_policies.get(normalize_instance_domain(domain))
+
+
 def is_domain_blocked(domain: str, config: SonghiveConfig) -> bool:
     """
     Return True when ``domain`` is blocked or not in the allow-list.
@@ -60,9 +82,12 @@ def is_domain_blocked(domain: str, config: SonghiveConfig) -> bool:
     - Blocked domains take precedence over allowed domains.
     - Comparisons are case-insensitive and ignore URL schemes/paths.
 
-    Delegates to ``pubby.moderation.is_domain_blocked`` with the configured
-    allow/block lists.
+    A database ``defederate`` policy counts as a block on top of the
+    configured lists. Delegates to ``pubby.moderation.is_domain_blocked``
+    with the configured allow/block lists otherwise.
     """
+    if db_domain_policy(domain) == "defederate":
+        return True
     return _pubby_is_domain_blocked(
         domain,
         allowed=config.federation.allowed_instances,
@@ -428,6 +453,8 @@ def resolve_actor_inbox(
     invoke it through ``asyncio.to_thread``.
     """
     if not actor_url.startswith(("http://", "https://")):
+        return None
+    if db_domain_policy(extract_domain(actor_url)) == "defederate":
         return None
     storage = create_activitypub_storage(config.database.url)
     return _pubby_resolve_actor_inbox(

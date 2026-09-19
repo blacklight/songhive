@@ -24,6 +24,7 @@ class AuditTargetType(str, Enum):
     """
 
     ACTIVITY = "activity"
+    ACTOR = "actor"
     ALBUM = "album"
     API_TOKEN = "api_token"
     ARTIST = "artist"
@@ -34,6 +35,7 @@ class AuditTargetType(str, Enum):
     FILE = "file"
     GENRE = "genre"
     IMAGES = "images"
+    INSTANCE = "instance"
     INVITE = "invite"
     LIBRARY = "library"
     OAUTH_CLIENT = "oauth_client"

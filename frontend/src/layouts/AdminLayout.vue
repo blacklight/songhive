@@ -18,6 +18,7 @@ const adminNav = [
   { name: "Users", to: "/admin/users", icon: "users" },
   { name: "Settings", to: "/admin/settings", icon: "gear" },
   { name: "Reports", to: "/admin/reports", icon: "flag" },
+  { name: "Moderation", to: "/admin/moderation", icon: "shield" },
   { name: "Invites", to: "/admin/invites", icon: "user-plus" },
   { name: "Audit", to: "/admin/audit", icon: "clipboard-list" },
   { name: "Tasks", to: "/admin/tasks", icon: "list-check" },

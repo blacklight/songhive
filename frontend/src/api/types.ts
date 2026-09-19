@@ -465,6 +465,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/users/me/mutes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List My Mutes
+     * @description List actors muted by the current user, newest first.
+     */
+    get: operations["list_my_mutes_api_v1_users_me_mutes_get"];
+    put?: never;
+    /**
+     * Mute Actor
+     * @description Mute a local or remote actor.
+     *
+     *     The muted actor's activities stop appearing in the current user's
+     *     feeds; the relationship is one-way — the muted actor still receives
+     *     the muter's activities.
+     */
+    post: operations["mute_actor_api_v1_users_me_mutes_post"];
+    /**
+     * Unmute Actor
+     * @description Remove a mute previously recorded by the current user.
+     */
+    delete: operations["unmute_actor_api_v1_users_me_mutes_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/me/blocks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List My Blocks
+     * @description List actors blocked by the current user, newest first.
+     */
+    get: operations["list_my_blocks_api_v1_users_me_blocks_get"];
+    put?: never;
+    /**
+     * Block Actor
+     * @description Block a local or remote actor.
+     *
+     *     A block cuts the relationship both ways: the target can no longer
+     *     see, reach, or interact with the blocker, and any existing follow
+     *     relationship between the two is severed.
+     */
+    post: operations["block_actor_api_v1_users_me_blocks_post"];
+    /**
+     * Unblock Actor
+     * @description Remove a block previously recorded by the current user.
+     */
+    delete: operations["unblock_actor_api_v1_users_me_blocks_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/me/password": {
     parameters: {
       query?: never;
@@ -3023,6 +3087,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/audit/target-types": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Audit Target Types
+     * @description List the canonical audit log target types (admin only).
+     */
+    get: operations["list_audit_target_types_api_v1_admin_audit_target_types_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/invites": {
     parameters: {
       query?: never;
@@ -3370,6 +3454,73 @@ export interface paths {
      */
     post: operations["purge_notifications_api_v1_admin_notifications_purge_post"];
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/moderation/users": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Moderated Users
+     * @description List actors under an admin limit/suspend action (admin only).
+     */
+    get: operations["list_moderated_users_api_v1_admin_moderation_users_get"];
+    put?: never;
+    /**
+     * Moderate User
+     * @description Limit or suspend a local user or remote actor (admin only).
+     *
+     *     ``limit`` forces the actor's follows of local users through approval
+     *     and restricts their fan-out to their followers. ``suspend`` severs
+     *     every local follow relationship, blocks all interaction, and hides
+     *     the actor's content. Applying an action to an already-moderated
+     *     actor updates it (e.g. limit upgrading to suspend).
+     */
+    post: operations["moderate_user_api_v1_admin_moderation_users_post"];
+    /**
+     * Unmoderate User
+     * @description Remove an admin limit/suspend on an actor (admin only).
+     */
+    delete: operations["unmoderate_user_api_v1_admin_moderation_users_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/moderation/instances": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Moderated Instances
+     * @description List domains under an admin moderation policy (admin only).
+     */
+    get: operations["list_moderated_instances_api_v1_admin_moderation_instances_get"];
+    put?: never;
+    /**
+     * Moderate Instance
+     * @description Defederate or followers-only-limit a remote domain (admin only).
+     *
+     *     ``defederate`` cuts all federation to and from the domain and hides
+     *     its actors; ``followers_only`` restricts the domain's activities to
+     *     the local users who follow them. These policies layer over the
+     *     configured instance allow/block lists.
+     */
+    post: operations["moderate_instance_api_v1_admin_moderation_instances_post"];
+    /**
+     * Unmoderate Instance
+     * @description Remove an admin domain moderation policy (admin only).
+     */
+    delete: operations["unmoderate_instance_api_v1_admin_moderation_instances_delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -4086,6 +4237,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/instance/domain_blocks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Instance Domain Blocks
+     * @description Return the domains moderated by this instance.
+     *
+     *     Mastodon-compatible shape: ``defederate`` policies are reported as
+     *     ``suspend`` severities and ``followers_only`` as ``silence``.
+     */
+    get: operations["get_instance_domain_blocks_api_v1_instance_domain_blocks_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/instance": {
     parameters: {
       query?: never;
@@ -4662,6 +4836,26 @@ export interface components {
       allow_duplicates: boolean;
     };
     /**
+     * AdminInstanceModerationRemoveRequest
+     * @description Request body removing an admin domain policy.
+     */
+    AdminInstanceModerationRemoveRequest: {
+      /** Domain */
+      domain: string;
+    };
+    /**
+     * AdminInstanceModerationRequest
+     * @description Request body for an admin domain policy.
+     */
+    AdminInstanceModerationRequest: {
+      /** Domain */
+      domain: string;
+      /** Action */
+      action: string;
+      /** Reason */
+      reason?: string | null;
+    };
+    /**
      * AdminInviteCreateRequest
      * @description Request body for creating an invite code.
      */
@@ -4693,6 +4887,52 @@ export interface components {
        * Format: date-time
        */
       created_at: string;
+    };
+    /**
+     * AdminModeratedActorResponse
+     * @description An actor under an admin limit/suspend action.
+     */
+    AdminModeratedActorResponse: {
+      /** Actor Url */
+      actor_url: string;
+      /** Handle */
+      handle?: string | null;
+      /** Display Name */
+      display_name?: string | null;
+      /** Avatar Url */
+      avatar_url?: string | null;
+      /** Local Username */
+      local_username?: string | null;
+      /** Action */
+      action: string;
+      /** Reason */
+      reason?: string | null;
+      /** Created By */
+      created_by?: string | null;
+      /**
+       * Moderated At
+       * Format: date-time
+       */
+      moderated_at: string;
+    };
+    /**
+     * AdminModeratedInstanceResponse
+     * @description A domain under an admin moderation policy.
+     */
+    AdminModeratedInstanceResponse: {
+      /** Domain */
+      domain: string;
+      /** Action */
+      action: string;
+      /** Reason */
+      reason?: string | null;
+      /** Created By */
+      created_by?: string | null;
+      /**
+       * Moderated At
+       * Format: date-time
+       */
+      moderated_at: string;
     };
     /**
      * AdminOAuthClientCreateRequest
@@ -4784,6 +5024,26 @@ export interface components {
       task_id?: string | null;
       /** Status */
       status: string;
+    };
+    /**
+     * AdminUserModerationRemoveRequest
+     * @description Request body removing an admin user-moderation action.
+     */
+    AdminUserModerationRemoveRequest: {
+      /** Actor Url */
+      actor_url: string;
+    };
+    /**
+     * AdminUserModerationRequest
+     * @description Request body for an admin limit/suspend on an actor.
+     */
+    AdminUserModerationRequest: {
+      /** Actor Url */
+      actor_url: string;
+      /** Action */
+      action: string;
+      /** Reason */
+      reason?: string | null;
     };
     /**
      * AdminUserResponse
@@ -5168,6 +5428,38 @@ export interface components {
        */
       created_at: string;
     };
+    /**
+     * AuditTargetType
+     * @description Canonical audit log target types.
+     *
+     *     This is the single source of truth for ``AuditLog.target_type`` values:
+     *     ``services.audit.log_action`` only accepts members of this enum, and the
+     *     admin API exposes them so the frontend filter dropdown stays in sync.
+     * @enum {string}
+     */
+    AuditTargetType:
+      | "activity"
+      | "album"
+      | "api_token"
+      | "artist"
+      | "celery"
+      | "external_library"
+      | "external_track"
+      | "federation"
+      | "file"
+      | "genre"
+      | "images"
+      | "invite"
+      | "library"
+      | "oauth_client"
+      | "playlist"
+      | "report"
+      | "setting"
+      | "storage"
+      | "tag"
+      | "track"
+      | "user"
+      | "user_session";
     /** Body_bulk_upload_files_api_v1_files_upload_bulk_post */
     Body_bulk_upload_files_api_v1_files_upload_bulk_post: {
       /** Files */
@@ -5484,6 +5776,21 @@ export interface components {
       deleted: number;
     };
     /**
+     * DomainBlock
+     * @description A moderated domain advertised for federation transparency.
+     */
+    DomainBlock: {
+      /** Domain */
+      domain: string;
+      /** Severity */
+      severity: string;
+      /**
+       * Comment
+       * @default
+       */
+      comment: string;
+    };
+    /**
      * EnrichImagesRequest
      * @description Request body for bulk image enrichment triggers.
      */
@@ -5675,7 +5982,6 @@ export interface components {
       config: {
         [key: string]: unknown;
       };
-      /** Visibility */
       visibility?: components["schemas"]["Visibility"] | null;
       /** Enabled */
       enabled: boolean;
@@ -5737,7 +6043,6 @@ export interface components {
       sync_interval_seconds?: number | null;
       /** Include In Library Index */
       include_in_library_index?: boolean | null;
-      /** Visibility */
       visibility?: components["schemas"]["Visibility"] | null;
     };
     /**
@@ -6283,6 +6588,27 @@ export interface components {
      */
     MentionSource: "local" | "activitypub" | "webmention";
     /**
+     * ModeratedActorResponse
+     * @description An actor muted or blocked by the current user.
+     */
+    ModeratedActorResponse: {
+      /** Actor Url */
+      actor_url: string;
+      /** Handle */
+      handle?: string | null;
+      /** Display Name */
+      display_name?: string | null;
+      /** Avatar Url */
+      avatar_url?: string | null;
+      /** Local Username */
+      local_username?: string | null;
+      /**
+       * Moderated At
+       * Format: date-time
+       */
+      moderated_at: string;
+    };
+    /**
      * NotificationIdsDeleteRequest
      * @description Payload for bulk deletion.
      */
@@ -6362,7 +6688,8 @@ export interface components {
       | "mention"
       | "share"
       | "webmention"
-      | "activity";
+      | "activity"
+      | "report";
     /**
      * NotificationsPurgeResponse
      * @description Result of a notification purge run.
@@ -6598,6 +6925,26 @@ export interface components {
        * @default false
        */
       activity_subscribed: boolean;
+      /**
+       * Muted
+       * @default false
+       */
+      muted: boolean;
+      /**
+       * Blocked
+       * @default false
+       */
+      blocked: boolean;
+      /**
+       * Limited
+       * @default false
+       */
+      limited: boolean;
+      /**
+       * Suspended
+       * @default false
+       */
+      suspended: boolean;
     };
     /**
      * QuoteActivityListResponse
@@ -6758,6 +7105,26 @@ export interface components {
        * @default false
        */
       activity_subscribed: boolean;
+      /**
+       * Muted
+       * @default false
+       */
+      muted: boolean;
+      /**
+       * Blocked
+       * @default false
+       */
+      blocked: boolean;
+      /**
+       * Limited
+       * @default false
+       */
+      limited: boolean;
+      /**
+       * Suspended
+       * @default false
+       */
+      suspended: boolean;
     };
     /**
      * RemoteLookupResponse
@@ -6893,6 +7260,11 @@ export interface components {
       reason: string;
       /** Description */
       description?: string | null;
+      /**
+       * Forward
+       * @default false
+       */
+      forward: boolean;
     };
     /**
      * ReportResponse
@@ -6903,14 +7275,20 @@ export interface components {
       id: string;
       /** Reporter Id */
       reporter_id: string;
+      /** Reporter Username */
+      reporter_username?: string | null;
       /** Target Type */
       target_type: string;
       /** Target Id */
       target_id: string;
+      /** Target Actor Url */
+      target_actor_url: string | null;
       /** Reason */
       reason: string;
       /** Description */
       description: string | null;
+      /** Forwarded */
+      forwarded: boolean;
       /** Status */
       status: string;
       /** Reviewed By */
@@ -8816,6 +9194,198 @@ export interface operations {
       };
     };
   };
+  list_my_mutes_api_v1_users_me_mutes_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModeratedActorResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mute_actor_api_v1_users_me_mutes_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FollowTargetRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModeratedActorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unmute_actor_api_v1_users_me_mutes_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FollowTargetRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_my_blocks_api_v1_users_me_blocks_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModeratedActorResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  block_actor_api_v1_users_me_blocks_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FollowTargetRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModeratedActorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unblock_actor_api_v1_users_me_blocks_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FollowTargetRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   change_my_password_api_v1_users_me_password_post: {
     parameters: {
       query?: never;
@@ -8975,6 +9545,8 @@ export interface operations {
         include_replies?: boolean;
         /** @description Filter by source type */
         source_type?: string | null;
+        /** @description Reveal this actor's followers-only-gated activities */
+        reveal?: boolean;
         cursor?: string | null;
         limit?: number;
       };
@@ -12561,6 +13133,8 @@ export interface operations {
       query?: {
         limit?: number;
         offset?: number;
+        /** @description Reveal this actor's followers-only-gated activities */
+        reveal?: boolean;
       };
       header?: never;
       path: {
@@ -13787,6 +14361,26 @@ export interface operations {
       };
     };
   };
+  list_audit_target_types_api_v1_admin_audit_target_types_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuditTargetType"][];
+        };
+      };
+    };
+  };
   list_invites_api_v1_admin_invites_get: {
     parameters: {
       query?: {
@@ -14368,6 +14962,202 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["NotificationsPurgeResponse"];
+        };
+      };
+    };
+  };
+  list_moderated_users_api_v1_admin_moderation_users_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by action (limit or suspend) */
+        action?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminModeratedActorResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  moderate_user_api_v1_admin_moderation_users_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminUserModerationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminModeratedActorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unmoderate_user_api_v1_admin_moderation_users_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminUserModerationRemoveRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_moderated_instances_api_v1_admin_moderation_instances_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by action (defederate or followers_only) */
+        action?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminModeratedInstanceResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  moderate_instance_api_v1_admin_moderation_instances_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminInstanceModerationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminModeratedInstanceResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unmoderate_instance_api_v1_admin_moderation_instances_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminInstanceModerationRemoveRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -15662,6 +16452,26 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  get_instance_domain_blocks_api_v1_instance_domain_blocks_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DomainBlock"][];
         };
       };
     };

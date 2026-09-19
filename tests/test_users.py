@@ -666,6 +666,10 @@ def test_get_user_profile_endpoint_returns_links(client, profile_user):
         "follows_count",
         "follow_state",
         "activity_subscribed",
+        "muted",
+        "blocked",
+        "limited",
+        "suspended",
     }
     assert set(data.keys()) == expected_fields
 

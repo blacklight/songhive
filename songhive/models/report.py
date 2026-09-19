@@ -7,7 +7,7 @@ Allows authenticated users to flag content for admin review.
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -24,9 +24,15 @@ class Report(Base):
         nullable=False,
     )
     target_type: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
-    target_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    target_id: Mapped[str] = mapped_column(String(512), index=True, nullable=False)
+    # Canonical actor URL for actor ("user") reports — local or remote —
+    # so admins can moderate the reported account directly.
+    target_actor_url: Mapped[Optional[str]] = mapped_column(String(512), index=True, nullable=True)
     reason: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Whether the report was forwarded to the reported actor's home
+    # instance as an ActivityPub ``Flag`` (remote targets only).
+    forwarded: Mapped[bool] = mapped_column(Boolean, default=False, insert_default=False, nullable=False)
     status: Mapped[str] = mapped_column(
         String(16),
         index=True,

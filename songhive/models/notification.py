@@ -47,6 +47,7 @@ class NotificationType(str, Enum):
     SHARE = "share"
     WEBMENTION = "webmention"
     ACTIVITY = "activity"
+    REPORT = "report"
 
 
 NOTIFICATION_TYPES = tuple(t.value for t in NotificationType)

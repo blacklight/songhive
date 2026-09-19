@@ -10,14 +10,24 @@ from kombu.exceptions import OperationalError as KombuOperationalError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...models.audit_log import AuditTargetType
+from ...models.moderation import (
+    ADMIN_ACTION_SUSPEND,
+    VALID_ADMIN_USER_ACTIONS,
+    VALID_INSTANCE_ACTIONS,
+)
 from ...models.user import User, UserRole
-from ...services import audit, auth, deletion, music
+from ...services import audit, auth, deletion
+from ...services import federation as federation_service
+from ...services import moderation as moderation_service
+from ...services import music
 from ...services import notifications as notifications_service
+from ...services import remote_content
 from ...services import settings as settings_service
 from ...services import stats as stats_service
 from ...services.admin_tasks import resolve_image_enrichment_targets
@@ -1285,3 +1295,349 @@ async def purge_notifications(
     await db.commit()
 
     return NotificationsPurgeResponse(deleted=deleted)
+
+
+# ---------------------------------------------------------------------------
+# Moderation (admin)
+# ---------------------------------------------------------------------------
+
+
+class AdminUserModerationRequest(BaseModel):
+    """Request body for an admin limit/suspend on an actor."""
+
+    # A local username, ``@user@domain`` handle, or actor/profile URL.
+    actor_url: str = Field(..., min_length=1, max_length=1024)
+    action: str
+    reason: Optional[str] = Field(None, max_length=2048)
+
+    @field_validator("action")
+    @classmethod
+    def _validate_action(cls, value: str) -> str:
+        if value not in VALID_ADMIN_USER_ACTIONS:
+            raise ValueError(f"action must be one of: {', '.join(VALID_ADMIN_USER_ACTIONS)}")
+        return value
+
+
+class AdminUserModerationRemoveRequest(BaseModel):
+    """Request body removing an admin user-moderation action."""
+
+    actor_url: str = Field(..., min_length=1, max_length=1024)
+
+
+class AdminModeratedActorResponse(BaseModel):
+    """An actor under an admin limit/suspend action."""
+
+    actor_url: str
+    handle: Optional[str] = None
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    # Set when the moderated actor is a user on this instance.
+    local_username: Optional[str] = None
+    action: str
+    reason: Optional[str] = None
+    created_by: Optional[str] = None
+    moderated_at: datetime
+
+
+def _admin_actor_response(row, local_users: dict) -> AdminModeratedActorResponse:
+    """Map an ``AdminUserModeration`` row to its API representation."""
+    actor_data = row.actor_data or {}
+    local = local_users.get(row.target_user_id) if row.target_user_id else None
+    username = actor_data.get("preferredUsername")
+    domain = federation_service.extract_domain(row.target_actor_url)
+    return AdminModeratedActorResponse(
+        actor_url=row.target_actor_url,
+        handle=(f"{username}@{domain}" if username and domain else None)
+        or remote_content.actor_handle_from_url(row.target_actor_url),
+        display_name=(local.display_name if local else None)
+        or (actor_data.get("name") if isinstance(actor_data.get("name"), str) else None),
+        avatar_url=(local.avatar_url if local else None)
+        or (
+            (actor_data.get("icon") or {}).get("url")
+            if isinstance(actor_data.get("icon"), dict)
+            else actor_data.get("icon") if isinstance(actor_data.get("icon"), str) else None
+        ),
+        local_username=local.username if local else None,
+        action=row.action,
+        reason=row.reason,
+        created_by=str(row.created_by) if row.created_by else None,
+        moderated_at=row.created_at,
+    )
+
+
+async def _admin_actor_responses(db: AsyncSession, rows: list) -> List[AdminModeratedActorResponse]:
+    """Serialize admin moderation rows, bulk-loading their local target users."""
+    ids = [row.target_user_id for row in rows if row.target_user_id]
+    local_users = {}
+    if ids:
+        result = await db.execute(select(User).where(User.id.in_(ids)))
+        local_users = {user.id: user for user in result.scalars()}
+    return [_admin_actor_response(row, local_users) for row in rows]
+
+
+@router.get(
+    "/moderation/users",
+    response_model=List[AdminModeratedActorResponse],
+    dependencies=[Depends(require_admin)],
+)
+async def list_moderated_users(
+    response: Response,
+    action: Optional[str] = Query(None, description="Filter by action (limit or suspend)"),
+    pagination: Pagination = Depends(get_pagination),
+    db: AsyncSession = Depends(get_db),
+):
+    """List actors under an admin limit/suspend action (admin only)."""
+    if action is not None and action not in VALID_ADMIN_USER_ACTIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"action must be one of: {', '.join(VALID_ADMIN_USER_ACTIONS)}",
+        )
+    rows = await moderation_service.list_admin_user_moderations(db, action)
+    pagination.set_total(response, len(rows))
+    page = rows[pagination.offset : pagination.offset + pagination.limit]
+    return await _admin_actor_responses(db, page)
+
+
+@router.post(
+    "/moderation/users",
+    response_model=AdminModeratedActorResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def moderate_user(
+    body: AdminUserModerationRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+    admin: User = Depends(require_admin),
+):
+    """
+    Limit or suspend a local user or remote actor (admin only).
+
+    ``limit`` forces the actor's follows of local users through approval
+    and restricts their fan-out to their followers. ``suspend`` severs
+    every local follow relationship, blocks all interaction, and hides
+    the actor's content. Applying an action to an already-moderated
+    actor updates it (e.g. limit upgrading to suspend).
+    """
+    canonical, local_user, actor_data = await moderation_service.resolve_moderation_target(db, config, body.actor_url)
+    if local_user is not None and local_user.id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot moderate yourself",
+        )
+    row = await moderation_service.set_admin_user_moderation(
+        db,
+        target_actor_url=canonical,
+        target_user_id=str(local_user.id) if local_user is not None else None,
+        action=body.action,
+        reason=body.reason,
+        actor_data=actor_data,
+        admin=admin,
+    )
+    severed = 0
+    if body.action == ADMIN_ACTION_SUSPEND:
+        severed = await moderation_service.sever_relationships(
+            db,
+            config,
+            actor_url=canonical,
+            user_id=str(local_user.id) if local_user is not None else None,
+        )
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action=f"moderation.user_{body.action}",
+        target_type=AuditTargetType.ACTOR,
+        target_id=canonical,
+        details={
+            "reason": body.reason,
+            "local_user_id": str(local_user.id) if local_user is not None else None,
+            "relationships_severed": severed,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+    rows = await _admin_actor_responses(db, [row])
+    return rows[0]
+
+
+@router.delete(
+    "/moderation/users",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def unmoderate_user(
+    body: AdminUserModerationRemoveRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+    admin: User = Depends(require_admin),
+):
+    """Remove an admin limit/suspend on an actor (admin only)."""
+    canonical, _, _ = await moderation_service.resolve_moderation_target(db, config, body.actor_url)
+    row = await moderation_service.clear_admin_user_moderation(db, canonical)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Actor is not moderated",
+        )
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="moderation.user_clear",
+        target_type=AuditTargetType.ACTOR,
+        target_id=canonical,
+        details={"previous_action": row.action},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class AdminInstanceModerationRequest(BaseModel):
+    """Request body for an admin domain policy."""
+
+    domain: str = Field(..., min_length=1, max_length=255)
+    action: str
+    reason: Optional[str] = Field(None, max_length=2048)
+
+    @field_validator("action")
+    @classmethod
+    def _validate_action(cls, value: str) -> str:
+        if value not in VALID_INSTANCE_ACTIONS:
+            raise ValueError(f"action must be one of: {', '.join(VALID_INSTANCE_ACTIONS)}")
+        return value
+
+
+class AdminInstanceModerationRemoveRequest(BaseModel):
+    """Request body removing an admin domain policy."""
+
+    domain: str = Field(..., min_length=1, max_length=255)
+
+
+class AdminModeratedInstanceResponse(BaseModel):
+    """A domain under an admin moderation policy."""
+
+    domain: str
+    action: str
+    reason: Optional[str] = None
+    created_by: Optional[str] = None
+    moderated_at: datetime
+
+
+def _admin_instance_response(row) -> AdminModeratedInstanceResponse:
+    """Map an ``InstanceModeration`` row to its API representation."""
+    return AdminModeratedInstanceResponse(
+        domain=row.domain,
+        action=row.action,
+        reason=row.reason,
+        created_by=str(row.created_by) if row.created_by else None,
+        moderated_at=row.created_at,
+    )
+
+
+@router.get(
+    "/moderation/instances",
+    response_model=List[AdminModeratedInstanceResponse],
+    dependencies=[Depends(require_admin)],
+)
+async def list_moderated_instances(
+    response: Response,
+    action: Optional[str] = Query(None, description="Filter by action (defederate or followers_only)"),
+    pagination: Pagination = Depends(get_pagination),
+    db: AsyncSession = Depends(get_db),
+):
+    """List domains under an admin moderation policy (admin only)."""
+    if action is not None and action not in VALID_INSTANCE_ACTIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"action must be one of: {', '.join(VALID_INSTANCE_ACTIONS)}",
+        )
+    rows = await moderation_service.list_instance_moderations(db, action)
+    pagination.set_total(response, len(rows))
+    page = rows[pagination.offset : pagination.offset + pagination.limit]
+    return [_admin_instance_response(row) for row in page]
+
+
+@router.post(
+    "/moderation/instances",
+    response_model=AdminModeratedInstanceResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def moderate_instance(
+    body: AdminInstanceModerationRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+    admin: User = Depends(require_admin),
+):
+    """
+    Defederate or followers-only-limit a remote domain (admin only).
+
+    ``defederate`` cuts all federation to and from the domain and hides
+    its actors; ``followers_only`` restricts the domain's activities to
+    the local users who follow them. These policies layer over the
+    configured instance allow/block lists.
+    """
+    normalized = federation_service.normalize_instance_domain(body.domain)
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid domain",
+        )
+    if normalized == federation_service.normalize_instance_domain(config.federation.instance_domain or ""):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot moderate the local instance domain",
+        )
+    row = await moderation_service.set_instance_moderation(
+        db,
+        domain=normalized,
+        action=body.action,
+        reason=body.reason,
+        admin=admin,
+    )
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action=f"moderation.instance_{body.action}",
+        target_type=AuditTargetType.INSTANCE,
+        target_id=row.domain,
+        details={"reason": body.reason},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+    return _admin_instance_response(row)
+
+
+@router.delete(
+    "/moderation/instances",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def unmoderate_instance(
+    body: AdminInstanceModerationRemoveRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Remove an admin domain moderation policy (admin only)."""
+    normalized = federation_service.normalize_instance_domain(body.domain)
+    removed = await moderation_service.clear_instance_moderation(db, normalized)
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Domain is not moderated",
+        )
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="moderation.instance_clear",
+        target_type=AuditTargetType.INSTANCE,
+        target_id=normalized,
+        details={},
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -21,10 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...federation.fetch import FetchError, FetchNotFound
+from ...models.moderation import USER_MODERATION_BLOCK, USER_MODERATION_MUTE
 from ...models.user import User
 from ...services import acl
 from ...services import activities as activity_service
 from ...services import follows as follows_service
+from ...services import moderation as moderation_service
 from ...services import notifications as notifications_service
 from ...services import remote_content
 from ..deps import get_config, get_current_user, get_current_user_optional, get_db
@@ -64,6 +66,12 @@ class RemoteActorResponse(BaseModel):
     # Whether the caller subscribed to this actor's activity notifications
     # (the profile bell).
     activity_subscribed: bool = False
+    # Viewer-relative user moderation state.
+    muted: bool = False
+    blocked: bool = False
+    # Instance-level admin moderation state on this actor.
+    limited: bool = False
+    suspended: bool = False
 
 
 class RemoteObjectResponse(BaseModel):
@@ -120,7 +128,9 @@ def _actor_response(
     actor: remote_content.RemoteActorResult,
     follow_state: Optional[str] = None,
     activity_subscribed: bool = False,
+    moderation: Optional[dict] = None,
 ) -> RemoteActorResponse:
+    flags = moderation or {}
     return RemoteActorResponse(
         handle=actor.handle,
         username=actor.username,
@@ -136,6 +146,10 @@ def _actor_response(
         url=f"/@{actor.handle}",
         follow_state=follow_state,
         activity_subscribed=activity_subscribed,
+        muted=flags.get("muted", False),
+        blocked=flags.get("blocked", False),
+        limited=flags.get("limited", False),
+        suspended=flags.get("suspended", False),
     )
 
 
@@ -155,6 +169,21 @@ async def _viewer_activity_subscribed(db: AsyncSession, user: Optional[User], ac
     if local_id is not None:
         return await notifications_service.is_subscribed_to_user_activity(db, str(user.id), str(local_id))
     return await notifications_service.is_subscribed_to_actor_activity(db, str(user.id), actor_url)
+
+
+async def _actor_moderation_flags(db: AsyncSession, user: Optional[User], actor_url: str) -> dict:
+    """Return the viewer-relative and admin moderation flags for ``actor_url``."""
+    flags = {"muted": False, "blocked": False, "limited": False, "suspended": False}
+    row = await moderation_service.get_admin_user_moderation(db, actor_url)
+    if row is not None:
+        flags["limited"] = row.action == moderation_service.ADMIN_ACTION_LIMIT
+        flags["suspended"] = row.action == moderation_service.ADMIN_ACTION_SUSPEND
+    if user is not None:
+        kinds = await moderation_service.user_moderation_map(db, user.id, [actor_url])
+        kset = kinds.get(actor_url) or set()
+        flags["muted"] = USER_MODERATION_MUTE in kset
+        flags["blocked"] = USER_MODERATION_BLOCK in kset
+    return flags
 
 
 def _object_response(row) -> RemoteObjectResponse:
@@ -234,10 +263,11 @@ async def remote_lookup(
         else:
             follow_state = await _viewer_follow_state(db, user, actor.actor_url)
             activity_subscribed = await _viewer_activity_subscribed(db, user, actor.actor_url)
+            moderation = await _actor_moderation_flags(db, user, actor.actor_url)
             return RemoteLookupResponse(
                 kind="actor",
                 url=f"/@{actor.handle}",
-                actor=_actor_response(actor, follow_state, activity_subscribed),
+                actor=_actor_response(actor, follow_state, activity_subscribed, moderation),
             )
 
     if target.kind in (
@@ -301,7 +331,8 @@ async def get_remote_actor(
         raise _fetch_error(exc) from exc
     follow_state = await _viewer_follow_state(db, user, actor.actor_url)
     activity_subscribed = await _viewer_activity_subscribed(db, user, actor.actor_url)
-    return _actor_response(actor, follow_state, activity_subscribed)
+    moderation = await _actor_moderation_flags(db, user, actor.actor_url)
+    return _actor_response(actor, follow_state, activity_subscribed, moderation)
 
 
 @router.post(
@@ -389,6 +420,7 @@ async def list_remote_actor_activities(
     handle: str,
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
+    reveal: bool = Query(False, description="Reveal this actor's followers-only-gated activities"),
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user_optional),
     config: SonghiveConfig = Depends(get_config),
@@ -405,7 +437,7 @@ async def list_remote_actor_activities(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Remote actor not cached")
 
     activities, total = await remote_content.list_cached_actor_activities(
-        db, actor.actor_url, user=user, limit=limit, offset=offset
+        db, actor.actor_url, user=user, limit=limit, offset=offset, reveal=reveal
     )
     profiles = await activity_service.resolve_source_actor_profiles(db, activities, config)
     summaries = await activity_service.resolve_interaction_summaries(db, activities, user, config)

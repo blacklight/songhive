@@ -340,6 +340,13 @@ async def _materialize_remote_object(
     if existing is not None:
         return existing
 
+    if target.owner_user_id is not None:
+        # A block from the target's local owner cuts the interaction.
+        from ..services import moderation as moderation_service
+
+        if await moderation_service.actor_blocked_by_local(session, str(target.owner_user_id), actor):
+            return None
+
     public = is_public(obj)
     mentions = await _remote_mentions(session, obj)
     if not public and not any(m["user_id"] for m in mentions):
@@ -573,6 +580,13 @@ async def materialize_remote_announce(
             target = result.activity
     if target is None or target.deleted_at is not None:
         return None
+
+    if target.owner_user_id is not None:
+        # A block from the boosted activity's local owner cuts the boost.
+        from ..services import moderation as moderation_service
+
+        if await moderation_service.actor_blocked_by_local(session, str(target.owner_user_id), actor):
+            return None
 
     if config is not None:
         # The boosting actor is normally cached already by the inbox's
@@ -884,6 +898,18 @@ async def sync_remote_activity(
     are ignored — likes stay interaction-only.
     """
     activity_type = activity.get("type")
+    actor = activity.get("actor")
+    if isinstance(actor, str) and activity_type not in ("Delete", "Undo"):
+        # Moderation gates inbound materialization: defederated domains
+        # and suspended actors are cut (their retractions still apply).
+        from ..services import moderation as moderation_service
+
+        await moderation_service.load_instance_policies(session)
+        if federation_service.db_domain_policy(federation_service.extract_domain(actor)) == "defederate":
+            return
+        if await moderation_service.actor_is_suspended(session, actor):
+            return
+
     if activity_type == "Create":
         obj = activity.get("object")
         actor = activity.get("actor")

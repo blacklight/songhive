@@ -17,13 +17,16 @@ from ...config.schema import SonghiveConfig
 from ...federation.actors import get_federation_storage, sync_user_actor
 from ...models.audit_log import AuditTargetType
 from ...models.follow import FOLLOW_STATE_ACCEPTED, Follow
+from ...models.moderation import USER_MODERATION_BLOCK, USER_MODERATION_MUTE
 from ...models.user import FollowersApproval, ProfileVisibility, User, UserRole
 from ...models.user_link import UserLink
 from ...services import activities as activity_service
 from ...services import audit
 from ...services import federation as federation_service
 from ...services import follows as follows_service
+from ...services import moderation as moderation_service
 from ...services import notifications as notifications_service
+from ...services import remote_content
 from ...services.auth import get_user_by_username, list_public_users
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
@@ -114,6 +117,14 @@ class PublicUserResponse(BaseModel):
     # for this user (the profile bell); always ``false`` for anonymous
     # viewers and for the user themself.
     activity_subscribed: bool = False
+    # Viewer-relative user moderation state; always ``false`` for
+    # anonymous viewers and for the user themself.
+    muted: bool = False
+    blocked: bool = False
+    # Instance-level admin moderation state on this account, reported to
+    # authenticated viewers.
+    limited: bool = False
+    suspended: bool = False
 
 
 class FollowerResponse(BaseModel):
@@ -153,6 +164,18 @@ class FollowTargetRequest(BaseModel):
 
     # A local username, ``@user@domain`` handle, or actor/profile URL.
     actor_url: str = Field(..., min_length=1, max_length=1024)
+
+
+class ModeratedActorResponse(BaseModel):
+    """An actor muted or blocked by the current user."""
+
+    actor_url: str
+    handle: Optional[str] = None
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    # Set when the moderated actor is a user on this instance.
+    local_username: Optional[str] = None
+    moderated_at: datetime
 
 
 class ActivitySubscriptionState(BaseModel):
@@ -210,6 +233,52 @@ async def _following_responses(db: AsyncSession, rows: list) -> List[FollowingRe
         result = await db.execute(select(User).where(User.id.in_(ids)))
         local_users = {user.id: user for user in result.scalars()}
     return [_following_response(row, local_users) for row in rows]
+
+
+def _moderated_actor_response(row, local_users: dict) -> ModeratedActorResponse:
+    """Map a ``UserModeration`` row to its API representation."""
+    actor_data = row.actor_data or {}
+    local = local_users.get(row.target_user_id) if row.target_user_id else None
+    username = actor_data.get("preferredUsername")
+    domain = federation_service.extract_domain(row.target_actor_url)
+    return ModeratedActorResponse(
+        actor_url=row.target_actor_url,
+        handle=(f"{username}@{domain}" if username and domain else None)
+        or remote_content.actor_handle_from_url(row.target_actor_url),
+        display_name=(local.display_name if local else None) or activity_service._actor_doc_display_name(actor_data),
+        avatar_url=(local.avatar_url if local else None) or activity_service._actor_doc_avatar_url(actor_data),
+        local_username=local.username if local else None,
+        moderated_at=row.created_at,
+    )
+
+
+async def _moderated_actor_responses(db: AsyncSession, rows: list) -> List[ModeratedActorResponse]:
+    """Serialize moderation rows, bulk-loading their local target users."""
+    ids = [row.target_user_id for row in rows if row.target_user_id]
+    local_users = {}
+    if ids:
+        result = await db.execute(select(User).where(User.id.in_(ids)))
+        local_users = {user.id: user for user in result.scalars()}
+    return [_moderated_actor_response(row, local_users) for row in rows]
+
+
+async def _resolve_moderation_target(
+    db: AsyncSession,
+    config: SonghiveConfig,
+    user: User,
+    actor_url: str,
+) -> tuple[str, Optional[User], Optional[dict]]:
+    """Resolve an actor identifier for moderation, rejecting self-targets."""
+    canonical, local_user, actor_data = await moderation_service.resolve_moderation_target(db, config, actor_url)
+    own_urls = {f"urn:songhive:user:{user.username}"}
+    if user.actor_url:
+        own_urls.add(user.actor_url)
+    if canonical in own_urls or (local_user is not None and local_user.id == user.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot moderate yourself",
+        )
+    return canonical, local_user, actor_data
 
 
 async def _load_followers(user: User, config: SonghiveConfig) -> list:
@@ -521,6 +590,147 @@ async def unfollow_actor(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get("/me/mutes", response_model=List[ModeratedActorResponse])
+async def list_my_mutes(
+    response: Response,
+    pagination: Pagination = Depends(get_pagination),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List actors muted by the current user, newest first."""
+    rows = await moderation_service.list_user_moderations(db, current_user.id, USER_MODERATION_MUTE)
+    pagination.set_total(response, len(rows))
+    page = rows[pagination.offset : pagination.offset + pagination.limit]
+    return await _moderated_actor_responses(db, page)
+
+
+@router.post(
+    "/me/mutes",
+    response_model=ModeratedActorResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def mute_actor(
+    body: FollowTargetRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """
+    Mute a local or remote actor.
+
+    The muted actor's activities stop appearing in the current user's
+    feeds; the relationship is one-way — the muted actor still receives
+    the muter's activities.
+    """
+    canonical, local_user, actor_data = await _resolve_moderation_target(db, config, current_user, body.actor_url)
+    row = await moderation_service.set_user_moderation(
+        db,
+        current_user,
+        target_actor_url=canonical,
+        target_user_id=str(local_user.id) if local_user is not None else None,
+        kind=USER_MODERATION_MUTE,
+        actor_data=actor_data,
+    )
+    await db.commit()
+    rows = await _moderated_actor_responses(db, [row])
+    return rows[0]
+
+
+@router.delete(
+    "/me/mutes",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def unmute_actor(
+    body: FollowTargetRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Remove a mute previously recorded by the current user."""
+    canonical, _, _ = await _resolve_moderation_target(db, config, current_user, body.actor_url)
+    removed = await moderation_service.clear_user_moderation(db, current_user.id, canonical, USER_MODERATION_MUTE)
+    if not removed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Actor is not muted")
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/me/blocks", response_model=List[ModeratedActorResponse])
+async def list_my_blocks(
+    response: Response,
+    pagination: Pagination = Depends(get_pagination),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List actors blocked by the current user, newest first."""
+    rows = await moderation_service.list_user_moderations(db, current_user.id, USER_MODERATION_BLOCK)
+    pagination.set_total(response, len(rows))
+    page = rows[pagination.offset : pagination.offset + pagination.limit]
+    return await _moderated_actor_responses(db, page)
+
+
+@router.post(
+    "/me/blocks",
+    response_model=ModeratedActorResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def block_actor(
+    body: FollowTargetRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """
+    Block a local or remote actor.
+
+    A block cuts the relationship both ways: the target can no longer
+    see, reach, or interact with the blocker, and any existing follow
+    relationship between the two is severed.
+    """
+    canonical, local_user, actor_data = await _resolve_moderation_target(db, config, current_user, body.actor_url)
+    row = await moderation_service.set_user_moderation(
+        db,
+        current_user,
+        target_actor_url=canonical,
+        target_user_id=str(local_user.id) if local_user is not None else None,
+        kind=USER_MODERATION_BLOCK,
+        actor_data=actor_data,
+    )
+    await moderation_service.sever_block_relationship(
+        db,
+        config,
+        current_user,
+        target_actor_url=canonical,
+        target_user_id=str(local_user.id) if local_user is not None else None,
+    )
+    await db.commit()
+    rows = await _moderated_actor_responses(db, [row])
+    return rows[0]
+
+
+@router.delete(
+    "/me/blocks",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def unblock_actor(
+    body: FollowTargetRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Remove a block previously recorded by the current user."""
+    canonical, _, _ = await _resolve_moderation_target(db, config, current_user, body.actor_url)
+    removed = await moderation_service.clear_user_moderation(db, current_user.id, canonical, USER_MODERATION_BLOCK)
+    if not removed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Actor is not blocked")
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post(
     "/me/password",
     response_model=ChangePasswordResponse,
@@ -733,6 +943,7 @@ async def list_user_activities_route(
     include_boosts: bool = Query(True, description="Include boosts in posts mode"),
     include_replies: bool = Query(False, description="Include replies in posts mode"),
     source_type: Optional[str] = Query(None, description="Filter by source type"),
+    reveal: bool = Query(False, description="Reveal this actor's followers-only-gated activities"),
     cursor: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=100),
     user: Optional[User] = Depends(get_current_user_optional),
@@ -756,6 +967,7 @@ async def list_user_activities_route(
         source_type=source_type,
         cursor=cursor,
         limit=limit,
+        reveal_actor_url=moderation_service.local_actor_url(target) if reveal else None,
     )
     profile_map = await activity_service.resolve_source_actor_profiles(db, activities, config)
     summary_map = await activity_service.resolve_interaction_summaries(db, activities, user, config)
@@ -839,6 +1051,13 @@ async def get_user(
     result = PublicUserResponse.model_validate(user)
     counts = await _followers_count_map(config)
     result.follows_count = await follows_service.count_user_follows(db, user.id, states=(FOLLOW_STATE_ACCEPTED,))
+    actor_urls = {f"urn:songhive:user:{user.username}"}
+    if user.actor_url:
+        actor_urls.add(user.actor_url)
+    admin_rows = await moderation_service.admin_user_moderation_map(db, actor_urls)
+    for row in admin_rows.values():
+        result.limited = result.limited or row.action == moderation_service.ADMIN_ACTION_LIMIT
+        result.suspended = result.suspended or row.action == moderation_service.ADMIN_ACTION_SUSPEND
     if viewer is not None and viewer.id != user.id:
         result.activity_subscribed = await notifications_service.is_subscribed_to_user_activity(
             db, str(viewer.id), str(user.id)
@@ -846,6 +1065,10 @@ async def get_user(
         if user.actor_url:
             states = await follows_service.follow_states_for(db, viewer.id, [user.actor_url])
             result.follow_state = states.get(user.actor_url)
+        viewer_kinds = await moderation_service.user_moderation_map(db, viewer.id, actor_urls)
+        kinds = {kind for kind_set in viewer_kinds.values() for kind in kind_set}
+        result.muted = USER_MODERATION_MUTE in kinds
+        result.blocked = USER_MODERATION_BLOCK in kinds
     return _with_followers_count(result, counts, user.actor_url)
 
 

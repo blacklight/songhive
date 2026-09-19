@@ -2,10 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.2.0
+## Unreleased
 
 ### Added
 
+- `moderation`: Mastodon-style moderation for actors and instances.
+  Users can mute (one-way hide) and block (reciprocal hide, no
+  interaction, no delivery, severs follows) local and remote actors from
+  profile pages, and manage both lists under `/settings?tab=moderation`.
+  Admins can limit (follows require approval, activity only reaches
+  existing followers — with a "limited by the moderators" notice and
+  explicit "show anyway" reveal on the profile) and suspend (no
+  interaction or delivery, all local follows severed, all content
+  hidden) actors, and defederate or
+  restrict instances to followers-only delivery — all with optional
+  reasons, audited via `moderation.<verb>` `AuditLog` entries, and
+  manageable from `/admin/moderation`. Database instance policies layer
+  over the configured `federation.allowed_instances`/`blocked_instances`
+  lists and are published on the Mastodon-compatible
+  `GET /api/v1/instance/domain_blocks` endpoint (`defederate`→`suspend`,
+  `followers_only`→`silence`). New endpoints: `users/me/mutes|blocks`,
+  `admin/moderation/users`, `admin/moderation/instances`; profile
+  payloads expose `muted`/`blocked`/`limited`/`suspended` flags and the
+  UI shows matching badges. See `docs/001-moderation/`.
+- `reports`: Mastodon-style user reporting. Profile pages (local and
+  remote) offer a "Report" action that files a report against the
+  account — by username, `@user@domain` handle or actor URL — with a
+  reason and optional comment, stored with the reported account's
+  canonical actor URL. For remote actors, an optional "forward" tickbox
+  delivers an ActivityPub `Flag` activity to the reported account's home
+  instance. Every active admin receives an in-app `report` notification
+  (new notification type, link straight to the reports queue) and the
+  `/admin/reports` review UI now shows the reporter's username, the
+  canonical actor URL and whether the report was forwarded.
+- `server`: Fixed single-flight request handling under Tornado — the
+  `WSGIContainer` bridging FastAPI via `a2wsgi` now runs on an explicit
+  `ThreadPoolExecutor` instead of the Tornado event-loop thread. The
+  previous setup serialized all API requests and deadlocked outbound
+  signed federation fetches: a remote instance resolving our `keyId`
+  (e.g. during actor lookup) could never be served its fetch-back while
+  the loop was busy inside the triggering request, so lookups of remote
+  actors/objects on instances that hadn't cached our key timed out
+  unconditionally — and stalled every other request meanwhile.
+
+## 0.2.0
+
+### Added
 - `federation`: Explicit remote content discovery — look up remote actors
   (`@user@domain`), activities and resources by handle or URL from the
   search page. Lookups are dereferenced through a new SSRF-guarded fetcher

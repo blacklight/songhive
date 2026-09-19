@@ -538,6 +538,11 @@ async def resolve_inbox_recipients(
             if str(user.id) not in seen:
                 seen.add(str(user.id))
                 recipients.append(user)
+
+    # Suspended local users receive no inbound activity.
+    from ..services import moderation as moderation_service
+
+    recipients = [user for user in recipients if not await moderation_service.user_is_suspended(session, user.id)]
     return recipients
 
 

@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import type { components } from "./types";
 import type { ActivityResponse } from "./activities";
 import type { ActivitySubscriptionState } from "./users";
 
@@ -6,25 +7,7 @@ import type { ActivitySubscriptionState } from "./users";
 // ``songhive/api/routes/remote.py``. Regenerate ``api/types.ts`` with
 // ``npm run api:gen`` to pick up the generated counterparts.
 
-export interface RemoteActor {
-  handle: string;
-  username: string;
-  domain: string;
-  actor_url: string;
-  display_name?: string | null;
-  summary?: string | null;
-  avatar_url?: string | null;
-  header_url?: string | null;
-  profile_url?: string | null;
-  fetched_at?: string | null;
-  unavailable: boolean;
-  /** Internal SPA route (``/@user@domain``). */
-  url: string;
-  /** Viewer-relative follow state (``pending``/``accepted``), when authenticated. */
-  follow_state?: string | null;
-  /** Whether the viewer subscribed to this actor's activity notifications (the profile bell). */
-  activity_subscribed?: boolean;
-}
+export type RemoteActor = components["schemas"]["RemoteActorResponse"];
 
 export type RemoteResourceKind =
   "track" | "album" | "artist" | "playlist" | "library";
@@ -97,11 +80,17 @@ export function getRemoteActor(
 /** List already-cached activities for a remote actor — no remote fetch. */
 export function getRemoteActorActivities(
   handle: string,
-  options?: { limit?: number; offset?: number },
+  options?: { limit?: number; offset?: number; reveal?: boolean },
 ): Promise<RemoteActorActivities> {
   return apiRequest<RemoteActorActivities>(
     `/remote/actors/${encodeURIComponent(handle)}/activities`,
-    { query: { limit: options?.limit, offset: options?.offset } },
+    {
+      query: {
+        limit: options?.limit,
+        offset: options?.offset,
+        reveal: options?.reveal || undefined,
+      },
+    },
   );
 }
 

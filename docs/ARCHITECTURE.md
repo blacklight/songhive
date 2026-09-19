@@ -1788,14 +1788,91 @@ resources — without crawling remote timelines or indexing the fediverse.
 ## Content Moderation
 
 - `Report` model stores user-submitted content flags (target type/id, reason,
-  description, status, reviewer).
-- Public submission: `POST /api/v1/reports`.
-- Admin review: `GET/PATCH /api/v1/admin/reports`.
+  description, status, reviewer). Actor reports (`target_type` `user`/`actor`)
+  accept a username, `@user@domain` handle or actor URL, are normalized to
+  `target_type="user"`, and store the reported account's canonical actor URL in
+  `target_actor_url` (`target_id` holds the local user id or the remote actor
+  URL; legacy callers may still pass a bare user id). The `forwarded` flag
+  records whether the report was relayed to a remote instance.
+- Public submission: `POST /api/v1/reports`. `forward: true` on a remote actor
+  report enqueues an ActivityPub `Flag` activity to the reported actor's inbox
+  via `tasks.federation.deliver_activity` (requires the reporter's federation
+  keys; otherwise the report is stored with `forwarded=false`).
+- Every report notifies all active admins (except the reporter) through a
+  `report` notification carrying `report_id`/`target_type`/`target_actor_url`/
+  `reason`; the frontend links it to `/admin/reports`.
+- Admin review: `GET/PUT /api/v1/admin/reports`. Responses include
+  `reporter_username`, `target_actor_url` and `forwarded`.
 - `AuditLog` records administrative and security-relevant actions (actor, target
   type/id, IP address, JSON details). `target_type` values are defined by the
   `AuditTargetType` enum (`models/audit_log.py`) — `log_action` only accepts
   enum members, and `GET /api/v1/admin/audit/target-types` exposes them to the
   admin UI's target-type filter.
+
+### Actor and instance moderation
+
+Mastodon-style moderation lives in three tables (`models/moderation.py`) and
+one service (`services/moderation.py`):
+
+- `UserModeration` — per-user `mute`/`block` on any actor (local or remote),
+  keyed on the canonical actor URL (`user.actor_url`, or the
+  `urn:songhive:user:<name>` fallback when federation is disabled). A mute is
+  one-way: the target's activities leave the muter's feeds but the muter's
+  activities still reach the target. A block is reciprocal: it hides both
+  directions, prevents interaction both ways, and severs every follow
+  relationship between the pair (`sever_block_relationship` removes the
+  `follows` rows and the pubby follower/request records).
+- `AdminUserModeration` — instance-wide `limit`/`suspend` on an actor with an
+  optional `reason`, unique per actor URL (applying a new action upgrades the
+  existing row). `limit` forces the actor's follows of local users through
+  manual approval (`follow_user` passes `force_manual`) and gates their
+  activities to their own followers — on timelines and on their profile
+  page, which shows a "limited by the moderators" notice and a "show
+  anyway" button that re-fetches the timeline with `reveal=1` (the
+  `reveal` query param lifts only the followers-only gate for that actor;
+  hidden/defederated content stays excluded). `suspend` additionally blocks all
+  interaction (`assert_interaction_allowed`), drops inbound activities
+  (`tasks/federation.process_incoming`), removes the actor from notification
+  fan-out, severs every local follow relationship (`sever_relationships`),
+  and hides all of the actor's content.
+- `InstanceModeration` — per-domain `defederate`/`followers_only` policies
+  with an optional `reason`, layered over the configured
+  `federation.allowed_instances`/`blocked_instances` lists. Because the
+  synchronous federation paths (Celery delivery, pubby inbox resolution,
+  remote-actor search) cannot query the database, `load_instance_policies`
+  installs a process-local snapshot (`federation.set_db_instance_policies`)
+  that `is_domain_blocked`/`db_domain_policy` consult — a `defederate` row
+  behaves exactly like a configured block, while `followers_only` gates the
+  domain's activities to local users who follow the author.
+
+Visibility is enforced through `moderation_context` (one small set of queries
+per request) + `moderation_filter`/`activity_hidden`, applied to activity
+lists, single-activity views, timelines, search results, and remote-actor
+lookups. Interaction endpoints run `assert_not_suspended`/
+`assert_interaction_allowed`; notification fan-out checks
+`notification_suppressed`, which also drops filterable notifications
+(everything but `report`) from limited actors and followers-only-domain
+actors when the recipient does not follow them — Mastodon's
+`for_limited_accounts: drop` policy. Federated dereference endpoints return 404 for
+suspended owners, and defederated domains are dropped inbound (inbox
+processing, remote materialization) and outbound (delivery domain checks,
+audience resolution).
+
+API surface:
+
+- `GET/POST/DELETE /api/v1/users/me/mutes` and `.../blocks` — personal
+  moderation lists (`ModeratedActorResponse` carries a display snapshot).
+- `GET/POST/DELETE /api/v1/admin/moderation/users` — admin limit/suspend.
+- `GET/POST/DELETE /api/v1/admin/moderation/instances` — admin domain policies.
+- `GET /api/v1/instance/domain_blocks` — Mastodon-compatible transparency
+  endpoint mapping `defederate`→`suspend` and `followers_only`→`silence`.
+- `GET /api/v1/users/{username}` and `/api/v1/remote/actors/{handle}` report
+  `muted`/`blocked` (viewer-relative) and `limited`/`suspended` (instance)
+  flags; profile pages show the badges plus mute/block actions for signed-in
+  viewers and limit/suspend/clear actions for admins.
+- `/settings?tab=moderation` lists the viewer's mutes/blocks with undo;
+  `/admin/moderation` manages all admin actions with optional reasons.
+- All admin mutations record `moderation.<verb>` `AuditLog` entries.
 
 ---
 
@@ -1905,7 +1982,8 @@ user profiles).
 `NotificationPreference` (unique per `(user_id, type)` with `in_app`,
 `email`, and `email_digest` toggles). The notification types are
 `follow`, `like`, `boost`, `quote`, `reply`, `mention`, `share`,
-`webmention`, and `activity`. `ActivitySubscription` rows
+`webmention`, `activity`, and `report` (admin-only: a user report was
+filed — links to `/admin/reports`). `ActivitySubscription` rows
 record that a local user wants an `activity` notification for every
 activity another actor authors — the "bell" toggle on a user profile.
 Local users are referenced through `target_user_id`, remote actors through

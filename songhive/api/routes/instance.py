@@ -463,3 +463,32 @@ async def get_instance_peers(config: SonghiveConfig = Depends(get_config)):
     if not config.federation.enabled:
         return []
     return list(config.federation.allowed_instances)
+
+
+class DomainBlock(BaseModel):
+    """A moderated domain advertised for federation transparency."""
+
+    domain: str
+    severity: str
+    comment: str = ""
+
+
+@v1_router.get("/domain_blocks", response_model=List[DomainBlock])
+async def get_instance_domain_blocks(db: AsyncSession = Depends(get_db)):
+    """
+    Return the domains moderated by this instance.
+
+    Mastodon-compatible shape: ``defederate`` policies are reported as
+    ``suspend`` severities and ``followers_only`` as ``silence``.
+    """
+    from ...services import moderation as moderation_service
+
+    rows = await moderation_service.list_instance_moderations(db)
+    return [
+        DomainBlock(
+            domain=row.domain,
+            severity=("suspend" if row.action == moderation_service.INSTANCE_ACTION_DEFEDERATE else "silence"),
+            comment=row.reason or "",
+        )
+        for row in rows
+    ]

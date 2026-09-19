@@ -3,21 +3,30 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, RouterView, RouterLink } from "vue-router";
 import {
+  blockActor,
   followActor,
   getPublic,
+  muteActor,
   subscribeToUserActivity,
+  unblockActor,
   unfollowActor,
+  unmuteActor,
   unsubscribeFromUserActivity,
-  type PublicUserResponse,
+  type PublicUserWithModeration,
 } from "@/api/users";
+import { moderateUser, unmoderateUser } from "@/api/admin";
+import { createReport, REPORT_REASONS, type ReportReason } from "@/api/reports";
 import { getApiErrorMessage } from "@/api/client";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
+import EntityActions from "@/components/ui/EntityActions.vue";
 import FeedButton from "@/components/ui/FeedButton.vue";
 import { userFeedUrls } from "@/utils/feeds";
 import { useFeedLinks } from "@/composables/useFeedLinks";
+import { useConfirm } from "@/composables/useConfirm";
 import AppModal from "@/components/feedback/AppModal.vue";
+import AppSelect from "@/components/ui/AppSelect.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import RichText from "@/components/RichText.vue";
 import StatusComposer from "@/components/statuses/StatusComposer.vue";
@@ -53,7 +62,7 @@ const feedUrls = computed(() =>
   isRemoteHandle.value ? undefined : userFeedUrls(username.value),
 );
 useFeedLinks(feedUrls);
-const profile = computed<PublicUserResponse | null>(() => data.value);
+const profile = computed<PublicUserWithModeration | null>(() => data.value);
 
 // The compose button only makes sense on one's own profile — statuses are
 // recorded on the author's ``user`` entity and listed in the posts tab.
@@ -106,11 +115,21 @@ const TABS = [
   },
 ] as const;
 
-const data = ref<PublicUserResponse | null>(null);
+const data = ref<PublicUserWithModeration | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const followBusy = ref(false);
 const activityBusy = ref(false);
+// Limited profiles hide the timeline behind an explicit "show anyway"
+// opt-in for everyone except the owner and accepted followers.
+const revealLimited = ref(false);
+const limitedTimelineGated = computed(
+  () =>
+    !!profile.value?.limited &&
+    !isOwnProfile.value &&
+    profile.value?.follow_state !== "accepted" &&
+    !revealLimited.value,
+);
 
 // The follow button and the activity bell only appear to logged-in
 // visitors on someone else's local profile — the viewer-relative
@@ -173,6 +192,221 @@ async function toggleActivitySubscription() {
   }
 }
 
+// Moderation: mute/block are viewer actions, limit/suspend are admin
+// actions. ``data.value.muted`` etc. are viewer-relative flags reported
+// by the profile endpoint.
+const moderationBusy = ref(false);
+const reasonModalOpen = ref(false);
+const pendingAdminAction = ref<"limit" | "suspend" | null>(null);
+const moderationReason = ref("");
+
+// Mastodon-style report flow: reason + optional comment goes to the
+// local moderators; remote profiles also offer forwarding.
+const reportModalOpen = ref(false);
+const reportReason = ref<ReportReason>("spam");
+const reportComment = ref("");
+const reportBusy = ref(false);
+const reportReasonOptions = computed(() =>
+  REPORT_REASONS.map((value) => ({
+    value,
+    label: t(`moderation.reportReasons.${value}`),
+  })),
+);
+
+const { confirm } = useConfirm();
+
+const showModerationActions = computed(
+  () => showProfileActions.value || (authStore.isAdmin && !isOwnProfile.value),
+);
+
+const moderationActions = computed(() => [
+  {
+    key: "mute",
+    label: data.value?.muted ? t("moderation.unmute") : t("moderation.mute"),
+    icon: "volume-xmark",
+    variant: "secondary" as const,
+    visible: showProfileActions.value,
+  },
+  {
+    key: "block",
+    label: data.value?.blocked
+      ? t("moderation.unblock")
+      : t("moderation.block"),
+    icon: "ban",
+    variant: "danger" as const,
+    visible: showProfileActions.value,
+  },
+  {
+    key: "report",
+    label: t("moderation.report"),
+    icon: "flag",
+    variant: "secondary" as const,
+    visible: showProfileActions.value,
+  },
+  {
+    key: "limit",
+    label: t("moderation.limit"),
+    icon: "arrow-down-wide-short",
+    variant: "secondary" as const,
+    visible:
+      authStore.isAdmin &&
+      !isOwnProfile.value &&
+      !data.value?.limited &&
+      !data.value?.suspended,
+  },
+  {
+    key: "suspend",
+    label: t("moderation.suspend"),
+    icon: "gavel",
+    variant: "danger" as const,
+    visible: authStore.isAdmin && !isOwnProfile.value && !data.value?.suspended,
+  },
+  {
+    key: "clear",
+    label: t("moderation.clear"),
+    icon: "rotate-left",
+    variant: "secondary" as const,
+    visible:
+      authStore.isAdmin &&
+      !isOwnProfile.value &&
+      !!(data.value?.limited || data.value?.suspended),
+  },
+]);
+
+async function applyAdminModeration(
+  action: "limit" | "suspend",
+  reason: string,
+) {
+  if (!data.value) return;
+  const row = await moderateUser({
+    actor_url: username.value,
+    action,
+    reason: reason || null,
+  });
+  data.value.limited = row.action === "limit";
+  data.value.suspended = row.action === "suspend";
+}
+
+async function onModerationAction(key: string) {
+  if (!data.value || moderationBusy.value) return;
+  if (key === "limit" || key === "suspend") {
+    pendingAdminAction.value = key;
+    moderationReason.value = "";
+    reasonModalOpen.value = true;
+    return;
+  }
+  if (key === "report") {
+    reportReason.value = "spam";
+    reportComment.value = "";
+    reportModalOpen.value = true;
+    return;
+  }
+  // Limit/suspend go through the reason modal (a confirmation gate of
+  // its own); mute/block apply immediately, so confirm them first —
+  // undo actions stay one-click.
+  if (key === "mute" && !data.value.muted) {
+    const ok = await confirm({
+      title: t("moderation.muteConfirmTitle"),
+      message: t("moderation.muteConfirmMessage", {
+        name: data.value.display_name || data.value.username,
+      }),
+      confirmLabel: t("moderation.mute"),
+    });
+    if (!ok) return;
+  }
+  if (key === "block" && !data.value.blocked) {
+    const ok = await confirm({
+      title: t("moderation.blockConfirmTitle"),
+      message: t("moderation.blockConfirmMessage", {
+        name: data.value.display_name || data.value.username,
+      }),
+      confirmLabel: t("moderation.block"),
+      danger: true,
+    });
+    if (!ok) return;
+  }
+  moderationBusy.value = true;
+  try {
+    switch (key) {
+      case "mute":
+        if (data.value.muted) {
+          await unmuteActor(username.value);
+          data.value.muted = false;
+        } else {
+          await muteActor(username.value);
+          data.value.muted = true;
+        }
+        break;
+      case "block":
+        if (data.value.blocked) {
+          await unblockActor(username.value);
+          data.value.blocked = false;
+        } else {
+          await blockActor(username.value);
+          data.value.blocked = true;
+          // Blocking severs the follow relationship.
+          data.value.follow_state = null;
+        }
+        break;
+      case "clear":
+        await unmoderateUser(username.value);
+        data.value.limited = false;
+        data.value.suspended = false;
+        break;
+    }
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: getApiErrorMessage(err) || t("common.error"),
+    });
+  } finally {
+    moderationBusy.value = false;
+  }
+}
+
+async function confirmAdminModeration() {
+  if (!pendingAdminAction.value) return;
+  moderationBusy.value = true;
+  try {
+    await applyAdminModeration(
+      pendingAdminAction.value,
+      moderationReason.value.trim(),
+    );
+    reasonModalOpen.value = false;
+    pendingAdminAction.value = null;
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: getApiErrorMessage(err) || t("common.error"),
+    });
+  } finally {
+    moderationBusy.value = false;
+  }
+}
+
+async function submitReport() {
+  if (!data.value || reportBusy.value) return;
+  reportBusy.value = true;
+  try {
+    await createReport({
+      target_type: "user",
+      target_id: username.value,
+      reason: reportReason.value,
+      description: reportComment.value.trim() || null,
+      forward: false,
+    });
+    reportModalOpen.value = false;
+    toast.push({ type: "success", message: t("moderation.reportSubmitted") });
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: getApiErrorMessage(err) || t("common.error"),
+    });
+  } finally {
+    reportBusy.value = false;
+  }
+}
+
 async function loadProfile() {
   if (isRemoteHandle.value) {
     // RemoteProfileView loads the actor itself.
@@ -182,6 +416,7 @@ async function loadProfile() {
   }
   loading.value = true;
   error.value = null;
+  revealLimited.value = false;
   try {
     data.value = await getPublic(username.value);
   } catch (err) {
@@ -231,6 +466,34 @@ watch(username, loadProfile);
             profile.role
           }}</span>
         </div>
+        <div
+          v-if="
+            profile.suspended ||
+            profile.limited ||
+            profile.muted ||
+            profile.blocked
+          "
+          class="user-profile__moderation-badges"
+        >
+          <span
+            v-if="profile.suspended"
+            class="user-profile__badge user-profile__badge--danger"
+          >
+            {{ t("moderation.suspendedBadge") }}
+          </span>
+          <span v-else-if="profile.limited" class="user-profile__badge">
+            {{ t("moderation.limitedBadge") }}
+          </span>
+          <span
+            v-if="profile.blocked"
+            class="user-profile__badge user-profile__badge--danger"
+          >
+            {{ t("moderation.blockedBadge") }}
+          </span>
+          <span v-else-if="profile.muted" class="user-profile__badge">
+            {{ t("moderation.mutedBadge") }}
+          </span>
+        </div>
         <p class="user-profile__handle">
           {{ fqn }}
           <AppButton
@@ -275,6 +538,13 @@ watch(username, loadProfile);
             "
             class="user-profile__activity-bell"
             @click="toggleActivitySubscription"
+          />
+          <EntityActions
+            v-if="showModerationActions"
+            :actions="moderationActions"
+            :primary-count="0"
+            menu-only
+            @select="onModerationAction"
           />
         </div>
 
@@ -342,7 +612,31 @@ watch(username, loadProfile);
       {{ t("profile.compose") }}
     </AppButton>
 
-    <RouterView :key="`${username}:${tabVersion}`" />
+    <div
+      v-if="profile.limited"
+      class="user-profile__limited-notice"
+      role="note"
+    >
+      <AppIcon name="arrow-down-wide-short" spacing="right" />
+      {{ t("moderation.limitedNotice") }}
+      <AppButton
+        v-if="limitedTimelineGated"
+        size="sm"
+        variant="secondary"
+        class="user-profile__reveal"
+        @click="revealLimited = true"
+      >
+        {{ t("moderation.showAnyway") }}
+      </AppButton>
+    </div>
+
+    <RouterView v-slot="{ Component }">
+      <component
+        :is="Component"
+        :key="`${username}:${tabVersion}`"
+        :reveal="revealLimited"
+      />
+    </RouterView>
 
     <AppModal
       :open="composerOpen"
@@ -350,6 +644,84 @@ watch(username, loadProfile);
       @close="composerOpen = false"
     >
       <StatusComposer autofocus @submitted="onStatusSubmitted" />
+    </AppModal>
+
+    <AppModal
+      :open="reasonModalOpen"
+      :title="
+        pendingAdminAction === 'suspend'
+          ? t('moderation.suspend')
+          : t('moderation.limit')
+      "
+      @close="reasonModalOpen = false"
+    >
+      <form
+        class="user-profile__reason-form"
+        @submit.prevent="confirmAdminModeration"
+      >
+        <label class="user-profile__reason-label" for="moderation-reason">
+          {{ t("moderation.reason") }}
+        </label>
+        <input
+          id="moderation-reason"
+          v-model="moderationReason"
+          type="text"
+          class="user-profile__reason-input"
+          :placeholder="t('moderation.reasonPlaceholder')"
+        />
+        <div class="user-profile__reason-actions">
+          <AppButton
+            type="button"
+            variant="ghost"
+            @click="reasonModalOpen = false"
+          >
+            {{ t("common.cancel") }}
+          </AppButton>
+          <AppButton
+            type="submit"
+            :variant="pendingAdminAction === 'suspend' ? 'danger' : 'primary'"
+            :loading="moderationBusy"
+          >
+            {{ t("common.confirm") }}
+          </AppButton>
+        </div>
+      </form>
+    </AppModal>
+
+    <AppModal
+      :open="reportModalOpen"
+      :title="t('moderation.reportTitle')"
+      @close="reportModalOpen = false"
+    >
+      <form class="user-profile__reason-form" @submit.prevent="submitReport">
+        <AppSelect
+          v-model="reportReason"
+          :label="t('moderation.reportReason')"
+          :options="reportReasonOptions"
+        />
+        <label class="user-profile__reason-label" for="user-report-comment">
+          {{ t("moderation.reportComment") }}
+        </label>
+        <textarea
+          id="user-report-comment"
+          v-model="reportComment"
+          class="user-profile__reason-input"
+          rows="4"
+          :placeholder="t('moderation.reportCommentPlaceholder')"
+        />
+        <div class="user-profile__reason-actions">
+          <AppButton
+            type="button"
+            variant="ghost"
+            @click="reportModalOpen = false"
+          >
+            {{ t("common.cancel") }}
+          </AppButton>
+          <AppButton type="submit" :loading="reportBusy">
+            {{ t("moderation.reportSubmit") }}
+          </AppButton>
+        </div>
+      </form>
     </AppModal>
   </div>
 </template>
@@ -398,6 +770,43 @@ watch(username, loadProfile);
   margin: 0;
   font-size: 1.5rem;
   display: inline-block;
+}
+
+.user-profile__moderation-badges {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.user-profile__badge {
+  font-size: 0.8rem;
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-lg);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.user-profile__badge--danger {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.user-profile__limited-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+}
+
+.user-profile__reveal {
+  margin-left: auto;
 }
 
 .user-profile__handle {
@@ -514,5 +923,25 @@ watch(username, loadProfile);
 .user-profile__tab:hover {
   color: var(--color-text);
   border-bottom-color: var(--color-accent);
+}
+
+.user-profile__reason-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.user-profile__reason-input {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.user-profile__reason-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 </style>

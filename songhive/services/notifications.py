@@ -145,6 +145,12 @@ async def create_notification(
     Returns ``None`` when every delivery target is disabled, and the existing
     row when an identical unseen notification already exists.
     """
+    from . import moderation as moderation_service
+
+    recipient = await session.get(User, user_id)
+    if recipient is None or await moderation_service.notification_suppressed(session, recipient, actor_url, type=type):
+        return None
+
     in_app, email, email_digest = await get_targets(session, user_id, type)
     if not (in_app or email or email_digest):
         return None

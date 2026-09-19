@@ -10,6 +10,7 @@ import ApiTokensTab from "./profile/ApiTokensTab.vue";
 import SessionsTab from "./profile/SessionsTab.vue";
 import NotificationSettings from "./profile/NotificationSettings.vue";
 import InterfaceTab from "./profile/InterfaceTab.vue";
+import ModerationTab from "./profile/ModerationTab.vue";
 import ExternalLibrariesView from "@/views/ExternalLibrariesView.vue";
 
 const { t } = useI18n();
@@ -27,6 +28,7 @@ const tab = computed(() => {
       "notifications",
       "interface",
       "externalLibraries",
+      "moderation",
     ].includes(value)
     ? value
     : "profile";
@@ -52,6 +54,11 @@ const tabs = [
     label: t("profile.tabs.externalLibraries"),
     icon: "cloud",
   },
+  {
+    key: "moderation",
+    label: t("profile.tabs.moderation"),
+    icon: "shield",
+  },
 ];
 
 const currentComponent = computed(() => {
@@ -68,6 +75,8 @@ const currentComponent = computed(() => {
       return InterfaceTab;
     case "externalLibraries":
       return ExternalLibrariesView;
+    case "moderation":
+      return ModerationTab;
     default:
       return ProfileTab;
   }

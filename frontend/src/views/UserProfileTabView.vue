@@ -35,6 +35,9 @@ import type { TrackResponse } from "@/player/types";
 
 interface Props {
   tab: "posts" | "activity" | "tracks" | "albums" | "libraries" | "playlists";
+  // Set by the parent profile view when the viewer opts in to seeing a
+  // limited profile's timeline anyway.
+  reveal?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -111,6 +114,7 @@ async function load(append = false) {
         mode,
         include_boosts: includeBoosts.value,
         include_replies: includeReplies.value,
+        reveal: props.reveal || undefined,
         limit,
       });
       activities.value = result;
@@ -193,6 +197,7 @@ async function loadMoreActivities() {
       mode: props.tab === "posts" ? "posts" : "all",
       include_boosts: includeBoosts.value,
       include_replies: includeReplies.value,
+      reveal: props.reveal || undefined,
       cursor: activitiesCursor.value,
       limit,
     });
@@ -216,7 +221,7 @@ async function loadMoreActivities() {
 onMounted(() => {
   void load();
 });
-watch([() => props.tab, username], () => {
+watch([() => props.tab, () => props.reveal, username], () => {
   reset();
   void load();
 });

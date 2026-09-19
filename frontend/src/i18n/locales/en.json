@@ -524,6 +524,9 @@
         "reason": "Reason",
         "status": "Status",
         "reporter": "Reporter",
+        "actorUrl": "Actor URL",
+        "forwarded": "Forwarded to remote instance",
+        "forwardedYes": "Yes",
         "createdAt": "Created",
         "filterStatus": "Filter by status",
         "statuses": {
@@ -595,6 +598,7 @@
           "invite": "Invite",
           "oauth_client": "OAuth client",
           "activity": "Activity",
+          "actor": "Actor",
           "api_token": "API token",
           "celery": "Celery task",
           "external_library": "External library",
@@ -602,6 +606,7 @@
           "federation": "Federation",
           "genre": "Genre",
           "images": "Images",
+          "instance": "Instance",
           "setting": "Setting",
           "storage": "Storage",
           "user_session": "User session"
@@ -907,7 +912,8 @@
       "libraries": "Libraries",
       "playlists": "Playlists",
       "notifications": "Notifications",
-      "interface": "Interface"
+      "interface": "Interface",
+      "moderation": "Moderation"
     },
     "copyHandle": "Copy fediverse handle",
     "compose": "Compose",
@@ -1499,7 +1505,8 @@
       "activityLike": "liked {object}",
       "activityAnnounce": "boosted {object}",
       "activityReply": "replied to {object}",
-      "activityQuote": "quoted {object}"
+      "activityQuote": "quoted {object}",
+      "report": "filed a report"
     },
     "objects": {
       "post": "post",
@@ -1547,7 +1554,8 @@
         "mention": "Mentions",
         "share": "Shares",
         "webmention": "Webmentions",
-        "activity": "User activity"
+        "activity": "User activity",
+        "report": "Reports"
       }
     },
     "onItem": "on {title}",
@@ -1582,5 +1590,71 @@
   "embed": {
     "unavailable": "This content is not available.",
     "openIn": "Open in {name}"
+  },
+  "moderation": {
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "block": "Block",
+    "unblock": "Unblock",
+    "limit": "Limit",
+    "suspend": "Suspend",
+    "clear": "Clear moderation",
+    "defederate": "Defederate",
+    "followersOnly": "Followers-only",
+    "apply": "Apply",
+    "actionApplied": "Moderation action applied.",
+    "mutedBadge": "Muted",
+    "blockedBadge": "Blocked",
+    "limitedBadge": "Limited",
+    "suspendedBadge": "Suspended",
+    "limitedNotice": "This account has been limited by the moderators of this instance.",
+    "showAnyway": "Show anyway",
+    "reason": "Reason (optional)",
+    "reasonPlaceholder": "Why is this action being taken?",
+    "muteConfirmTitle": "Mute user",
+    "muteConfirmMessage": "Mute {name}? Their activity will be hidden from you, but they'll still see yours.",
+    "blockConfirmTitle": "Block user",
+    "blockConfirmMessage": "Block {name}? They won't be able to see your activity or interact with you, and existing follows will be removed.",
+    "mutedUsers": "Muted users",
+    "mutesHint": "Muted users' activity is hidden from you; they still receive yours.",
+    "noMutes": "No muted users.",
+    "blockedUsers": "Blocked users",
+    "blocksHint": "Blocked users cannot see your activity or interact with you.",
+    "noBlocks": "No blocked users.",
+    "adminTitle": "Moderation",
+    "usersSection": "User moderation",
+    "instancesSection": "Instance moderation",
+    "actorUrlLabel": "Actor",
+    "actorUrlHint": "Local username, {'@'}user{'@'}domain handle, or actor URL.",
+    "actionLabel": "Action",
+    "domainLabel": "Domain",
+    "domainHint": "Remote instance domain, e.g. mastodon.social.",
+    "limitedUsers": "Limited users",
+    "limitHint": "Follows require approval; activities reach only their followers.",
+    "noLimited": "No limited users.",
+    "suspendedUsers": "Suspended users",
+    "suspendHint": "Cannot interact or receive activity; all local follow relationships severed.",
+    "noSuspended": "No suspended users.",
+    "defederatedInstances": "Defederated instances",
+    "defederateHint": "All federation to and from the instance is cut; its actors are hidden.",
+    "noDefederated": "No defederated instances.",
+    "followersOnlyInstances": "Followers-only instances",
+    "followersOnlyHint": "Activities are delivered only to local users who follow the author.",
+    "noFollowersOnly": "No followers-only instances.",
+    "report": "Report",
+    "reportTitle": "Report user",
+    "reportReason": "Why are you reporting this account?",
+    "reportReasons": {
+      "spam": "Spam",
+      "harassment": "Harassment",
+      "copyright": "Copyright violation",
+      "illegal": "Illegal content",
+      "other": "Other"
+    },
+    "reportComment": "Additional comments (optional)",
+    "reportCommentPlaceholder": "Is there anything else the moderators should know?",
+    "forwardToRemote": "Also forward to {domain}",
+    "reportSubmit": "Submit report",
+    "reportSubmitted": "Report submitted. Thank you."
   }
 }
