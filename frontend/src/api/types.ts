@@ -5675,6 +5675,8 @@ export interface components {
       config: {
         [key: string]: unknown;
       };
+      /** Visibility */
+      visibility?: components["schemas"]["Visibility"] | null;
       /** Enabled */
       enabled: boolean;
       /** Include In Library Index */
@@ -5735,6 +5737,8 @@ export interface components {
       sync_interval_seconds?: number | null;
       /** Include In Library Index */
       include_in_library_index?: boolean | null;
+      /** Visibility */
+      visibility?: components["schemas"]["Visibility"] | null;
     };
     /**
      * ExternalProviderResponse

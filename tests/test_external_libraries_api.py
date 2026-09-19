@@ -86,11 +86,13 @@ async def test_providers_lists_user_configurable(client, regular_user, auth_head
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert len(data) == 1
-    assert data[0]["provider_type"] == "fake"
-    assert data[0]["user_configurable"] is True
-    assert "list_items" in data[0]["capabilities_summary"]
-    assert data[0]["capabilities_summary"]["list_items"] is True
+    providers = {p["provider_type"]: p for p in data}
+    assert "fake" in providers
+    assert "s3" in providers
+    fake = providers["fake"]
+    assert fake["user_configurable"] is True
+    assert "list_items" in fake["capabilities_summary"]
+    assert fake["capabilities_summary"]["list_items"] is True
 
 
 @pytest.mark.asyncio
@@ -680,3 +682,78 @@ async def test_audit_details_never_contain_raw_config(client, regular_user, auth
         assert "super-secret" not in str(log.details)
         assert "hunter2" not in str(log.details)
         assert "abc123" not in str(log.details)
+
+
+@pytest.mark.asyncio
+async def test_update_visibility(client, regular_user, auth_headers, monkeypatch, db_session):
+    """The owner can change the backing library visibility."""
+    data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
+    assert data["visibility"] == "private"
+
+    response = client.patch(
+        f"/api/v1/external-libraries/{data['id']}",
+        json={"visibility": "public"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["visibility"] == "public"
+
+    library = await db_session.get(Library, data["library_id"])
+    assert library is not None
+    assert library.visibility == "public"
+
+
+@pytest.mark.asyncio
+async def test_update_visibility_propagates_to_tracks(client, regular_user, auth_headers, monkeypatch, db_session):
+    """Making an external library public updates its synced tracks."""
+    data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
+    external_library = await db_session.get(ExternalLibrary, data["id"])
+    external_track = await _make_track_for_external(db_session, external_library, regular_user)
+
+    response = client.patch(
+        f"/api/v1/external-libraries/{data['id']}",
+        json={"visibility": "public"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+
+    track = await db_session.get(Track, external_track.track_id)
+    assert track is not None
+    assert track.visibility == "public"
+
+
+@pytest.mark.asyncio
+async def test_update_visibility_forbids_other_users(client, regular_user, other_user, auth_headers, monkeypatch):
+    """A non-owner cannot change an external library's visibility."""
+    data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
+
+    response = client.patch(
+        f"/api/v1/external-libraries/{data['id']}",
+        json={"visibility": "public"},
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_update_config_preserves_redacted_secrets(client, regular_user, auth_headers, monkeypatch, db_session):
+    """Submitting the redacted config form keeps the stored secret values."""
+    data = await _create_user_external_library(client, regular_user, auth_headers, monkeypatch)
+    assert data["config"]["secret_key"] == "<redacted>"
+    assert data["config"]["password"] == "<redacted>"
+    assert data["config"]["token"] == "<redacted>"
+
+    response = client.patch(
+        f"/api/v1/external-libraries/{data['id']}",
+        json={"config": data["config"]},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+
+    from songhive.services import secrets
+
+    external_library = await db_session.get(ExternalLibrary, data["id"])
+    decrypted = secrets.decrypt_json(external_library.config)
+    assert decrypted["secret_key"] == "super-secret"
+    assert decrypted["password"] == "hunter2"
+    assert decrypted["token"] == "abc123"

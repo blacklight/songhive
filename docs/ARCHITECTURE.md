@@ -1001,11 +1001,86 @@ The global `external_libraries.local_roots` allowlist is required: a library's
 `root` must resolve to a path inside one of the configured roots, or validation
 fails.
 
+#### S3 provider
+
+The `s3` provider (`external/_s3.py`) indexes audio objects stored in an
+S3-compatible bucket (AWS S3, MinIO, and other S3 API-compatible services).
+Both regular users (when `allow_user_created_libraries` permits the provider)
+and admins can attach buckets; like every external library, the backing
+`Library` is private to its owner by default and can be made `public`/`local`
+or shared explicitly through library share grants.
+
+An S3 external library stores the following adapter config:
+
+| Key                         | Required | Default     | Description                                                              |
+|-----------------------------|----------|-------------|--------------------------------------------------------------------------|
+| `bucket`                    | yes      | —           | Bucket containing the audio objects.                                     |
+| `prefix`                    | no       | `""`        | Only index objects under this key prefix.                                |
+| `endpoint_url`              | no       | AWS         | Custom endpoint for S3-compatible services (e.g. `http://minio:9000`).   |
+| `region`                    | no       | —           | Bucket region.                                                           |
+| `access_key`/`secret_key`   | no       | ambient     | Static credentials; when omitted the SDK's ambient credentials are used. |
+| `path_style`                | no       | `false`     | Force path-style addressing (needed by some S3-compatible services).     |
+| `presigned_urls`            | no       | `true`      | Redirect clients to short-lived presigned GET URLs for playback.         |
+| `presigned_expiry_seconds`  | no       | `3600`      | Presigned URL lifetime, clamped to 60–604800 (SigV4's one-week limit).   |
+| `extensions`                | no       | all audio   | List of object-key suffixes to index.                                    |
+| `exclude`                   | no       | `[]`        | `fnmatch` patterns applied to prefix-relative keys.                      |
+| `recursive`                 | no       | `true`      | When `false`, only index keys directly under `prefix` (delimiter `/`).   |
+| `allow_hashing`             | no       | `true`      | Whether to compute audio hashes for new/updated objects.                 |
+| `fast_hash`                 | no       | `false`     | Hash raw object bytes instead of ffmpeg audio-only hashing.              |
+| `allow_write_tags`          | no       | `false`     | Rewrite embedded tags by re-uploading the object in place.               |
+| `allow_rename_source`       | no       | `false`     | Allow `rename_source` (server-side copy + delete).                       |
+| `allow_delete_source`       | no       | `false`     | Allow `delete_source` to remove objects.                                 |
+
+Streaming defaults to presigned GET URLs returned with `safe_to_redirect`
+(the client fetches bytes directly from the object store, including HTTP
+ranges). When `presigned_urls` is `false`, Songhive proxies the object body
+through the normal stream handler, so bandwidth flows through the server.
+Hashing prefers the object's S3 `ChecksumSHA256` attribute when present,
+then falls back to `fast_hash` streaming or a temp-file ffmpeg pass —
+all gated on `allow_hashing` because they require downloading the object.
+
+#### S3 freshness vs. filesystem watching
+
+The filesystem watchdog only applies to the `local` provider — object stores
+have no `watchfiles`-style change events, so S3 libraries rely on scheduled
+syncs (`sync_interval_seconds`, driven by `scan_scheduled_syncs_task`).
+To keep polling cheap, `iter_items` lists the bucket prefix with
+`ListObjectsV2` (paginated, no object payloads) and reports each object's
+`ETag`, `LastModified`, and size. `external/sync.py` advertises this through
+the `detect_changes` capability: when the stored `provider_etag` (or
+mtime+size) still matches, the item is treated as unchanged and sync skips
+metadata reads, hashing, and downloads entirely. A scheduled sync over an
+unchanged bucket therefore costs one `ListObjectsV2` call set — no per-object
+transfer — while still catching new, modified, and deleted keys on the next
+interval. Operators wanting tighter freshness should shorten
+`sync_interval_seconds` rather than run manual full scans; scoped syncs
+(`scope=`) can restrict a sync to a sub-prefix. Future integrations could
+plug S3 event notifications or S3 Inventory into the same task pipeline.
+
+#### Visibility, sharing, and secret redaction
+
+Every external library is backed by a normal `Library` row, so visibility
+(`private`/`local`/`public`) and `ShareGrant` sharing behave exactly like
+regular libraries. `PATCH /api/v1/external-libraries/{id}` (and the admin
+equivalent) accepts a `visibility` field; changing it updates the backing
+library and calls `services.music.propagate_external_library_visibility`,
+which rewrites the visibility of all linked synced tracks so list queries
+and single-track ACLs stay consistent. `PATCH /api/v1/libraries/{id}` on an
+external-backed library propagates the same way. Non-admin propagation only
+touches tracks the caller owns, mirroring album visibility propagation.
+
+Because API responses redact secret-bearing config keys to `"<redacted>"`,
+both PATCH routes run submitted configs through
+`_merge_config_preserving_redacted`: any key still carrying the sentinel is
+restored from the stored (decrypted) config before validation and
+re-encryption, so editing non-secret fields never clobbers credentials.
+
 The web UI renders a per-provider configuration form instead of raw JSON.
 Provider form templates live in
 `frontend/src/config/externalLibraryProviderTemplates.ts`. Each template entry
 lists the JSON property name, i18n label/description keys, field type (string,
-number, boolean, enum, or comma-separated string array), and default value.
+password, number, boolean, enum, or comma-separated string array), and
+default value.
 `ExternalLibraryEditView` switches the displayed fields whenever the provider
 `<select>` changes, and falls back to a plain JSON textarea for providers that do
 not have a template yet.

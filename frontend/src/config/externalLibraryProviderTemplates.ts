@@ -4,7 +4,7 @@ export interface ProviderFieldOption {
 }
 
 export type ProviderFieldType =
-  "string" | "number" | "boolean" | "enum" | "string-array";
+  "string" | "password" | "number" | "boolean" | "enum" | "string-array";
 
 export interface ProviderFieldTemplate {
   /** JSON configuration key for this field. */
@@ -124,6 +124,159 @@ export const providerTemplates: Record<string, ProviderTemplate> = {
       },
     ],
   },
+  s3: {
+    providerType: "s3",
+    fields: [
+      {
+        name: "bucket",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.bucket.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.bucket.description",
+        required: true,
+      },
+      {
+        name: "prefix",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.prefix.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.prefix.description",
+      },
+      {
+        name: "endpoint_url",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.endpoint_url.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.endpoint_url.description",
+      },
+      {
+        name: "region",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.region.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.region.description",
+      },
+      {
+        name: "access_key",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.access_key.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.access_key.description",
+      },
+      {
+        name: "secret_key",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.secret_key.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.secret_key.description",
+      },
+      {
+        name: "path_style",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.path_style.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.path_style.description",
+        default: false,
+      },
+      {
+        name: "presigned_urls",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.presigned_urls.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.presigned_urls.description",
+        default: true,
+      },
+      {
+        name: "presigned_expiry_seconds",
+        type: "number",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.presigned_expiry_seconds.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.presigned_expiry_seconds.description",
+        default: 3600,
+      },
+      {
+        name: "extensions",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.extensions.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.extensions.description",
+        default: DEFAULT_LOCAL_EXTENSIONS,
+      },
+      {
+        name: "exclude",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.exclude.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.exclude.description",
+        default: "",
+      },
+      {
+        name: "recursive",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.recursive.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.recursive.description",
+        default: true,
+      },
+      {
+        name: "allow_hashing",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.allow_hashing.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.allow_hashing.description",
+        default: true,
+      },
+      {
+        name: "fast_hash",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.fast_hash.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.fast_hash.description",
+        default: false,
+      },
+      {
+        name: "allow_write_tags",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.allow_write_tags.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.allow_write_tags.description",
+        default: false,
+      },
+      {
+        name: "allow_rename_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.allow_rename_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.allow_rename_source.description",
+        default: false,
+      },
+      {
+        name: "allow_delete_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.s3.fields.allow_delete_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.s3.fields.allow_delete_source.description",
+        default: false,
+      },
+    ],
+  },
 };
 
 export function getProviderTemplate(providerType: string): ProviderTemplate {
@@ -179,7 +332,11 @@ export function buildProviderConfigFromTemplate(
       continue;
     }
 
-    if (field.type === "string" || field.type === "enum") {
+    if (
+      field.type === "string" ||
+      field.type === "password" ||
+      field.type === "enum"
+    ) {
       const str = isEmpty(raw) ? "" : String(raw);
       if (str === "" && !field.required) continue;
       config[field.name] = str;

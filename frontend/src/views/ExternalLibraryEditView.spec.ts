@@ -140,6 +140,13 @@ describe("ExternalLibraryEditView", () => {
     ) as HTMLInputElement;
     nameInput.value = "New Library";
     nameInput.dispatchEvent(new Event("input"));
+
+    const bucketInput = getInputByLabel(
+      i18n.global.t("pages.externalLibraries.providers.s3.fields.bucket.label"),
+    );
+    expect(bucketInput).not.toBeNull();
+    bucketInput!.value = "music";
+    bucketInput!.dispatchEvent(new Event("input"));
     await flushPromises();
 
     const saveButton = Array.from(
@@ -156,6 +163,7 @@ describe("ExternalLibraryEditView", () => {
         provider_type: "s3",
         name: "New Library",
         include_in_library_index: false,
+        config: expect.objectContaining({ bucket: "music" }),
       }),
     );
   });
@@ -333,7 +341,7 @@ describe("ExternalLibraryEditView", () => {
         capabilities_summary: {},
       },
       {
-        provider_type: "s3",
+        provider_type: "webdav",
         user_configurable: true,
         capabilities_summary: {},
       },
@@ -356,7 +364,7 @@ describe("ExternalLibraryEditView", () => {
     const providerSelect = document.body.querySelector(
       "select",
     ) as HTMLSelectElement;
-    providerSelect.value = "s3";
+    providerSelect.value = "webdav";
     providerSelect.dispatchEvent(new Event("change"));
     await flushPromises();
 

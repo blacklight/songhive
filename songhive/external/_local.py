@@ -13,7 +13,7 @@ import mimetypes
 import os
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, AsyncIterator, Optional
+from typing import AsyncIterator, Optional
 
 from ..config.constants import AUDIO_EXTENSIONS
 from ..config.loader import load_config
@@ -332,41 +332,9 @@ class LocalExternalAdapter(ExternalLibraryAdapter):
         """Read tags from a local audio file."""
         path = await asyncio.to_thread(self._resolve_item_path, config, item)
 
-        from ..services.metadata import extract_metadata
+        from ._audio import track_metadata_from_file
 
-        meta = extract_metadata(path)
-
-        album_artist = ""
-        raw_tags = meta.raw_tags or {}
-        if isinstance(raw_tags, dict):
-            for key, values in raw_tags.items():
-                if key.lower() in {"albumartist", "album artist", "talb"} and values:
-                    album_artist = str(values[0])
-                    break
-        if not album_artist:
-            album_artist = meta.artist or ""
-
-        raw_metadata: dict[str, Any] = {
-            "display_path": item.provider_key,
-            "mimetype": meta.mimetype,
-            "raw_tags": raw_tags,
-        }
-
-        return ExternalTrackMetadata(
-            title=meta.title or item.provider_key,
-            artist=meta.artist or "",
-            album=meta.album or "",
-            album_artist=album_artist,
-            track_number=meta.track_number,
-            disc_number=meta.disc_number,
-            duration=meta.duration,
-            release_year=meta.year,
-            genre=meta.genre,
-            musicbrainz_id=None,
-            cover_art=meta.cover_art,
-            cover_art_mime=meta.cover_art_mime,
-            raw_metadata=raw_metadata,
-        )
+        return track_metadata_from_file(path, item.provider_key)
 
     async def open_stream(
         self,
@@ -489,6 +457,8 @@ class LocalExternalAdapter(ExternalLibraryAdapter):
                 f"Invalid new path: {new_provider_key}",
                 operation="rename_source",
             )
+        if new_provider_key == item.provider_key:
+            return item
 
         old_candidate = root / item.provider_key
         new_candidate = root / new_provider_key

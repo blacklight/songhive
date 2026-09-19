@@ -41,7 +41,7 @@ from ...models import ExternalLibrary, ExternalSyncRun, ExternalTrack, Library
 from ...models._enums import Visibility
 from ...models.audit_log import AuditTargetType
 from ...models.user import User
-from ...services import acl, audit, deletion
+from ...services import acl, audit, deletion, music
 from ...services.federation import unpublish_track_activity
 from ...services.secrets import decrypt_json, encrypt_json, redact_config
 from ...services.storage import StorageService
@@ -91,6 +91,7 @@ class ExternalLibraryUpdate(BaseModel):
     sync_enabled: Optional[bool] = None
     sync_interval_seconds: Optional[int] = None
     include_in_library_index: Optional[bool] = None
+    visibility: Optional[Visibility] = None
 
 
 class ExternalLibraryCapabilitiesResponse(BaseModel):
@@ -123,6 +124,7 @@ class ExternalLibraryResponse(BaseModel):
     scope: str
     name: Optional[str] = None
     config: dict
+    visibility: Optional[Visibility] = None
     enabled: bool
     include_in_library_index: bool
     sync_enabled: bool
@@ -262,6 +264,21 @@ def _redacted_config(raw: Any) -> dict:
     return redact_config(_decrypt_external_config(raw))
 
 
+def _merge_config_preserving_redacted(new_config: dict, decrypted_old: dict) -> dict:
+    """Restore stored values for fields the client left at the redaction sentinel.
+
+    API responses replace secret-bearing keys with ``"<redacted>"``; when a
+    client submits the redacted form unchanged (e.g. editing other fields of
+    an S3 library), the stored secret must be kept instead of saving the
+    sentinel literally.
+    """
+    merged = dict(new_config)
+    for key, value in new_config.items():
+        if value == "<redacted>" and key in decrypted_old:
+            merged[key] = decrypted_old[key]
+    return merged
+
+
 def _mutation_to_dict(mutation: ExternalMutationResult) -> dict:
     """Return a JSON-safe, redactable dict for an ``ExternalMutationResult``."""
     return {
@@ -321,6 +338,9 @@ async def _build_external_library_response(
     if user is not None and external_library.library_id is not None:
         can_manage = await acl.can_manage(db, user, "library", external_library.library_id)
 
+    library = None
+    if external_library.library_id is not None:
+        library = await db.get(Library, external_library.library_id)
     return ExternalLibraryResponse(
         id=str(external_library.id),
         library_id=str(external_library.library_id),
@@ -328,6 +348,7 @@ async def _build_external_library_response(
         scope=external_library.scope,
         name=external_library.name,
         config=_redacted_config(external_library.config),
+        visibility=Visibility(library.visibility) if library is not None else None,
         enabled=external_library.enabled,
         include_in_library_index=external_library.include_in_library_index,
         sync_enabled=external_library.sync_enabled,
@@ -688,10 +709,19 @@ async def update_external_library(
         external_library.sync_interval_seconds = body.sync_interval_seconds
         changes["sync_interval_seconds"] = body.sync_interval_seconds
 
+    if body.visibility is not None and external_library.library is not None:
+        external_library.library.visibility = body.visibility.value
+        changes["visibility"] = body.visibility.value
+        await music.propagate_external_library_visibility(db, external_library, current_user)
+
     if body.config is not None:
+        merged_config = _merge_config_preserving_redacted(
+            body.config,
+            _decrypt_external_config(external_library.config),
+        )
         encrypted, capabilities = await _validate_and_encrypt_config(
             external_library.provider_type,
-            body.config,
+            merged_config,
         )
         external_library.config = cast(Any, encrypted)
         external_library.capabilities = dataclasses.asdict(capabilities)

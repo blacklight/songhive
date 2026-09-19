@@ -290,6 +290,7 @@ function resetForm() {
   }
   providerType.value = source.provider_type;
   name.value = source.name ?? "";
+  visibility.value = source.visibility ?? "private";
   enabled.value = source.enabled;
   syncEnabled.value = source.sync_enabled;
   syncInterval.value = source.sync_interval_seconds ?? null;
@@ -360,6 +361,7 @@ async function onSubmit() {
       const body: ExternalLibraryUpdate = {
         name: name.value.trim() || null,
         config,
+        visibility: visibility.value,
         enabled: enabled.value,
         sync_enabled: syncEnabled.value,
         sync_interval_seconds: syncInterval.value,
@@ -769,11 +771,18 @@ onUnmounted(() => {
               <AppInput
                 v-if="
                   field.type === 'string' ||
+                  field.type === 'password' ||
                   field.type === 'number' ||
                   field.type === 'string-array'
                 "
                 :model-value="getFieldInputValue(field)"
-                :type="field.type === 'number' ? 'number' : 'text'"
+                :type="
+                  field.type === 'number'
+                    ? 'number'
+                    : field.type === 'password'
+                      ? 'password'
+                      : 'text'
+                "
                 :as="field.type === 'string-array' ? 'textarea' : 'input'"
                 :rows="field.type === 'string-array' ? 2 : undefined"
                 :label="t(field.labelI18nKey)"

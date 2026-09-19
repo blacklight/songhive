@@ -816,6 +816,78 @@
               "description": "Use raw SHA-256 instead of ffmpeg audio-only hashing. Faster but changes when tags or artwork change."
             }
           }
+        },
+        "s3": {
+          "fields": {
+            "bucket": {
+              "label": "Bucket",
+              "description": "Name of the S3 bucket containing the audio files."
+            },
+            "prefix": {
+              "label": "Key prefix",
+              "description": "Only index objects under this prefix (e.g. music/). Leave empty to scan the whole bucket."
+            },
+            "endpoint_url": {
+              "label": "Endpoint URL",
+              "description": "Custom endpoint for S3-compatible services (e.g. MinIO). Leave empty for AWS."
+            },
+            "region": {
+              "label": "Region",
+              "description": "AWS region of the bucket. Optional for most S3-compatible services."
+            },
+            "access_key": {
+              "label": "Access key",
+              "description": "Access key ID. Leave empty to use the server's ambient credentials."
+            },
+            "secret_key": {
+              "label": "Secret key",
+              "description": "Secret access key paired with the access key. Stored encrypted."
+            },
+            "path_style": {
+              "label": "Path-style addressing",
+              "description": "Use path-style URLs (bucket/key) instead of virtual-hosted style. Required by some S3-compatible services such as MinIO."
+            },
+            "presigned_urls": {
+              "label": "Stream via presigned URLs",
+              "description": "Redirect clients to short-lived presigned URLs for playback instead of proxying audio through Songhive."
+            },
+            "presigned_expiry_seconds": {
+              "label": "Presigned URL expiry (seconds)",
+              "description": "How long generated streaming URLs stay valid (60–604800)."
+            },
+            "extensions": {
+              "label": "File extensions",
+              "description": "Comma-separated list of audio file extensions to index (e.g. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Exclude patterns",
+              "description": "Comma-separated glob patterns for object keys to skip during scanning."
+            },
+            "recursive": {
+              "label": "Recursive scan",
+              "description": "Index objects in nested key prefixes. Disable to index only keys directly under the prefix."
+            },
+            "allow_hashing": {
+              "label": "Allow audio hashing",
+              "description": "Compute a stable audio hash for tracks to detect duplicates and support transcoding. Requires downloading new or changed objects once."
+            },
+            "fast_hash": {
+              "label": "Use fast raw hash",
+              "description": "Use raw SHA-256 instead of ffmpeg audio-only hashing. Cheaper but changes when tags or artwork change."
+            },
+            "allow_write_tags": {
+              "label": "Allow metadata write-back",
+              "description": "Allow Songhive to rewrite embedded tags and re-upload objects when tracks are edited."
+            },
+            "allow_rename_source": {
+              "label": "Allow source renaming",
+              "description": "Allow Songhive to rename objects through track edits. Requires write permission on the bucket."
+            },
+            "allow_delete_source": {
+              "label": "Allow source deletion",
+              "description": "Allow deleting objects from the bucket. Requires write permission on the bucket."
+            }
+          }
         }
       }
     }

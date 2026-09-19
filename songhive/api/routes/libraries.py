@@ -21,12 +21,14 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
-from ...models._enums import Visibility
+from ...models import Visibility
 from ...models.artist import Artist
 from ...models.audit_log import AuditTargetType
+from ...models.external_library import ExternalLibrary
 from ...models.library import Library
 from ...models.user import User
 from ...services import acl, activities, audit, deletion, music
@@ -845,6 +847,13 @@ async def update_library(
         library.description = body.description
     if body.visibility is not None:
         library.visibility = body.visibility.value
+        # Tracks synced from an external provider inherit the library's
+        # visibility; keep them aligned so the library really is as public
+        # (or private) as its visibility advertises.
+        ext_result = await db.execute(select(ExternalLibrary).where(ExternalLibrary.library_id == library_id))
+        external_library = ext_result.scalar_one_or_none()
+        if external_library is not None:
+            await music.propagate_external_library_visibility(db, external_library, current_user)
 
     await audit.log_action(
         db,

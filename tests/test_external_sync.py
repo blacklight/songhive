@@ -3,6 +3,7 @@ Tests for the external-library sync service.
 """
 
 import asyncio
+import hashlib
 from datetime import datetime, timezone
 
 import pytest
@@ -541,3 +542,100 @@ async def test_sync_unknown_library_raises(db_session, fake_redis):
             triggered_by="manual",
             redis=fake_redis,
         )
+
+
+@pytest.mark.asyncio
+async def test_resync_unchanged_uses_etag_fast_path(db_session, fake_redis, _make_external_library, monkeypatch):
+    """When the provider etag is unchanged, sync skips hashing and metadata reads."""
+    items = {
+        "track1.flac": {
+            "data": list(b"audio1"),
+            "metadata": {"title": "Track 1", "artist": "Artist A"},
+        },
+    }
+    external_library = await _make_external_library(items)
+
+    await sync_external_library(
+        db_session,
+        str(external_library.id),
+        triggered_by="manual",
+        redis=fake_redis,
+    )
+
+    async def _no_metadata(*args, **kwargs):
+        raise AssertionError("read_metadata must not run for unchanged items")
+
+    async def _no_hash(*args, **kwargs):
+        raise AssertionError("compute_sha256 must not run for unchanged items")
+
+    monkeypatch.setattr(FakeExternalAdapter, "read_metadata", _no_metadata)
+    monkeypatch.setattr(FakeExternalAdapter, "compute_sha256", _no_hash)
+
+    run = await sync_external_library(
+        db_session,
+        str(external_library.id),
+        triggered_by="manual",
+        redis=fake_redis,
+    )
+
+    assert run.status == "success"
+    assert run.items_seen == 1
+    assert run.tracks_created == 0
+    assert run.tracks_updated == 0
+    assert run.tracks_failed == 0
+
+
+@pytest.mark.asyncio
+async def test_resync_changed_etag_reads_metadata(db_session, fake_redis, _make_external_library, monkeypatch):
+    """A changed provider etag falls back to the full metadata path."""
+    items = {
+        "track1.flac": {
+            "data": list(b"audio1"),
+            "metadata": {"title": "Track 1", "artist": "Artist A"},
+        },
+    }
+    external_library = await _make_external_library(items)
+
+    await sync_external_library(
+        db_session,
+        str(external_library.id),
+        triggered_by="manual",
+        redis=fake_redis,
+    )
+
+    # Change the payload so the fake's etag covers a different change token.
+    ext_lib = await db_session.get(ExternalLibrary, external_library.id)
+    config = secrets.decrypt_json(ext_lib.config)
+    config["items"]["track1.flac"]["data"] = list(b"audio1-changed")
+    ext_lib.config = secrets.encrypt_json(config)
+    await db_session.flush()
+
+    calls = {"read_metadata": 0, "compute_sha256": 0}
+    orig_read = FakeExternalAdapter.read_metadata
+    orig_hash = FakeExternalAdapter.compute_sha256
+
+    async def _read(self, config, item):
+        calls["read_metadata"] += 1
+        return await orig_read(self, config, item)
+
+    async def _hash(self, config, item):
+        calls["compute_sha256"] += 1
+        return await orig_hash(self, config, item)
+
+    monkeypatch.setattr(FakeExternalAdapter, "read_metadata", _read)
+    monkeypatch.setattr(FakeExternalAdapter, "compute_sha256", _hash)
+
+    run = await sync_external_library(
+        db_session,
+        str(external_library.id),
+        triggered_by="manual",
+        redis=fake_redis,
+    )
+
+    assert run.status == "success"
+    assert calls["read_metadata"] == 1
+    # The listing supplies the sha256, so no hashing call is needed even here.
+    assert calls["compute_sha256"] == 0
+
+    ext_track = (await db_session.execute(select(ExternalTrack))).scalars().one()
+    assert ext_track.sha256 == hashlib.sha256(b"audio1-changed").hexdigest()

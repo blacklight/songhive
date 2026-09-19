@@ -29,7 +29,7 @@ from ...external.sync import _find_or_create_library_track
 from ...models import ExternalLibrary, ExternalSyncRun, ExternalTrack
 from ...models.audit_log import AuditTargetType
 from ...models.user import User
-from ...services import audit, deletion
+from ...services import audit, deletion, music
 from ...services.federation import unpublish_track_activity
 from ...services.secrets import redact_config
 from ...services.storage import StorageService
@@ -58,6 +58,7 @@ from .external_libraries import (
     _load_external_library,
     _load_external_track,
     _mark_track_tombstoned,
+    _merge_config_preserving_redacted,
     _mutation_to_dict,
     _provider_capabilities_summary,
     _provider_item_exists,
@@ -206,10 +207,19 @@ async def update_admin_external_library(
         external_library.include_in_library_index = body.include_in_library_index or False
         changes["include_in_library_index"] = external_library.include_in_library_index
 
+    if body.visibility is not None and external_library.library is not None:
+        external_library.library.visibility = body.visibility.value
+        changes["visibility"] = body.visibility.value
+        await music.propagate_external_library_visibility(db, external_library, admin)
+
     if body.config is not None:
+        merged_config = _merge_config_preserving_redacted(
+            body.config,
+            _decrypt_external_config(external_library.config),
+        )
         encrypted, capabilities = await _validate_and_encrypt_config(
             external_library.provider_type,
-            body.config,
+            merged_config,
         )
         external_library.config = cast(Any, encrypted)
         external_library.capabilities = dataclasses.asdict(capabilities)

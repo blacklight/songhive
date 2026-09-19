@@ -138,6 +138,23 @@ def _set_item_error(
     counters.tracks_failed += 1
 
 
+def _item_matches_existing(item: ExternalItemRef, external_track: ExternalTrack) -> bool:
+    """Return True when the listing record proves the provider item is unchanged.
+
+    ETags are compared when both sides carry one; otherwise the stored
+    mtime/size pair must match exactly. Adapters that cannot detect changes
+    from listing metadata alone must not advertise ``detect_changes``.
+    """
+    if item.etag or external_track.provider_etag:
+        return item.etag is not None and item.etag == external_track.provider_etag
+    return (
+        item.mtime is not None
+        and item.mtime == external_track.provider_mtime
+        and item.size is not None
+        and item.size == external_track.provider_size
+    )
+
+
 async def _load_existing_track(
     session: AsyncSession,
     external_track: ExternalTrack,
@@ -309,6 +326,31 @@ async def _apply_metadata(
     return MetadataDecision.UNCHANGED
 
 
+async def _mark_track_shadowed(
+    session: AsyncSession,
+    external_library: ExternalLibrary,
+    external_track: ExternalTrack,
+    item: ExternalItemRef,
+    sha256: str,
+    counters: RunCounters,
+) -> None:
+    """Mark an external track as shadowed by an identical StoredFile."""
+    if external_track.state == "active" and external_track.track_id is not None:
+        await _remove_library_track(session, str(external_library.library_id), str(external_track.track_id))
+        external_track.track_id = None
+    external_track.sha256 = sha256
+    external_track.provider_etag = item.etag
+    external_track.provider_mtime = item.mtime
+    external_track.provider_size = item.size
+    external_track.provider_mime_type = item.mime_type
+    external_track.provider_checksum = item.checksum
+    external_track.state = "shadowed"
+    external_track.last_seen_at = _utcnow()
+    external_track.last_synced_at = _utcnow()
+    external_track.sync_error = None
+    counters.tracks_shadowed += 1
+
+
 async def _process_item(
     session: AsyncSession,
     external_library: ExternalLibrary,
@@ -343,6 +385,32 @@ async def _process_item(
     if external_track.state == "tombstoned" and not include_tombstones:
         return
 
+    if (
+        capabilities.detect_changes
+        and external_track.state == "active"
+        and external_track.track_id is not None
+        and external_track.sha256
+        and _item_matches_existing(item, external_track)
+    ):
+        # The listing proves the item is unchanged: skip hashing and metadata
+        # reads (which may require downloading the object) but still honour
+        # shadowing when a matching StoredFile appeared since the last sync.
+        stored_result = await session.execute(
+            select(StoredFile).where(StoredFile.sha256 == external_track.sha256).limit(1)
+        )
+        if stored_result.scalar_one_or_none() is not None:
+            await _mark_track_shadowed(session, external_library, external_track, item, external_track.sha256, counters)
+            return
+        track = await _load_existing_track(session, external_track)
+        if track is not None:
+            external_track.last_seen_at = _utcnow()
+            external_track.last_synced_at = _utcnow()
+            external_track.sync_error = None
+            if track.musicbrainz_enriched_at is None:
+                counters.enrich_queue.add(str(track.id))
+            return
+        # The linked Songhive track is gone: fall through and re-create it.
+
     sha256 = _resolve_sha256(item, capabilities, config)
     if not sha256:
         if capabilities.compute_hash and config.get("allow_hashing", True):
@@ -358,20 +426,7 @@ async def _process_item(
     result = await session.execute(select(StoredFile).where(StoredFile.sha256 == sha256).limit(1))
     stored_file = result.scalar_one_or_none()
     if stored_file is not None:
-        if external_track.state == "active" and external_track.track_id is not None:
-            await _remove_library_track(session, str(external_library.library_id), str(external_track.track_id))
-            external_track.track_id = None
-        external_track.sha256 = sha256
-        external_track.provider_etag = item.etag
-        external_track.provider_mtime = item.mtime
-        external_track.provider_size = item.size
-        external_track.provider_mime_type = item.mime_type
-        external_track.provider_checksum = item.checksum
-        external_track.state = "shadowed"
-        external_track.last_seen_at = _utcnow()
-        external_track.last_synced_at = _utcnow()
-        external_track.sync_error = None
-        counters.tracks_shadowed += 1
+        await _mark_track_shadowed(session, external_library, external_track, item, sha256, counters)
         return
 
     try:

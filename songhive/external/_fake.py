@@ -122,7 +122,10 @@ class FakeExternalAdapter(ExternalLibraryAdapter):
         data = record["data"]
         sha256 = record["sha256"] or hashlib.sha256(data).hexdigest()
         checksum = record["checksum"] or sha256
-        etag = record["etag"] or sha256
+        # The implicit etag covers both payload and metadata so that tag edits
+        # count as provider-side changes, matching real object stores where any
+        # object rewrite produces a new ETag.
+        etag = record["etag"] or self._item_etag(data, record["metadata"])
         return ExternalItemRef(
             provider_key=provider_key,
             display_path=provider_key,
@@ -133,6 +136,19 @@ class FakeExternalAdapter(ExternalLibraryAdapter):
             checksum=checksum,
             sha256=sha256,
         )
+
+    @staticmethod
+    def _item_etag(data: bytes, metadata: dict[str, Any]) -> str:
+        """Compute a change token covering the payload and metadata record."""
+        import json
+
+        hasher = hashlib.sha256()
+        hasher.update(data)
+        try:
+            hasher.update(json.dumps(metadata, sort_keys=True, default=str).encode("utf-8"))
+        except (TypeError, ValueError):
+            hasher.update(repr(sorted(metadata.items())).encode("utf-8"))
+        return hasher.hexdigest()
 
     async def read_metadata(self, config: dict, item: ExternalItemRef) -> ExternalTrackMetadata:
         """Read metadata from the in-memory item record."""

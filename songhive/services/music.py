@@ -1056,6 +1056,43 @@ async def propagate_album_visibility(
     return changed
 
 
+async def propagate_external_library_visibility(
+    session: AsyncSession,
+    external_library: ExternalLibrary,
+    user: User,
+) -> List[Tuple[Track, str]]:
+    """Copy the backing ``Library.visibility`` onto the library's synced tracks.
+
+    External-library tracks are seeded with the library's visibility at sync
+    time; propagating keeps list queries and single-item ACL consistent when
+    the owner later makes the library public/local or locks it back down.
+    Non-admin callers only affect tracks they own, mirroring
+    ``propagate_album_visibility``.  Returns ``(track, previous_visibility)``
+    pairs for the tracks whose visibility actually changed.
+    """
+    library = external_library.library
+    if library is None:
+        return []
+
+    external_track_ids = select(ExternalTrack.track_id).where(
+        ExternalTrack.external_library_id == str(external_library.id),
+        ExternalTrack.track_id.isnot(None),
+    )
+    stmt = select(Track).where(
+        Track.id.in_(external_track_ids),
+        Track.visibility != library.visibility,
+    )
+    if not user.is_admin:
+        stmt = stmt.where(Track.owner_id == user.id)
+    result = await session.execute(stmt)
+    changed = [(track, track.visibility) for track in result.scalars().all()]
+    for track, _ in changed:
+        track.visibility = library.visibility
+    if changed:
+        await session.flush()
+    return changed
+
+
 async def get_track_ids_for_artist(
     session: AsyncSession,
     artist_id: str,

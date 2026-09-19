@@ -481,6 +481,20 @@ async def test_rename_source_rejects_missing_file(local_adapter, tmp_root, base_
 
 
 @pytest.mark.asyncio
+async def test_rename_source_same_name_is_noop(local_adapter, tmp_root, base_config):
+    """rename_source to the current name succeeds without touching the file."""
+    _write_file(tmp_root / "music" / "track.mp3")
+    base_config["allow_rename_source"] = True
+    await local_adapter.validate_config(base_config)
+
+    item = ExternalItemRef(provider_key="music/track.mp3", display_path="music/track.mp3")
+    new_item = await local_adapter.rename_source(base_config, item, "track.mp3")
+
+    assert new_item.provider_key == "music/track.mp3"
+    assert (tmp_root / "music" / "track.mp3").exists()
+
+
+@pytest.mark.asyncio
 async def test_rename_source_rejects_target_collision(local_adapter, tmp_root, base_config):
     """rename_source raises when the target path already exists."""
     _write_file(tmp_root / "track.mp3")

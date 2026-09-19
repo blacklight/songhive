@@ -1957,6 +1957,32 @@ async def test_update_track_filename_renames_external_source(client, regular_use
 
 
 @pytest.mark.asyncio
+async def test_update_track_filename_unchanged_skips_provider_rename(
+    client, regular_user, auth_headers, db_session, monkeypatch
+):
+    """PATCH with the unchanged filename never calls the provider's rename."""
+    from songhive.external._fake import FakeExternalAdapter
+
+    track, external_track, _ = await _make_external_track_for_user(db_session, regular_user, provider_key="song1.mp3")
+
+    async def _fail_rename(self, config, item, new_name):
+        raise AssertionError("rename_source must not be called for an unchanged filename")
+
+    monkeypatch.setattr(FakeExternalAdapter, "rename_source", _fail_rename)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"filename": "song1.mp3"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    assert response.json()["filename"] == "song1.mp3"
+
+    refreshed = await db_session.get(ExternalTrack, external_track.id)
+    assert refreshed.provider_key == "song1.mp3"
+
+
+@pytest.mark.asyncio
 async def test_update_track_filename_rejected_when_no_media(client, sample_tracks, regular_user, auth_headers):
     """PATCH with filename fails for a track with no stored or external media."""
     track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)

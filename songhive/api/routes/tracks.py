@@ -276,6 +276,9 @@ async def _rename_external_track_file(
         )
 
     filename = _prepare_track_filename(new_filename, external_track.provider_key)
+    if filename == Path(external_track.provider_key).name:
+        return filename
+
     adapter_cls = get_external_adapter(external_library.provider_type)
     adapter = adapter_cls()
     raw_config = external_library.config
