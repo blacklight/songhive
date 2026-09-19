@@ -4,15 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-- `server`: Fixed single-flight request handling under Tornado — the
-  `WSGIContainer` bridging FastAPI via `a2wsgi` now runs on an explicit
-  `ThreadPoolExecutor` instead of the Tornado event-loop thread. The
-  previous setup serialized all API requests and deadlocked outbound
-  signed federation fetches: a remote instance resolving our `keyId`
-  (e.g. during actor lookup) could never be served its fetch-back while
-  the loop was busy inside the triggering request, so lookups of remote
-  actors/objects on instances that hadn't cached our key timed out
-  unconditionally — and stalled every other request meanwhile.
+### Added
+
 - `federation`: Explicit remote content discovery — look up remote actors
   (`@user@domain`), activities and resources by handle or URL from the
   search page. Lookups are dereferenced through a new SSRF-guarded fetcher
@@ -35,11 +28,7 @@ All notable changes to this project will be documented in this file.
   resolve straight to their SPA route — object permalinks
   (`/users/{u}/objects|statuses/{id}`) map through the local track and
   activity tables — instead of being rejected.
-- `federation`: Remote fetch timeout raised from 10s to 20s and made
-  configurable via `federation.fetch_timeout_seconds` (env
-  `SONGHIVE_FEDERATION__FETCH_TIMEOUT_SECONDS`, `config.toml`, or the
-  admin settings UI; 1–300s, applied per outbound request hop to
-  WebFinger, actor and object dereferencing).
+  ([`ff68a8a`](https://git.platypush.tech/blacklight/songhive/commit/ff68a8a662f27039a17fd9248be8586ec14fe108))
 - `federation`: Per-user follower approval policy (`accept`, `manual`,
   `reject`; default `accept`), configurable from `/settings` and PATCHed
   via `followers_approval` on `/api/v1/users/me`. `manual` holds incoming
@@ -58,6 +47,7 @@ All notable changes to this project will be documented in this file.
   storage and the `accept_follow_request`/`reject_follow_request`
   helpers (local `pubby>=0.3.8` checkouts built from source include
   them).
+  ([`862e453`](https://git.platypush.tech/blacklight/songhive/commit/862e453c6e179b2a6c2b6b1aad911e20573a4289))
 - `api`: Aggregate collection statistics. New `GET
   /api/v1/artists/{id}/stats`, `/albums/{id}/stats`,
   `/playlists/{id}/stats` and `/libraries/{id}/stats` endpoints return
@@ -65,21 +55,21 @@ All notable changes to this project will be documented in this file.
   playlists) computed with SQL `COUNT`/`SUM` queries filtered by the
   caller's access rights, so totals reflect only visible content and
   detail pages don't have to load every track.
+  ([`a724c8e`](https://git.platypush.tech/blacklight/songhive/commit/a724c8e77a83ef4b25019aec973db5c0ab6d8ab2))
 - `frontend`: Artist, album, playlist and library detail pages now show
   their aggregate stats in the header — track count, album count and
   total duration — via a shared `CollectionStats` component loaded
   asynchronously from the new stats endpoints, and refreshed when tracks
   are removed from the collection.
+  ([`a724c8e`](https://git.platypush.tech/blacklight/songhive/commit/a724c8e77a83ef4b25019aec973db5c0ab6d8ab2))
 - `frontend`: Allow searching for hashtags prefixed by "#" on the search page,
   and add tags autocomplete both to the search bar and the composer component.
+  ([`e126263`](https://git.platypush.tech/blacklight/songhive/commit/e126263405c55cf9b764992ee771a1a870bb2b4d))
 - `api`: Link preview cards for activity posts — the first bare URL in a post
   (mentions and hashtags excluded) is fetched in the background and cached per
   URL, preferring OpenGraph metadata with `<title>`/domain fallbacks, and
   rendered on the activity card. Controllable per instance and per user.
-- `federation`: Track `Audio` attachments now carry structured
-  `songhive:trackTitle`/`artistName`/`albumName`/`trackUrl` keys plus a
-  standard `image` entry with the cover art, so music-aware consumers can
-  render a rich player instead of guessing at the flat `name` label.
+  ([`24338ef`](https://git.platypush.tech/blacklight/songhive/commit/24338efc6fcc191e29253b786004a4e69279b93e))
 - `frontend`: Audio attachments on activity cards and remote replies render in
   a styled `ActivityAudioPlayer` — artwork, title/artist/album, seek, volume —
   with "Play in player" and "Add to queue" actions that hand the track to the
@@ -87,6 +77,161 @@ All notable changes to this project will be documented in this file.
   federated audio streams its media URL directly as a `remote` queue track
   (skipped in listen history, no local track links). Embedded players pause
   each other and the global player so only one source plays at a time.
+  ([`cfb7ffa`](https://git.platypush.tech/blacklight/songhive/commit/cfb7ffa549e93692dd9697aa4d51a2cbe5ff3a34))
+- `meta`: The SPA shell now carries entity-specific OpenGraph and
+  semantic tags — `og:*` metadata, `rel="tag"`/`rel="author"` links,
+  `music:*` relations and `fediverse:creator` — for tracks, albums,
+  artists, playlists, libraries, genres, tags and users, honoring ACL
+  visibility. The backend serves `index.html` through its fallback
+  route (nginx now proxies all non-streaming requests to it), so
+  crawlers and link unfurlers get real metadata on entity pages.
+  ([`912ec40`](https://git.platypush.tech/blacklight/songhive/commit/912ec40bd8058f377d31b35f22e85b005fd0ed2d))
+- `search`: Mention autocomplete can now match remote actors —
+  `GET /api/v1/search?remote_users=1` merges accounts cached in pubby's
+  follower/actor tables as `user@domain` handles, and the composer
+  accepts `user@domain` mention queries resolved through WebFinger.
+  ([`f8c33f0`](https://git.platypush.tech/blacklight/songhive/commit/f8c33f0b2b9e2048657219edb690ef88385affa6))
+- `ui`: Keyboard navigation for search suggestions — ArrowUp/ArrowDown
+  highlight entries and Enter selects, wired into both the search bar
+  and the composer's suggestion pickers.
+  ([`3167e17`](https://git.platypush.tech/blacklight/songhive/commit/3167e176916f33ed6289fef8f6a0d15b36c0f32e))
+- `activity-card`: The embedded audio player gained a download action.
+  ([`96120f7`](https://git.platypush.tech/blacklight/songhive/commit/96120f7701d71c9453d23e641376a829a430c85c))
+- `users`: Profile visibility (`public`/`local`/`private`, default
+  `public`) controls directory listings — `GET /api/v1/users` and the
+  users section of search show `local` profiles only to authenticated
+  callers and never list `private` ones; selectable from `/settings`.
+  ([`d1695e7`](https://git.platypush.tech/blacklight/songhive/commit/d1695e7268f47393704ae45f4eab83300e764185))
+- `webmentions`: Webmention support — a `/webmentions` receiver
+  materializes incoming mentions as activities and notifies owners,
+  while outgoing mentions for public local activities and interactions
+  are discovered and delivered; h-entry source pages are served at
+  `/webmentions/source/{activity_id}`.
+  ([`13b68ad`](https://git.platypush.tech/blacklight/songhive/commit/13b68ad9f9efaafb00612cceee7972a85e441b00))
+- `home`: The home page is reworked into Music/Activity tabs backed by
+  a new `GET /api/v1/timeline` endpoint (scopes, modes, keyset
+  pagination) and audience-specific shelves. Adds a public instance
+  stats endpoint gated by `public_stats_enabled`, and a
+  `single_user_username` setting that redirects anonymous `/` visitors
+  to that user's profile.
+  ([`d0b0108`](https://git.platypush.tech/blacklight/songhive/commit/d0b01084d64dbd483fca779b20de7faaa7a4272f))
+- `browse`: An "Only mine" toggle filters the album, artist, track,
+  library and playlist lists to content owned by the caller — artists
+  through the new `owner_username` list filter.
+  ([`d97928c`](https://git.platypush.tech/blacklight/songhive/commit/d97928c3ae0a775ce94fa6635731114c9080db8c))
+- `share`: The share dialog can now expose and copy a public track's
+  direct download URL alongside its page URL.
+  ([`7d1303a`](https://git.platypush.tech/blacklight/songhive/commit/7d1303a079c4fede78bb42d4fd8c2c248ce29268))
+- `meta`: Single-user instances advertise `rel="me"` — injected `<link>`
+  elements plus a `Link` response header on `/` (including the
+  single-user redirect) pointing at the configured user's profile.
+  ([`91c7ec1`](https://git.platypush.tech/blacklight/songhive/commit/91c7ec1bed7ec5558c913dbc898dcaf6d4bf6800))
+- `statuses`: Audio attachments can be imported into the library at
+  post time — `audio_import` options on statuses, replies, quotes,
+  edits and publishes, an `import_audio=false` upload flag to defer the
+  import, and composer UI to pick the target library.
+  ([`312b2e0`](https://git.platypush.tech/blacklight/songhive/commit/312b2e0257a2a5d9a05b15582c3a9fa4c78cc0e2))
+- `mentions`: A persistent mentions archive — mentions from local
+  activities, the ActivityPub inbox and Webmentions are recorded and
+  listed through `GET /api/v1/mentions/` (source/visibility filters,
+  pagination) and a new `/mentions` view.
+  ([`2582b7f`](https://git.platypush.tech/blacklight/songhive/commit/2582b7fc3598e51552a640bbbbee8364fcdd5520))
+- `federation`: Outbound follows — local users can follow local and
+  remote actors (`Follow`/`Undo(Follow)` delivery, follow/unfollow and
+  listing endpoints), and inbound remote activities are only
+  materialized for followed actors. Adds a remote-activity cache prune
+  task with admin endpoint, CLI command and retention config knobs.
+  ([`8acea4a`](https://git.platypush.tech/blacklight/songhive/commit/8acea4aab5491d30ad38c173fbb32d213145478f))
+- `subsonic`: Subsonic/OpenSubsonic API compatibility — a pluggable
+  adapter framework mounts `/rest` endpoints (auth, browsing,
+  streaming) so Subsonic clients can use the instance.
+  ([`6178e65`](https://git.platypush.tech/blacklight/songhive/commit/6178e65f9dcf50265223ed922b92210a1ae52dab))
+- `share`: Embed snippets for public entities — the share dialog's new
+  Embed tab generates `<audio>`/HTML, Markdown, `<script>` widget and
+  `<iframe>` snippets rendered by the standalone `/embed/:type/:id`
+  route, with `postMessage`-based iframe auto-resizing.
+  ([`9608b0c`](https://git.platypush.tech/blacklight/songhive/commit/9608b0ccbbfc007af16e170d1fadc5f80d25a357))
+- `federation`: Inbound `Announce` boosts are materialized as
+  activities — unknown boosted objects are dereferenced and cached,
+  `Undo(Announce)` retracts them, and boost counts/listings deduplicate
+  materialized rows against stored pubby interactions.
+  ([`01b8e6f`](https://git.platypush.tech/blacklight/songhive/commit/01b8e6feee11c5f449dbec5b1dfc563f7afd62af))
+- `feeds`: RSS/Atom feeds under `/feeds` for users, entities, artists,
+  collections, tags and genres, with `rel="alternate"` discovery links
+  injected server-side and a Feed button in the UI — gated by the feeds
+  config and the requester's ACL.
+  ([`101b593`](https://git.platypush.tech/blacklight/songhive/commit/101b5930e97739ce522920764f1f8278818975cb))
+- `federation`: Activity subscriptions now cover remote actors — the
+  profile bell on `/@user@domain` pages subscribes to their posts (and
+  follows them so activities keep arriving), fanning out `activity`
+  notifications for remote-authored activities.
+  ([`f304945`](https://git.platypush.tech/blacklight/songhive/commit/f30494592c62ef948ed3e6b17de398edcf4052b5))
+- `audit`: Audit target types are canonicalized into an
+  `AuditTargetType` enum enforced by `audit.log_action`, and
+  `GET /api/v1/admin/audit/target-types` feeds the admin audit-view
+  filter options.
+  ([`17eb603`](https://git.platypush.tech/blacklight/songhive/commit/17eb60365ee4c5123f53f92b1f78f4b7b0310e29))
+
+### Changed
+
+- `federation`: Remote fetch timeout raised from 10s to 20s and made
+  configurable via `federation.fetch_timeout_seconds` (env
+  `SONGHIVE_FEDERATION__FETCH_TIMEOUT_SECONDS`, `config.toml`, or the
+  admin settings UI; 1–300s, applied per outbound request hop to
+  WebFinger, actor and object dereferencing).
+  ([`ff68a8a`](https://git.platypush.tech/blacklight/songhive/commit/ff68a8a662f27039a17fd9248be8586ec14fe108))
+- `federation`: Track `Audio` attachments now carry structured
+  `songhive:trackTitle`/`artistName`/`albumName`/`trackUrl` keys plus a
+  standard `image` entry with the cover art, so music-aware consumers can
+  render a rich player instead of guessing at the flat `name` label.
+  ([`cfb7ffa`](https://git.platypush.tech/blacklight/songhive/commit/cfb7ffa549e93692dd9697aa4d51a2cbe5ff3a34))
+- `history`: History entries now include the track's cover `image_url`,
+  surfaced through the home shelves.
+  ([`72bec4d`](https://git.platypush.tech/blacklight/songhive/commit/72bec4d31edf026cddff0792772b901742144d03))
+- `home`: Activities list layout on small screens — full-bleed negative
+  side margins on mobile (restored at ≥768px) and no right-aligned
+  controls.
+  ([`571734d`](https://git.platypush.tech/blacklight/songhive/commit/571734d0a8fc8e86f1864d803336b6d75c679cc9))
+- `tags`: Normalized the center margin of activity results under
+  `/tags`.
+  ([`31df41c`](https://git.platypush.tech/blacklight/songhive/commit/31df41c7f129322c7ba6c36c7715e28b4550b54b))
+- `ui`: Thinner scrollbars.
+  ([`e3a318f`](https://git.platypush.tech/blacklight/songhive/commit/e3a318fbf61eda6ee7765aed8a626d6bb51ca92d))
+
+### Fixed
+
+- `server`: Fixed single-flight request handling under Tornado — the
+  `WSGIContainer` bridging FastAPI via `a2wsgi` now runs on an explicit
+  `ThreadPoolExecutor` instead of the Tornado event-loop thread. The
+  previous setup serialized all API requests and deadlocked outbound
+  signed federation fetches: a remote instance resolving our `keyId`
+  (e.g. during actor lookup) could never be served its fetch-back while
+  the loop was busy inside the triggering request, so lookups of remote
+  actors/objects on instances that hadn't cached our key timed out
+  unconditionally — and stalled every other request meanwhile.
+  ([`ff68a8a`](https://git.platypush.tech/blacklight/songhive/commit/ff68a8a662f27039a17fd9248be8586ec14fe108))
+- `api`: `HEAD` requests are served as bodyless `GET` responses instead
+  of 405s — the bodies previously emitted for `HEAD` made the
+  Tornado/a2wsgi bridge raise `HTTPOutputError`, surfacing as 502s to
+  crawlers probing pages and `og:image` URLs.
+  ([`d322cef`](https://git.platypush.tech/blacklight/songhive/commit/d322cef071c5db0f34f950b3ae69448b6f621883))
+- `federation`: Unpublished tracks now serve the SPA to mixed-`Accept`
+  clients (ActivityPub + `text/html`, e.g. card crawlers) instead of
+  404ing; pure ActivityPub dereferences still get a 404.
+  ([`8a8fc2b`](https://git.platypush.tech/blacklight/songhive/commit/8a8fc2b079fa2cac6d6b5bb0c72346ec3d178fdf))
+- `webmentions`: Remote fetches now go through the library's
+  SSRF-guarded fetcher (per-hop redirect revalidation, streamed body
+  cap, local-target exclusion), and transient request errors are
+  re-raised so Celery `autoretry_for` applies instead of silently
+  dropping accepted mentions.
+  ([`4816e86`](https://git.platypush.tech/blacklight/songhive/commit/4816e861692ac154dfb8c4f2c26032c426303a89))
+- `api-tokens`: Revoked token names can be reused — recreating a
+  revoked token rotates its `jti` and replaces the row in place, while
+  reusing an active name is rejected with 409.
+  ([`5ab455b`](https://git.platypush.tech/blacklight/songhive/commit/5ab455b4955c27c9705eb72d57dd2748935b4da2))
+- `library`: Library and playlist cards now display the owner when it
+  isn't the viewer.
+  ([`c5cc5b8`](https://git.platypush.tech/blacklight/songhive/commit/c5cc5b8b339f6117c29e69ea18f06b0667a33058))
 
 ## 0.1.4
 
