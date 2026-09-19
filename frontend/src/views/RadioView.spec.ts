@@ -98,7 +98,11 @@ describe("RadioView", () => {
 
     await mountView();
 
-    expect(radiosApi.listRadios).toHaveBeenCalledWith({ limit: 20, offset: 0 });
+    expect(radiosApi.listRadios).toHaveBeenCalledWith({
+      limit: 20,
+      offset: 0,
+      collection: true,
+    });
     expect(wrapper.text()).toContain("Test Radio");
     expect(wrapper.text()).toContain("A description");
     expect(wrapper.text()).toContain(i18n.global.t("browse.visibility.public"));
@@ -241,7 +245,11 @@ describe("RadioView", () => {
     await loadMore?.trigger("click");
     await flushPromises();
 
-    expect(listRadios).toHaveBeenLastCalledWith({ limit: 20, offset: 20 });
+    expect(listRadios).toHaveBeenLastCalledWith({
+      limit: 20,
+      offset: 20,
+      collection: true,
+    });
     expect(wrapper.text()).toContain("Station 20");
   });
 

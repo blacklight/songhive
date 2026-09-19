@@ -7,7 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 import * as tracksApi from "@/api/tracks";
 import type { TrackResponse, ListTracksResult } from "@/api/tracks";
 import TracksView from "./TracksView.vue";
-import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
+import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 vi.mock("@/api/tracks", () => ({
   listTracksWithMeta: vi.fn(),
@@ -256,17 +256,20 @@ describe("TracksView", () => {
     expect(wrapper.text()).toContain("Song 20");
   });
 
-  it("hides the only-mine toggle when signed out", async () => {
+  it("hides the collection toggle when signed out", async () => {
     wrapper = mount(TracksView, {
       global: { plugins: [createTestRouter()] },
     });
     await flushPromises();
 
-    const toggle = wrapper.findComponent(OnlyMineToggle);
+    const toggle = wrapper.findComponent(CollectionToggle);
     expect(toggle.find('input[type="checkbox"]').exists()).toBe(false);
+    expect(tracksApi.listTracksWithMeta).toHaveBeenLastCalledWith(
+      expect.objectContaining({ collection: undefined }),
+    );
   });
 
-  it("filters by the current user when the only-mine toggle is enabled", async () => {
+  it("enables the collection filter by default when signed in", async () => {
     setAuthenticated();
     const fetcher = vi.mocked(tracksApi.listTracksWithMeta);
 
@@ -276,15 +279,32 @@ describe("TracksView", () => {
     await flushPromises();
 
     const checkbox = wrapper
-      .findComponent(OnlyMineToggle)
+      .findComponent(CollectionToggle)
       .find('input[type="checkbox"]');
     expect(checkbox.exists()).toBe(true);
+    expect((checkbox.element as HTMLInputElement).checked).toBe(true);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ collection: true }),
+    );
+  });
 
-    await checkbox.setValue(true);
+  it("drops the collection filter when the toggle is disabled", async () => {
+    setAuthenticated();
+    const fetcher = vi.mocked(tracksApi.listTracksWithMeta);
+
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const checkbox = wrapper
+      .findComponent(CollectionToggle)
+      .find('input[type="checkbox"]');
+    await checkbox.setValue(false);
     await flushPromises();
 
     expect(fetcher).toHaveBeenLastCalledWith(
-      expect.objectContaining({ owner_username: "alice" }),
+      expect.objectContaining({ collection: undefined }),
     );
   });
 });

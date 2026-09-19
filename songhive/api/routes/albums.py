@@ -2,7 +2,7 @@
 Album routes.
 """
 
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 from fastapi import (
     APIRouter,
@@ -23,7 +23,7 @@ from ...models._enums import Visibility
 from ...models.audit_log import AuditTargetType
 from ...models.track import Track
 from ...models.user import User
-from ...services import acl, audit, deletion, music
+from ...services import acl, audit, collection, deletion, music
 from ...services.auth import get_user_by_username
 from ...services.federation import unpublish_track_activity
 from ...services.genres import (
@@ -82,6 +82,7 @@ class AlbumResponse(BaseModel):
     genre: Optional[str] = None
     owner_id: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+    in_collection: bool = False
     artist: Optional[ArtistSummary] = None
     owner: Optional[UserSummary] = None
     tracks: Optional[List[TrackSummary]] = None
@@ -144,6 +145,7 @@ async def _build_album_response(
     user: Optional[User],
     storage: StorageService,
     include: IncludeQuery,
+    saved_ids: Optional[Set[str]] = None,
 ) -> AlbumResponse:
     """Build an AlbumResponse with optional nested summaries."""
     artist = None
@@ -175,6 +177,8 @@ async def _build_album_response(
         genre=album.genre,
         owner_id=owner_id,
         visibility=album.visibility,
+        in_collection=user is not None
+        and (album.owner_id == user.id or (saved_ids is not None and str(album.id) in saved_ids)),
         artist=artist,
         owner=owner,
         tracks=tracks,
@@ -192,6 +196,11 @@ async def list_albums(
     year_to: Optional[int] = Query(None),
     genre: Optional[str] = Query(None, description="Filter by genre name"),
     owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
+    collection_only: Optional[bool] = Query(
+        None,
+        alias="collection",
+        description="Only return albums in the current user's collection (owned or saved)",
+    ),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"title", "artist_name", "created_at", "updated_at", "release_year"}, "title")),
@@ -217,6 +226,7 @@ async def list_albums(
         genre=genre,
         owner_id=owner_id,
         user=user,
+        collection=collection_only,
     )
     rows = await music.list_albums(
         db,
@@ -227,6 +237,7 @@ async def list_albums(
         genre=genre,
         owner_id=owner_id,
         user=user,
+        collection=collection_only,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),
@@ -234,7 +245,8 @@ async def list_albums(
         sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
-    return [await _build_album_response(a, user, storage, include) for a in rows]
+    saved_ids = await collection.saved_item_ids(db, user, "album", [str(a.id) for a in rows])
+    return [await _build_album_response(a, user, storage, include, saved_ids) for a in rows]
 
 
 @router.get(
@@ -254,7 +266,8 @@ async def get_album(
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    return await _build_album_response(album, user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, user, "album", {album_id})
+    return await _build_album_response(album, user, storage, include, saved_ids)
 
 
 @router.get(
@@ -349,7 +362,8 @@ async def update_album(
             _enqueue_track_tag_sync(track_id)
 
     album = await music.get_album(db, album_id, include=set(include.values) | {"artist"})
-    return await _build_album_response(album, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
+    return await _build_album_response(album, current_user, storage, include, saved_ids)
 
 
 @router.post("/{album_id}/cover", response_model=AlbumResponse)
@@ -397,7 +411,8 @@ async def upload_album_cover(
     for track_id in track_ids:
         _enqueue_track_tag_sync(track_id)
 
-    return await _build_album_response(album, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
+    return await _build_album_response(album, current_user, storage, include, saved_ids)
 
 
 @router.delete("/{album_id}/cover", response_model=AlbumResponse)
@@ -436,7 +451,8 @@ async def delete_album_cover(
     for track_id in track_ids:
         _enqueue_track_tag_sync(track_id)
 
-    return await _build_album_response(album, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
+    return await _build_album_response(album, current_user, storage, include, saved_ids)
 
 
 @router.delete("/{album_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
@@ -593,7 +609,8 @@ async def add_album_tags(
         ip_address=client_ip(request),
     )
     await db.commit()
-    return await _build_album_response(album, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
+    return await _build_album_response(album, current_user, storage, include, saved_ids)
 
 
 @router.delete("/{album_id}/tags/{tag}", response_model=AlbumResponse)
@@ -636,7 +653,8 @@ async def remove_album_tag(
         ip_address=client_ip(request),
     )
     await db.commit()
-    return await _build_album_response(album, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
+    return await _build_album_response(album, current_user, storage, include, saved_ids)
 
 
 @router.post("/{album_id}/genres", response_model=AlbumResponse)
@@ -699,7 +717,8 @@ async def set_album_genres(
     for track_id in track_ids:
         _enqueue_track_tag_sync(track_id)
 
-    return await _build_album_response(album, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
+    return await _build_album_response(album, current_user, storage, include, saved_ids)
 
 
 @router.delete("/{album_id}/genres/{genre}", response_model=AlbumResponse)
@@ -755,4 +774,5 @@ async def remove_album_genre(
     for track_id in track_ids:
         _enqueue_track_tag_sync(track_id)
 
-    return await _build_album_response(album, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
+    return await _build_album_response(album, current_user, storage, include, saved_ids)

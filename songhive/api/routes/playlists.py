@@ -24,7 +24,7 @@ from ...models._enums import Visibility
 from ...models.audit_log import AuditTargetType
 from ...models.playlist import Playlist
 from ...models.user import User
-from ...services import acl, audit, deletion, music
+from ...services import acl, audit, collection, deletion, music
 from ...services.auth import get_user_by_username
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
@@ -64,6 +64,7 @@ class PlaylistResponse(BaseModel):
     visibility: str = Visibility.PRIVATE.value
     image_url: Optional[str] = None
     cover_url: Optional[str] = None
+    in_collection: bool = False
     owner: Optional[UserSummary] = None
     tracks: Optional[List[TrackSummary]] = None
     tags: List[str] = []
@@ -154,6 +155,7 @@ async def _build_playlist_response(
     user: Optional[User],
     storage: StorageService,
     include: IncludeQuery,
+    saved_ids: Optional[Set[str]] = None,
 ) -> PlaylistResponse:
     """Build a PlaylistResponse with optional nested summaries."""
     owner = None
@@ -179,6 +181,8 @@ async def _build_playlist_response(
         visibility=playlist.visibility,
         image_url=await _playlist_image_url(playlist, storage),
         cover_url=await _playlist_cover_url(playlist, storage),
+        in_collection=user is not None
+        and (playlist.owner_id == user.id or (saved_ids is not None and str(playlist.id) in saved_ids)),
         owner=owner,
         tracks=tracks,
         tags=_playlist_tags(playlist),
@@ -190,6 +194,11 @@ async def list_playlists(
     response: Response,
     q: Optional[str] = Query(None, description="Search playlists"),
     owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
+    collection_only: Optional[bool] = Query(
+        None,
+        alias="collection",
+        description="Only return playlists in the current user's collection (owned or saved)",
+    ),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
@@ -206,12 +215,13 @@ async def list_playlists(
     else:
         owner_id = None
 
-    total = await music.count_playlists(db, user=user, owner_id=owner_id, query=q)
+    total = await music.count_playlists(db, user=user, owner_id=owner_id, query=q, collection=collection_only)
     rows = await music.list_playlists(
         db,
         user=user,
         owner_id=owner_id,
         query=q,
+        collection=collection_only,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),
@@ -219,7 +229,8 @@ async def list_playlists(
         sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
-    return [await _build_playlist_response(p, user, storage, include) for p in rows]
+    saved_ids = await collection.saved_item_ids(db, user, "playlist", [str(p.id) for p in rows])
+    return [await _build_playlist_response(p, user, storage, include, saved_ids) for p in rows]
 
 
 @router.post("/", response_model=PlaylistResponse, status_code=201)
@@ -245,6 +256,7 @@ async def create_playlist(
         owner_id=playlist.owner_id,
         description=playlist.description,
         visibility=playlist.visibility,
+        in_collection=True,
     )
 
 
@@ -266,7 +278,8 @@ async def get_playlist(
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
 
-    return await _build_playlist_response(playlist, user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, user, "playlist", {playlist_id})
+    return await _build_playlist_response(playlist, user, storage, include, saved_ids)
 
 
 @router.get(
@@ -331,7 +344,8 @@ async def update_playlist(
     )
     await db.commit()
 
-    return await _build_playlist_response(playlist, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
 
 
 @router.post("/{playlist_id}/image", response_model=PlaylistResponse)
@@ -376,7 +390,8 @@ async def upload_playlist_image(
     )
     await db.commit()
 
-    return await _build_playlist_response(playlist, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
 
 
 @router.post("/{playlist_id}/cover", response_model=PlaylistResponse)
@@ -421,7 +436,8 @@ async def upload_playlist_cover(
     )
     await db.commit()
 
-    return await _build_playlist_response(playlist, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
 
 
 @router.delete("/{playlist_id}/image", response_model=PlaylistResponse)
@@ -457,7 +473,8 @@ async def delete_playlist_image(
     )
     await db.commit()
 
-    return await _build_playlist_response(playlist, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
 
 
 @router.delete("/{playlist_id}/cover", response_model=PlaylistResponse)
@@ -493,7 +510,8 @@ async def delete_playlist_cover(
     )
     await db.commit()
 
-    return await _build_playlist_response(playlist, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
 
 
 async def _resolve_track_ids(
@@ -847,7 +865,8 @@ async def add_playlist_tags(
         ip_address=client_ip(request),
     )
     await db.commit()
-    return await _build_playlist_response(playlist, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
 
 
 @router.delete("/{playlist_id}/tags/{tag}", response_model=PlaylistResponse)
@@ -892,4 +911,5 @@ async def remove_playlist_tag(
         ip_address=client_ip(request),
     )
     await db.commit()
-    return await _build_playlist_response(playlist, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)

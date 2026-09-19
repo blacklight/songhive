@@ -5,6 +5,7 @@ from .api_token import ApiToken
 from .artist import Artist
 from .audit_log import AuditLog, AuditTargetType
 from .base import Base, get_session, init_db, reset_db
+from .collection_item import CollectionItem
 from .external_library import ExternalLibrary
 from .external_sync_run import ExternalSyncRun
 from .external_track import ExternalTrack
@@ -48,6 +49,7 @@ __all__ = [
     "AuditLog",
     "AuditTargetType",
     "Base",
+    "CollectionItem",
     "ExternalLibrary",
     "ExternalSyncRun",
     "ExternalTrack",

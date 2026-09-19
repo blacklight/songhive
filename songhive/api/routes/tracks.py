@@ -37,7 +37,7 @@ from ...models.audit_log import AuditTargetType
 from ...models.external_track import ExternalTrack
 from ...models.stored_file import StoredFile
 from ...models.user import User
-from ...services import acl, activities, audit, deletion, music, notifications
+from ...services import acl, activities, audit, collection, deletion, music, notifications
 from ...services.auth import get_user_by_id, get_user_by_username
 from ...services.federation import ensure_user_actor, unpublish_track_activity
 from ...services.genres import (
@@ -434,6 +434,7 @@ async def _build_track_response(
     storage: StorageService,
     include: IncludeQuery,
     favorited_track_ids: Optional[Set[str]] = None,
+    saved_ids: Optional[Set[str]] = None,
 ) -> TrackResponse:
     """Build a TrackResponse with optional nested summaries."""
     artist = None
@@ -448,6 +449,9 @@ async def _build_track_response(
         owner = await build_user_summary(track.owner)
 
     favorited = bool(str(track.id) in (favorited_track_ids or []) if user else False)
+    in_collection = bool(
+        user and (favorited or track.owner_id == user.id or (saved_ids is not None and str(track.id) in saved_ids))
+    )
 
     is_external = False
     external_library_id: Optional[str] = None
@@ -507,6 +511,7 @@ async def _build_track_response(
         tags=_track_tags(track),
         genres=_track_genres(track),
         favorited=favorited,
+        in_collection=in_collection,
         is_external=is_external,
         external_library_id=external_library_id,
         external_track_id=external_track_id,
@@ -600,6 +605,11 @@ async def list_tracks(
     favorited: Optional[bool] = Query(None, description="Only return tracks favorited by the current user"),
     around_track_id: Optional[str] = Query(None, description="Center the returned chunk on this track"),
     owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
+    collection_only: Optional[bool] = Query(
+        None,
+        alias="collection",
+        description="Only return tracks in the current user's collection (owned, favorited, or saved)",
+    ),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(
@@ -635,6 +645,7 @@ async def list_tracks(
         user=user,
         favorited=favorited,
         owner_id=owner_id,
+        collection=collection_only,
     )
     rows, effective_offset = await music.list_tracks(
         db,
@@ -655,6 +666,7 @@ async def list_tracks(
         sort_dir=sort.direction,
         favorited=favorited,
         owner_id=owner_id,
+        collection=collection_only,
     )
     pagination.set_total(response, total)
     response.headers["X-List-Offset"] = str(effective_offset)
@@ -663,7 +675,8 @@ async def list_tracks(
         user,
         {str(t.id) for t in rows},
     )
-    return [await _build_track_response(t, user, storage, include, favorited_ids) for t in rows]
+    saved_ids = await collection.saved_item_ids(db, user, "track", {str(t.id) for t in rows})
+    return [await _build_track_response(t, user, storage, include, favorited_ids, saved_ids) for t in rows]
 
 
 @router.get(
@@ -684,7 +697,8 @@ async def get_track(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     favorited_ids = await music.get_favorited_track_ids(db, user, {track_id})
-    return await _build_track_response(track, user, storage, include, favorited_ids)
+    saved_ids = await collection.saved_item_ids(db, user, "track", {track_id})
+    return await _build_track_response(track, user, storage, include, favorited_ids, saved_ids)
 
 
 @router.patch("/{track_id}", response_model=TrackResponse)
@@ -842,7 +856,8 @@ async def update_track(
 
     track = await music.get_track(db, track_id, include=set(include.values) | {"artist"})
     assert track  # for mypy
-    return await _build_track_response(track, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
 
 
 @router.post("/{track_id}/image", response_model=TrackResponse)
@@ -888,7 +903,8 @@ async def upload_track_image(
     await db.commit()
     _enqueue_track_tag_sync(track_id)
 
-    return await _build_track_response(track, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
 
 
 @router.delete("/{track_id}/image", response_model=TrackResponse)
@@ -925,7 +941,8 @@ async def delete_track_image(
     await db.commit()
     _enqueue_track_tag_sync(track_id)
 
-    return await _build_track_response(track, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
 
 
 @router.delete("/bulk", status_code=status.HTTP_200_OK, dependencies=[Depends(rate_limit_account)])
@@ -1231,7 +1248,8 @@ async def add_track_tags(
     )
     await db.commit()
     assert track  # for mypy
-    return await _build_track_response(track, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
 
 
 @router.delete("/{track_id}/tags/{tag}", response_model=TrackResponse)
@@ -1275,7 +1293,8 @@ async def remove_track_tag(
     )
     await db.commit()
     assert track  # for mypy
-    return await _build_track_response(track, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
 
 
 @router.post("/{track_id}/genres", response_model=TrackResponse)
@@ -1346,7 +1365,8 @@ async def set_track_genres(
     else:
         _enqueue_track_tag_sync(track_id)
 
-    return await _build_track_response(track, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
 
 
 @router.delete("/{track_id}/genres/{genre}", response_model=TrackResponse)
@@ -1411,4 +1431,5 @@ async def remove_track_genre(
     else:
         _enqueue_track_tag_sync(track_id)
 
-    return await _build_track_response(track, current_user, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids)

@@ -114,5 +114,6 @@ export function attachmentToQueueTrack(
     stream_url: info.url,
     remote: true,
     remote_url: info.trackUrl,
+    in_collection: false,
   };
 }

@@ -1084,7 +1084,7 @@
       "empty": "No {entity} found.",
       "loadMore": "Load more",
       "loadPrevious": "Load previous",
-      "onlyMine": "Show only mine",
+      "myCollection": "My collection",
       "createPlaylist": "Create playlist",
       "createLibrary": "Create library",
       "newPlaylist": "New playlist",
@@ -1308,6 +1308,14 @@
     },
     "createPlaylist": "Playlist created.",
     "createLibrary": "Library created.",
+    "collection": {
+      "save": "Save to my collection",
+      "remove": "Remove from my collection",
+      "saveSuccess": "Saved to your collection.",
+      "removeSuccess": "Removed from your collection.",
+      "saveError": "Could not save: {message}",
+      "removeError": "Could not remove: {message}"
+    },
     "playlist": {
       "empty": "No tracks in this playlist yet."
     }

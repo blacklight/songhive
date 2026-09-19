@@ -2,7 +2,7 @@
 Artist routes.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from fastapi import (
     APIRouter,
@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.audit_log import AuditTargetType
 from ...models.user import User
-from ...services import acl, audit, deletion, music
+from ...services import acl, audit, collection, deletion, music
 from ...services.auth import get_user_by_username
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
@@ -63,6 +63,7 @@ class ArtistResponse(BaseModel):
     cover_url: Optional[str] = None
     albums: Optional[List[AlbumSummary]] = None
     tracks: Optional[List[TrackSummary]] = None
+    in_collection: bool = False
     tags: List[str] = []
 
 
@@ -115,6 +116,7 @@ async def _build_artist_response(
     artist,
     storage: StorageService,
     include: IncludeQuery,
+    saved_ids: Optional[Set[str]] = None,
 ) -> ArtistResponse:
     """Build an ArtistResponse with optional nested summaries."""
     albums = None
@@ -148,6 +150,7 @@ async def _build_artist_response(
         cover_url=await _cover_url(artist, storage),
         albums=albums,
         tracks=tracks,
+        in_collection=saved_ids is not None and str(artist.id) in saved_ids,
         tags=_artist_tags(artist),
     )
 
@@ -157,6 +160,11 @@ async def list_artists(
     response: Response,
     q: Optional[str] = Query(None, description="Search query"),
     owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
+    collection_only: Optional[bool] = Query(
+        None,
+        alias="collection",
+        description="Only return artists in the current user's collection (saved)",
+    ),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
@@ -173,12 +181,13 @@ async def list_artists(
     else:
         owner_id = None
 
-    total = await music.count_artists(db, query=q, user=user, owner_id=owner_id)
+    total = await music.count_artists(db, query=q, user=user, owner_id=owner_id, collection=collection_only)
     rows = await music.list_artists(
         db,
         query=q,
         user=user,
         owner_id=owner_id,
+        collection=collection_only,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),
@@ -186,12 +195,14 @@ async def list_artists(
         sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
-    return [await _build_artist_response(a, storage, include) for a in rows]
+    saved_ids = await collection.saved_item_ids(db, user, "artist", [str(a.id) for a in rows])
+    return [await _build_artist_response(a, storage, include, saved_ids) for a in rows]
 
 
 @router.get("/{artist_id}", response_model=ArtistResponse)
 async def get_artist(
     artist_id: str,
+    user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     include: IncludeQuery = Depends(get_include({"albums", "tracks", "tags"})),
@@ -201,7 +212,8 @@ async def get_artist(
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    return await _build_artist_response(artist, storage, include)
+    saved_ids = await collection.saved_item_ids(db, user, "artist", {artist_id})
+    return await _build_artist_response(artist, storage, include, saved_ids)
 
 
 @router.get("/{artist_id}/stats", response_model=ArtistStatsResponse)
@@ -264,7 +276,8 @@ async def update_artist(
         for track_id in track_ids:
             _enqueue_track_tag_sync(track_id)
 
-    return await _build_artist_response(artist, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
+    return await _build_artist_response(artist, storage, include, saved_ids)
 
 
 @router.post("/{artist_id}/image", response_model=ArtistResponse)
@@ -308,7 +321,8 @@ async def upload_artist_image(
     )
     await db.commit()
 
-    return await _build_artist_response(artist, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
+    return await _build_artist_response(artist, storage, include, saved_ids)
 
 
 @router.post("/{artist_id}/cover", response_model=ArtistResponse)
@@ -352,7 +366,8 @@ async def upload_artist_cover(
     )
     await db.commit()
 
-    return await _build_artist_response(artist, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
+    return await _build_artist_response(artist, storage, include, saved_ids)
 
 
 @router.delete("/{artist_id}/image", response_model=ArtistResponse)
@@ -388,7 +403,8 @@ async def delete_artist_image(
     )
     await db.commit()
 
-    return await _build_artist_response(artist, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
+    return await _build_artist_response(artist, storage, include, saved_ids)
 
 
 @router.delete("/{artist_id}/cover", response_model=ArtistResponse)
@@ -424,7 +440,8 @@ async def delete_artist_cover(
     )
     await db.commit()
 
-    return await _build_artist_response(artist, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
+    return await _build_artist_response(artist, storage, include, saved_ids)
 
 
 @router.delete("/{artist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
@@ -535,7 +552,8 @@ async def add_artist_tags(
         ip_address=client_ip(request),
     )
     await db.commit()
-    return await _build_artist_response(artist, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
+    return await _build_artist_response(artist, storage, include, saved_ids)
 
 
 @router.delete("/{artist_id}/tags/{tag}", response_model=ArtistResponse)
@@ -578,4 +596,5 @@ async def remove_artist_tag(
         ip_address=client_ip(request),
     )
     await db.commit()
-    return await _build_artist_response(artist, storage, include)
+    saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
+    return await _build_artist_response(artist, storage, include, saved_ids)

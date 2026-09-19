@@ -17,6 +17,7 @@ import {
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
+import { useCollectionItem } from "@/composables/useCollectionItem";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
@@ -94,6 +95,11 @@ const { canManage } = useCanManage(
 
 const isPublic = computed(() => library.value?.visibility === "public");
 
+const { collectionAction, toggleCollection } = useCollectionItem(
+  "library",
+  library,
+);
+
 const deleteLibrary = useEntityDelete({
   delete: deleteLibraryApi,
   entity: t("browse.entities.library"),
@@ -157,6 +163,7 @@ function onTrackSort(field: string, direction: "asc" | "desc") {
 }
 
 const actions = computed(() => [
+  collectionAction.value,
   {
     key: "share",
     label: t("common.share"),
@@ -190,6 +197,9 @@ const actions = computed(() => [
 async function onAction(key: string) {
   if (!library.value) return;
   switch (key) {
+    case "collection":
+      await toggleCollection();
+      break;
     case "share":
       openShare(
         "library",

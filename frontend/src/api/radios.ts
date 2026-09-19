@@ -10,6 +10,7 @@ export type RadioCreate = components["schemas"]["RadioCreate"];
 export type { Visibility } from "./libraries";
 
 export function listRadios(params?: {
+  collection?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<RadioResponse[]> {

@@ -16,6 +16,7 @@ export function listTracks(params?: {
   year_to?: number;
   library_id?: string;
   owner_username?: string;
+  collection?: boolean;
   limit?: number;
   offset?: number;
   include?: string;
@@ -42,6 +43,7 @@ export async function listTracksWithMeta(params?: {
   year_to?: number;
   library_id?: string;
   owner_username?: string;
+  collection?: boolean;
   limit?: number;
   offset?: number;
   include?: string;

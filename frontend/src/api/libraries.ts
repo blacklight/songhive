@@ -12,6 +12,7 @@ export type Visibility = components["schemas"]["Visibility"];
 export function listLibraries(params?: {
   q?: string;
   owner_username?: string;
+  collection?: boolean;
   include_external?: boolean;
   limit?: number;
   offset?: number;
@@ -31,6 +32,7 @@ export interface ListLibrariesResult {
 export async function listLibrariesWithMeta(params?: {
   q?: string;
   owner_username?: string;
+  collection?: boolean;
   include_external?: boolean;
   limit?: number;
   offset?: number;

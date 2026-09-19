@@ -11,6 +11,7 @@ export function listAlbums(params?: {
   year_to?: number;
   genre?: string;
   owner_username?: string;
+  collection?: boolean;
   limit?: number;
   offset?: number;
   include?: string;
@@ -33,6 +34,7 @@ export async function listAlbumsWithMeta(params?: {
   year_to?: number;
   genre?: string;
   owner_username?: string;
+  collection?: boolean;
   limit?: number;
   offset?: number;
   include?: string;

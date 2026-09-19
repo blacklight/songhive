@@ -25,6 +25,7 @@ from ..models.track import Track
 from ..models.user import User
 from ._common import ilike_contains
 from .acl import apply_access_filter
+from .collection import apply_collection_filter, in_collection_clause
 from .genres import InvalidGenreName, validate_genre_name
 
 
@@ -198,13 +199,16 @@ def _build_artists_stmt(
     query: Optional[str] = None,
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
+    collection: Optional[bool] = None,
 ) -> Select[Any]:
     """Build a statement for listing/counting artists.
 
     Artists carry no ACL of their own, so non-admin requesters only see
     artists that have at least one track or album they can access. When
     ``owner_id`` is set, artists must additionally have at least one track
-    or album owned by that user.
+    or album owned by that user. When ``collection`` is set, artists must
+    instead be saved to the requester's collection or have at least one
+    accessible track or album in it.
     """
     stmt = select(Artist)
     if query:
@@ -219,6 +223,35 @@ def _build_artists_stmt(
             Album.owner_id == owner_id,
         )
         stmt = stmt.where(or_(exists(owned_tracks), exists(owned_albums)))
+    if collection:
+        if user is None:
+            stmt = stmt.where(false())
+        else:
+            collected_tracks = apply_access_filter(
+                select(Track.id).where(
+                    Track.artist_id == Artist.id,
+                    in_collection_clause(Track, "track", user),
+                ),
+                Track,
+                user,
+                "track",
+            )
+            collected_albums = apply_access_filter(
+                select(Album.id).where(
+                    Album.artist_id == Artist.id,
+                    in_collection_clause(Album, "album", user),
+                ),
+                Album,
+                user,
+                "album",
+            )
+            stmt = stmt.where(
+                or_(
+                    exists(collected_tracks),
+                    exists(collected_albums),
+                    in_collection_clause(Artist, "artist", user),
+                )
+            )
     if user is None or not user.is_admin:
         accessible_tracks = apply_access_filter(
             select(Track.id).where(Track.artist_id == Artist.id),
@@ -241,6 +274,7 @@ async def list_artists(
     query: Optional[str] = None,
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
+    collection: Optional[bool] = None,
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
@@ -249,7 +283,9 @@ async def list_artists(
 ) -> List[Artist]:
     """List artists with optional search and sorting, honouring the requester's ACL."""
     field = getattr(Artist, sort_by)
-    stmt = _build_artists_stmt(query=query, user=user, owner_id=owner_id).options(*_artist_selectin_options(include))
+    stmt = _build_artists_stmt(query=query, user=user, owner_id=owner_id, collection=collection).options(
+        *_artist_selectin_options(include)
+    )
     stmt = _apply_sort(stmt, field, sort_dir, Artist.id)
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -261,9 +297,10 @@ async def count_artists(
     query: Optional[str] = None,
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
+    collection: Optional[bool] = None,
 ) -> int:
     """Return the total number of artists matching the optional search and ACL."""
-    stmt = _build_artists_stmt(query=query, user=user, owner_id=owner_id)
+    stmt = _build_artists_stmt(query=query, user=user, owner_id=owner_id, collection=collection)
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
 
@@ -355,6 +392,8 @@ def _build_albums_stmt(
     year_to: Optional[int] = None,
     genre: Optional[str] = None,
     owner_id: Optional[str] = None,
+    collection: Optional[bool] = None,
+    user: Optional[User] = None,
 ) -> Select[Any]:
     """Build a statement for listing/counting albums."""
     stmt = select(Album)
@@ -383,6 +422,7 @@ def _build_albums_stmt(
                     .where(Genre.name == genre_name)
                 )
             )
+    stmt = apply_collection_filter(stmt, Album, user, "album", collection)
     return stmt
 
 
@@ -394,6 +434,7 @@ async def list_albums(
     year_to: Optional[int] = None,
     genre: Optional[str] = None,
     owner_id: Optional[str] = None,
+    collection: Optional[bool] = None,
     user: Optional[User] = None,
     limit: int = 20,
     offset: int = 0,
@@ -409,6 +450,8 @@ async def list_albums(
         year_to=year_to,
         genre=genre,
         owner_id=owner_id,
+        collection=collection,
+        user=user,
     ).options(*_album_selectin_options(include))
     stmt = apply_access_filter(stmt, Album, user, "album")
     field = (
@@ -432,6 +475,7 @@ async def count_albums(
     year_to: Optional[int] = None,
     genre: Optional[str] = None,
     owner_id: Optional[str] = None,
+    collection: Optional[bool] = None,
     user: Optional[User] = None,
 ) -> int:
     """Return the total number of albums matching the filters and ACL."""
@@ -442,6 +486,8 @@ async def count_albums(
         year_to=year_to,
         genre=genre,
         owner_id=owner_id,
+        collection=collection,
+        user=user,
     )
     stmt = apply_access_filter(stmt, Album, user, "album")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
@@ -554,6 +600,7 @@ def _build_tracks_stmt(
     year_to: Optional[int] = None,
     library_id: Optional[str] = None,
     favorited: Optional[bool] = None,
+    collection: Optional[bool] = None,
     owner_id: Optional[str] = None,
     user: Optional[User] = None,
     file_id: Optional[str] = None,
@@ -614,6 +661,8 @@ def _build_tracks_stmt(
         else:
             stmt = stmt.join(Favorite, and_(Favorite.track_id == Track.id, Favorite.user_id == user.id))
 
+    stmt = apply_collection_filter(stmt, Track, user, "track", collection)
+
     if query:
         stmt = _apply_tracks_query(session, stmt, query=query, year_from=year_from, year_to=year_to)
 
@@ -648,6 +697,7 @@ async def list_tracks(
     sort_by: str = "created_at",
     sort_dir: str = "desc",
     favorited: Optional[bool] = None,
+    collection: Optional[bool] = None,
     owner_id: Optional[str] = None,
     file_id: Optional[str] = None,
 ) -> Tuple[List[Track], int]:
@@ -669,6 +719,7 @@ async def list_tracks(
         year_to=year_to,
         library_id=library_id,
         favorited=favorited,
+        collection=collection,
         user=user,
         file_id=file_id,
         owner_id=owner_id,
@@ -724,6 +775,7 @@ async def count_tracks(
     library_id: Optional[str] = None,
     user: Optional[User] = None,
     favorited: Optional[bool] = None,
+    collection: Optional[bool] = None,
     owner_id: Optional[str] = None,
     file_id: Optional[str] = None,
 ) -> int:
@@ -739,6 +791,7 @@ async def count_tracks(
         year_to=year_to,
         library_id=library_id,
         favorited=favorited,
+        collection=collection,
         user=user,
         file_id=file_id,
         owner_id=owner_id,
@@ -832,6 +885,7 @@ async def list_playlists(
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
     query: Optional[str] = None,
+    collection: Optional[bool] = None,
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
@@ -845,6 +899,7 @@ async def list_playlists(
         stmt = stmt.where(Playlist.owner_id == owner_id)
     if query:
         stmt = stmt.where(or_(ilike_contains(Playlist.name, query), ilike_contains(Playlist.description, query)))
+    stmt = apply_collection_filter(stmt, Playlist, user, "playlist", collection)
     stmt = apply_access_filter(stmt, Playlist, user, "playlist")
     stmt = _apply_sort(stmt, field, sort_dir, Playlist.id)
     stmt = stmt.offset(offset).limit(limit)
@@ -857,6 +912,7 @@ async def count_playlists(
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
     query: Optional[str] = None,
+    collection: Optional[bool] = None,
 ) -> int:
     """Return the total number of playlists visible to ``user``."""
     stmt = select(Playlist)
@@ -864,6 +920,7 @@ async def count_playlists(
         stmt = stmt.where(Playlist.owner_id == owner_id)
     if query:
         stmt = stmt.where(or_(ilike_contains(Playlist.name, query), ilike_contains(Playlist.description, query)))
+    stmt = apply_collection_filter(stmt, Playlist, user, "playlist", collection)
     stmt = apply_access_filter(stmt, Playlist, user, "playlist")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
@@ -892,6 +949,7 @@ async def list_libraries(
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
     query: Optional[str] = None,
+    collection: Optional[bool] = None,
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
@@ -919,6 +977,7 @@ async def list_libraries(
                 ),
             )
         )
+    stmt = apply_collection_filter(stmt, Library, user, "library", collection)
     stmt = apply_access_filter(stmt, Library, user, "library")
     stmt = _apply_sort(stmt, field, sort_dir, Library.id)
     stmt = stmt.offset(offset).limit(limit)
@@ -931,6 +990,7 @@ async def count_libraries(
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
     query: Optional[str] = None,
+    collection: Optional[bool] = None,
     include_external: bool = False,
 ) -> int:
     """Return the total number of libraries visible to ``user``."""
@@ -952,6 +1012,7 @@ async def count_libraries(
                 ),
             )
         )
+    stmt = apply_collection_filter(stmt, Library, user, "library", collection)
     stmt = apply_access_filter(stmt, Library, user, "library")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
@@ -978,11 +1039,13 @@ async def get_library(
 async def list_radios(
     session: AsyncSession,
     user: Optional[User] = None,
+    collection: Optional[bool] = None,
     limit: int = 20,
     offset: int = 0,
 ) -> List[Radio]:
     """List radios visible to ``user``."""
     stmt = select(Radio)
+    stmt = apply_collection_filter(stmt, Radio, user, "radio", collection)
     stmt = apply_access_filter(stmt, Radio, user, "radio")
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -992,9 +1055,11 @@ async def list_radios(
 async def count_radios(
     session: AsyncSession,
     user: Optional[User] = None,
+    collection: Optional[bool] = None,
 ) -> int:
     """Return the total number of radios visible to ``user``."""
     stmt = select(Radio)
+    stmt = apply_collection_filter(stmt, Radio, user, "radio", collection)
     stmt = apply_access_filter(stmt, Radio, user, "radio")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0

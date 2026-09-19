@@ -14,12 +14,12 @@ import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import SortControl from "@/components/ui/SortControl.vue";
-import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
+import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
 const player = usePlayerStore();
-const onlyMine = ref(false);
+const myCollection = ref(authStore.isAuthenticated);
 const {
   items,
   loading,
@@ -44,7 +44,7 @@ const {
     const result = await listTracksWithMeta({
       ...params,
       include: "artist,album",
-      owner_username: onlyMine.value ? authStore.user?.username : undefined,
+      collection: myCollection.value || undefined,
     });
     return { items: result.tracks, offset: result.offset, total: result.total };
   },
@@ -80,8 +80,8 @@ async function onRemoved() {
   await refresh();
 }
 
-function onOnlyMineChange(value: boolean) {
-  onlyMine.value = value;
+function onMyCollectionChange(value: boolean) {
+  myCollection.value = value;
   void refresh();
 }
 
@@ -120,9 +120,9 @@ watch(
         @update:direction="(dir) => setSort(sortBy, dir)"
       />
 
-      <OnlyMineToggle
-        :model-value="onlyMine"
-        @update:model-value="onOnlyMineChange"
+      <CollectionToggle
+        :model-value="myCollection"
+        @update:model-value="onMyCollectionChange"
       />
 
       <!--

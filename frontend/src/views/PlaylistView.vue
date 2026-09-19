@@ -19,6 +19,7 @@ import { useToastStore } from "@/stores/toast";
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
+import { useCollectionItem } from "@/composables/useCollectionItem";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
@@ -101,6 +102,11 @@ const { canManage } = useCanManage(
 );
 
 const isPublic = computed(() => playlist.value?.visibility === "public");
+
+const { collectionAction, toggleCollection } = useCollectionItem(
+  "playlist",
+  playlist,
+);
 
 const deletePlaylist = useEntityDelete({
   delete: deletePlaylistApi,
@@ -192,6 +198,7 @@ function onTrackSort(field: string, direction: "asc" | "desc") {
 }
 
 const actions = computed(() => [
+  collectionAction.value,
   {
     key: "share",
     label: t("common.share"),
@@ -225,6 +232,9 @@ const actions = computed(() => [
 async function onAction(key: string) {
   if (!playlist.value) return;
   switch (key) {
+    case "collection":
+      await toggleCollection();
+      break;
     case "share":
       openShare(
         "playlist",

@@ -7,7 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 import * as albumsApi from "@/api/albums";
 import type { AlbumResponse } from "@/api/albums";
 import AlbumsView from "./AlbumsView.vue";
-import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
+import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 vi.mock("@/api/albums", () => ({
   listAlbums: vi.fn(),
@@ -178,17 +178,20 @@ describe("AlbumsView", () => {
     expect(wrapper.text()).toContain("Album 20");
   });
 
-  it("hides the only-mine toggle when signed out", async () => {
+  it("hides the collection toggle when signed out", async () => {
     wrapper = mount(AlbumsView, {
       global: { plugins: [createTestRouter()] },
     });
     await flushPromises();
 
-    const toggle = wrapper.findComponent(OnlyMineToggle);
+    const toggle = wrapper.findComponent(CollectionToggle);
     expect(toggle.find('input[type="checkbox"]').exists()).toBe(false);
+    expect(albumsApi.listAlbums).toHaveBeenLastCalledWith(
+      expect.objectContaining({ collection: undefined }),
+    );
   });
 
-  it("filters by the current user when the only-mine toggle is enabled", async () => {
+  it("enables the collection filter by default when signed in", async () => {
     setAuthenticated();
     const fetcher = vi.mocked(albumsApi.listAlbums);
 
@@ -198,15 +201,32 @@ describe("AlbumsView", () => {
     await flushPromises();
 
     const checkbox = wrapper
-      .findComponent(OnlyMineToggle)
+      .findComponent(CollectionToggle)
       .find('input[type="checkbox"]');
     expect(checkbox.exists()).toBe(true);
+    expect((checkbox.element as HTMLInputElement).checked).toBe(true);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ collection: true }),
+    );
+  });
 
-    await checkbox.setValue(true);
+  it("drops the collection filter when the toggle is disabled", async () => {
+    setAuthenticated();
+    const fetcher = vi.mocked(albumsApi.listAlbums);
+
+    wrapper = mount(AlbumsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const checkbox = wrapper
+      .findComponent(CollectionToggle)
+      .find('input[type="checkbox"]');
+    await checkbox.setValue(false);
     await flushPromises();
 
     expect(fetcher).toHaveBeenLastCalledWith(
-      expect.objectContaining({ owner_username: "alice" }),
+      expect.objectContaining({ collection: undefined }),
     );
   });
 });

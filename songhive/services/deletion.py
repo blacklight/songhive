@@ -20,6 +20,7 @@ from ..models._enums import Visibility
 from ..models.activity import Activity, ActivityTarget
 from ..models.album import Album
 from ..models.artist import Artist
+from ..models.collection_item import CollectionItem
 from ..models.external_library import ExternalLibrary
 from ..models.external_sync_run import ExternalSyncRun
 from ..models.external_track import ExternalTrack
@@ -215,6 +216,9 @@ async def _delete_track_dependents(
     await session.execute(delete(LibraryTrack).where(LibraryTrack.track_id == track.id))
     await session.execute(delete(Favorite).where(Favorite.track_id == track.id))
     await session.execute(delete(ListeningHistory).where(ListeningHistory.track_id == track.id))
+    await session.execute(
+        delete(CollectionItem).where(CollectionItem.item_type == "track", CollectionItem.item_id == track.id)
+    )
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "track", ShareGrant.item_id == track.id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "track", ShareToken.item_id == track.id))
     await session.execute(delete(Report).where(Report.target_type == "track", Report.target_id == track.id))
@@ -377,6 +381,9 @@ async def delete_album(
         if track_ids:
             await session.execute(update(Track).where(Track.id.in_(track_ids)).values(album_id=None))
 
+    await session.execute(
+        delete(CollectionItem).where(CollectionItem.item_type == "album", CollectionItem.item_id == album.id)
+    )
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "album", ShareGrant.item_id == album.id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "album", ShareToken.item_id == album.id))
     await session.execute(delete(Report).where(Report.target_type == "album", Report.target_id == album.id))
@@ -458,6 +465,9 @@ async def delete_artist(
                 # Defensive guard: the pre-check above should prevent this path.
                 raise DeletionError("Cannot delete track owned by another user", 403)
 
+    await session.execute(
+        delete(CollectionItem).where(CollectionItem.item_type == "artist", CollectionItem.item_id == artist.id)
+    )
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "artist", ShareGrant.item_id == artist.id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "artist", ShareToken.item_id == artist.id))
     await session.execute(delete(Report).where(Report.target_type == "artist", Report.target_id == artist.id))
@@ -510,6 +520,9 @@ async def delete_playlist(
 
     await session.execute(delete(PlaylistTrack).where(PlaylistTrack.playlist_id == playlist_id))
     await session.execute(
+        delete(CollectionItem).where(CollectionItem.item_type == "playlist", CollectionItem.item_id == playlist.id)
+    )
+    await session.execute(
         delete(ShareGrant).where(ShareGrant.item_type == "playlist", ShareGrant.item_id == playlist.id)
     )
     await session.execute(
@@ -560,6 +573,9 @@ async def delete_library(
                     deletion.unpublish.append(info)
 
     await session.execute(delete(LibraryTrack).where(LibraryTrack.library_id == library_id))
+    await session.execute(
+        delete(CollectionItem).where(CollectionItem.item_type == "library", CollectionItem.item_id == library.id)
+    )
     await session.execute(delete(ShareGrant).where(ShareGrant.item_type == "library", ShareGrant.item_id == library.id))
     await session.execute(delete(ShareToken).where(ShareToken.item_type == "library", ShareToken.item_id == library.id))
     await session.execute(delete(Report).where(Report.target_type == "library", Report.target_id == library.id))

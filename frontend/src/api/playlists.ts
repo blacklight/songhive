@@ -10,6 +10,7 @@ export type TrackResponse = components["schemas"]["TrackResponse"];
 export function listPlaylists(params?: {
   q?: string;
   owner_username?: string;
+  collection?: boolean;
   limit?: number;
   offset?: number;
   include?: string;
@@ -28,6 +29,7 @@ export interface ListPlaylistsResult {
 export async function listPlaylistsWithMeta(params?: {
   q?: string;
   owner_username?: string;
+  collection?: boolean;
   limit?: number;
   offset?: number;
   include?: string;

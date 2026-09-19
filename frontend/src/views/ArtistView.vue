@@ -21,6 +21,7 @@ import { useShareDialog } from "@/composables/useShareDialog";
 import { useFeedLinks } from "@/composables/useFeedLinks";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useCanManage } from "@/composables/useCanManage";
+import { useCollectionItem } from "@/composables/useCollectionItem";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
@@ -58,6 +59,11 @@ const artist = ref<ArtistResponse | null>(null);
 const stats = ref<ArtistStats | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
+
+const { collectionAction, toggleCollection } = useCollectionItem(
+  "artist",
+  artist,
+);
 
 const {
   items: albums,
@@ -184,6 +190,7 @@ function onTrackSort(field: string, direction: "asc" | "desc") {
 }
 
 const actions = computed(() => [
+  collectionAction.value,
   {
     key: "share",
     label: t("common.share"),
@@ -229,6 +236,9 @@ const actions = computed(() => [
 async function onAction(key: string) {
   if (!artist.value) return;
   switch (key) {
+    case "collection":
+      await toggleCollection();
+      break;
     case "share":
       openShare("artist", artist.value.id, artist.value.name, null, null);
       break;

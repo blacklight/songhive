@@ -2536,6 +2536,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/collection/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Collection
+     * @description List the items saved to the current user's collection.
+     */
+    get: operations["list_collection_api_v1_collection__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/collection/{item_type}/{item_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Add To Collection
+     * @description Add an item to the current user's collection.
+     */
+    post: operations["add_to_collection_api_v1_collection__item_type___item_id__post"];
+    /**
+     * Remove From Collection
+     * @description Remove an item from the current user's collection.
+     */
+    delete: operations["remove_from_collection_api_v1_collection__item_type___item_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/notifications/": {
     parameters: {
       query?: never;
@@ -5098,6 +5142,11 @@ export interface components {
        * @default private
        */
       visibility: string;
+      /**
+       * In Collection
+       * @default false
+       */
+      in_collection: boolean;
       artist?: components["schemas"]["ArtistSummary"] | null;
       owner?: components["schemas"]["UserSummary"] | null;
       /** Tracks */
@@ -5330,6 +5379,11 @@ export interface components {
       albums?: components["schemas"]["AlbumSummary"][] | null;
       /** Tracks */
       tracks?: components["schemas"]["TrackSummary"][] | null;
+      /**
+       * In Collection
+       * @default false
+       */
+      in_collection: boolean;
       /**
        * Tags
        * @default []
@@ -5719,6 +5773,20 @@ export interface components {
        * @default true
        */
       success: boolean;
+    };
+    /**
+     * CollectionItemResponse
+     * @description Public collection item response.
+     */
+    CollectionItemResponse: {
+      /** Id */
+      id: string;
+      /** Item Type */
+      item_type: string;
+      /** Item Id */
+      item_id: string;
+      /** Created At */
+      created_at: string;
     };
     /**
      * CreatedShareResponse
@@ -6499,6 +6567,11 @@ export interface components {
        * @default false
        */
       can_write: boolean;
+      /**
+       * In Collection
+       * @default false
+       */
+      in_collection: boolean;
       owner?: components["schemas"]["UserSummary"] | null;
       /** Tracks */
       tracks?: components["schemas"]["TrackSummary"][] | null;
@@ -6806,6 +6879,11 @@ export interface components {
       image_url?: string | null;
       /** Cover Url */
       cover_url?: string | null;
+      /**
+       * In Collection
+       * @default false
+       */
+      in_collection: boolean;
       owner?: components["schemas"]["UserSummary"] | null;
       /** Tracks */
       tracks?: components["schemas"]["TrackSummary"][] | null;
@@ -6994,6 +7072,11 @@ export interface components {
        * @default private
        */
       visibility: string;
+      /**
+       * In Collection
+       * @default false
+       */
+      in_collection: boolean;
     };
     /**
      * RefreshRequest
@@ -7840,6 +7923,11 @@ export interface components {
       genres: string[];
       /** Favorited */
       favorited?: boolean | null;
+      /**
+       * In Collection
+       * @default false
+       */
+      in_collection: boolean;
       /**
        * Is External
        * @default false
@@ -10444,6 +10532,8 @@ export interface operations {
         q?: string | null;
         /** @description Filter by owner's username */
         owner_username?: string | null;
+        /** @description Only return artists in the current user's collection (saved) */
+        collection?: boolean | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
@@ -10843,6 +10933,8 @@ export interface operations {
         genre?: string | null;
         /** @description Filter by owner's username */
         owner_username?: string | null;
+        /** @description Only return albums in the current user's collection (owned or saved) */
+        collection?: boolean | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
@@ -11313,6 +11405,8 @@ export interface operations {
         around_track_id?: string | null;
         /** @description Filter by owner's username */
         owner_username?: string | null;
+        /** @description Only return tracks in the current user's collection (owned, favorited, or saved) */
+        collection?: boolean | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
@@ -11773,6 +11867,8 @@ export interface operations {
         q?: string | null;
         /** @description Filter by owner's username */
         owner_username?: string | null;
+        /** @description Only return playlists in the current user's collection (owned or saved) */
+        collection?: boolean | null;
         limit?: number;
         offset?: number;
         /** @description Field to sort by */
@@ -12349,6 +12445,8 @@ export interface operations {
         q?: string | null;
         /** @description Filter by owner's username */
         owner_username?: string | null;
+        /** @description Only return libraries in the current user's collection (owned or saved) */
+        collection?: boolean | null;
         /** @description Include external libraries (admin only) */
         include_external?: boolean;
         limit?: number;
@@ -13469,6 +13567,102 @@ export interface operations {
       };
     };
   };
+  list_collection_api_v1_collection__get: {
+    parameters: {
+      query?: {
+        /** @description Filter by item type */
+        item_type?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionItemResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  add_to_collection_api_v1_collection__item_type___item_id__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        item_type: string;
+        item_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionItemResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  remove_from_collection_api_v1_collection__item_type___item_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        item_type: string;
+        item_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_notifications_api_v1_notifications__get: {
     parameters: {
       query?: {
@@ -13847,6 +14041,8 @@ export interface operations {
   list_radios_api_v1_radios__get: {
     parameters: {
       query?: {
+        /** @description Only return radios in the current user's collection (owned or saved) */
+        collection?: boolean | null;
         limit?: number;
         offset?: number;
       };

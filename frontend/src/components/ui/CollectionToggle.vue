@@ -19,7 +19,7 @@ const authStore = useAuthStore();
   <AppCheckbox
     v-if="authStore.isAuthenticated"
     :model-value="modelValue"
-    :label="t('browse.list.onlyMine')"
+    :label="t('browse.list.myCollection')"
     @update:model-value="emit('update:modelValue', $event)"
   />
 </template>

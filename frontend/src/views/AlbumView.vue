@@ -20,6 +20,7 @@ import { getApiErrorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
 import { useCanManage } from "@/composables/useCanManage";
+import { useCollectionItem } from "@/composables/useCollectionItem";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
@@ -95,6 +96,11 @@ const { canManage } = useCanManage(
 
 const isPublic = computed(() => album.value?.visibility === "public");
 
+const { collectionAction, toggleCollection } = useCollectionItem(
+  "album",
+  album,
+);
+
 const deleteAlbum = useEntityDelete({
   delete: deleteAlbumApi,
   entity: t("browse.entities.album"),
@@ -135,6 +141,7 @@ async function onTracksRemoved() {
 }
 
 const actions = computed(() => [
+  collectionAction.value,
   {
     key: "share",
     label: t("common.share"),
@@ -186,6 +193,9 @@ const actions = computed(() => [
 async function onAction(key: string) {
   if (!album.value) return;
   switch (key) {
+    case "collection":
+      await toggleCollection();
+      break;
     case "share":
       openShare(
         "album",

@@ -6,11 +6,11 @@ import { listArtists, deleteArtist, type ArtistResponse } from "@/api/artists";
 import { useAuthStore } from "@/stores/auth";
 import ArtistCard from "@/components/library/ArtistCard.vue";
 import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
-import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
+import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
-const onlyMine = ref(false);
+const myCollection = ref(authStore.isAuthenticated);
 const {
   items,
   loading,
@@ -29,7 +29,7 @@ const {
   (params) =>
     listArtists({
       ...params,
-      owner_username: onlyMine.value ? authStore.user?.username : undefined,
+      collection: myCollection.value || undefined,
     }),
   {
     defaultSortBy: "name",
@@ -47,8 +47,8 @@ function onSort(field: string, direction: "asc" | "desc") {
   void setSort(field, direction);
 }
 
-function onOnlyMineChange(value: boolean) {
-  onlyMine.value = value;
+function onMyCollectionChange(value: boolean) {
+  myCollection.value = value;
   void refresh();
 }
 
@@ -85,9 +85,9 @@ onMounted(() => load());
       @sort="onSort"
     >
       <template #filters>
-        <OnlyMineToggle
-          :model-value="onlyMine"
-          @update:model-value="onOnlyMineChange"
+        <CollectionToggle
+          :model-value="myCollection"
+          @update:model-value="onMyCollectionChange"
         />
       </template>
 

@@ -110,6 +110,7 @@ class TrackResponse(BaseModel):
     tags: List[str] = []
     genres: List[str] = []
     favorited: Optional[bool] = None
+    in_collection: bool = False
     is_external: bool = False
     external_library_id: Optional[str] = None
     external_track_id: Optional[str] = None

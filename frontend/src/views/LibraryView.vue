@@ -18,13 +18,13 @@ import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import LibraryCard from "@/components/library/LibraryCard.vue";
 import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
-import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
+import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 import type { Visibility } from "@/api/libraries";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
 const toastStore = useToastStore();
-const onlyMine = ref(false);
+const myCollection = ref(authStore.isAuthenticated);
 const {
   items,
   loading,
@@ -44,7 +44,7 @@ const {
     listLibraries({
       ...params,
       include: "owner",
-      owner_username: onlyMine.value ? authStore.user?.username : undefined,
+      collection: myCollection.value || undefined,
     }),
   {
     defaultSortBy: "name",
@@ -77,8 +77,8 @@ function onSort(field: string, direction: "asc" | "desc") {
   void setSort(field, direction);
 }
 
-function onOnlyMineChange(value: boolean) {
-  onlyMine.value = value;
+function onMyCollectionChange(value: boolean) {
+  myCollection.value = value;
   void refresh();
 }
 
@@ -161,9 +161,9 @@ async function onCreate() {
       </template>
 
       <template #filters>
-        <OnlyMineToggle
-          :model-value="onlyMine"
-          @update:model-value="onOnlyMineChange"
+        <CollectionToggle
+          :model-value="myCollection"
+          @update:model-value="onMyCollectionChange"
         />
       </template>
 

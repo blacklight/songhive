@@ -7,6 +7,7 @@ export type ArtistUpdate = components["schemas"]["ArtistUpdate"];
 export function listArtists(params?: {
   q?: string;
   owner_username?: string;
+  collection?: boolean;
   limit?: number;
   offset?: number;
   include?: string;
@@ -25,6 +26,7 @@ export interface ListArtistsResult {
 export async function listArtistsWithMeta(params?: {
   q?: string;
   owner_username?: string;
+  collection?: boolean;
   limit?: number;
   offset?: number;
   include?: string;

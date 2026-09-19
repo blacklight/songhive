@@ -7,7 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 import * as artistsApi from "@/api/artists";
 import type { ArtistResponse } from "@/api/artists";
 import ArtistsView from "./ArtistsView.vue";
-import OnlyMineToggle from "@/components/ui/OnlyMineToggle.vue";
+import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 vi.mock("@/api/artists", () => ({
   listArtists: vi.fn(),
@@ -172,17 +172,20 @@ describe("ArtistsView", () => {
     expect(wrapper.text()).toContain("Artist 20");
   });
 
-  it("hides the only-mine toggle when signed out", async () => {
+  it("hides the collection toggle when signed out", async () => {
     wrapper = mount(ArtistsView, {
       global: { plugins: [createTestRouter()] },
     });
     await flushPromises();
 
-    const toggle = wrapper.findComponent(OnlyMineToggle);
+    const toggle = wrapper.findComponent(CollectionToggle);
     expect(toggle.find('input[type="checkbox"]').exists()).toBe(false);
+    expect(artistsApi.listArtists).toHaveBeenLastCalledWith(
+      expect.objectContaining({ collection: undefined }),
+    );
   });
 
-  it("filters by the current user when the only-mine toggle is enabled", async () => {
+  it("enables the collection filter by default when signed in", async () => {
     setAuthenticated();
     const fetcher = vi.mocked(artistsApi.listArtists);
 
@@ -192,15 +195,32 @@ describe("ArtistsView", () => {
     await flushPromises();
 
     const checkbox = wrapper
-      .findComponent(OnlyMineToggle)
+      .findComponent(CollectionToggle)
       .find('input[type="checkbox"]');
     expect(checkbox.exists()).toBe(true);
+    expect((checkbox.element as HTMLInputElement).checked).toBe(true);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ collection: true }),
+    );
+  });
 
-    await checkbox.setValue(true);
+  it("drops the collection filter when the toggle is disabled", async () => {
+    setAuthenticated();
+    const fetcher = vi.mocked(artistsApi.listArtists);
+
+    wrapper = mount(ArtistsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const checkbox = wrapper
+      .findComponent(CollectionToggle)
+      .find('input[type="checkbox"]');
+    await checkbox.setValue(false);
     await flushPromises();
 
     expect(fetcher).toHaveBeenLastCalledWith(
-      expect.objectContaining({ owner_username: "alice" }),
+      expect.objectContaining({ collection: undefined }),
     );
   });
 });

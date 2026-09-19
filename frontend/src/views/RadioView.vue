@@ -11,6 +11,7 @@ import {
   type Visibility,
 } from "@/api/radios";
 import { getApiErrorMessage } from "@/api/client";
+import { addToCollection, removeFromCollection } from "@/api/collection";
 import { useAuthStore } from "@/stores/auth";
 import { usePlayerStore } from "@/stores/player";
 import { useToastStore } from "@/stores/toast";
@@ -20,6 +21,7 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
+import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 
 const { t } = useI18n();
@@ -34,6 +36,8 @@ const limit = 20;
 const hasMore = ref(false);
 
 const playingId = ref<string | null>(null);
+const savingId = ref<string | null>(null);
+const myCollection = ref(auth.isAuthenticated);
 
 const showCreateForm = computed(() => auth.isAuthenticated);
 
@@ -68,7 +72,11 @@ async function load(reset = false) {
   }
 
   try {
-    const result = await listRadios({ limit, offset });
+    const result = await listRadios({
+      limit,
+      offset,
+      collection: myCollection.value || undefined,
+    });
     if (reset) {
       radios.value = result;
     } else {
@@ -95,6 +103,52 @@ async function loadMore() {
 
 function getVisibilityLabel(value: string): string {
   return t(`browse.visibility.${toVisibility(value)}`);
+}
+
+function isOwned(radio: RadioResponse): boolean {
+  return !!auth.user && radio.owner_id === auth.user.id;
+}
+
+function canToggleCollection(radio: RadioResponse): boolean {
+  return auth.isAuthenticated && !isOwned(radio);
+}
+
+function onMyCollectionChange(value: boolean) {
+  myCollection.value = value;
+  void load(true);
+}
+
+async function onToggleCollection(radio: RadioResponse) {
+  if (savingId.value) return;
+  savingId.value = radio.id;
+  const wasSaved = Boolean(radio.in_collection);
+  try {
+    if (wasSaved) {
+      await removeFromCollection("radio", radio.id);
+      radio.in_collection = false;
+      toast.push({
+        type: "success",
+        message: t("browse.collection.removeSuccess"),
+      });
+    } else {
+      await addToCollection("radio", radio.id);
+      radio.in_collection = true;
+      toast.push({
+        type: "success",
+        message: t("browse.collection.saveSuccess"),
+      });
+    }
+  } catch (err) {
+    const message = getErrorMessage(err);
+    toast.push({
+      type: "error",
+      message: wasSaved
+        ? t("browse.collection.removeError", { message })
+        : t("browse.collection.saveError", { message }),
+    });
+  } finally {
+    savingId.value = null;
+  }
 }
 
 async function onPlay(radio: RadioResponse) {
@@ -168,6 +222,13 @@ onMounted(() => load(true));
       t("pages.radio.title")
     }}</AppPageTitle>
 
+    <div v-if="auth.isAuthenticated" class="radio-view__controls">
+      <CollectionToggle
+        :model-value="myCollection"
+        @update:model-value="onMyCollectionChange"
+      />
+    </div>
+
     <div v-if="error" class="radio-view__error" role="alert">
       <span>{{ error }}</span>
       <AppButton size="sm" icon="rotate-right" @click="retry">
@@ -197,14 +258,30 @@ onMounted(() => load(true));
             {{ getVisibilityLabel(radio.visibility) }}
           </span>
         </div>
-        <AppButton
-          size="sm"
-          icon="play"
-          :loading="playingId === radio.id"
-          @click="onPlay(radio)"
-        >
-          {{ t("common.play") }}
-        </AppButton>
+        <div class="radio-view__station-actions">
+          <AppButton
+            v-if="canToggleCollection(radio)"
+            size="sm"
+            variant="secondary"
+            :icon="radio.in_collection ? 'xmark' : 'bookmark'"
+            :loading="savingId === radio.id"
+            @click="onToggleCollection(radio)"
+          >
+            {{
+              radio.in_collection
+                ? t("browse.collection.remove")
+                : t("browse.collection.save")
+            }}
+          </AppButton>
+          <AppButton
+            size="sm"
+            icon="play"
+            :loading="playingId === radio.id"
+            @click="onPlay(radio)"
+          >
+            {{ t("common.play") }}
+          </AppButton>
+        </div>
       </li>
     </ul>
 
@@ -286,6 +363,19 @@ onMounted(() => load(true));
 .radio-view__title {
   margin: 0;
   font-size: 1.5rem;
+}
+
+.radio-view__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.radio-view__station-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .radio-view__error {
