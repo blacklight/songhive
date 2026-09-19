@@ -44,12 +44,33 @@ async def issue_api_token(
     name: str,
     expires_at: Optional[datetime],
 ) -> tuple[ApiToken, str]:
-    """Create and persist a new API token, returning the row and raw JWT."""
+    """
+    Create and persist a new API token, returning the row and raw JWT.
+
+    If the user already owns a revoked token with the same ``name``, that row
+    is replaced in place: it receives the new ``jti``/``iat``/``expires_at``
+    and is un-revoked, so the previously issued JWT dies with its old ``jti``.
+    Reusing the name of an active token raises :class:`ApiTokenError`.
+    """
     jti = secrets.token_urlsafe(32)
     # ``created_at`` is pinned to the JWT ``iat`` claim so the Subsonic
     # adapter can reconstruct this exact JWT for salted-token verification.
     iat = datetime.now(timezone.utc)
     raw_jwt = create_api_token_jwt(user.id, config.auth.secret_key, jti, expires_at, iat=iat)
+
+    result = await db.execute(select(ApiToken).where(ApiToken.user_id == user.id, ApiToken.name == name))
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        if existing.revoked_at is None:
+            raise ApiTokenError("Name already in use", status_code=409)
+        existing.jti = jti
+        existing.expires_at = expires_at
+        existing.created_at = iat
+        existing.revoked_at = None
+        existing.last_used_at = None
+        await db.flush()
+        return existing, raw_jwt
+
     api_token = ApiToken(
         user_id=user.id,
         jti=jti,

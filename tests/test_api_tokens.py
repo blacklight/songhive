@@ -1,10 +1,12 @@
-"""Tests for the API token Celery task."""
+"""Tests for the API token service and Celery task."""
 
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
+import pytest
+from fastapi import status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -14,6 +16,13 @@ from songhive.models.api_token import ApiToken
 from songhive.models.base import Base
 from songhive.models.user import User
 from songhive.tasks.api_tokens import flush_usage_timestamps
+from songhive.users.api_tokens import (
+    ApiTokenError,
+    get_api_token_by_jti,
+    issue_api_token,
+    revoke_api_token,
+    validate_api_token,
+)
 
 
 class _LocalSessionFactory:
@@ -130,3 +139,57 @@ def test_flush_usage_timestamps_updates_last_used_at(tmp_path, monkeypatch):
             assert token.last_used_at.isoformat() == now
 
     asyncio.run(_verify())
+
+
+async def test_issue_api_token_rejects_active_name_reuse(db_session, config, regular_user):
+    """Reissuing a name still held by an active token fails with 409."""
+    await issue_api_token(db_session, regular_user, config, "cli", None)
+    await db_session.commit()
+
+    with pytest.raises(ApiTokenError) as excinfo:
+        await issue_api_token(db_session, regular_user, config, "cli", None)
+    assert excinfo.value.status_code == status.HTTP_409_CONFLICT
+
+
+async def test_issue_api_token_replaces_revoked_token_with_same_name(db_session, config, regular_user):
+    """Reissuing a revoked token's name replaces the row and kills the old JWT."""
+    old_token, old_jwt = await issue_api_token(db_session, regular_user, config, "cli", None)
+    old_token.last_used_at = datetime.now(timezone.utc)
+    await db_session.commit()
+    old_jti = old_token.jti
+
+    await revoke_api_token(db_session, old_token.id, regular_user.id)
+    await db_session.commit()
+
+    new_token, new_jwt = await issue_api_token(db_session, regular_user, config, "cli", None)
+    await db_session.commit()
+
+    assert new_token.id == old_token.id
+    assert new_token.jti != old_jti
+    assert new_token.revoked_at is None
+    assert new_token.last_used_at is None
+    assert new_jwt != old_jwt
+
+    # The old JWT is dead: its ``jti`` no longer resolves to a row.
+    assert await get_api_token_by_jti(db_session, old_jti) is None
+    assert await validate_api_token(db_session, new_token.jti) is not None
+
+
+async def test_api_token_endpoints_allow_reusing_revoked_name(client, regular_user, auth_headers):
+    """The API reuses a revoked token's name instead of returning 409."""
+    headers = auth_headers(regular_user)
+
+    created = client.post("/api/v1/auth/api-tokens", json={"name": "deploy"}, headers=headers)
+    assert created.status_code == status.HTTP_201_CREATED
+    first = created.json()
+
+    duplicate = client.post("/api/v1/auth/api-tokens", json={"name": "deploy"}, headers=headers)
+    assert duplicate.status_code == status.HTTP_409_CONFLICT
+
+    revoked = client.delete(f"/api/v1/auth/api-tokens/{first['id']}", headers=headers)
+    assert revoked.status_code == status.HTTP_200_OK
+
+    reissued = client.post("/api/v1/auth/api-tokens", json={"name": "deploy"}, headers=headers)
+    assert reissued.status_code == status.HTTP_201_CREATED
+    assert reissued.json()["id"] == first["id"]
+    assert reissued.json()["token"] != first["token"]
