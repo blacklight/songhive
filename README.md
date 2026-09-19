@@ -36,7 +36,9 @@
     + [Docker installation](#docker-installation-1)
     + [pip installation](#pip-installation-1)
 - [Testing the installation](#testing-the-installation)
-- [Subsonic-compatible clients](#subsonic-compatible-clients)
+- [Integrations](#integrations)
+  * [Subsonic-compatible clients](#subsonic-compatible-clients)
+  * [Mopidy](#mopidy)
 - [Development](#development)
   * [Frontend](#frontend)
 - [API](#api)
@@ -363,7 +365,9 @@ Open:
 - **Swagger UI**: http://localhost:8000/swagger-ui/
 - **OpenAPI spec**: http://localhost:8000/openapi.json
 
-## Subsonic-compatible clients
+## Integrations
+
+### Subsonic-compatible clients
 
 Songhive implements the
 [Subsonic API](http://www.subsonic.org/pages/api.jsp) under the
@@ -396,6 +400,20 @@ Some Subsonic-compatible clients:
 
 The adapter is enabled by default; set `subsonic.enabled = false` in
 `config.toml` to disable it.
+
+### Mopidy
+
+The `mopidy-songhive` extension can be installed in your Mopidy instance:
+
+```bash
+pip install mopidy-songhive
+```
+
+- [Repository](https://git.fabiomanganiello.com/mopidy-songhive)
+- [Github mirror](https://github.com/blacklight/mopidy-songhive)
+
+It allows you to browse and play your libraries, playlists, albums etc. directly
+from your Mopidy instance.
 
 ## Development
 
