@@ -26,6 +26,7 @@ from songhive.models.mention_record import MentionRecord  # noqa: F401
 from songhive.models.notification import ActivitySubscription, Notification, NotificationPreference  # noqa: F401
 from songhive.models.oauth_client import OAuth2Client  # noqa: F401
 from songhive.models.playlist import Playlist  # noqa: F401
+from songhive.models.podcast import Podcast, PodcastEpisode, PodcastSubscription  # noqa: F401
 from songhive.models.radio import Radio  # noqa: F401
 from songhive.models.report import Report  # noqa: F401
 from songhive.models.setting import Setting  # noqa: F401

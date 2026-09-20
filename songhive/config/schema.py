@@ -214,6 +214,34 @@ class FeedsConfig(BaseSettings):
     )
 
 
+class PodcastsConfig(BaseSettings):
+    """Podcast subscription configuration."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable podcast RSS subscriptions under /api/v1/podcasts",
+    )
+    refresh_interval_minutes: int = Field(
+        default=240,
+        ge=15,
+        description=(
+            "Minimum minutes between automatic feed refreshes for a followed "
+            "podcast. The periodic scan task only refetches feeds whose last "
+            "fetch is older than this."
+        ),
+    )
+    request_timeout_seconds: float = Field(
+        default=15.0,
+        ge=1.0,
+        description="Timeout in seconds for podcast feed HTTP requests",
+    )
+    max_feed_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        ge=1024,
+        description="Maximum response body size accepted when fetching a podcast feed",
+    )
+
+
 class WebmentionsConfig(BaseSettings):
     """Webmention (W3C recommendation) configuration."""
 
@@ -632,6 +660,7 @@ class SonghiveConfig(BaseSettings):
     federation: FederationConfig = Field(default_factory=FederationConfig)
     webmentions: WebmentionsConfig = Field(default_factory=WebmentionsConfig)
     feeds: FeedsConfig = Field(default_factory=FeedsConfig)
+    podcasts: PodcastsConfig = Field(default_factory=PodcastsConfig)
     auth: AuthConfig = Field(default_factory=_require_auth_secret_key)
     email: EmailConfig = Field(default_factory=EmailConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)

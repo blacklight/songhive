@@ -172,6 +172,12 @@ const navItems = computed<NavItem[]>(() => [
     icon: "tower-broadcast",
   },
   {
+    name: t("nav.podcasts"),
+    to: "/podcasts",
+    requiresAuth: true,
+    icon: "podcast",
+  },
+  {
     name: t("nav.about"),
     to: "/about",
     requiresAuth: false,

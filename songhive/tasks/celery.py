@@ -97,6 +97,12 @@ def make_celery(
                 "task": "songhive.tasks.notifications.purge_old_notifications",
                 "schedule": _parse_crontab(f"0 {notification_purge_hour} * * *"),
             },
+            # The scan itself is cheap; the task decides per feed whether a
+            # refresh is due based on podcasts.refresh_interval_minutes.
+            "scan-due-podcasts": {
+                "task": "songhive.tasks.podcasts.scan_due_podcasts",
+                "schedule": crontab(minute="*/15"),
+            },
         },
     )
     if remote_activity_prune_schedule:

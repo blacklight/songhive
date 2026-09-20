@@ -120,6 +120,13 @@
 - The frontend toolchain (vite 8, vitest 5, jsdom 30 via undici 8) requires
   Node 24+; undici 8 calls `worker_threads.markAsUncloneable`, which does not
   exist on Node 20. CI and the Dockerfile `NODE_VERSION` both pin Node 24.
+- In a git worktree (`.worktrees/*`), `songhive/static/` is not built, so the
+  SPA-serving tests (`tests/test_app.py`, `tests/test_semantic_meta.py`,
+  `tests/test_home_page.py`, feed-link injection tests in `tests/test_feeds.py`)
+  fail with 404 — environmental, not a regression. The worktree's
+  `frontend/node_modules` is a symlink into the main checkout, so invoke
+  frontend tools via `PATH=$PWD/node_modules/.bin:$PATH <tool>` (plain
+  `npm run` may not resolve `.bin` correctly from the worktree).
 - Celery tasks are organized by domain: `tasks/import_.py`,
   `tasks/federation.py`, `tasks/tags.py`, `tasks/transcoding.py`,
   `tasks/notifications.py` (daily digest + seen-notification purge).

@@ -249,6 +249,7 @@ describe("AppLayout", () => {
       "Files",
       "Shares",
       "Radio",
+      "Podcasts",
       "About",
       "API",
       "Settings",

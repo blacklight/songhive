@@ -80,7 +80,8 @@
     "download": "Download",
     "yes": "Yes",
     "no": "No",
-    "all": "All"
+    "all": "All",
+    "playAll": "Play all"
   },
   "sort": {
     "label": "Sort by",
@@ -246,7 +247,8 @@
     "login": "Log in",
     "notifications": "Notifications",
     "mentions": "Mentions",
-    "unreadNotifications": "{count} unread notifications"
+    "unreadNotifications": "{count} unread notifications",
+    "podcasts": "Podcasts"
   },
   "errors": {
     "unknown": "Something went wrong. Please try again.",
@@ -408,6 +410,38 @@
       "emptyTracks": "No tracks were generated for this station.",
       "empty": "No radio stations yet.",
       "loginHint": "Log in to create your own station."
+    },
+    "podcasts": {
+      "title": "Podcasts",
+      "feedUrl": "RSS feed URL",
+      "feedUrlPlaceholder": "https://example.com/feed.xml",
+      "follow": "Follow podcast",
+      "followSuccess": "Now following {title}.",
+      "followError": "Could not follow podcast: {message}",
+      "importOpml": "Import OPML",
+      "exportOpml": "Export OPML",
+      "importResult": "Import finished: {subscribed} followed, {skipped} already followed, {failed} failed.",
+      "importError": "Could not import OPML: {message}",
+      "loadError": "Could not load podcasts: {message}",
+      "episodeCount": "{count} episode | {count} episodes",
+      "feedError": "Feed refresh failed",
+      "empty": "No podcasts yet. Follow one by RSS feed URL above, or import an OPML file."
+    },
+    "podcast": {
+      "loadError": "Could not load podcast: {message}",
+      "episodesError": "Could not load episodes: {message}",
+      "episodes": "Episodes",
+      "emptyEpisodes": "No episodes yet.",
+      "refresh": "Refresh feed",
+      "refreshSuccess": "Feed refreshed.",
+      "refreshError": "Could not refresh feed: {message}",
+      "unfollow": "Unfollow",
+      "unfollowSuccess": "Podcast unfollowed.",
+      "unfollowError": "Could not unfollow podcast: {message}",
+      "explicit": "Explicit",
+      "season": "S{n}",
+      "trailer": "Trailer",
+      "feedErrorDetail": "Last feed refresh failed: {message}"
     },
     "about": {
       "title": "About",
