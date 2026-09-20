@@ -19,6 +19,8 @@ export interface PodcastResponse {
   categories: string[];
   explicit: boolean;
   episode_count: number;
+  unplayed_count: number;
+  latest_episode_at: string | null;
   last_fetched_at: string | null;
   last_error: string | null;
   following: boolean;
@@ -40,6 +42,7 @@ export interface PodcastEpisodeResponse {
   season_number: number | null;
   episode_number: number | null;
   episode_type: string | null;
+  played: boolean;
 }
 
 export interface OpmlImportResponse {
@@ -49,9 +52,14 @@ export interface OpmlImportResponse {
   errors: string[];
 }
 
+export type PodcastSortBy = "latest" | "episodes" | "unplayed" | "name";
+
 export function listPodcasts(params?: {
+  q?: string;
   limit?: number;
   offset?: number;
+  sort_by?: PodcastSortBy | string;
+  sort_dir?: "asc" | "desc";
 }): Promise<PodcastResponse[]> {
   return apiRequest<PodcastResponse[]>("/podcasts/", { query: params });
 }
@@ -85,6 +93,18 @@ export function listEpisodes(
     `/podcasts/${podcastId}/episodes`,
     { query: params },
   );
+}
+
+export function markEpisodePlayed(episodeId: string): Promise<void> {
+  return apiRequest<void>(`/podcasts/episodes/${episodeId}/played`, {
+    method: "POST",
+  });
+}
+
+export function markEpisodeUnplayed(episodeId: string): Promise<void> {
+  return apiRequest<void>(`/podcasts/episodes/${episodeId}/played`, {
+    method: "DELETE",
+  });
 }
 
 /**
@@ -128,6 +148,7 @@ export function episodeToQueueTrack(
     stream_url: episode.audio_url,
     remote: true,
     remote_url: episode.link ?? undefined,
+    podcast_episode_id: episode.id,
     in_collection: false,
   };
 }

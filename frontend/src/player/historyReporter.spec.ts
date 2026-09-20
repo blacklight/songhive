@@ -97,4 +97,30 @@ describe("HistoryReporter", () => {
 
     expect(addHistory).not.toHaveBeenCalled();
   });
+
+  it("uses a custom reporter when one is provided", () => {
+    const report = vi.fn(() => Promise.resolve());
+    reporter.load("episode-1", report);
+    reporter.setDuration(10);
+
+    reporter.onTimeUpdate(0, 10);
+    reporter.onTimeUpdate(5.1, 10);
+
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith("episode-1");
+    expect(addHistory).not.toHaveBeenCalled();
+  });
+
+  it("falls back to listen history on the next load without a reporter", () => {
+    const report = vi.fn(() => Promise.resolve());
+    reporter.load("episode-1", report);
+    reporter.load("track-8");
+    reporter.setDuration(10);
+
+    reporter.onTimeUpdate(0, 10);
+    reporter.onTimeUpdate(5.1, 10);
+
+    expect(report).not.toHaveBeenCalled();
+    expect(addHistory).toHaveBeenCalledWith("track-8");
+  });
 });

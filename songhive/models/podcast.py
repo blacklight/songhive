@@ -93,3 +93,13 @@ class PodcastSubscription(Base):
     podcast_id: Mapped[str] = mapped_column(ForeignKey("podcasts.id", ondelete="CASCADE"), index=True)
 
     podcast = relationship("Podcast", back_populates="subscriptions")
+
+
+class PodcastEpisodePlay(Base):
+    __tablename__ = "podcast_episode_plays"
+    __table_args__ = (UniqueConstraint("user_id", "episode_id", name="uq_podcast_episode_plays_user_episode"),)
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    episode_id: Mapped[str] = mapped_column(ForeignKey("podcast_episodes.id", ondelete="CASCADE"), index=True)
+
+    episode = relationship("PodcastEpisode")

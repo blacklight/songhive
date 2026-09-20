@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { PlayerEngine } from "./engine";
 import type { QueueTrack } from "./types";
+import * as historyApi from "@/api/history";
+import * as podcastsApi from "@/api/podcasts";
 
 vi.mock("@/api/stream", () => ({
   streamUrl: (track: { id: string }) => `/stream/${track.id}`,
@@ -8,6 +10,10 @@ vi.mock("@/api/stream", () => ({
 
 vi.mock("@/api/history", () => ({
   addHistory: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock("@/api/podcasts", () => ({
+  markEpisodePlayed: vi.fn(() => Promise.resolve()),
 }));
 
 function makeTrack(id: string): QueueTrack {
@@ -25,6 +31,8 @@ describe("PlayerEngine", () => {
   let primary: HTMLAudioElement;
 
   beforeEach(() => {
+    vi.mocked(historyApi.addHistory).mockClear();
+    vi.mocked(podcastsApi.markEpisodePlayed).mockClear();
     engine = new PlayerEngine();
     primary = (engine as unknown as { primary: HTMLAudioElement }).primary;
     primary.currentTime = 0;
@@ -196,5 +204,39 @@ describe("PlayerEngine", () => {
     engine.destroy();
     expect(primary.src).toBe("");
     expect(primary.pause).toHaveBeenCalled();
+  });
+
+  it("reports podcast episodes via markEpisodePlayed at the threshold", () => {
+    engine.init({});
+    const track = {
+      ...makeTrack("ep"),
+      remote: true,
+      stream_url: "https://example.com/ep.mp3",
+      podcast_episode_id: "episode-1",
+    };
+
+    engine.load(track);
+    (primary as unknown as { duration: number }).duration = 60;
+    primary.currentTime = 31;
+    primary.dispatchEvent(new Event("timeupdate"));
+
+    expect(podcastsApi.markEpisodePlayed).toHaveBeenCalledWith("episode-1");
+  });
+
+  it("does not report generic remote tracks", () => {
+    engine.init({});
+    const track = {
+      ...makeTrack("r"),
+      remote: true,
+      stream_url: "https://example.com/r.mp3",
+    };
+
+    engine.load(track);
+    (primary as unknown as { duration: number }).duration = 60;
+    primary.currentTime = 31;
+    primary.dispatchEvent(new Event("timeupdate"));
+
+    expect(historyApi.addHistory).not.toHaveBeenCalled();
+    expect(podcastsApi.markEpisodePlayed).not.toHaveBeenCalled();
   });
 });

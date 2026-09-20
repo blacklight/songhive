@@ -27,6 +27,7 @@ from ..models.mention_record import MentionRecord
 from ..models.notification import ActivitySubscription, Notification, NotificationPreference
 from ..models.oauth_client import OAuth2Client
 from ..models.playlist import Playlist
+from ..models.podcast import PodcastEpisodePlay, PodcastSubscription
 from ..models.radio import Radio
 from ..models.report import Report
 from ..models.setting import Setting
@@ -416,6 +417,8 @@ async def _remove_user_references(session: AsyncSession, user: User) -> None:
     await session.execute(delete(MentionRecord).where(MentionRecord.user_id == user.id))
     await session.execute(delete(Notification).where(Notification.user_id == user.id))
     await session.execute(delete(NotificationPreference).where(NotificationPreference.user_id == user.id))
+    await session.execute(delete(PodcastEpisodePlay).where(PodcastEpisodePlay.user_id == user.id))
+    await session.execute(delete(PodcastSubscription).where(PodcastSubscription.user_id == user.id))
     # Subscriptions in both directions: ones the user made and ones
     # targeting them — including any keyed on their actor URL.
     conditions = [

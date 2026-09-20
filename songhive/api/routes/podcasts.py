@@ -21,7 +21,7 @@ from ...config.schema import SonghiveConfig
 from ...models.podcast import Podcast, PodcastEpisode
 from ...models.user import User
 from ...services import podcasts as podcasts_service
-from ...services.podcasts import FeedFetchError
+from ...services.podcasts import FeedFetchError, PodcastStats
 from .._common import Pagination, get_pagination
 from ..deps import get_config, get_current_user, get_db
 
@@ -48,6 +48,8 @@ class PodcastResponse(BaseModel):
     categories: List[str] = []
     explicit: bool = False
     episode_count: int = 0
+    unplayed_count: int = 0
+    latest_episode_at: Optional[datetime] = None
     last_fetched_at: Optional[datetime] = None
     last_error: Optional[str] = None
     following: bool = False
@@ -73,6 +75,7 @@ class PodcastEpisodeResponse(BaseModel):
     season_number: Optional[int] = None
     episode_number: Optional[int] = None
     episode_type: Optional[str] = None
+    played: bool = False
 
 
 class PodcastFollowRequest(BaseModel):
@@ -107,7 +110,7 @@ def _categories(podcast: Podcast) -> List[str]:
     return [str(item) for item in value] if isinstance(value, list) else []
 
 
-def _podcast_response(podcast: Podcast, following: bool, episode_count: int) -> PodcastResponse:
+def _podcast_response(podcast: Podcast, following: bool, stats: PodcastStats) -> PodcastResponse:
     return PodcastResponse(
         id=str(podcast.id),
         feed_url=podcast.feed_url,
@@ -119,20 +122,16 @@ def _podcast_response(podcast: Podcast, following: bool, episode_count: int) -> 
         language=podcast.language,
         categories=_categories(podcast),
         explicit=podcast.explicit,
-        episode_count=episode_count,
+        episode_count=stats.episode_count,
+        unplayed_count=stats.unplayed_count,
+        latest_episode_at=stats.latest_episode_at,
         last_fetched_at=podcast.last_fetched_at,
         last_error=podcast.last_error,
         following=following,
     )
 
 
-async def _podcast_responses(db: AsyncSession, podcasts: List[Podcast], following: bool) -> List[PodcastResponse]:
-    """Serialize podcasts, resolving episode counts with one grouped query."""
-    counts = await podcasts_service.episode_counts(db, [str(p.id) for p in podcasts])
-    return [_podcast_response(p, following, counts.get(str(p.id), 0)) for p in podcasts]
-
-
-def _episode_response(episode: PodcastEpisode) -> PodcastEpisodeResponse:
+def _episode_response(episode: PodcastEpisode, played: bool = False) -> PodcastEpisodeResponse:
     return PodcastEpisodeResponse(
         id=str(episode.id),
         podcast_id=str(episode.podcast_id),
@@ -149,6 +148,7 @@ def _episode_response(episode: PodcastEpisode) -> PodcastEpisodeResponse:
         season_number=episode.season_number,
         episode_number=episode.episode_number,
         episode_type=episode.episode_type,
+        played=played,
     )
 
 
@@ -162,18 +162,33 @@ async def _get_podcast_or_404(db: AsyncSession, podcast_id: str) -> Podcast:
 @router.get("/", response_model=List[PodcastResponse])
 async def list_podcasts(
     response: Response,
+    q: Optional[str] = Query(None, max_length=200),
+    sort_by: str = Query("latest", pattern="^(latest|episodes|unplayed|name)$"),
+    sort_dir: Optional[str] = Query(None, pattern="^(asc|desc)$"),
     current_user: User = Depends(get_current_user),
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
 ):
-    """List podcasts the current user follows."""
+    """
+    List podcasts the current user follows.
+
+    ``sort_by`` accepts ``latest`` (newest episode first, the default),
+    ``episodes``, ``unplayed`` or ``name``; ``q`` filters on title, author
+    and description.
+    """
     _check_podcasts(config)
-    podcasts, total = await podcasts_service.list_subscribed_podcasts(
-        db, current_user, limit=pagination.limit, offset=pagination.offset
+    entries, total = await podcasts_service.list_subscribed_podcasts(
+        db,
+        current_user,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        search=q,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
     pagination.set_total(response, total)
-    return await _podcast_responses(db, podcasts, following=True)
+    return [_podcast_response(entry.podcast, True, entry.stats) for entry in entries]
 
 
 @router.post("/", response_model=PodcastResponse, status_code=201)
@@ -186,14 +201,14 @@ async def follow_podcast(
     """Follow a podcast by RSS/Atom feed URL."""
     _check_podcasts(config)
     try:
-        podcast, _created = await podcasts_service.subscribe(db, current_user, body.feed_url, config)
+        podcast, _ = await podcasts_service.subscribe(db, current_user, body.feed_url, config)
     except FeedFetchError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Could not fetch or parse feed: {exc}",
         ) from exc
-    counts = await podcasts_service.episode_counts(db, [str(podcast.id)])
-    return _podcast_response(podcast, True, counts.get(str(podcast.id), 0))
+    stats = await podcasts_service.podcast_stats(db, current_user, [str(podcast.id)])
+    return _podcast_response(podcast, True, stats.get(str(podcast.id), PodcastStats()))
 
 
 @router.get("/opml")
@@ -204,9 +219,9 @@ async def export_opml(
 ):
     """Export the current user's podcast subscriptions as an OPML document."""
     _check_podcasts(config)
-    podcasts, _total = await podcasts_service.list_subscribed_podcasts(db, current_user, limit=1000)
+    entries, _ = await podcasts_service.list_subscribed_podcasts(db, current_user, limit=1000, sort_by="name")
     username = current_user.display_name or current_user.username
-    document = podcasts_service.render_opml(f"{username}'s podcasts", podcasts)
+    document = podcasts_service.render_opml(f"{username}'s podcasts", [entry.podcast for entry in entries])
     return Response(
         content=document,
         media_type=OPML_MEDIA_TYPE,
@@ -238,9 +253,9 @@ async def import_opml(
         ) from exc
 
     result = OpmlImportResponse()
-    for feed_url, _title in entries:
+    for feed_url, _ in entries:
         try:
-            _podcast, created = await podcasts_service.subscribe(db, current_user, feed_url, config)
+            __, created = await podcasts_service.subscribe(db, current_user, feed_url, config)
         except FeedFetchError as exc:
             result.failed += 1
             result.errors.append(f"{feed_url}: {exc}")
@@ -263,8 +278,8 @@ async def get_podcast(
     _check_podcasts(config)
     podcast = await _get_podcast_or_404(db, podcast_id)
     following = await podcasts_service.is_subscribed(db, current_user, podcast_id)
-    counts = await podcasts_service.episode_counts(db, [podcast_id])
-    return _podcast_response(podcast, following, counts.get(podcast_id, 0))
+    stats = await podcasts_service.podcast_stats(db, current_user, [podcast_id])
+    return _podcast_response(podcast, following, stats.get(podcast_id, PodcastStats()))
 
 
 @router.delete("/{podcast_id}", status_code=204)
@@ -299,19 +314,16 @@ async def refresh_podcast(
             detail=f"Could not refresh feed: {exc}",
         ) from exc
     following = await podcasts_service.is_subscribed(db, current_user, podcast_id)
-    counts = await podcasts_service.episode_counts(db, [podcast_id])
-    return _podcast_response(podcast, following, counts.get(podcast_id, 0))
+    stats = await podcasts_service.podcast_stats(db, current_user, [podcast_id])
+    return _podcast_response(podcast, following, stats.get(podcast_id, PodcastStats()))
 
 
-@router.get(
-    "/{podcast_id}/episodes",
-    dependencies=[Depends(get_current_user)],
-    response_model=List[PodcastEpisodeResponse],
-)
+@router.get("/{podcast_id}/episodes", response_model=List[PodcastEpisodeResponse])
 async def list_episodes(
     podcast_id: str,
     response: Response,
     sort: str = Query("newest", pattern="^(newest|oldest)$"),
+    current_user: User = Depends(get_current_user),
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
@@ -323,4 +335,49 @@ async def list_episodes(
         db, podcast_id, limit=pagination.limit, offset=pagination.offset, oldest_first=sort == "oldest"
     )
     pagination.set_total(response, total)
-    return [_episode_response(episode) for episode in episodes]
+    played = await podcasts_service.played_episode_ids(db, current_user, [str(e.id) for e in episodes])
+    return [_episode_response(episode, str(episode.id) in played) for episode in episodes]
+
+
+@router.get("/episodes/{episode_id}", response_model=PodcastEpisodeResponse)
+async def get_episode(
+    episode_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Get a single podcast episode by id."""
+    _check_podcasts(config)
+    episode = await podcasts_service.get_episode(db, episode_id)
+    if episode is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
+    played = await podcasts_service.played_episode_ids(db, current_user, [str(episode.id)])
+    return _episode_response(episode, str(episode.id) in played)
+
+
+@router.post("/episodes/{episode_id}/played", status_code=204)
+async def mark_episode_played(
+    episode_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Mark an episode as played for the current user (idempotent)."""
+    _check_podcasts(config)
+    episode = await podcasts_service.mark_episode_played(db, current_user, episode_id)
+    if episode is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
+
+
+@router.delete("/episodes/{episode_id}/played", status_code=204)
+async def mark_episode_unplayed(
+    episode_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Clear the played mark for an episode."""
+    _check_podcasts(config)
+    episode = await podcasts_service.mark_episode_unplayed(db, current_user, episode_id)
+    if episode is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")

@@ -21,7 +21,7 @@ from .moderation import AdminUserModeration, InstanceModeration, UserModeration
 from .notification import ActivitySubscription, Notification, NotificationPreference
 from .oauth_client import OAuth2Client
 from .playlist import Playlist, PlaylistTrack
-from .podcast import Podcast, PodcastEpisode, PodcastSubscription
+from .podcast import Podcast, PodcastEpisode, PodcastEpisodePlay, PodcastSubscription
 from .preview_card import PreviewCard
 from .radio import Radio
 from .remote_object import RemoteObject
@@ -81,6 +81,7 @@ __all__ = [
     "PlaylistTrack",
     "Podcast",
     "PodcastEpisode",
+    "PodcastEpisodePlay",
     "PodcastSubscription",
     "PreviewCard",
     "Radio",

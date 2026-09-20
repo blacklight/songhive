@@ -2,15 +2,20 @@ import { addHistory } from "@/api/history";
 
 const HISTORY_MIN_SECONDS = 30;
 
+/** What to call once a track passes the listen threshold. */
+export type ListenReporter = (id: string) => Promise<unknown>;
+
 export class HistoryReporter {
   private trackId: string | null = null;
+  private report: ListenReporter = addHistory;
   private duration = 0;
   private elapsed = 0;
   private previousTime = 0;
   private reported = false;
 
-  load(trackId: string | null) {
+  load(trackId: string | null, report: ListenReporter = addHistory) {
     this.trackId = trackId;
+    this.report = report;
     this.duration = 0;
     this.elapsed = 0;
     this.previousTime = 0;
@@ -37,7 +42,7 @@ export class HistoryReporter {
 
     if (reachedTime || reachedHalf) {
       this.reported = true;
-      Promise.resolve(addHistory(this.trackId)).catch((err) => {
+      Promise.resolve(this.report(this.trackId)).catch((err) => {
         console.warn("Failed to record listen history", err);
       });
     }

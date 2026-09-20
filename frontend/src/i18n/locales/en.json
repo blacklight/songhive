@@ -425,7 +425,16 @@
       "loadError": "Could not load podcasts: {message}",
       "episodeCount": "{count} episode | {count} episodes",
       "feedError": "Feed refresh failed",
-      "empty": "No podcasts yet. Follow one by RSS feed URL above, or import an OPML file."
+      "empty": "No podcasts yet. Follow one by RSS feed URL above, or import an OPML file.",
+      "searchPlaceholder": "Search podcasts",
+      "noResults": "No podcasts match \"{query}\".",
+      "unplayedCount": "{count} unplayed episode | {count} unplayed episodes",
+      "latestEpisodeAt": "Latest episode: {date}",
+      "sort": {
+        "latest": "Latest episode",
+        "unplayed": "Unplayed",
+        "episodes": "Episodes"
+      }
     },
     "podcast": {
       "loadError": "Could not load podcast: {message}",
@@ -441,7 +450,10 @@
       "explicit": "Explicit",
       "season": "S{n}",
       "trailer": "Trailer",
-      "feedErrorDetail": "Last feed refresh failed: {message}"
+      "feedErrorDetail": "Last feed refresh failed: {message}",
+      "markPlayed": "Mark as played",
+      "markUnplayed": "Mark as unplayed",
+      "playedError": "Could not update played state: {message}"
     },
     "about": {
       "title": "About",

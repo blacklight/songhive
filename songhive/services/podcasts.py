@@ -34,14 +34,15 @@ from xml.etree import ElementTree
 from xml.sax.saxutils import escape, quoteattr
 
 import requests
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import ColumnElement, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_default_user_agent
 from ..config.schema import SonghiveConfig
-from ..models.podcast import Podcast, PodcastEpisode, PodcastSubscription
+from ..models.podcast import Podcast, PodcastEpisode, PodcastEpisodePlay, PodcastSubscription
 from ..models.user import User
+from ._common import ilike_contains
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,23 @@ class ParsedFeed:
     language: Optional[str] = None
     categories: List[str] = field(default_factory=list)
     explicit: bool = False
+
+
+@dataclass
+class PodcastStats:
+    """Per-user aggregates for one podcast's episode catalog."""
+
+    episode_count: int = 0
+    unplayed_count: int = 0
+    latest_episode_at: Optional[datetime] = None
+
+
+@dataclass
+class SubscribedPodcast:
+    """A followed podcast row together with its per-user stats."""
+
+    podcast: Podcast
+    stats: PodcastStats
 
 
 @dataclass
@@ -660,6 +678,11 @@ async def get_podcast(db: AsyncSession, podcast_id: str) -> Optional[Podcast]:
     return await db.get(Podcast, podcast_id)
 
 
+async def get_episode(db: AsyncSession, episode_id: str) -> Optional[PodcastEpisode]:
+    """Return a podcast episode by id, or None."""
+    return await db.get(PodcastEpisode, episode_id)
+
+
 async def get_podcast_by_feed_url(db: AsyncSession, feed_url: str) -> Optional[Podcast]:
     """Return the podcast row for ``feed_url``, or None."""
     return await db.scalar(select(Podcast).where(Podcast.feed_url == feed_url))
@@ -827,24 +850,227 @@ async def is_subscribed(db: AsyncSession, user: Optional[User], podcast_id: str)
     ) > 0
 
 
+PODCAST_SORT_FIELDS = ("latest", "episodes", "unplayed", "name")
+# Numeric sorts read most naturally newest/most first; name defaults to A–Z.
+_PODCAST_SORT_DEFAULT_DIR = {"latest": "desc", "episodes": "desc", "unplayed": "desc", "name": "asc"}
+
+
+def _episode_stats_subquery():
+    """Per-podcast episode count and newest publication date."""
+    return (
+        select(
+            PodcastEpisode.podcast_id.label("podcast_id"),
+            func.count().label("episode_count"),
+            func.max(PodcastEpisode.published_at).label("latest_episode_at"),
+        )
+        .group_by(PodcastEpisode.podcast_id)
+        .subquery()
+    )
+
+
+def _played_stats_subquery(user_id: str):
+    """Per-podcast count of episodes ``user_id`` has marked played."""
+    return (
+        select(
+            PodcastEpisode.podcast_id.label("podcast_id"),
+            func.count().label("played_count"),
+        )
+        .join(PodcastEpisodePlay, PodcastEpisodePlay.episode_id == PodcastEpisode.id)
+        .where(PodcastEpisodePlay.user_id == user_id)
+        .group_by(PodcastEpisode.podcast_id)
+        .subquery()
+    )
+
+
+def _subscription_filter(user: User, search: Optional[str]):
+    """Base predicates for a user's subscriptions plus the optional search."""
+    conditions = [PodcastSubscription.user_id == user.id]
+    term = (search or "").strip()
+    if term:
+        conditions.append(
+            or_(
+                ilike_contains(Podcast.title, term),
+                ilike_contains(Podcast.author, term),
+                ilike_contains(Podcast.description, term),
+            )
+        )
+    return conditions
+
+
 async def list_subscribed_podcasts(
     db: AsyncSession,
     user: User,
     *,
     limit: int = 100,
     offset: int = 0,
-) -> tuple[List[Podcast], int]:
-    """Return ``(podcasts, total)`` for feeds ``user`` follows, newest first."""
-    base = select(Podcast).join(
-        PodcastSubscription,
-        PodcastSubscription.podcast_id == Podcast.id,
+    search: Optional[str] = None,
+    sort_by: str = "latest",
+    sort_dir: Optional[str] = None,
+) -> tuple[List[SubscribedPodcast], int]:
+    """
+    Return ``(entries, total)`` for feeds ``user`` follows, with stats.
+
+    ``sort_by`` is one of ``latest`` (newest episode publication date),
+    ``episodes`` (episode count), ``unplayed`` (episodes the user has not
+    marked played) or ``name``. ``sort_dir`` falls back to the field's
+    natural direction when omitted or unrecognised.
+    """
+    episodes_sq = _episode_stats_subquery()
+    played_sq = _played_stats_subquery(str(user.id))
+    episode_count = func.coalesce(episodes_sq.c.episode_count, 0)
+    unplayed_count = episode_count - func.coalesce(played_sq.c.played_count, 0)
+
+    conditions = _subscription_filter(user, search)
+
+    total = (
+        await db.scalar(
+            select(func.count())
+            .select_from(Podcast)
+            .join(PodcastSubscription, PodcastSubscription.podcast_id == Podcast.id)
+            .where(*conditions)
+        )
+        or 0
     )
-    filtered = base.where(PodcastSubscription.user_id == user.id)
-    total = await db.scalar(select(func.count()).select_from(filtered.subquery())) or 0
-    rows = (
-        await db.scalars(filtered.order_by(PodcastSubscription.created_at.desc()).offset(offset).limit(limit))
-    ).all()
-    return list(rows), total
+
+    stmt = (
+        select(
+            Podcast,
+            episode_count.label("episode_count"),
+            unplayed_count.label("unplayed_count"),
+            episodes_sq.c.latest_episode_at,
+        )
+        .join(PodcastSubscription, PodcastSubscription.podcast_id == Podcast.id)
+        .outerjoin(episodes_sq, episodes_sq.c.podcast_id == Podcast.id)
+        .outerjoin(played_sq, played_sq.c.podcast_id == Podcast.id)
+        .where(*conditions)
+    )
+
+    if sort_by == "name":
+        order_col: ColumnElement = func.lower(Podcast.title)
+    elif sort_by == "episodes":
+        order_col = episode_count
+    elif sort_by == "unplayed":
+        order_col = unplayed_count
+    else:
+        order_col = episodes_sq.c.latest_episode_at
+
+    direction = sort_dir if sort_dir in ("asc", "desc") else _PODCAST_SORT_DEFAULT_DIR.get(sort_by, "desc")
+    ordering: list[ColumnElement] = [
+        order_col.asc().nulls_last() if direction == "asc" else order_col.desc().nulls_last()
+    ]
+    if sort_by != "name":
+        ordering.append(func.lower(Podcast.title).asc())
+    ordering.append(Podcast.id.asc())
+
+    rows = (await db.execute(stmt.order_by(*ordering).offset(offset).limit(limit))).all()
+    entries = [
+        SubscribedPodcast(
+            podcast=row[0],
+            stats=PodcastStats(
+                episode_count=row.episode_count,
+                unplayed_count=row.unplayed_count,
+                latest_episode_at=row.latest_episode_at,
+            ),
+        )
+        for row in rows
+    ]
+    return entries, total
+
+
+async def podcast_stats(db: AsyncSession, user: User, podcast_ids: List[str]) -> dict[str, PodcastStats]:
+    """Return a ``podcast_id → PodcastStats`` map for the given podcasts."""
+    if not podcast_ids:
+        return {}
+    episodes_sq = (
+        select(
+            PodcastEpisode.podcast_id.label("podcast_id"),
+            func.count().label("episode_count"),
+            func.max(PodcastEpisode.published_at).label("latest_episode_at"),
+        )
+        .where(PodcastEpisode.podcast_id.in_(podcast_ids))
+        .group_by(PodcastEpisode.podcast_id)
+        .subquery()
+    )
+    played_sq = (
+        select(
+            PodcastEpisode.podcast_id.label("podcast_id"),
+            func.count().label("played_count"),
+        )
+        .join(PodcastEpisodePlay, PodcastEpisodePlay.episode_id == PodcastEpisode.id)
+        .where(PodcastEpisode.podcast_id.in_(podcast_ids), PodcastEpisodePlay.user_id == user.id)
+        .group_by(PodcastEpisode.podcast_id)
+        .subquery()
+    )
+    rows = await db.execute(
+        select(
+            episodes_sq.c.podcast_id,
+            episodes_sq.c.episode_count,
+            episodes_sq.c.latest_episode_at,
+            func.coalesce(played_sq.c.played_count, 0).label("played_count"),
+        ).outerjoin(played_sq, played_sq.c.podcast_id == episodes_sq.c.podcast_id)
+    )
+    return {
+        row.podcast_id: PodcastStats(
+            episode_count=row.episode_count,
+            unplayed_count=row.episode_count - row.played_count,
+            latest_episode_at=row.latest_episode_at,
+        )
+        for row in rows
+    }
+
+
+async def played_episode_ids(db: AsyncSession, user: User, episode_ids: List[str]) -> set[str]:
+    """Return the subset of ``episode_ids`` ``user`` has marked played."""
+    if not episode_ids:
+        return set()
+    rows = await db.scalars(
+        select(PodcastEpisodePlay.episode_id).where(
+            PodcastEpisodePlay.user_id == user.id,
+            PodcastEpisodePlay.episode_id.in_(episode_ids),
+        )
+    )
+    return set(rows)
+
+
+async def mark_episode_played(db: AsyncSession, user: User, episode_id: str) -> Optional[PodcastEpisode]:
+    """Record ``episode_id`` as played for ``user``; returns the episode or None.
+
+    Idempotent — a repeat mark short-circuits on the existing row. The
+    ``begin_nested`` guard only covers a genuine concurrent-insert race.
+    """
+    episode = await db.get(PodcastEpisode, episode_id)
+    if episode is None:
+        return None
+    existing = await db.scalar(
+        select(PodcastEpisodePlay.id).where(
+            PodcastEpisodePlay.user_id == user.id,
+            PodcastEpisodePlay.episode_id == episode.id,
+        )
+    )
+    if existing is not None:
+        return episode
+    db.add(PodcastEpisodePlay(user_id=user.id, episode_id=episode.id))
+    try:
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        pass
+    return episode
+
+
+async def mark_episode_unplayed(db: AsyncSession, user: User, episode_id: str) -> Optional[PodcastEpisode]:
+    """Clear the played mark for ``episode_id``; returns the episode or None."""
+    episode = await db.get(PodcastEpisode, episode_id)
+    if episode is None:
+        return None
+    await db.execute(
+        delete(PodcastEpisodePlay).where(
+            PodcastEpisodePlay.user_id == user.id,
+            PodcastEpisodePlay.episode_id == episode.id,
+        )
+    )
+    await db.flush()
+    return episode
 
 
 async def list_episodes(
@@ -880,18 +1106,6 @@ async def list_episodes(
         )
     ).all()
     return list(rows), total
-
-
-async def episode_counts(db: AsyncSession, podcast_ids: List[str]) -> dict[str, int]:
-    """Return a ``podcast_id → episode count`` map for the given podcasts."""
-    if not podcast_ids:
-        return {}
-    rows = await db.execute(
-        select(PodcastEpisode.podcast_id, func.count())
-        .where(PodcastEpisode.podcast_id.in_(podcast_ids))
-        .group_by(PodcastEpisode.podcast_id)
-    )
-    return dict(rows.all())  # type: ignore
 
 
 async def due_podcast_ids(db: AsyncSession, interval: timedelta, *, limit: int = 500) -> List[str]:

@@ -1,4 +1,5 @@
 import { streamUrl } from "@/api/stream";
+import { markEpisodePlayed } from "@/api/podcasts";
 import type { QueueTrack, EngineCallbacks } from "./types";
 import { HistoryReporter } from "./historyReporter";
 
@@ -46,8 +47,14 @@ export class PlayerEngine {
   load(track: QueueTrack, startAt?: number) {
     this.pendingStartAt = startAt;
     // Remote attachment audio has no local track row — there is nothing to
-    // report listen history against.
-    this.history.load(track.remote ? null : track.id);
+    // report listen history against. Podcast episodes are remote too, but
+    // report to the podcast played-state endpoint so the unplayed counters
+    // on /podcasts stay accurate.
+    if (track.podcast_episode_id) {
+      this.history.load(track.podcast_episode_id, markEpisodePlayed);
+    } else {
+      this.history.load(track.remote ? null : track.id);
+    }
     this.callbacks.onStateChange?.("loading");
 
     const url = streamUrl(track);

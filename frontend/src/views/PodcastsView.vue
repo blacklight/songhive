@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
 import {
@@ -10,21 +10,38 @@ import {
   type PodcastResponse,
 } from "@/api/podcasts";
 import { getApiErrorMessage } from "@/api/client";
+import { useEntityList } from "@/composables/useEntityList";
 import { useToastStore } from "@/stores/toast";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import SearchBar from "@/components/ui/SearchBar.vue";
+import SortControl from "@/components/ui/SortControl.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 
 const { t } = useI18n();
 const toast = useToastStore();
 
-const podcasts = ref<PodcastResponse[]>([]);
-const loading = ref(false);
-const error = ref<string | null>(null);
-const limit = 50;
-const hasMore = ref(false);
+const {
+  items: podcasts,
+  loading,
+  error,
+  query,
+  hasMore,
+  sortBy,
+  sortDir,
+  load,
+  loadMore,
+  search,
+  setSort,
+  retry,
+  refresh,
+} = useEntityList<PodcastResponse>((params) => listPodcasts(params), {
+  defaultSortBy: "latest",
+  defaultSortDir: "desc",
+  syncQuery: true,
+});
 
 const feedUrl = ref("");
 const following = ref(false);
@@ -33,6 +50,13 @@ const followError = ref<string | null>(null);
 const opmlInput = ref<HTMLInputElement | null>(null);
 const importing = ref(false);
 
+const sortOptions = computed(() => [
+  { value: "latest", label: t("pages.podcasts.sort.latest") },
+  { value: "unplayed", label: t("pages.podcasts.sort.unplayed") },
+  { value: "episodes", label: t("pages.podcasts.sort.episodes") },
+  { value: "name", label: t("sort.fields.name") },
+]);
+
 function getErrorMessage(err: unknown): string {
   return (
     getApiErrorMessage(err) ||
@@ -40,25 +64,22 @@ function getErrorMessage(err: unknown): string {
   );
 }
 
-async function load(reset = false) {
-  if (loading.value) return;
+function formatDate(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+}
 
-  const offset = reset ? 0 : podcasts.value.length;
-  loading.value = true;
-  if (reset) error.value = null;
+function onSearch(q: string) {
+  void search(q);
+}
 
-  try {
-    const result = await listPodcasts({ limit, offset });
-    podcasts.value = reset ? result : [...podcasts.value, ...result];
-    hasMore.value = result.length === limit;
-  } catch (err) {
-    error.value = t("pages.podcasts.loadError", {
-      message: getErrorMessage(err),
-    });
-    hasMore.value = false;
-  } finally {
-    loading.value = false;
-  }
+function onSort(field: string, direction: "asc" | "desc") {
+  // Switching fields restores that field's natural direction; toggling the
+  // direction on the current field just inverts it.
+  const dir =
+    field === sortBy.value ? direction : field === "name" ? "asc" : "desc";
+  void setSort(field, dir);
 }
 
 async function onFollow() {
@@ -74,10 +95,7 @@ async function onFollow() {
       type: "success",
       message: t("pages.podcasts.followSuccess", { title: podcast.title }),
     });
-    podcasts.value = [
-      podcast,
-      ...podcasts.value.filter((p) => p.id !== podcast.id),
-    ];
+    await refresh();
   } catch (err) {
     followError.value = t("pages.podcasts.followError", {
       message: getErrorMessage(err),
@@ -111,7 +129,7 @@ async function onOpmlFileChange(event: Event) {
     for (const message of result.errors.slice(0, 3)) {
       toast.push({ type: "error", message });
     }
-    await load(true);
+    await refresh();
   } catch (err) {
     toast.push({
       type: "error",
@@ -124,7 +142,7 @@ async function onOpmlFileChange(event: Event) {
   }
 }
 
-void load(true);
+onMounted(() => load(true));
 </script>
 
 <template>
@@ -177,9 +195,26 @@ void load(true);
       />
     </div>
 
+    <div class="podcasts-view__controls">
+      <SearchBar
+        :model-value="query"
+        :debounce="0"
+        class="podcasts-view__search"
+        :placeholder="t('pages.podcasts.searchPlaceholder')"
+        @update:model-value="onSearch"
+      />
+      <SortControl
+        :model-value="sortBy"
+        :direction="sortDir"
+        :options="sortOptions"
+        @update:model-value="(field) => onSort(field, sortDir)"
+        @update:direction="(dir) => onSort(sortBy, dir)"
+      />
+    </div>
+
     <div v-if="error" class="podcasts-view__error" role="alert">
       <span>{{ error }}</span>
-      <AppButton size="sm" icon="rotate-right" @click="load(true)">
+      <AppButton size="sm" icon="rotate-right" @click="retry">
         {{ t("common.retry") }}
       </AppButton>
     </div>
@@ -192,7 +227,11 @@ void load(true);
     </div>
 
     <div v-else-if="podcasts.length === 0" class="podcasts-view__empty">
-      {{ t("pages.podcasts.empty") }}
+      {{
+        query
+          ? t("pages.podcasts.noResults", { query })
+          : t("pages.podcasts.empty")
+      }}
     </div>
 
     <ul v-else class="podcasts-view__list" role="list">
@@ -200,16 +239,39 @@ void load(true);
         <RouterLink
           :to="{ name: 'podcast', params: { id: podcast.id } }"
           class="podcasts-view__podcast"
+          :title="
+            podcast.latest_episode_at
+              ? t('pages.podcasts.latestEpisodeAt', {
+                  date: formatDate(podcast.latest_episode_at),
+                })
+              : undefined
+          "
         >
-          <img
-            v-if="podcast.image_url"
-            :src="podcast.image_url"
-            :alt="podcast.title"
-            class="podcasts-view__cover"
-            loading="lazy"
-          />
-          <span v-else class="podcasts-view__cover podcasts-view__cover--empty">
-            <AppIcon name="podcast" />
+          <span class="podcasts-view__cover-wrap">
+            <img
+              v-if="podcast.image_url"
+              :src="podcast.image_url"
+              :alt="podcast.title"
+              class="podcasts-view__cover"
+              loading="lazy"
+            />
+            <span
+              v-else
+              class="podcasts-view__cover podcasts-view__cover--empty"
+            >
+              <AppIcon name="podcast" />
+            </span>
+            <span
+              v-if="podcast.unplayed_count > 0"
+              class="podcasts-view__unplayed"
+              :title="
+                t('pages.podcasts.unplayedCount', {
+                  count: podcast.unplayed_count,
+                })
+              "
+            >
+              {{ podcast.unplayed_count }}
+            </span>
           </span>
           <span class="podcasts-view__info">
             <span class="podcasts-view__name">{{ podcast.title }}</span>
@@ -232,6 +294,13 @@ void load(true);
               {{ t("pages.podcasts.feedError") }}
             </span>
           </span>
+          <span v-if="podcast.latest_episode_at" class="podcasts-view__latest">
+            {{
+              t("pages.podcasts.latestEpisodeAt", {
+                date: formatDate(podcast.latest_episode_at),
+              })
+            }}
+          </span>
         </RouterLink>
       </li>
     </ul>
@@ -241,7 +310,7 @@ void load(true);
         icon="chevron-down"
         variant="secondary"
         :loading="loading"
-        @click="load()"
+        @click="loadMore"
       >
         {{ t("browse.list.loadMore") }}
       </AppButton>
@@ -304,6 +373,20 @@ void load(true);
   display: none;
 }
 
+.podcasts-view__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.podcasts-view__search {
+  flex: 1;
+  min-width: 12rem;
+  max-width: 32rem;
+}
+
 .podcasts-view__error {
   display: flex;
   align-items: center;
@@ -335,6 +418,7 @@ void load(true);
 }
 
 .podcasts-view__podcast {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -350,10 +434,15 @@ void load(true);
   background-color: var(--color-surface-hover);
 }
 
+.podcasts-view__cover-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .podcasts-view__cover {
   width: 4rem;
   height: 4rem;
-  flex-shrink: 0;
+  display: block;
   border-radius: var(--radius-sm);
   object-fit: cover;
   background-color: var(--color-surface-raised);
@@ -365,6 +454,24 @@ void load(true);
   justify-content: center;
   color: var(--color-text-muted);
   font-size: 1.5rem;
+}
+
+.podcasts-view__unplayed {
+  position: absolute;
+  top: -0.375rem;
+  right: -0.375rem;
+  min-width: 1.375rem;
+  height: 1.375rem;
+  padding: 0 var(--space-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .podcasts-view__info {
@@ -388,6 +495,25 @@ void load(true);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.podcasts-view__latest {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-2);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  padding: 0 var(--space-2);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  border-radius: var(--radius-md);
+  pointer-events: none;
+}
+
+.podcasts-view__podcast:hover .podcasts-view__latest,
+.podcasts-view__podcast:focus-visible .podcasts-view__latest {
+  opacity: 1;
 }
 
 .podcasts-view__feed-error {

@@ -5,6 +5,8 @@ import { useRoute, useRouter } from "vue-router";
 import {
   getPodcast,
   listEpisodes,
+  markEpisodePlayed,
+  markEpisodeUnplayed,
   refreshPodcast,
   unfollowPodcast,
   episodeToQueueTrack,
@@ -146,6 +148,37 @@ function onPlayAll() {
   player.playAll(episodes.value.map((item) => episodeToQueueTrack(item, show)));
 }
 
+const togglingPlayed = ref<Set<string>>(new Set());
+
+async function onTogglePlayed(episode: PodcastEpisodeResponse) {
+  if (togglingPlayed.value.has(episode.id)) return;
+  togglingPlayed.value.add(episode.id);
+  const target = !episode.played;
+  try {
+    if (target) {
+      await markEpisodePlayed(episode.id);
+    } else {
+      await markEpisodeUnplayed(episode.id);
+    }
+    episode.played = target;
+    if (podcast.value) {
+      podcast.value.unplayed_count = Math.max(
+        0,
+        podcast.value.unplayed_count + (target ? -1 : 1),
+      );
+    }
+  } catch (err) {
+    toast.push({
+      type: "error",
+      message: t("pages.podcast.playedError", {
+        message: getErrorMessage(err),
+      }),
+    });
+  } finally {
+    togglingPlayed.value.delete(episode.id);
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -262,6 +295,7 @@ onMounted(load);
             v-for="episode in episodes"
             :key="episode.id"
             class="podcast-view__episode"
+            :class="{ 'podcast-view__episode--played': episode.played }"
           >
             <AppButton
               variant="ghost"
@@ -306,6 +340,18 @@ onMounted(load);
                 {{ episode.description }}
               </p>
             </div>
+            <AppButton
+              variant="ghost"
+              size="sm"
+              :icon="episode.played ? 'circle-check' : 'check'"
+              class="podcast-view__episode-played"
+              :title="
+                episode.played
+                  ? t('pages.podcast.markUnplayed')
+                  : t('pages.podcast.markPlayed')
+              "
+              @click="onTogglePlayed(episode)"
+            />
           </li>
         </ul>
 
@@ -467,6 +513,22 @@ onMounted(load);
 .podcast-view__episode-play {
   flex-shrink: 0;
   margin-top: var(--space-1);
+}
+
+.podcast-view__episode-played {
+  flex-shrink: 0;
+  margin-top: var(--space-1);
+  margin-left: auto;
+  color: var(--color-text-muted);
+}
+
+.podcast-view__episode--played .podcast-view__episode-title,
+.podcast-view__episode--played .podcast-view__episode-description {
+  color: var(--color-text-muted);
+}
+
+.podcast-view__episode--played .podcast-view__episode-played {
+  color: var(--color-accent);
 }
 
 .podcast-view__episode-cover {

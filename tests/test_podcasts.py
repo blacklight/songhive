@@ -228,7 +228,7 @@ async def test_subscribe_second_user_shares_podcast_row(db_session, regular_user
     assert created is True
     assert podcast1.id == podcast2.id
     subs = await podcasts_service.list_subscribed_podcasts(db_session, other_user)
-    assert [p.id for p in subs[0]] == [podcast1.id]
+    assert [entry.podcast.id for entry in subs[0]] == [podcast1.id]
 
 
 async def test_subscribe_fetch_failure_drops_new_podcast(db_session, regular_user, config, monkeypatch):
@@ -502,3 +502,178 @@ def test_podcasts_disabled_returns_404(client, regular_user, auth_headers, app):
         assert response.status_code == 404
     finally:
         app.state.config.podcasts.enabled = True
+
+
+RSS_FEED_B = b"""<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Another Show</title>
+    <description>Second podcast.</description>
+    <item>
+      <title>B Episode</title>
+      <guid>b-ep-1</guid>
+      <pubDate>Wed, 01 Oct 2025 10:00:00 GMT</pubDate>
+      <enclosure url="https://cdn.b.example/e1.mp3" type="audio/mpeg" length="5"/>
+    </item>
+  </channel>
+</rss>
+"""
+
+FEED_URL_B = "https://b.example/feed.xml"
+
+
+def _follow(client, headers, feed_url=FEED_URL):
+    response = client.post("/api/v1/podcasts/", json={"feed_url": feed_url}, headers=headers)
+    assert response.status_code == 201
+    return response.json()
+
+
+async def test_list_subscribed_podcasts_returns_stats(db_session, regular_user, other_user, config, monkeypatch):
+    _stub_fetch(monkeypatch)
+    podcast, _ = await podcasts_service.subscribe(db_session, regular_user, FEED_URL, config)
+
+    entries, total = await podcasts_service.list_subscribed_podcasts(db_session, regular_user)
+    assert total == 1
+    entry = entries[0]
+    assert entry.podcast.id == podcast.id
+    assert entry.stats.episode_count == 2
+    assert entry.stats.unplayed_count == 2
+    assert entry.stats.latest_episode_at == datetime(2025, 9, 8, 10, 0, tzinfo=timezone.utc)
+
+    episodes, _ = await podcasts_service.list_episodes(db_session, podcast.id)
+    await podcasts_service.mark_episode_played(db_session, regular_user, episodes[0].id)
+    stats = await podcasts_service.podcast_stats(db_session, regular_user, [podcast.id])
+    assert stats[podcast.id].unplayed_count == 1
+
+    # Another user's plays do not affect this user's counters.
+    stats_other = await podcasts_service.podcast_stats(db_session, other_user, [podcast.id])
+    assert stats_other[podcast.id].unplayed_count == 2
+
+
+async def test_mark_episode_played_idempotent_and_unplayed(db_session, regular_user, config, monkeypatch):
+    _stub_fetch(monkeypatch)
+    podcast, _ = await podcasts_service.subscribe(db_session, regular_user, FEED_URL, config)
+    episodes, _ = await podcasts_service.list_episodes(db_session, podcast.id)
+    episode = episodes[0]
+
+    assert await podcasts_service.mark_episode_played(db_session, regular_user, episode.id) is not None
+    assert await podcasts_service.mark_episode_played(db_session, regular_user, episode.id) is not None
+    assert await podcasts_service.played_episode_ids(db_session, regular_user, [episode.id]) == {episode.id}
+
+    assert await podcasts_service.mark_episode_unplayed(db_session, regular_user, episode.id) is not None
+    assert await podcasts_service.played_episode_ids(db_session, regular_user, [episode.id]) == set()
+
+    assert await podcasts_service.mark_episode_played(db_session, regular_user, "missing") is None
+
+
+async def test_list_subscribed_podcasts_search_and_sort(db_session, regular_user, config, monkeypatch):
+    _stub_fetch(monkeypatch, RSS_FEED)
+    podcast_a, _ = await podcasts_service.subscribe(db_session, regular_user, FEED_URL, config)
+    _stub_fetch(monkeypatch, RSS_FEED_B)
+    await podcasts_service.subscribe(db_session, regular_user, FEED_URL_B, config)
+
+    async def _titles(**kwargs):
+        entries, _ = await podcasts_service.list_subscribed_podcasts(db_session, regular_user, **kwargs)
+        return [entry.podcast.title for entry in entries]
+
+    # Default: newest episode first (B's episode is newer than A's).
+    assert await _titles() == ["Another Show", "Test Show"]
+    assert await _titles(sort_by="name") == ["Another Show", "Test Show"]
+    assert await _titles(sort_by="name", sort_dir="desc") == ["Test Show", "Another Show"]
+    assert await _titles(sort_by="episodes") == ["Test Show", "Another Show"]
+    assert await _titles(sort_by="episodes", sort_dir="asc") == ["Another Show", "Test Show"]
+
+    # Search matches title, author and description.
+    assert await _titles(search="test") == ["Test Show"]
+    assert await _titles(search="another") == ["Another Show"]
+    assert await _titles(search="zzz") == []
+
+    # Unplayed sorting reacts to played marks.
+    episodes_a, _ = await podcasts_service.list_episodes(db_session, podcast_a.id)
+    for episode in episodes_a:
+        await podcasts_service.mark_episode_played(db_session, regular_user, episode.id)
+    assert await _titles(sort_by="unplayed") == ["Another Show", "Test Show"]
+
+    entries, _ = await podcasts_service.list_subscribed_podcasts(db_session, regular_user, search="Test")
+    assert entries[0].stats.unplayed_count == 0
+
+
+def test_list_podcasts_search_and_sort_api(client, regular_user, auth_headers, monkeypatch):
+    _stub_fetch(monkeypatch, RSS_FEED)
+    _follow(client, auth_headers(regular_user))
+    _stub_fetch(monkeypatch, RSS_FEED_B)
+    _follow(client, auth_headers(regular_user), FEED_URL_B)
+
+    response = client.get("/api/v1/podcasts/", headers=auth_headers(regular_user))
+    assert [p["title"] for p in response.json()] == ["Another Show", "Test Show"]
+    assert response.json()[1]["latest_episode_at"].startswith("2025-09-08")
+
+    response = client.get("/api/v1/podcasts/?q=test", headers=auth_headers(regular_user))
+    assert [p["title"] for p in response.json()] == ["Test Show"]
+
+    response = client.get("/api/v1/podcasts/?sort_by=episodes", headers=auth_headers(regular_user))
+    assert [p["title"] for p in response.json()] == ["Test Show", "Another Show"]
+
+    response = client.get("/api/v1/podcasts/?sort_by=bogus", headers=auth_headers(regular_user))
+    assert response.status_code == 422
+
+
+def test_episode_played_state_api(client, regular_user, other_user, auth_headers, monkeypatch):
+    _stub_fetch(monkeypatch)
+    podcast = _follow(client, auth_headers(regular_user))
+    episodes = client.get(f"/api/v1/podcasts/{podcast['id']}/episodes", headers=auth_headers(regular_user)).json()
+    episode = episodes[0]
+    assert episode["played"] is False
+    assert podcast["unplayed_count"] == 2
+
+    response = client.post(f"/api/v1/podcasts/episodes/{episode['id']}/played", headers=auth_headers(regular_user))
+    assert response.status_code == 204
+    # Idempotent.
+    assert (
+        client.post(f"/api/v1/podcasts/episodes/{episode['id']}/played", headers=auth_headers(regular_user)).status_code
+        == 204
+    )
+
+    episodes = client.get(f"/api/v1/podcasts/{podcast['id']}/episodes", headers=auth_headers(regular_user)).json()
+    assert [e["played"] for e in episodes] == [e["id"] == episode["id"] for e in episodes]
+
+    listed = client.get("/api/v1/podcasts/", headers=auth_headers(regular_user)).json()
+    assert listed[0]["unplayed_count"] == 1
+
+    # Play marks are per-user.
+    theirs = client.get(f"/api/v1/podcasts/{podcast['id']}/episodes", headers=auth_headers(other_user)).json()
+    assert all(e["played"] is False for e in theirs)
+
+    response = client.delete(f"/api/v1/podcasts/episodes/{episode['id']}/played", headers=auth_headers(regular_user))
+    assert response.status_code == 204
+    listed = client.get("/api/v1/podcasts/", headers=auth_headers(regular_user)).json()
+    assert listed[0]["unplayed_count"] == 2
+
+
+def test_episode_played_unknown_episode_404(client, regular_user, auth_headers):
+    response = client.post("/api/v1/podcasts/episodes/nope/played", headers=auth_headers(regular_user))
+    assert response.status_code == 404
+    assert client.delete("/api/v1/podcasts/episodes/nope/played", headers=auth_headers(regular_user)).status_code == 404
+
+
+def test_episode_played_requires_auth(client):
+    assert client.post("/api/v1/podcasts/episodes/x/played").status_code == 401
+
+
+def test_get_episode_api(client, regular_user, auth_headers, monkeypatch):
+    _stub_fetch(monkeypatch)
+    podcast = _follow(client, auth_headers(regular_user))
+    episodes = client.get(f"/api/v1/podcasts/{podcast['id']}/episodes", headers=auth_headers(regular_user)).json()
+    episode = episodes[0]
+
+    response = client.get(f"/api/v1/podcasts/episodes/{episode['id']}", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    assert response.json()["id"] == episode["id"]
+    assert response.json()["played"] is False
+
+    client.post(f"/api/v1/podcasts/episodes/{episode['id']}/played", headers=auth_headers(regular_user))
+    response = client.get(f"/api/v1/podcasts/episodes/{episode['id']}", headers=auth_headers(regular_user))
+    assert response.json()["played"] is True
+
+    assert client.get("/api/v1/podcasts/episodes/nope", headers=auth_headers(regular_user)).status_code == 404
+    assert client.get(f"/api/v1/podcasts/episodes/{episode['id']}").status_code == 401

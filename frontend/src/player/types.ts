@@ -19,6 +19,11 @@ export type QueueTrack = TrackResponse & {
   remote?: boolean;
   /** Canonical page URL on the origin instance, for remote queue tracks. */
   remote_url?: string;
+  /**
+   * Podcast episode id for remote queue tracks backed by the local podcast
+   * catalog — the player marks it played once the listen threshold is met.
+   */
+  podcast_episode_id?: string;
 };
 
 export type RepeatMode = "off" | "all" | "one";
