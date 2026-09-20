@@ -14,6 +14,7 @@ import {
   type PodcastResponse,
 } from "@/api/podcasts";
 import { getApiErrorMessage } from "@/api/client";
+import { useAlternateLinks } from "@/composables/useFeedLinks";
 import { usePlayerStore } from "@/stores/player";
 import { useToastStore } from "@/stores/toast";
 import { formatTime } from "@/utils/time";
@@ -148,6 +149,37 @@ function onPlayAll() {
   player.playAll(episodes.value.map((item) => episodeToQueueTrack(item, show)));
 }
 
+// Advertise the upstream RSS source in <head> for feed readers and browser
+// feed-discovery extensions; the backend injects the same tag into the
+// initially served SPA shell.
+useAlternateLinks(() =>
+  podcast.value
+    ? [
+        {
+          href: podcast.value.feed_url,
+          type: "application/rss+xml",
+          title: podcast.value.title,
+        },
+      ]
+    : undefined,
+);
+
+async function copyFeedUrl() {
+  if (!podcast.value) return;
+  try {
+    await navigator.clipboard.writeText(podcast.value.feed_url);
+    toast.push({
+      type: "success",
+      message: t("pages.podcast.feedUrlCopied"),
+    });
+  } catch {
+    toast.push({
+      type: "error",
+      message: t("pages.podcast.feedUrlCopyFailed"),
+    });
+  }
+}
+
 const togglingPlayed = ref<Set<string>>(new Set());
 
 async function onTogglePlayed(episode: PodcastEpisodeResponse) {
@@ -240,6 +272,24 @@ onMounted(load);
             <a :href="podcast.link" target="_blank" rel="noopener noreferrer">
               <AppIcon name="globe" spacing="right" />{{ podcast.link }}
             </a>
+          </p>
+          <p class="podcast-view__feed">
+            <a
+              :href="podcast.feed_url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="podcast-view__feed-url"
+            >
+              <AppIcon name="rss" spacing="right" />{{ podcast.feed_url }}
+            </a>
+            <AppButton
+              variant="ghost"
+              size="sm"
+              icon="copy"
+              :title="t('pages.podcast.copyFeedUrl')"
+              :aria-label="t('pages.podcast.copyFeedUrl')"
+              @click="copyFeedUrl"
+            />
           </p>
           <p
             v-if="podcast.last_error"
@@ -464,6 +514,10 @@ onMounted(load);
   overflow: hidden;
 }
 
+.podcast-view__link {
+  margin-bottom: 0;
+}
+
 .podcast-view__link a {
   color: var(--color-text-link);
   text-decoration: none;
@@ -471,6 +525,26 @@ onMounted(load);
 }
 
 .podcast-view__link a:hover {
+  text-decoration: underline;
+}
+
+.podcast-view__feed {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.podcast-view__feed-url {
+  color: var(--color-text-link);
+  text-decoration: none;
+  word-break: break-all;
+  font-size: 0.875rem;
+  min-width: 0;
+}
+
+.podcast-view__feed-url:hover {
   text-decoration: underline;
 }
 

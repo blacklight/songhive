@@ -240,6 +240,15 @@ class PodcastsConfig(BaseSettings):
         ge=1024,
         description="Maximum response body size accepted when fetching a podcast feed",
     )
+    gpodder_sync_interval_minutes: int = Field(
+        default=30,
+        ge=5,
+        description=(
+            "Minimum minutes between automatic GPodder subscription syncs "
+            "per user. The periodic scan only syncs accounts whose last "
+            "attempt is older than this."
+        ),
+    )
 
 
 class WebmentionsConfig(BaseSettings):

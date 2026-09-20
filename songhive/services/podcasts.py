@@ -40,7 +40,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_default_user_agent
 from ..config.schema import SonghiveConfig
-from ..models.podcast import Podcast, PodcastEpisode, PodcastEpisodePlay, PodcastSubscription
+from ..models.podcast import (
+    Podcast,
+    PodcastEpisode,
+    PodcastEpisodePlay,
+    PodcastSubscription,
+    PodcastSyncEvent,
+)
 from ..models.user import User
 from ._common import ilike_contains
 
@@ -757,11 +763,29 @@ async def refresh_podcast(
     return new_count
 
 
+def record_subscription_event(
+    db: AsyncSession,
+    user_id: str,
+    feed_url: str,
+    action: str,
+    *,
+    origin: str = "local",
+) -> None:
+    """Log a subscription change for GPodder sync diffing.
+
+    ``action`` is ``add`` or ``remove``; ``origin`` keeps sync-applied
+    changes (``remote``) from being pushed back to the server.
+    """
+    db.add(PodcastSyncEvent(user_id=user_id, feed_url=feed_url, action=action, origin=origin))
+
+
 async def subscribe(
     db: AsyncSession,
     user: User,
     feed_url: str,
     config: SonghiveConfig,
+    *,
+    origin: str = "local",
 ) -> tuple[Podcast, bool]:
     """
     Follow ``feed_url`` for ``user``.
@@ -769,7 +793,8 @@ async def subscribe(
     The feed is fetched and parsed synchronously so the subscription
     response carries real show metadata. Returns ``(podcast, created)``
     where ``created`` marks a brand-new subscription; following a feed the
-    user already follows is idempotent.
+    user already follows is idempotent. ``origin`` tags the sync event —
+    pass ``remote`` when applying a change received from a sync server.
     """
     feed_url = normalize_feed_url(feed_url)
     podcast = await get_podcast_by_feed_url(db, feed_url)
@@ -815,20 +840,27 @@ async def subscribe(
             await db.flush()
     except IntegrityError:
         return podcast, False
+    record_subscription_event(db, str(user.id), podcast.feed_url, "add", origin=origin)
     return podcast, True
 
 
-async def unsubscribe(db: AsyncSession, user: User, podcast_id: str) -> bool:
+async def unsubscribe(db: AsyncSession, user: User, podcast_id: str, *, origin: str = "local") -> bool:
     """Remove ``user``'s subscription to ``podcast_id``. Returns False if absent."""
-    subscription = await db.scalar(
-        select(PodcastSubscription).where(
-            PodcastSubscription.user_id == user.id,
-            PodcastSubscription.podcast_id == podcast_id,
+    row = (
+        await db.execute(
+            select(PodcastSubscription, Podcast.feed_url)
+            .join(Podcast, Podcast.id == PodcastSubscription.podcast_id)
+            .where(
+                PodcastSubscription.user_id == user.id,
+                PodcastSubscription.podcast_id == podcast_id,
+            )
         )
-    )
-    if subscription is None:
+    ).first()
+    if row is None:
         return False
+    subscription, feed_url = row
     await db.delete(subscription)
+    record_subscription_event(db, str(user.id), feed_url, "remove", origin=origin)
     await db.flush()
     return True
 

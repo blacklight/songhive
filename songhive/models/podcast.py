@@ -10,7 +10,7 @@ source. ``podcasts`` holds one row per feed URL shared instance-wide;
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TZDateTime
@@ -103,3 +103,55 @@ class PodcastEpisodePlay(Base):
     episode_id: Mapped[str] = mapped_column(ForeignKey("podcast_episodes.id", ondelete="CASCADE"), index=True)
 
     episode = relationship("PodcastEpisode")
+
+
+class PodcastSyncConfig(Base):
+    """Per-user GPodder-compatible podcast sync settings.
+
+    ``password`` is stored but never returned by the API — the response only
+    reports ``has_password``. ``last_sync_timestamp`` is the opaque
+    server-issued timestamp used as the ``since`` marker; ``last_synced_at``
+    is the wall-clock start of the last *successful* sync and doubles as the
+    watermark for pending local ``PodcastSyncEvent`` rows.
+    """
+
+    __tablename__ = "podcast_sync_configs"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    # ``gpodder`` — the gpodder.net API (gpodder.net, opodsync); ``nextcloud``
+    # — the Nextcloud gpoddersync app, which replicates the add/remove diff
+    # format under ``/index.php/apps/gpoddersync`` with different paths.
+    server_type: Mapped[str] = mapped_column(String(16), default="gpodder", insert_default="gpodder")
+    server_url: Mapped[str] = mapped_column(String(1024))
+    username: Mapped[str] = mapped_column(String(255))
+    password: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    # GPodder sync is per-device; each account syncs as its own device id.
+    device_id: Mapped[str] = mapped_column(String(255), default="songhive", insert_default="songhive")
+    # ``pull`` applies remote changes only; ``bidirectional`` also uploads
+    # local subscription changes.
+    mode: Mapped[str] = mapped_column(String(16), default="pull", insert_default="pull")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, insert_default=True)
+
+    last_sync_timestamp: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
+    last_attempt_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class PodcastSyncEvent(Base):
+    """One subscription change, logged so sync can diff against last sync.
+
+    ``origin`` distinguishes changes made in Songhive (``local`` — eligible
+    for upload in bidirectional mode) from ones applied *by* sync itself
+    (``remote`` — never echoed back to the server).
+    """
+
+    __tablename__ = "podcast_sync_events"
+    __table_args__ = (Index("ix_podcast_sync_events_user_created", "user_id", "created_at"),)
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    feed_url: Mapped[str] = mapped_column(String(1024))
+    # ``add`` / ``remove``
+    action: Mapped[str] = mapped_column(String(16))
+    # ``local`` / ``remote``
+    origin: Mapped[str] = mapped_column(String(16), default="local", insert_default="local")

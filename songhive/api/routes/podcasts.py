@@ -11,16 +11,18 @@ local storage. ``GET /opml`` exports the caller's subscriptions and
 import json
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
-from ...models.podcast import Podcast, PodcastEpisode
+from ...models.podcast import Podcast, PodcastEpisode, PodcastSyncConfig
 from ...models.user import User
+from ...services import gpodder as gpodder_service
 from ...services import podcasts as podcasts_service
+from ...services.gpodder import GPodderError
 from ...services.podcasts import FeedFetchError, PodcastStats
 from .._common import Pagination, get_pagination
 from ..deps import get_config, get_current_user, get_db
@@ -90,6 +92,45 @@ class OpmlImportResponse(BaseModel):
     subscribed: int = 0
     skipped: int = 0
     failed: int = 0
+    errors: List[str] = []
+
+
+class PodcastSyncConfigRequest(BaseModel):
+    """Create or update the caller's GPodder sync configuration."""
+
+    # ``gpodder`` — gpodder.net API servers (gpodder.net, opodsync);
+    # ``nextcloud`` — the Nextcloud gpoddersync app.
+    server_type: Literal["gpodder", "nextcloud"] = "gpodder"
+    server_url: str
+    username: str
+    # Write-only: omitted keeps the stored password, "" clears it.
+    password: Optional[str] = None
+    device_id: str = "songhive"
+    mode: Literal["pull", "bidirectional"] = "pull"
+    enabled: bool = True
+
+
+class PodcastSyncConfigResponse(BaseModel):
+    """The caller's GPodder sync configuration (password never returned)."""
+
+    server_type: str
+    server_url: str
+    username: str
+    device_id: str
+    mode: str
+    enabled: bool
+    has_password: bool
+    last_synced_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+
+
+class PodcastSyncResultResponse(BaseModel):
+    """Summary of a single sync run."""
+
+    subscribed: int = 0
+    unsubscribed: int = 0
+    pushed_adds: int = 0
+    pushed_removes: int = 0
     errors: List[str] = []
 
 
@@ -265,6 +306,141 @@ async def import_opml(
         else:
             result.skipped += 1
     return result
+
+
+def _sync_config_response(row: PodcastSyncConfig) -> PodcastSyncConfigResponse:
+    return PodcastSyncConfigResponse(
+        server_type=row.server_type,
+        server_url=row.server_url,
+        username=row.username,
+        device_id=row.device_id,
+        mode=row.mode,
+        enabled=row.enabled,
+        has_password=bool(row.password),
+        last_synced_at=row.last_synced_at,
+        last_error=row.last_error,
+    )
+
+
+# The ``/sync`` routes must be declared before ``/{podcast_id}`` so the
+# literal "sync" is not captured as a podcast id.
+@router.get("/sync", response_model=PodcastSyncConfigResponse)
+async def get_sync_config(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Return the current user's GPodder sync configuration."""
+    _check_podcasts(config)
+    row = await gpodder_service.get_sync_config(db, current_user)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sync is not configured")
+    return _sync_config_response(row)
+
+
+@router.put("/sync", response_model=PodcastSyncConfigResponse)
+async def put_sync_config(
+    body: PodcastSyncConfigRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """
+    Configure GPodder subscription sync for the current user.
+
+    ``mode`` is ``pull`` (apply remote changes only) or ``bidirectional``
+    (also upload local changes; on conflict the most recent change wins —
+    see the sync service for how that is resolved). The credentials are
+    verified against the server before the configuration is saved.
+    """
+    _check_podcasts(config)
+    if not body.username.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="username is required",
+        )
+    try:
+        server_url = gpodder_service.normalize_server_url(body.server_url, body.server_type)
+    except GPodderError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    existing = await gpodder_service.get_sync_config(db, current_user)
+    effective_password = body.password if body.password is not None else (existing.password if existing else None)
+    if not effective_password:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="password is required",
+        )
+    # Verify the credentials before persisting anything — a transient row is
+    # enough for the client.
+    candidate = PodcastSyncConfig(
+        user_id=str(current_user.id),
+        server_type=body.server_type,
+        server_url=server_url,
+        username=body.username.strip(),
+        password=effective_password,
+        device_id=body.device_id.strip() or gpodder_service.DEFAULT_DEVICE_ID,
+        mode=body.mode,
+        enabled=body.enabled,
+    )
+    try:
+        await gpodder_service.verify_credentials(candidate, config)
+    except GPodderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Could not authenticate with sync server: {exc}",
+        ) from exc
+    row, _ = await gpodder_service.upsert_sync_config(
+        db,
+        current_user,
+        server_type=body.server_type,
+        server_url=server_url,
+        username=body.username.strip(),
+        password=body.password,
+        device_id=body.device_id,
+        mode=body.mode,
+        enabled=body.enabled,
+    )
+    return _sync_config_response(row)
+
+
+@router.delete("/sync", status_code=204)
+async def delete_sync_config(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Remove the current user's GPodder sync configuration and change log."""
+    _check_podcasts(config)
+    if not await gpodder_service.delete_sync_config(db, current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sync is not configured")
+
+
+@router.post("/sync/now", response_model=PodcastSyncResultResponse)
+async def sync_now(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Run a subscription sync immediately for the current user."""
+    _check_podcasts(config)
+    row = await gpodder_service.get_sync_config(db, current_user)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sync is not configured")
+    try:
+        result = await gpodder_service.run_sync(db, current_user, row, config)
+    except GPodderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Sync failed: {exc}",
+        ) from exc
+    return PodcastSyncResultResponse(
+        subscribed=result.subscribed,
+        unsubscribed=result.unsubscribed,
+        pushed_adds=result.pushed_adds,
+        pushed_removes=result.pushed_removes,
+        errors=result.errors,
+    )
 
 
 @router.get("/{podcast_id}", response_model=PodcastResponse)

@@ -11,6 +11,7 @@ import SessionsTab from "./profile/SessionsTab.vue";
 import NotificationSettings from "./profile/NotificationSettings.vue";
 import InterfaceTab from "./profile/InterfaceTab.vue";
 import ModerationTab from "./profile/ModerationTab.vue";
+import PodcastSyncTab from "./profile/PodcastSyncTab.vue";
 import ExternalLibrariesView from "@/views/ExternalLibrariesView.vue";
 
 const { t } = useI18n();
@@ -27,6 +28,7 @@ const tab = computed(() => {
       "sessions",
       "notifications",
       "interface",
+      "podcastSync",
       "externalLibraries",
       "moderation",
     ].includes(value)
@@ -48,6 +50,11 @@ const tabs = [
     key: "interface",
     label: t("profile.tabs.interface"),
     icon: "palette",
+  },
+  {
+    key: "podcastSync",
+    label: t("profile.tabs.podcastSync"),
+    icon: "podcast",
   },
   {
     key: "externalLibraries",
@@ -73,6 +80,8 @@ const currentComponent = computed(() => {
       return NotificationSettings;
     case "interface":
       return InterfaceTab;
+    case "podcastSync":
+      return PodcastSyncTab;
     case "externalLibraries":
       return ExternalLibrariesView;
     case "moderation":

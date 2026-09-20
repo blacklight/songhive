@@ -11,6 +11,7 @@ from songhive.models.artist import Artist
 from songhive.models.genre import Genre
 from songhive.models.library import Library
 from songhive.models.playlist import Playlist
+from songhive.models.podcast import Podcast
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 from songhive.services.tags import add_tags_to_entity
@@ -28,6 +29,7 @@ from songhive.services.tags import add_tags_to_entity
         ("/libraries/abc", ("library", "abc")),
         ("/genres/rock", ("genre", "rock")),
         ("/tags/rock", ("tag", "rock")),
+        ("/podcasts/abc", ("podcast", "abc")),
         ("/@alice", ("user", "alice")),
         ("/@alice/posts", ("user", "alice")),
         ("/@alice/followers", ("user", "alice")),
@@ -52,6 +54,7 @@ def test_match_object_path_matches(path, expected):
         "/search",
         "/login",
         "/share/sometoken",
+        "/podcasts",
     ],
 )
 def test_match_object_path_ignores(path):
@@ -443,3 +446,64 @@ async def test_user_profile_page_injects_profile_username(client, db_session, re
     await db_session.commit()
     response = client.get("/@regular")
     assert '<meta property="profile:username" content="regular">' in response.text
+
+
+@pytest.fixture
+async def podcast(db_session):
+    show = Podcast(
+        feed_url="https://podcast.example.com/feed.xml",
+        title="My Podcast",
+        description="A show about things",
+        image_url="https://img.example.com/podcast.png",
+    )
+    db_session.add(show)
+    await db_session.commit()
+    return show
+
+
+async def test_podcast_page_injects_feed_link(client, db_session, podcast, auth_headers, regular_user):
+    # The SPA fallback opens its own session, so the user must be committed.
+    await db_session.commit()
+    response = client.get(f"/podcasts/{podcast.id}", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    text = response.text
+    assert '<meta property="og:title" content="My Podcast">' in text
+    assert (
+        '<link rel="alternate" type="application/rss+xml" '
+        'href="https://podcast.example.com/feed.xml" title="My Podcast">'
+    ) in text
+
+
+async def test_podcast_page_has_no_songhive_feed_links(client, db_session, podcast, auth_headers, regular_user):
+    await db_session.commit()
+    response = client.get(f"/podcasts/{podcast.id}", headers=auth_headers(regular_user))
+    assert "/feeds/podcasts/" not in response.text
+    # The upstream link is still present — it is not a /feeds route.
+    assert 'href="https://podcast.example.com/feed.xml"' in response.text
+
+
+def test_podcast_page_injects_nothing_anonymously(client, podcast):
+    response = client.get(f"/podcasts/{podcast.id}")
+    assert response.status_code == 200
+    assert "og:title" not in response.text
+    assert 'rel="alternate"' not in response.text
+
+
+async def test_unknown_podcast_has_no_tags(client, db_session, auth_headers, regular_user):
+    await db_session.commit()
+    response = client.get("/podcasts/does-not-exist", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    assert "og:title" not in response.text
+    assert 'rel="alternate"' not in response.text
+
+
+async def test_podcast_page_has_no_tags_when_podcasts_disabled(client, db_session, podcast, auth_headers, regular_user):
+    await db_session.commit()
+    client.app.state.config.podcasts.enabled = False
+    try:
+        response = client.get(f"/podcasts/{podcast.id}", headers=auth_headers(regular_user))
+        assert response.status_code == 200
+        assert "og:title" not in response.text
+        assert 'rel="alternate"' not in response.text
+    finally:
+        client.app.state.config.podcasts.enabled = True

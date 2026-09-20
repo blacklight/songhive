@@ -1,4 +1,4 @@
-import { apiRequest } from "./client";
+import { apiRequest, ApiError } from "./client";
 import { API_PREFIX } from "./config";
 import type { QueueTrack } from "@/player/types";
 
@@ -49,6 +49,40 @@ export interface OpmlImportResponse {
   subscribed: number;
   skipped: number;
   failed: number;
+  errors: string[];
+}
+
+export type PodcastSyncMode = "pull" | "bidirectional";
+export type PodcastSyncServerType = "gpodder" | "nextcloud";
+
+export interface PodcastSyncConfigResponse {
+  server_type: PodcastSyncServerType;
+  server_url: string;
+  username: string;
+  device_id: string;
+  mode: PodcastSyncMode;
+  enabled: boolean;
+  has_password: boolean;
+  last_synced_at: string | null;
+  last_error: string | null;
+}
+
+export interface PodcastSyncConfigRequest {
+  server_type?: PodcastSyncServerType;
+  server_url: string;
+  username: string;
+  /** Omitted keeps the stored password; "" clears it. */
+  password?: string;
+  device_id?: string;
+  mode?: PodcastSyncMode;
+  enabled?: boolean;
+}
+
+export interface PodcastSyncResultResponse {
+  subscribed: number;
+  unsubscribed: number;
+  pushed_adds: number;
+  pushed_removes: number;
   errors: string[];
 }
 
@@ -121,6 +155,40 @@ export function importOpml(file: File): Promise<OpmlImportResponse> {
   return apiRequest<OpmlImportResponse>("/podcasts/opml/import", {
     method: "POST",
     body,
+  });
+}
+
+/**
+ * Fetch the caller's GPodder sync configuration. Returns ``null`` when no
+ * sync is configured (the API answers 404).
+ */
+export async function getPodcastSyncConfig(): Promise<PodcastSyncConfigResponse | null> {
+  try {
+    return await apiRequest<PodcastSyncConfigResponse>("/podcasts/sync");
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+export function putPodcastSyncConfig(
+  body: PodcastSyncConfigRequest,
+): Promise<PodcastSyncConfigResponse> {
+  return apiRequest<PodcastSyncConfigResponse>("/podcasts/sync", {
+    method: "PUT",
+    body,
+  });
+}
+
+export function deletePodcastSyncConfig(): Promise<void> {
+  return apiRequest<void>("/podcasts/sync", { method: "DELETE" });
+}
+
+export function syncPodcastsNow(): Promise<PodcastSyncResultResponse> {
+  return apiRequest<PodcastSyncResultResponse>("/podcasts/sync/now", {
+    method: "POST",
   });
 }
 

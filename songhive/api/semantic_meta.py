@@ -31,6 +31,7 @@ from ..models.user import User
 from ..services import acl
 from ..services import feeds as feeds_service
 from ..services import music
+from ..services import podcasts as podcasts_service
 from ..services.auth import get_user_by_username
 from ..services.genres import validate_genre_name
 from ..services.storage import StorageService
@@ -49,6 +50,7 @@ _OBJECT_PREFIXES = {
     "libraries": "library",
     "genres": "genre",
     "tags": "tag",
+    "podcasts": "podcast",
 }
 
 # Sub-paths that still render the parent object in the SPA.
@@ -64,6 +66,7 @@ _OG_TYPES = {
     "genre": "website",
     "tag": "website",
     "user": "profile",
+    "podcast": "website",
 }
 
 
@@ -387,6 +390,36 @@ async def _tag_tags(
     )
 
 
+async def _podcast_tags(
+    session: AsyncSession,
+    user: Optional[User],
+    podcast_id: str,
+    base_url: str,
+    site_name: str,
+) -> Optional[list[str]]:
+    # The JSON API serves podcasts to authenticated users only, so anonymous
+    # requests get no metadata. The injected ``rel="alternate"`` link points
+    # at the upstream RSS/Atom source — there is no ``/feeds`` counterpart.
+    if user is None:
+        return None
+    podcast = await podcasts_service.get_podcast(session, podcast_id)
+    if podcast is None:
+        return None
+
+    return _og_tags(
+        title=podcast.title,
+        description=podcast.description,
+        url=f"{base_url}/podcasts/{podcast.id}",
+        site_name=site_name,
+        og_type=_OG_TYPES["podcast"],
+        image=_absolute(base_url, podcast.image_url),
+        extra=[
+            f'<link rel="alternate" type="application/rss+xml" href="{_h(podcast.feed_url)}" '
+            f'title="{_h(podcast.title)}">'
+        ],
+    )
+
+
 def user_head_tags(user: User, base_url: str, site_name: str) -> list[str]:
     """Build the OpenGraph tags for a user profile page."""
     description = user.bio.strip() if user.bio else None
@@ -476,9 +509,13 @@ async def entity_head_tags(
         tags = await _tag_tags(session, key, base_url, site_name)
     elif kind == "user":
         tags = await _user_tags(session, user, key, base_url, site_name)
+    elif kind == "podcast" and config.podcasts.enabled:
+        tags = await _podcast_tags(session, user, key, base_url, site_name)
     else:
         tags = None
-    if tags and config.feeds.enabled:
+    # Podcasts advertise their upstream feed (built in _podcast_tags), not a
+    # Songhive /feeds endpoint, which does not exist for them.
+    if tags and config.feeds.enabled and kind != "podcast":
         activities = request.url.path.rstrip("/").endswith("/activities")
         tags += feed_link_tags(kind, key, base_url, activities=activities)
     return tags or []

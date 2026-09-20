@@ -99,10 +99,14 @@ async function mountView() {
   return { wrapper, router };
 }
 
+const FEED_SELECTOR =
+  'link[rel="alternate"][type="application/rss+xml"], link[rel="alternate"][type="application/atom+xml"]';
+
 describe("PodcastDetailView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    document.head.querySelectorAll(FEED_SELECTOR).forEach((el) => el.remove());
     getPodcast.mockResolvedValue(createPodcast());
     listEpisodes.mockResolvedValue([
       createEpisode("e1"),
@@ -136,5 +140,38 @@ describe("PodcastDetailView", () => {
     expect(markUnplayed).toHaveBeenCalledWith("e2");
     expect(markPlayed).not.toHaveBeenCalled();
     expect(rows[1].classes()).not.toContain("podcast-view__episode--played");
+  });
+
+  it("advertises the upstream feed via a <link rel=alternate> in the head", async () => {
+    const { wrapper } = await mountView();
+
+    const links = document.head.querySelectorAll(FEED_SELECTOR);
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute("href")).toBe("https://example.com/feed.xml");
+    expect(links[0].getAttribute("type")).toBe("application/rss+xml");
+    expect(links[0].getAttribute("title")).toBe("My Podcast");
+
+    wrapper.unmount();
+    expect(document.head.querySelectorAll(FEED_SELECTOR)).toHaveLength(0);
+  });
+
+  it("shows the feed URL and copies it to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    const { wrapper } = await mountView();
+
+    const feedUrl = wrapper.find(".podcast-view__feed-url");
+    expect(feedUrl.exists()).toBe(true);
+    expect(feedUrl.text()).toContain("https://example.com/feed.xml");
+    expect(feedUrl.attributes("href")).toBe("https://example.com/feed.xml");
+
+    await wrapper.find(".podcast-view__feed button").trigger("click");
+    await flushPromises();
+
+    expect(writeText).toHaveBeenCalledWith("https://example.com/feed.xml");
   });
 });

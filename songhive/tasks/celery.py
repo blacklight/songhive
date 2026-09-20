@@ -103,6 +103,10 @@ def make_celery(
                 "task": "songhive.tasks.podcasts.scan_due_podcasts",
                 "schedule": crontab(minute="*/15"),
             },
+            "scan-due-gpodder-syncs": {
+                "task": "songhive.tasks.podcasts.scan_due_gpodder_syncs",
+                "schedule": crontab(minute="*/15"),
+            },
         },
     )
     if remote_activity_prune_schedule:
