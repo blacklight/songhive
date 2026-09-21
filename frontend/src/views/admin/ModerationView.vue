@@ -498,6 +498,12 @@ onMounted(load);
   border-radius: var(--radius-md);
 }
 
+@media (max-width: 75rem) {
+  .admin-moderation__form {
+    flex-direction: column;
+  }
+}
+
 .admin-moderation__form button.app-btn--primary {
   margin: auto 0;
 }
