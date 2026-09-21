@@ -42,7 +42,7 @@ from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.models.user_link import UserLink
 from songhive.services.activities import record_track_publication
-from songhive.services.federation import publish_actor_update
+from songhive.services.federation import publish_actor_update, set_db_instance_policies
 from songhive.tasks.federation import _load_user_actor, deliver_activity, process_incoming
 
 
@@ -1681,6 +1681,12 @@ def test_load_user_actor_found(monkeypatch):
     assert _load_user_actor("alice") is user
 
 
+def _empty_moderation(*_a, **_k):
+    """Stub ``_load_incoming_moderation`` with an empty policy snapshot."""
+    set_db_instance_policies({})
+    return {}, False, False
+
+
 def _patch_process_incoming(monkeypatch, config=None):
     """Apply common monkeypatches for process_incoming tests."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: config or _fed_config())
@@ -1691,6 +1697,15 @@ def _patch_process_incoming(monkeypatch, config=None):
     monkeypatch.setattr("songhive.tasks.federation.get_federation_storage", lambda *a, **k: MagicMock())
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda *a, **k: "private_key")
     monkeypatch.setattr("songhive.tasks.federation.init_db", lambda *a, **k: None)
+    monkeypatch.setattr("songhive.tasks.federation._load_incoming_moderation", _empty_moderation)
+
+
+def _stub_policy_refresh(monkeypatch):
+    """Stub the DB instance-policy refresh for deliver_activity unit tests."""
+    monkeypatch.setattr(
+        "songhive.tasks.federation._refresh_instance_policies",
+        lambda *a, **k: set_db_instance_policies({}),
+    )
 
 
 def test_process_incoming_disabled(monkeypatch):
@@ -1783,6 +1798,7 @@ def test_deliver_activity_blocked_domain(monkeypatch):
         "songhive.tasks.federation.load_config",
         lambda *a, **k: _fed_config(blocked_instances=["example.com"]),
     )
+    _stub_policy_refresh(monkeypatch)
     self = _deliver_self()
     assert deliver_activity.run.__func__(self, {"type": "Create"}, "https://example.com/inbox", "key", "pem") is None
     self.retry.assert_not_called()
@@ -1791,6 +1807,7 @@ def test_deliver_activity_blocked_domain(monkeypatch):
 def test_deliver_activity_success(monkeypatch):
     """deliver_activity delegates the signed POST to pubby and returns the status."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
+    _stub_policy_refresh(monkeypatch)
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
     pubby_deliver = MagicMock(return_value=200)
     monkeypatch.setattr("songhive.tasks.federation.pubby_deliver_activity", pubby_deliver)
@@ -1818,6 +1835,7 @@ def test_deliver_activity_request_exception_retries(monkeypatch):
     from requests import RequestException
 
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
+    _stub_policy_refresh(monkeypatch)
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
     monkeypatch.setattr(
         "songhive.tasks.federation.pubby_deliver_activity",
@@ -1834,6 +1852,7 @@ def test_deliver_activity_request_exception_retries(monkeypatch):
 def test_deliver_activity_5xx_retries(monkeypatch):
     """deliver_activity retries on 5xx responses."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
+    _stub_policy_refresh(monkeypatch)
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
     monkeypatch.setattr("songhive.tasks.federation.pubby_deliver_activity", MagicMock(return_value=503))
 
@@ -1847,6 +1866,7 @@ def test_deliver_activity_5xx_retries(monkeypatch):
 def test_deliver_activity_4xx_gives_up(monkeypatch):
     """deliver_activity gives up on non-retryable 4xx responses."""
     monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *a, **k: _fed_config())
+    _stub_policy_refresh(monkeypatch)
     monkeypatch.setattr("songhive.tasks.federation.load_private_key", lambda pem: "private_key")
     monkeypatch.setattr("songhive.tasks.federation.pubby_deliver_activity", MagicMock(return_value=400))
 

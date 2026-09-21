@@ -16,9 +16,20 @@ from celery.exceptions import Retry
 from pubby.crypto import export_private_key_pem, generate_rsa_keypair
 
 from songhive.config.schema import SonghiveConfig
+from songhive.services.federation import set_db_instance_policies
 from songhive.tasks.federation import deliver_activity
 
 PUBBY_POST = "pubby.handlers._outbox.requests.post"
+
+
+@pytest.fixture(autouse=True)
+def _stub_policy_refresh(monkeypatch):
+    """Stub the DB instance-policy refresh — these tests run without a database."""
+    set_db_instance_policies({})
+    monkeypatch.setattr(
+        "songhive.tasks.federation._refresh_instance_policies",
+        lambda *a, **k: set_db_instance_policies({}),
+    )
 
 
 def _make_config(**federation_overrides):

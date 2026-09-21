@@ -42,7 +42,7 @@ def test_process_incoming_noops_when_federation_disabled(tmp_path, caplog):
     assert not mock_storage.called
 
 
-def test_process_incoming_skips_blocked_domain(tmp_path):
+def test_process_incoming_skips_blocked_domain(engine, tmp_path):
     """The task forwards allow/block lists to InboxProcessor, which drops the activity."""
     config = _make_config(
         tmp_path,
@@ -54,6 +54,7 @@ def test_process_incoming_skips_blocked_domain(tmp_path):
         patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
         patch("songhive.tasks.federation.load_config", return_value=config),
         patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
+        _patch_db(engine),
     ):
         mock_processor.return_value.process.return_value = None
         result = process_incoming(activity)
@@ -65,7 +66,7 @@ def test_process_incoming_skips_blocked_domain(tmp_path):
     assert call_kwargs["blocked_instances"] == []
 
 
-def test_process_incoming_enables_strict_attribution(tmp_path):
+def test_process_incoming_enables_strict_attribution(engine, tmp_path):
     """The task constructs InboxProcessor with pubby's strict attribution guard."""
     config = _make_config(tmp_path)
     activity = {"actor": "https://remote.example/users/bob", "type": "Follow"}
@@ -74,13 +75,14 @@ def test_process_incoming_enables_strict_attribution(tmp_path):
         patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
         patch("songhive.tasks.federation.load_config", return_value=config),
         patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
     ):
         process_incoming(activity)
 
     assert mock_processor.call_args.kwargs["strict_attribution"] is True
 
 
-def test_process_incoming_enables_auto_approve_quotes(tmp_path):
+def test_process_incoming_enables_auto_approve_quotes(engine, tmp_path):
     """The task constructs InboxProcessor with FEP-044f quote auto-approval."""
     config = _make_config(tmp_path)
     activity = {"actor": "https://remote.example/users/bob", "type": "Follow"}
@@ -89,13 +91,14 @@ def test_process_incoming_enables_auto_approve_quotes(tmp_path):
         patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
         patch("songhive.tasks.federation.load_config", return_value=config),
         patch("songhive.tasks.federation.get_federation_storage"),
+        _patch_db(engine),
     ):
         process_incoming(activity)
 
     assert mock_processor.call_args.kwargs["auto_approve_quotes"] is True
 
 
-def test_process_incoming_instance_actor(tmp_path):
+def test_process_incoming_instance_actor(engine, tmp_path):
     """Instance-targeted activities use the instance actor and key, with signatures enabled."""
     config = _make_config(tmp_path)
     activity = {"actor": "https://remote.example/users/bob", "type": "Follow"}
@@ -104,6 +107,7 @@ def test_process_incoming_instance_actor(tmp_path):
         patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
         patch("songhive.tasks.federation.load_config", return_value=config),
         patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
+        _patch_db(engine),
     ):
         result = process_incoming(activity)
 
@@ -441,7 +445,7 @@ def test_process_incoming_no_username_creates_nothing(engine, tmp_path, monkeypa
     assert _notifications_for(engine, user.id) == []
 
 
-def test_process_incoming_shared_inbox_actor_delete_retracts_followers(tmp_path):
+def test_process_incoming_shared_inbox_actor_delete_retracts_followers(engine, tmp_path):
     """A verified self-Delete on the shared inbox wipes all of the actor's follows.
 
     Pubby only retracts the follow of the bound actor — the instance actor
@@ -454,6 +458,7 @@ def test_process_incoming_shared_inbox_actor_delete_retracts_followers(tmp_path)
         patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
         patch("songhive.tasks.federation.load_config", return_value=config),
         patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
+        _patch_db(engine),
     ):
         mock_processor.return_value.process.return_value = {"ok": True}
         for obj in ({"type": "Person", "id": actor}, actor):
@@ -474,7 +479,7 @@ def test_process_incoming_shared_inbox_actor_delete_retracts_followers(tmp_path)
     storage.remove_follower.assert_called_with(actor, "")
 
 
-def test_process_incoming_shared_inbox_delete_object_keeps_followers(tmp_path):
+def test_process_incoming_shared_inbox_delete_object_keeps_followers(engine, tmp_path):
     """A shared-inbox Delete of a regular object does not touch follow records."""
     config = _make_config(tmp_path)
     actor = "https://remote.example/users/bob"
@@ -489,6 +494,7 @@ def test_process_incoming_shared_inbox_delete_object_keeps_followers(tmp_path):
         patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
         patch("songhive.tasks.federation.load_config", return_value=config),
         patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
+        _patch_db(engine),
     ):
         mock_processor.return_value.process.return_value = {"ok": True}
         process_incoming(activity, username=None, headers={"signature": "sig"})
@@ -496,7 +502,7 @@ def test_process_incoming_shared_inbox_delete_object_keeps_followers(tmp_path):
     mock_storage.return_value.remove_follower.assert_not_called()
 
 
-def test_process_incoming_shared_inbox_actor_delete_blocked_domain(tmp_path):
+def test_process_incoming_shared_inbox_actor_delete_blocked_domain(engine, tmp_path):
     """A self-Delete from a blocked domain cannot wipe follows.
 
     The processor drops blocked-domain activities before signature
@@ -515,6 +521,7 @@ def test_process_incoming_shared_inbox_actor_delete_blocked_domain(tmp_path):
         patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
         patch("songhive.tasks.federation.load_config", return_value=config),
         patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
+        _patch_db(engine),
     ):
         mock_processor.return_value.process.return_value = None
         process_incoming(activity, username=None, headers={"signature": "sig"})
