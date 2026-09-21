@@ -28,6 +28,7 @@ from songhive.models.history import ListeningHistory
 from songhive.models.library import Library
 from songhive.models.track import Track
 from songhive.services.auth import create_user
+from songhive.streaming.handler import StreamHandler
 from songhive.ws.events import EventWebSocket
 
 
@@ -239,7 +240,10 @@ class TestExternalStreamHandler(tornado.testing.AsyncHTTPTestCase):
                 )
                 return result.scalar_one_or_none()
 
-        response = self.fetch(f"/api/v1/stream/{self.long_track.id}", headers=self._auth_header())
+        # Serving completes instantly in tests; simulate real-time
+        # consumption so the wall-clock bound lets the threshold trip.
+        with patch.object(StreamHandler, "_elapsed_seconds", return_value=40.0):
+            response = self.fetch(f"/api/v1/stream/{self.long_track.id}", headers=self._auth_header())
         self.assertEqual(response.code, 200)
         listen = self.io_loop.run_sync(_assert_listen)
         self.assertIsNotNone(listen)

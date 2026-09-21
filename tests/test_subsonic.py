@@ -37,6 +37,7 @@ from songhive.models.base import Base, get_session, init_db, reset_db
 from songhive.models.history import ListeningHistory
 from songhive.models.library import Library
 from songhive.models.playlist import Playlist
+from songhive.models.scrobble import ScrobbleConfig
 from songhive.models.track import Track
 from songhive.services.auth import create_user
 from songhive.services.genres import add_genres_to_entity
@@ -712,6 +713,135 @@ def test_scrobble_now_playing_and_get_now_playing(client, library, regular_user)
     entry = body["nowPlaying"]["entry"][0]
     assert entry["id"] == song_id
     assert entry["username"] == regular_user.username
+
+
+def _enqueued(send_task, name):
+    """Return the positional task args of every ``send_task`` call for ``name``."""
+    return [
+        call.kwargs.get("args", call.args[1] if len(call.args) > 1 else ())
+        for call in send_task.call_args_list
+        if call.args and call.args[0] == name
+    ]
+
+
+def _scrobble_config(db_session, user):
+    db_session.add(
+        ScrobbleConfig(
+            user_id=str(user.id),
+            service="lastfm",
+            username="alice",
+            session_key="sk",
+        )
+    )
+
+
+async def test_scrobble_submission_enqueues_scrobble_task(
+    client, library, regular_user, db_session, _no_real_celery_broker
+):
+    """``submission=true`` records a listen and enqueues ``track.scrobble``."""
+    _scrobble_config(db_session, regular_user)
+    song_id = str(library["song"].id)
+    _ok(client.get("/rest/scrobble.view", params=_creds(regular_user, id=song_id)))
+    scrobbles = _enqueued(_no_real_celery_broker, "songhive.tasks.scrobbling.scrobble")
+    assert len(scrobbles) == 1
+    assert scrobbles[0][1] == song_id
+    assert not _enqueued(_no_real_celery_broker, "songhive.tasks.scrobbling.now_playing")
+
+
+async def test_scrobble_now_playing_enqueues_task_for_reported_track(
+    client, library, regular_user, db_session, _no_real_celery_broker
+):
+    """``submission=false`` enqueues ``track.updateNowPlaying`` for that track only."""
+    _scrobble_config(db_session, regular_user)
+    song_id = str(library["song"].id)
+    _ok(client.get("/rest/scrobble.view", params=_creds(regular_user, id=song_id, submission="false")))
+    calls = _enqueued(_no_real_celery_broker, "songhive.tasks.scrobbling.now_playing")
+    assert calls == [(str(regular_user.id), song_id)]
+    assert not _enqueued(_no_real_celery_broker, "songhive.tasks.scrobbling.scrobble")
+
+
+async def test_scrobble_now_playing_without_config_enqueues_nothing(
+    client, library, regular_user, _no_real_celery_broker
+):
+    """Without a scrobble config no external task is dispatched."""
+    song_id = str(library["song"].id)
+    _ok(client.get("/rest/scrobble.view", params=_creds(regular_user, id=song_id, submission="false")))
+    assert not _enqueued(_no_real_celery_broker, "songhive.tasks.scrobbling.now_playing")
+
+
+@pytest.mark.parametrize("submission", ["true", "1", "yes"])
+async def test_scrobble_submission_truthy_variants(client, library, regular_user, db_session, submission):
+    """Clients spell booleans differently; all truthy forms record a listen."""
+    song_id = str(library["song"].id)
+    _ok(client.get("/rest/scrobble.view", params=_creds(regular_user, id=song_id, submission=submission)))
+    rows = (
+        (await db_session.execute(select(ListeningHistory).where(ListeningHistory.track_id == song_id))).scalars().all()
+    )
+    assert len(rows) == 1
+
+
+async def test_scrobble_time_param_sets_listen_timestamp(client, library, regular_user, db_session):
+    """The optional ``time`` (ms since epoch) becomes the listen's timestamp."""
+    song_id = str(library["song"].id)
+    played_ms = 1_700_000_000_000
+    _ok(client.get("/rest/scrobble.view", params=_creds(regular_user, id=song_id, time=played_ms)))
+    row = (await db_session.execute(select(ListeningHistory).where(ListeningHistory.track_id == song_id))).scalar_one()
+    actual = row.created_at
+    if actual.tzinfo is None:
+        actual = actual.replace(tzinfo=timezone.utc)
+    assert actual == datetime.fromtimestamp(played_ms / 1000, timezone.utc)
+
+
+async def test_scrobble_repeated_ids_pair_with_positional_times(client, library, regular_user, db_session):
+    """Repeated ``id``/``time`` params pair positionally (queued submissions)."""
+    song_id = str(library["song"].id)
+    hidden_id = str(library["hidden"].id)
+    t1, t2 = 1_700_000_000_000, 1_700_000_100_000
+    _ok(
+        client.get(
+            "/rest/scrobble.view",
+            params=_creds(regular_user) | {"id": [song_id, hidden_id], "time": [t1, t2]},
+        )
+    )
+    rows = (
+        (await db_session.execute(select(ListeningHistory).where(ListeningHistory.track_id.in_([song_id, hidden_id]))))
+        .scalars()
+        .all()
+    )
+    stamps = {r.track_id: r.created_at.replace(tzinfo=timezone.utc) for r in rows}
+    assert stamps[song_id] == datetime.fromtimestamp(t1 / 1000, timezone.utc)
+    assert stamps[hidden_id] == datetime.fromtimestamp(t2 / 1000, timezone.utc)
+
+
+async def test_now_playing_view_never_records_listen(client, library, regular_user, db_session, _no_real_celery_broker):
+    """The legacy ``nowPlaying.view`` endpoint is a now-playing report only —
+    it must not record a listen or enqueue a scrobble."""
+    _scrobble_config(db_session, regular_user)
+    song_id = str(library["song"].id)
+    _ok(client.get("/rest/nowPlaying.view", params=_creds(regular_user, id=song_id)))
+
+    rows = (
+        (await db_session.execute(select(ListeningHistory).where(ListeningHistory.track_id == song_id))).scalars().all()
+    )
+    assert rows == []
+    assert not _enqueued(_no_real_celery_broker, "songhive.tasks.scrobbling.scrobble")
+
+    body = _ok(client.get("/rest/getNowPlaying.view", params=_creds(regular_user)))
+    assert body["nowPlaying"]["entry"][0]["id"] == song_id
+
+
+async def test_stream_does_not_count_as_play(client, library, regular_user, db_session, _no_real_celery_broker):
+    """``stream.view`` (used for prefetching) must not enqueue now-playing or
+    register in ``getNowPlaying`` — the spec reserves that for scrobble.view."""
+    _scrobble_config(db_session, regular_user)
+    song_id = str(library["song"].id)
+    response = client.get("/rest/stream.view", params=_creds(regular_user, id=song_id))
+    assert response.status_code == 200
+    assert not _enqueued(_no_real_celery_broker, "songhive.tasks.scrobbling.now_playing")
+    assert not _enqueued(_no_real_celery_broker, "songhive.tasks.scrobbling.scrobble")
+
+    body = _ok(client.get("/rest/getNowPlaying.view", params=_creds(regular_user)))
+    assert body["nowPlaying"]["entry"] == []
 
 
 # ---------------------------------------------------------------------------

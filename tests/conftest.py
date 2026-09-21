@@ -36,6 +36,7 @@ from songhive.models.podcast import (  # noqa: F401
 )
 from songhive.models.radio import Radio  # noqa: F401
 from songhive.models.report import Report  # noqa: F401
+from songhive.models.scrobble import ScrobbleConfig  # noqa: F401
 from songhive.models.setting import Setting  # noqa: F401
 from songhive.models.share_grant import ShareGrant  # noqa: F401
 from songhive.models.share_token import ShareToken  # noqa: F401

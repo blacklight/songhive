@@ -216,3 +216,18 @@ local_roots = []
 # stream the instance's library after logging in with a Songhive username
 # and password or API token.
 enabled = true
+
+[scrobbling]
+# Scrobbling to Audioscrobbler-compatible services (Last.fm, Libre.fm).
+# When enabled, users can connect an account from /settings?tab=scrobbling;
+# plays then submit "now playing" updates and full scrobbles once the
+# user's thresholds are met (default: 30 seconds or 25% of the track).
+# A service is selectable only when its API key pair is configured below —
+# the instance acts as the API application and stores per-user session keys.
+enabled = true
+# request_timeout_seconds = 15
+# Register an API account at https://www.last.fm/api/account/create
+# lastfm_api_key = ""
+# lastfm_api_secret = ""
+# librefm_api_key = ""
+# librefm_api_secret = ""

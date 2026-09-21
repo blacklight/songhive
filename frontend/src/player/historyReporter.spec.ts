@@ -111,6 +111,33 @@ describe("HistoryReporter", () => {
     expect(addHistory).not.toHaveBeenCalled();
   });
 
+  it("honours a custom seconds threshold", () => {
+    reporter.setThresholds(10, 50);
+    reporter.load("track-9");
+    reporter.setDuration(120);
+
+    for (let i = 0; i <= 40; i++) {
+      reporter.onTimeUpdate(i * 0.25, 120);
+    }
+
+    expect(addHistory).toHaveBeenCalledTimes(1);
+    expect(addHistory).toHaveBeenCalledWith("track-9");
+  });
+
+  it("honours a custom percent threshold", () => {
+    reporter.setThresholds(30, 25);
+    reporter.load("track-10");
+    reporter.setDuration(60);
+
+    reporter.onTimeUpdate(0, 60);
+    reporter.onTimeUpdate(14.9, 60);
+    expect(addHistory).not.toHaveBeenCalled();
+
+    reporter.onTimeUpdate(15.1, 60);
+    expect(addHistory).toHaveBeenCalledTimes(1);
+    expect(addHistory).toHaveBeenCalledWith("track-10");
+  });
+
   it("falls back to listen history on the next load without a reporter", () => {
     const report = vi.fn(() => Promise.resolve());
     reporter.load("episode-1", report);

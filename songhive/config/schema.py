@@ -612,6 +612,30 @@ class SubsonicConfig(BaseSettings):
     )
 
 
+class ScrobblingConfig(BaseSettings):
+    """Scrobbling (Audioscrobbler-compatible services) configuration."""
+
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Allow users to scrobble plays to an Audioscrobbler-compatible "
+            "service (Last.fm, Libre.fm) from /settings?tab=scrobbling"
+        ),
+    )
+    request_timeout_seconds: float = Field(
+        default=15.0,
+        ge=1.0,
+        description="Timeout in seconds for scrobble service HTTP requests",
+    )
+    # The instance acts as the API application: users authorize their account
+    # through auth.getMobileSession and Songhive stores the returned session
+    # key. A service is selectable only when its key pair is configured here.
+    lastfm_api_key: str = Field(default="", description="Last.fm API key")
+    lastfm_api_secret: str = Field(default="", description="Last.fm API shared secret")
+    librefm_api_key: str = Field(default="", description="Libre.fm API key")
+    librefm_api_secret: str = Field(default="", description="Libre.fm API shared secret")
+
+
 def _bitrate_to_bits(value: str) -> int:
     """Parse a bitrate string such as '192k' or '1.5M' into bits per second.
 
@@ -678,3 +702,4 @@ class SonghiveConfig(BaseSettings):
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     external_libraries: ExternalLibrariesConfig = Field(default_factory=ExternalLibrariesConfig)
     subsonic: SubsonicConfig = Field(default_factory=SubsonicConfig)
+    scrobbling: ScrobblingConfig = Field(default_factory=ScrobblingConfig)

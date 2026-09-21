@@ -4,8 +4,8 @@ In-memory "now playing" registry for ``getNowPlaying.view``.
 Subsonic clients expect the server to know what is currently playing across
 users. Songhive broadcasts now-playing events over WebSockets but does not
 persist them, so the adapter keeps a small process-local registry populated
-by ``scrobble.view?submission=false`` and by the Tornado stream handler
-(which records every authenticated stream start).
+by ``scrobble.view?submission=false``. Stream/download requests do not
+register here: clients prefetch and cache audio they never play.
 
 Entries expire after ``TTL``; because the store is in-memory it is local to
 the serving process — under multi-process deployments ``getNowPlaying``

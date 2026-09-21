@@ -1,6 +1,7 @@
 import { addHistory } from "@/api/history";
 
-const HISTORY_MIN_SECONDS = 30;
+export const HISTORY_DEFAULT_MIN_SECONDS = 30;
+export const HISTORY_DEFAULT_MIN_PERCENT = 50;
 
 /** What to call once a track passes the listen threshold. */
 export type ListenReporter = (id: string) => Promise<unknown>;
@@ -12,6 +13,8 @@ export class HistoryReporter {
   private elapsed = 0;
   private previousTime = 0;
   private reported = false;
+  private minSeconds = HISTORY_DEFAULT_MIN_SECONDS;
+  private minPercent = HISTORY_DEFAULT_MIN_PERCENT;
 
   load(trackId: string | null, report: ListenReporter = addHistory) {
     this.trackId = trackId;
@@ -26,6 +29,12 @@ export class HistoryReporter {
     this.duration = duration;
   }
 
+  /** Apply the user's listen thresholds (seconds / percent of duration). */
+  setThresholds(minSeconds: number, minPercent: number) {
+    this.minSeconds = minSeconds;
+    this.minPercent = minPercent;
+  }
+
   onTimeUpdate(currentTime: number, duration = this.duration) {
     if (this.reported || !this.trackId) return;
 
@@ -37,10 +46,11 @@ export class HistoryReporter {
     }
     this.previousTime = currentTime;
 
-    const reachedTime = this.elapsed >= HISTORY_MIN_SECONDS;
-    const reachedHalf = duration > 0 && currentTime / duration >= 0.5;
+    const reachedTime = this.elapsed >= this.minSeconds;
+    const reachedPercent =
+      duration > 0 && currentTime / duration >= this.minPercent / 100;
 
-    if (reachedTime || reachedHalf) {
+    if (reachedTime || reachedPercent) {
       this.reported = true;
       Promise.resolve(this.report(this.trackId)).catch((err) => {
         console.warn("Failed to record listen history", err);

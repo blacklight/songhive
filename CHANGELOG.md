@@ -6,6 +6,24 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `scrobbling`: scrobble plays to Audioscrobbler-compatible services
+  (Last.fm and Libre.fm). The instance registers an API key pair per
+  service under `[scrobbling]`; users connect their account from
+  `/settings?tab=scrobbling` (the service password is exchanged for a
+  session key via `auth.getMobileSession` and stored Fernet-encrypted —
+  never persisted or returned). `track.updateNowPlaying` is submitted
+  on explicit play reports — the web player posts
+  `/api/v1/scrobbling/now-playing/{track}` on its first `play` event,
+  Subsonic clients use `scrobble.view?submission=false`; stream and
+  download requests never count as plays since clients prefetch audio
+  they may never play — and `track.scrobble` fires once a
+  play crosses the user's configured thresholds — `min_seconds` elapsed
+  or `min_percent` of the duration, whichever first (defaults 30s /
+  25%). All submissions run through Celery tasks (`tasks/scrobbling.py`)
+  with Redis deduplication, so third-party latency or duplicate
+  listen-report paths never affect playback. The same thresholds drive
+  the web player's listen reporting and the Tornado stream handler's
+  server-side listen threshold (`/api/v1/scrobbling/` exposes them).
 - `moderation`: Mastodon-style moderation for actors and instances.
   Users can mute (one-way hide) and block (reciprocal hide, no
   interaction, no delivery, severs follows) local and remote actors from

@@ -35,7 +35,6 @@ from ...services.streaming import (
 )
 from ...storage import get_storage
 from ...streaming.transcoder import Transcoder
-from . import now_playing
 from .auth import authenticate_subsonic
 from .errors import GENERIC_ERROR, NOT_AUTHORIZED, NOT_FOUND, SubsonicError, missing_parameter
 from .responses import error_envelope, render
@@ -116,7 +115,6 @@ async def _stream(ctx: _Ctx, *, download: bool = False) -> Response:
         if local_path is None:
             raise SubsonicError(NOT_FOUND, "Media file not found")
 
-        now_playing.record(str(ctx.user.id), ctx.user.username, str(track.id), ctx.params.get("c"))
         headers = {}
         if download:
             headers["Content-Disposition"] = f'attachment; filename="{track.title}"'
@@ -126,11 +124,13 @@ async def _stream(ctx: _Ctx, *, download: bool = False) -> Response:
             headers=headers,
         )
 
+    # Serving bytes is not a play signal — clients prefetch upcoming tracks
+    # through this endpoint — so neither the now-playing registry nor the
+    # external scrobbler is notified here. ``scrobble.view`` reports plays.
     stream = await _resolve_external(ctx, str(track.id), range_header)
     if stream is None:
         raise SubsonicError(NOT_FOUND, "Media file not found")
 
-    now_playing.record(str(ctx.user.id), ctx.user.username, str(track.id), ctx.params.get("c"))
     return await _serve_external_stream(ctx, stream, download=download)
 
 

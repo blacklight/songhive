@@ -1,7 +1,11 @@
 import { streamUrl } from "@/api/stream";
 import { markEpisodePlayed } from "@/api/podcasts";
+import { getScrobbleStatus, reportNowPlaying } from "@/api/scrobbling";
 import type { QueueTrack, EngineCallbacks } from "./types";
-import { HistoryReporter } from "./historyReporter";
+import {
+  HistoryReporter,
+  HISTORY_DEFAULT_MIN_PERCENT,
+} from "./historyReporter";
 
 export class PlayerEngine {
   private primary: HTMLAudioElement;
@@ -11,6 +15,8 @@ export class PlayerEngine {
   private currentUrl = "";
   private history: HistoryReporter;
   private pendingStartAt: number | undefined;
+  private pendingNowPlaying: string | null = null;
+  private scrobbleActive = false;
 
   private boundTimeUpdate: () => void;
   private boundLoadedMetadata: () => void;
@@ -42,6 +48,20 @@ export class PlayerEngine {
     this.callbacks = callbacks;
     this.removeListeners(this.primary);
     this.addListeners(this.primary);
+    // Adopt the user's scrobble thresholds as the listen-report thresholds.
+    // Without a scrobble config the API reports the server defaults
+    // (``min_percent`` null), so the local 50% history default stays.
+    getScrobbleStatus()
+      .then((status) => {
+        // ``min_percent`` is only set for users with an active scrobble
+        // config, so it doubles as the "submit now-playing" signal.
+        this.scrobbleActive = status.thresholds.min_percent != null;
+        this.history.setThresholds(
+          status.thresholds.min_seconds,
+          status.thresholds.min_percent ?? HISTORY_DEFAULT_MIN_PERCENT,
+        );
+      })
+      .catch(() => {});
   }
 
   load(track: QueueTrack, startAt?: number) {
@@ -55,6 +75,10 @@ export class PlayerEngine {
     } else {
       this.history.load(track.remote ? null : track.id);
     }
+    // Stream requests can't signal a real play (preload fetches upcoming
+    // tracks too), so now-playing is reported on the first play event.
+    this.pendingNowPlaying =
+      !track.remote && !track.podcast_episode_id ? track.id : null;
     this.callbacks.onStateChange?.("loading");
 
     const url = streamUrl(track);
@@ -172,6 +196,13 @@ export class PlayerEngine {
   }
 
   private handlePlay() {
+    if (this.pendingNowPlaying && this.scrobbleActive) {
+      const trackId = this.pendingNowPlaying;
+      reportNowPlaying(trackId).catch((err: unknown) => {
+        console.warn("Failed to report now playing", err);
+      });
+    }
+    this.pendingNowPlaying = null;
     this.callbacks.onStateChange?.("playing");
   }
 

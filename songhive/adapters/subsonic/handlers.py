@@ -13,7 +13,6 @@ from ...models.base import get_session
 from ...models.track import Track
 from ...models.user import User
 from ...streaming.handler import StreamHandler
-from . import now_playing
 from . import serializers as sz
 from .auth import authenticate_subsonic
 from .errors import GENERIC_ERROR, MISSING_PARAMETER, NOT_AUTHORIZED, NOT_FOUND, WRONG_CREDENTIALS, SubsonicError
@@ -69,14 +68,16 @@ class SubsonicStreamHandler(StreamHandler):
             self._subsonic_error(exc.code, exc.message)
             return None
 
-    def _client_name(self) -> Optional[str]:
-        return self.get_argument("c", None)
+    @staticmethod
+    async def _record_listen_if_needed(session, track_id, user, state) -> None:
+        """
+        Never count stream access as a play.
 
-    async def _prepare_response(self, track: Track) -> None:
-        """Record the play in the adapter's now-playing registry."""
-        user = self._subsonic_user
-        if user is not None:
-            now_playing.record(str(user.id), user.username, str(track.id), self._client_name())
+        OpenSubsonic requires servers not to treat ``stream``/``download``
+        requests as plays: clients prefetch and cache upcoming tracks, so
+        bytes served cannot prove playback. Plays are reported explicitly
+        through ``scrobble.view``.
+        """
 
     def _requested_format(self) -> tuple[Optional[str], Optional[str]]:
         """Map Subsonic ``format``/``maxBitRate`` to the transcode arguments."""

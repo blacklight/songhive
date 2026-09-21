@@ -396,7 +396,27 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
             assert len(result.scalars().all()) == 1
 
     def test_full_stream_records_listen_threshold(self):
-        """Streaming a long track to completion records a listen."""
+        """Streaming a long track past the threshold records a listen."""
+        # Serving the whole file takes milliseconds in tests; simulate the
+        # client consuming the stream in real time so the wall-clock bound
+        # on the streamed-seconds estimate lets the threshold trip.
+        with patch.object(StreamHandler, "_elapsed_seconds", return_value=40.0):
+            response = self.fetch(
+                f"/api/v1/stream/{self.public_long_track.id}",
+                headers=self._auth_header(self.token),
+                request_timeout=60,
+            )
+        assert response.code == 200
+
+        self.io_loop.run_sync(self._assert_listen_recorded)
+
+    def test_fast_full_stream_does_not_record_listen(self):
+        """A download faster than the threshold does not count as a listen.
+
+        Players buffer files far quicker than real time, so bytes served
+        cannot alone prove playback — the threshold must also wait for the
+        corresponding wall-clock seconds to elapse.
+        """
         response = self.fetch(
             f"/api/v1/stream/{self.public_long_track.id}",
             headers=self._auth_header(self.token),
@@ -404,16 +424,17 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
         )
         assert response.code == 200
 
-        self.io_loop.run_sync(self._assert_listen_recorded)
+        self.io_loop.run_sync(lambda: self._assert_listen_not_recorded(self.public_long_track))
 
-    async def _assert_listen_not_recorded(self):
+    async def _assert_listen_not_recorded(self, track=None):
+        track = track or self.public_track
         async with get_session() as session:
-            track = await session.get(Track, self.public_track.id)
-            assert track is not None
-            assert track.play_count == 0
-            result = await session.execute(select(Track).where(Track.id == self.public_track.id))
-            track = result.scalar_one()
-            assert track.play_count == 0
+            fetched = await session.get(Track, track.id)
+            assert fetched is not None
+            assert fetched.play_count == 0
+            result = await session.execute(select(Track).where(Track.id == track.id))
+            fetched = result.scalar_one()
+            assert fetched.play_count == 0
 
     def test_short_stream_does_not_record_listen(self):
         """A short stream does not cross the 30-second threshold."""
@@ -623,7 +644,10 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
             await self.flush()
             return 1
 
-        with patch.object(StreamHandler, "_serve_file", _fake_serve_file):
+        with (
+            patch.object(StreamHandler, "_serve_file", _fake_serve_file),
+            patch.object(StreamHandler, "_elapsed_seconds", return_value=40.0),
+        ):
             response = self.fetch(
                 f"/api/v1/stream/{self.public_long_track.id}?format=opus&bitrate=128k",
                 headers=self._auth_header(self.token),

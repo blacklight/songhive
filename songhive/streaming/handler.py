@@ -6,7 +6,7 @@ import logging
 import os
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -24,7 +24,7 @@ from ..models.base import get_session
 from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..models.user import User
-from ..services import acl
+from ..services import acl, scrobbler
 from ..services.auth import get_user_by_id
 from ..services.storage import StorageService
 from ..services.streaming import (
@@ -47,10 +47,22 @@ logger = logging.getLogger(__name__)
 class _StreamState:
     """
     Track streaming state for listen recording.
+
+    ``min_seconds``/``min_percent`` are the requesting user's effective
+    scrobble thresholds (``min_percent`` is ``None`` for users without an
+    active scrobble config); a play counts once the estimated streamed
+    seconds cross whichever applies first.
+
+    ``started_at`` bounds that estimate: bytes served only approximate the
+    playback position while delivery is consumption-limited — a player that
+    buffers the whole file in seconds must not trip the threshold early.
     """
 
     recorded: bool = False
     threshold_reached: bool = False
+    min_seconds: float = 30.0
+    min_percent: Optional[float] = None
+    started_at: float = field(default_factory=time.monotonic)
 
 
 class StreamHandler(tornado.web.RequestHandler):
@@ -291,13 +303,30 @@ class StreamHandler(tornado.web.RequestHandler):
         return fmt, bitrate, passthrough
 
     @staticmethod
+    def _threshold_seconds(track: Track, state: _StreamState) -> float:
+        """Return the played-seconds threshold that counts this stream as a listen."""
+        threshold = state.min_seconds
+        if state.min_percent is not None and track.duration:
+            threshold = min(threshold, track.duration * state.min_percent / 100.0)
+        return threshold
+
+    @staticmethod
+    def _elapsed_seconds(state: _StreamState) -> float:
+        """Return the wall-clock seconds since this stream started serving."""
+        return time.monotonic() - state.started_at
+
+    @staticmethod
     def _update_streamed_threshold(bytes_served: int, track: Track, stream_size: Optional[int], state: _StreamState):
-        """Mark the listen threshold as reached once ~30 seconds of audio have been served."""
+        """Mark the listen threshold as reached once enough audio has been served."""
         if state.threshold_reached or not track.duration or not stream_size:
             return
 
         streamed_seconds = bytes_served / (stream_size / track.duration)
-        if streamed_seconds >= 30:
+        # Cap the estimate at the elapsed wall-clock time: a client cannot
+        # have played more seconds than have passed since the stream
+        # started, and buffered downloads must not count as plays early.
+        streamed_seconds = min(streamed_seconds, StreamHandler._elapsed_seconds(state))
+        if streamed_seconds >= StreamHandler._threshold_seconds(track, state):
             state.threshold_reached = True
 
     @staticmethod
@@ -307,7 +336,7 @@ class StreamHandler(tornado.web.RequestHandler):
         user: Optional[User],
         state: _StreamState,
     ):
-        """Record a listen once when the 30-second threshold has been crossed."""
+        """Record a listen once when the streamed threshold has been crossed."""
         if state.recorded or user is None:
             return
 
@@ -332,11 +361,7 @@ class StreamHandler(tornado.web.RequestHandler):
         except tornado.iostream.StreamClosedError:
             return
 
-        if track.duration and stored_file.size:
-            streamed_seconds = bytes_served / (stored_file.size / track.duration)
-            if streamed_seconds >= 30:
-                state.threshold_reached = True
-
+        self._update_streamed_threshold(bytes_served, track, stored_file.size, state)
         await self._record_listen_if_needed(session, track_id, user, state)
         await session.commit()
 
@@ -371,11 +396,7 @@ class StreamHandler(tornado.web.RequestHandler):
         except tornado.iostream.StreamClosedError:
             return True
 
-        if track.duration and cached.size:
-            streamed_seconds = bytes_served / (cached.size / track.duration)
-            if streamed_seconds >= 30:
-                state.threshold_reached = True
-
+        self._update_streamed_threshold(bytes_served, track, cached.size, state)
         await self._record_listen_if_needed(session, track_id, user, state)
         await session.commit()
         return True
@@ -384,7 +405,7 @@ class StreamHandler(tornado.web.RequestHandler):
         self,
         session,
         local_path: Path,
-        track_id: str,
+        track: Track,
         fmt: str,
         bitrate: str,
         mimetype: str,
@@ -412,13 +433,13 @@ class StreamHandler(tornado.web.RequestHandler):
                 tee.extend(chunk)
                 if start_time is None:
                     start_time = time.perf_counter()
-                elif time.perf_counter() - start_time >= 30:
+                elif time.perf_counter() - start_time >= self._threshold_seconds(track, state):
                     state.threshold_reached = True
-                    await self._record_listen_if_needed(session, track_id, user, state)
+                    await self._record_listen_if_needed(session, str(track.id), user, state)
         except tornado.iostream.StreamClosedError:
             pass
 
-        await self._record_listen_if_needed(session, track_id, user, state)
+        await self._record_listen_if_needed(session, str(track.id), user, state)
         await session.commit()
         return tee
 
@@ -672,6 +693,13 @@ class StreamHandler(tornado.web.RequestHandler):
             if not await self._check_access(session, track_id, user):
                 return
 
+            min_seconds, min_percent = await scrobbler.thresholds_for(session, user)
+            state = _StreamState(min_seconds=min_seconds, min_percent=min_percent)
+
+            # Byte delivery is not a play signal: clients prefetch and cache
+            # upcoming tracks, so Last.fm now-playing must come from explicit
+            # reports (web player now-playing endpoint, Subsonic
+            # ``scrobble.view?submission=false``) rather than stream starts.
             self._broadcast_now_playing(track_id, user)
             await self._prepare_response(track)
 
@@ -689,7 +717,6 @@ class StreamHandler(tornado.web.RequestHandler):
                     return
 
                 fmt, requested_bitrate, passthrough = parsed
-                state = _StreamState()
                 if passthrough:
                     await self._serve_passthrough(
                         session,
@@ -726,7 +753,7 @@ class StreamHandler(tornado.web.RequestHandler):
                 tee = await self._serve_live_transcode(
                     session,
                     local_path,
-                    track_id,
+                    track,
                     fmt,
                     effective,
                     fmt_mimetype,
@@ -751,7 +778,6 @@ class StreamHandler(tornado.web.RequestHandler):
                         logger.exception("Failed to cache transcode for track %s: %s", track_id, e)
             else:
                 assert external_stream is not None
-                state = _StreamState()
                 await self._serve_external_stream(
                     session,
                     track,

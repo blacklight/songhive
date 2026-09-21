@@ -13,6 +13,7 @@ import NotificationSettings from "./profile/NotificationSettings.vue";
 import InterfaceTab from "./profile/InterfaceTab.vue";
 import ModerationTab from "./profile/ModerationTab.vue";
 import PodcastSyncTab from "./profile/PodcastSyncTab.vue";
+import ScrobblingTab from "./profile/ScrobblingTab.vue";
 import ExternalLibrariesView from "@/views/ExternalLibrariesView.vue";
 
 const { t } = useI18n();
@@ -31,6 +32,7 @@ const tab = computed(() => {
       "notifications",
       "interface",
       "podcastSync",
+      "scrobbling",
       "externalLibraries",
       "moderation",
     ].includes(value)
@@ -60,6 +62,11 @@ const tabs = [
     icon: "podcast",
   },
   {
+    key: "scrobbling",
+    label: t("profile.tabs.scrobbling"),
+    icon: "music",
+  },
+  {
     key: "externalLibraries",
     label: t("profile.tabs.externalLibraries"),
     icon: "cloud",
@@ -87,6 +94,8 @@ const currentComponent = computed(() => {
       return InterfaceTab;
     case "podcastSync":
       return PodcastSyncTab;
+    case "scrobbling":
+      return ScrobblingTab;
     case "externalLibraries":
       return ExternalLibrariesView;
     case "moderation":

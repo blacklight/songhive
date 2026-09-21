@@ -19,6 +19,7 @@ import random
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union, overload
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -38,7 +39,7 @@ from ...models.favorite import Favorite
 from ...models.playlist import Playlist, PlaylistTrack
 from ...models.track import Track
 from ...models.user import User
-from ...services import acl, audit, deletion, music
+from ...services import acl, audit, deletion, music, scrobbler
 from ...services.auth import get_user_by_username
 from ...services.storage import StorageService
 from ...services.streaming import record_listen
@@ -142,7 +143,7 @@ class Params(Mapping[str, str]):
         raw = self.get(name)
         if raw is None:
             return default
-        return raw.lower() == "true"
+        return raw.lower() in ("true", "1", "yes")
 
 
 async def _collect_params(request: Request) -> Params:
@@ -1024,20 +1025,37 @@ async def _delete_playlist(ctx: _Ctx) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@_endpoint("scrobble")
-@_endpoint("nowPlaying")
-async def _scrobble(ctx: _Ctx) -> Dict[str, Any]:
-    submission = ctx.params.boolean("submission", True)
+async def _scrobble_impl(ctx: _Ctx, submission: bool) -> Dict[str, Any]:
     player = ctx.params.get("c")
-    for track_id in ctx.params.getlist("id"):
+    # ``time`` values (ms since epoch) pair positionally with ``id`` values.
+    times = ctx.params.getlist("time")
+    for index, track_id in enumerate(ctx.params.getlist("id")):
         if not await acl.can_access(ctx.db, ctx.user, "track", track_id):
             continue
         if submission:
-            await record_listen(ctx.db, str(ctx.user.id), track_id)
+            played_at: Optional[datetime] = None
+            if index < len(times):
+                try:
+                    played_at = datetime.fromtimestamp(int(times[index]) / 1000, timezone.utc)
+                except (ValueError, OverflowError, OSError):
+                    pass
+            await record_listen(ctx.db, str(ctx.user.id), track_id, played_at=played_at)
         else:
             now_playing.record(str(ctx.user.id), ctx.user.username, track_id, player)
+            await scrobbler.maybe_enqueue_now_playing(ctx.db, str(ctx.user.id), track_id)
     await ctx.db.commit()
     return {}
+
+
+@_endpoint("scrobble")
+async def _scrobble(ctx: _Ctx) -> Dict[str, Any]:
+    return await _scrobble_impl(ctx, ctx.params.boolean("submission", True))
+
+
+@_endpoint("nowPlaying")
+async def _now_playing_view(ctx: _Ctx) -> Dict[str, Any]:
+    """Legacy now-playing report endpoint — never a completed-play submission."""
+    return await _scrobble_impl(ctx, submission=False)
 
 
 @_endpoint("setRating")

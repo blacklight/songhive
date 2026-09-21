@@ -3,6 +3,7 @@ import { PlayerEngine } from "./engine";
 import type { QueueTrack } from "./types";
 import * as historyApi from "@/api/history";
 import * as podcastsApi from "@/api/podcasts";
+import * as scrobblingApi from "@/api/scrobbling";
 
 vi.mock("@/api/stream", () => ({
   streamUrl: (track: { id: string }) => `/stream/${track.id}`,
@@ -14,6 +15,18 @@ vi.mock("@/api/history", () => ({
 
 vi.mock("@/api/podcasts", () => ({
   markEpisodePlayed: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock("@/api/scrobbling", () => ({
+  getScrobbleStatus: vi.fn(() =>
+    Promise.resolve({
+      enabled: true,
+      services: [],
+      thresholds: { min_seconds: 30, min_percent: null },
+      config: null,
+    }),
+  ),
+  reportNowPlaying: vi.fn(() => Promise.resolve()),
 }));
 
 function makeTrack(id: string): QueueTrack {
@@ -33,6 +46,7 @@ describe("PlayerEngine", () => {
   beforeEach(() => {
     vi.mocked(historyApi.addHistory).mockClear();
     vi.mocked(podcastsApi.markEpisodePlayed).mockClear();
+    vi.mocked(scrobblingApi.reportNowPlaying).mockClear();
     engine = new PlayerEngine();
     primary = (engine as unknown as { primary: HTMLAudioElement }).primary;
     primary.currentTime = 0;
@@ -221,6 +235,71 @@ describe("PlayerEngine", () => {
     primary.dispatchEvent(new Event("timeupdate"));
 
     expect(podcastsApi.markEpisodePlayed).toHaveBeenCalledWith("episode-1");
+  });
+
+  const activeScrobbleStatus = {
+    enabled: true,
+    services: [],
+    thresholds: { min_seconds: 30, min_percent: 25 },
+    config: {
+      service: "lastfm",
+      username: "a",
+      enabled: true,
+      min_seconds: 30,
+      min_percent: 25,
+      last_scrobbled_at: null,
+      last_error: null,
+    },
+  };
+
+  it("reports now playing on the first real play when scrobbling is active", async () => {
+    vi.mocked(scrobblingApi.getScrobbleStatus).mockResolvedValueOnce(
+      activeScrobbleStatus,
+    );
+    engine.init({});
+    await Promise.resolve();
+    engine.load(makeTrack("a"));
+
+    primary.dispatchEvent(new Event("play"));
+    expect(scrobblingApi.reportNowPlaying).toHaveBeenCalledWith("a");
+
+    // Pause/resume must not re-report.
+    primary.dispatchEvent(new Event("pause"));
+    primary.dispatchEvent(new Event("play"));
+    expect(scrobblingApi.reportNowPlaying).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report now playing without an active scrobble config", async () => {
+    engine.init({});
+    await Promise.resolve();
+    engine.load(makeTrack("a"));
+    primary.dispatchEvent(new Event("play"));
+    expect(scrobblingApi.reportNowPlaying).not.toHaveBeenCalled();
+  });
+
+  it("does not report now playing for remote or podcast tracks", async () => {
+    vi.mocked(scrobblingApi.getScrobbleStatus).mockResolvedValueOnce(
+      activeScrobbleStatus,
+    );
+    engine.init({});
+    await Promise.resolve();
+
+    engine.load({
+      ...makeTrack("r"),
+      remote: true,
+      stream_url: "https://example.com/r.mp3",
+    });
+    primary.dispatchEvent(new Event("play"));
+    expect(scrobblingApi.reportNowPlaying).not.toHaveBeenCalled();
+
+    engine.load({
+      ...makeTrack("ep"),
+      remote: true,
+      stream_url: "https://example.com/ep.mp3",
+      podcast_episode_id: "episode-1",
+    });
+    primary.dispatchEvent(new Event("play"));
+    expect(scrobblingApi.reportNowPlaying).not.toHaveBeenCalled();
   });
 
   it("does not report generic remote tracks", () => {

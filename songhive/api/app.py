@@ -53,6 +53,7 @@ from .routes import (
     radios,
     remote,
     reports,
+    scrobbling,
     search,
     sessions,
     share,
@@ -296,6 +297,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(history.router, prefix=api_prefix, tags=["history"])
     app.include_router(radios.router, prefix=api_prefix, tags=["radios"])
     app.include_router(podcasts.router, prefix=api_prefix, tags=["podcasts"])
+    app.include_router(scrobbling.router, prefix=api_prefix, tags=["scrobbling"])
     app.include_router(reports.router, prefix=api_prefix, tags=["reports"])
     app.include_router(reports.admin_router, prefix=api_prefix, tags=["reports"])
     app.include_router(admin.router, prefix=api_prefix, tags=["admin"])

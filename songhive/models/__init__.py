@@ -33,6 +33,7 @@ from .preview_card import PreviewCard
 from .radio import Radio
 from .remote_object import RemoteObject
 from .report import Report
+from .scrobble import ScrobbleConfig
 from .setting import Setting
 from .share_grant import ShareGrant
 from .share_token import ShareToken
@@ -98,6 +99,7 @@ __all__ = [
     "RecoveryCode",
     "RemoteObject",
     "Report",
+    "ScrobbleConfig",
     "ShareGrant",
     "Setting",
     "ShareToken",

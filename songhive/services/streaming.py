@@ -5,6 +5,7 @@ Streaming service: resolve track backing files, transcode cache, and listen hist
 import io
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Union, cast
 
@@ -25,6 +26,7 @@ from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..models.transcoded_file import TranscodedFile
 from ..models.upload import Upload
+from . import scrobbler
 from .secrets import decrypt_json
 from .storage import StorageService
 
@@ -128,20 +130,43 @@ async def cache_transcode(
     return stored_file
 
 
-async def record_listen(session: AsyncSession, user_id: str, track_id: str) -> None:
+async def record_listen(
+    session: AsyncSession,
+    user_id: str,
+    track_id: str,
+    played_at: Optional[datetime] = None,
+) -> None:
     """
     Record a listen: insert history and increment the track play count.
+
+    ``played_at`` carries the client-reported play time (e.g. Subsonic
+    ``scrobble.view`` ``time``) so queued submissions keep the real
+    timestamp; ``None`` means "now".
 
     The play count is incremented with an atomic ``UPDATE`` expression so
     concurrent listens do not silently under-count.
     """
-    session.add(ListeningHistory(user_id=user_id, track_id=track_id))
+    entry = ListeningHistory(user_id=user_id, track_id=track_id)
+    if played_at is not None:
+        entry.created_at = played_at
+    session.add(entry)
     await session.execute(update(Track).where(Track.id == track_id).values(play_count=Track.play_count + 1))
 
     track = await session.get(Track, track_id)
     if track is not None:
         await session.flush()
         await session.refresh(track)
+
+    # Every listen-recording path funnels here, so this is the single point
+    # where a completed play is scrobbled. Skip enqueueing when the user has
+    # no active scrobble config; the task deduplicates the calls that remain
+    # (history report and streamed-byte threshold both land here).
+    if await scrobbler.has_active_config(session, user_id):
+        scrobbler.enqueue_scrobble(
+            user_id,
+            track_id,
+            int(played_at.timestamp()) if played_at is not None else None,
+        )
 
 
 def _parse_external_range_header(

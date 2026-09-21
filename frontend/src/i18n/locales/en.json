@@ -1069,6 +1069,35 @@
           }
         }
       }
+    },
+    "scrobbling": {
+      "title": "Scrobbling",
+      "hint": "Submit the tracks you play to a Last.fm or Libre.fm account. A \"now playing\" update is sent when playback starts and the track is scrobbled once it passes the thresholds below.",
+      "disabled": "Scrobbling is disabled on this instance.",
+      "service": "Service",
+      "serviceUnavailable": "{name} (not configured on this instance)",
+      "username": "Username",
+      "password": "Password",
+      "passwordHint": "Your account password on the scrobble service. It is only used to create a session and is never stored.",
+      "connect": "Connect account",
+      "connected": "Scrobble account connected.",
+      "connectedAs": "Connected to {service} as {name}.",
+      "connectError": "Could not connect: {message}",
+      "enabled": "Scrobbling enabled",
+      "enabledHint": "When disabled, plays are recorded locally but not submitted.",
+      "minSeconds": "Scrobble after (seconds)",
+      "minSecondsHint": "A play counts once this much playback time has elapsed.",
+      "minPercent": "Scrobble after (percent)",
+      "minPercentHint": "A play counts once this share of the track's duration has played — whichever threshold is reached first wins.",
+      "disconnect": "Disconnect",
+      "saved": "Scrobbling settings saved.",
+      "saveError": "Could not save scrobbling settings: {message}",
+      "deleted": "Scrobble account disconnected.",
+      "deleteError": "Could not disconnect: {message}",
+      "loadError": "Could not load scrobbling settings: {message}",
+      "lastScrobbled": "Last scrobbled: {date}",
+      "neverScrobbled": "never",
+      "lastError": "Last scrobble error: {message}"
     }
   },
   "profile": {
@@ -1089,7 +1118,8 @@
       "interface": "Interface",
       "moderation": "Moderation",
       "security": "Security",
-      "podcastSync": "Podcast sync"
+      "podcastSync": "Podcast sync",
+      "scrobbling": "Scrobbling"
     },
     "copyHandle": "Copy fediverse handle",
     "compose": "Compose",

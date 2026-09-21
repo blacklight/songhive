@@ -129,7 +129,42 @@
   `npm run` may not resolve `.bin` correctly from the worktree).
 - Celery tasks are organized by domain: `tasks/import_.py`,
   `tasks/federation.py`, `tasks/tags.py`, `tasks/transcoding.py`,
-  `tasks/notifications.py` (daily digest + seen-notification purge).
+  `tasks/notifications.py` (daily digest + seen-notification purge),
+  `tasks/scrobbling.py` (Last.fm/Libre.fm submissions).
+- Scrobbling (`services/scrobbler.py`, `tasks/scrobbling.py`,
+  `api/routes/scrobbling.py`) targets Audioscrobbler-compatible services
+  (Last.fm `https://ws.audioscrobbler.com/2.0/`, Libre.fm
+  `https://libre.fm/2.0/`). Instance API key pairs live under
+  `[scrobbling]`; a service is only offered when both key and secret are
+  set. Users authenticate via `auth.getMobileSession` — the password is
+  exchanged for a session key which is Fernet-encrypted on the
+  `scrobble_configs` row (`models/scrobble.py`) and never returned by
+  the API. `track.updateNowPlaying` is enqueued only on explicit play
+  reports — `POST /api/v1/scrobbling/now-playing/{track}` (the web player
+  calls it on the first `play` event after `load`) and
+  `scrobble.view?submission=false`. Stream/download requests never
+  trigger it: clients prefetch upcoming tracks (Substreamer caches the
+  whole album ahead), so bytes served are not a play signal —
+  `SubsonicStreamHandler` also disables the streamed-byte listen
+  recording (`_record_listen_if_needed` is a no-op) and never writes the
+  `getNowPlaying` registry from `stream.view`.
+  `track.scrobble` is enqueued inside `services.streaming.record_listen`,
+  the funnel every listen path (web player history report, streamed-byte
+  threshold, `scrobble.view?submission=true`) passes through;
+  `record_listen` accepts an optional `played_at` so queued Subsonic
+  submissions (`time` param, ms epoch, positional per `id`) keep the
+  real play timestamp. Both tasks
+  deduplicate in Redis (`songhive:scrobble:{np,sub}:{user}:{track}` —
+  the same play reaches `record_listen` twice within seconds). The
+  per-user `min_seconds`/`min_percent` thresholds are exposed through
+  `GET /api/v1/scrobbling/` and drive both the web player's
+  `HistoryReporter` and the stream handler's streamed-seconds threshold;
+  unconfigured users keep the historical defaults (30s server-side, 50%
+  client-side). The streamed-seconds estimate
+  (`_StreamState.started_at`/`_elapsed_seconds`) is capped by wall-clock
+  elapsed since the stream started — bytes only approximate playback
+  position while delivery is consumption-limited, so a client that
+  buffers the whole file in seconds must not trip the threshold early.
 - RSS/Atom feeds live under `/feeds` (outside `/api/v1`):
   `api/routes/feeds.py` + `services/feeds.py` render the XML, and
   `api/semantic_meta.py` / `api/routes/profile_pages.py` inject the
