@@ -19,8 +19,15 @@ import { usePlayerStore } from "@/stores/player";
 import { useToastStore } from "@/stores/toast";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import EntityActions, {
+  type ActionItem,
+} from "@/components/ui/EntityActions.vue";
+import AddToCollectionDialog, {
+  type AddableItemType,
+} from "@/components/library/AddToCollectionDialog.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 
 const { t } = useI18n();
@@ -180,6 +187,163 @@ async function copyFeedUrl() {
   }
 }
 
+const addDialogOpen = ref(false);
+const addDialogItemType = ref<AddableItemType>("episode");
+const addDialogItemId = ref("");
+const addDialogItemIds = ref<string[]>([]);
+const addDialogItemName = ref("");
+
+function onAddEpisodeToPlaylist(episode: PodcastEpisodeResponse) {
+  addDialogItemType.value = "episode";
+  addDialogItemId.value = episode.id;
+  addDialogItemIds.value = [];
+  addDialogItemName.value = episode.title;
+  addDialogOpen.value = true;
+}
+
+const bulkMode = ref(false);
+const selectedIds = ref<Set<string>>(new Set());
+const bulkBusy = ref(false);
+
+const selectedEpisodes = computed(() =>
+  episodes.value.filter((episode) => selectedIds.value.has(episode.id)),
+);
+
+const allSelected = computed(
+  () =>
+    episodes.value.length > 0 &&
+    episodes.value.every((episode) => selectedIds.value.has(episode.id)),
+);
+
+const someSelected = computed(
+  () =>
+    !allSelected.value &&
+    episodes.value.some((episode) => selectedIds.value.has(episode.id)),
+);
+
+function toggleBulkMode() {
+  bulkMode.value = !bulkMode.value;
+  if (!bulkMode.value) {
+    selectedIds.value.clear();
+  }
+}
+
+function toggleAll() {
+  if (allSelected.value) {
+    episodes.value.forEach((episode) => selectedIds.value.delete(episode.id));
+  } else {
+    episodes.value.forEach((episode) => selectedIds.value.add(episode.id));
+  }
+}
+
+function toggleEpisode(episode: PodcastEpisodeResponse) {
+  if (selectedIds.value.has(episode.id)) {
+    selectedIds.value.delete(episode.id);
+  } else {
+    selectedIds.value.add(episode.id);
+  }
+}
+
+const bulkActions = computed<ActionItem[]>(() => {
+  if (!bulkMode.value) return [];
+  const none = selectedEpisodes.value.length === 0;
+  return [
+    {
+      key: "add-to-playlist",
+      label: t("browse.bulkEdit.addToPlaylist"),
+      icon: "list",
+      variant: "secondary",
+      disabled: none || bulkBusy.value,
+    },
+    {
+      key: "mark-played",
+      label: t("pages.podcast.markPlayed"),
+      icon: "check",
+      variant: "secondary",
+      disabled:
+        none ||
+        bulkBusy.value ||
+        !selectedEpisodes.value.some((episode) => !episode.played),
+    },
+    {
+      key: "mark-unplayed",
+      label: t("pages.podcast.markUnplayed"),
+      icon: "rotate-left",
+      variant: "secondary",
+      disabled:
+        none ||
+        bulkBusy.value ||
+        !selectedEpisodes.value.some((episode) => episode.played),
+    },
+  ];
+});
+
+function onBulkAction(key: string) {
+  if (selectedIds.value.size === 0 || bulkBusy.value) return;
+  switch (key) {
+    case "add-to-playlist":
+      onBulkAddToPlaylist();
+      break;
+    case "mark-played":
+      void onBulkSetPlayed(true);
+      break;
+    case "mark-unplayed":
+      void onBulkSetPlayed(false);
+      break;
+  }
+}
+
+function onBulkAddToPlaylist() {
+  addDialogItemType.value = "episode";
+  addDialogItemId.value = "";
+  addDialogItemIds.value = selectedEpisodes.value.map((episode) => episode.id);
+  addDialogItemName.value = "";
+  addDialogOpen.value = true;
+}
+
+async function onBulkSetPlayed(played: boolean) {
+  const targets = selectedEpisodes.value.filter(
+    (episode) => episode.played !== played,
+  );
+  if (targets.length === 0) return;
+  bulkBusy.value = true;
+  try {
+    const results = await Promise.allSettled(
+      targets.map((episode) =>
+        played
+          ? markEpisodePlayed(episode.id)
+          : markEpisodeUnplayed(episode.id),
+      ),
+    );
+    let changed = 0;
+    let firstError: unknown = null;
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        targets[index]!.played = played;
+        changed += 1;
+      } else if (firstError === null) {
+        firstError = result.reason;
+      }
+    });
+    if (podcast.value && changed > 0) {
+      podcast.value.unplayed_count = Math.max(
+        0,
+        podcast.value.unplayed_count + (played ? -changed : changed),
+      );
+    }
+    if (firstError !== null) {
+      toast.push({
+        type: "error",
+        message: t("pages.podcast.playedError", {
+          message: getErrorMessage(firstError),
+        }),
+      });
+    }
+  } finally {
+    bulkBusy.value = false;
+  }
+}
+
 const togglingPlayed = ref<Set<string>>(new Set());
 
 async function onTogglePlayed(episode: PodcastEpisodeResponse) {
@@ -311,6 +475,15 @@ onMounted(load);
           {{ t("common.playAll") }}
         </AppButton>
         <AppButton
+          v-if="!bulkMode"
+          variant="secondary"
+          icon="pen-to-square"
+          :disabled="episodes.length === 0"
+          @click="toggleBulkMode"
+        >
+          {{ t("browse.bulkEdit.start") }}
+        </AppButton>
+        <AppButton
           variant="secondary"
           icon="rotate"
           :loading="refreshing"
@@ -326,6 +499,25 @@ onMounted(load);
           @click="onUnfollow"
         >
           {{ t("pages.podcast.unfollow") }}
+        </AppButton>
+      </div>
+
+      <div v-if="bulkMode" class="podcast-view__bulk">
+        <AppCheckbox
+          :model-value="allSelected"
+          :indeterminate="someSelected"
+          :label="t('browse.bulkEdit.selectAll')"
+          @update:model-value="toggleAll"
+        />
+        <EntityActions :actions="bulkActions" @select="onBulkAction" />
+        <AppButton
+          variant="secondary"
+          size="sm"
+          icon="xmark"
+          :disabled="bulkBusy"
+          @click="toggleBulkMode"
+        >
+          {{ t("browse.bulkEdit.done") }}
         </AppButton>
       </div>
 
@@ -347,6 +539,13 @@ onMounted(load);
             class="podcast-view__episode"
             :class="{ 'podcast-view__episode--played': episode.played }"
           >
+            <AppCheckbox
+              v-if="bulkMode"
+              class="podcast-view__episode-select"
+              :model-value="selectedIds.has(episode.id)"
+              :aria-label="episode.title"
+              @update:model-value="toggleEpisode(episode)"
+            />
             <AppButton
               variant="ghost"
               size="sm"
@@ -393,6 +592,15 @@ onMounted(load);
             <AppButton
               variant="ghost"
               size="sm"
+              icon="list"
+              class="podcast-view__episode-add"
+              :title="t('pages.podcast.addToPlaylist')"
+              :aria-label="t('pages.podcast.addToPlaylist')"
+              @click="onAddEpisodeToPlaylist(episode)"
+            />
+            <AppButton
+              variant="ghost"
+              size="sm"
               :icon="episode.played ? 'circle-check' : 'check'"
               class="podcast-view__episode-played"
               :title="
@@ -416,6 +624,16 @@ onMounted(load);
           </AppButton>
         </div>
       </section>
+
+      <AddToCollectionDialog
+        :open="addDialogOpen"
+        mode="playlist"
+        :item-type="addDialogItemType"
+        :item-id="addDialogItemId"
+        :item-ids="addDialogItemIds"
+        :item-name="addDialogItemName"
+        @close="addDialogOpen = false"
+      />
     </template>
   </div>
 </template>
@@ -560,6 +778,18 @@ onMounted(load);
   gap: var(--space-3);
 }
 
+.podcast-view__bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.podcast-view__episode-select {
+  flex-shrink: 0;
+  margin-top: var(--space-1);
+}
+
 .podcast-view__empty {
   text-align: center;
   padding: var(--space-6);
@@ -589,10 +819,16 @@ onMounted(load);
   margin-top: var(--space-1);
 }
 
-.podcast-view__episode-played {
+.podcast-view__episode-add {
   flex-shrink: 0;
   margin-top: var(--space-1);
   margin-left: auto;
+  color: var(--color-text-muted);
+}
+
+.podcast-view__episode-played {
+  flex-shrink: 0;
+  margin-top: var(--space-1);
   color: var(--color-text-muted);
 }
 

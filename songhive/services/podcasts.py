@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from typing import List, Optional
+from typing import List, Optional, Sequence, Set
 from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape, quoteattr
@@ -1138,6 +1138,24 @@ async def list_episodes(
         )
     ).all()
     return list(rows), total
+
+
+async def existing_episode_ids(db: AsyncSession, episode_ids: Sequence[str]) -> Set[str]:
+    """Return the subset of ``episode_ids`` that exists in the catalog."""
+    if not episode_ids:
+        return set()
+    rows = await db.scalars(select(PodcastEpisode.id).where(PodcastEpisode.id.in_(episode_ids)))
+    return {str(row) for row in rows.all()}
+
+
+async def episode_ids_for_podcast(db: AsyncSession, podcast_id: str) -> List[str]:
+    """Return all episode ids of ``podcast_id`` in chronological order."""
+    rows = await db.scalars(
+        select(PodcastEpisode.id)
+        .where(PodcastEpisode.podcast_id == podcast_id)
+        .order_by(PodcastEpisode.published_at.asc().nulls_last(), PodcastEpisode.created_at.asc())
+    )
+    return [str(row) for row in rows.all()]
 
 
 async def due_podcast_ids(db: AsyncSession, interval: timedelta, *, limit: int = 500) -> List[str]:

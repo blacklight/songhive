@@ -2,7 +2,8 @@
 Playlist routes.
 """
 
-from typing import List, Optional, Set
+from datetime import datetime
+from typing import List, Literal, Optional, Set
 
 from fastapi import (
     APIRouter,
@@ -17,14 +18,17 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config.schema import SonghiveConfig
 from ...models._enums import Visibility
 from ...models.audit_log import AuditTargetType
 from ...models.playlist import Playlist
+from ...models.podcast import PodcastEpisode
 from ...models.user import User
 from ...services import acl, audit, collection, deletion, music
+from ...services import podcasts as podcasts_service
 from ...services.auth import get_user_by_username
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
@@ -37,6 +41,7 @@ from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
 from .._sorting import SortParams, get_sort
 from ..deps import (
+    get_config,
     get_current_user,
     get_current_user_optional,
     get_db,
@@ -71,9 +76,10 @@ class PlaylistResponse(BaseModel):
 
 
 class PlaylistStatsResponse(BaseModel):
-    """Aggregate statistics for a playlist's accessible tracks."""
+    """Aggregate statistics for a playlist's accessible items."""
 
     track_count: int
+    episode_count: int = 0
     total_duration: float
 
 
@@ -93,24 +99,34 @@ class PlaylistUpdate(BaseModel):
 
 
 class AddPlaylistTracksRequest(BaseModel):
-    """Request body for adding tracks, albums, or artists to a playlist."""
+    """Request body for adding tracks, albums, artists, or podcast episodes to a playlist."""
 
     track_ids: Optional[List[str]] = None
     album_id: Optional[str] = None
     artist_id: Optional[str] = None
+    episode_ids: Optional[List[str]] = None
+    # Adds every cataloged episode of the podcast, oldest first.
+    podcast_id: Optional[str] = None
     allow_duplicates: bool = False
 
 
 class RemovePlaylistTracksRequest(BaseModel):
-    """Request body for removing tracks from a playlist."""
+    """Request body for removing tracks or podcast episodes from a playlist."""
 
-    track_ids: List[str]
+    track_ids: Optional[List[str]] = None
+    episode_ids: Optional[List[str]] = None
 
 
 class ReorderPlaylistTracksRequest(BaseModel):
-    """Request body for reordering tracks in a playlist."""
+    """Request body for reordering items in a playlist.
 
-    track_ids: List[str] = Field(min_length=1)
+    ``item_ids`` are entity ids — track ids or podcast episode ids — moved as
+    a block to ``position``. ``track_ids`` is a deprecated alias for
+    ``item_ids``.
+    """
+
+    item_ids: Optional[List[str]] = None
+    track_ids: Optional[List[str]] = None
     position: Optional[int] = None
 
     @field_validator("position")
@@ -122,11 +138,46 @@ class ReorderPlaylistTracksRequest(BaseModel):
 
 
 class ReorderPlaylistTracksResponse(BaseModel):
-    """Response body for a successful playlist track reorder."""
+    """Response body for a successful playlist item reorder."""
 
     reordered: bool = True
+    item_ids: List[str]
+    # Deprecated alias of ``item_ids`` kept for backward compatibility.
     track_ids: List[str]
     count: int
+
+
+class PlaylistEpisodeItem(BaseModel):
+    """Podcast episode data embedded in a playlist item."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    podcast_id: str
+    podcast_title: str
+    title: str
+    description: Optional[str] = None
+    link: Optional[str] = None
+    image_url: Optional[str] = None
+    audio_url: str
+    audio_type: Optional[str] = None
+    audio_length: Optional[int] = None
+    duration_seconds: Optional[int] = None
+    published_at: Optional[datetime] = None
+    season_number: Optional[int] = None
+    episode_number: Optional[int] = None
+    episode_type: Optional[str] = None
+    played: bool = False
+
+
+class PlaylistItemResponse(BaseModel):
+    """One ordered playlist entry — a track or a podcast episode."""
+
+    item_id: str
+    position: int
+    type: Literal["track", "episode"]
+    track: Optional[TrackResponse] = None
+    episode: Optional[PlaylistEpisodeItem] = None
 
 
 async def _playlist_image_url(playlist: Playlist, storage: StorageService) -> Optional[str]:
@@ -540,6 +591,29 @@ async def _resolve_track_ids(
     return deduped
 
 
+async def _resolve_episode_ids(
+    db: AsyncSession,
+    body: AddPlaylistTracksRequest,
+) -> List[str]:
+    """Resolve ``episode_ids`` / ``podcast_id`` into cataloged episode IDs."""
+    resolved: List[str] = []
+
+    if body.episode_ids:
+        existing = await podcasts_service.existing_episode_ids(db, body.episode_ids)
+        resolved.extend(episode_id for episode_id in body.episode_ids if episode_id in existing)
+
+    if body.podcast_id:
+        resolved.extend(await podcasts_service.episode_ids_for_podcast(db, body.podcast_id))
+
+    seen: set[str] = set()
+    deduped: List[str] = []
+    for episode_id in resolved:
+        if episode_id not in seen:
+            seen.add(episode_id)
+            deduped.append(episode_id)
+    return deduped
+
+
 async def _track_response(
     storage: StorageService,
     track,
@@ -558,8 +632,9 @@ async def add_tracks_to_playlist(
     body: AddPlaylistTracksRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
 ):
-    """Add existing tracks, an album, or an artist to a playlist."""
+    """Add existing tracks, an album, an artist, episodes, or a whole podcast to a playlist."""
     playlist = await music.get_playlist(db, playlist_id)
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -569,21 +644,34 @@ async def add_tracks_to_playlist(
             detail="Access denied",
         )
 
-    if not body.track_ids and not body.album_id and not body.artist_id:
+    if not any((body.track_ids, body.album_id, body.artist_id, body.episode_ids, body.podcast_id)):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="At least one source must be provided",
         )
+    if (body.episode_ids or body.podcast_id) and not config.podcasts.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Podcasts are disabled on this instance",
+        )
 
     track_ids = await _resolve_track_ids(db, current_user, body)
+    episode_ids = await _resolve_episode_ids(db, body)
     try:
-        added_ids = await music.add_playlist_tracks(db, playlist_id, track_ids, allow_duplicates=body.allow_duplicates)
+        added_track_ids, added_episode_ids = await music.add_playlist_items(
+            db,
+            playlist_id,
+            track_ids=track_ids,
+            episode_ids=episode_ids,
+            allow_duplicates=body.allow_duplicates,
+        )
     except music.DuplicatePlaylistTrackError as exc:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={
-                "detail": "Tracks already in playlist",
+                "detail": "Items already in playlist",
                 "track_ids": exc.track_ids,
+                "episode_ids": exc.episode_ids,
             },
         )
 
@@ -595,14 +683,19 @@ async def add_tracks_to_playlist(
         target_id=playlist_id,
         details={
             "source": body.model_dump(exclude_unset=True),
-            "track_ids": added_ids,
-            "count": len(added_ids),
+            "track_ids": added_track_ids,
+            "episode_ids": added_episode_ids,
+            "count": len(added_track_ids) + len(added_episode_ids),
         },
         ip_address=client_ip(request),
     )
     await db.commit()
 
-    return {"added": len(added_ids), "track_ids": added_ids}
+    return {
+        "added": len(added_track_ids) + len(added_episode_ids),
+        "track_ids": added_track_ids,
+        "episode_ids": added_episode_ids,
+    }
 
 
 @router.get(
@@ -660,6 +753,105 @@ async def list_playlist_tracks_route(
     return [await _track_response(storage, row, user, include, favorited_ids) for row in rows]
 
 
+def _episode_item(episode: PodcastEpisode, played: bool) -> PlaylistEpisodeItem:
+    """Build the episode side of a playlist item (podcast must be loaded)."""
+    podcast = episode.podcast
+    return PlaylistEpisodeItem(
+        id=str(episode.id),
+        podcast_id=str(episode.podcast_id),
+        podcast_title=podcast.title if podcast is not None else "",
+        title=episode.title,
+        description=episode.description,
+        link=episode.link,
+        image_url=episode.image_url or (podcast.image_url if podcast is not None else None),
+        audio_url=episode.audio_url,
+        audio_type=episode.audio_type,
+        audio_length=episode.audio_length,
+        duration_seconds=episode.duration_seconds,
+        published_at=episode.published_at,
+        season_number=episode.season_number,
+        episode_number=episode.episode_number,
+        episode_type=episode.episode_type,
+        played=played,
+    )
+
+
+@router.get(
+    "/{playlist_id}/items",
+    response_model=List[PlaylistItemResponse],
+    dependencies=[Depends(require_access("playlist"))],
+)
+async def list_playlist_items_route(
+    response: Response,
+    playlist_id: str,
+    q: Optional[str] = Query(None, description="Search items by title, artist, album, podcast, tag, or genre"),
+    user: Optional[User] = Depends(get_current_user_optional),
+    pagination: Pagination = Depends(get_pagination),
+    sort: SortParams = Depends(
+        get_sort(
+            {
+                "position",
+                "created_at",
+                "title",
+                "artist_name",
+                "album_title",
+                "updated_at",
+                "release_year",
+            },
+            "position",
+        )
+    ),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "album", "owner"})),
+):
+    """List a playlist's items — tracks and podcast episodes — in order."""
+    playlist = await music.get_playlist(db, playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    total = await music.count_playlist_items(db, playlist_id=playlist_id, user=user, query=q)
+    rows = await music.list_playlist_items(
+        db,
+        playlist_id=playlist_id,
+        user=user,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        include=set(include.values),
+        sort_by=sort.field,
+        sort_dir=sort.direction,
+        query=q,
+    )
+    pagination.set_total(response, total)
+
+    track_ids = {str(row.track.id) for row in rows if row.track is not None}
+    episode_ids = [str(row.episode.id) for row in rows if row.episode is not None]
+    favorited_ids = await music.get_favorited_track_ids(db, user, track_ids)
+    played_ids = await podcasts_service.played_episode_ids(db, user, episode_ids) if user is not None else set()
+
+    items: List[PlaylistItemResponse] = []
+    for row in rows:
+        if row.track is not None:
+            items.append(
+                PlaylistItemResponse(
+                    item_id=str(row.id),
+                    position=row.position,
+                    type="track",
+                    track=await _track_response(storage, row.track, user, include, favorited_ids),
+                )
+            )
+        elif row.episode is not None:
+            items.append(
+                PlaylistItemResponse(
+                    item_id=str(row.id),
+                    position=row.position,
+                    type="episode",
+                    episode=_episode_item(row.episode, str(row.episode.id) in played_ids),
+                )
+            )
+    return items
+
+
 @router.post("/{playlist_id}/tracks/remove", status_code=status.HTTP_200_OK)
 async def remove_tracks_from_playlist(
     playlist_id: str,
@@ -668,7 +860,7 @@ async def remove_tracks_from_playlist(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove existing tracks from a playlist."""
+    """Remove existing tracks or podcast episodes from a playlist."""
     playlist = await music.get_playlist(db, playlist_id)
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -678,13 +870,18 @@ async def remove_tracks_from_playlist(
             detail="Access denied",
         )
 
-    if not body.track_ids:
+    if not body.track_ids and not body.episode_ids:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="track_ids must not be empty",
+            detail="track_ids or episode_ids must not be empty",
         )
 
-    removed_count, removed_ids = await music.remove_playlist_tracks(db, playlist_id, body.track_ids)
+    removed_count, removed_track_ids, removed_episode_ids = await music.remove_playlist_items(
+        db,
+        playlist_id,
+        track_ids=body.track_ids or [],
+        episode_ids=body.episode_ids or [],
+    )
 
     await audit.log_action(
         db,
@@ -693,14 +890,19 @@ async def remove_tracks_from_playlist(
         target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={
-            "track_ids": removed_ids,
+            "track_ids": removed_track_ids,
+            "episode_ids": removed_episode_ids,
             "count": removed_count,
         },
         ip_address=client_ip(request),
     )
     await db.commit()
 
-    return {"removed": removed_count, "track_ids": removed_ids}
+    return {
+        "removed": removed_count,
+        "track_ids": removed_track_ids,
+        "episode_ids": removed_episode_ids,
+    }
 
 
 @router.post("/{playlist_id}/tracks/reorder", response_model=ReorderPlaylistTracksResponse)
@@ -711,7 +913,7 @@ async def reorder_playlist_tracks_route(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Reorder tracks within a playlist."""
+    """Reorder items within a playlist (``item_ids`` may mix tracks and episodes)."""
     playlist = await music.get_playlist(db, playlist_id)
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -722,11 +924,21 @@ async def reorder_playlist_tracks_route(
             detail="Access denied",
         )
 
+    item_ids = list(body.item_ids or [])
+    for track_id in body.track_ids or []:
+        if track_id not in item_ids:
+            item_ids.append(track_id)
+    if not item_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="item_ids must not be empty",
+        )
+
     try:
-        moved = await music.reorder_playlist_tracks(
+        moved = await music.reorder_playlist_items(
             db,
             playlist_id,
-            body.track_ids,
+            item_ids,
             body.position,
         )
     except ValueError as exc:
@@ -742,6 +954,7 @@ async def reorder_playlist_tracks_route(
         target_type=AuditTargetType.PLAYLIST,
         target_id=playlist_id,
         details={
+            "item_ids": moved,
             "track_ids": moved,
             "position": body.position,
             "count": len(moved),
@@ -750,7 +963,7 @@ async def reorder_playlist_tracks_route(
     )
     await db.commit()
 
-    return ReorderPlaylistTracksResponse(reordered=True, track_ids=moved, count=len(moved))
+    return ReorderPlaylistTracksResponse(reordered=True, item_ids=moved, track_ids=moved, count=len(moved))
 
 
 @router.delete("/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])

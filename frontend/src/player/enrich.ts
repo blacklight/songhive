@@ -15,11 +15,16 @@ export function toQueueTrack(
   track: TrackResponse,
   enrich?: TrackEnrich | null,
 ): QueueTrack {
+  // Inputs that are already QueueTracks (e.g. podcast episodes built from a
+  // playlist item) keep their denormalized display fields.
+  const preset = track as Partial<QueueTrack>;
   return {
     ...track,
-    artist_name: track.artist?.name ?? enrich?.artist_name ?? "",
-    album_title: track.album?.title ?? enrich?.album_title,
-    artwork_url: track.image_url ?? enrich?.artwork_url,
+    artist_name:
+      track.artist?.name ?? preset.artist_name ?? enrich?.artist_name ?? "",
+    album_title:
+      track.album?.title ?? preset.album_title ?? enrich?.album_title,
+    artwork_url: track.image_url ?? preset.artwork_url ?? enrich?.artwork_url,
   };
 }
 

@@ -4,7 +4,7 @@ libraries, and radios.
 """
 
 import contextlib
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, cast
 
 from sqlalchemy import Select, and_, exists, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,22 +19,24 @@ from ..models.genre import Genre, GenreAlbum, GenreTrack
 from ..models.library import Library
 from ..models.library_track import LibraryTrack
 from ..models.playlist import Playlist, PlaylistTrack
+from ..models.podcast import Podcast, PodcastEpisode
 from ..models.radio import Radio
 from ..models.tag import Tag, TagTrack
 from ..models.track import Track
 from ..models.user import User
 from ._common import ilike_contains
-from .acl import apply_access_filter
+from .acl import _list_access_predicate, apply_access_filter
 from .collection import apply_collection_filter, in_collection_clause
 from .genres import InvalidGenreName, validate_genre_name
 
 
 class DuplicatePlaylistTrackError(ValueError):
-    """Raised when tracks are already present in a playlist and duplicates are disallowed."""
+    """Raised when items are already present in a playlist and duplicates are disallowed."""
 
-    def __init__(self, track_ids: List[str]):
+    def __init__(self, track_ids: List[str], episode_ids: Optional[List[str]] = None):
         self.track_ids = track_ids
-        super().__init__(f"Duplicate playlist tracks: {track_ids}")
+        self.episode_ids = episode_ids or []
+        super().__init__(f"Duplicate playlist items: tracks={track_ids} episodes={self.episode_ids}")
 
 
 def _track_selectin_options(include: Optional[Set[str]]) -> List[Any]:
@@ -1253,6 +1255,89 @@ async def remove_library_tracks(
     return removed
 
 
+async def add_playlist_items(
+    session: AsyncSession,
+    playlist_id: str,
+    *,
+    track_ids: Sequence[str] = (),
+    episode_ids: Sequence[str] = (),
+    allow_duplicates: bool = False,
+) -> Tuple[List[str], List[str]]:
+    """
+    Append ``track_ids`` and ``episode_ids`` to ``playlist_id`` at the end.
+
+    Tracks are appended first, then podcast episodes; each new
+    ``PlaylistTrack`` row is assigned an increasing ``position``. The returned
+    tuple contains the appended ``(track_ids, episode_ids)`` in input order.
+
+    If ``allow_duplicates`` is ``False`` (the default) and any of the items are
+    already in the playlist, a ``DuplicatePlaylistTrackError`` carrying the
+    offending ids is raised.
+    """
+    if not track_ids and not episode_ids:
+        return [], []
+
+    if not allow_duplicates:
+        existing_tracks: Set[str] = set()
+        existing_episodes: Set[str] = set()
+        if track_ids:
+            result = await session.execute(
+                select(PlaylistTrack.track_id).where(
+                    PlaylistTrack.playlist_id == playlist_id,
+                    PlaylistTrack.track_id.in_(track_ids),
+                )
+            )
+            existing_tracks = {str(row) for row in result.scalars().all()}
+        if episode_ids:
+            result = await session.execute(
+                select(PlaylistTrack.podcast_episode_id).where(
+                    PlaylistTrack.playlist_id == playlist_id,
+                    PlaylistTrack.podcast_episode_id.in_(episode_ids),
+                )
+            )
+            existing_episodes = {str(row) for row in result.scalars().all()}
+        duplicate_tracks: List[str] = []
+        duplicate_episodes: List[str] = []
+        seen: Set[str] = set()
+        for track_id in track_ids:
+            if track_id in existing_tracks and track_id not in seen:
+                seen.add(track_id)
+                duplicate_tracks.append(track_id)
+        for episode_id in episode_ids:
+            if episode_id in existing_episodes and episode_id not in seen:
+                seen.add(episode_id)
+                duplicate_episodes.append(episode_id)
+        if duplicate_tracks or duplicate_episodes:
+            raise DuplicatePlaylistTrackError(duplicate_tracks, duplicate_episodes)
+
+    result = await session.execute(
+        select(func.max(PlaylistTrack.position)).where(PlaylistTrack.playlist_id == playlist_id)
+    )
+    max_position = cast(int, result.scalar() or 0)
+
+    added_tracks: List[str] = []
+    added_episodes: List[str] = []
+    rows: List[PlaylistTrack] = []
+    for offset, track_id in enumerate(track_ids, start=1):
+        rows.append(PlaylistTrack(playlist_id=playlist_id, track_id=track_id, position=max_position + offset))
+        added_tracks.append(track_id)
+    for offset, episode_id in enumerate(episode_ids, start=len(rows) + 1):
+        rows.append(
+            PlaylistTrack(
+                playlist_id=playlist_id,
+                podcast_episode_id=episode_id,
+                position=max_position + offset,
+            )
+        )
+        added_episodes.append(episode_id)
+
+    if rows:
+        session.add_all(rows)
+        await session.flush()
+
+    return added_tracks, added_episodes
+
+
 async def add_playlist_tracks(
     session: AsyncSession,
     playlist_id: str,
@@ -1262,48 +1347,75 @@ async def add_playlist_tracks(
     """
     Append ``track_ids`` to ``playlist_id`` at the end of the playlist.
 
-    New ``PlaylistTrack`` rows are assigned increasing ``position`` values. The
-    returned list contains the IDs that were appended, in input order.
-
-    If ``allow_duplicates`` is ``False`` (the default) and any of ``track_ids``
-    are already in the playlist, a ``DuplicatePlaylistTrackError`` is raised.
+    Thin wrapper over ``add_playlist_items`` kept for track-only callers
+    (Subsonic). Returns the appended track IDs in input order and raises
+    ``DuplicatePlaylistTrackError`` when duplicates are disallowed.
     """
-    if not track_ids:
-        return []
-
-    if not allow_duplicates:
-        result = await session.execute(
-            select(PlaylistTrack.track_id).where(
-                PlaylistTrack.playlist_id == playlist_id,
-                PlaylistTrack.track_id.in_(track_ids),
-            )
-        )
-        existing = {str(row) for row in result.scalars().all()}
-        duplicates: List[str] = []
-        seen: Set[str] = set()
-        for track_id in track_ids:
-            if track_id in existing and track_id not in seen:
-                seen.add(track_id)
-                duplicates.append(track_id)
-        if duplicates:
-            raise DuplicatePlaylistTrackError(duplicates)
-
-    result = await session.execute(
-        select(func.max(PlaylistTrack.position)).where(PlaylistTrack.playlist_id == playlist_id)
+    added, _ = await add_playlist_items(
+        session,
+        playlist_id,
+        track_ids=track_ids,
+        allow_duplicates=allow_duplicates,
     )
-    max_position = cast(int, result.scalar() or 0)
+    return added
 
-    added: List[str] = []
-    rows: List[PlaylistTrack] = []
-    for offset, track_id in enumerate(track_ids, start=1):
-        rows.append(PlaylistTrack(playlist_id=playlist_id, track_id=track_id, position=max_position + offset))
-        added.append(track_id)
+
+async def remove_playlist_items(
+    session: AsyncSession,
+    playlist_id: str,
+    *,
+    track_ids: Sequence[str] = (),
+    episode_ids: Sequence[str] = (),
+) -> Tuple[int, List[str], List[str]]:
+    """
+    Remove all occurrences of ``track_ids``/``episode_ids`` from ``playlist_id``.
+
+    Returns the number of rows removed and the distinct track/episode IDs that
+    were removed.
+    """
+    if not track_ids and not episode_ids:
+        return 0, [], []
+
+    clauses = []
+    if track_ids:
+        clauses.append(PlaylistTrack.track_id.in_(track_ids))
+    if episode_ids:
+        clauses.append(PlaylistTrack.podcast_episode_id.in_(episode_ids))
+    result = await session.execute(
+        select(PlaylistTrack).where(
+            PlaylistTrack.playlist_id == playlist_id,
+            or_(*clauses),
+        )
+    )
+    rows = list(result.scalars().all())
+    removed_track_counts: Dict[str, int] = {}
+    removed_episode_counts: Dict[str, int] = {}
+    for row in rows:
+        await session.delete(row)
+        if row.track_id is not None:
+            track_id = str(row.track_id)
+            removed_track_counts[track_id] = removed_track_counts.get(track_id, 0) + 1
+        if row.podcast_episode_id is not None:
+            episode_id = str(row.podcast_episode_id)
+            removed_episode_counts[episode_id] = removed_episode_counts.get(episode_id, 0) + 1
+
+    removed_track_ids: List[str] = []
+    removed_episode_ids: List[str] = []
+    seen: Set[str] = set()
+    for track_id in track_ids:
+        if track_id in removed_track_counts and track_id not in seen:
+            seen.add(track_id)
+            removed_track_ids.append(track_id)
+    for episode_id in episode_ids:
+        if episode_id in removed_episode_counts and episode_id not in seen:
+            seen.add(episode_id)
+            removed_episode_ids.append(episode_id)
 
     if rows:
-        session.add_all(rows)
         await session.flush()
+        await renormalize_playlist_track_positions(session, playlist_id)
 
-    return added
+    return len(rows), removed_track_ids, removed_episode_ids
 
 
 async def remove_playlist_tracks(
@@ -1311,40 +1423,9 @@ async def remove_playlist_tracks(
     playlist_id: str,
     track_ids: List[str],
 ) -> Tuple[int, List[str]]:
-    """
-    Remove all occurrences of ``track_ids`` from ``playlist_id``.
-
-    Returns the number of rows removed and the distinct track IDs that were
-    removed.
-    """
-    if not track_ids:
-        return 0, []
-
-    result = await session.execute(
-        select(PlaylistTrack).where(
-            PlaylistTrack.playlist_id == playlist_id,
-            PlaylistTrack.track_id.in_(track_ids),
-        )
-    )
-    rows = list(result.scalars().all())
-    removed_track_counts: Dict[str, int] = {}
-    for row in rows:
-        await session.delete(row)
-        track_id = str(row.track_id)
-        removed_track_counts[track_id] = removed_track_counts.get(track_id, 0) + 1
-
-    removed_ids: List[str] = []
-    seen: Set[str] = set()
-    for track_id in track_ids:
-        if track_id in removed_track_counts and track_id not in seen:
-            seen.add(track_id)
-            removed_ids.append(track_id)
-
-    if rows:
-        await session.flush()
-        await renormalize_playlist_track_positions(session, playlist_id)
-
-    return len(rows), removed_ids
+    """Remove all occurrences of ``track_ids`` from ``playlist_id``."""
+    removed, track_ids_out, _ = await remove_playlist_items(session, playlist_id, track_ids=track_ids)
+    return removed, track_ids_out
 
 
 async def renormalize_playlist_track_positions(session: AsyncSession, playlist_id: str) -> None:
@@ -1371,28 +1452,38 @@ async def renormalize_playlist_track_positions(session: AsyncSession, playlist_i
         await session.flush()
 
 
-async def reorder_playlist_tracks(
+def _playlist_item_entity_id(row: PlaylistTrack) -> Optional[str]:
+    """Return the entity id (track or podcast episode) carried by a playlist row."""
+    if row.track_id is not None:
+        return str(row.track_id)
+    if row.podcast_episode_id is not None:
+        return str(row.podcast_episode_id)
+    return None
+
+
+async def reorder_playlist_items(
     session: AsyncSession,
     playlist_id: str,
-    track_ids: List[str],
+    item_ids: List[str],
     position: Optional[int] = None,
 ) -> List[str]:
     """
-    Move all occurrences of ``track_ids`` to ``position`` in the playlist.
+    Move all occurrences of ``item_ids`` to ``position`` in the playlist.
 
-    The block of tracks is taken from its current locations, preserving its
-    internal order, and inserted at the 1-based rank ``position`` (``None``
-    means the end). Unknown track IDs raise ``ValueError``.
+    ``item_ids`` are entity ids — track ids or podcast episode ids. The block
+    of items is taken from its current locations, preserving its internal
+    order, and inserted at the 1-based rank ``position`` (``None`` means the
+    end). Unknown item IDs raise ``ValueError``.
     """
-    if not track_ids:
+    if not item_ids:
         return []
 
     seen: Set[str] = set()
     deduped: List[str] = []
-    for track_id in track_ids:
-        if track_id not in seen:
-            seen.add(track_id)
-            deduped.append(track_id)
+    for item_id in item_ids:
+        if item_id not in seen:
+            seen.add(item_id)
+            deduped.append(item_id)
 
     result = await session.execute(
         select(PlaylistTrack)
@@ -1400,15 +1491,15 @@ async def reorder_playlist_tracks(
         .order_by(PlaylistTrack.position, PlaylistTrack.id)
     )
     rows = list(result.scalars().all())
-    present = {str(row.track_id) for row in rows}
+    present = {entity_id for row in rows if (entity_id := _playlist_item_entity_id(row)) is not None}
 
-    for track_id in deduped:
-        if track_id not in present:
-            raise ValueError(f"Track {track_id} is not in the playlist")
+    for item_id in deduped:
+        if item_id not in present:
+            raise ValueError(f"Item {item_id} is not in the playlist")
 
     move_set = set(deduped)
-    moving = [row for row in rows if str(row.track_id) in move_set]
-    rest = [row for row in rows if str(row.track_id) not in move_set]
+    moving = [row for row in rows if _playlist_item_entity_id(row) in move_set]
+    rest = [row for row in rows if _playlist_item_entity_id(row) not in move_set]
     insertion_index = max(1, min(position, len(rest) + 1)) - 1 if position is not None else len(rest)
 
     final = rest[:insertion_index] + moving + rest[insertion_index:]
@@ -1418,6 +1509,16 @@ async def reorder_playlist_tracks(
 
     await session.flush()
     return deduped
+
+
+async def reorder_playlist_tracks(
+    session: AsyncSession,
+    playlist_id: str,
+    track_ids: List[str],
+    position: Optional[int] = None,
+) -> List[str]:
+    """Move all occurrences of ``track_ids`` to ``position`` in the playlist."""
+    return await reorder_playlist_items(session, playlist_id, track_ids, position)
 
 
 async def list_playlist_tracks(
@@ -1466,6 +1567,124 @@ async def count_playlist_tracks(
     return result.scalar() or 0
 
 
+def _playlist_items_stmt(playlist_id: str, user: Optional[User], query: Optional[str]) -> Select[Any]:
+    """Build the base statement selecting a playlist's ``PlaylistTrack`` rows.
+
+    Track rows are filtered by the track access predicate (inaccessible tracks
+    drop out of listings, as on the tracks endpoint); podcast episode rows are
+    always included — the playlist's own visibility is the gate, and episode
+    metadata/enclosures are public feed data.
+    """
+    stmt = (
+        select(PlaylistTrack)
+        .outerjoin(Track, PlaylistTrack.track_id == Track.id)
+        .outerjoin(PodcastEpisode, PlaylistTrack.podcast_episode_id == PodcastEpisode.id)
+        .outerjoin(Podcast, PodcastEpisode.podcast_id == Podcast.id)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+    )
+    if user is None or not user.is_admin:
+        stmt = stmt.where(
+            or_(
+                Track.id.is_(None),
+                _list_access_predicate(Track, user, "track"),
+            )
+        )
+    if query:
+        stmt = stmt.where(
+            or_(
+                and_(
+                    Track.id.isnot(None),
+                    or_(
+                        ilike_contains(Track.title, query),
+                        Track.artist.has(ilike_contains(Artist.name, query)),
+                        Track.album.has(ilike_contains(Album.title, query)),
+                        ilike_contains(Track.genre, query),
+                        Track.tags.any(ilike_contains(Tag.name, query)),
+                        Track.genres.any(ilike_contains(Genre.name, query)),
+                    ),
+                ),
+                and_(
+                    PodcastEpisode.id.isnot(None),
+                    or_(
+                        ilike_contains(PodcastEpisode.title, query),
+                        ilike_contains(Podcast.title, query),
+                        ilike_contains(Podcast.author, query),
+                    ),
+                ),
+            )
+        )
+    return stmt
+
+
+def _playlist_item_sort_clause(sort_by: str, sort_dir: str) -> Tuple[Any, ...]:
+    """Return ORDER BY clauses for a mixed playlist item list.
+
+    Episode rows participate in track-oriented sorts via ``coalesce`` so a
+    mixed list stays meaningfully ordered (episode title, podcast author as
+    artist name, podcast title as album title, publish year as release year).
+    """
+    if sort_by == "position":
+        primary = _order_clause(PlaylistTrack.position, sort_dir)
+        secondary = _order_clause(PlaylistTrack.id, sort_dir)
+        return (primary, secondary)
+
+    artist_name = select(Artist.name).where(Artist.id == Track.artist_id).scalar_subquery()
+    album_title = select(Album.title).where(Album.id == Track.album_id).scalar_subquery()
+    album_release_year = select(Album.release_year).where(Album.id == Track.album_id).scalar_subquery()
+
+    field_map = {
+        "created_at": PlaylistTrack.created_at,
+        "updated_at": PlaylistTrack.updated_at,
+        "title": func.coalesce(Track.title, PodcastEpisode.title),
+        "artist_name": func.coalesce(artist_name, Podcast.author, Podcast.title),
+        "album_title": func.coalesce(album_title, Podcast.title),
+        "release_year": func.coalesce(
+            Track.release_year,
+            album_release_year,
+            func.extract("year", PodcastEpisode.published_at),
+        ),
+    }
+    field = field_map.get(sort_by, PlaylistTrack.position)
+    nulls_last = sort_by in {"release_year", "album_title", "artist_name", "title"}
+    primary = _order_clause(field, sort_dir, nulls_last)
+    secondary = _order_clause(PlaylistTrack.position, sort_dir)
+    return (primary, secondary)
+
+
+async def list_playlist_items(
+    session: AsyncSession,
+    playlist_id: str,
+    user: Optional[User] = None,
+    limit: int = 20,
+    offset: int = 0,
+    include: Optional[Set[str]] = None,
+    sort_by: str = "position",
+    sort_dir: str = "asc",
+    query: Optional[str] = None,
+) -> List[PlaylistTrack]:
+    """List a playlist's membership rows (tracks and podcast episodes) in order."""
+    stmt = _playlist_items_stmt(playlist_id, user, query).options(
+        selectinload(PlaylistTrack.track).options(*_track_selectin_options(include)),
+        selectinload(PlaylistTrack.episode).selectinload(PodcastEpisode.podcast),
+    )
+    stmt = stmt.order_by(*_playlist_item_sort_clause(sort_by, sort_dir))
+    stmt = stmt.offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def count_playlist_items(
+    session: AsyncSession,
+    playlist_id: str,
+    user: Optional[User] = None,
+    query: Optional[str] = None,
+) -> int:
+    """Return the number of playlist items (tracks + episodes) visible to ``user``."""
+    stmt = _playlist_items_stmt(playlist_id, user, query)
+    result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    return result.scalar() or 0
+
+
 async def _count_and_duration(session: AsyncSession, stmt: Select[Any]) -> Dict[str, Any]:
     """Return ``track_count``/``total_duration`` aggregates over a tracks statement."""
     sub = stmt.subquery()
@@ -1503,14 +1722,25 @@ async def get_playlist_stats(
     playlist_id: str,
     user: Optional[User] = None,
 ) -> Dict[str, Any]:
-    """Return aggregate track count and total duration for ``playlist_id`` visible to ``user``."""
+    """Return aggregate item counts and total duration for ``playlist_id`` visible to ``user``."""
     stmt = (
         select(Track)
         .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
         .where(PlaylistTrack.playlist_id == playlist_id)
     )
     stmt = apply_access_filter(stmt, Track, user, "track")
-    return await _count_and_duration(session, stmt)
+    stats = await _count_and_duration(session, stmt)
+
+    episode_stmt = (
+        select(func.count(), func.coalesce(func.sum(PodcastEpisode.duration_seconds), 0.0))
+        .select_from(PlaylistTrack)
+        .join(PodcastEpisode, PlaylistTrack.podcast_episode_id == PodcastEpisode.id)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+    )
+    row = (await session.execute(episode_stmt)).one()
+    stats["episode_count"] = int(row[0])
+    stats["total_duration"] += float(row[1])
+    return stats
 
 
 async def get_library_stats(

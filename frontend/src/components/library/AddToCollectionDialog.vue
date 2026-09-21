@@ -27,7 +27,8 @@ import AppSelect from "@/components/ui/AppSelect.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 
 export type CollectionMode = "library" | "playlist";
-export type AddableItemType = "track" | "album" | "artist";
+export type AddableItemType =
+  "track" | "album" | "artist" | "episode" | "podcast";
 
 export interface Props {
   open: boolean;
@@ -35,6 +36,8 @@ export interface Props {
   itemType: AddableItemType;
   itemId?: string;
   itemIds?: string[];
+  /** Podcast episode ids added alongside ``itemIds`` (playlist mode only). */
+  episodeIds?: string[];
   itemName?: string;
 }
 
@@ -71,10 +74,13 @@ function reset() {
 }
 
 const itemLabel = computed(() => {
-  if (props.itemIds && props.itemIds.length > 0) {
-    return t("browse.addToCollection.trackCount", {
-      count: props.itemIds.length,
-    });
+  const count = (props.itemIds?.length ?? 0) + (props.episodeIds?.length ?? 0);
+  if (count > 0) {
+    const key =
+      props.itemType === "episode"
+        ? "browse.addToCollection.episodeCount"
+        : "browse.addToCollection.trackCount";
+    return t(key, { count });
   }
   return props.itemName || t("browse.entities.item");
 });
@@ -164,21 +170,46 @@ function close() {
   if (!isSaving.value) emit("close");
 }
 
-function buildRequestBody():
-  | { track_ids: string[]; allow_duplicates?: boolean }
-  | { album_id: string; allow_duplicates?: boolean }
-  | { artist_id: string; allow_duplicates?: boolean } {
+function buildRequestBody(): {
+  track_ids?: string[];
+  episode_ids?: string[];
+  album_id?: string;
+  artist_id?: string;
+  podcast_id?: string;
+  allow_duplicates?: boolean;
+} {
+  const allow =
+    props.mode === "playlist" && allowDuplicates.value ? true : undefined;
+  if (props.itemType === "episode") {
+    return {
+      episode_ids:
+        props.itemIds && props.itemIds.length > 0
+          ? props.itemIds
+          : props.itemId
+            ? [props.itemId]
+            : [],
+      allow_duplicates: allow,
+    };
+  }
+  if (props.itemType === "podcast") {
+    return { podcast_id: props.itemId ?? "", allow_duplicates: allow };
+  }
   if (props.itemType === "track") {
-    const body: { track_ids: string[]; allow_duplicates?: boolean } = {
+    const body: {
+      track_ids: string[];
+      episode_ids?: string[];
+      allow_duplicates?: boolean;
+    } = {
       track_ids:
         props.itemIds && props.itemIds.length > 0
           ? props.itemIds
           : props.itemId
             ? [props.itemId]
             : [],
+      allow_duplicates: allow,
     };
-    if (props.mode === "playlist" && allowDuplicates.value) {
-      body.allow_duplicates = true;
+    if (props.mode === "playlist" && props.episodeIds?.length) {
+      body.episode_ids = props.episodeIds;
     }
     return body;
   }
@@ -233,13 +264,24 @@ async function onConfirm() {
   if (showDuplicateWarning.value && !allowDuplicates.value) {
     return;
   }
+  // Podcast episodes can't be added to music libraries — playlist-only items.
+  if (
+    props.mode === "library" &&
+    (props.itemType === "episode" || props.itemType === "podcast")
+  ) {
+    return;
+  }
   isSaving.value = true;
   try {
     const targetId = isNew.value ? await createCollection() : selectedId.value;
     const body = buildRequestBody();
     const response =
       props.mode === "library"
-        ? await addTracksToLibrary(targetId, body)
+        ? await addTracksToLibrary(targetId, {
+            track_ids: body.track_ids,
+            album_id: body.album_id,
+            artist_id: body.artist_id,
+          })
         : await addTracksToPlaylist(targetId, body);
     if (response.added === 0) {
       toastStore.push({

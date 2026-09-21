@@ -491,7 +491,8 @@
       "feedUrlCopyFailed": "Could not copy feed URL.",
       "markPlayed": "Mark as played",
       "markUnplayed": "Mark as unplayed",
-      "playedError": "Could not update played state: {message}"
+      "playedError": "Could not update played state: {message}",
+      "addToPlaylist": "Add to playlist"
     },
     "about": {
       "title": "About",
@@ -1162,7 +1163,8 @@
       "radio": "Radio",
       "item": "Item",
       "share": "Share",
-      "shares": "Shares"
+      "shares": "Shares",
+      "episode": "Episode"
     },
     "list": {
       "searchPlaceholder": "Search {entity}…",
@@ -1191,7 +1193,8 @@
       "tags": "Tags",
       "playAll": "Play all",
       "trackCount": "No tracks | {count} track | {count} tracks",
-      "albumCount": "No albums | {count} album | {count} albums"
+      "albumCount": "No albums | {count} album | {count} albums",
+      "episodeCount": "No episodes | {count} episode | {count} episodes"
     },
     "visibility": {
       "private": "Private",
@@ -1320,7 +1323,8 @@
       "removeFromPlaylist": "Remove from playlist",
       "deleteTrack": "Delete track",
       "editTrack": "Edit track",
-      "enrich": "Fetch metadata"
+      "enrich": "Fetch metadata",
+      "goToPodcast": "Go to podcast"
     },
     "enrich": {
       "title": "Fetch metadata",
@@ -1376,6 +1380,7 @@
       "addToLibrary": "Add to library",
       "addToPlaylist": "Add to playlist",
       "trackCount": "{count} tracks",
+      "episodeCount": "{count} episodes",
       "libraryTitle": "Add {name} to library",
       "playlistTitle": "Add {name} to playlist",
       "selectLibrary": "Library",

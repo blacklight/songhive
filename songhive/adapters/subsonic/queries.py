@@ -179,12 +179,17 @@ async def remove_playlist_tracks_at_indexes(
     playlist_id: str,
     indexes: Sequence[int],
 ) -> int:
-    """Remove playlist entries at the given 0-based positions; returns the removal count."""
+    """
+    Remove playlist entries at the given 0-based positions; returns the removal count.
+
+    Indexes address the track-only view of the playlist (the Subsonic song
+    list) — podcast episode entries are skipped, not counted.
+    """
     if not indexes:
         return 0
     result = await session.execute(
         select(PlaylistTrack)
-        .where(PlaylistTrack.playlist_id == playlist_id)
+        .where(PlaylistTrack.playlist_id == playlist_id, PlaylistTrack.track_id.isnot(None))
         .order_by(PlaylistTrack.position, PlaylistTrack.id)
     )
     rows = list(result.scalars().all())

@@ -1,11 +1,44 @@
 import type { components } from "./types";
 import { apiRequest, apiRequestWithHeaders } from "./client";
+import type { QueueTrack } from "@/player/types";
 
 export type PlaylistResponse = components["schemas"]["PlaylistResponse"];
 export type PlaylistCreate = components["schemas"]["PlaylistCreate"];
 export type PlaylistUpdate = components["schemas"]["PlaylistUpdate"];
 export type Visibility = components["schemas"]["Visibility"];
 export type TrackResponse = components["schemas"]["TrackResponse"];
+
+/**
+ * Podcast episode data embedded in a playlist item. Mirrors the backend
+ * ``PlaylistEpisodeItem`` schema (types.ts is regenerated separately).
+ */
+export interface PlaylistEpisodeItem {
+  id: string;
+  podcast_id: string;
+  podcast_title: string;
+  title: string;
+  description: string | null;
+  link: string | null;
+  image_url: string | null;
+  audio_url: string;
+  audio_type: string | null;
+  audio_length: number | null;
+  duration_seconds: number | null;
+  published_at: string | null;
+  season_number: number | null;
+  episode_number: number | null;
+  episode_type: string | null;
+  played: boolean;
+}
+
+/** One ordered playlist entry — a track or a podcast episode. */
+export interface PlaylistItemResponse {
+  item_id: string;
+  position: number;
+  type: "track" | "episode";
+  track: TrackResponse | null;
+  episode: PlaylistEpisodeItem | null;
+}
 
 export function listPlaylists(params?: {
   q?: string;
@@ -74,6 +107,7 @@ export function getPlaylist(
 
 export interface PlaylistStats {
   track_count: number;
+  episode_count?: number;
   total_duration: number;
 }
 
@@ -95,12 +129,16 @@ export interface AddTracksToPlaylistRequest {
   track_ids?: string[];
   album_id?: string;
   artist_id?: string;
+  episode_ids?: string[];
+  /** Adds every cataloged episode of the podcast, oldest first. */
+  podcast_id?: string;
   allow_duplicates?: boolean;
 }
 
 export interface AddTracksToPlaylistResponse {
   added: number;
   track_ids: string[];
+  episode_ids?: string[];
 }
 
 export function addTracksToPlaylist(
@@ -130,21 +168,27 @@ export function listPlaylistTracks(
 }
 
 export interface RemoveTracksFromPlaylistRequest {
-  track_ids: string[];
+  track_ids?: string[];
+  episode_ids?: string[];
 }
 
 export interface RemoveTracksFromPlaylistResponse {
   removed: number;
   track_ids: string[];
+  episode_ids?: string[];
 }
 
 export interface ReorderPlaylistTracksRequest {
-  track_ids: string[];
+  /** Entity ids — track ids or podcast episode ids — moved as a block. */
+  item_ids?: string[];
+  /** Deprecated alias for ``item_ids``. */
+  track_ids?: string[];
   position?: number | null;
 }
 
 export interface ReorderPlaylistTracksResponse {
   reordered: boolean;
+  item_ids: string[];
   track_ids: string[];
   count: number;
 }
@@ -216,4 +260,55 @@ export function reorderPlaylistTracks(
       body,
     },
   );
+}
+
+export function listPlaylistItems(
+  id: string,
+  params?: {
+    q?: string;
+    limit?: number;
+    offset?: number;
+    include?: string;
+    sort_by?: string;
+    sort_dir?: "asc" | "desc";
+  },
+): Promise<PlaylistItemResponse[]> {
+  return apiRequest<PlaylistItemResponse[]>(`/playlists/${id}/items`, {
+    query: params,
+  });
+}
+
+/**
+ * Map a playlist item to a QueueTrack the player can consume: track items
+ * carry a full TrackResponse; episode items become remote queue tracks that
+ * stream the episode's enclosure URL.
+ */
+export function playlistItemToQueueTrack(
+  item: PlaylistItemResponse,
+): QueueTrack | null {
+  if (item.type === "track" && item.track) {
+    return item.track as QueueTrack;
+  }
+  if (item.type === "episode" && item.episode) {
+    const episode = item.episode;
+    return {
+      id: episode.id,
+      title: episode.title,
+      artist_id: "",
+      artist_name: episode.podcast_title,
+      artwork_url: episode.image_url ?? undefined,
+      duration: episode.duration_seconds ?? undefined,
+      visibility: "public",
+      tags: [],
+      genres: [],
+      is_external: false,
+      stream_url: episode.audio_url,
+      remote: true,
+      remote_url: episode.link ?? undefined,
+      podcast_episode_id: episode.id,
+      podcast_id: episode.podcast_id,
+      in_collection: false,
+    };
+  }
+  return null;
 }

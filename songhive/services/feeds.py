@@ -19,6 +19,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 from sqlalchemy import exists, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..config.schema import SonghiveConfig
 from ..models.activity import Activity
@@ -26,6 +27,7 @@ from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library_track import LibraryTrack
 from ..models.playlist import PlaylistTrack
+from ..models.podcast import PodcastEpisode
 from ..models.track import Track
 from ..models.user import User
 from . import activities as activity_service
@@ -233,6 +235,26 @@ def track_item(track: Track, base_url: str) -> FeedItem:
     return item
 
 
+def episode_item(episode: PodcastEpisode, base_url: str) -> FeedItem:
+    """Build a feed item for a podcast episode — the enclosure streams the remote source."""
+    podcast = episode.podcast
+    podcast_title = podcast.title if podcast is not None else None
+    title = f"{podcast_title} - {episode.title}" if podcast_title else episode.title
+    link = episode.link or f"{base_url}/podcasts/{episode.podcast_id}"
+    return FeedItem(
+        id=link,
+        title=title,
+        link=link,
+        published=episode.published_at or episode.created_at,
+        description=episode.description,
+        author=podcast.author if podcast is not None else podcast_title,
+        updated=episode.updated_at,
+        enclosure_url=episode.audio_url,
+        enclosure_type=episode.audio_type,
+        enclosure_length=episode.audio_length,
+    )
+
+
 def album_item(album: Album, base_url: str) -> FeedItem:
     """Build a feed item for an album release."""
     artist_name = album.artist.name if album.artist else None
@@ -421,14 +443,33 @@ async def collection_feed(
     feed_url: str,
     limit: int,
 ) -> Feed:
-    """Build the feed of tracks most recently added to a playlist or library."""
+    """Build the feed of items most recently added to a playlist or library.
+
+    Playlist feeds include podcast episodes alongside tracks — episodes keep
+    their remote enclosure URL so readers stream from the source.
+    """
     if kind == "playlist":
-        stmt = (
-            select(Track)
-            .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
+        entries_stmt = (
+            select(PlaylistTrack)
+            .options(
+                selectinload(PlaylistTrack.track).options(*music_service._track_selectin_options({"artist", "album"})),
+                selectinload(PlaylistTrack.episode).selectinload(PodcastEpisode.podcast),
+            )
+            .outerjoin(Track, PlaylistTrack.track_id == Track.id)
             .where(PlaylistTrack.playlist_id == entity.id)  # type: ignore[attr-defined]
             .order_by(PlaylistTrack.created_at.desc(), PlaylistTrack.id.desc())
         )
+        if requester is None or not requester.is_admin:
+            entries_stmt = entries_stmt.where(
+                or_(Track.id.is_(None), _list_access_predicate(Track, requester, "track"))
+            )
+        rows = list((await session.execute(entries_stmt.limit(limit))).scalars().all())
+        items = []
+        for row in rows:
+            if row.track is not None:
+                items.append(track_item(row.track, base_url))
+            elif row.episode is not None:
+                items.append(episode_item(row.episode, base_url))
     else:
         stmt = (
             select(Track)
@@ -436,11 +477,10 @@ async def collection_feed(
             .where(LibraryTrack.library_id == entity.id)  # type: ignore[attr-defined]
             .order_by(LibraryTrack.created_at.desc(), LibraryTrack.id.desc())
         )
-    stmt = stmt.options(*music_service._track_selectin_options({"artist", "album"}))
-    stmt = apply_access_filter(stmt, Track, requester, "track").limit(limit)
-    tracks = list((await session.execute(stmt)).scalars().all())
-
-    items = [track_item(t, base_url) for t in tracks]
+        stmt = stmt.options(*music_service._track_selectin_options({"artist", "album"}))
+        stmt = apply_access_filter(stmt, Track, requester, "track").limit(limit)
+        tracks = list((await session.execute(stmt)).scalars().all())
+        items = [track_item(t, base_url) for t in tracks]
     plural = get_item_plural(kind) or f"{kind}s"
     link = f"{base_url}/{plural}/{entity.id}"  # type: ignore[attr-defined]
     return Feed(

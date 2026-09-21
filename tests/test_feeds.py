@@ -377,6 +377,60 @@ async def test_playlist_feed_lists_added_tracks(client, db_session, regular_user
 
 
 @pytest.mark.asyncio
+async def test_playlist_feed_includes_episodes(client, db_session, regular_user):
+    """Playlist feeds carry podcast episodes with their remote enclosure URL."""
+    from songhive.models.podcast import Podcast, PodcastEpisode
+
+    artist = await _make_artist(db_session)
+    track = await _make_track(db_session, regular_user, artist)
+    podcast = Podcast(
+        feed_url="https://pod.example/feed.xml",
+        title="Feed Show",
+        author="Feed Author",
+    )
+    db_session.add(podcast)
+    await db_session.flush()
+    episode = PodcastEpisode(
+        podcast_id=podcast.id,
+        guid="ep-1",
+        title="Feed Episode",
+        link="https://pod.example/ep1",
+        audio_url="https://cdn.pod.example/ep1.mp3",
+        audio_type="audio/mpeg",
+        audio_length=12345,
+    )
+    db_session.add(episode)
+    playlist = Playlist(
+        name="Feed Playlist",
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+    )
+    db_session.add(playlist)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            PlaylistTrack(playlist_id=playlist.id, track_id=track.id, position=0),
+            PlaylistTrack(playlist_id=playlist.id, podcast_episode_id=episode.id, position=1),
+        ]
+    )
+    await db_session.flush()
+
+    resp = client.get(f"/feeds/playlists/{playlist.id}.rss")
+
+    assert resp.status_code == 200
+    items = _rss_items(_parse(resp))
+    assert len(items) == 2
+    episode_item = next(i for i in items if "Feed Episode" in (i.find("title").text or ""))
+    # Episode entries keep the upstream enclosure — readers stream the source.
+    enclosure = episode_item.find("enclosure")
+    assert enclosure is not None
+    assert enclosure.attrib["url"] == "https://cdn.pod.example/ep1.mp3"
+    assert enclosure.attrib["type"] == "audio/mpeg"
+    assert enclosure.attrib["length"] == "12345"
+    assert episode_item.find("link").text == "https://pod.example/ep1"
+
+
+@pytest.mark.asyncio
 async def test_private_playlist_feed_forbidden(client, db_session, other_user):
     playlist = Playlist(
         name="Secret Playlist",

@@ -217,6 +217,7 @@ export function episodeToQueueTrack(
     remote: true,
     remote_url: episode.link ?? undefined,
     podcast_episode_id: episode.id,
+    podcast_id: episode.podcast_id,
     in_collection: false,
   };
 }

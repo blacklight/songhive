@@ -24,6 +24,8 @@ export type QueueTrack = TrackResponse & {
    * catalog — the player marks it played once the listen threshold is met.
    */
   podcast_episode_id?: string;
+  /** Podcast id for episode queue tracks — used to link back to the show. */
+  podcast_id?: string;
 };
 
 export type RepeatMode = "off" | "all" | "one";

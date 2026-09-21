@@ -607,6 +607,68 @@ async def test_playlist_lifecycle(client, library, regular_user, db_session):
     assert body["error"]["code"] == 70
 
 
+async def test_playlist_podcast_episodes_invisible_to_subsonic(client, library, regular_user, db_session):
+    """Subsonic sees and edits only the track rows of a mixed playlist."""
+    from songhive.models.playlist import PlaylistTrack
+    from songhive.models.podcast import Podcast, PodcastEpisode
+
+    song_id = str(library["song"].id)
+
+    podcast = Podcast(feed_url="https://pod.example/feed.xml", title="Pod Show")
+    db_session.add(podcast)
+    await db_session.flush()
+    episode = PodcastEpisode(
+        podcast_id=podcast.id,
+        guid="ep-1",
+        title="Pod Episode",
+        audio_url="https://cdn.pod.example/ep1.mp3",
+    )
+    db_session.add(episode)
+    await db_session.flush()
+
+    created = _ok(client.get("/rest/createPlaylist.view", params=_creds(regular_user, name="Mix", songId=[song_id])))
+    playlist_id = created["playlist"]["id"]
+    db_session.add(PlaylistTrack(playlist_id=playlist_id, podcast_episode_id=episode.id, position=0))
+    await db_session.commit()
+
+    # Episode rows are invisible: songCount and entries cover tracks only.
+    body = _ok(client.get("/rest/getPlaylist.view", params=_creds(regular_user, id=playlist_id)))
+    assert body["playlist"]["songCount"] == 1
+    assert [e["id"] for e in body["playlist"]["entry"]] == [song_id]
+
+    # Index 0 addresses the track view — the episode row survives removal.
+    _ok(
+        client.get(
+            "/rest/updatePlaylist.view",
+            params=_creds(regular_user, playlistId=playlist_id, songIndexToRemove="0"),
+        )
+    )
+    remaining = (
+        (await db_session.execute(select(PlaylistTrack).where(PlaylistTrack.playlist_id == playlist_id)))
+        .scalars()
+        .all()
+    )
+    assert len(remaining) == 1
+    assert remaining[0].podcast_episode_id == episode.id
+
+    # A full replace via createPlaylist+playlistId keeps the episode and swaps
+    # only track rows.
+    _ok(
+        client.get(
+            "/rest/createPlaylist.view",
+            params=_creds(regular_user, playlistId=playlist_id, songId=[song_id]),
+        )
+    )
+    rows = (
+        (await db_session.execute(select(PlaylistTrack).where(PlaylistTrack.playlist_id == playlist_id)))
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 2
+    assert {str(r.podcast_episode_id) for r in rows if r.podcast_episode_id} == {str(episode.id)}
+    assert {str(r.track_id) for r in rows if r.track_id} == {song_id}
+
+
 async def test_playlist_update_requires_ownership(client, library, other_user, regular_user, db_session):
     playlist = Playlist(name="Not yours", owner_id=str(regular_user.id), visibility=Visibility.PRIVATE.value)
     db_session.add(playlist)

@@ -18,6 +18,12 @@ vi.mock("@/api/podcasts", () => ({
   })),
 }));
 
+vi.mock("@/api/playlists", () => ({
+  listPlaylists: vi.fn(() => Promise.resolve([])),
+  createPlaylist: vi.fn(),
+  addTracksToPlaylist: vi.fn(),
+}));
+
 const getPodcast = vi.mocked(podcastsApi.getPodcast);
 const listEpisodes = vi.mocked(podcastsApi.listEpisodes);
 const markPlayed = vi.mocked(podcastsApi.markEpisodePlayed);
@@ -173,5 +179,147 @@ describe("PodcastDetailView", () => {
     await flushPromises();
 
     expect(writeText).toHaveBeenCalledWith("https://example.com/feed.xml");
+  });
+
+  it("opens the add-to-playlist dialog for a single episode", async () => {
+    const { wrapper } = await mountView();
+
+    const addButton = wrapper
+      .findAll(".podcast-view__episode")[0]
+      .find(".podcast-view__episode-add");
+    expect(addButton.exists()).toBe(true);
+    await addButton.trigger("click");
+    await flushPromises();
+
+    const dialog = wrapper.findComponent({
+      name: "AddToCollectionDialog",
+    });
+    expect(dialog.exists()).toBe(true);
+    expect(dialog.props("mode")).toBe("playlist");
+    expect(dialog.props("itemType")).toBe("episode");
+    expect(dialog.props("itemId")).toBe("e1");
+  });
+
+  it("enters bulk mode and selects all episodes", async () => {
+    const { wrapper } = await mountView();
+
+    const bulkButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === "Bulk edit");
+    expect(bulkButton).toBeDefined();
+    await bulkButton!.trigger("click");
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll(
+      '.podcast-view__episode input[type="checkbox"]',
+    );
+    expect(checkboxes).toHaveLength(2);
+
+    const selectAll = wrapper.find(
+      '.podcast-view__bulk input[type="checkbox"]',
+    );
+    await selectAll.setValue(true);
+    await flushPromises();
+
+    expect(
+      checkboxes.every((c) => (c.element as HTMLInputElement).checked),
+    ).toBe(true);
+  });
+
+  it("opens the add-to-playlist dialog with the selected episodes", async () => {
+    const { wrapper } = await mountView();
+
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text() === "Bulk edit")!
+      .trigger("click");
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll(
+      '.podcast-view__episode input[type="checkbox"]',
+    );
+    await checkboxes[0]!.setValue(true);
+    await checkboxes[1]!.setValue(true);
+    await flushPromises();
+
+    const addSelected = wrapper
+      .findAll("button")
+      .find((b) => b.text() === "Add to playlist");
+    expect(addSelected).toBeDefined();
+    await addSelected!.trigger("click");
+    await flushPromises();
+
+    const dialog = wrapper.findComponent({
+      name: "AddToCollectionDialog",
+    });
+    expect(dialog.exists()).toBe(true);
+    expect(dialog.props("mode")).toBe("playlist");
+    expect(dialog.props("itemType")).toBe("episode");
+    expect(dialog.props("itemIds")).toEqual(["e1", "e2"]);
+  });
+
+  it("marks selected episodes as played in bulk", async () => {
+    const { wrapper } = await mountView();
+
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text() === "Bulk edit")!
+      .trigger("click");
+    await flushPromises();
+
+    // e1 is unplayed, e2 is played; select both.
+    const checkboxes = wrapper.findAll(
+      '.podcast-view__episode input[type="checkbox"]',
+    );
+    await checkboxes[0]!.setValue(true);
+    await checkboxes[1]!.setValue(true);
+    await flushPromises();
+
+    const markPlayedBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text() === "Mark as played");
+    expect(markPlayedBtn).toBeDefined();
+    await markPlayedBtn!.trigger("click");
+    await flushPromises();
+
+    // Only the unplayed episode needs the API call.
+    expect(markPlayed).toHaveBeenCalledTimes(1);
+    expect(markPlayed).toHaveBeenCalledWith("e1");
+    expect(markUnplayed).not.toHaveBeenCalled();
+    expect(
+      wrapper
+        .findAll(".podcast-view__episode")
+        .every((r) => r.classes().includes("podcast-view__episode--played")),
+    ).toBe(true);
+  });
+
+  it("marks selected episodes as unplayed in bulk", async () => {
+    const { wrapper } = await mountView();
+
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text() === "Bulk edit")!
+      .trigger("click");
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll(
+      '.podcast-view__episode input[type="checkbox"]',
+    );
+    await checkboxes[1]!.setValue(true);
+    await flushPromises();
+
+    const markUnplayedBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text() === "Mark as unplayed");
+    expect(markUnplayedBtn).toBeDefined();
+    await markUnplayedBtn!.trigger("click");
+    await flushPromises();
+
+    expect(markUnplayed).toHaveBeenCalledTimes(1);
+    expect(markUnplayed).toHaveBeenCalledWith("e2");
+    expect(markPlayed).not.toHaveBeenCalled();
+    expect(
+      wrapper.findAll(".podcast-view__episode")[1]!.classes(),
+    ).not.toContain("podcast-view__episode--played");
   });
 });

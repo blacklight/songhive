@@ -896,9 +896,15 @@ async def _create_playlist(ctx: _Ctx) -> Dict[str, Any]:
         name = ctx.params.get("name")
         if name:
             playlist.name = name
-        # Replace the track list when songIds are provided.
+        # Replace the track list when songIds are provided. Podcast episode
+        # entries are kept — Subsonic clients cannot see or address them.
         if song_ids:
-            existing = await ctx.db.execute(select(PlaylistTrack).where(PlaylistTrack.playlist_id == playlist.id))
+            existing = await ctx.db.execute(
+                select(PlaylistTrack).where(
+                    PlaylistTrack.playlist_id == playlist.id,
+                    PlaylistTrack.track_id.isnot(None),
+                )
+            )
             for row in existing.scalars().all():
                 await ctx.db.delete(row)
             await ctx.db.flush()

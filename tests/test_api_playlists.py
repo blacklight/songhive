@@ -250,7 +250,7 @@ async def test_add_duplicate_track_to_playlist_rejected(client, regular_user, db
 
     assert response.status_code == 409
     data = response.json()
-    assert data["detail"] == "Tracks already in playlist"
+    assert data["detail"] == "Items already in playlist"
     assert data["track_ids"] == [str(track.id)]
 
     result = await db_session.execute(select(PlaylistTrack.track_id).where(PlaylistTrack.playlist_id == playlist.id))
@@ -311,7 +311,7 @@ async def test_add_album_to_playlist_rejects_existing_duplicates(client, regular
 
     assert response.status_code == 409
     data = response.json()
-    assert data["detail"] == "Tracks already in playlist"
+    assert data["detail"] == "Items already in playlist"
     assert data["track_ids"] == [str(track.id)]
 
 

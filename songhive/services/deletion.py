@@ -501,7 +501,12 @@ async def delete_playlist(
         track_ids = list(
             (
                 await session.execute(
-                    select(PlaylistTrack.track_id).distinct().where(PlaylistTrack.playlist_id == playlist_id)
+                    select(PlaylistTrack.track_id)
+                    .distinct()
+                    .where(
+                        PlaylistTrack.playlist_id == playlist_id,
+                        PlaylistTrack.track_id.isnot(None),
+                    )
                 )
             )
             .scalars()

@@ -3,19 +3,27 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import * as playlistsApi from "@/api/playlists";
-import type { PlaylistResponse } from "@/api/playlists";
+import type {
+  PlaylistEpisodeItem,
+  PlaylistItemResponse,
+  PlaylistResponse,
+} from "@/api/playlists";
 import type { TrackResponse } from "@/api/tracks";
 import { useAuthStore } from "@/stores/auth";
 import type { UserResponse } from "@/api/users";
 import PlaylistView from "./PlaylistView.vue";
 
-vi.mock("@/api/playlists", () => ({
-  getPlaylist: vi.fn(),
-  getPlaylistStats: vi.fn(),
-  listPlaylistTracks: vi.fn(),
-  reorderPlaylistTracks: vi.fn(),
-  deletePlaylist: vi.fn(),
-}));
+vi.mock("@/api/playlists", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/playlists")>();
+  return {
+    getPlaylist: vi.fn(),
+    getPlaylistStats: vi.fn(),
+    listPlaylistItems: vi.fn(),
+    playlistItemToQueueTrack: actual.playlistItemToQueueTrack,
+    reorderPlaylistTracks: vi.fn(),
+    deletePlaylist: vi.fn(),
+  };
+});
 
 vi.mock("@/api/tracks", () => ({
   deleteTrack: vi.fn(),
@@ -29,6 +37,7 @@ function createTestRouter() {
       { path: "/playlists/:id", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
+      { path: "/podcasts/:id", component: { template: "<div/>" } },
       {
         path: "/@:username",
         name: "userProfile",
@@ -82,6 +91,44 @@ function createTrack(id: string, title: string): TrackResponse {
   };
 }
 
+function createTrackItem(id: string, title: string): PlaylistItemResponse {
+  return {
+    item_id: `item-${id}`,
+    position: 0,
+    type: "track",
+    track: createTrack(id, title),
+    episode: null,
+  };
+}
+
+function createEpisodeItem(id: string, title: string): PlaylistItemResponse {
+  const episode: PlaylistEpisodeItem = {
+    id,
+    podcast_id: "pod-1",
+    podcast_title: "The Show",
+    title,
+    description: null,
+    link: null,
+    image_url: null,
+    audio_url: `https://example.com/${id}.mp3`,
+    audio_type: "audio/mpeg",
+    audio_length: 1000,
+    duration_seconds: 600,
+    published_at: "2026-01-10T00:00:00Z",
+    season_number: null,
+    episode_number: null,
+    episode_type: null,
+    played: false,
+  };
+  return {
+    item_id: `item-${id}`,
+    position: 0,
+    type: "episode",
+    track: null,
+    episode,
+  };
+}
+
 describe("PlaylistView", () => {
   let wrapper: ReturnType<typeof mount>;
 
@@ -99,7 +146,7 @@ describe("PlaylistView", () => {
       track_count: 0,
       total_duration: 0,
     });
-    vi.mocked(playlistsApi.listPlaylistTracks).mockResolvedValue([]);
+    vi.mocked(playlistsApi.listPlaylistItems).mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -118,8 +165,8 @@ describe("PlaylistView", () => {
   }
 
   it("loads playlist and tracks on mount", async () => {
-    vi.mocked(playlistsApi.listPlaylistTracks).mockResolvedValue([
-      createTrack("track-1", "Song One"),
+    vi.mocked(playlistsApi.listPlaylistItems).mockResolvedValue([
+      createTrackItem("track-1", "Song One"),
     ]);
 
     await mountAt("/playlists/playlist-1");
@@ -127,7 +174,7 @@ describe("PlaylistView", () => {
     expect(playlistsApi.getPlaylist).toHaveBeenCalledWith("playlist-1", {
       include: "owner",
     });
-    expect(playlistsApi.listPlaylistTracks).toHaveBeenCalledWith("playlist-1", {
+    expect(playlistsApi.listPlaylistItems).toHaveBeenCalledWith("playlist-1", {
       q: "",
       limit: 20,
       offset: 0,
@@ -175,8 +222,8 @@ describe("PlaylistView", () => {
     vi.mocked(playlistsApi.getPlaylist).mockResolvedValue(
       createPlaylist("playlist-1", "Road Trip"),
     );
-    vi.mocked(playlistsApi.listPlaylistTracks).mockResolvedValue([
-      createTrack("track-1", "Song One"),
+    vi.mocked(playlistsApi.listPlaylistItems).mockResolvedValue([
+      createTrackItem("track-1", "Song One"),
     ]);
     await wrapper.find("button").trigger("click");
     await flushPromises();
@@ -209,9 +256,9 @@ describe("PlaylistView", () => {
   it("filters tracks by search query", async () => {
     vi.useFakeTimers();
     try {
-      vi.mocked(playlistsApi.listPlaylistTracks)
-        .mockResolvedValueOnce([createTrack("track-1", "First Song")])
-        .mockResolvedValueOnce([createTrack("track-2", "Searched Song")]);
+      vi.mocked(playlistsApi.listPlaylistItems)
+        .mockResolvedValueOnce([createTrackItem("track-1", "First Song")])
+        .mockResolvedValueOnce([createTrackItem("track-2", "Searched Song")]);
 
       await mountAt("/playlists/playlist-1");
 
@@ -223,7 +270,7 @@ describe("PlaylistView", () => {
       vi.advanceTimersByTime(300);
       await flushPromises();
 
-      expect(playlistsApi.listPlaylistTracks).toHaveBeenLastCalledWith(
+      expect(playlistsApi.listPlaylistItems).toHaveBeenLastCalledWith(
         "playlist-1",
         {
           q: "searched",
@@ -242,12 +289,13 @@ describe("PlaylistView", () => {
   });
 
   it("reorders tracks and refreshes the list", async () => {
-    vi.mocked(playlistsApi.listPlaylistTracks).mockResolvedValue([
-      createTrack("track-1", "Song One"),
-      createTrack("track-2", "Song Two"),
+    vi.mocked(playlistsApi.listPlaylistItems).mockResolvedValue([
+      createTrackItem("track-1", "Song One"),
+      createTrackItem("track-2", "Song Two"),
     ]);
     vi.mocked(playlistsApi.reorderPlaylistTracks).mockResolvedValue({
       reordered: true,
+      item_ids: ["track-2"],
       track_ids: ["track-2"],
       count: 1,
     });
@@ -284,8 +332,21 @@ describe("PlaylistView", () => {
 
     expect(playlistsApi.reorderPlaylistTracks).toHaveBeenCalledWith(
       "playlist-1",
-      { track_ids: ["track-1"], position: 2 },
+      { item_ids: ["track-1"], position: 2 },
     );
-    expect(playlistsApi.listPlaylistTracks).toHaveBeenCalledTimes(2);
+    expect(playlistsApi.listPlaylistItems).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders podcast episodes alongside tracks", async () => {
+    vi.mocked(playlistsApi.listPlaylistItems).mockResolvedValue([
+      createTrackItem("track-1", "Song One"),
+      createEpisodeItem("ep-1", "Episode One"),
+    ]);
+
+    await mountAt("/playlists/playlist-1");
+
+    expect(wrapper.text()).toContain("Song One");
+    expect(wrapper.text()).toContain("Episode One");
+    expect(wrapper.text()).toContain("The Show");
   });
 });

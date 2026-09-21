@@ -6,7 +6,7 @@ import { i18n } from "@/i18n";
 import { usePlayerStore } from "@/stores/player";
 import { useAuthStore } from "@/stores/auth";
 import type { UserResponse } from "@/api/users";
-import type { TrackResponse } from "@/player/types";
+import type { QueueTrack, TrackResponse } from "@/player/types";
 import { toQueueTrack } from "@/player/enrich";
 import * as externalLibrariesApi from "@/api/externalLibraries";
 import * as favoritesApi from "@/api/favorites";
@@ -65,6 +65,7 @@ function createTestRouter() {
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
       { path: "/tracks/:id", component: { template: "<div/>" } },
+      { path: "/podcasts/:id", component: { template: "<div/>" } },
       {
         path: "/tracks/:id/edit",
         name: "trackEdit",
@@ -89,6 +90,23 @@ function makeTrack(overrides: Partial<TrackResponse> = {}): TrackResponse {
     duration: 185,
     visibility: "public" as const,
     favorited: false,
+    ...overrides,
+  };
+}
+
+function makeEpisode(overrides: Partial<QueueTrack> = {}): QueueTrack {
+  return {
+    ...makeTrack({
+      id: "ep-1",
+      title: "Episode One",
+      artist_id: "",
+      album_id: null,
+    }),
+    artist_name: "The Show",
+    stream_url: "https://example.com/ep-1.mp3",
+    remote: true,
+    podcast_episode_id: "ep-1",
+    podcast_id: "pod-1",
     ...overrides,
   };
 }
@@ -430,6 +448,105 @@ describe("TrackList", () => {
     expect(wrapper.findAll(".track-list__link").length).toBe(0);
     expect(wrapper.text()).toContain("Artist Name");
     expect(wrapper.text()).toContain("Album Title");
+  });
+
+  it("renders a podcast episode with a show link and podcast icon", async () => {
+    ({ wrapper } = mountTrackList({ tracks: [makeEpisode()] }));
+    await flushPromises();
+
+    const link = wrapper.find(".track-list__link");
+    expect(link.exists()).toBe(true);
+    expect(link.attributes("href")).toBe("/podcasts/pod-1");
+    expect(link.text()).toBe("The Show");
+    expect(wrapper.find(".track-list__podcast-icon").exists()).toBe(true);
+  });
+
+  it("offers go-to-podcast instead of track actions for episodes", async () => {
+    const router = createTestRouter();
+    ({ wrapper } = mountTrackList(
+      { tracks: [makeEpisode()], context: "Artist" },
+      router,
+    ));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    expect(
+      findMenuLabel(i18n.global.t("browse.contextMenu.goToPodcast")),
+    ).toBeDefined();
+    for (const hidden of [
+      "browse.contextMenu.goToTrack",
+      "browse.contextMenu.editTrack",
+      "browse.contextMenu.addToLibrary",
+      "browse.contextMenu.enrich",
+      "activities.view",
+      "common.share",
+    ]) {
+      expect(findMenuLabel(i18n.global.t(hidden))).toBeUndefined();
+    }
+
+    await clickMenuItem(i18n.global.t("browse.contextMenu.goToPodcast"));
+    expect(router.currentRoute.value.path).toBe("/podcasts/pod-1");
+  });
+
+  it("splits track and episode ids when removing a mixed playlist selection", async () => {
+    vi.mocked(playlistsApi.removeTracksFromPlaylist).mockResolvedValue({
+      removed: 2,
+      track_ids: ["track-1"],
+      episode_ids: ["ep-1"],
+    });
+
+    ({ wrapper } = mountTrackList({
+      tracks: [makeTrack(), makeEpisode()],
+      context: "Artist",
+      removableFrom: {
+        type: "playlist",
+        id: "playlist-1",
+        canRemove: true,
+        name: "My Playlist",
+      },
+    }));
+    await flushPromises();
+
+    const bulkButton = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.bulkEdit.start"));
+    await bulkButton?.trigger("click");
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll('input[type="checkbox"]');
+    await checkboxes[0]?.setValue(true);
+    await flushPromises();
+
+    const removeSelected = wrapper
+      .findAll("button")
+      .find(
+        (b) =>
+          b.text() ===
+          i18n.global.t("browse.bulkEdit.removeSelectedFromPlaylist"),
+      );
+    expect(removeSelected).toBeDefined();
+    await removeSelected?.trigger("click");
+    await flushPromises();
+
+    const confirmButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) =>
+        b.textContent === i18n.global.t("browse.removeFromCollection.confirm"),
+    );
+    confirmButton?.click();
+    await flushPromises();
+
+    expect(playlistsApi.removeTracksFromPlaylist).toHaveBeenCalledWith(
+      "playlist-1",
+      {
+        track_ids: ["track-1"],
+        episode_ids: ["ep-1"],
+      },
+    );
+    expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1", "ep-1"]]);
   });
 
   it("renders the artist as a router link in the compact view", async () => {

@@ -18,7 +18,9 @@ import ContextMenu from "@/components/ui/ContextMenu.vue";
 import EntityActions, {
   type ActionItem,
 } from "@/components/ui/EntityActions.vue";
-import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
+import AddToCollectionDialog, {
+  type AddableItemType,
+} from "@/components/library/AddToCollectionDialog.vue";
 import BulkTrackEditModal from "@/components/library/BulkTrackEditModal.vue";
 import { formatTime } from "@/utils/time";
 import { getApiErrorMessage } from "@/api/client";
@@ -106,9 +108,11 @@ const dialogTrack = ref<QueueTrack | null>(null);
 
 const addDialogOpen = ref(false);
 const addDialogMode = ref<"library" | "playlist">("library");
+const addDialogItemType = ref<AddableItemType>("track");
 const bulkAddOpen = ref(false);
 const bulkAddMode = ref<"library" | "playlist">("library");
 const bulkAddIds = ref<string[]>([]);
+const bulkAddEpisodeIds = ref<string[]>([]);
 
 const selectedIds = ref<Set<string>>(new Set());
 const bulkMode = ref(false);
@@ -176,6 +180,10 @@ watch(
   },
 );
 
+function isPodcastEpisode(track: QueueTrack): boolean {
+  return !!track.podcast_episode_id;
+}
+
 function openAddDialog(mode: "library" | "playlist") {
   addDialogMode.value = mode;
   addDialogOpen.value = true;
@@ -188,7 +196,13 @@ function closeAddDialog() {
 
 function openBulkAddDialog(mode: "library" | "playlist") {
   bulkAddMode.value = mode;
-  bulkAddIds.value = Array.from(selectedIds.value);
+  const selected = selectedQueueTracks();
+  bulkAddIds.value = selected
+    .filter((track) => !isPodcastEpisode(track))
+    .map((track) => track.id);
+  bulkAddEpisodeIds.value = selected
+    .filter(isPodcastEpisode)
+    .map((track) => track.id);
   bulkAddOpen.value = true;
 }
 
@@ -407,10 +421,14 @@ function toggleReorderMode() {
   }
 }
 
+function selectedQueueTracks(): QueueTrack[] {
+  return enrichedTracks.value.filter((track) =>
+    selectedIds.value.has(track.id),
+  );
+}
+
 function selectedTrackIds(): string[] {
-  return enrichedTracks.value
-    .filter((track) => selectedIds.value.has(track.id))
-    .map((track) => track.id);
+  return selectedQueueTracks().map((track) => track.id);
 }
 
 function firstSelectedIndex(): number {
@@ -737,15 +755,21 @@ function canManageTrack(track: QueueTrack): boolean {
   return canManageItem(authStore, track);
 }
 
+const selectedPlainTrackCount = computed(
+  () =>
+    selectedQueueTracks().filter((track) => !isPodcastEpisode(track)).length,
+);
+
 const bulkActions = computed(() => {
   if (!bulkMode.value) return [];
+  const noTracks = selectedPlainTrackCount.value === 0;
   const actions: ActionItem[] = [
     {
       key: "edit-metadata",
       label: t("browse.bulkEdit.editMetadata"),
       icon: "pen-to-square",
       variant: "secondary" as const,
-      disabled: selectedIds.value.size === 0 || isRemoving.value,
+      disabled: noTracks || isRemoving.value,
     },
     {
       key: "add-to-library",
@@ -753,7 +777,7 @@ const bulkActions = computed(() => {
       icon: "folder-plus",
       variant: "secondary" as const,
       visible: authStore.isAuthenticated,
-      disabled: selectedIds.value.size === 0 || isRemoving.value,
+      disabled: noTracks || isRemoving.value,
     },
     {
       key: "add-to-playlist",
@@ -790,7 +814,7 @@ const bulkActions = computed(() => {
     icon: "trash",
     variant: "danger" as const,
     visible: props.deletable,
-    disabled: selectedIds.value.size === 0 || isRemoving.value,
+    disabled: noTracks || isRemoving.value,
   });
 
   return actions;
@@ -817,7 +841,9 @@ function onBulkAction(key: string) {
   }
 }
 function openBulkEdit() {
-  bulkEditIds.value = Array.from(selectedIds.value);
+  bulkEditIds.value = selectedQueueTracks()
+    .filter((track) => !isPodcastEpisode(track))
+    .map((track) => track.id);
   bulkEditOpen.value = true;
 }
 
@@ -942,7 +968,14 @@ async function onConfirm() {
         ids = [confirmTrack.value.id];
         deleted = 1;
       } else {
-        const response = await deleteTracks(trackIds);
+        const plainIds = selectedQueueTracks()
+          .filter((item) => !isPodcastEpisode(item))
+          .map((item) => item.id);
+        if (plainIds.length === 0) {
+          closeConfirm();
+          return;
+        }
+        const response = await deleteTracks(plainIds);
         ids = response.track_ids;
         deleted = response.deleted;
       }
@@ -975,14 +1008,27 @@ async function onConfirm() {
     }
 
     if (!props.removableFrom) return;
-    const remove =
-      props.removableFrom.type === "library"
-        ? removeTracksFromLibrary
-        : removeTracksFromPlaylist;
-    const response = await remove(props.removableFrom.id, {
-      track_ids: trackIds,
-    });
     const collection = props.removableFrom.name;
+    let removedIds: string[];
+    let removedCount: number;
+    if (props.removableFrom.type === "playlist") {
+      const idSet = new Set(trackIds);
+      const items = enrichedTracks.value.filter((item) => idSet.has(item.id));
+      const response = await removeTracksFromPlaylist(props.removableFrom.id, {
+        track_ids: items
+          .filter((item) => !isPodcastEpisode(item))
+          .map((item) => item.id),
+        episode_ids: items.filter(isPodcastEpisode).map((item) => item.id),
+      });
+      removedIds = [...response.track_ids, ...(response.episode_ids ?? [])];
+      removedCount = response.removed;
+    } else {
+      const response = await removeTracksFromLibrary(props.removableFrom.id, {
+        track_ids: trackIds,
+      });
+      removedIds = response.track_ids;
+      removedCount = response.removed;
+    }
 
     if (confirmMode.value === "single" && confirmTrack.value) {
       toastStore.push({
@@ -996,13 +1042,13 @@ async function onConfirm() {
       toastStore.push({
         type: "success",
         message: t("browse.removeFromCollection.bulkSuccess", {
-          count: response.removed,
+          count: removedCount,
           collection,
         }),
       });
     }
 
-    emit("removed", response.track_ids);
+    emit("removed", removedIds);
     closeConfirm();
     if (confirmMode.value === "bulk") {
       selectedIds.value.clear();
@@ -1048,6 +1094,8 @@ const menuItems = computed(() => {
     },
   ];
 
+  const isEpisode = isPodcastEpisode(track);
+
   if (track.audio_url) {
     items.push({
       key: "download",
@@ -1057,18 +1105,18 @@ const menuItems = computed(() => {
   }
 
   if (authStore.isAuthenticated) {
-    items.push(
-      {
+    if (!isEpisode) {
+      items.push({
         key: "add-to-library",
         label: t("browse.contextMenu.addToLibrary"),
         icon: "folder-plus",
-      },
-      {
-        key: "add-to-playlist",
-        label: t("browse.contextMenu.addToPlaylist"),
-        icon: "list",
-      },
-    );
+      });
+    }
+    items.push({
+      key: "add-to-playlist",
+      label: t("browse.contextMenu.addToPlaylist"),
+      icon: "list",
+    });
   }
 
   if (props.removableFrom?.canRemove) {
@@ -1084,7 +1132,7 @@ const menuItems = computed(() => {
     });
   }
 
-  if (track && canManageTrack(track)) {
+  if (!isEpisode && track && canManageTrack(track)) {
     items.push({
       key: "edit-track",
       label: t("browse.contextMenu.editTrack"),
@@ -1092,7 +1140,7 @@ const menuItems = computed(() => {
     });
   }
 
-  if (track && canManageTrack(track)) {
+  if (!isEpisode && track && canManageTrack(track)) {
     items.push({
       key: "enrich",
       label: t("browse.contextMenu.enrich"),
@@ -1100,7 +1148,7 @@ const menuItems = computed(() => {
     });
   }
 
-  if (props.deletable && track && canManageTrack(track)) {
+  if (!isEpisode && props.deletable && track && canManageTrack(track)) {
     items.push({
       key: "delete-track",
       label: t("browse.contextMenu.deleteTrack"),
@@ -1109,7 +1157,7 @@ const menuItems = computed(() => {
     });
   }
 
-  if (authStore.isAuthenticated) {
+  if (authStore.isAuthenticated && !isEpisode) {
     const favorited = isTrackFavorited(track);
     items.push({
       key: "favorite",
@@ -1120,11 +1168,19 @@ const menuItems = computed(() => {
     });
   }
 
-  items.push({
-    key: "go-to-track",
-    label: t("browse.contextMenu.goToTrack"),
-    icon: "music",
-  });
+  if (isEpisode && track.podcast_id) {
+    items.push({
+      key: "go-to-podcast",
+      label: t("browse.contextMenu.goToPodcast"),
+      icon: "podcast",
+    });
+  } else {
+    items.push({
+      key: "go-to-track",
+      label: t("browse.contextMenu.goToTrack"),
+      icon: "music",
+    });
+  }
 
   if (track.album_id) {
     items.push({
@@ -1141,17 +1197,19 @@ const menuItems = computed(() => {
     });
   }
 
-  items.push({
-    key: "activities",
-    label: t("activities.view"),
-    icon: "comments",
-  });
+  if (!isEpisode) {
+    items.push({
+      key: "activities",
+      label: t("activities.view"),
+      icon: "comments",
+    });
 
-  items.push({
-    key: "share",
-    label: t("common.share"),
-    icon: "share-nodes",
-  });
+    items.push({
+      key: "share",
+      label: t("common.share"),
+      icon: "share-nodes",
+    });
+  }
   return items;
 });
 
@@ -1177,6 +1235,9 @@ async function onMenuSelect(key: string) {
     case "go-to-track":
       await router.push(`/tracks/${track.id}`);
       break;
+    case "go-to-podcast":
+      if (track.podcast_id) await router.push(`/podcasts/${track.podcast_id}`);
+      break;
     case "download":
       try {
         await downloadTrack(track.audio_url!, track.title);
@@ -1191,11 +1252,13 @@ async function onMenuSelect(key: string) {
       break;
     case "add-to-library":
       dialogTrack.value = track;
+      addDialogItemType.value = "track";
       closeMenu();
       openAddDialog("library");
       break;
     case "add-to-playlist":
       dialogTrack.value = track;
+      addDialogItemType.value = isPodcastEpisode(track) ? "episode" : "track";
       closeMenu();
       openAddDialog("playlist");
       break;
@@ -1512,6 +1575,12 @@ async function onMenuSelect(key: string) {
               {{ asTrackRow(row).track.title }}
             </span>
             <AppIcon
+              v-if="asTrackRow(row).track.podcast_episode_id"
+              name="podcast"
+              class="track-list__podcast-icon"
+              :aria-label="t('browse.entities.episode')"
+            />
+            <AppIcon
               v-if="isTrackFavorited(asTrackRow(row).track)"
               name="heart"
               variant="solid"
@@ -1528,7 +1597,15 @@ async function onMenuSelect(key: string) {
 
         <template #row-artist="{ row }">
           <RouterLink
-            v-if="asTrackRow(row).track.artist_id"
+            v-if="asTrackRow(row).track.podcast_id"
+            :to="`/podcasts/${asTrackRow(row).track.podcast_id}`"
+            :title="asTrackRow(row).artist"
+            class="track-list__link"
+          >
+            {{ asTrackRow(row).artist }}
+          </RouterLink>
+          <RouterLink
+            v-else-if="asTrackRow(row).track.artist_id"
             :to="`/artists/${asTrackRow(row).track.artist_id}`"
             :title="asTrackRow(row).artist"
             class="track-list__link"
@@ -1711,6 +1788,12 @@ async function onMenuSelect(key: string) {
               >
                 {{ asTrackRow(row).track.title }}
                 <AppIcon
+                  v-if="asTrackRow(row).track.podcast_episode_id"
+                  name="podcast"
+                  class="track-list__podcast-icon"
+                  :aria-label="t('browse.entities.episode')"
+                />
+                <AppIcon
                   v-if="isTrackFavorited(asTrackRow(row).track)"
                   name="heart"
                   variant="solid"
@@ -1724,7 +1807,15 @@ async function onMenuSelect(key: string) {
                 />
               </button>
               <RouterLink
-                v-if="asTrackRow(row).track.artist_id"
+                v-if="asTrackRow(row).track.podcast_id"
+                :to="`/podcasts/${asTrackRow(row).track.podcast_id}`"
+                :title="asTrackRow(row).artist"
+                class="track-list__compact-artist"
+              >
+                {{ asTrackRow(row).artist }}
+              </RouterLink>
+              <RouterLink
+                v-else-if="asTrackRow(row).track.artist_id"
                 :to="`/artists/${asTrackRow(row).track.artist_id}`"
                 :title="asTrackRow(row).artist"
                 class="track-list__compact-artist"
@@ -1786,18 +1877,19 @@ async function onMenuSelect(key: string) {
       v-if="dialogTrack"
       :open="addDialogOpen"
       :mode="addDialogMode"
-      item-type="track"
+      :item-type="addDialogItemType"
       :item-id="dialogTrack.id"
       :item-name="dialogTrack.title"
       @close="closeAddDialog"
     />
 
     <AddToCollectionDialog
-      v-if="canEdit && bulkAddIds.length > 0"
+      v-if="canEdit && bulkAddIds.length + bulkAddEpisodeIds.length > 0"
       :open="bulkAddOpen"
       :mode="bulkAddMode"
       item-type="track"
       :item-ids="bulkAddIds"
+      :episode-ids="bulkAddEpisodeIds"
       @close="closeBulkAddDialog"
     />
 
@@ -1916,6 +2008,12 @@ async function onMenuSelect(key: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.track-list__podcast-icon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
 }
 
 .track-list__cell-text {

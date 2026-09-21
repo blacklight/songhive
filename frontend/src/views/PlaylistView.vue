@@ -9,14 +9,15 @@ import {
 import {
   getPlaylist,
   getPlaylistStats,
-  listPlaylistTracks,
+  listPlaylistItems,
+  playlistItemToQueueTrack,
   reorderPlaylistTracks,
   deletePlaylist as deletePlaylistApi,
+  type PlaylistItemResponse,
   type PlaylistResponse,
   type PlaylistStats,
 } from "@/api/playlists";
 import { useToastStore } from "@/stores/toast";
-import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
 import { useCollectionItem } from "@/composables/useCollectionItem";
@@ -58,7 +59,7 @@ const error = ref<string | null>(null);
 const toastStore = useToastStore();
 
 const {
-  items: tracks,
+  items: playlistItems,
   loading: tracksLoading,
   loadingMore: tracksLoadingMore,
   error: tracksError,
@@ -74,9 +75,9 @@ const {
   setSort: setTrackSort,
   retry: retryTracks,
   refresh: refreshTracks,
-} = useEntityList<TrackResponse>(
+} = useEntityList<PlaylistItemResponse>(
   (params: EntityListParams) =>
-    listPlaylistTracks(playlistId.value, {
+    listPlaylistItems(playlistId.value, {
       q: params.q,
       limit: params.limit,
       offset: params.offset,
@@ -90,6 +91,13 @@ const {
     syncQuery: true,
     queryKey: "tracks",
   },
+);
+
+// Mixed playlist rows → player-consumable queue tracks (episodes stream remotely).
+const tracks = computed<QueueTrack[]>(() =>
+  playlistItems.value
+    .map(playlistItemToQueueTrack)
+    .filter((item): item is QueueTrack => item !== null),
 );
 
 const { owner, visibilityText, visibilityIcon } = useEntityMeta(playlist);
@@ -144,7 +152,7 @@ function onReorder({
   position?: number;
 }) {
   if (!playlist.value) return;
-  reorderPlaylistTracks(playlist.value.id, { track_ids: trackIds, position })
+  reorderPlaylistTracks(playlist.value.id, { item_ids: trackIds, position })
     .then(() => refreshTracks())
     .catch((err) => {
       toastStore.push({
@@ -352,6 +360,7 @@ watch(
           <CollectionStats
             v-if="stats"
             :track-count="stats.track_count"
+            :episode-count="stats.episode_count ?? 0"
             :total-duration="stats.total_duration"
           />
         </div>

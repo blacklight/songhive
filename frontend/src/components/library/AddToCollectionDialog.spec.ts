@@ -372,4 +372,86 @@ describe("AddToCollectionDialog", () => {
       { track_ids: ["track-1"], allow_duplicates: true },
     );
   });
+
+  it("sends episode_ids for an episode item", async () => {
+    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([samplePlaylist]);
+    vi.mocked(playlistsApi.addTracksToPlaylist).mockResolvedValue({
+      added: 1,
+      track_ids: [],
+      episode_ids: ["ep-1"],
+    });
+
+    mountDialog({
+      mode: "playlist",
+      itemType: "episode",
+      itemId: "ep-1",
+      itemName: "Episode One",
+    });
+    await flushPromises();
+
+    const saveButton = findButton(i18n.global.t("common.save"));
+    saveButton?.click();
+    await flushPromises();
+
+    expect(playlistsApi.addTracksToPlaylist).toHaveBeenCalledWith(
+      "playlist-1",
+      { episode_ids: ["ep-1"], allow_duplicates: undefined },
+    );
+  });
+
+  it("sends podcast_id for a whole podcast", async () => {
+    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([samplePlaylist]);
+    vi.mocked(playlistsApi.addTracksToPlaylist).mockResolvedValue({
+      added: 12,
+      track_ids: [],
+      episode_ids: ["e1", "e2"],
+    });
+
+    mountDialog({
+      mode: "playlist",
+      itemType: "podcast",
+      itemId: "pod-1",
+      itemName: "Test Show",
+    });
+    await flushPromises();
+
+    const saveButton = findButton(i18n.global.t("common.save"));
+    saveButton?.click();
+    await flushPromises();
+
+    expect(playlistsApi.addTracksToPlaylist).toHaveBeenCalledWith(
+      "playlist-1",
+      { podcast_id: "pod-1", allow_duplicates: undefined },
+    );
+  });
+
+  it("combines track_ids and episode_ids in playlist mode", async () => {
+    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([samplePlaylist]);
+    vi.mocked(playlistsApi.addTracksToPlaylist).mockResolvedValue({
+      added: 3,
+      track_ids: ["t1"],
+      episode_ids: ["e1", "e2"],
+    });
+
+    mountDialog({
+      mode: "playlist",
+      itemType: "track",
+      itemIds: ["t1"],
+      episodeIds: ["e1", "e2"],
+    });
+    await flushPromises();
+
+    const saveButton = findButton(i18n.global.t("common.save"));
+    saveButton?.click();
+    await flushPromises();
+
+    expect(playlistsApi.addTracksToPlaylist).toHaveBeenCalledWith(
+      "playlist-1",
+      {
+        track_ids: ["t1"],
+        episode_ids: ["e1", "e2"],
+        allow_duplicates: undefined,
+      },
+    );
+  });
 });

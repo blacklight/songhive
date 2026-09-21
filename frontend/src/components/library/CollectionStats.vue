@@ -6,11 +6,13 @@ import AppIcon from "@/components/ui/AppIcon.vue";
 export interface Props {
   trackCount: number;
   albumCount?: number | null;
+  episodeCount?: number | null;
   totalDuration?: number | null;
 }
 
 withDefaults(defineProps<Props>(), {
   albumCount: null,
+  episodeCount: null,
   totalDuration: null,
 });
 
@@ -26,6 +28,10 @@ const { t } = useI18n();
     <span class="collection-stats__item">
       <AppIcon name="music" />
       {{ t("browse.detail.trackCount", trackCount) }}
+    </span>
+    <span v-if="episodeCount" class="collection-stats__item">
+      <AppIcon name="podcast" />
+      {{ t("browse.detail.episodeCount", episodeCount) }}
     </span>
     <span v-if="totalDuration" class="collection-stats__item">
       <AppIcon name="clock" />
