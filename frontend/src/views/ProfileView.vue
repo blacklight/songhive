@@ -6,6 +6,7 @@ import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ProfileTab from "./profile/ProfileTab.vue";
 import ChangePasswordTab from "./profile/ChangePasswordTab.vue";
+import SecurityTab from "./profile/SecurityTab.vue";
 import ApiTokensTab from "./profile/ApiTokensTab.vue";
 import SessionsTab from "./profile/SessionsTab.vue";
 import NotificationSettings from "./profile/NotificationSettings.vue";
@@ -24,6 +25,7 @@ const tab = computed(() => {
     [
       "profile",
       "password",
+      "security",
       "apiTokens",
       "sessions",
       "notifications",
@@ -39,6 +41,7 @@ const tab = computed(() => {
 const tabs = [
   { key: "profile", label: t("profile.tabs.profile"), icon: "user" },
   { key: "password", label: t("profile.tabs.password"), icon: "lock" },
+  { key: "security", label: t("profile.tabs.security"), icon: "shield-halved" },
   { key: "apiTokens", label: t("profile.tabs.apiTokens"), icon: "key" },
   { key: "sessions", label: t("profile.tabs.sessions"), icon: "laptop" },
   {
@@ -72,6 +75,8 @@ const currentComponent = computed(() => {
   switch (tab.value) {
     case "password":
       return ChangePasswordTab;
+    case "security":
+      return SecurityTab;
     case "apiTokens":
       return ApiTokensTab;
     case "sessions":

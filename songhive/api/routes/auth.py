@@ -4,7 +4,7 @@ Authentication routes: registration, login, token refresh, logout, and OAuth2.
 
 import base64
 from datetime import datetime, timezone
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
@@ -21,6 +21,7 @@ from ...services.auth import (
     verify_password,
 )
 from ...tasks.email import send_password_reset_email, send_verification_email
+from ...users import two_factor
 from ...users.manager import (
     RegistrationError,
     confirm_password_reset,
@@ -89,6 +90,20 @@ class TokenPairResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    expires_in: int
+
+
+class MfaRequiredResponse(BaseModel):
+    """Returned when a password-verified login still needs a second factor.
+
+    The ``mfa_token`` identifies a short-lived pending login; it is exchanged
+    for a token pair at ``/auth/2fa/login`` (TOTP or recovery code) or
+    ``/auth/2fa/login/webauthn/*`` (security key).
+    """
+
+    mfa_required: bool = True
+    mfa_token: str
+    methods: List[str]
     expires_in: int
 
 
@@ -228,7 +243,7 @@ async def register(
     return RegisterResponse.model_validate(user)
 
 
-@router.post("/login", response_model=TokenPairResponse)
+@router.post("/login", response_model=Union[TokenPairResponse, MfaRequiredResponse])
 async def login(
     body: LoginRequest,
     request: Request,
@@ -237,7 +252,14 @@ async def login(
     config: SonghiveConfig = Depends(get_config),
     redis: Redis = Depends(get_redis),
 ):
-    """Authenticate with a username/email and password."""
+    """
+    Authenticate with a username/email and password.
+
+    Users with two-factor authentication enrolled receive an
+    ``mfa_required`` challenge instead of tokens; the pending login is
+    completed through the ``/auth/2fa/login`` endpoints. API tokens are
+    issued through a separate authenticated endpoint and never involve 2FA.
+    """
     await check_rate_limit(request, config, redis, identifier=body.username)
     user = await get_user_by_username_or_email(db, body.username)
     if user is None or not verify_password(body.password, user.password_hash):
@@ -258,6 +280,14 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email not verified",
+        )
+
+    if await two_factor.user_has_2fa(db, user):
+        mfa_token = await two_factor.create_pending_login(user, redis)
+        return MfaRequiredResponse(
+            mfa_token=mfa_token,
+            methods=await two_factor.enabled_methods(db, user),
+            expires_in=two_factor.PENDING_LOGIN_TTL,
         )
 
     user.last_login = datetime.now(timezone.utc)

@@ -36,6 +36,11 @@ export interface paths {
     /**
      * Login
      * @description Authenticate with a username/email and password.
+     *
+     *     Users with two-factor authentication enrolled receive an
+     *     ``mfa_required`` challenge instead of tokens; the pending login is
+     *     completed through the ``/auth/2fa/login`` endpoints. API tokens are
+     *     issued through a separate authenticated endpoint and never involve 2FA.
      */
     post: operations["login_api_v1_auth_login_post"];
     delete?: never;
@@ -339,6 +344,232 @@ export interface paths {
      * @description Revoke an API token belonging to the authenticated user.
      */
     delete: operations["delete_api_token_api_v1_auth_api_tokens__token_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Two Factor Status
+     * @description Return the current user's two-factor enrollment status.
+     */
+    get: operations["two_factor_status_api_v1_auth_2fa_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa/totp/setup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Totp Setup
+     * @description Start TOTP enrollment: returns the secret and a QR code for it.
+     *
+     *     The secret is not persisted yet — :func:`totp_confirm` must verify a
+     *     current code before it becomes active.
+     */
+    post: operations["totp_setup_api_v1_auth_2fa_totp_setup_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa/totp/confirm": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Totp Confirm
+     * @description Confirm a pending TOTP enrollment with a current code.
+     *
+     *     On success the secret is saved and a batch of recovery codes is returned
+     *     exactly once.
+     */
+    post: operations["totp_confirm_api_v1_auth_2fa_totp_confirm_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa/totp/disable": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Totp Disable
+     * @description Disable TOTP after re-verifying the account password.
+     */
+    post: operations["totp_disable_api_v1_auth_2fa_totp_disable_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa/webauthn/register/begin": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Webauthn Register Begin
+     * @description Start a security-key registration ceremony (WebAuthn create options).
+     */
+    post: operations["webauthn_register_begin_api_v1_auth_2fa_webauthn_register_begin_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa/webauthn/register/complete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Webauthn Register Complete
+     * @description Finish a security-key registration with the browser's attestation.
+     */
+    post: operations["webauthn_register_complete_api_v1_auth_2fa_webauthn_register_complete_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa/webauthn/{credential_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Webauthn Delete
+     * @description Remove a registered security key.
+     */
+    delete: operations["webauthn_delete_api_v1_auth_2fa_webauthn__credential_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa/recovery-codes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Recovery Codes Regenerate
+     * @description Regenerate the user's recovery codes after re-verifying the password.
+     */
+    post: operations["recovery_codes_regenerate_api_v1_auth_2fa_recovery_codes_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa/login": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mfa Login
+     * @description Complete a password-verified login with a TOTP or recovery code.
+     */
+    post: operations["mfa_login_api_v1_auth_2fa_login_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa/login/webauthn/begin": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mfa Login Webauthn Begin
+     * @description Start a security-key assertion for a pending two-factor login.
+     */
+    post: operations["mfa_login_webauthn_begin_api_v1_auth_2fa_login_webauthn_begin_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/2fa/login/webauthn/complete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mfa Login Webauthn Complete
+     * @description Finish a security-key assertion for a pending two-factor login.
+     */
+    post: operations["mfa_login_webauthn_complete_api_v1_auth_2fa_login_webauthn_complete_post"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -3338,6 +3569,29 @@ export interface paths {
      * @description Delete a user account and all dependent data (admin only).
      */
     delete: operations["delete_user_api_v1_admin_users__user_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/users/{user_id}/2fa/clear": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Clear User 2Fa
+     * @description Clear all two-factor authentication state for a user (admin only).
+     *
+     *     Removes the TOTP secret, registered security keys, and recovery codes.
+     *     Useful for account recovery when a user loses access to their factors.
+     */
+    post: operations["clear_user_2fa_api_v1_admin_users__user_id__2fa_clear_post"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -6924,6 +7178,37 @@ export interface components {
      */
     MentionSource: "local" | "activitypub" | "webmention";
     /**
+     * MfaLoginRequest
+     * @description Request body for completing a password-verified login with a code.
+     */
+    MfaLoginRequest: {
+      /** Mfa Token */
+      mfa_token: string;
+      /** Code */
+      code: string;
+    };
+    /**
+     * MfaRequiredResponse
+     * @description Returned when a password-verified login still needs a second factor.
+     *
+     *     The ``mfa_token`` identifies a short-lived pending login; it is exchanged
+     *     for a token pair at ``/auth/2fa/login`` (TOTP or recovery code) or
+     *     ``/auth/2fa/login/webauthn/*`` (security key).
+     */
+    MfaRequiredResponse: {
+      /**
+       * Mfa Required
+       * @default true
+       */
+      mfa_required: boolean;
+      /** Mfa Token */
+      mfa_token: string;
+      /** Methods */
+      methods: string[];
+      /** Expires In */
+      expires_in: number;
+    };
+    /**
      * ModeratedActorResponse
      * @description An actor muted or blocked by the current user.
      */
@@ -7095,6 +7380,14 @@ export interface components {
        * @default []
        */
       errors: string[];
+    };
+    /**
+     * PasswordConfirmRequest
+     * @description Request body for sensitive actions that re-verify the password.
+     */
+    PasswordConfirmRequest: {
+      /** Password */
+      password: string;
     };
     /**
      * PasswordResetConfirmRequest
@@ -7620,6 +7913,14 @@ export interface components {
        * @default false
        */
       in_collection: boolean;
+    };
+    /**
+     * RecoveryCodesResponse
+     * @description A freshly generated batch of recovery codes (shown once).
+     */
+    RecoveryCodesResponse: {
+      /** Recovery Codes */
+      recovery_codes: string[];
     };
     /**
      * RefreshRequest
@@ -8297,6 +8598,17 @@ export interface components {
       tracks?: components["schemas"]["TrackSummary"][] | null;
     };
     /**
+     * SuccessResponse
+     * @description Generic success response.
+     */
+    SuccessResponse: {
+      /**
+       * Success
+       * @default true
+       */
+      success: boolean;
+    };
+    /**
      * SyncTagsRequest
      * @description Request body for bulk tag sync triggers.
      */
@@ -8378,6 +8690,26 @@ export interface components {
       token_type: string;
       /** Expires In */
       expires_in: number;
+    };
+    /**
+     * TotpConfirmRequest
+     * @description Request body for confirming a pending TOTP enrollment.
+     */
+    TotpConfirmRequest: {
+      /** Code */
+      code: string;
+    };
+    /**
+     * TotpSetupResponse
+     * @description Pending TOTP enrollment details (secret is not yet active).
+     */
+    TotpSetupResponse: {
+      /** Secret */
+      secret: string;
+      /** Otpauth Url */
+      otpauth_url: string;
+      /** Qr Code */
+      qr_code: string;
     };
     /**
      * TrackEnrichResponse
@@ -8566,6 +8898,20 @@ export interface components {
       description?: string | null;
     };
     /**
+     * TwoFactorStatusResponse
+     * @description Overview of the current user's second-factor enrollment.
+     */
+    TwoFactorStatusResponse: {
+      /** Enabled */
+      enabled: boolean;
+      /** Totp Enabled */
+      totp_enabled: boolean;
+      /** Webauthn Credentials */
+      webauthn_credentials: components["schemas"]["WebAuthnCredentialSummary"][];
+      /** Recovery Codes Remaining */
+      recovery_codes_remaining: number;
+    };
+    /**
      * UnreadCountResponse
      * @description Number of unseen notifications.
      */
@@ -8713,6 +9059,66 @@ export interface components {
      * @enum {string}
      */
     Visibility: "private" | "mentioned" | "local" | "followers" | "public";
+    /**
+     * WebAuthnCredentialSummary
+     * @description Public view of a registered security key.
+     */
+    WebAuthnCredentialSummary: {
+      /** Id */
+      id: string;
+      /** Credential Id */
+      credential_id: string;
+      /** Name */
+      name: string | null;
+      /** Transports */
+      transports: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+    };
+    /**
+     * WebAuthnLoginBeginRequest
+     * @description Request body for starting a security-key assertion at login.
+     */
+    WebAuthnLoginBeginRequest: {
+      /** Mfa Token */
+      mfa_token: string;
+    };
+    /**
+     * WebAuthnLoginCompleteRequest
+     * @description Request body for finishing a security-key assertion at login.
+     */
+    WebAuthnLoginCompleteRequest: {
+      /** Mfa Token */
+      mfa_token: string;
+      /** Credential */
+      credential: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * WebAuthnRegisterCompleteRequest
+     * @description Browser-produced attestation plus an optional display name.
+     */
+    WebAuthnRegisterCompleteRequest: {
+      /** Name */
+      name?: string | null;
+      /** Credential */
+      credential: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * WebAuthnRegisterCompleteResponse
+     * @description The stored credential and, for first-time enrollment, recovery codes.
+     */
+    WebAuthnRegisterCompleteResponse: {
+      credential: components["schemas"]["WebAuthnCredentialSummary"];
+      /** Recovery Codes */
+      recovery_codes?: string[] | null;
+    };
     /**
      * WebmentionResponse
      * @description Serialized Webmention metadata attached to a ``webmention`` activity.
@@ -9017,7 +9423,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["TokenPairResponse"];
+          "application/json":
+            | components["schemas"]["TokenPairResponse"]
+            | components["schemas"]["MfaRequiredResponse"];
         };
       };
       /** @description Validation Error */
@@ -9548,6 +9956,326 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RevokeApiTokenResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  two_factor_status_api_v1_auth_2fa_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TwoFactorStatusResponse"];
+        };
+      };
+    };
+  };
+  totp_setup_api_v1_auth_2fa_totp_setup_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TotpSetupResponse"];
+        };
+      };
+    };
+  };
+  totp_confirm_api_v1_auth_2fa_totp_confirm_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TotpConfirmRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RecoveryCodesResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  totp_disable_api_v1_auth_2fa_totp_disable_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordConfirmRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SuccessResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  webauthn_register_begin_api_v1_auth_2fa_webauthn_register_begin_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  webauthn_register_complete_api_v1_auth_2fa_webauthn_register_complete_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WebAuthnRegisterCompleteRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebAuthnRegisterCompleteResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  webauthn_delete_api_v1_auth_2fa_webauthn__credential_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        credential_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  recovery_codes_regenerate_api_v1_auth_2fa_recovery_codes_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordConfirmRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RecoveryCodesResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mfa_login_api_v1_auth_2fa_login_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MfaLoginRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TokenPairResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mfa_login_webauthn_begin_api_v1_auth_2fa_login_webauthn_begin_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WebAuthnLoginBeginRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mfa_login_webauthn_complete_api_v1_auth_2fa_login_webauthn_complete_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WebAuthnLoginCompleteRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TokenPairResponse"];
         };
       };
       /** @description Validation Error */
@@ -15503,6 +16231,37 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  clear_user_2fa_api_v1_admin_users__user_id__2fa_clear_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserResponse"];
+        };
       };
       /** @description Validation Error */
       422: {

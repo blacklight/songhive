@@ -62,6 +62,7 @@ from .routes import (
     tags,
     timeline,
     tracks,
+    two_factor,
     users,
     webmentions,
 )
@@ -273,6 +274,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(auth.router, prefix=api_prefix, tags=["auth"])
     app.include_router(sessions.router, prefix=api_prefix, tags=["sessions"])
     app.include_router(api_tokens.router, prefix=api_prefix, tags=["api-tokens"])
+    app.include_router(two_factor.router, prefix=api_prefix, tags=["two-factor"])
     app.include_router(users.router, prefix=api_prefix, tags=["users"])
     app.include_router(tags.router, prefix=api_prefix, tags=["tags"])
     app.include_router(activities.router, prefix=api_prefix, tags=["activities"])

@@ -35,6 +35,7 @@ from ..models.share_grant import ShareGrant
 from ..models.share_token import ShareToken
 from ..models.stored_file import StoredFile
 from ..models.track import Track
+from ..models.two_factor import RecoveryCode, WebAuthnCredential
 from ..models.user import User, UserRole
 from ..models.user_link import UserLink
 from ..services import deletion
@@ -465,6 +466,8 @@ async def _remove_user_references(session: AsyncSession, user: User) -> None:
     await session.execute(delete(ShareGrant).where(ShareGrant.created_by == user.id))
     await session.execute(delete(ShareToken).where(ShareToken.created_by == user.id))
     await session.execute(delete(UserLink).where(UserLink.user_id == user.id))
+    await session.execute(delete(WebAuthnCredential).where(WebAuthnCredential.user_id == user.id))
+    await session.execute(delete(RecoveryCode).where(RecoveryCode.user_id == user.id))
 
     # Nullify optional owner/reviewer fields on user-created content.
     await session.execute(update(Album).where(Album.owner_id == user.id).values(owner_id=None))

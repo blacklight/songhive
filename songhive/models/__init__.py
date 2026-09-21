@@ -40,6 +40,7 @@ from .stored_file import StoredFile
 from .tag import Tag, TagAlbum, TagArtist, TagLibrary, TagPlaylist, TagTrack
 from .track import Track
 from .transcoded_file import TranscodedFile
+from .two_factor import RecoveryCode, WebAuthnCredential
 from .upload import Upload
 from .user import User
 from .user_link import UserLink
@@ -94,6 +95,7 @@ __all__ = [
     "PodcastSyncEvent",
     "PreviewCard",
     "Radio",
+    "RecoveryCode",
     "RemoteObject",
     "Report",
     "ShareGrant",
@@ -107,4 +109,5 @@ __all__ = [
     "UserLink",
     "UserModeration",
     "Visibility",
+    "WebAuthnCredential",
 ]

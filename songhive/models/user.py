@@ -115,6 +115,10 @@ class User(Base):
         lazy="selectin",
     )
 
+    # Two-factor authentication: encrypted TOTP shared secret. Security keys
+    # and recovery codes live in their own tables keyed by user id.
+    totp_secret: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Federation fields
     actor_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, unique=True)
     private_key_pem: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

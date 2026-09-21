@@ -1,9 +1,11 @@
 import { computed, ref, type Ref } from "vue";
 import { defineStore } from "pinia";
 import * as authApi from "@/api/auth";
+import * as twoFactorApi from "@/api/twoFactor";
 import * as usersApi from "@/api/users";
 import { ApiError, setLogoutHandler, setRefreshHandler } from "@/api/client";
 import type { UserResponse } from "@/api/users";
+import { credentialToJson, requestOptionsFromJson } from "@/utils/webauthn";
 
 // Only non-sensitive session state is persisted. The access and refresh
 // tokens live in server-managed HttpOnly cookies, so JavaScript can never
@@ -32,6 +34,12 @@ if (/(?:^|;\s*)access_token=/.test(document.cookie)) {
 
 export type AuthStatus =
   "idle" | "loading" | "authenticated" | "unauthenticated" | "error";
+
+/** Returned by login() when a second factor must be supplied to finish. */
+export interface MfaChallenge {
+  mfaToken: string;
+  methods: string[];
+}
 
 type UserProfile = UserResponse;
 type UserRole = "user" | "moderator" | "admin";
@@ -65,14 +73,29 @@ export const useAuthStore = defineStore("auth", () => {
     persist();
   }
 
-  async function login(username: string, password: string) {
+  // login resolves to null once the session is established, or to an
+  // MfaChallenge when the account requires a second factor first.
+  async function login(
+    username: string,
+    password: string,
+  ): Promise<MfaChallenge | null> {
     status.value = "loading";
     try {
+      const response = await authApi.login({ username, password });
+      if (twoFactorApi.isMfaRequired(response)) {
+        // No session yet — keep the view unauthenticated until the second
+        // factor completes.
+        status.value = "unauthenticated";
+        return {
+          mfaToken: response.mfa_token,
+          methods: response.methods,
+        };
+      }
       // The response sets the HttpOnly auth cookies; the token pair in the
       // body is intentionally unused by the SPA.
-      await authApi.login({ username, password });
       await fetchProfile();
       status.value = "authenticated";
+      return null;
     } catch (err) {
       status.value = "error";
       if (err instanceof ApiError) {
@@ -80,6 +103,43 @@ export const useAuthStore = defineStore("auth", () => {
       }
       throw new Error("Login failed", { cause: err });
     }
+  }
+
+  async function finishMfaLogin(
+    complete: () => Promise<unknown>,
+  ): Promise<void> {
+    status.value = "loading";
+    try {
+      await complete();
+      await fetchProfile();
+      status.value = "authenticated";
+    } catch (err) {
+      status.value = "error";
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      throw new Error("Two-factor verification failed", { cause: err });
+    }
+  }
+
+  /** Complete a pending login with a TOTP or recovery code. */
+  function loginWithMfaCode(mfaToken: string, code: string): Promise<void> {
+    return finishMfaLogin(() => twoFactorApi.mfaLogin(mfaToken, code));
+  }
+
+  /** Complete a pending login by signing with a registered security key. */
+  function loginWithMfaSecurityKey(mfaToken: string): Promise<void> {
+    return finishMfaLogin(async () => {
+      const options = await twoFactorApi.mfaWebAuthnBegin(mfaToken);
+      const credential = (await navigator.credentials.get({
+        publicKey: requestOptionsFromJson(options),
+      })) as PublicKeyCredential | null;
+      if (!credential) throw new Error("Security key assertion cancelled");
+      await twoFactorApi.mfaWebAuthnComplete(
+        mfaToken,
+        credentialToJson(credential),
+      );
+    });
   }
 
   async function refresh(): Promise<boolean> {
@@ -150,6 +210,8 @@ export const useAuthStore = defineStore("auth", () => {
     isAuthenticated,
     isAdmin,
     login,
+    loginWithMfaCode,
+    loginWithMfaSecurityKey,
     logout,
     refresh,
     bootstrap,

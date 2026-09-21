@@ -41,6 +41,7 @@ from ...tasks.tags import sync_track_tags
 from ...users import invites as invite_service
 from ...users import manager as user_manager
 from ...users import oauth as oauth_client_service
+from ...users import two_factor
 from ...users.tokens import revoke_all_user_refresh_tokens
 from .._common import Pagination, client_ip, get_pagination
 from ..deps import get_config, get_db, get_redis, get_storage_service, require_admin
@@ -308,6 +309,40 @@ async def delete_user(
                 )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/users/{user_id}/2fa/clear",
+    response_model=AdminUserResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def clear_user_2fa(
+    user_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Clear all two-factor authentication state for a user (admin only).
+
+    Removes the TOTP secret, registered security keys, and recovery codes.
+    Useful for account recovery when a user loses access to their factors.
+    """
+    try:
+        user = await user_manager._get_user_or_raise(db, user_id)
+    except user_manager.UserManagementError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    await two_factor.clear_two_factor(db, user)
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="user.2fa_clear",
+        target_type=AuditTargetType.USER,
+        target_id=user_id,
+        details={"username": user.username},
+        ip_address=client_ip(request),
+    )
+    return AdminUserResponse.model_validate(user)
 
 
 @router.delete(

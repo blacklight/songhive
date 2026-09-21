@@ -180,7 +180,16 @@
       "failed": "Invalid username or password.",
       "emailNotVerified": "Your email address has not been verified.",
       "forgotPassword": "Forgot password?",
-      "noAccount": "Don't have an account? Register"
+      "noAccount": "Don't have an account? Register",
+      "mfa": {
+        "title": "Two-factor authentication",
+        "hint": "Enter the code from your authenticator app, or one of your recovery codes.",
+        "code": "Authentication or recovery code",
+        "submit": "Verify",
+        "useSecurityKey": "Use a security key",
+        "back": "Back to login",
+        "failed": "Verification failed. Please sign in again."
+      }
     },
     "registerPage": {
       "title": "Register",
@@ -1078,8 +1087,9 @@
       "playlists": "Playlists",
       "notifications": "Notifications",
       "interface": "Interface",
-      "podcastSync": "Podcast sync",
-      "moderation": "Moderation"
+      "moderation": "Moderation",
+      "security": "Security",
+      "podcastSync": "Podcast sync"
     },
     "copyHandle": "Copy fediverse handle",
     "compose": "Compose",
@@ -1212,6 +1222,50 @@
       "themeLabel": "Theme",
       "themeHint": "\"System\" follows your device's appearance setting.",
       "accentHint": "Used for highlights, buttons and active states."
+    },
+    "security": {
+      "passwordLabel": "Current password",
+      "totp": {
+        "heading": "Authenticator app",
+        "disabledHint": "Use an authenticator app to generate one-time codes when signing in.",
+        "enabledHint": "Your authenticator app is active. Enter your password to disable it.",
+        "setup": "Set up authenticator app",
+        "scanHint": "Scan this QR code with your authenticator app, then enter the code it shows to confirm setup.",
+        "qrAlt": "QR code for authenticator app setup",
+        "manualEntry": "Can't scan? Enter this key manually:",
+        "codeLabel": "Authentication code",
+        "codeHint": "Enter the 6-digit code shown by your app.",
+        "confirm": "Confirm and enable",
+        "enabled": "Two-factor authentication enabled.",
+        "disabled": "Authenticator app disabled.",
+        "disable": "Disable",
+        "disableConfirm": "This will turn off the authenticator app second factor. Continue?"
+      },
+      "keys": {
+        "heading": "Security keys",
+        "unsupported": "Your browser does not support security keys (WebAuthn).",
+        "name": "Name",
+        "createdAt": "Added",
+        "actions": "",
+        "empty": "No security keys registered.",
+        "nameLabel": "Key name",
+        "nameHint": "A label to recognize this key, e.g. 'YubiKey'.",
+        "add": "Add security key",
+        "added": "Security key registered.",
+        "cancelled": "Security key registration was cancelled.",
+        "remove": "Remove",
+        "removeConfirm": "Remove the security key '{name}'?",
+        "unnamed": "Unnamed key"
+      },
+      "recovery": {
+        "heading": "Recovery codes",
+        "remaining": "{count} unused recovery codes remaining.",
+        "regenerate": "Regenerate codes",
+        "regenerateConfirm": "This invalidates all existing recovery codes. Continue?",
+        "newCodes": "Your new recovery codes",
+        "newCodesHint": "Store these codes somewhere safe. Each one can be used once to sign in if you lose your other factors.",
+        "copied": "Recovery codes copied."
+      }
     }
   },
   "users": {
@@ -1243,8 +1297,7 @@
       "radio": "Radio",
       "item": "Item",
       "share": "Share",
-      "shares": "Shares",
-      "episode": "Episode"
+      "shares": "Shares"
     },
     "list": {
       "searchPlaceholder": "Search {entity}…",

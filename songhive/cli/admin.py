@@ -10,6 +10,7 @@ Usage:
     songhive admin approve-user --username <name>
     songhive admin disable-user --username <name>
     songhive admin reset-password --username <name> --password <pw>
+    songhive admin clear-2fa --username <name>
     songhive admin import-dir --path <dir> --library-id <uuid> [--owner <username>]
     songhive admin create-invite --created-by <username> [--max-uses <n>] [--expires-at <iso>]
     songhive admin list-invites
@@ -92,6 +93,14 @@ def _add_reset_password_command(subparsers: argparse._SubParsersAction) -> None:
     reset_parser = subparsers.add_parser("reset-password", help="Reset a user's password")
     reset_parser.add_argument("--username", required=True)
     reset_parser.add_argument("--password", required=True)
+
+
+def _add_clear_2fa_command(subparsers: argparse._SubParsersAction) -> None:
+    clear_parser = subparsers.add_parser(
+        "clear-2fa",
+        help="Clear a user's two-factor authentication (TOTP, security keys, recovery codes)",
+    )
+    clear_parser.add_argument("--username", required=True)
 
 
 def _add_import_dir_command(subparsers: argparse._SubParsersAction) -> None:
@@ -215,6 +224,7 @@ def _create_admin_parser() -> argparse.ArgumentParser:
     _add_approve_user_command(subparsers)
     _add_disable_user_command(subparsers)
     _add_reset_password_command(subparsers)
+    _add_clear_2fa_command(subparsers)
     _add_import_dir_command(subparsers)
     _add_create_invite_command(subparsers)
     _add_list_invites_command(subparsers)
@@ -333,6 +343,19 @@ async def _handle_reset_password(args):
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
         print(f"Password reset for user '{args.username}'")
+
+
+async def _handle_clear_2fa(args):
+    """Clear all two-factor authentication state for a user."""
+    from ..users import two_factor
+
+    async with get_session() as session:
+        user = await get_user_by_username(session, args.username)
+        if not user:
+            print(f"Error: user '{args.username}' not found", file=sys.stderr)
+            sys.exit(1)
+        await two_factor.clear_two_factor(session, user)
+        print(f"Two-factor authentication cleared for user '{args.username}'")
 
 
 def _normalize_scan_roots(roots: Iterable[str]) -> list[Path]:
@@ -666,6 +689,7 @@ def admin_main(argv=None):
         "approve-user": _handle_approve_user,
         "disable-user": _handle_disable_user,
         "reset-password": _handle_reset_password,
+        "clear-2fa": _handle_clear_2fa,
         "import-dir": _handle_import_dir,
         "create-invite": _handle_create_invite,
         "list-invites": _handle_list_invites,

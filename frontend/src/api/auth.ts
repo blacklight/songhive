@@ -1,5 +1,6 @@
 import type { paths } from "./types";
 import { apiRequest } from "./client";
+import type { LoginResponse } from "./twoFactor";
 
 export type RegisterRequest =
   paths["/api/v1/auth/register"]["post"]["requestBody"]["content"]["application/json"];
@@ -26,8 +27,8 @@ export type ApiTokenCreateRequest =
 export type ApiTokenCreateResponse =
   paths["/api/v1/auth/api-tokens"]["post"]["responses"]["201"]["content"]["application/json"];
 
-export function login(body: LoginRequest): Promise<TokenPairResponse> {
-  return apiRequest<TokenPairResponse>("/auth/login", {
+export function login(body: LoginRequest): Promise<LoginResponse> {
+  return apiRequest<LoginResponse>("/auth/login", {
     method: "POST",
     body,
     skipAuth: true,
