@@ -773,7 +773,8 @@ onUnmounted(() => {
                   field.type === 'string' ||
                   field.type === 'password' ||
                   field.type === 'number' ||
-                  field.type === 'string-array'
+                  field.type === 'string-array' ||
+                  field.type === 'textarea'
                 "
                 :model-value="getFieldInputValue(field)"
                 :type="
@@ -783,8 +784,18 @@ onUnmounted(() => {
                       ? 'password'
                       : 'text'
                 "
-                :as="field.type === 'string-array' ? 'textarea' : 'input'"
-                :rows="field.type === 'string-array' ? 2 : undefined"
+                :as="
+                  field.type === 'string-array' || field.type === 'textarea'
+                    ? 'textarea'
+                    : 'input'
+                "
+                :rows="
+                  field.type === 'string-array'
+                    ? 2
+                    : field.type === 'textarea'
+                      ? 6
+                      : undefined
+                "
                 :label="t(field.labelI18nKey)"
                 :hint="
                   field.descriptionI18nKey

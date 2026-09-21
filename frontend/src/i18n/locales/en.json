@@ -978,6 +978,86 @@
               "description": "Allow deleting objects from the bucket. Requires write permission on the bucket."
             }
           }
+        },
+        "sftp": {
+          "fields": {
+            "host": {
+              "label": "Host",
+              "description": "Hostname or IP address of the SFTP/SSH server. The remote host must be reachable from the Songhive server — all file access happens server-side."
+            },
+            "port": {
+              "label": "Port",
+              "description": "SSH port of the remote server (usually 22)."
+            },
+            "username": {
+              "label": "Username",
+              "description": "SSH username used to log in to the remote server."
+            },
+            "password": {
+              "label": "Password",
+              "description": "SSH password. May be combined with a private key; the server picks whichever method it accepts. Stored encrypted."
+            },
+            "private_key": {
+              "label": "Private key",
+              "description": "PEM or OpenSSH private key for public-key authentication. Paste the full key including the BEGIN/END lines. Stored encrypted."
+            },
+            "private_key_passphrase": {
+              "label": "Private key passphrase",
+              "description": "Passphrase protecting the private key, if it is encrypted. Stored encrypted."
+            },
+            "verify_host_key": {
+              "label": "Verify host key",
+              "description": "Verify the server's SSH host key. When enabled, the host must be listed in the known hosts data below or in the server's ~/.ssh/known_hosts file."
+            },
+            "known_hosts": {
+              "label": "Known hosts",
+              "description": "OpenSSH known_hosts lines used to verify the server's host key, e.g. \"host.example ssh-ed25519 AAAA...\". Only used when host key verification is enabled."
+            },
+            "root": {
+              "label": "Remote root",
+              "description": "Directory on the remote server to index. Relative paths resolve against the SSH user's home directory; leave empty to index the home directory itself."
+            },
+            "connect_timeout": {
+              "label": "Connect timeout (seconds)",
+              "description": "How long to wait for the SSH connection and login to complete."
+            },
+            "follow_symlinks": {
+              "label": "Follow symlinks",
+              "description": "Whether to follow symbolic links while scanning the remote library."
+            },
+            "recursive": {
+              "label": "Recursive scan",
+              "description": "Index audio files in remote subdirectories recursively."
+            },
+            "extensions": {
+              "label": "File extensions",
+              "description": "Comma-separated list of audio file extensions to index (e.g. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Exclude patterns",
+              "description": "Comma-separated glob patterns for remote paths to skip during scanning."
+            },
+            "allow_hashing": {
+              "label": "Allow audio hashing",
+              "description": "Compute a stable audio hash for tracks to detect duplicates and support transcoding. Requires downloading new or changed files once."
+            },
+            "fast_hash": {
+              "label": "Use fast raw hash",
+              "description": "Use raw SHA-256 instead of ffmpeg audio-only hashing. Cheaper but changes when tags or artwork change."
+            },
+            "allow_write_tags": {
+              "label": "Allow metadata write-back",
+              "description": "Allow Songhive to rewrite embedded tags and re-upload files when tracks are edited. Requires write permission on the remote server."
+            },
+            "allow_rename_source": {
+              "label": "Allow source renaming",
+              "description": "Allow Songhive to rename remote files through track edits. Requires write permission on the remote server."
+            },
+            "allow_delete_source": {
+              "label": "Allow source deletion",
+              "description": "Allow deleting files on the remote server. Requires write permission on the remote server."
+            }
+          }
         }
       }
     }

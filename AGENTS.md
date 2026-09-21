@@ -222,8 +222,9 @@
   `local` profiles only to authenticated callers and never lists `private`
   profiles (not even to their owner). Individual profile pages stay reachable
   regardless.
-- External libraries (`songhive/external/`) support a `s3` provider
-  (`external/_s3.py`, aioboto3) alongside `local`/`fake`. Two traps when
+- External libraries (`songhive/external/`) support `s3`
+  (`external/_s3.py`, aioboto3) and `sftp` (`external/_sftp.py`, asyncssh)
+  providers alongside `local`/`fake`. Two traps when
   touching that code: (1) API responses redact secret config keys to
   `"<redacted>"`, so PATCH routes must run submitted configs through
   `_merge_config_preserving_redacted` or credentials get overwritten with the

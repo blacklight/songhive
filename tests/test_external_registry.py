@@ -7,6 +7,7 @@ import pytest
 from songhive.external.base import ExternalLibraryAdapter
 from songhive.external.errors import UnsupportedExternalOperation
 from songhive.external.registry import (
+    _REGISTRY,
     get_external_adapter,
     is_user_configurable,
     list_external_provider_types,
@@ -32,6 +33,8 @@ class _DummyAdapter(ExternalLibraryAdapter):
 @pytest.fixture(autouse=True)
 def _register_dummy():
     register_external_adapter("dummy", _DummyAdapter)
+    yield
+    _REGISTRY.pop("dummy", None)
 
 
 def test_register_and_get_adapter():

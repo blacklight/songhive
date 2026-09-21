@@ -175,7 +175,7 @@ allow_user_created_libraries = false
 
 # When allow_user_created_libraries is true, restrict non-admin users to these
 # provider types. Empty means all user_configurable providers are allowed.
-# Examples: ["local", "s3", "webdav"]
+# Examples: ["local", "s3", "sftp", "webdav"]
 allowed_user_providers = []
 
 # Provider types non-admin users may never configure, regardless of allow list.

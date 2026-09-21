@@ -1057,6 +1057,57 @@ interval. Operators wanting tighter freshness should shorten
 (`scope=`) can restrict a sync to a sub-prefix. Future integrations could
 plug S3 event notifications or S3 Inventory into the same task pipeline.
 
+#### SFTP provider
+
+The `sftp` provider (`external/_sftp.py`, asyncssh) indexes audio files on a
+remote host reached over SSH/SFTP. **The remote host must be reachable from
+the Songhive instance** — every listing, download, and mutation originates
+server-side, so firewalls/NAT between Songhive and the SSH server must allow
+outbound connections to the configured host and port. Like S3, both regular
+users (when `allow_user_created_libraries` permits the provider) and admins
+can attach SFTP roots.
+
+An SFTP external library stores the following adapter config:
+
+| Key                        | Required | Default  | Description                                                            |
+|----------------------------|----------|----------|------------------------------------------------------------------------|
+| `host`                     | yes      | —        | Hostname or IP of the SSH server.                                      |
+| `port`                     | no       | `22`     | SSH port.                                                              |
+| `username`                 | yes      | —        | SSH login user.                                                        |
+| `password`                 | no       | —        | SSH password (stored encrypted).                                       |
+| `private_key`              | no       | —        | PEM/OpenSSH private key (stored encrypted).                            |
+| `private_key_passphrase`   | no       | —        | Passphrase for an encrypted `private_key` (stored encrypted).          |
+| `verify_host_key`          | no       | `true`   | Verify the server host key against `known_hosts` or the default files. |
+| `known_hosts`              | no       | —        | Inline OpenSSH `known_hosts` lines used when `verify_host_key` is on.  |
+| `root`                     | no       | `.`      | Remote directory to index; relative paths resolve against the login home. |
+| `connect_timeout`          | no       | `15`     | Seconds to wait for TCP connect and SSH login.                         |
+| `extensions`               | no       | all audio| List of file extensions to index.                                      |
+| `exclude`                  | no       | `[]`     | `fnmatch` patterns applied to root-relative paths.                     |
+| `recursive`                | no       | `true`   | Whether to scan subdirectories.                                        |
+| `follow_symlinks`          | no       | `false`  | Whether to follow symbolic links while scanning.                       |
+| `allow_hashing`            | no       | `true`   | Whether to compute audio hashes for new/updated files.                 |
+| `fast_hash`                | no       | `false`  | Hash raw file bytes instead of ffmpeg audio-only hashing.              |
+| `allow_write_tags`         | no       | `false`  | Rewrite embedded tags by re-uploading the file in place.               |
+| `allow_rename_source`      | no       | `false`  | Allow `rename_source` to rename remote files.                          |
+| `allow_delete_source`      | no       | `false`  | Allow `delete_source` to remove remote files.                          |
+
+Authentication accepts a password, an inline private key (optionally
+passphrase-protected), or both — asyncssh presents whichever the server
+accepts. With neither configured, the Songhive process's default SSH client
+keys and agent are tried, mirroring the S3 adapter's ambient-credentials
+behaviour.
+`verify_host_key` defaults on and checks the host key against the inline
+`known_hosts` data or the process's `~/.ssh/known_hosts`; disabling it must be
+an explicit `verify_host_key = false`, since an unverified connection is open
+to MITM impersonation (including credential theft when password auth is used).
+
+SFTP has no presignable URL, so `open_stream` always returns a proxied byte
+iterator (with byte-range support via positioned reads). Freshness follows
+the S3 scheduled-sync model: `iter_items` walks the remote tree with
+`READDIR` (metadata only) and reports an `mtime:size` change token via
+`detect_changes`, so unchanged trees cost a directory walk and no file
+transfer.
+
 #### Visibility, sharing, and secret redaction
 
 Every external library is backed by a normal `Library` row, so visibility
@@ -1079,8 +1130,8 @@ The web UI renders a per-provider configuration form instead of raw JSON.
 Provider form templates live in
 `frontend/src/config/externalLibraryProviderTemplates.ts`. Each template entry
 lists the JSON property name, i18n label/description keys, field type (string,
-password, number, boolean, enum, or comma-separated string array), and
-default value.
+password, number, boolean, enum, comma-separated string array, or multiline
+textarea), and default value.
 `ExternalLibraryEditView` switches the displayed fields whenever the provider
 `<select>` changes, and falls back to a plain JSON textarea for providers that do
 not have a template yet.

@@ -14,6 +14,21 @@ describe("externalLibraryProviderTemplates", () => {
     expect(template.fields.map((f) => f.name)).toContain("follow_symlinks");
   });
 
+  it("returns a template for the sftp provider", () => {
+    const template = getProviderTemplate("sftp");
+    expect(template.providerType).toBe("sftp");
+    const fields = template.fields.map((f) => f.name);
+    expect(fields).toContain("host");
+    expect(fields).toContain("username");
+    expect(fields).toContain("password");
+    expect(fields).toContain("private_key");
+    expect(fields).toContain("root");
+    expect(template.fields.find((f) => f.name === "host")!.required).toBe(true);
+    expect(template.fields.find((f) => f.name === "private_key")!.type).toBe(
+      "textarea",
+    );
+  });
+
   it("returns an empty template for unknown providers", () => {
     const template = getProviderTemplate("unknown");
     expect(template.providerType).toBe("unknown");
@@ -76,6 +91,34 @@ describe("externalLibraryProviderTemplates", () => {
       allow_hashing: true,
       fast_hash: false,
     });
+  });
+
+  it("keeps multiline textarea values intact", () => {
+    const template = getProviderTemplate("sftp");
+    const pem =
+      "-----BEGIN OPENSSH PRIVATE KEY-----\nabc123\n-----END OPENSSH PRIVATE KEY-----";
+    const values: Record<string, unknown> = {
+      host: "nas.local",
+      port: 22,
+      username: "music",
+      private_key: pem,
+      verify_host_key: false,
+      follow_symlinks: false,
+      recursive: true,
+      allow_hashing: true,
+      fast_hash: false,
+      allow_write_tags: false,
+      allow_rename_source: false,
+      allow_delete_source: false,
+    };
+
+    const config = buildProviderConfigFromTemplate(template, values);
+    expect(config.private_key).toBe(pem);
+    expect(config.host).toBe("nas.local");
+    expect(config.port).toBe(22);
+    expect(config).not.toHaveProperty("password");
+    expect(config).not.toHaveProperty("known_hosts");
+    expect(config).not.toHaveProperty("root");
   });
 
   it("parses comma-separated string arrays and skips empty optional arrays", () => {

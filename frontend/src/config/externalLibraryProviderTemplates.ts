@@ -4,7 +4,13 @@ export interface ProviderFieldOption {
 }
 
 export type ProviderFieldType =
-  "string" | "password" | "number" | "boolean" | "enum" | "string-array";
+  | "string"
+  | "password"
+  | "number"
+  | "boolean"
+  | "enum"
+  | "string-array"
+  | "textarea";
 
 export interface ProviderFieldTemplate {
   /** JSON configuration key for this field. */
@@ -277,6 +283,177 @@ export const providerTemplates: Record<string, ProviderTemplate> = {
       },
     ],
   },
+  sftp: {
+    providerType: "sftp",
+    fields: [
+      {
+        name: "host",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.host.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.host.description",
+        required: true,
+      },
+      {
+        name: "port",
+        type: "number",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.port.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.port.description",
+        default: 22,
+      },
+      {
+        name: "username",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.username.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.username.description",
+        required: true,
+      },
+      {
+        name: "password",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.password.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.password.description",
+      },
+      {
+        name: "private_key",
+        type: "textarea",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.private_key.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.private_key.description",
+      },
+      {
+        name: "private_key_passphrase",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.private_key_passphrase.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.private_key_passphrase.description",
+      },
+      {
+        name: "verify_host_key",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.verify_host_key.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.verify_host_key.description",
+        default: true,
+      },
+      {
+        name: "known_hosts",
+        type: "textarea",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.known_hosts.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.known_hosts.description",
+      },
+      {
+        name: "root",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.root.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.root.description",
+      },
+      {
+        name: "connect_timeout",
+        type: "number",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.connect_timeout.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.connect_timeout.description",
+        default: 15,
+      },
+      {
+        name: "follow_symlinks",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.follow_symlinks.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.follow_symlinks.description",
+        default: false,
+      },
+      {
+        name: "recursive",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.recursive.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.recursive.description",
+        default: true,
+      },
+      {
+        name: "extensions",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.extensions.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.extensions.description",
+        default: DEFAULT_LOCAL_EXTENSIONS,
+      },
+      {
+        name: "exclude",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.exclude.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.exclude.description",
+        default: "",
+      },
+      {
+        name: "allow_hashing",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.allow_hashing.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.allow_hashing.description",
+        default: true,
+      },
+      {
+        name: "fast_hash",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.fast_hash.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.fast_hash.description",
+        default: false,
+      },
+      {
+        name: "allow_write_tags",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.allow_write_tags.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.allow_write_tags.description",
+        default: false,
+      },
+      {
+        name: "allow_rename_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.allow_rename_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.allow_rename_source.description",
+        default: false,
+      },
+      {
+        name: "allow_delete_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.allow_delete_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.sftp.fields.allow_delete_source.description",
+        default: false,
+      },
+    ],
+  },
 };
 
 export function getProviderTemplate(providerType: string): ProviderTemplate {
@@ -335,7 +512,8 @@ export function buildProviderConfigFromTemplate(
     if (
       field.type === "string" ||
       field.type === "password" ||
-      field.type === "enum"
+      field.type === "enum" ||
+      field.type === "textarea"
     ) {
       const str = isEmpty(raw) ? "" : String(raw);
       if (str === "" && !field.required) continue;

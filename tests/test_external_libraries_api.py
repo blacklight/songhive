@@ -89,6 +89,7 @@ async def test_providers_lists_user_configurable(client, regular_user, auth_head
     providers = {p["provider_type"]: p for p in data}
     assert "fake" in providers
     assert "s3" in providers
+    assert "sftp" in providers
     fake = providers["fake"]
     assert fake["user_configurable"] is True
     assert "list_items" in fake["capabilities_summary"]

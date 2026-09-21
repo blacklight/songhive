@@ -27,6 +27,7 @@ redis>=5.0
 aiofiles>=23.2.1
 aioboto3>=12.4.0
 boto3>=1.28
+asyncssh>=2.14.2
 
 # Audio
 mutagen>=1.47
