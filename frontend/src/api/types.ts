@@ -1896,9 +1896,29 @@ export interface paths {
     put?: never;
     /**
      * Add Tracks To Playlist
-     * @description Add existing tracks, an album, or an artist to a playlist.
+     * @description Add existing tracks, an album, an artist, episodes, or a whole podcast to a playlist.
      */
     post: operations["add_tracks_to_playlist_api_v1_playlists__playlist_id__tracks_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/playlists/{playlist_id}/items": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Playlist Items Route
+     * @description List a playlist's items — tracks and podcast episodes — in order.
+     */
+    get: operations["list_playlist_items_route_api_v1_playlists__playlist_id__items_get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1916,7 +1936,7 @@ export interface paths {
     put?: never;
     /**
      * Remove Tracks From Playlist
-     * @description Remove existing tracks from a playlist.
+     * @description Remove existing tracks or podcast episodes from a playlist.
      */
     post: operations["remove_tracks_from_playlist_api_v1_playlists__playlist_id__tracks_remove_post"];
     delete?: never;
@@ -1936,7 +1956,7 @@ export interface paths {
     put?: never;
     /**
      * Reorder Playlist Tracks Route
-     * @description Reorder tracks within a playlist.
+     * @description Reorder items within a playlist (``item_ids`` may mix tracks and episodes).
      */
     post: operations["reorder_playlist_tracks_route_api_v1_playlists__playlist_id__tracks_reorder_post"];
     delete?: never;
@@ -2886,6 +2906,238 @@ export interface paths {
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/podcasts/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Podcasts
+     * @description List podcasts the current user follows.
+     *
+     *     ``sort_by`` accepts ``latest`` (newest episode first, the default),
+     *     ``episodes``, ``unplayed`` or ``name``; ``q`` filters on title, author
+     *     and description.
+     */
+    get: operations["list_podcasts_api_v1_podcasts__get"];
+    put?: never;
+    /**
+     * Follow Podcast
+     * @description Follow a podcast by RSS/Atom feed URL.
+     */
+    post: operations["follow_podcast_api_v1_podcasts__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/podcasts/opml": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export Opml
+     * @description Export the current user's podcast subscriptions as an OPML document.
+     */
+    get: operations["export_opml_api_v1_podcasts_opml_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/podcasts/opml/import": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Import Opml
+     * @description Follow every feed listed in an uploaded OPML document.
+     *
+     *     Each feed is fetched and parsed synchronously; feeds that fail are
+     *     reported in ``errors`` without aborting the rest of the import.
+     */
+    post: operations["import_opml_api_v1_podcasts_opml_import_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/podcasts/sync": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Sync Config
+     * @description Return the current user's GPodder sync configuration.
+     */
+    get: operations["get_sync_config_api_v1_podcasts_sync_get"];
+    /**
+     * Put Sync Config
+     * @description Configure GPodder subscription sync for the current user.
+     *
+     *     ``mode`` is ``pull`` (apply remote changes only) or ``bidirectional``
+     *     (also upload local changes; on conflict the most recent change wins —
+     *     see the sync service for how that is resolved). The credentials are
+     *     verified against the server before the configuration is saved.
+     */
+    put: operations["put_sync_config_api_v1_podcasts_sync_put"];
+    post?: never;
+    /**
+     * Delete Sync Config
+     * @description Remove the current user's GPodder sync configuration and change log.
+     */
+    delete: operations["delete_sync_config_api_v1_podcasts_sync_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/podcasts/sync/now": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sync Now
+     * @description Run a subscription sync immediately for the current user.
+     */
+    post: operations["sync_now_api_v1_podcasts_sync_now_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/podcasts/{podcast_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Podcast
+     * @description Get a podcast by id.
+     */
+    get: operations["get_podcast_api_v1_podcasts__podcast_id__get"];
+    put?: never;
+    post?: never;
+    /**
+     * Unfollow Podcast
+     * @description Unfollow a podcast (drops the subscription, not the shared feed row).
+     */
+    delete: operations["unfollow_podcast_api_v1_podcasts__podcast_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/podcasts/{podcast_id}/refresh": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Refresh Podcast
+     * @description Re-fetch and reparse the podcast's feed right now.
+     */
+    post: operations["refresh_podcast_api_v1_podcasts__podcast_id__refresh_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/podcasts/{podcast_id}/episodes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Episodes
+     * @description List a podcast's episodes, newest first.
+     */
+    get: operations["list_episodes_api_v1_podcasts__podcast_id__episodes_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/podcasts/episodes/{episode_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Episode
+     * @description Get a single podcast episode by id.
+     */
+    get: operations["get_episode_api_v1_podcasts_episodes__episode_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/podcasts/episodes/{episode_id}/played": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mark Episode Played
+     * @description Mark an episode as played for the current user (idempotent).
+     */
+    post: operations["mark_episode_played_api_v1_podcasts_episodes__episode_id__played_post"];
+    /**
+     * Mark Episode Unplayed
+     * @description Clear the played mark for an episode.
+     */
+    delete: operations["mark_episode_unplayed_api_v1_podcasts_episodes__episode_id__played_delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -4864,7 +5116,7 @@ export interface components {
     };
     /**
      * AddPlaylistTracksRequest
-     * @description Request body for adding tracks, albums, or artists to a playlist.
+     * @description Request body for adding tracks, albums, artists, or podcast episodes to a playlist.
      */
     AddPlaylistTracksRequest: {
       /** Track Ids */
@@ -4873,6 +5125,10 @@ export interface components {
       album_id?: string | null;
       /** Artist Id */
       artist_id?: string | null;
+      /** Episode Ids */
+      episode_ids?: string[] | null;
+      /** Podcast Id */
+      podcast_id?: string | null;
       /**
        * Allow Duplicates
        * @default false
@@ -5493,6 +5749,7 @@ export interface components {
      */
     AuditTargetType:
       | "activity"
+      | "actor"
       | "album"
       | "api_token"
       | "artist"
@@ -5503,6 +5760,7 @@ export interface components {
       | "file"
       | "genre"
       | "images"
+      | "instance"
       | "invite"
       | "library"
       | "oauth_client"
@@ -5525,6 +5783,11 @@ export interface components {
     Body_bulk_upload_tracks_api_v1_libraries__library_id__tracks_bulk_post: {
       /** Files */
       files: string[];
+    };
+    /** Body_import_opml_api_v1_podcasts_opml_import_post */
+    Body_import_opml_api_v1_podcasts_opml_import_post: {
+      /** File */
+      file: string;
     };
     /** Body_oauth_introspect_api_v1_auth_oauth_introspect_post */
     Body_oauth_introspect_api_v1_auth_oauth_introspect_post: {
@@ -6808,6 +7071,32 @@ export interface components {
       scope?: string | null;
     };
     /**
+     * OpmlImportResponse
+     * @description Summary of an OPML subscription import.
+     */
+    OpmlImportResponse: {
+      /**
+       * Subscribed
+       * @default 0
+       */
+      subscribed: number;
+      /**
+       * Skipped
+       * @default 0
+       */
+      skipped: number;
+      /**
+       * Failed
+       * @default 0
+       */
+      failed: number;
+      /**
+       * Errors
+       * @default []
+       */
+      errors: string[];
+    };
+    /**
      * PasswordResetConfirmRequest
      * @description Request body for confirming a password reset.
      */
@@ -6858,6 +7147,64 @@ export interface components {
       description?: string | null;
     };
     /**
+     * PlaylistEpisodeItem
+     * @description Podcast episode data embedded in a playlist item.
+     */
+    PlaylistEpisodeItem: {
+      /** Id */
+      id: string;
+      /** Podcast Id */
+      podcast_id: string;
+      /** Podcast Title */
+      podcast_title: string;
+      /** Title */
+      title: string;
+      /** Description */
+      description?: string | null;
+      /** Link */
+      link?: string | null;
+      /** Image Url */
+      image_url?: string | null;
+      /** Audio Url */
+      audio_url: string;
+      /** Audio Type */
+      audio_type?: string | null;
+      /** Audio Length */
+      audio_length?: number | null;
+      /** Duration Seconds */
+      duration_seconds?: number | null;
+      /** Published At */
+      published_at?: string | null;
+      /** Season Number */
+      season_number?: number | null;
+      /** Episode Number */
+      episode_number?: number | null;
+      /** Episode Type */
+      episode_type?: string | null;
+      /**
+       * Played
+       * @default false
+       */
+      played: boolean;
+    };
+    /**
+     * PlaylistItemResponse
+     * @description One ordered playlist entry — a track or a podcast episode.
+     */
+    PlaylistItemResponse: {
+      /** Item Id */
+      item_id: string;
+      /** Position */
+      position: number;
+      /**
+       * Type
+       * @enum {string}
+       */
+      type: "track" | "episode";
+      track?: components["schemas"]["TrackResponse"] | null;
+      episode?: components["schemas"]["PlaylistEpisodeItem"] | null;
+    };
+    /**
      * PlaylistResponse
      * @description Public playlist response.
      */
@@ -6895,11 +7242,16 @@ export interface components {
     };
     /**
      * PlaylistStatsResponse
-     * @description Aggregate statistics for a playlist's accessible tracks.
+     * @description Aggregate statistics for a playlist's accessible items.
      */
     PlaylistStatsResponse: {
       /** Track Count */
       track_count: number;
+      /**
+       * Episode Count
+       * @default 0
+       */
+      episode_count: number;
       /** Total Duration */
       total_duration: number;
     };
@@ -6913,6 +7265,197 @@ export interface components {
       /** Description */
       description?: string | null;
       visibility?: components["schemas"]["Visibility"] | null;
+    };
+    /**
+     * PodcastEpisodeResponse
+     * @description A single podcast episode; ``audio_url`` is the remote enclosure.
+     */
+    PodcastEpisodeResponse: {
+      /** Id */
+      id: string;
+      /** Podcast Id */
+      podcast_id: string;
+      /** Guid */
+      guid: string;
+      /** Title */
+      title: string;
+      /** Description */
+      description?: string | null;
+      /** Link */
+      link?: string | null;
+      /** Image Url */
+      image_url?: string | null;
+      /** Audio Url */
+      audio_url: string;
+      /** Audio Type */
+      audio_type?: string | null;
+      /** Audio Length */
+      audio_length?: number | null;
+      /** Duration Seconds */
+      duration_seconds?: number | null;
+      /** Published At */
+      published_at?: string | null;
+      /** Season Number */
+      season_number?: number | null;
+      /** Episode Number */
+      episode_number?: number | null;
+      /** Episode Type */
+      episode_type?: string | null;
+      /**
+       * Played
+       * @default false
+       */
+      played: boolean;
+    };
+    /**
+     * PodcastFollowRequest
+     * @description Follow a podcast by RSS/Atom feed URL.
+     */
+    PodcastFollowRequest: {
+      /** Feed Url */
+      feed_url: string;
+    };
+    /**
+     * PodcastResponse
+     * @description Public podcast response.
+     */
+    PodcastResponse: {
+      /** Id */
+      id: string;
+      /** Feed Url */
+      feed_url: string;
+      /** Title */
+      title: string;
+      /** Description */
+      description?: string | null;
+      /** Author */
+      author?: string | null;
+      /** Link */
+      link?: string | null;
+      /** Image Url */
+      image_url?: string | null;
+      /** Language */
+      language?: string | null;
+      /**
+       * Categories
+       * @default []
+       */
+      categories: string[];
+      /**
+       * Explicit
+       * @default false
+       */
+      explicit: boolean;
+      /**
+       * Episode Count
+       * @default 0
+       */
+      episode_count: number;
+      /**
+       * Unplayed Count
+       * @default 0
+       */
+      unplayed_count: number;
+      /** Latest Episode At */
+      latest_episode_at?: string | null;
+      /** Last Fetched At */
+      last_fetched_at?: string | null;
+      /** Last Error */
+      last_error?: string | null;
+      /**
+       * Following
+       * @default false
+       */
+      following: boolean;
+    };
+    /**
+     * PodcastSyncConfigRequest
+     * @description Create or update the caller's GPodder sync configuration.
+     */
+    PodcastSyncConfigRequest: {
+      /**
+       * Server Type
+       * @default gpodder
+       * @enum {string}
+       */
+      server_type: "gpodder" | "nextcloud";
+      /** Server Url */
+      server_url: string;
+      /** Username */
+      username: string;
+      /** Password */
+      password?: string | null;
+      /**
+       * Device Id
+       * @default songhive
+       */
+      device_id: string;
+      /**
+       * Mode
+       * @default pull
+       * @enum {string}
+       */
+      mode: "pull" | "bidirectional";
+      /**
+       * Enabled
+       * @default true
+       */
+      enabled: boolean;
+    };
+    /**
+     * PodcastSyncConfigResponse
+     * @description The caller's GPodder sync configuration (password never returned).
+     */
+    PodcastSyncConfigResponse: {
+      /** Server Type */
+      server_type: string;
+      /** Server Url */
+      server_url: string;
+      /** Username */
+      username: string;
+      /** Device Id */
+      device_id: string;
+      /** Mode */
+      mode: string;
+      /** Enabled */
+      enabled: boolean;
+      /** Has Password */
+      has_password: boolean;
+      /** Last Synced At */
+      last_synced_at?: string | null;
+      /** Last Error */
+      last_error?: string | null;
+    };
+    /**
+     * PodcastSyncResultResponse
+     * @description Summary of a single sync run.
+     */
+    PodcastSyncResultResponse: {
+      /**
+       * Subscribed
+       * @default 0
+       */
+      subscribed: number;
+      /**
+       * Unsubscribed
+       * @default 0
+       */
+      unsubscribed: number;
+      /**
+       * Pushed Adds
+       * @default 0
+       */
+      pushed_adds: number;
+      /**
+       * Pushed Removes
+       * @default 0
+       */
+      pushed_removes: number;
+      /**
+       * Errors
+       * @default []
+       */
+      errors: string[];
     };
     /**
      * PreviewCardResponse
@@ -7284,25 +7827,33 @@ export interface components {
     };
     /**
      * RemovePlaylistTracksRequest
-     * @description Request body for removing tracks from a playlist.
+     * @description Request body for removing tracks or podcast episodes from a playlist.
      */
     RemovePlaylistTracksRequest: {
       /** Track Ids */
-      track_ids: string[];
+      track_ids?: string[] | null;
+      /** Episode Ids */
+      episode_ids?: string[] | null;
     };
     /**
      * ReorderPlaylistTracksRequest
-     * @description Request body for reordering tracks in a playlist.
+     * @description Request body for reordering items in a playlist.
+     *
+     *     ``item_ids`` are entity ids — track ids or podcast episode ids — moved as
+     *     a block to ``position``. ``track_ids`` is a deprecated alias for
+     *     ``item_ids``.
      */
     ReorderPlaylistTracksRequest: {
+      /** Item Ids */
+      item_ids?: string[] | null;
       /** Track Ids */
-      track_ids: string[];
+      track_ids?: string[] | null;
       /** Position */
       position?: number | null;
     };
     /**
      * ReorderPlaylistTracksResponse
-     * @description Response body for a successful playlist track reorder.
+     * @description Response body for a successful playlist item reorder.
      */
     ReorderPlaylistTracksResponse: {
       /**
@@ -7310,6 +7861,8 @@ export interface components {
        * @default true
        */
       reordered: boolean;
+      /** Item Ids */
+      item_ids: string[];
       /** Track Ids */
       track_ids: string[];
       /** Count */
@@ -12295,6 +12848,48 @@ export interface operations {
       };
     };
   };
+  list_playlist_items_route_api_v1_playlists__playlist_id__items_get: {
+    parameters: {
+      query?: {
+        /** @description Search items by title, artist, album, podcast, tag, or genre */
+        q?: string | null;
+        limit?: number;
+        offset?: number;
+        /** @description Field to sort by */
+        sort_by?: string | null;
+        /** @description Sort direction (asc or desc) */
+        sort_dir?: string | null;
+        /** @description Comma-separated relations to include. Allowed: album, artist, owner */
+        include?: string | null;
+      };
+      header?: never;
+      path: {
+        playlist_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlaylistItemResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   remove_tracks_from_playlist_api_v1_playlists__playlist_id__tracks_remove_post: {
     parameters: {
       query?: never;
@@ -14159,6 +14754,433 @@ export interface operations {
         content: {
           "application/json": unknown;
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_podcasts_api_v1_podcasts__get: {
+    parameters: {
+      query?: {
+        q?: string | null;
+        sort_by?: string;
+        sort_dir?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PodcastResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  follow_podcast_api_v1_podcasts__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PodcastFollowRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PodcastResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  export_opml_api_v1_podcasts_opml_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  import_opml_api_v1_podcasts_opml_import_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_import_opml_api_v1_podcasts_opml_import_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OpmlImportResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_sync_config_api_v1_podcasts_sync_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PodcastSyncConfigResponse"];
+        };
+      };
+    };
+  };
+  put_sync_config_api_v1_podcasts_sync_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PodcastSyncConfigRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PodcastSyncConfigResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_sync_config_api_v1_podcasts_sync_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  sync_now_api_v1_podcasts_sync_now_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PodcastSyncResultResponse"];
+        };
+      };
+    };
+  };
+  get_podcast_api_v1_podcasts__podcast_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        podcast_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PodcastResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unfollow_podcast_api_v1_podcasts__podcast_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        podcast_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  refresh_podcast_api_v1_podcasts__podcast_id__refresh_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        podcast_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PodcastResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_episodes_api_v1_podcasts__podcast_id__episodes_get: {
+    parameters: {
+      query?: {
+        sort?: string;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        podcast_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_episode_api_v1_podcasts_episodes__episode_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        episode_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mark_episode_played_api_v1_podcasts_episodes__episode_id__played_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        episode_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mark_episode_unplayed_api_v1_podcasts_episodes__episode_id__played_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        episode_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {
