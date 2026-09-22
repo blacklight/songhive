@@ -6,6 +6,43 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `external`: S3 external library provider. External libraries can now
+  live on S3-compatible storage, with presigned or proxied streaming,
+  hashing and sync operations. Redacted secrets are preserved on
+  config PATCH, and an external library's visibility is propagated to
+  the synced tracks. ([`e811c8b`](https://git.platypush.tech/blacklight/songhive/commit/e811c8bd68542f177cbd070a6b0ed6456d68ecca)).
+- `external`: SFTP external library provider, backed by `asyncssh`,
+  with streaming, hashing and mutations, plus a new UI provider
+  template. ([`641f862`](https://git.platypush.tech/blacklight/songhive/commit/641f862392af11414fe2d455b38e1cbc6e148231)).
+- `auth`: Two-factor authentication with TOTP and WebAuthn. Login
+  returns an MFA challenge when 2FA is enabled; enrollment, recovery
+  codes and MFA login are managed from the new profile Security tab,
+  and admins can clear a user's 2FA via the admin UI or CLI.
+  ([`f68c57b`](https://git.platypush.tech/blacklight/songhive/commit/f68c57b4ecdf9f3b9c351c944710d7390a9c50aa)).
+- `podcasts`: Podcast support — follow/unfollow podcasts from RSS
+  feeds, import/export subscriptions to/from OPML, and automatic
+  refresh via Celery tasks.
+  ([`9a4d866`](https://git.platypush.tech/blacklight/songhive/commit/9a4d866b2efb399bb5c4c3fb63c85121e93a7cad)).
+- `podcasts`: Track played episodes with per-user play marks and
+  unplayed stats. Podcasts expose `unplayed_count` and
+  `latest_episode_at` with search/sort, the UI shows unplayed badges
+  and an episode played toggle, and episodes are marked played from
+  the player at the listen threshold.
+  ([`943182d`](https://git.platypush.tech/blacklight/songhive/commit/943182d53beed37b321d050407ea4e7d97fe5c1b)).
+- `podcasts`: GPodder subscription sync and upstream feed discovery.
+  Sync configurations can be managed and triggered from a new profile
+  tab, subscription changes are recorded for bidirectional sync, and
+  podcasts advertise their upstream RSS feed via a
+  `<link rel="alternate">` head tag.
+  ([`676367d`](https://git.platypush.tech/blacklight/songhive/commit/676367db70317bf463821724a0912a4583f17c83)).
+- `playlists`: Podcast episodes can now be added to playlists, with
+  mixed add/remove/reorder APIs, episode-aware playlist stats and RSS
+  feeds, and add-to-playlist/bulk actions in the UI.
+  ([`c2ff7c7`](https://git.platypush.tech/blacklight/songhive/commit/c2ff7c7846b95035bfbb493ec0139995e56e0f99)).
+- `collections`: Users can save/remove items to their collection, and
+  browse APIs accept a `collection=` filter with an `in_collection`
+  flag; frontend lists and entity actions gained save/remove actions.
+  ([`0c69d00`](https://git.platypush.tech/blacklight/songhive/commit/0c69d002eac22886871b58dd7f5883322c45a06e)).
 - `scrobbling`: scrobble plays to Audioscrobbler-compatible services
   (Last.fm and Libre.fm). The instance registers an API key pair per
   service under `[scrobbling]`; users connect their account from
@@ -62,6 +99,21 @@ All notable changes to this project will be documented in this file.
   the loop was busy inside the triggering request, so lookups of remote
   actors/objects on instances that hadn't cached our key timed out
   unconditionally — and stalled every other request meanwhile.
+
+### Fixed
+
+- `settings`: Fixed the CSS max-width scope of the settings page.
+  ([`19478e6`](https://git.platypush.tech/blacklight/songhive/commit/19478e6f8402c2ec78b909b805e2b3d808b9f4c0)).
+- `admin`: Fixed moderation forms layout on smaller viewports.
+  ([`3cc5ed4`](https://git.platypush.tech/blacklight/songhive/commit/3cc5ed4b94bfd05112574b5bff82d6ba872da930)).
+
+### Changed
+
+- `docs`: Extended the README with screenshots, expanded feature
+  descriptions and documentation of user-facing configuration sections,
+  and added documentation about the mopidy-songhive extensions.
+  ([`a15f275`](https://git.platypush.tech/blacklight/songhive/commit/a15f275073f723914280e63d8d2d1786f746e747),
+  [`928af75`](https://git.platypush.tech/blacklight/songhive/commit/928af757865285a528d1c701cbb8ebac41084861)).
 
 ## 0.2.0
 
