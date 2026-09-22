@@ -11,22 +11,27 @@
 
 <!-- toc -->
 
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Installation](#installation)
-  * [Docker](#docker)
+- [🌟 Overview](#%F0%9F%8C%9F-overview)
+- [⚡ Features](#%E2%9A%A1-features)
+  * [🎵 Music streaming](#%F0%9F%8E%B5-music-streaming)
+  * [📢 Social & federated](#%F0%9F%93%A2-social--federated)
+  * [🔁 Sharing & privacy](#%F0%9F%94%81-sharing--privacy)
+  * [🛠️ Platform](#%F0%9F%9B%A0%EF%B8%8F-platform)
+- [📐 Architecture](#%F0%9F%93%90-architecture)
+- [📦 Installation](#%F0%9F%93%A6-installation)
+  * [🏗️ Docker](#%F0%9F%8F%97%EF%B8%8F-docker)
     + [Latest image](#latest-image)
     + [From a local checkout](#from-a-local-checkout)
-  * [pip](#pip)
+  * [🐍 pip](#%F0%9F%90%8D-pip)
     + [Latest stable package](#latest-stable-package)
     + [From a local checkout](#from-a-local-checkout-1)
-  * [nginx setup](#nginx-setup)
-- [Configuration](#configuration)
+  * [🌐 nginx setup](#%F0%9F%8C%90-nginx-setup)
+- [⚙️ Configuration](#%E2%9A%99%EF%B8%8F-configuration)
   * [Getting the default configuration](#getting-the-default-configuration)
   * [Base configuration](#base-configuration)
   * [From environment variables](#from-environment-variables)
-- [Running the service](#running-the-service)
+  * [User-facing features and toggles](#user-facing-features-and-toggles)
+- [⚡ Running the service](#%E2%9A%A1-running-the-service)
   * [Docker installation](#docker-installation)
   * [pip installation](#pip-installation)
     + [Celery](#celery)
@@ -35,54 +40,114 @@
   * [Creating the admin user](#creating-the-admin-user)
     + [Docker installation](#docker-installation-1)
     + [pip installation](#pip-installation-1)
-- [Testing the installation](#testing-the-installation)
-- [Integrations](#integrations)
+- [▶️ Testing the installation](#%E2%96%B6%EF%B8%8F-testing-the-installation)
+- [🧩 Integrations](#%F0%9F%A7%A9-integrations)
   * [Subsonic-compatible clients](#subsonic-compatible-clients)
   * [Mopidy](#mopidy)
-- [Development](#development)
+- [🛠️ Development](#%F0%9F%9B%A0%EF%B8%8F-development)
   * [Frontend](#frontend)
-- [API](#api)
-- [License](#license)
+- [🔌 API](#%F0%9F%94%8C-api)
+- [📜 License](#%F0%9F%93%9C-license)
 
 <!-- tocstop -->
 
 A federated and self-hosted music sharing service, built with ActivityPub
 federation support.
 
-## Overview
+## 🌟 Overview
 
-Songhive is a music streaming platform similar to
-[Funkwhale](https://funkwhale.audio), with a focus on better federation. It
-allows users to upload, organize, and stream their music library while
-federating with other instances (including Mastodon) via ActivityPub.
+Songhive is a self-hosted music streaming and sharing platform — think
+[Funkwhale](https://funkwhale.audio) meets Mastodon — where your music library
+lives on *your* hardware, but your music can travel across the fediverse.
 
-## Features
+Where most self-hosted media servers (Jellyfin, Mopidy, plain Subsonic) are
+single-player islands, and Funkwhale's federation is mostly library-oriented,
+Songhive treats music as **social content**: tracks, albums and playlists are
+first-class ActivityPub objects that can be published, followed, replied to,
+boosted and quoted from Mastodon and any other ActivityPub-compatible service.
+It is a music library, a streaming server, and a fediverse social hub in a
+single package.
 
-- **Music Library**: Upload and organize artists, albums, and tracks
-- **Streaming**: Audio streaming with on-the-fly transcoding (MP3, OGG, FLAC, AAC, Opus)
-- **Metadata Enrichment**: Fetch metadata from external services
-- **Federation**: ActivityPub support via
+![Screenshot of an instance's home page on
+desktop](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-full.png)
+![Screenshot of an instance's home page on
+mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federated.png)
+
+## ⚡ Features
+
+### 🎵 Music streaming
+
+- **Music Library**: Upload and organize artists, albums, and tracks, with
+  automatic tag extraction, duplicate detection, and metadata enrichment from
+  MusicBrainz and the Cover Art Archive
+- **Streaming**: Audio streaming with on-the-fly transcoding (MP3, OGG, FLAC,
+  AAC, Opus), range requests, and per-user/per-role bitrate caps
+- **Playlists & Radios**: Create playlists and dynamic radio stations
+- **Listening history, favorites and scrobbling**: every play is recorded, and
+  submissions to Last.fm and Libre.fm work out of the box
+- **Subsonic API**: Compatibility layer for Subsonic clients — use the mobile
+  or desktop player you already have (see
+  [Subsonic-compatible clients](#subsonic-compatible-clients))
+- **Mopidy**: browse and play your instance's library from a Mopidy server via
+  the `mopidy-songhive` extension
+
+### 📢 Social & federated
+
+- **Federation**: Full ActivityPub support via
   [pubby](https://github.com/blacklight/pubby) — federate with Mastodon and
-  other AP-compatible services
-- **Remote discovery**: Explicit lookup of remote actors, posts and resources by
-  handle or URL — SSRF-guarded, domain-moderated, cached, and gated by a
+  other AP-compatible services. Follow remote actors, receive their posts in
+  your timeline, and reply, boost, quote and like from Songhive or from your
+  Mastodon client
+- **Posts & interactions**: Mastodon-style statuses with mentions, hashtags,
+  Markdown support, threaded replies, quotes and link preview cards
+- **Remote discovery**: Explicit lookup of remote actors, posts and resources
+  by handle or URL — SSRF-guarded, domain-moderated, cached, and gated by a
   per-instance access policy
+- **Notifications**: in-app real-time notifications over WebSocket, with
+  per-type email and daily-digest preferences
 - **Moderation**: Mastodon-style moderation — users can mute/block local and
   remote actors; admins can limit/suspend actors and defederate or restrict
   instances to followers-only delivery. Users can also report accounts to local
   moderators, optionally forwarding the report to the reported actor's home
   instance via ActivityPub `Flag`
-- **Playlists & Radios**: Create playlists and dynamic radio stations
-- **Multi-user**: User registration, profiles, and admin management
-- **OAuth2 Provider**: Third-party app authorization
-- **Subsonic API**: Compatibility layer for Subsonic clients (see
-  [Subsonic-compatible clients](#subsonic-compatible-clients))
-- **Flexible Storage**: Local filesystem or S3-compatible object storage
-- **External Libraries**: Attach external music storage (e.g. cloud adapters) to
-  Songhive libraries; index, stream, and write metadata back to the provider.
-  See [docs/ARCHITECTURE.md#external-libraries](docs/ARCHITECTURE.md#external-libraries).
+- **RSS/Atom feeds**: every profile, artist, playlist, library, tag and genre
+  exposes RSS 2.0 and Atom feeds, with `<link rel="alternate">` discovery tags
+  served to feed readers
 
-## Architecture
+### 🔁 Sharing & privacy
+
+- **Fine-grained visibility**: keep tracks, albums, playlists and libraries
+  `private`, `local` (instance-only) or `public`
+- **Sharing**: grant access to specific users, or generate revocable short
+  links that render a preview page with an audio player for anyone
+- **Embeddables**: embed public tracks and collections on any web page via
+  `<audio>` tags, Markdown links, `<script>` widgets or iframes — with
+  `Access-Control-Allow-Origin` on media endpoints so Fediverse clients can
+  embed your audio too
+- **Webmentions**: bidirectional notifications support for public content. Any
+  blog or social media platform that links to your song and supports Webmentions
+  will send you a notification. Every content you share, link or comment on on a
+  source that supports Webmentions will send a Webmention back to the source
+
+### 🛠️ Platform
+
+- **Multi-user**: User registration (open, invite-only or closed), profiles
+  with per-user profile visibility, and admin management
+- **OAuth2 Provider**: Third-party app authorization, plus API tokens for
+  scripts and Subsonic clients
+- **Flexible Storage**: Local filesystem or S3-compatible object storage
+- **External Libraries**: Attach external music storage (local folders, S3,
+  SFTP, cloud adapters) to Songhive libraries; index, stream, and write
+  metadata back to the provider.
+  See [docs/ARCHITECTURE.md#external-libraries](docs/ARCHITECTURE.md#external-libraries).
+- **Metadata enrichment**: automatic MusicBrainz MBID lookup, cover art from
+  the Cover Art Archive, and artist image fetching; tags are written back to
+  the audio files themselves (content-hashed, so re-tagging never moves files)
+
+![Screenshot of a profile
+view](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/profile-view.png)
+
+## 📐 Architecture
 
 - **Backend**: FastAPI (REST API) + Tornado (WebSocket, streaming, process server)
 - **Models**: Pydantic (validation) + SQLAlchemy (async ORM)
@@ -91,12 +156,12 @@ federating with other instances (including Mastodon) via ActivityPub.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
 
-## Installation
+## 📦 Installation
 
 Songhive can be run either as a complete Docker stack or installed locally with
 `pip`.
 
-### Docker
+### 🏗️ Docker
 
 The Docker Compose setup builds the frontend and backend images, starts
 PostgreSQL and Redis, and wires everything together behind an Nginx reverse
@@ -128,7 +193,7 @@ export PGID=$(id -g)
 docker compose build
 ```
 
-### pip
+### 🐍 pip
 
 This path is useful for local development or running on an existing Python host.
 A published package is also available on PyPI and ships the built web UI, so the
@@ -172,12 +237,12 @@ npm run build
 cd ..
 ```
 
-### nginx setup
+### 🌐 nginx setup
 
 If you are planning to serve Songhive behind a reverse proxy, you can reuse the
 [`nginx.conf`](./docker/nginx.conf) used by the Docker setup.
 
-## Configuration
+## ⚙️ Configuration
 
 ### Getting the default configuration
 
@@ -238,7 +303,34 @@ becomes:
 SONGHIVE_DATABASE__URL="postgresql+asyncpg://songhive:songhive@localhost:5432/songhive"
 ```
 
-## Running the service
+### User-facing features and toggles
+
+Beyond the base setup, `config.toml` exposes a few knobs for the features
+described above. Most of them are enabled by default — check
+[`config.toml.example`](./config.toml.example) for the full annotated list.
+
+| Section | What it controls |
+|---------|------------------|
+| `[auth] registration_mode` | `open`, `invite-only`, `approval-required` or `closed` registration |
+| `[federation] enabled` / `instance_domain` | ActivityPub federation; also enables remote discovery and Webmention delivery |
+| `[webmentions]` | Incoming/outgoing Webmention link-backs for public content |
+| `[feeds] enabled` | RSS 2.0 / Atom feeds under `/feeds` |
+| `[streaming]` | Default and max audio bitrate (globally or per user role), transcode cache |
+| `[subsonic] enabled` | The Subsonic compatibility layer (on by default) |
+| `[scrobbling]` | Instance API keys for Last.fm / Libre.fm scrobbling |
+| `[musicbrainz]` | Metadata enrichment: MBID lookup, cover art and artist images |
+| `[email]` | SMTP settings for verification emails, password resets and notification digests |
+
+Some of these can also be changed at runtime from the admin UI (stored as
+instance settings) without restarting the server — e.g. link preview cards and
+registration mode.
+
+Users control their own experience from the web UI's **Settings** page:
+profile visibility (`public`/`local`/`private`), notification preferences
+(in-app, email, daily digest), API tokens, active sessions, mutes and blocks,
+and scrobbling thresholds.
+
+## ⚡ Running the service
 
 ### Docker installation
 
@@ -357,7 +449,7 @@ songhive -c "$SONGHIVE_CONFIG" admin create-user \
     --admin
 ```
 
-## Testing the installation
+## ▶️ Testing the installation
 
 Open:
 
@@ -365,7 +457,7 @@ Open:
 - **Swagger UI**: http://localhost:8000/swagger-ui/
 - **OpenAPI spec**: http://localhost:8000/openapi.json
 
-## Integrations
+## 🧩 Integrations
 
 ### Subsonic-compatible clients
 
@@ -401,6 +493,9 @@ Some Subsonic-compatible clients:
 The adapter is enabled by default; set `subsonic.enabled = false` in
 `config.toml` to disable it.
 
+![Screenshot of a Songhive library rendered from a Subsonic client on
+Android](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/subsonic-android.png)
+
 ### Mopidy
 
 The `mopidy-songhive` extension can be installed in your Mopidy instance:
@@ -415,7 +510,7 @@ pip install mopidy-songhive
 It allows you to browse and play your libraries, playlists, albums etc. directly
 from your Mopidy instance.
 
-## Development
+## 🛠️ Development
 
 ```bash
 # Run tests
@@ -440,7 +535,7 @@ npm run dev     # Development server
 npm run build   # Production build (outputs to songhive/static/)
 ```
 
-## API
+## 🔌 API
 
 REST API available at `/api/v1/`:
 
@@ -464,6 +559,6 @@ WebSocket: `/ws/events` (real-time notifications)
 
 Federation: `/.well-known/webfinger`, `/ap/actor`, `/ap/inbox`, `/ap/outbox`
 
-## License
+## 📜 License
 
-AGPL-3.0
+[AGPL-3.0](./LICENSE)
