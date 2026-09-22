@@ -600,6 +600,74 @@ class ExternalLibrariesConfig(BaseSettings):
         return value
 
 
+class StreamsConfig(BaseSettings):
+    """Server-side audio output stream configuration."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable server-side audio output streaming.",
+    )
+    allow_user_created_outputs: bool = Field(
+        default=False,
+        description="Whether non-admin users may create audio output streams.",
+    )
+    allowed_user_providers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Provider types non-admin users may configure when "
+            "allow_user_created_outputs=true; empty means all user_configurable providers."
+        ),
+    )
+    denied_user_providers: list[str] = Field(
+        default_factory=list,
+        description="Provider types non-admin users may never configure, regardless of allowed_user_providers.",
+    )
+    allowed_output_hosts: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Hosts that user-created Icecast outputs may target; empty means no extra "
+            "restriction beyond allow_user_created_outputs. Admins are exempt."
+        ),
+    )
+    icecast_ffmpeg_path: Optional[str] = Field(
+        default=None,
+        description="Path to the ffmpeg binary for Icecast; falls back to streaming.ffmpeg_path.",
+    )
+    background_idle_timeout_seconds: int = Field(
+        default=900,
+        ge=0,
+        description="Seconds a background stream may stay idle before stopping.",
+    )
+    default_sample_rate: int = Field(
+        default=44100,
+        gt=0,
+        description="Default output sample rate in Hz.",
+    )
+    default_bitrate: int = Field(
+        default=192,
+        gt=0,
+        description="Default output bitrate in kbps.",
+    )
+
+    @field_validator(
+        "allowed_user_providers",
+        "denied_user_providers",
+        "allowed_output_hosts",
+        mode="before",
+    )
+    @classmethod
+    def _parse_providers(cls, value):
+        if isinstance(value, str):
+            return ServerConfig._split_cors_origins(value)
+        if isinstance(value, list):
+            return [
+                item
+                for sub in (ServerConfig._split_cors_origins(v) if isinstance(v, str) else [v] for v in value)
+                for item in sub
+            ]
+        return value
+
+
 class SubsonicConfig(BaseSettings):
     """Subsonic API adapter configuration."""
 
@@ -701,5 +769,6 @@ class SonghiveConfig(BaseSettings):
     imports: ImportConfig = Field(default_factory=ImportConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     external_libraries: ExternalLibrariesConfig = Field(default_factory=ExternalLibrariesConfig)
+    streams: StreamsConfig = Field(default_factory=StreamsConfig)
     subsonic: SubsonicConfig = Field(default_factory=SubsonicConfig)
     scrobbling: ScrobblingConfig = Field(default_factory=ScrobblingConfig)

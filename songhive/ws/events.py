@@ -118,6 +118,7 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.user_id: Optional[str] = None
+        self.connection_id: Optional[str] = None
         self.topics: Set[str] = set()
 
     def _get_allowed_origins(self) -> set[str]:
@@ -230,7 +231,7 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
         EventWebSocket._connections.add(self)
 
     def on_message(self, message: Union[str, bytes]) -> None:
-        """Handle client subscription and unsubscription requests."""
+        """Handle client subscription, unsubscription, and playback-control registration."""
         if isinstance(message, bytes):
             message = message.decode("utf-8")
         try:
@@ -240,6 +241,12 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
             return
 
         action = payload.get("action")
+        if action == "playback-control":
+            connection_id = payload.get("connection_id")
+            if isinstance(connection_id, str):
+                self.connection_id = connection_id
+            return
+
         raw_topics = payload.get("topics")
         if not isinstance(raw_topics, list):
             logger.warning("Ignoring WebSocket message without a valid topics list")
@@ -256,6 +263,11 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
     def on_close(self) -> None:
         """Handle WebSocket connection close."""
         EventWebSocket._connections.discard(self)
+        user_id = self.user_id
+        connection_id = self.connection_id
+        if user_id and connection_id:
+            loop = tornado.ioloop.IOLoop.current()
+            loop.add_callback(lambda: asyncio.create_task(_clear_controller(user_id, connection_id)))
 
     @classmethod
     def _send(cls, conn: "EventWebSocket", message: str) -> None:
@@ -368,3 +380,16 @@ class EventWebSocket(tornado.websocket.WebSocketHandler):
         elif kind == "broadcast":
             topic = envelope.get("topic")
             cls._local_broadcast(event_type, data, topic if isinstance(topic, str) else None)
+
+
+async def _clear_controller(user_id: str, connection_id: str) -> None:
+    """Clear the playback controller when its connection closes."""
+    # Import locally to avoid an import cycle with ``ws.events``.
+    from ..models.base import get_session
+    from ..services.playback import clear_controller
+
+    try:
+        async with get_session() as session:
+            await clear_controller(session, user_id, connection_id)
+    except Exception:
+        logger.exception("Failed to clear controller for user %s", user_id)

@@ -20,6 +20,8 @@ from .mention_record import MentionRecord
 from .moderation import AdminUserModeration, InstanceModeration, UserModeration
 from .notification import ActivitySubscription, Notification, NotificationPreference
 from .oauth_client import OAuth2Client
+from .output_stream import OutputStream
+from .playback_session import PlaybackSession, PlaybackSessionOutput
 from .playlist import Playlist, PlaylistTrack
 from .podcast import (
     Podcast,
@@ -86,6 +88,9 @@ __all__ = [
     "Notification",
     "NotificationPreference",
     "OAuth2Client",
+    "OutputStream",
+    "PlaybackSession",
+    "PlaybackSessionOutput",
     "Playlist",
     "PlaylistTrack",
     "Podcast",

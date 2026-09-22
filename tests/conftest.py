@@ -25,6 +25,8 @@ from songhive.models.library import Library  # noqa: F401
 from songhive.models.mention_record import MentionRecord  # noqa: F401
 from songhive.models.notification import ActivitySubscription, Notification, NotificationPreference  # noqa: F401
 from songhive.models.oauth_client import OAuth2Client  # noqa: F401
+from songhive.models.output_stream import OutputStream  # noqa: F401
+from songhive.models.playback_session import PlaybackSession, PlaybackSessionOutput  # noqa: F401
 from songhive.models.playlist import Playlist  # noqa: F401
 from songhive.models.podcast import (  # noqa: F401
     Podcast,
@@ -54,6 +56,15 @@ def _register_fake_external_adapter():
     from songhive.external.registry import register_external_adapter
 
     register_external_adapter("fake", FakeExternalAdapter)
+
+
+@pytest.fixture(autouse=True)
+def _register_fake_output_provider():
+    """Register the fake audio output provider for tests that need it."""
+    from songhive.streams.fake import FakeOutput
+    from songhive.streams.registry import register_output
+
+    register_output("fake", FakeOutput)
 
 
 @pytest.fixture(autouse=True)

@@ -364,6 +364,60 @@ def test_streaming_config_defaults():
     }
 
 
+def test_streams_config_defaults():
+    """Streams configuration has the expected defaults."""
+    config = SonghiveConfig(auth={"secret_key": "a" * 64})
+    assert config.streams.enabled is True
+    assert config.streams.allow_user_created_outputs is False
+    assert config.streams.allowed_user_providers == []
+    assert config.streams.denied_user_providers == []
+    assert config.streams.allowed_output_hosts == []
+    assert config.streams.icecast_ffmpeg_path is None
+    assert config.streams.background_idle_timeout_seconds == 900
+    assert config.streams.default_sample_rate == 44100
+    assert config.streams.default_bitrate == 192
+
+
+def test_streams_config_from_toml(tmp_path):
+    """Streams settings are loaded from a TOML file."""
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text(
+        "\n".join(
+            [
+                "[streams]",
+                "allow_user_created_outputs = true",
+                "allowed_user_providers = ['icecast']",
+                "background_idle_timeout_seconds = 300",
+                "default_bitrate = 256",
+            ]
+        )
+    )
+    config = load_config(["--config", str(toml_file)])
+    assert config.streams.allow_user_created_outputs is True
+    assert config.streams.allowed_user_providers == ["icecast"]
+    assert config.streams.background_idle_timeout_seconds == 300
+    assert config.streams.default_bitrate == 256
+
+
+def test_streams_config_from_env(monkeypatch):
+    """SONGHIVE_STREAMS__* environment variables override streams config."""
+    monkeypatch.setenv("SONGHIVE_STREAMS__ENABLED", "false")
+    monkeypatch.setenv("SONGHIVE_STREAMS__ALLOW_USER_CREATED_OUTPUTS", "true")
+    config = SonghiveConfig(auth={"secret_key": "a" * 64})
+    assert config.streams.enabled is False
+    assert config.streams.allow_user_created_outputs is True
+
+
+def test_streams_config_parses_comma_string_providers(monkeypatch):
+    """Streams provider allow/deny lists parse comma-separated strings."""
+    monkeypatch.setenv(
+        "SONGHIVE_STREAMS__ALLOWED_USER_PROVIDERS",
+        "icecast, fake",
+    )
+    config = SonghiveConfig(auth={"secret_key": "a" * 64})
+    assert config.streams.allowed_user_providers == ["icecast", "fake"]
+
+
 def test_streaming_config_from_env(monkeypatch):
     """SONGHIVE_STREAMING__* environment variables override streaming config."""
     monkeypatch.setenv("SONGHIVE_STREAMING__MAX_BITRATE", "128k")

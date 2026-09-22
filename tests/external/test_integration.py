@@ -1,6 +1,6 @@
 """End-to-end integration tests for the external-library subsystem."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import status
@@ -12,6 +12,7 @@ from songhive.models.external_track import ExternalTrack
 from songhive.models.history import ListeningHistory
 from songhive.models.track import Track
 from songhive.services.metadata import AudioMetadata
+from songhive.streaming.handler import StreamHandler
 
 
 def _sync_payload() -> dict:
@@ -134,11 +135,14 @@ async def test_full_external_library_flow(
     first_track = await db_session.get(Track, first_ext_track.track_id)
     assert first_track is not None
 
-    # Stream the first track through the Tornado endpoint.
-    stream_response = await tornado_client.get(
-        f"/api/v1/stream/{first_track.id}",
-        headers=headers,
-    )
+    # Stream the first track through the Tornado endpoint. Serving completes
+    # instantly in tests; simulate real-time consumption so the wall-clock bound
+    # on the streamed-seconds estimate lets the listen threshold trip.
+    with patch.object(StreamHandler, "_elapsed_seconds", return_value=40.0):
+        stream_response = await tornado_client.get(
+            f"/api/v1/stream/{first_track.id}",
+            headers=headers,
+        )
     assert stream_response.status_code == 200
     assert stream_response.content == b"X" * 32000
 
