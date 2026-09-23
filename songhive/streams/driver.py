@@ -63,6 +63,11 @@ class OutputDriver(ABC):
         return 0
 
     @property
+    def is_paused(self) -> bool:
+        """Whether the driver is paused (e.g. feeding silence to the output)."""
+        return False
+
+    @property
     def generation(self) -> Optional[int]:
         """Generation tag for the active source; ``None`` when untracked.
 

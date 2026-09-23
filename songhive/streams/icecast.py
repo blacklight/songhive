@@ -219,6 +219,10 @@ class IcecastDriver(OutputDriver):
             "-hide_banner",
             "-loglevel",
             "error",
+            # Without -re, anullsrc generates silence as fast as the CPU allows:
+            # the encoder floods Icecast with hours of "audio" per minute,
+            # Icecast drops listeners that fall behind, and the mount can wedge.
+            "-re",
             "-f",
             "lavfi",
             "-i",
@@ -452,6 +456,7 @@ class IcecastDriver(OutputDriver):
         logger.info("pause")
         self._paused = True
         self._resume_position = self._elapsed_position()
+        self._position = self._resume_position
         self._source_started_at = time.monotonic()
         await self._start_decoder_task(AudioSource(kind="path"), 0.0)
 
@@ -475,6 +480,11 @@ class IcecastDriver(OutputDriver):
             self._position = seconds
             return
         await self.set_source(self._current_source, position=seconds, metadata=self._current_metadata)
+
+    @property
+    def is_paused(self) -> bool:
+        """Whether the silence generator is currently feeding the encoder."""
+        return self._paused
 
     @property
     def generation(self) -> Optional[int]:

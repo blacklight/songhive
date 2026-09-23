@@ -57,10 +57,15 @@ class FakeDriver(OutputDriver):
     def generation(self) -> int:
         return self._generation
 
+    @property
+    def is_paused(self) -> bool:
+        return self.paused
+
     async def start(self) -> None:
         self.commands.append("start")
         self.playing = True
-        self.paused = False
+        # Like the real drivers, the pipeline starts paused until a source is set.
+        self.paused = True
 
     async def stop(self) -> None:
         self.commands.append("stop")

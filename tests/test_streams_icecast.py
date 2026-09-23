@@ -112,6 +112,22 @@ async def test_icecast_decoder_argv():
     assert "pipe:1" in argv
 
 
+@pytest.mark.asyncio
+async def test_icecast_silence_argv_is_realtime():
+    provider = IcecastOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    driver = IcecastDriver(config)
+    argv = driver._silence_argv()
+    # Without -re, anullsrc floods the encoder far faster than realtime and
+    # Icecast drops listeners that fall behind.
+    assert "-re" in argv
+    assert argv.index("-re") < argv.index("-f")
+    assert "lavfi" in argv
+    assert any(arg.startswith("anullsrc=") for arg in argv)
+    assert "pipe:1" in argv
+
+
 class _FakeStream:
     async def read(self, _n: int = -1) -> bytes:
         return b""

@@ -354,7 +354,6 @@ class SessionDriver:
                 if session is None:
                     return
 
-                prev_state = session.state
                 connection_id = envelope.get("issued_by") or args.get("connection_id")
                 await self._apply_command(db, session, command, args, connection_id)
 
@@ -373,14 +372,18 @@ class SessionDriver:
 
         track_id = _current_track_id(session)
         if source is not None and session.state == "playing":
-            # Restart the decoder only when the track changed or the command
-            # explicitly repositions playback; control-only commands (e.g.
+            # Restart the decoder only when the track changed, the command
+            # explicitly repositions playback, or the driver is still paused:
+            # the API commits the new session state before publishing the
+            # command, so the loaded state can't tell us whether this is a
+            # resume — but a paused driver feeding silence must be swapped
+            # back to the real source. Control-only commands (e.g.
             # take_control, set_repeat) leave the stream untouched so
             # listeners are not interrupted.
             needs_source = (
                 track_id != self._active_track_id
                 or command in ("play_at", "next", "prev", "seek")
-                or (command == "play" and prev_state != "playing")
+                or self.driver.is_paused
             )
             if needs_source:
                 try:

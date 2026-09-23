@@ -480,6 +480,56 @@ async def test_stale_source_ended_ignored(
 
 
 @pytest.mark.asyncio
+async def test_play_after_pause_restarts_source(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """Resuming a paused session must restart the decoder.
+
+    The API commits state=playing before publishing the control envelope, so
+    the worker cannot detect the resume from the loaded session state alone;
+    it must rely on the driver still being paused.
+    """
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    await asyncio.sleep(0.1)
+
+    async def _persist_and_notify(command: str) -> None:
+        async with get_session() as db:
+            persisted = await db.get(PlaybackSession, session.id)
+            assert persisted is not None
+            await handle_command(db, persisted, command, {}, "conn-1")
+        await worker.redis.rpush(
+            _control_key(session.id),
+            json.dumps({"command": command, "args": {}, "issued_by": "conn-1"}),
+        )
+
+    await _persist_and_notify("pause")
+    await asyncio.sleep(0.3)
+
+    fake = capture_driver["driver"]
+    assert fake is not None
+    assert _find_command(fake, "pause") is not None
+    assert fake.is_paused
+
+    await _persist_and_notify("play")
+    await asyncio.sleep(0.3)
+
+    driver._shutting_down = True
+    await asyncio.wait_for(task, timeout=2.0)
+
+    set_source_commands = [cmd for cmd in fake.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
+    # One set_source from the startup sync, one from the resume.
+    assert len(set_source_commands) == 2
+    assert not fake.is_paused
+
+
+@pytest.mark.asyncio
 async def test_set_queue_while_playing_keeps_source(
     engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
 ):
