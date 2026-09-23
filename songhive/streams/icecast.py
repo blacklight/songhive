@@ -6,12 +6,12 @@ import asyncio
 import logging
 import os
 import re
-import signal
 import time
 from pathlib import Path
 from typing import Any, ClassVar, Optional
 
 import aiofiles
+import httpx
 
 from .base import AudioOutput
 from .driver import OutputDriver
@@ -41,10 +41,27 @@ class IcecastOutput(AudioOutput):
         {"name": "mount", "type": "text", "required": True, "label": "Mount point"},
         {"name": "username", "type": "text", "required": False, "label": "Username", "default": "source"},
         {"name": "password", "type": "password", "required": True, "label": "Password"},
-        {"name": "protocol", "type": "select", "required": False, "label": "Protocol", "default": "http"},
-        {"name": "format", "type": "select", "required": True, "label": "Format"},
+        {
+            "name": "protocol",
+            "type": "select",
+            "required": False,
+            "label": "Protocol",
+            "default": "http",
+            "options": [{"value": "http", "label": "HTTP"}, {"value": "https", "label": "HTTPS"}],
+        },
+        {
+            "name": "format",
+            "type": "select",
+            "required": True,
+            "label": "Format",
+            "options": [
+                {"value": "ogg", "label": "Ogg Vorbis"},
+                {"value": "mp3", "label": "MP3"},
+                {"value": "opus", "label": "Opus"},
+            ],
+        },
         {"name": "bitrate", "type": "text", "required": True, "label": "Bitrate"},
-        {"name": "sample_rate", "type": "number", "required": True, "label": "Sample rate"},
+        {"name": "sample_rate", "type": "number", "required": True, "label": "Sample rate", "default": 44100},
         {"name": "name", "type": "text", "required": False, "label": "Stream name"},
         {"name": "description", "type": "text", "required": False, "label": "Description"},
         {"name": "genre", "type": "text", "required": False, "label": "Genre"},
@@ -106,6 +123,7 @@ class IcecastDriver(OutputDriver):
     def __init__(self, config: dict) -> None:
         super().__init__(config)
         self._encoder: Optional[asyncio.subprocess.Process] = None
+        self._encoder_watch_task: Optional[asyncio.Task] = None
         self._decoder_task: Optional[asyncio.Task] = None
         self._current_source: Optional[AudioSource] = None
         self._current_metadata: TrackMeta = TrackMeta(track_id="", title="", artist="")
@@ -113,8 +131,12 @@ class IcecastDriver(OutputDriver):
         self._position = 0.0
         self._resume_position = 0.0
         self._source_started_at = 0.0
+        self._shutting_down = False
         self._sample_rate = int(config.get("sample_rate", 44100))
         self._task_count = 0
+        self._listener_count_cache: Optional[int] = None
+        self._listener_count_at = 0.0
+        self._listener_count_ttl = 5.0
 
     @property
     def _format_spec(self) -> dict[str, str]:
@@ -167,6 +189,7 @@ class IcecastDriver(OutputDriver):
             "-hide_banner",
             "-loglevel",
             "error",
+            "-re",
             "-ss",
             str(max(0.0, position)),
         ]
@@ -215,6 +238,7 @@ class IcecastDriver(OutputDriver):
             source = await self._spill_iterator_to_temp(source)
 
         argv = self._silence_argv() if self._paused else self._decoder_argv(source, position=position)
+        logger.info("Starting decoder task=%s paused=%s argv=%s", task_id, self._paused, argv)
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.DEVNULL,
@@ -250,8 +274,25 @@ class IcecastDriver(OutputDriver):
             except ProcessLookupError:
                 pass
 
-            if self._task_count == task_id and self._encoder is not None and not self._paused:
-                self._emit({"type": "source_ended"})
+            stderr = b""
+            if proc.stderr is not None:
+                try:
+                    stderr = await asyncio.wait_for(proc.stderr.read(), timeout=2.0)
+                except Exception:
+                    pass
+            stderr_text = stderr.decode("utf-8", "replace").strip()
+            if stderr_text:
+                logger.error("Decoder stderr task=%s rc=%s: %s", task_id, proc.returncode, stderr_text)
+            else:
+                logger.info("Decoder task=%s rc=%s finished (no stderr)", task_id, proc.returncode)
+
+            if (
+                self._task_count == task_id
+                and self._encoder is not None
+                and self._encoder.returncode is None
+                and not self._paused
+            ):
+                self._emit({"type": "source_ended", "generation": task_id})
         except asyncio.CancelledError:
             self._kill_proc(proc)
             raise
@@ -264,7 +305,7 @@ class IcecastDriver(OutputDriver):
         if proc is None or proc.returncode is not None:
             return
         try:
-            proc.send_signal(signal.SIGTERM)
+            proc.kill()
         except ProcessLookupError:
             return
 
@@ -289,17 +330,65 @@ class IcecastDriver(OutputDriver):
             size=path.stat().st_size if path.exists() else None,
         )
 
-    async def start(self) -> None:
-        """Start the encoder and begin producing output."""
-        self._encoder = await asyncio.create_subprocess_exec(
-            *self._encoder_argv(),
+    async def _start_encoder(self) -> None:
+        """Start a fresh ffmpeg encoder process and a watcher for it."""
+        argv = self._encoder_argv()
+        redacted = list(argv)
+        redacted[-1] = re.sub(r"^(icecast://)[^@]+@", r"\1source:***@", redacted[-1])
+        logger.info("Starting encoder: %s", redacted)
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
+        self._encoder = proc
+        self._encoder_watch_task = asyncio.create_task(self._watch_encoder(proc))
+
+    async def _watch_encoder(self, proc: asyncio.subprocess.Process) -> None:
+        """Watch the encoder and restart it if it exits unexpectedly."""
+        rc = await proc.wait()
+        if self._shutting_down or self._encoder is not proc:
+            return
+        logger.error("Encoder exited unexpectedly rc=%s; restarting", rc)
+        self._encoder = None
+        self._encoder_watch_task = None
+        try:
+            await asyncio.sleep(0.5)
+            await self._start_encoder()
+        except Exception:
+            logger.exception("Failed to restart encoder")
+            self._emit({"type": "error", "message": f"encoder exited (rc={rc})"})
+            return
+        await self._restart_decoder()
+
+    async def _restart_decoder(self) -> None:
+        """Restart the decoder against the current source after an encoder restart."""
+        if self._current_source is not None and not self._paused:
+            await self._start_decoder_task(self._current_source, self._elapsed_position())
+        else:
+            await self._start_decoder_task(AudioSource(kind="path"), 0.0)
+
+    async def start(self) -> None:
+        """Start the encoder and begin producing output."""
+        self._shutting_down = False
+        await self._start_encoder()
+        # Feed silence while waiting for the first track or a pause command so
+        # Icecast does not drop the source for inactivity.
+        self._paused = True
+        self._source_started_at = time.monotonic()
+        await self._start_decoder_task(AudioSource(kind="path"), 0.0)
 
     async def stop(self) -> None:
         """Stop the encoder and any decoder."""
+        self._shutting_down = True
+        if self._encoder_watch_task is not None:
+            self._encoder_watch_task.cancel()
+            try:
+                await self._encoder_watch_task
+            except asyncio.CancelledError:
+                pass
+            self._encoder_watch_task = None
         if self._decoder_task is not None:
             self._decoder_task.cancel()
             try:
@@ -334,6 +423,7 @@ class IcecastDriver(OutputDriver):
         metadata: TrackMeta,
     ) -> None:
         """Switch to a new audio source, optionally starting at ``position``."""
+        logger.info("set_source position=%s metadata=%s source=%s", position, metadata, source)
         self._current_metadata = metadata
         self._current_source = source
         self._position = position
@@ -343,6 +433,7 @@ class IcecastDriver(OutputDriver):
         await self._start_decoder_task(source, position)
 
     async def _start_decoder_task(self, source: AudioSource, position: float) -> None:
+        logger.info("_start_decoder_task source=%s position=%s", source, position)
         if self._decoder_task is not None:
             self._decoder_task.cancel()
             try:
@@ -358,6 +449,7 @@ class IcecastDriver(OutputDriver):
         """Pause by swapping to a silence generator."""
         if self._paused:
             return
+        logger.info("pause")
         self._paused = True
         self._resume_position = self._elapsed_position()
         self._source_started_at = time.monotonic()
@@ -367,11 +459,27 @@ class IcecastDriver(OutputDriver):
         """Resume by swapping back to the current source."""
         if not self._paused:
             return
+        logger.info("resume")
         self._paused = False
         self._position = self._resume_position
         self._source_started_at = time.monotonic()
         if self._current_source is not None:
             await self._start_decoder_task(self._current_source, self._resume_position)
+
+    async def seek(self, seconds: float) -> None:
+        """Reposition the current source; updates the resume point while paused."""
+        if self._current_source is None:
+            return
+        if self._paused:
+            self._resume_position = seconds
+            self._position = seconds
+            return
+        await self.set_source(self._current_source, position=seconds, metadata=self._current_metadata)
+
+    @property
+    def generation(self) -> Optional[int]:
+        """Decoder task generation, used to drop stale ``source_ended`` events."""
+        return self._task_count
 
     async def update_metadata(self, metadata: TrackMeta) -> None:
         """v1: no-op because the ffmpeg icecast muxer cannot update ICY in flight."""
@@ -390,8 +498,35 @@ class IcecastDriver(OutputDriver):
         return OutputHealth(ok=True, message="encoder running")
 
     async def listener_count(self) -> int:
-        """Best-effort listener count; v1 cannot query Icecast, so always 0."""
-        return 0
+        """Best-effort listener count via the Icecast status JSON endpoint."""
+        now = time.monotonic()
+        if self._listener_count_cache is not None and now - self._listener_count_at < self._listener_count_ttl:
+            return self._listener_count_cache
+
+        cfg = self.config
+        status_url = f"http://{cfg['host']}:{cfg['port']}/status-json.xsl"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(status_url)
+                resp.raise_for_status()
+                data = resp.json()
+            mount = data.get("icestats", {}).get("source")
+            count = 0
+            if isinstance(mount, list):
+                for src in mount:
+                    if src.get("listenurl", "").endswith(cfg["mount"]):
+                        count = int(src.get("listeners", 0))
+                        break
+            elif isinstance(mount, dict) and mount.get("listenurl", "").endswith(cfg["mount"]):
+                count = int(mount.get("listeners", 0))
+            self._listener_count_cache = count
+            self._listener_count_at = now
+            return count
+        except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.TimeoutException) as exc:
+            logger.warning("Icecast status endpoint unreachable at %s: %s", status_url, exc)
+        except Exception:
+            logger.exception("Failed to query Icecast listener count")
+        return self._listener_count_cache if self._listener_count_cache is not None else 0
 
 
 register_output("icecast", IcecastOutput)

@@ -51,6 +51,11 @@ class FakeDriver(OutputDriver):
         self.current_metadata: TrackMeta | None = None
         self.playing = False
         self.paused = False
+        self._generation = 0
+
+    @property
+    def generation(self) -> int:
+        return self._generation
 
     async def start(self) -> None:
         self.commands.append("start")
@@ -73,6 +78,10 @@ class FakeDriver(OutputDriver):
         self.current_metadata = metadata
         self.playing = True
         self.paused = False
+        self._generation += 1
+
+    async def seek(self, seconds: float) -> None:
+        self.commands.append(("seek", seconds))
 
     async def pause(self) -> None:
         self.commands.append("pause")
@@ -88,9 +97,9 @@ class FakeDriver(OutputDriver):
     async def health(self) -> OutputHealth:
         return OutputHealth(ok=True, message="Fake driver is healthy")
 
-    def trigger_source_ended(self) -> None:
+    def trigger_source_ended(self, generation: int | None = None) -> None:
         """Emit a ``source_ended`` event, as a real decoder EOF would."""
-        self._emit({"type": "source_ended"})
+        self._emit({"type": "source_ended", "generation": generation if generation is not None else self._generation})
 
     def trigger_error(self, message: str) -> None:
         """Emit an ``error`` event with the supplied message."""

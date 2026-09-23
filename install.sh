@@ -120,7 +120,7 @@ else
 fi
 
 # Install systemd units
-UNITS="songhive.service songhive-server.service songhive-celery.service songhive-watch-extlib.service"
+UNITS="songhive.service songhive-server.service songhive-celery.service songhive-watch-extlib.service songhive-stream-worker.service"
 for unit in $UNITS; do
     src="$REPO_ROOT/config/systemd/$unit"
     dst="$SYSTEMD_DIR/$unit"

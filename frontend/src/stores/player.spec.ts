@@ -533,4 +533,56 @@ describe("usePlayerStore", () => {
     expect(store.playbackState).toBe("loading");
     expect(store.restoredPosition).toBeNull();
   });
+
+  it("advances progress every second while a session is playing", async () => {
+    const store = usePlayerStore();
+    store.setSessionMode(true);
+    store.setSessionState(
+      [makeTrack("a")],
+      0,
+      "off",
+      false,
+      10,
+      true,
+      "playing",
+      180,
+    );
+    await flushPromises();
+
+    vi.advanceTimersByTime(3000);
+    expect(store.currentTime).toBe(13);
+  });
+
+  it("stops session progress when paused or leaving session mode", async () => {
+    const store = usePlayerStore();
+    store.setSessionMode(true);
+    store.setSessionState(
+      [makeTrack("a")],
+      0,
+      "off",
+      false,
+      10,
+      true,
+      "playing",
+      180,
+    );
+    await flushPromises();
+
+    vi.advanceTimersByTime(1000);
+    expect(store.currentTime).toBe(11);
+
+    store.setSessionState(
+      [makeTrack("a")],
+      0,
+      "off",
+      false,
+      11,
+      false,
+      "paused",
+      180,
+    );
+    await flushPromises();
+    vi.advanceTimersByTime(2000);
+    expect(store.currentTime).toBe(11);
+  });
 });

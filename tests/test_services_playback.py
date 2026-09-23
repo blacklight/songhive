@@ -2,7 +2,7 @@
 Tests for the playback-session control plane.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -245,3 +245,115 @@ async def test_session_state_dict_queue_and_outputs(db_session, session_user, pl
     state = await session_state_dict(db_session, playback_session)
     assert state["queue"] == queue
     assert state["outputs"][0]["name"] == "named output"
+
+
+@pytest.mark.asyncio
+async def test_session_state_dict_enriches_queue_metadata(db_session, session_user, playback_session):
+    """Queue entries matching local tracks gain artist/album/artwork fields."""
+    from songhive.models.album import Album
+    from songhive.models.artist import Artist
+    from songhive.models.stored_file import StoredFile
+    from songhive.models.track import Track
+
+    artist = Artist(name="Enriched Artist")
+    cover = StoredFile(
+        storage_path="covers/aa/bb",
+        storage_backend="local",
+        content_type="image/jpeg",
+        size=10,
+        sha256="b" * 64,
+        original_filename="cover.jpg",
+    )
+    db_session.add_all([artist, cover])
+    await db_session.flush()
+    album = Album(title="Enriched Album", artist_id=str(artist.id), cover_file_id=str(cover.id))
+    db_session.add(album)
+    await db_session.flush()
+    track = Track(
+        title="Enriched Track",
+        artist_id=str(artist.id),
+        album_id=str(album.id),
+        duration=321,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    queue = [
+        {"id": str(track.id), "title": "Enriched Track"},
+        {"id": "remote-1", "title": "Remote", "remote": True},
+    ]
+    await handle_command(db_session, playback_session, "set_queue", {"queue": queue}, "conn-1")
+
+    state = await session_state_dict(db_session, playback_session)
+    entry = state["queue"][0]
+    assert entry["artist_id"] == str(artist.id)
+    assert entry["album_id"] == str(album.id)
+    assert entry["artist"] == "Enriched Artist"
+    assert entry["album"] == "Enriched Album"
+    assert entry["duration"] == 321
+    assert entry["image_url"] == f"/api/v1/files/{cover.id}/download"
+    assert entry["visibility"] == track.visibility
+
+    # Entries without a local track keep their stored fields untouched.
+    assert state["queue"][1] == {"id": "remote-1", "title": "Remote", "remote": True}
+
+
+@pytest.mark.asyncio
+async def test_set_queue_preserves_playing_track(db_session, session_user, playback_session):
+    """set_queue keeps playback running when the current track survives in the new queue."""
+    queue = [
+        {"id": "t1", "title": "a", "artist": "a", "duration": 100},
+        {"id": "t2", "title": "b", "artist": "b", "duration": 100},
+    ]
+    await handle_command(db_session, playback_session, "set_queue", {"queue": queue}, "conn-1")
+    await handle_command(db_session, playback_session, "play_at", {"index": 0}, "conn-1")
+
+    # Simulate elapsed time, then enqueue more tracks while playing.
+    playback_session.position_anchor_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+    extended = queue + [{"id": "t3", "title": "c", "artist": "c", "duration": 100}]
+    await handle_command(db_session, playback_session, "set_queue", {"queue": extended}, "conn-1")
+
+    assert playback_session.state == "playing"
+    assert playback_session.current_index == 0
+    assert playback_session.position_anchor_at is not None
+    assert playback_session.position_seconds >= 9.0
+
+    # Replacing the queue without the current track resets to idle.
+    await handle_command(
+        db_session,
+        playback_session,
+        "set_queue",
+        {"queue": [{"id": "t9", "title": "z", "artist": "z"}]},
+        "conn-1",
+    )
+    assert playback_session.state == "idle"
+    assert playback_session.current_index == 0
+    assert playback_session.position_seconds == 0.0
+
+
+@pytest.mark.asyncio
+async def test_set_queue_reindexes_surviving_track(db_session, session_user, playback_session):
+    """set_queue moves the index to the current track's new position."""
+    await handle_command(
+        db_session,
+        playback_session,
+        "set_queue",
+        {"queue": [{"id": "t2", "title": "b", "artist": "b", "duration": 100}]},
+        "conn-1",
+    )
+    await handle_command(db_session, playback_session, "play_at", {"index": 0}, "conn-1")
+
+    await handle_command(
+        db_session,
+        playback_session,
+        "set_queue",
+        {
+            "queue": [
+                {"id": "t1", "title": "a", "artist": "a", "duration": 100},
+                {"id": "t2", "title": "b", "artist": "b", "duration": 100},
+            ]
+        },
+        "conn-1",
+    )
+    assert playback_session.state == "playing"
+    assert playback_session.current_index == 1

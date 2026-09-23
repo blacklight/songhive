@@ -5,6 +5,7 @@ import type {
   RepeatMode,
   PlaybackState,
   EngineApi,
+  SessionController,
 } from "@/player/types";
 
 const STORAGE_QUEUE = "songhive.player.queue";
@@ -132,11 +133,17 @@ export const usePlayerStore = defineStore("player", () => {
   });
 
   let engine: EngineApi | null = null;
+  let sessionController: SessionController | null = null;
+  const sessionMode: Ref<boolean> = ref(false);
 
   function registerEngine(api: EngineApi) {
     engine = api;
     engine.setVolume(volume.value, muted.value);
     engine.setNextTrack(nextTrack.value);
+  }
+
+  function registerSessionController(controller: SessionController) {
+    sessionController = controller;
   }
 
   watch(
@@ -147,7 +154,41 @@ export const usePlayerStore = defineStore("player", () => {
     { immediate: true },
   );
 
+  // Server-side outputs do not report position continuously, so advance the
+  // local clock while a session is playing.
+  let progressTimer: ReturnType<typeof setInterval> | null = null;
+
+  function startSessionProgressTimer() {
+    if (progressTimer) return;
+    progressTimer = setInterval(() => {
+      if (!sessionMode.value || !isPlaying.value) return;
+      const next = currentTime.value + 1;
+      currentTime.value =
+        duration.value > 0 ? Math.min(next, duration.value) : next;
+    }, 1000);
+  }
+
+  function stopSessionProgressTimer() {
+    if (progressTimer) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
+  }
+
+  watch(
+    [sessionMode, isPlaying],
+    ([mode, playing]) => {
+      if (mode && playing) startSessionProgressTimer();
+      else stopSessionProgressTimer();
+    },
+    { immediate: true },
+  );
+
   function playTrack(track: QueueTrack, queueContext?: QueueTrack[]) {
+    if (sessionMode.value && sessionController) {
+      sessionController.playTrack(track, queueContext);
+      return;
+    }
     const previousTrackId = currentTrack.value?.id;
     const newQueue =
       queueContext && queueContext.length > 0 ? queueContext : [track];
@@ -173,6 +214,10 @@ export const usePlayerStore = defineStore("player", () => {
 
   function playAll(tracks: QueueTrack[], startIndex = 0) {
     if (tracks.length === 0) return;
+    if (sessionMode.value && sessionController) {
+      sessionController.playAll(tracks, startIndex);
+      return;
+    }
     const previousTrackId = currentTrack.value?.id;
     queue.value = [...tracks];
     originalQueue.value = [];
@@ -196,6 +241,10 @@ export const usePlayerStore = defineStore("player", () => {
 
   function playAt(i: number) {
     if (i < 0 || i >= queue.value.length) return;
+    if (sessionMode.value && sessionController) {
+      sessionController.playAt(i);
+      return;
+    }
     const previousTrackId = currentTrack.value?.id;
     index.value = i;
 
@@ -217,12 +266,20 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   function enqueue(track: QueueTrack) {
+    if (sessionMode.value && sessionController) {
+      sessionController.enqueue(track);
+      return;
+    }
     queue.value.push(track);
     if (originalQueue.value.length > 0) originalQueue.value.push(track);
     persistNow();
   }
 
   function enqueueNext(track: QueueTrack) {
+    if (sessionMode.value && sessionController) {
+      sessionController.enqueueNext(track);
+      return;
+    }
     const insertAt = Math.min(Math.max(index.value + 1, 0), queue.value.length);
     queue.value.splice(insertAt, 0, track);
     if (originalQueue.value.length > 0) {
@@ -238,6 +295,10 @@ export const usePlayerStore = defineStore("player", () => {
 
   function removeAt(i: number) {
     if (i < 0 || i >= queue.value.length) return;
+    if (sessionMode.value && sessionController) {
+      sessionController.removeAt(i);
+      return;
+    }
     const removed = queue.value[i];
     queue.value.splice(i, 1);
     if (originalQueue.value.length > 0) {
@@ -266,6 +327,10 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   function clear() {
+    if (sessionMode.value && sessionController) {
+      sessionController.clear();
+      return;
+    }
     queue.value = [];
     originalQueue.value = [];
     index.value = -1;
@@ -279,6 +344,10 @@ export const usePlayerStore = defineStore("player", () => {
 
   function play() {
     if (!currentTrack.value) return;
+    if (sessionMode.value && sessionController) {
+      sessionController.play();
+      return;
+    }
     isPlaying.value = true;
     if (playbackState.value === "idle" || playbackState.value === "error") {
       const startAt = restoredPosition.value ?? 0;
@@ -292,12 +361,20 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   function pause() {
+    if (sessionMode.value && sessionController) {
+      sessionController.pause();
+      return;
+    }
     isPlaying.value = false;
     engine?.pause();
   }
 
   function next() {
     if (!currentTrack.value) return;
+    if (sessionMode.value && sessionController) {
+      sessionController.next();
+      return;
+    }
     if (repeat.value === "one") {
       currentTime.value = 0;
       engine?.seek(0);
@@ -324,6 +401,10 @@ export const usePlayerStore = defineStore("player", () => {
 
   function prev() {
     if (!currentTrack.value) return;
+    if (sessionMode.value && sessionController) {
+      sessionController.prev();
+      return;
+    }
     if (currentTime.value > 3) {
       currentTime.value = 0;
       engine?.seek(0);
@@ -349,6 +430,10 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   function seek(seconds: number) {
+    if (sessionMode.value && sessionController) {
+      sessionController.seek(seconds);
+      return;
+    }
     const clamped = Math.min(Math.max(seconds, 0), duration.value || 0);
     currentTime.value = clamped;
     engine?.seek(clamped);
@@ -366,6 +451,10 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   function toggleShuffle() {
+    if (sessionMode.value && sessionController) {
+      sessionController.toggleShuffle(!shuffle.value);
+      return;
+    }
     if (shuffle.value) {
       // Disable: restore original order.
       if (originalQueue.value.length > 0) {
@@ -394,6 +483,12 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   function cycleRepeat() {
+    if (sessionMode.value && sessionController) {
+      const next: RepeatMode =
+        repeat.value === "off" ? "all" : repeat.value === "all" ? "one" : "off";
+      sessionController.setRepeat(next);
+      return;
+    }
     if (repeat.value === "off") repeat.value = "all";
     else if (repeat.value === "all") repeat.value = "one";
     else repeat.value = "off";
@@ -420,17 +515,45 @@ export const usePlayerStore = defineStore("player", () => {
     currentTime.value = Math.min(Math.max(seconds, 0), duration.value || 0);
   }
 
+  function setSessionState(
+    newQueue: QueueTrack[],
+    newIndex: number,
+    newRepeat: RepeatMode,
+    newShuffle: boolean,
+    newPosition: number,
+    newPlaying: boolean,
+    newState: PlaybackState,
+    newDuration: number,
+  ) {
+    queue.value = newQueue;
+    index.value = newIndex;
+    repeat.value = newRepeat;
+    shuffle.value = newShuffle;
+    currentTime.value = newPosition;
+    isPlaying.value = newPlaying;
+    playbackState.value = newState;
+    duration.value = newDuration;
+  }
+
+  function setSessionMode(enabled: boolean) {
+    sessionMode.value = enabled;
+  }
+
   // Persistence: debounce localStorage writes to at most once per second.
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   function doPersist() {
-    localStorage.setItem(STORAGE_QUEUE, JSON.stringify(queue.value));
-    localStorage.setItem(STORAGE_INDEX, String(index.value));
-    localStorage.setItem(STORAGE_POSITION, String(currentTime.value));
-    localStorage.setItem(STORAGE_SHUFFLE, String(shuffle.value));
-    localStorage.setItem(STORAGE_REPEAT, repeat.value);
-    localStorage.setItem(STORAGE_VOLUME, String(volume.value));
-    localStorage.setItem(STORAGE_MUTED, String(muted.value));
+    try {
+      localStorage.setItem(STORAGE_QUEUE, JSON.stringify(queue.value));
+      localStorage.setItem(STORAGE_INDEX, String(index.value));
+      localStorage.setItem(STORAGE_POSITION, String(currentTime.value));
+      localStorage.setItem(STORAGE_SHUFFLE, String(shuffle.value));
+      localStorage.setItem(STORAGE_REPEAT, repeat.value);
+      localStorage.setItem(STORAGE_VOLUME, String(volume.value));
+      localStorage.setItem(STORAGE_MUTED, String(muted.value));
+    } catch {
+      // Storage may be unavailable (restricted mode or teardown).
+    }
   }
 
   function persist() {
@@ -475,7 +598,9 @@ export const usePlayerStore = defineStore("player", () => {
     hasPrev,
     progress,
     nextTrack,
+    sessionMode,
     registerEngine,
+    registerSessionController,
     playTrack,
     playAll,
     playAt,
@@ -496,5 +621,7 @@ export const usePlayerStore = defineStore("player", () => {
     updateDuration,
     setPlaybackState,
     setDisplayedTime,
+    setSessionState,
+    setSessionMode,
   };
 });

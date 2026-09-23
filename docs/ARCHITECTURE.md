@@ -2768,8 +2768,9 @@ Songhive as a systemd service. The `install.sh` script automates the setup:
 - Creates data, cache, and log directories
 - Installs the systemd units and sets the correct `ExecStart` paths
 
-The master `songhive.service` unit starts three dependent units:
+The master `songhive.service` unit starts four dependent units:
 
 - `songhive-server.service` — main web server (`songhive`)
 - `songhive-celery.service` — Celery worker and scheduler
 - `songhive-watch-extlib.service` — external-library watchdog
+- `songhive-stream-worker.service` — audio stream worker for server-side outputs (`songhive stream-worker`)

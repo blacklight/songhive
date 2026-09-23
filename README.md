@@ -384,11 +384,12 @@ and an [`install.sh`](./install.sh) script that sets up a virtual environment,
 copies the example config, installs the units, and creates the required
 directories.
 
-The master `songhive.service` unit pulls in three units:
+The master `songhive.service` unit pulls in four units:
 
 - `songhive-server.service` — the main web server
 - `songhive-celery.service` — the Celery worker and scheduler
 - `songhive-watch-extlib.service` — the external-library watchdog
+- `songhive-stream-worker.service` — the audio stream worker for server-side outputs
 
 Run the installer as **root** for a system-wide service:
 

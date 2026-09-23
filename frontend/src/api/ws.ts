@@ -12,8 +12,9 @@ export interface WsEvent {
 }
 
 export interface WsMessage {
-  action: "subscribe" | "unsubscribe";
-  topics: string[];
+  action: "subscribe" | "unsubscribe" | "playback-control";
+  topics?: string[];
+  connection_id?: string;
 }
 
 type WsHandler = (event: WsEvent) => void;
@@ -28,6 +29,7 @@ export class EventBus {
   private closing = false;
   private openedAt = 0;
   private lastAuthRefresh = 0;
+  private playbackControlConnectionId: string | null = null;
 
   // A connection that stayed open this long counts as healthy: when it
   // drops, the next reconnect starts again from the shortest delay.
@@ -55,6 +57,12 @@ export class EventBus {
       this.openedAt = Date.now();
       if (this.topics.size > 0) {
         this.send({ action: "subscribe", topics: [...this.topics] });
+      }
+      if (this.playbackControlConnectionId) {
+        this.send({
+          action: "playback-control",
+          connection_id: this.playbackControlConnectionId,
+        });
       }
     });
 
@@ -152,6 +160,14 @@ export class EventBus {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(message));
     }
+  }
+
+  playbackControl(connectionId: string) {
+    this.playbackControlConnectionId = connectionId;
+    this.send({
+      action: "playback-control",
+      connection_id: connectionId,
+    });
   }
 
   private scheduleReconnect() {

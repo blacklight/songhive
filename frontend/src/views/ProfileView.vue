@@ -15,6 +15,7 @@ import ModerationTab from "./profile/ModerationTab.vue";
 import PodcastSyncTab from "./profile/PodcastSyncTab.vue";
 import ScrobblingTab from "./profile/ScrobblingTab.vue";
 import ExternalLibrariesView from "@/views/ExternalLibrariesView.vue";
+import OutputsView from "@/views/OutputsView.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -34,6 +35,7 @@ const tab = computed(() => {
       "podcastSync",
       "scrobbling",
       "externalLibraries",
+      "outputs",
       "moderation",
     ].includes(value)
     ? value
@@ -72,6 +74,11 @@ const tabs = [
     icon: "cloud",
   },
   {
+    key: "outputs",
+    label: t("profile.tabs.outputs"),
+    icon: "radio",
+  },
+  {
     key: "moderation",
     label: t("profile.tabs.moderation"),
     icon: "shield",
@@ -98,6 +105,8 @@ const currentComponent = computed(() => {
       return ScrobblingTab;
     case "externalLibraries":
       return ExternalLibrariesView;
+    case "outputs":
+      return OutputsView;
     case "moderation":
       return ModerationTab;
     default:

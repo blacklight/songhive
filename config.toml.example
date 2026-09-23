@@ -146,6 +146,39 @@ rate_limit_enabled = true
 rate_limit_requests = 10
 rate_limit_window_seconds = 60
 
+[streams]
+# Path to the ffmpeg binary used by the stream worker. If unset, it falls back
+# to the system PATH and to streaming.ffmpeg_path.
+# icecast_ffmpeg_path = "/usr/bin/ffmpeg"
+
+# Seconds between stream worker session discovery scans. Lower values start
+# outputs faster; higher values reduce database load.
+# worker_poll_interval_seconds = 1.0
+
+# TTL (in seconds) for the Redis lock that ensures only one worker drives an
+# output at a time. Must be longer than the longest expected command round-trip.
+# worker_lock_ttl_seconds = 60
+
+# Seconds a background stream may stay idle before stopping. A zero value
+# disables idle shutdown.
+# background_idle_timeout_seconds = 900
+
+# Hosts that user-created Icecast outputs may target. Empty means all hosts are
+# allowed (not recommended for public instances).
+# allowed_output_hosts = []
+
+# Whether regular users may create server-side outputs. Admins can always
+# create outputs if a provider is available.
+# allow_user_created_outputs = false
+
+# Provider types non-admin users are allowed to create. Empty means all
+# user-configurable providers are allowed.
+# allowed_user_providers = []
+
+# Provider types non-admin users may never configure, regardless of
+# allowed_user_providers.
+# denied_user_providers = []
+
 [streaming]
 # Path to the ffmpeg binary. When omitted, Songhive searches PATH.
 # ffmpeg_path = "/usr/bin/ffmpeg"

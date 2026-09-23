@@ -1119,7 +1119,8 @@
       "moderation": "Moderation",
       "security": "Security",
       "podcastSync": "Podcast sync",
-      "scrobbling": "Scrobbling"
+      "scrobbling": "Scrobbling",
+      "outputs": "Outputs"
     },
     "copyHandle": "Copy fediverse handle",
     "compose": "Compose",
@@ -1917,5 +1918,32 @@
     "forwardToRemote": "Also forward to {domain}",
     "reportSubmit": "Submit report",
     "reportSubmitted": "Report submitted. Thank you."
+  },
+  "outputs": {
+    "title": "Outputs",
+    "thisDevice": "This device",
+    "select": "Playback output",
+    "output": "Output",
+    "new": "New output",
+    "newTitle": "New output",
+    "editTitle": "Edit output",
+    "name": "Name",
+    "provider": "Provider",
+    "enabled": "Enabled",
+    "status": "Status",
+    "ok": "OK",
+    "test": "Test",
+    "testSuccess": "Output configuration is valid.",
+    "testFailed": "Output test failed.",
+    "noProviders": "No output providers are available.",
+    "noOutputs": "No server outputs configured yet.",
+    "fieldRequired": "{field} is required.",
+    "createSuccess": "Output created.",
+    "saveSuccess": "Output saved.",
+    "saveError": "Could not save output: {message}",
+    "deleteSuccess": "Output deleted.",
+    "deleteError": "Could not delete output: {message}",
+    "deleteConfirm": "Delete the output \"{name}\"?",
+    "loadError": "Could not load outputs: {message}"
   }
 }

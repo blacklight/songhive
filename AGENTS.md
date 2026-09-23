@@ -496,3 +496,14 @@ async def update_library(
   Where the implementation contract specifies per-item entries (e.g. the
   admin bulk user endpoints use `user.bulk_deactivate`, `user.bulk_activate`,
   and `user.bulk_delete` per user), follow the contract.
+
+## Audio Streams
+
+- The `stream-worker` command (`songhive stream-worker`) runs a dedicated process
+  that owns long-lived server-side output drivers. It is registered in
+  `songhive/app.py` and ships in the Docker Compose `streams` profile and as a systemd unit at `config/systemd/songhive-stream-worker.service`.
+- Each `SessionDriver` generates a unique lock token and uses Redis
+  `songhive:stream:lock:{output_id}` to ensure only one worker drives an output.
+  The lock is refreshed on every main-loop iteration and released on shutdown.
+- Worker tests live in `tests/test_streams_worker.py`; output/playback tests in
+  `tests/test_api_outputs.py` and `tests/test_api_playback.py`.

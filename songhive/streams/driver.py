@@ -8,6 +8,7 @@ pushing an Icecast mount). The stream worker consumes events from the driver's
 
 import asyncio
 from abc import ABC, abstractmethod
+from typing import Optional
 
 from .types import AudioSource, OutputHealth, TrackMeta
 
@@ -52,6 +53,24 @@ class OutputDriver(ABC):
     @abstractmethod
     async def health(self) -> OutputHealth:
         """Return the current runtime health of the driver."""
+
+    async def seek(self, seconds: float) -> None:
+        """Reposition the current source; optional, drivers may override."""
+        return None
+
+    async def listener_count(self) -> int:
+        """Return a best-effort listener count for this output."""
+        return 0
+
+    @property
+    def generation(self) -> Optional[int]:
+        """Generation tag for the active source; ``None`` when untracked.
+
+        ``source_ended`` events carrying an older generation than the
+        current one are ignored by the worker, so drivers that restart
+        their decoder for each source should bump this per restart.
+        """
+        return None
 
     def _emit(self, event: dict) -> None:
         """Put an event onto the worker queue from any context."""

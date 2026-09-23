@@ -648,6 +648,16 @@ class StreamsConfig(BaseSettings):
         gt=0,
         description="Default output bitrate in kbps.",
     )
+    worker_poll_interval_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        description="Seconds between stream worker session discovery scans.",
+    )
+    worker_lock_ttl_seconds: int = Field(
+        default=60,
+        ge=10,
+        description="Redis TTL for a stream worker output lock.",
+    )
 
     @field_validator(
         "allowed_user_providers",

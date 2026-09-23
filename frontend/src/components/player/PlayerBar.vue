@@ -7,6 +7,7 @@ import NowPlaying from "./NowPlaying.vue";
 import PlayerControls from "./PlayerControls.vue";
 import ProgressBar from "./ProgressBar.vue";
 import VolumeControl from "./VolumeControl.vue";
+import OutputSelector from "./OutputSelector.vue";
 import QueuePanel from "./QueuePanel.vue";
 import { useMediaSession } from "@/composables/useMediaSession";
 
@@ -74,6 +75,7 @@ function queueReturnTarget() {
 
       <div class="player-bar__right">
         <VolumeControl />
+        <OutputSelector />
         <AppButton
           ref="queueToggle"
           variant="ghost"
@@ -148,6 +150,7 @@ function queueReturnTarget() {
         <ProgressBar />
         <div class="player-bar__expanded-bottom">
           <VolumeControl />
+          <OutputSelector />
           <AppButton
             ref="expandedQueueToggle"
             variant="ghost"

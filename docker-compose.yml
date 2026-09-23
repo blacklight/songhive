@@ -112,6 +112,35 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  stream-worker:
+    image: quay.io/blacklight/songhive
+    # Or uncomment the following lines if you want to build the image from the
+    # local checkout
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     USER_ID: ${PUID:-1000}
+    #     GROUP_ID: ${PGID:-1000}
+    container_name: songhive-stream-worker
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      <<: *songhive-env
+    command: songhive stream-worker
+    volumes:
+      - ./volumes/config:/etc/songhive
+      - ./volumes/data:/data
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    profiles:
+      - streams
+
   nginx:
     image: nginx:stable-alpine
     container_name: songhive-nginx

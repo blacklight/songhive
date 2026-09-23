@@ -48,3 +48,20 @@ export interface EngineApi {
   setNextTrack(track: QueueTrack | null): void;
   destroy(): void;
 }
+
+export interface SessionController {
+  playTrack(track: QueueTrack, queueContext?: QueueTrack[]): void;
+  playAll(tracks: QueueTrack[], startIndex?: number): void;
+  playAt(index: number): void;
+  play(): void;
+  pause(): void;
+  next(): void;
+  prev(): void;
+  seek(seconds: number): void;
+  toggleShuffle(shuffle: boolean): void;
+  setRepeat(repeat: RepeatMode): void;
+  enqueue(track: QueueTrack): void;
+  enqueueNext(track: QueueTrack): void;
+  removeAt(index: number): void;
+  clear(): void;
+}

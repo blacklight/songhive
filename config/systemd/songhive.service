@@ -1,6 +1,6 @@
 [Unit]
 Description=Songhive federated music sharing service
-Wants=songhive-server.service songhive-celery.service songhive-watch-extlib.service
+Wants=songhive-server.service songhive-celery.service songhive-watch-extlib.service songhive-stream-worker.service
 After=network.target
 ConditionPathExists=@@CONFIG_DIR@@/config.toml
 

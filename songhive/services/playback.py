@@ -69,6 +69,58 @@ def _track_duration(session: PlaybackSession) -> Optional[float]:
     return None
 
 
+def _queue_image_url(track: Track) -> Optional[str]:
+    """Return the artwork URL for a queue track, falling back to the album cover."""
+    if track.image_file_id and track.image_file is not None:
+        return f"/api/v1/files/{track.image_file_id}/download"
+    if track.album is not None:
+        if track.album.cover_file_id and track.album.cover_file is not None:
+            return f"/api/v1/files/{track.album.cover_file_id}/download"
+        return track.album.cover_url
+    return None
+
+
+async def _enrich_queue(db: AsyncSession, queue: list) -> list:
+    """Overlay display metadata from local tracks onto stored queue entries.
+
+    The persisted queue only carries a small dict per track. Entries that
+    resolve to local ``Track`` rows gain fresh ``artist_id``/``album_id``/
+    ``image_url``/``visibility`` so clients can render the player bar while a
+    remote output drives playback. Entries without a local row (e.g. remote
+    attachments) keep whatever fields the client stored.
+    """
+    ids = [t.get("id") for t in queue if isinstance(t, dict) and t.get("id")]
+    if not ids:
+        return queue
+    result = await db.execute(select(Track).where(Track.id.in_(ids)))
+    tracks = {str(track.id): track for track in result.scalars().all()}
+    if not tracks:
+        return queue
+
+    enriched = []
+    for entry in queue:
+        if not isinstance(entry, dict):
+            enriched.append(entry)
+            continue
+        track = tracks.get(str(entry.get("id")))
+        if track is None:
+            enriched.append(entry)
+            continue
+        merged = dict(entry)
+        merged["artist_id"] = track.artist_id
+        merged["album_id"] = track.album_id
+        if track.artist is not None:
+            merged["artist"] = track.artist.name
+        if track.album is not None:
+            merged["album"] = track.album.title
+        if track.duration:
+            merged["duration"] = track.duration
+        merged["visibility"] = track.visibility
+        merged["image_url"] = _queue_image_url(track)
+        enriched.append(merged)
+    return enriched
+
+
 def compute_next_index(
     session: PlaybackSession,
     *,
@@ -159,11 +211,12 @@ async def select_outputs(
     """Replace the outputs attached to a session."""
     await db.execute(delete(PlaybackSessionOutput).where(PlaybackSessionOutput.session_id == session.id))
 
+    if connection_id:
+        session.controller_connection_id = connection_id
+
     stream_count = 0
     for output_id in output_ids:
         if output_id == "web":
-            if connection_id:
-                session.controller_connection_id = connection_id
             db.add(
                 PlaybackSessionOutput(
                     session_id=session.id,
@@ -240,7 +293,7 @@ async def session_state_dict(db: AsyncSession, session: PlaybackSession) -> dict
         "repeat": session.repeat,
         "shuffle": session.shuffle,
         "controller_connection_id": session.controller_connection_id,
-        "queue": session.queue or [],
+        "queue": await _enrich_queue(db, session.queue or []),
         "outputs": outputs,
         "last_active_at": session.last_active_at.isoformat() if session.last_active_at else None,
     }
@@ -309,6 +362,10 @@ async def _commit_command(
     session.last_active_at = _now_utc()
     await db.flush()
     state = await session_state_dict(db, session)
+    # Commit before notifying the worker: it reads the session through its own
+    # connection, so an earlier control envelope would race the commit and make
+    # it sync the driver to stale state.
+    await db.commit()
     publish_playback_event(session.user_id, state)
     publish_control_command(session.id, command, args, connection_id)
 
@@ -420,13 +477,31 @@ async def cmd_set_queue(
     queue: list[dict],
     connection_id: Optional[str] = None,
 ) -> None:
-    """Replace the session queue."""
+    """Replace the session queue, preserving playback when the current track survives."""
     _assert_control(session, connection_id)
+
+    current = _current_track(session)
+    current_id = current.get("id") if current else None
+    surviving_index = None
+    if current_id is not None:
+        for i, entry in enumerate(queue):
+            if isinstance(entry, dict) and entry.get("id") == current_id:
+                surviving_index = i
+                break
+
     session.queue = queue
-    session.current_index = 0
-    session.position_seconds = 0.0
-    session.position_anchor_at = None
-    session.state = "idle"
+    if surviving_index is not None:
+        # The current track is still in the queue: keep playing it
+        # uninterrupted, only adjusting the index to its new position.
+        session.current_index = surviving_index
+        if session.state == "playing":
+            session.position_seconds = _live_position_seconds(session)
+            _refresh_anchor(session)
+    else:
+        session.current_index = 0
+        session.position_seconds = 0.0
+        session.position_anchor_at = None
+        session.state = "idle"
     await _commit_command(db, session, "set_queue", {"queue_length": len(queue)}, connection_id)
 
 

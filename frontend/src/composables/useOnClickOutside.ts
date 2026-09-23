@@ -2,12 +2,12 @@ import { onBeforeUnmount, onMounted } from "vue";
 
 export function useOnClickOutside(
   element: () => HTMLElement | null,
-  handler: () => void,
+  handler: (event: MouseEvent) => void,
 ) {
   function onClick(event: MouseEvent) {
     const el = element();
     if (el && !el.contains(event.target as Node)) {
-      handler();
+      handler(event);
     }
   }
 

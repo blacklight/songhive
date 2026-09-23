@@ -344,6 +344,7 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
         response = self.fetch(
             f"/api/v1/stream/{self.public_track.id}?format=wav",
             headers=self._auth_header(self.token),
+            request_timeout=30,
         )
         assert response.code == 400
 

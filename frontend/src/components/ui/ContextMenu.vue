@@ -9,6 +9,7 @@ export interface MenuItem {
   icon?: string;
   iconVariant?: "solid" | "regular" | "light" | "brand";
   danger?: boolean;
+  active?: boolean;
 }
 
 export interface Props {
@@ -16,6 +17,8 @@ export interface Props {
   open: boolean;
   x?: number;
   y?: number;
+  /** Element that toggles the menu; clicks inside it are not "outside". */
+  trigger?: HTMLElement | null;
 }
 
 const props = defineProps<Props>();
@@ -37,7 +40,10 @@ const style = computed(() => ({
 
 useOnClickOutside(
   () => menuRef.value,
-  () => emit("close"),
+  (event) => {
+    if (props.trigger?.contains(event.target as Node)) return;
+    emit("close");
+  },
 );
 
 function reposition() {
@@ -158,13 +164,20 @@ function select(key: string) {
       :style="style"
       @keydown="onKeyDown"
     >
+      <li v-if="$slots.header" class="context-menu__header" role="presentation">
+        <slot name="header" />
+      </li>
       <li
         v-for="item in props.items"
         :key="item.key"
         role="menuitem"
+        :aria-current="item.active ? 'true' : undefined"
         :class="[
           'context-menu__item',
-          { 'context-menu__item--danger': item.danger },
+          {
+            'context-menu__item--danger': item.danger,
+            'context-menu__item--active': item.active,
+          },
         ]"
         tabindex="-1"
         @click="select(item.key)"
@@ -218,6 +231,17 @@ function select(key: string) {
 
 .context-menu__item--danger {
   color: var(--color-danger);
+}
+
+.context-menu__item--active {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.context-menu__header {
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .context-menu__icon {

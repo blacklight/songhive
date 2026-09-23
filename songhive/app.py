@@ -243,9 +243,16 @@ def _watch_main(args: Collection[str]):
     watch_main(args)
 
 
+def _stream_worker_main(args: Collection[str]):
+    from .cli.stream_worker import stream_worker_main
+
+    stream_worker_main(args)
+
+
 _entry_points: Dict[str, Callable[[Collection[str]], None]] = {
     "admin": _admin_main,
     "watch-external-libraries": _watch_main,
+    "stream-worker": _stream_worker_main,
 }
 
 
