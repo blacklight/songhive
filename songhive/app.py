@@ -251,6 +251,8 @@ def _stream_worker_main(args: Collection[str]):
     stream_worker_main(args)
 
 
+# CLI subcommands dispatched by main(). Each name must be registered on the
+# root argument parser by songhive.cli.build_parser.
 _entry_points: Dict[str, Callable[[Collection[str]], None]] = {
     "admin": _admin_main,
     "watch-external-libraries": _watch_main,
@@ -262,12 +264,25 @@ def main():
     """
     Songhive application entry point.
     """
+    from .cli import build_parser
+
+    # Parse with the root parser so that `--help` (at any level) covers both
+    # the server options and the dedicated CLI subcommands.
+    parser = build_parser()
+    args = parser.parse_args()
+
     # Check for dedicated CLI commands before starting the web server.
-    if len(sys.argv) > 1:
-        entry_point = _entry_points.get(sys.argv[1])
-        if entry_point:
-            entry_point(sys.argv[2:])
-            return
+    if args.subcommand:
+        if sys.argv[1] != args.subcommand:
+            # Server options don't apply to subcommands (they call
+            # `load_config([])` internally); reject the mix instead of
+            # silently ignoring them.
+            parser.error(
+                f"the '{args.subcommand}' subcommand must be the first "
+                f"argument (see 'songhive {args.subcommand} --help')"
+            )
+        _entry_points[args.subcommand](sys.argv[2:])
+        return
 
     config = load_config()
 

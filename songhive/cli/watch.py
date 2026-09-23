@@ -15,16 +15,34 @@ from ..config import load_config
 from ..external.watchdog import watch_external_libraries
 
 
-def watch_main(argv=None) -> None:
-    """Parse CLI arguments and start the watchdog."""
-    parser = argparse.ArgumentParser(prog="songhive watch-external-libraries")
+def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--debug",
         action="store_true",
         default=False,
         help="Enable debug logging",
     )
-    args = parser.parse_args(argv)
+
+
+def _create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="songhive watch-external-libraries")
+    _add_arguments(parser)
+    return parser
+
+
+def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``watch-external-libraries`` command on the root ``songhive`` parser."""
+    parser = subparsers.add_parser(
+        "watch-external-libraries",
+        help="Watch local external libraries for filesystem changes",
+    )
+    _add_arguments(parser)
+    return parser
+
+
+def watch_main(argv=None) -> None:
+    """Parse CLI arguments and start the watchdog."""
+    args = _create_parser().parse_args(argv)
 
     # If no auth secret is configured, try the one persisted by the Docker
     # entrypoint so that `docker compose exec ... songhive watch-...` works

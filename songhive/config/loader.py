@@ -55,8 +55,13 @@ def _find_config_file(explicit_path: Optional[str] = None) -> Optional[Path]:
     return None
 
 
-def _build_cli_parser() -> argparse.ArgumentParser:
-    """Build the CLI argument parser."""
+def build_cli_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser with the server options only.
+
+    The ``songhive`` subcommands (``admin``, ``stream-worker``,
+    ``watch-external-libraries``) are registered on top of this parser by
+    ``songhive.cli.build_parser``.
+    """
     parser = argparse.ArgumentParser(
         prog="songhive",
         description="Songhive - A federated music sharing service",
@@ -170,7 +175,7 @@ def load_config(argv: Optional[list] = None) -> SonghiveConfig:
     :param argv: Optional list of CLI arguments (defaults to sys.argv[1:]).
     :returns: A fully resolved SonghiveConfig instance.
     """
-    parser = _build_cli_parser()
+    parser = build_cli_parser()
     args = parser.parse_args(argv if argv is not None else None)
     config_file = _find_config_file(args.config)
     cli_data = _cli_overrides(args)

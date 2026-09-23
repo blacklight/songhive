@@ -15,16 +15,34 @@ from ..config import load_config
 from ..streams.worker import run_stream_worker
 
 
-def stream_worker_main(argv=None) -> None:
-    """Parse CLI arguments and start the stream worker."""
-    parser = argparse.ArgumentParser(prog="songhive stream-worker")
+def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--debug",
         action="store_true",
         default=False,
         help="Enable debug logging",
     )
-    args = parser.parse_args(argv)
+
+
+def _create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="songhive stream-worker")
+    _add_arguments(parser)
+    return parser
+
+
+def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``stream-worker`` command on the root ``songhive`` parser."""
+    parser = subparsers.add_parser(
+        "stream-worker",
+        help="Run the stream worker for server-side audio outputs",
+    )
+    _add_arguments(parser)
+    return parser
+
+
+def stream_worker_main(argv=None) -> None:
+    """Parse CLI arguments and start the stream worker."""
+    args = _create_parser().parse_args(argv)
 
     # If no auth secret is configured, try the one persisted by the Docker
     # entrypoint so that `docker compose exec ... songhive stream-worker` works

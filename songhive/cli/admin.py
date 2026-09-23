@@ -212,8 +212,8 @@ def _add_enrich_image_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
-def _create_admin_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="songhive admin")
+def _add_admin_commands(parser: argparse.ArgumentParser) -> None:
+    """Add the admin subcommands to an ``admin`` (sub)parser."""
     subparsers = parser.add_subparsers(dest="command")
 
     _add_init_db_command(subparsers)
@@ -234,6 +234,21 @@ def _create_admin_parser() -> argparse.ArgumentParser:
     _add_prune_remote_activities_command(subparsers)
     _add_sync_tags_command(subparsers)
     _add_enrich_image_parser(subparsers)
+
+
+def _create_admin_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="songhive admin")
+    _add_admin_commands(parser)
+    return parser
+
+
+def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``admin`` command group on the root ``songhive`` parser."""
+    parser = subparsers.add_parser(
+        "admin",
+        help="Run administrative commands (init-db, migrate, create-user, ...)",
+    )
+    _add_admin_commands(parser)
     return parser
 
 

@@ -86,6 +86,15 @@
   (`/streams/{mount}`) natively; all other routes fall through to
   FastAPI.
 - Configuration priority: env vars (SONGHIVE_*) > CLI args > config.toml > defaults.
+- The `songhive` CLI has one root argparse parser built by
+  `songhive.cli.build_parser` (`cli/__init__.py`): core server options come
+  from `config.loader.build_cli_parser`, and each subcommand module
+  (`cli/admin.py`, `cli/stream_worker.py`, `cli/watch.py`) registers itself
+  via an `add_parser(subparsers)` function. `app.main()` parses argv with the
+  root parser (so `--help` lists the subcommands at every level) and then
+  dispatches `sys.argv[2:]` to the matching `*_main` entry point — a
+  subcommand must be the first argument, since server options are not
+  forwarded to it.
 - The `pubby` library provides ActivityPub federation (FastAPI adapter).
 - Every remote HTTP fetch on the Webmention path (incoming source parsing,
   outgoing endpoint discovery, outgoing delivery, outgoing source reads)
@@ -339,7 +348,7 @@
 songhive/          # Python backend package
 ├── adapters/      # Foreign API adapters (Subsonic at /rest, registry + base)
 ├── api/           # FastAPI app + routes
-├── cli/           # Admin CLI
+├── cli/           # CLI subcommands (admin, stream-worker, watch-external-libraries)
 ├── config/        # Configuration (Pydantic settings + TOML loader)
 ├── federation/    # ActivityPub (pubby) integration
 ├── migrations/    # Alembic migration scripts

@@ -249,6 +249,31 @@ def test_main_admin_subcommand(monkeypatch):
     assert calls == [["init-db"]]
 
 
+def test_main_subcommand_must_come_first(monkeypatch):
+    """Test main() rejecting a subcommand preceded by server options."""
+    monkeypatch.setattr(sys, "argv", ["songhive", "--port", "8001", "admin", "init-db"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 2
+
+
+def test_main_stream_worker_subcommand(monkeypatch):
+    """Test main() dispatching to the stream worker CLI."""
+    calls = []
+
+    def fake_stream_worker_main(argv):
+        calls.append(argv)
+
+    monkeypatch.setattr("songhive.cli.stream_worker.stream_worker_main", fake_stream_worker_main)
+    monkeypatch.setattr(sys, "argv", ["songhive", "stream-worker", "--debug"])
+
+    main()
+
+    assert calls == [["--debug"]]
+
+
 def test_main_import_error_fallback(monkeypatch, _minimal_config, tmp_path):
     """Test main() falling back to uvicorn when a2wsgi cannot be imported."""
     calls = []
