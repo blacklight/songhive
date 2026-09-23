@@ -399,6 +399,29 @@ class NotificationsConfig(BaseSettings):
         le=23,
         description="Hour of day (UTC) when notification digest emails are sent",
     )
+    vapid_public_key: Optional[str] = Field(
+        default=None,
+        description="VAPID public key (base64url) for Web Push notifications",
+    )
+    vapid_private_key: Optional[str] = Field(
+        default=None,
+        description="VAPID private key (base64url) for Web Push notifications",
+        repr=False,
+        exclude=True,
+    )
+    vapid_subscriber: Optional[str] = Field(
+        default=None,
+        description="VAPID subscriber contact (mailto: or https: URL) for push claim",
+    )
+    push_enabled: bool = Field(
+        default=True,
+        description="Allow Web Push notifications when VAPID keys are configured",
+    )
+    push_timeout: float = Field(
+        default=15.0,
+        ge=1.0,
+        description="Timeout in seconds for each outbound Web Push request",
+    )
 
 
 class ServerConfig(BaseSettings):

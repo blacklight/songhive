@@ -28,6 +28,7 @@ from ..models.user import User
 from ..services import email as email_service
 from ..services import notifications as notifications_service
 from ..services.email import EmailNotConfiguredError
+from ..services.push import send_notification_to_user
 from .celery import celery_app
 
 logger = logging.getLogger(__name__)
@@ -138,3 +139,20 @@ def purge_old_notifications() -> int:
     config = load_config([])
     init_db(config.database.url)
     return asyncio.run(_purge_old_notifications(config))
+
+
+async def _send_push_notifications(config, user_id: str, notification: dict) -> int:
+    """Deliver a push notification to the user's stored subscriptions."""
+    try:
+        async with get_session() as session:
+            return await send_notification_to_user(session, user_id, notification, config)
+    finally:
+        await dispose_and_reset()
+
+
+@celery_app.task(name="songhive.tasks.notifications.send_push_notifications")
+def send_push_notifications(user_id: str, notification: dict) -> int:
+    """Send a Web Push copy of an in-app notification to the user's browsers."""
+    config = load_config([])
+    init_db(config.database.url)
+    return asyncio.run(_send_push_notifications(config, user_id, notification))

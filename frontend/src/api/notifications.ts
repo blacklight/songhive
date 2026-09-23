@@ -130,3 +130,36 @@ export function updateNotificationPreferences(
     },
   ).then((response) => response.preferences);
 }
+
+export interface PushConfigResponse {
+  enabled: boolean;
+  public_key: string | null;
+}
+
+export interface PushSubscriptionRequest {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}
+
+export function getPushConfig(): Promise<PushConfigResponse> {
+  return apiRequest<PushConfigResponse>("/notifications/push-config", {
+    skipAuth: true,
+  });
+}
+
+export function registerPushSubscription(
+  subscription: PushSubscriptionRequest,
+): Promise<void> {
+  return apiRequest<void>("/notifications/push-subscription", {
+    method: "POST",
+    body: subscription,
+  });
+}
+
+export function unregisterPushSubscription(endpoint: string): Promise<number> {
+  return apiRequest<{ removed: number }>("/notifications/push-subscription", {
+    method: "DELETE",
+    query: { endpoint },
+  }).then((response) => response.removed);
+}

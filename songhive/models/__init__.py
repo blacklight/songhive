@@ -18,7 +18,7 @@ from .library import Library
 from .library_track import LibraryTrack
 from .mention_record import MentionRecord
 from .moderation import AdminUserModeration, InstanceModeration, UserModeration
-from .notification import ActivitySubscription, Notification, NotificationPreference
+from .notification import ActivitySubscription, Notification, NotificationPreference, PushSubscription
 from .oauth_client import OAuth2Client
 from .output_stream import OutputStream
 from .playback_session import PlaybackSession, PlaybackSessionOutput
@@ -100,6 +100,7 @@ __all__ = [
     "PodcastSyncConfig",
     "PodcastSyncEvent",
     "PreviewCard",
+    "PushSubscription",
     "Radio",
     "RecoveryCode",
     "RemoteObject",

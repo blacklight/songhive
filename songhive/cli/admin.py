@@ -17,6 +17,7 @@ Usage:
     songhive admin provision-federation-keys
     songhive admin rehash-audio [--dry-run]
     songhive admin purge-notifications
+    songhive admin generate-vapid-keys
     songhive admin sync-tags \
         (--track-id <id> | --album-id <id> | --artist-id <id> | --library-id <id> | --all) [--dry-run]
     songhive admin enrich-images \
@@ -154,6 +155,13 @@ def _add_purge_notifications_command(subparsers: argparse._SubParsersAction) -> 
     )
 
 
+def _add_generate_vapid_keys_command(subparsers: argparse._SubParsersAction) -> None:
+    subparsers.add_parser(
+        "generate-vapid-keys",
+        help="Generate a VAPID key pair for Web Push notifications",
+    )
+
+
 def _add_prune_remote_activities_command(subparsers: argparse._SubParsersAction) -> None:
     prune_parser = subparsers.add_parser(
         "prune-remote-activities",
@@ -231,6 +239,7 @@ def _add_admin_commands(parser: argparse.ArgumentParser) -> None:
     _add_provision_federation_keys_command(subparsers)
     _add_rehash_audio_command(subparsers)
     _add_purge_notifications_command(subparsers)
+    _add_generate_vapid_keys_command(subparsers)
     _add_prune_remote_activities_command(subparsers)
     _add_sync_tags_command(subparsers)
     _add_enrich_image_parser(subparsers)
@@ -555,6 +564,17 @@ async def _handle_purge_notifications(args):
     print(f"Deleted {deleted} notification(s)")
 
 
+async def _handle_generate_vapid_keys(args):
+    """Generate and print a VAPID key pair for Web Push notifications."""
+    from ..services.push import generate_vapid_keys
+
+    public_key, private_key = generate_vapid_keys()
+    print("Add these values to your configuration:")
+    print(f'  notifications.vapid_public_key = "{public_key}"')
+    print(f'  notifications.vapid_private_key = "{private_key}"')
+    print('  notifications.vapid_subscriber = "mailto:your-contact@example.com"')
+
+
 async def _handle_prune_remote_activities(args):
     """Prune stale remote activities no local user has interacted with."""
     from ..services.remote_content import prune_stale_remote_activities
@@ -711,6 +731,7 @@ def admin_main(argv=None):
         "provision-federation-keys": _handle_provision_federation_keys,
         "rehash-audio": _handle_rehash_audio,
         "purge-notifications": _handle_purge_notifications,
+        "generate-vapid-keys": _handle_generate_vapid_keys,
         "prune-remote-activities": _handle_prune_remote_activities,
         "sync-tags": _handle_sync_tags,
         "enrich-images": _handle_enrich_images,

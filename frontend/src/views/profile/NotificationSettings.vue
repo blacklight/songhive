@@ -11,6 +11,7 @@ import {
 import { getApiErrorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
+import { usePushNotifications } from "@/composables/usePushNotifications";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
@@ -25,6 +26,37 @@ const isSaving = ref(false);
 const error = ref<string | null>(null);
 
 const emailVerified = computed(() => authStore.user?.email_verified === true);
+
+const push = usePushNotifications();
+const pushState = push.state;
+const pushError = push.error;
+const pushSupported = push.isSupported;
+const pushSubscribed = push.isSubscribed;
+
+const pushStatusLabel = computed(() => {
+  switch (pushState.value) {
+    case "unsupported":
+      return t("notifications.settings.push.status.unsupported");
+    case "unavailable":
+      return t("notifications.settings.push.status.unavailable");
+    case "denied":
+      return t("notifications.settings.push.status.denied");
+    case "subscribed":
+      return t("notifications.settings.push.status.subscribed");
+    case "loading":
+      return t("notifications.settings.push.status.loading");
+    default:
+      return t("notifications.settings.push.status.prompt");
+  }
+});
+
+async function togglePush() {
+  if (push.isSubscribed.value) {
+    await push.disable();
+  } else {
+    await push.enable();
+  }
+}
 
 function prefFor(type: NotificationType): NotificationPreferenceItem {
   let pref = preferences.value.find((p) => p.type === type);
@@ -72,7 +104,10 @@ async function save() {
   }
 }
 
-onMounted(fetchPreferences);
+onMounted(() => {
+  fetchPreferences();
+  push.load();
+});
 </script>
 
 <template>
@@ -83,6 +118,50 @@ onMounted(fetchPreferences);
     <p class="notification-settings__hint">
       {{ t("notifications.settings.hint") }}
     </p>
+
+    <div class="notification-settings__push">
+      <h3 class="notification-settings__push-title">
+        {{ t("notifications.settings.push.title") }}
+      </h3>
+      <p class="notification-settings__push-hint">
+        {{ t("notifications.settings.push.hint") }}
+      </p>
+
+      <div v-if="pushSupported" class="notification-settings__push-row">
+        <span class="notification-settings__push-status">
+          {{ pushStatusLabel }}
+        </span>
+        <AppButton
+          size="sm"
+          :loading="pushState === 'loading'"
+          :disabled="
+            pushState === 'loading' ||
+            pushState === 'unsupported' ||
+            pushState === 'unavailable' ||
+            pushState === 'denied'
+          "
+          @click="togglePush"
+        >
+          {{
+            pushSubscribed
+              ? t("notifications.settings.push.disable")
+              : t("notifications.settings.push.enable")
+          }}
+        </AppButton>
+      </div>
+
+      <p v-else class="notification-settings__push-unavailable">
+        {{ t("notifications.push.unsupported") }}
+      </p>
+
+      <p
+        v-if="pushError"
+        class="notification-settings__push-error"
+        role="alert"
+      >
+        {{ pushError }}
+      </p>
+    </div>
 
     <p
       v-if="!emailVerified"
@@ -214,5 +293,37 @@ onMounted(fetchPreferences);
 
 .notification-settings__save {
   align-self: flex-start;
+}
+
+.notification-settings__push {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+.notification-settings__push-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.notification-settings__push-hint,
+.notification-settings__push-unavailable {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.notification-settings__push-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.notification-settings__push-error {
+  margin: 0;
+  color: var(--color-danger);
 }
 </style>

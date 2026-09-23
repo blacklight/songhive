@@ -42,6 +42,7 @@
     + [Docker installation](#docker-installation-1)
     + [pip installation](#pip-installation-1)
 - [▶️ Testing the installation](#%E2%96%B6%EF%B8%8F-testing-the-installation)
+- [🔔 Notifications](#%F0%9F%94%94-notifications)
 - [🧩 Integrations](#%F0%9F%A7%A9-integrations)
   * [Subsonic-compatible clients](#subsonic-compatible-clients)
   * [Mopidy](#mopidy)
@@ -483,6 +484,17 @@ Open:
 - **Web UI**: http://localhost:8000/
 - **Swagger UI**: http://localhost:8000/swagger-ui/
 - **OpenAPI spec**: http://localhost:8000/openapi.json
+
+## 🔔 Notifications
+
+For OS-native notifications, generate your VAPID keys with:
+
+```bash
+songhive admin generate-vapid-keys
+```
+
+Then add them to [your configuration](./config.toml.example) and restart the
+service.
 
 ## 🧩 Integrations
 

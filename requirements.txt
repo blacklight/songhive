@@ -57,3 +57,6 @@ watchfiles>=0.24
 
 # Secret-at-rest encryption for external library configs
 cryptography>=46.0.5
+
+# Web Push notifications
+pywebpush>=2.0.0,<3.0.0

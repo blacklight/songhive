@@ -1807,6 +1807,21 @@
       "saveFailed": "Could not save notification preferences: {message}",
       "loadFailed": "Could not load notification preferences: {message}",
       "emailUnverified": "Email delivery requires a verified email address. Verify your email to enable email notifications.",
+      "push": {
+        "title": "OS-native notifications",
+        "hint": "Receive browser push notifications on supported devices even when Songhive is closed. Your browser will ask for permission when you enable this.",
+        "enable": "Enable",
+        "disable": "Disable",
+        "unsupported": "This browser does not support push notifications.",
+        "status": {
+          "unsupported": "Not supported by this browser.",
+          "unavailable": "Push notifications are not configured on this instance.",
+          "denied": "Permission was denied. Enable notifications in your browser settings to use this feature.",
+          "prompt": "Push notifications are off.",
+          "subscribed": "Push notifications are enabled.",
+          "loading": "Loading…"
+        }
+      },
       "typeNames": {
         "follow": "Follows",
         "like": "Likes",

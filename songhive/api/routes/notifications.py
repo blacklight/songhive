@@ -1,6 +1,6 @@
 """
-Notifications routes: list, seen-state management, deletion, and delivery
-preferences.
+Notifications routes: list, seen-state management, deletion, delivery
+preferences, and browser push subscriptions.
 """
 
 from typing import List, Optional
@@ -9,11 +9,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config.schema import SonghiveConfig
 from ...models.notification import NotificationType
 from ...models.user import User
 from ...services import notifications
+from ...services.push import (
+    get_public_key,
+    is_push_available,
+    remove_subscription,
+    store_subscription,
+)
 from .._common import Pagination, get_pagination
-from ..deps import get_current_user, get_db
+from ..deps import get_config, get_current_user, get_db
 
 router = APIRouter(prefix="/notifications")
 
@@ -79,6 +86,27 @@ class UnreadCountResponse(BaseModel):
     """Number of unseen notifications."""
 
     count: int
+
+
+class PushConfigResponse(BaseModel):
+    """Web Push configuration exposed to the frontend."""
+
+    enabled: bool
+    public_key: Optional[str] = None
+
+
+class PushSubscriptionRequest(BaseModel):
+    """Payload for registering a browser push subscription."""
+
+    endpoint: str = Field(min_length=1, max_length=2048)
+    p256dh: str = Field(min_length=1, max_length=255)
+    auth: str = Field(min_length=1, max_length=255)
+
+
+class PushSubscriptionRemoved(BaseModel):
+    """Number of push subscriptions removed."""
+
+    removed: int
 
 
 def _parse_types(value: Optional[str]) -> Optional[List[NotificationType]]:
@@ -153,6 +181,42 @@ async def mark_all_seen(
     updated = await notifications.mark_all_seen(db, current_user.id)
     await db.commit()
     return UpdatedResponse(updated=updated)
+
+
+@router.get("/push-config", response_model=PushConfigResponse)
+async def get_push_config(config: SonghiveConfig = Depends(get_config)):
+    """Return the VAPID public key and whether Web Push is configured."""
+    return PushConfigResponse(enabled=is_push_available(config), public_key=get_public_key(config))
+
+
+@router.post("/push-subscription", status_code=status.HTTP_204_NO_CONTENT)
+async def register_push_subscription(
+    body: PushSubscriptionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Store a browser push subscription for the current user."""
+    await store_subscription(
+        db,
+        str(current_user.id),
+        body.endpoint,
+        body.p256dh,
+        body.auth,
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/push-subscription", response_model=PushSubscriptionRemoved)
+async def unregister_push_subscription(
+    endpoint: str = Query(..., min_length=1, max_length=2048),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the current user's push subscription for the given endpoint."""
+    removed = await remove_subscription(db, str(current_user.id), endpoint)
+    await db.commit()
+    return PushSubscriptionRemoved(removed=removed)
 
 
 @router.delete("/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)

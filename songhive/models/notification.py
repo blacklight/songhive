@@ -162,3 +162,20 @@ class ActivitySubscription(Base):
         String(512),
         nullable=True,
     )
+
+
+class PushSubscription(Base):
+    """A browser push subscription for a local user."""
+
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "endpoint", name="uq_push_subscriptions_user_id_endpoint"),
+        Index("ix_push_subscriptions_user_id", "user_id"),
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+    )
+    endpoint: Mapped[str] = mapped_column(String(1024))
+    p256dh: Mapped[str] = mapped_column(String(255))
+    auth: Mapped[str] = mapped_column(String(255))

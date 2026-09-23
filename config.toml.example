@@ -219,6 +219,22 @@ transcode_cache_enabled = true
 # smtp_tls = true
 # from_address = "songhive@example.com"
 
+[notifications]
+# Days to keep seen notifications before the nightly purge.
+# retention_days = 90
+# Hour of day (UTC) for the nightly purge and digest tasks.
+# purge_hour = 3
+# digest_hour = 8
+
+# Web Push (OS-native) notifications. Requires VAPID keys; generate them with:
+#   songhive admin generate-vapid-keys
+# The vapid_subscriber must be a mailto: or https: URL used for the VAPID claim.
+# vapid_public_key = ""
+# vapid_private_key = ""  # Prefer SONGHIVE_NOTIFICATIONS__VAPID_PRIVATE_KEY.
+# vapid_subscriber = "mailto:admin@example.com"
+# push_enabled = true
+# push_timeout = 15.0
+
 [external_libraries]
 # External (cloud/storage-provider) libraries. Keep this disabled unless you
 # explicitly want users to configure third-party music sources.

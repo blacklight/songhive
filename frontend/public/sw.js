@@ -48,6 +48,66 @@ function isAssetRequest(request) {
   return request.method === "GET";
 }
 
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    if (event.data) {
+      payload = event.data.json();
+    }
+  } catch {
+    payload = {};
+  }
+
+  const title = payload.title || "Songhive";
+  const options = {
+    body: payload.body || "",
+    icon: payload.icon || "/pwa/pwa-192x192.png",
+    badge: payload.badge || "/pwa/pwa-192x192.png",
+    tag: payload.tag || "songhive-push",
+    data: { url: payload.url || "/" },
+    requireInteraction: false,
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+function safeLocalUrl(input) {
+  try {
+    const url = new URL(input, self.location.origin);
+    if (url.origin !== self.location.origin) {
+      return "/";
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return "/";
+    }
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return "/";
+  }
+}
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const target = safeLocalUrl(event.notification.data?.url);
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true })
+      .then((clientList) => {
+        const existing = clientList.find(
+          (client) => client.url === target && "focus" in client,
+        );
+        if (existing) {
+          return existing.focus();
+        }
+        if (self.clients.openWindow) {
+          return self.clients.openWindow(target);
+        }
+        return Promise.resolve();
+      }),
+  );
+});
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
     return;

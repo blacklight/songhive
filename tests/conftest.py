@@ -23,7 +23,12 @@ from songhive.models.base import Base, init_db, reset_db
 from songhive.models.invite import Invite  # noqa: F401
 from songhive.models.library import Library  # noqa: F401
 from songhive.models.mention_record import MentionRecord  # noqa: F401
-from songhive.models.notification import ActivitySubscription, Notification, NotificationPreference  # noqa: F401
+from songhive.models.notification import (  # noqa: F401
+    ActivitySubscription,
+    Notification,
+    NotificationPreference,
+    PushSubscription,
+)
 from songhive.models.oauth_client import OAuth2Client  # noqa: F401
 from songhive.models.output_stream import OutputStream  # noqa: F401
 from songhive.models.playback_session import PlaybackSession, PlaybackSessionOutput  # noqa: F401

@@ -130,6 +130,16 @@ def _enqueue_email_task(notification_id: str) -> None:
         logger.warning("Could not queue notification email for %s: %s", notification_id, exc)
 
 
+def _maybe_enqueue_push(user_id: str, notification: Notification) -> None:
+    """Queue a Web Push copy of an in-app notification, tolerating a missing broker."""
+    from ..tasks.notifications import send_push_notifications
+
+    try:
+        send_push_notifications.delay(str(user_id), notification_to_dict(notification))  # type: ignore
+    except Exception as exc:  # kombu/redis broker errors vary; never fail the request
+        logger.warning("Could not queue push notification for %s: %s", user_id, exc)
+
+
 async def create_notification(
     session: AsyncSession,
     *,
@@ -179,6 +189,7 @@ async def create_notification(
             NOTIFICATION_WS_EVENT,
             notification_to_dict(notification),
         )
+        _maybe_enqueue_push(user_id, notification)
 
     if email:
         recipient = await session.get(User, user_id)
