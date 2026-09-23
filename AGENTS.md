@@ -81,8 +81,9 @@
   any outbound signed federation fetch whose remote resolves our `keyId`
   back to this instance (the fetch-back can never be served while the loop
   is busy inside the triggering request).
-- Tornado handles WebSocket connections (`/ws/events`) and audio streaming
-  (`/api/v1/stream/{track_id}`) natively; all other routes fall through to
+- Tornado handles WebSocket connections (`/ws/events`), audio streaming
+  (`/api/v1/stream/{track_id}`), and native HTTP stream mountpoints
+  (`/streams/{mount}`) natively; all other routes fall through to
   FastAPI.
 - Configuration priority: env vars (SONGHIVE_*) > CLI args > config.toml > defaults.
 - The `pubby` library provides ActivityPub federation (FastAPI adapter).
@@ -507,3 +508,21 @@ async def update_library(
   The lock is refreshed on every main-loop iteration and released on shutdown.
 - Worker tests live in `tests/test_streams_worker.py`; output/playback tests in
   `tests/test_api_outputs.py` and `tests/test_api_playback.py`.
+- The `http` provider (`songhive/streams/http.py`) serves Icecast-style
+  mountpoints without an external server. The worker's encoder writes encoded
+  chunks to the capped Redis stream `songhive:stream:data:{mount}`; the Tornado
+  `StreamMountHandler` (`songhive/streaming/mount.py`) serves
+  `GET /streams/{mount}` by bursting the newest entries (`XREVRANGE`) then
+  following the stream (`XREAD BLOCK`), so each listener is an independent
+  cursor and Redis does the fan-out. Entries older than
+  `streams.http_stream_max_lag_seconds` (entry IDs are server ms timestamps)
+  are skipped so a lagging listener jumps forward instead of accumulating
+  latency, and `X-Accel-Buffering: no` keeps buffering proxies (nginx) from
+  hiding that lag in their own buffers. Liveness is the TTL'd
+  `songhive:stream:meta:{mount}` key refreshed by the driver; an
+  `{"end": "1"}` stream entry disconnects listeners on graceful stop, and
+  per-listener `songhive:stream:listener:{mount}:{id}` TTL keys feed
+  `driver.listener_count()` for idle shutdown. Mount slugs must be unique
+  across all `http` outputs (enforced in `services/outputs.py`), may carry an
+  optional `listen_token` (`?token=`/`Bearer`), and are unreachable in the
+  uvicorn fallback like the other native Tornado routes.

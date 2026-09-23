@@ -16,6 +16,9 @@ class AudioOutput(ABC):
     provider_type: ClassVar[str] = ""
     user_configurable: ClassVar[bool] = False
 
+    # Optional human-friendly label for UI listings; defaults to the type key.
+    label: ClassVar[str] = ""
+
     # Optional schema hint for the frontend output-configuration form.
     FIELDS: ClassVar[list[dict]] = []
 

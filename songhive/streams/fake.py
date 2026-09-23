@@ -88,6 +88,9 @@ class FakeDriver(OutputDriver):
     async def seek(self, seconds: float) -> None:
         self.commands.append(("seek", seconds))
 
+    async def set_volume(self, volume: float) -> None:
+        self.commands.append(("set_volume", volume))
+
     async def pause(self) -> None:
         self.commands.append("pause")
         self.paused = True

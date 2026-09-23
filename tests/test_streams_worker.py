@@ -576,3 +576,73 @@ async def test_set_queue_while_playing_keeps_source(
     set_source_commands = [cmd for cmd in fake.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
     assert len(set_source_commands) == 1
     assert _find_command(fake, "pause") is None
+
+
+@pytest.mark.asyncio
+async def test_set_volume_command_reaches_driver(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """A set_volume command updates the session and reaches the driver."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    await asyncio.sleep(0.1)
+
+    await worker.redis.rpush(
+        _control_key(session.id),
+        json.dumps({"command": "set_volume", "args": {"volume": 0.3}, "issued_by": "conn-1"}),
+    )
+
+    await asyncio.sleep(0.3)
+
+    driver._shutting_down = True
+    await asyncio.wait_for(task, timeout=2.0)
+
+    fake = capture_driver["driver"]
+    assert fake is not None
+    # The startup sync also pushes a set_volume (default 1.0); the command's
+    # value must reach the driver too.
+    vols = [c[1] for c in fake.commands if isinstance(c, tuple) and c[0] == "set_volume"]
+    assert any(v == pytest.approx(0.3) for v in vols)
+
+    async with get_session() as db:
+        persisted = await db.get(PlaybackSession, session.id)
+        assert persisted is not None
+        assert persisted.volume == pytest.approx(0.3)
+
+
+@pytest.mark.asyncio
+async def test_startup_sync_applies_persisted_volume(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """The worker pushes the persisted session volume to the driver on claim."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    session.volume = 0.5
+    await db_session.commit()
+
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    await asyncio.sleep(0.3)
+
+    driver._shutting_down = True
+    await asyncio.wait_for(task, timeout=2.0)
+
+    fake = capture_driver["driver"]
+    assert fake is not None
+    vol = _find_command(fake, "set_volume")
+    assert vol is not None
+    assert vol[1] == pytest.approx(0.5)
+    # Volume lands before the first source so the decoder starts at the right
+    # gain instead of being restarted a moment later.
+    commands = [c[0] if isinstance(c, tuple) else c for c in fake.commands]
+    assert commands.index("set_volume") < commands.index("set_source")

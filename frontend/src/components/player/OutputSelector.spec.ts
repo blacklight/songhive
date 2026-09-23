@@ -23,6 +23,7 @@ vi.mock("@/api/playback", () => ({
 
 const provider = {
   provider_type: "icecast",
+  label: "icecast",
   user_configurable: true,
   can_create: true,
   fields: [],

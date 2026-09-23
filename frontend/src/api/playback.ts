@@ -38,6 +38,7 @@ export interface PlaybackSessionState {
   live_position_seconds: number;
   repeat: "off" | "all" | "one";
   shuffle: boolean;
+  volume: number;
   controller_connection_id: string | null;
   queue: QueueTrackData[];
   outputs: PlaybackSessionOutput[];

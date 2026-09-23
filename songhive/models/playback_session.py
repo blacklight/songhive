@@ -81,6 +81,11 @@ class PlaybackSession(Base):
         default=False,
         server_default="0",
     )
+    volume: Mapped[float] = mapped_column(
+        Float,
+        default=1.0,
+        server_default="1",
+    )
     controller_connection_id: Mapped[Optional[str]] = mapped_column(
         String(64),
         nullable=True,

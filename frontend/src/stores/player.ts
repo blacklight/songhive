@@ -442,12 +442,27 @@ export const usePlayerStore = defineStore("player", () => {
 
   function setVolume(v: number) {
     volume.value = Math.min(Math.max(v, 0), 1);
+    if (sessionMode.value && sessionController) {
+      sessionController.setVolume(volume.value);
+      return;
+    }
     engine?.setVolume(volume.value, muted.value);
   }
 
   function toggleMute() {
     muted.value = !muted.value;
+    if (sessionMode.value && sessionController) {
+      // Mute is local presentation state; on the output it maps to gain 0.
+      sessionController.setVolume(muted.value ? 0 : volume.value);
+      return;
+    }
     engine?.setVolume(volume.value, muted.value);
+  }
+
+  // Session-driven volume updates bypass the controller so server state
+  // echoes never bounce back as new commands.
+  function setSessionVolume(v: number) {
+    volume.value = Math.min(Math.max(v, 0), 1);
   }
 
   function toggleShuffle() {
@@ -614,6 +629,7 @@ export const usePlayerStore = defineStore("player", () => {
     prev,
     seek,
     setVolume,
+    setSessionVolume,
     toggleMute,
     toggleShuffle,
     cycleRepeat,

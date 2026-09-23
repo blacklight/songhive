@@ -58,6 +58,10 @@ class OutputDriver(ABC):
         """Reposition the current source; optional, drivers may override."""
         return None
 
+    async def set_volume(self, volume: float) -> None:
+        """Set the output gain (0.0–1.0); optional, drivers may override."""
+        return None
+
     async def listener_count(self) -> int:
         """Return a best-effort listener count for this output."""
         return 0

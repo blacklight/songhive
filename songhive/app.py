@@ -50,6 +50,7 @@ def _build_tornado_app(config: SonghiveConfig, fastapi_app, tornado_redis=None) 
     from tornado.wsgi import WSGIContainer
 
     from .streaming.handler import StreamHandler
+    from .streaming.mount import StreamMountHandler
     from .ws.events import EventWebSocket
 
     EventWebSocket._allowed_origins = set(config.server.cors_origins)
@@ -88,6 +89,7 @@ def _build_tornado_app(config: SonghiveConfig, fastapi_app, tornado_redis=None) 
         (r"/ws/events", EventWebSocket),
         (r"/ws/", EventWebSocket),
         (r"/api/v1/stream/(?P<track_id>[^/]+)", StreamHandler),
+        (r"/streams/(?P<mount>[^/]+)", StreamMountHandler),
         *adapter_tornado_routes(config),
         (r".*", FallbackHandler, {"fallback": container}),
     ]

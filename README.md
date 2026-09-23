@@ -36,6 +36,7 @@
   * [pip installation](#pip-installation)
     + [Celery](#celery)
     + [Local library watchdog](#local-library-watchdog)
+    + [Stream worker](#stream-worker)
   * [systemd service](#systemd-service)
   * [Creating the admin user](#creating-the-admin-user)
     + [Docker installation](#docker-installation-1)
@@ -82,6 +83,11 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
   MusicBrainz and the Cover Art Archive
 - **Streaming**: Audio streaming with on-the-fly transcoding (MP3, OGG, FLAC,
   AAC, Opus), range requests, and per-user/per-role bitrate caps
+- **Server-side outputs**: Route playback to persistent audio outputs instead
+  of the browser — stream to an external Icecast server, or host your own
+  mountpoints entirely inside Songhive (`/streams/<mount>`) with fan-out to
+  multiple listeners. Playback keeps running on the server even after you
+  close the tab
 - **Playlists & Radios**: Create playlists and dynamic radio stations
 - **Listening history, favorites and scrobbling**: every play is recorded, and
   submissions to Last.fm and Libre.fm work out of the box
@@ -316,6 +322,7 @@ described above. Most of them are enabled by default — check
 | `[webmentions]` | Incoming/outgoing Webmention link-backs for public content |
 | `[feeds] enabled` | RSS 2.0 / Atom feeds under `/feeds` |
 | `[streaming]` | Default and max audio bitrate (globally or per user role), transcode cache |
+| `[streams]` | Server-side outputs (Icecast, native HTTP mounts): enable/disable, who may create outputs, allowed Icecast hosts, worker timings, native HTTP stream buffering and listener caps |
 | `[subsonic] enabled` | The Subsonic compatibility layer (on by default) |
 | `[scrobbling]` | Instance API keys for Last.fm / Libre.fm scrobbling |
 | `[musicbrainz]` | Metadata enrichment: MBID lookup, cover art and artist images |
@@ -376,6 +383,24 @@ The Docker stack runs this as a separate `watcher` container. The watcher is kep
 as a standalone process rather than a child of the web server so that a single
 host has exactly one watchdog, even when the web server is scaled to multiple
 workers.
+
+#### Stream worker
+
+Server-side audio outputs (Icecast relays and native HTTP mountpoints) are
+driven by a dedicated process:
+
+```bash
+songhive stream-worker
+```
+
+It claims outputs through a Redis lock, so a single worker process is enough —
+running more than one is safe (they just split the outputs), and none is
+required if you don't use server-side outputs. The Docker stack runs it as an
+optional `stream-worker` container under the `streams` profile:
+
+```bash
+docker compose --profile streams up -d
+```
 
 ### systemd service
 
@@ -554,6 +579,8 @@ REST API available at `/api/v1/`:
 | `/api/v1/history/` | Listening history |
 | `/api/v1/radios/` | Dynamic radios |
 | `/api/v1/stream/{id}` | Audio streaming |
+| `/api/v1/outputs/` | Server-side audio outputs (Icecast relays, native HTTP mounts) |
+| `/streams/{mount}` | Native HTTP stream mountpoints (listener-facing) |
 | `/api/v1/admin/` | Admin endpoints |
 
 WebSocket: `/ws/events` (real-time notifications)

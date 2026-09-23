@@ -34,7 +34,10 @@ const redactedKeys = ref<Set<string>>(new Set());
 const providerOptions = computed(() =>
   store.providers
     .filter((p) => p.can_create)
-    .map((p) => ({ value: p.provider_type, label: p.provider_type })),
+    .map((p) => ({
+      value: p.provider_type,
+      label: p.label || p.provider_type,
+    })),
 );
 
 const provider = computed(() =>
@@ -48,6 +51,7 @@ const canCreate = computed(() => providerOptions.value.length > 0);
 const columns = computed(() => [
   { key: "name", label: t("outputs.name") },
   { key: "provider_type", label: t("outputs.provider") },
+  { key: "stream_url", label: t("outputs.streamUrl") },
   { key: "enabled", label: t("outputs.enabled"), align: "center" as const },
   { key: "status", label: t("outputs.status") },
   {
@@ -61,7 +65,9 @@ const rows = computed<Record<string, unknown>[]>(() =>
   store.outputs.map((output) => ({
     id: output.id,
     name: output.name,
-    provider_type: output.provider_type,
+    provider_type:
+      store.getProvider(output.provider_type)?.label || output.provider_type,
+    stream_url: output.stream_url || "",
     enabled: output.enabled,
     status: output.last_error || t("outputs.ok"),
   })),
@@ -510,6 +516,18 @@ onMounted(async () => {
         :loading="store.loading"
         :empty-label="t('outputs.noOutputs')"
       >
+        <template #row-stream_url="{ value }">
+          <a
+            v-if="value"
+            :href="String(value)"
+            class="outputs-view__stream-url"
+            target="_blank"
+            rel="noopener"
+            >{{ String(value) }}</a
+          >
+          <span v-else class="outputs-view__no-url">—</span>
+        </template>
+
         <template #row-enabled="{ row, value }">
           <AppCheckbox
             :model-value="Boolean(value)"
@@ -639,5 +657,14 @@ onMounted(async () => {
 .outputs-view__error-text {
   color: var(--color-danger);
   font-size: 0.875rem;
+}
+
+.outputs-view__stream-url {
+  font-size: 0.875rem;
+  word-break: break-all;
+}
+
+.outputs-view__no-url {
+  color: var(--color-text-muted);
 }
 </style>

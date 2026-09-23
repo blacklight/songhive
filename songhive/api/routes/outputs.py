@@ -69,6 +69,7 @@ class OutputResponse(BaseModel):
     capabilities: Optional[OutputCapabilitiesResponse] = None
     enabled: bool
     last_error: Optional[str] = None
+    stream_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -77,6 +78,7 @@ class ProviderResponse(BaseModel):
     """Available output provider."""
 
     provider_type: str
+    label: str
     user_configurable: bool
     can_create: bool
     fields: list[dict]
@@ -99,16 +101,29 @@ def _to_capabilities_response(caps: Optional[dict]) -> Optional[OutputCapabiliti
         return None
 
 
+def _stream_url(output: OutputStream, config: dict) -> Optional[str]:
+    """Return the public mountpoint URL path for native HTTP outputs."""
+    if output.provider_type != "http":
+        return None
+
+    from ...streams.http import normalize_mount
+
+    mount = normalize_mount(config.get("mount"))
+    return f"/streams/{mount}" if mount else None
+
+
 def _to_response(output: OutputStream) -> OutputResponse:
+    config = redacted_config(output.config, output.provider_type)
     return OutputResponse(
         id=str(output.id),
         user_id=output.user_id,
         provider_type=output.provider_type,
         name=output.name,
-        config=redacted_config(output.config, output.provider_type),
+        config=config,
         capabilities=_to_capabilities_response(output.capabilities),
         enabled=output.enabled,
         last_error=output.last_error,
+        stream_url=_stream_url(output, config),
         created_at=output.created_at,
         updated_at=output.updated_at,
     )
@@ -135,6 +150,7 @@ async def list_providers(
         providers.append(
             ProviderResponse(
                 provider_type=provider_type,
+                label=provider_cls.label or provider_type,
                 user_configurable=provider_cls.user_configurable,
                 can_create=_provider_allowed_for_create(provider_type, current_user, config),
                 fields=get_provider_fields(provider_type),

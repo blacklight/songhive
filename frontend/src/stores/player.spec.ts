@@ -416,6 +416,46 @@ describe("usePlayerStore", () => {
     expect(engine.setVolume).toHaveBeenLastCalledWith(0.5, true);
   });
 
+  it("setVolume and toggleMute delegate to the session controller", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const controller = {
+      playTrack: vi.fn(),
+      playAll: vi.fn(),
+      playAt: vi.fn(),
+      play: vi.fn(),
+      pause: vi.fn(),
+      next: vi.fn(),
+      prev: vi.fn(),
+      seek: vi.fn(),
+      toggleShuffle: vi.fn(),
+      setRepeat: vi.fn(),
+      setVolume: vi.fn(),
+      enqueue: vi.fn(),
+      enqueueNext: vi.fn(),
+      removeAt: vi.fn(),
+      clear: vi.fn(),
+    };
+    store.registerSessionController(controller);
+    store.setSessionMode(true);
+
+    store.setVolume(0.4);
+    expect(store.volume).toBe(0.4);
+    expect(controller.setVolume).toHaveBeenCalledWith(0.4);
+    // The local engine stays untouched while an output drives playback —
+    // the only call is the initial one from registerEngine.
+    expect(engine.setVolume).toHaveBeenCalledTimes(1);
+
+    store.toggleMute();
+    expect(store.muted).toBe(true);
+    expect(controller.setVolume).toHaveBeenLastCalledWith(0);
+
+    store.toggleMute();
+    expect(store.muted).toBe(false);
+    expect(controller.setVolume).toHaveBeenLastCalledWith(0.4);
+  });
+
   it("persists state to localStorage and restores it", async () => {
     const firstStore = usePlayerStore();
     const engine = createMockEngine();

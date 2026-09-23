@@ -128,6 +128,7 @@ class IcecastDriver(OutputDriver):
         self._current_source: Optional[AudioSource] = None
         self._current_metadata: TrackMeta = TrackMeta(track_id="", title="", artist="")
         self._paused = False
+        self._volume = 1.0
         self._position = 0.0
         self._resume_position = 0.0
         self._source_started_at = 0.0
@@ -142,6 +143,10 @@ class IcecastDriver(OutputDriver):
     def _format_spec(self) -> dict[str, str]:
         return _FORMAT_SPECS[self.config["format"]]
 
+    @property
+    def _ffmpeg(self) -> str:
+        return str(self.config.get("ffmpeg_path") or "ffmpeg")
+
     def _encoder_argv(self) -> list[str]:
         """Build the persistent encoder ffmpeg command."""
         cfg = self.config
@@ -149,7 +154,7 @@ class IcecastDriver(OutputDriver):
         url = f"icecast://{cfg['username']}:{cfg['password']}@" f"{cfg['host']}:{cfg['port']}{cfg['mount']}"
 
         argv: list[str] = [
-            "ffmpeg",
+            self._ffmpeg,
             "-hide_banner",
             "-loglevel",
             "error",
@@ -185,7 +190,7 @@ class IcecastDriver(OutputDriver):
     def _decoder_argv(self, source: AudioSource, *, position: float) -> list[str]:
         """Build a per-track decoder ffmpeg command."""
         argv: list[str] = [
-            "ffmpeg",
+            self._ffmpeg,
             "-hide_banner",
             "-loglevel",
             "error",
@@ -201,6 +206,8 @@ class IcecastDriver(OutputDriver):
 
         argv.extend(
             [
+                "-af",
+                f"volume={self._volume}",
                 "-f",
                 "s16le",
                 "-ar",
@@ -215,7 +222,7 @@ class IcecastDriver(OutputDriver):
     def _silence_argv(self) -> list[str]:
         """Build a silence generator command for pause."""
         return [
-            "ffmpeg",
+            self._ffmpeg,
             "-hide_banner",
             "-loglevel",
             "error",
@@ -480,6 +487,17 @@ class IcecastDriver(OutputDriver):
             self._position = seconds
             return
         await self.set_source(self._current_source, position=seconds, metadata=self._current_metadata)
+
+    async def set_volume(self, volume: float) -> None:
+        """Set the decoder gain; restarts the decoder at the live position."""
+        self._volume = min(max(float(volume), 0.0), 1.0)
+        if self._paused or self._current_source is None:
+            return
+        await self.set_source(
+            self._current_source,
+            position=self._elapsed_position(),
+            metadata=self._current_metadata,
+        )
 
     @property
     def is_paused(self) -> bool:

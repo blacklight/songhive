@@ -1931,6 +1931,7 @@
     "provider": "Provider",
     "enabled": "Enabled",
     "status": "Status",
+    "streamUrl": "Stream URL",
     "ok": "OK",
     "test": "Test",
     "testSuccess": "Output configuration is valid.",

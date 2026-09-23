@@ -152,7 +152,7 @@ def _setup_spa_routes(app: FastAPI, static_dir: Path):
                 raise HTTPException(status_code=404)
 
             path = scope["path"].lstrip("/")
-            if path.startswith(("api/", "ws/", "stream/", "rest/")):
+            if path.startswith(("api/", "ws/", "stream/", "streams/", "rest/")):
                 raise HTTPException(status_code=404)
 
             # Federation/ActivityPub requests to disabled endpoints should 404,

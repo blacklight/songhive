@@ -111,6 +111,52 @@ def _output_host_allowed(provider_type: str, cfg: dict, user: User, config: Song
     return host in allowed_hosts
 
 
+async def find_http_stream_output(db: AsyncSession, mount: str) -> Optional[tuple[OutputStream, dict]]:
+    """Return the enabled native-HTTP output owning ``mount`` and its decrypted config.
+
+    Used by the Tornado mountpoint handler; configs are decrypted on read and
+    never leave the server side.
+    """
+    from ..streams.http import normalize_mount
+
+    slug = normalize_mount(mount)
+    if not slug:
+        return None
+
+    result = await db.execute(
+        select(OutputStream).where(
+            OutputStream.provider_type == "http",
+            OutputStream.enabled.is_(True),
+        )
+    )
+
+    for output in result.scalars().all():
+        cfg = _decrypt_output_config(output.config)
+        if normalize_mount(cfg.get("mount")) == slug:
+            return output, cfg
+    return None
+
+
+async def _check_http_mount_available(db: AsyncSession, cfg: dict, exclude_id: Optional[str] = None) -> None:
+    """Reject a native-HTTP config whose mount slug is already in use."""
+    from ..streams.http import normalize_mount
+
+    slug = normalize_mount(cfg.get("mount"))
+    if not slug:
+        return
+
+    result = await db.execute(select(OutputStream).where(OutputStream.provider_type == "http"))
+    for output in result.scalars().all():
+        if exclude_id is not None and str(output.id) == exclude_id:
+            continue
+        existing = _decrypt_output_config(output.config)
+        if normalize_mount(existing.get("mount")) == slug:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Mount point '{slug}' is already in use",
+            )
+
+
 async def _validate_and_encrypt_config(provider_type: str, config: dict) -> tuple[str, Optional[dict], Optional[str]]:
     """Validate config with the provider and return the encrypted token and capabilities."""
     try:
@@ -156,6 +202,9 @@ async def create_output(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Icecast host is not in the allowlist",
         )
+
+    if provider_type == "http":
+        await _check_http_mount_available(db, cfg)
 
     encrypted, capabilities, _ = await _validate_and_encrypt_config(provider_type, cfg)
 
@@ -217,6 +266,9 @@ async def update_output(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Icecast host is not in the allowlist",
             )
+
+        if output.provider_type == "http":
+            await _check_http_mount_available(db, merged, exclude_id=str(output.id))
 
         encrypted, capabilities, _ = await _validate_and_encrypt_config(output.provider_type, merged)
         output.config = encrypted

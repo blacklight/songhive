@@ -32,6 +32,7 @@ function makeState(queue: QueueTrackData[]): PlaybackSessionState {
     live_position_seconds: 0,
     repeat: "off",
     shuffle: false,
+    volume: 1,
     controller_connection_id: null,
     queue,
     outputs: [
@@ -122,5 +123,63 @@ describe("usePlaybackStore", () => {
       image_url: "/api/v1/files/t1/download",
       visibility: "public",
     });
+  });
+
+  it("applies the session volume to the player store", async () => {
+    const store = usePlaybackStore();
+    const playerStore = usePlayerStore();
+    const state = { ...makeState([]), volume: 0.6 };
+    vi.mocked(playbackApi.setSessionOutputs).mockResolvedValue(state);
+
+    await store.selectOutput("os1");
+
+    expect(playerStore.volume).toBe(0.6);
+  });
+
+  it("setVolume sends throttled set_volume commands in session mode", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = usePlaybackStore();
+      const playerStore = usePlayerStore();
+      store.registerWithPlayer();
+      playerStore.setSessionMode(true);
+      vi.mocked(playbackApi.sendPlaybackCommand).mockResolvedValue(
+        makeState([]),
+      );
+
+      playerStore.setVolume(0.3);
+      expect(playerStore.volume).toBe(0.3);
+      expect(playbackApi.sendPlaybackCommand).toHaveBeenCalledTimes(1);
+      expect(
+        vi.mocked(playbackApi.sendPlaybackCommand).mock.calls[0][0],
+      ).toMatchObject({ command: "set_volume", args: { volume: 0.3 } });
+
+      // Rapid slider ticks within the window coalesce into one trailing send.
+      playerStore.setVolume(0.5);
+      playerStore.setVolume(0.6);
+      expect(playbackApi.sendPlaybackCommand).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(300);
+      expect(playbackApi.sendPlaybackCommand).toHaveBeenCalledTimes(2);
+      expect(
+        vi.mocked(playbackApi.sendPlaybackCommand).mock.calls[1][0],
+      ).toMatchObject({ command: "set_volume", args: { volume: 0.6 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("toggleMute maps to volume 0 on the output in session mode", async () => {
+    const store = usePlaybackStore();
+    const playerStore = usePlayerStore();
+    store.registerWithPlayer();
+    playerStore.setSessionMode(true);
+    vi.mocked(playbackApi.sendPlaybackCommand).mockResolvedValue(makeState([]));
+
+    playerStore.toggleMute();
+    await Promise.resolve();
+    expect(
+      vi.mocked(playbackApi.sendPlaybackCommand).mock.calls[0][0],
+    ).toMatchObject({ command: "set_volume", args: { volume: 0 } });
   });
 });

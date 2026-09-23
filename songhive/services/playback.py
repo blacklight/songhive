@@ -292,6 +292,7 @@ async def session_state_dict(db: AsyncSession, session: PlaybackSession) -> dict
         "live_position_seconds": live_position,
         "repeat": session.repeat,
         "shuffle": session.shuffle,
+        "volume": session.volume,
         "controller_connection_id": session.controller_connection_id,
         "queue": await _enrich_queue(db, session.queue or []),
         "outputs": outputs,
@@ -534,6 +535,18 @@ async def cmd_set_shuffle(
     await _commit_command(db, session, "set_shuffle", {"shuffle": session.shuffle}, connection_id)
 
 
+async def cmd_set_volume(
+    db: AsyncSession,
+    session: PlaybackSession,
+    volume: float,
+    connection_id: Optional[str] = None,
+) -> None:
+    """Set the output gain (0.0–1.0) for the session's stream outputs."""
+    _assert_control(session, connection_id)
+    session.volume = min(max(volume, 0.0), 1.0)
+    await _commit_command(db, session, "set_volume", {"volume": session.volume}, connection_id)
+
+
 async def cmd_stop(
     db: AsyncSession,
     session: PlaybackSession,
@@ -585,6 +598,7 @@ COMMAND_HANDLERS: dict[str, Callable[..., Awaitable[None]]] = {
     "set_queue": cmd_set_queue,
     "set_repeat": cmd_set_repeat,
     "set_shuffle": cmd_set_shuffle,
+    "set_volume": cmd_set_volume,
     "stop": cmd_stop,
     "take_control": cmd_take_control,
     "release_control": cmd_release_control,
@@ -640,6 +654,15 @@ async def handle_command(
         await cmd_set_repeat(db, session, args.get("repeat", "off"), connection_id)
     elif command == "set_shuffle":
         await cmd_set_shuffle(db, session, args.get("shuffle", False), connection_id)
+    elif command == "set_volume":
+        try:
+            volume = float(args.get("volume", 1.0))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="volume must be a number",
+            )
+        await cmd_set_volume(db, session, volume, connection_id)
     else:
         await handler(db, session, connection_id)
 

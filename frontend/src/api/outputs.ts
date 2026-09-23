@@ -17,6 +17,7 @@ export interface OutputResponse {
   capabilities: OutputCapabilities | null;
   enabled: boolean;
   last_error: string | null;
+  stream_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +35,7 @@ export interface ProviderField {
 
 export interface ProviderResponse {
   provider_type: string;
+  label: string;
   user_configurable: boolean;
   can_create: boolean;
   fields: ProviderField[];

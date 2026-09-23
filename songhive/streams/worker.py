@@ -231,11 +231,18 @@ class SessionDriver:
             config = decrypt_json(output_stream.config)
             await provider.validate_config(config)
 
-            # Allow icecast config to fall back to the configured ffmpeg path.
-            if output_stream.provider_type == "icecast" and not config.get("ffmpeg_path"):
+            # Allow provider configs to fall back to the configured ffmpeg path.
+            if output_stream.provider_type in ("icecast", "http") and not config.get("ffmpeg_path"):
                 config["ffmpeg_path"] = (
                     self.worker.config.streams.icecast_ffmpeg_path or self.worker.config.streaming.ffmpeg_path
                 )
+
+            # Native HTTP mounts are served from the web process; the driver
+            # publishes encoded audio to a Redis stream, so it needs the
+            # worker's Redis client and the configured backlog size.
+            if output_stream.provider_type == "http":
+                config["_redis"] = self.worker.redis
+                config["_stream_max_entries"] = self.worker.config.streams.http_stream_max_entries
 
             self.driver = provider.create_driver(config)
             await self.driver.start()
@@ -327,6 +334,9 @@ class SessionDriver:
                 session = await self._load_session(db)
                 if session is None:
                     return
+                # Push the persisted gain first so the first decoder argv is
+                # built with the right volume instead of restarting right away.
+                await self.driver.set_volume(session.volume)
                 if session.state == "playing":
                     source, metadata = await self._resolve_source(db, session)
                     if source is not None:
@@ -355,7 +365,7 @@ class SessionDriver:
                     return
 
                 connection_id = envelope.get("issued_by") or args.get("connection_id")
-                await self._apply_command(db, session, command, args, connection_id)
+                await self._apply_command(session, command, args, connection_id)
 
                 session.last_active_at = _now_utc()
                 await db.flush()
@@ -405,9 +415,14 @@ class SessionDriver:
             except Exception:
                 logger.exception("Failed to pause driver for %s", self.session_id)
 
+        if command == "set_volume":
+            try:
+                await self.driver.set_volume(session.volume)
+            except Exception:
+                logger.exception("Failed to set driver volume for %s", self.session_id)
+
     async def _apply_command(
         self,
-        db,
         session: PlaybackSession,
         command: str,
         args: dict,
@@ -452,6 +467,13 @@ class SessionDriver:
 
         elif command == "set_shuffle":
             session.shuffle = bool(args.get("shuffle", False))
+
+        elif command == "set_volume":
+            try:
+                volume = float(args.get("volume", session.volume or 1.0))
+            except (TypeError, ValueError):
+                volume = session.volume or 1.0
+            session.volume = min(max(volume, 0.0), 1.0)
 
         elif command == "stop":
             session.state = "idle"
@@ -668,7 +690,7 @@ class SessionDriver:
                 )
 
             if external_stream.iterator is not None:
-                temp_path = await self._spill_iterator(external_stream.iterator, external_stream.content_type)
+                temp_path = await self._spill_iterator(external_stream.iterator)
                 if temp_path is not None:
                     return (
                         AudioSource(
@@ -682,7 +704,7 @@ class SessionDriver:
 
         return None, metadata
 
-    async def _spill_iterator(self, iterator, content_type: Optional[str]) -> Optional[Path]:
+    async def _spill_iterator(self, iterator) -> Optional[Path]:
         """Write an async byte iterator to a temporary file and return its path."""
         import tempfile
 

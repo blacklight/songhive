@@ -153,6 +153,8 @@ songhive/
 │   ├── external_library.py # External library adapter instance
 │   ├── external_sync_run.py # External library sync history
 │   ├── external_track.py   # Track discovered through an external provider
+│   ├── output_stream.py    # Server-side audio output (encrypted provider config)
+│   ├── playback_session.py # Persisted playback control plane for server outputs
 │   └── setting.py          # Runtime-editable instance settings (key/JSON-value)
 ├── services/               # Business logic layer
 │   ├── acl.py              # Three-level visibility + share-grant + share-token ACL
@@ -171,6 +173,8 @@ songhive/
 │   ├── metadata.py         # Tag extraction coordination
 │   ├── music.py            # Music library helpers
 │   ├── musicbrainz.py      # MusicBrainz + Cover Art Archive enrichment (async httpx)
+│   ├── outputs.py          # Output CRUD, config encryption, mount resolution
+│   ├── playback.py         # PlaybackSession state machine + worker commands
 │   ├── redis.py            # Redis client lifecycle
 │   ├── reports.py          # Content report CRUD
 │   ├── secrets.py          # Config encryption, decryption, and secret redaction
@@ -205,7 +209,17 @@ songhive/
 │   └── metadata.py         # Tag reading (mutagen), field normalization
 ├── streaming/              # Audio streaming
 │   ├── handler.py          # Tornado streaming handler (range requests, send-file)
+│   ├── mount.py            # Tornado listener handler for native HTTP mounts
 │   └── transcoder.py       # ffmpeg wrapper: MP3, OGG, FLAC, AAC, Opus
+├── streams/                # Server-side audio outputs
+│   ├── base.py             # AudioOutput provider base class (fields, redaction)
+│   ├── driver.py           # OutputDriver runtime interface (start/pause/seek/events)
+│   ├── registry.py         # provider_type → AudioOutput registry
+│   ├── icecast.py          # Icecast provider: ffmpeg → icecast:// pipeline
+│   ├── http.py             # Native HTTP provider: ffmpeg → Redis Stream fan-out
+│   ├── fake.py             # In-memory provider for tests
+│   ├── types.py            # AudioSource and related dataclasses
+│   └── worker.py           # `songhive stream-worker` session driver loop
 ├── storage/                # Media storage backends
 │   ├── base.py             # Abstract StorageBackend interface + FileSizeLimitExceededError
 │   ├── exc.py              # Storage-layer exceptions
@@ -256,6 +270,7 @@ from tornado.httpserver import HTTPServer
 from songhive.api.app import create_app
 from songhive.ws.events import EventWebSocket
 from songhive.streaming.handler import StreamHandler
+from songhive.streaming.mount import StreamMountHandler
 
 fastapi_app = create_app(config)
 wsgi_app = ASGIMiddleware(fastapi_app)
@@ -265,6 +280,7 @@ tornado_app = Application([
     (r"/ws/events", EventWebSocket),
     (r"/ws/", EventWebSocket),
     (r"/api/v1/stream/(?P<track_id>[^/]+)", StreamHandler),
+    (r"/streams/(?P<mount>[^/]+)", StreamMountHandler),
     (r".*", FallbackHandler, {"fallback": container}),
 ])
 
@@ -310,6 +326,7 @@ these subsections:
 | `notifications`| retention_days, purge_hour, digest_hour                     |
 | `imports`      | scan_roots, bulk_import_sync_threshold                        |
 | `streaming`    | max_bitrate, max_bitrate_by_role, default_bitrate, chunk_size, transcode_cache_enabled |
+| `streams`      | enabled, allow_user_created_outputs, allowed/denied_user_providers, allowed_output_hosts, icecast_ffmpeg_path, worker timings, idle timeout, http_stream_* |
 
 Runtime-editable overrides (instance settings stored in the `settings` DB
 table, cached in Redis) are applied over the file-based config at startup and
@@ -1433,6 +1450,74 @@ Recursive deletion collects unpublish information for public tracks and enqueues
   (`max_bitrate_by_role` keyed by `User.role`).
 - **Supported formats**: MP3, OGG (Vorbis), FLAC, AAC (M4A), Opus.
 
+### Server-side audio outputs
+
+Playback can be routed to persistent server-side outputs instead of the
+browser Web Player, Spotify-Connect-style: the browser (or any client) sends
+commands, but audio is rendered by the server, so playback continues after
+the controlling tab closes.
+
+- **Control plane** — a persisted `PlaybackSession` row
+  (`models/playback_session.py`) holds the queue, index, position, volume and
+  play/pause state per user. `services/playback.py` validates commands,
+  commits the new state, then publishes a control envelope on the Redis list
+  `songhive:playback:control:{session_id}`. Session changes are broadcast
+  over `/ws/events` (`playback_session` events) so multiple tabs stay in
+  sync.
+- **Outputs** — an `OutputStream` row (`models/output_stream.py`) stores a
+  `provider_type` plus a provider config. Secret config fields are
+  Fernet-encrypted at rest and redacted to `"<redacted>"` in API responses;
+  PATCH routes merge the sentinel back to the stored value. Providers are
+  registered in `streams/registry.py` by subclassing `AudioOutput`
+  (`provider_type`, `FIELDS` schema hint, `validate_config`,
+  `create_driver`); `GET /api/v1/outputs/providers` exposes the schema to
+  the frontend form builder.
+- **Stream worker** — `songhive stream-worker` (`streams/worker.py`) is a
+  dedicated process that scans for active sessions bound to outputs and runs
+  one `SessionDriver` per session. Each driver holds a Redis lock
+  `songhive:stream:lock:{output_id}` (unique token, refreshed every loop,
+  released on shutdown) so exactly one worker drives a given output. The
+  worker owns queue advancement, repeat/shuffle, listen recording,
+  scrobbling and idle shutdown (`streams.background_idle_timeout_seconds`).
+  Deployed as the `stream-worker` Compose service (`streams` profile) and
+  `songhive-stream-worker.service`.
+- **Icecast provider** (`streams/icecast.py`) — one long-lived ffmpeg
+  *encoder* pushes an MP3, Ogg Vorbis or Opus stream to an `icecast://`
+  mountpoint;
+  a short-lived ffmpeg *decoder* (`-re -ss <pos>`) feeds PCM into it per
+  track. Pausing swaps the decoder for a **realtime** (`-re`) `anullsrc`
+  silence generator so the mount stays alive without flooding listeners.
+  `source_ended` decoder events carry a generation tag so events from a
+  killed decoder can't pause the new source. ffmpeg's Icecast muxer does not
+  support mid-stream ICY metadata, so `update_metadata` is a no-op.
+- **Native HTTP provider** (`streams/http.py`) — same driver machinery, but
+  the encoder writes to `pipe:1` and a publish task XADDs each ~16 KiB chunk
+  (base64) into the Redis stream `songhive:stream:data:{mount}`
+  (`MAXLEN ≈ streams.http_stream_max_entries`). The Tornado
+  `StreamMountHandler` (`streaming/mount.py`) serves `GET /streams/{mount}`
+  by bursting the newest `streams.http_stream_burst_entries` entries
+  (`XREVRANGE`) then following the stream (`XREAD BLOCK`) — every listener
+  is an independent cursor, so Redis provides the fan-out and a stalled
+  client never slows the others. Entries older than
+  `streams.http_stream_max_lag_seconds` (entry IDs are server millisecond
+  timestamps) are skipped rather than delivered, so a listener that falls
+  behind jumps forward instead of accumulating latency, and the
+  `X-Accel-Buffering: no` response header keeps buffering proxies from
+  hiding listener lag in their own buffers. Liveness is the TTL'd
+  `songhive:stream:meta:{mount}` key refreshed by the driver; `{"end": "1"}`
+  entries disconnect listeners on graceful stop; per-listener TTL keys under
+  `songhive:stream:listener:{mount}:*` feed `listener_count` for idle
+  shutdown and enforce `streams.http_stream_max_listeners` (0 = uncapped).
+  Mount slugs must be unique across `http` outputs; an optional
+  `listen_token` field gates listeners via `?token=`/`Bearer`. No external
+  server or extra port is needed.
+- **Driver interface** (`streams/driver.py`) — `start`, `stop`,
+  `set_source`, `pause`, `resume`, `seek`, `set_volume`, `update_metadata`,
+  `health`, `is_paused`, `listener_count`, and an `events` queue. The worker
+  uses `driver.is_paused` (not the persisted session state, which is already
+  post-command by the time the worker reads it) to detect pause→play
+  transitions.
+
 ---
 
 ## Federation
@@ -2525,7 +2610,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/main.ts` | App bootstrap, Pinia + i18n + router mount, theme apply |
 | `frontend/src/App.vue` | Root component (`<RouterView />`) |
 | `frontend/src/router/` | Vue Router (history mode) with global auth/admin guard |
-| `frontend/src/stores/` | Pinia stores (auth, theme, toast, confirm, player) |
+| `frontend/src/stores/` | Pinia stores (auth, theme, toast, confirm, player, playback session, outputs) |
 | `frontend/src/components/ui/` | Headless base components (button, input, select, avatar, table, pagination, search, context menu, entity actions) |
 | `frontend/src/components/feedback/` | Toast, banner, spinner, skeleton, modal, confirm dialog |
 | `frontend/src/components/entity/` | Reusable entity grid/list components (e.g. `BulkEditableGrid` for bulk selection and deletion) |
@@ -2533,7 +2618,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/statuses/` | `StatusComposer` — shared status editor (plain text or Markdown, visibility, BCP-47 language defaulting to the browser locale, `@` mention and `#` hashtag autocomplete (hashtags sorted by popularity; mentions also cover remote actors via the `remote_users` search flag and accept `user@domain` narrowing) plus track-only attach search via `SearchBar`/`SearchSuggestions`, file uploads through `api/files.ts`). Posts through `api/statuses.ts` (`POST /statuses/`) by default; the share dialog's Fediverse tab injects a custom submit that calls `tracks.publishTrack` instead, and `ActivityEditModal` reuses it for edits (`initial*` props seed the existing text/format/language/attachments; attachment chips map to `songhive:fileId`/`songhive:trackId`-marked docs). |
 | `frontend/src/components/user/` | Reusable user display components (`UserLink`) used across activity cards, resource owner metadata, file details, audit logs, and admin lists. `UserLink` renders local users as `RouterLink`s to `/@{username}`, remote users as external links to `actor_url`, and accepts either a full `UserSummary` owner or legacy `username`/`displayName`/`avatarUrl`/`remoteUrl` props |
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
-| `frontend/src/components/player/` | Persistent player bar (`PlayerBar`, `NowPlaying`, `QueuePanel`, `VolumeControl`) mounted in `AppLayout` so playback survives route changes, backed by `stores/player.ts` and the singleton `player/engine.ts` (dual `HTMLAudioElement` primary/preload). `QueueTrack` extends `TrackResponse` with `stream_url` — a direct media URL used instead of `/api/v1/stream/{id}` for audio without a local track row — and `remote`, which suppresses library links and listen-history reporting |
+| `frontend/src/components/player/` | Persistent player bar (`PlayerBar`, `NowPlaying`, `QueuePanel`, `VolumeControl`, `OutputSelector`) mounted in `AppLayout` so playback survives route changes, backed by `stores/player.ts` and the singleton `player/engine.ts` (dual `HTMLAudioElement` primary/preload). `OutputSelector` routes playback between "This device" and configured server-side outputs via `stores/playback.ts`; output management lives in the profile Outputs tab (`views/OutputsView.vue`, `stores/outputs.ts`). `QueueTrack` extends `TrackResponse` with `stream_url` — a direct media URL used instead of `/api/v1/stream/{id}` for audio without a local track row — and `remote`, which suppresses library links and listen-history reporting |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
 | `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, `/settings` for the authenticated user, `UserProfileView` for `/@{username}`, `UsersDirectoryView` for `/users`, `SearchView` for the public `/search` page, plus 403/404 and placeholder views). `SearchView` renders grouped, independently sortable and paginated sections for every searchable entity via `useSearchSections`; the shared `SearchBar` supports an optional autocomplete mode backed by the aggregate `/api/v1/search/` endpoint, with `SearchSuggestions` offering arrow-key navigation (Enter picks the highlighted item) via an exposed `handleKeydown` hook the controlling input forwards to. When the caller passes `remote` (the `remote_available` flag from the search response) and the query looks federated — an `https://` URL or an `@user@domain` FQN — `SearchSuggestions` appends a "See on the Fediverse" entry that emits `remote-lookup`; `SearchView` routes it to `/remote/lookup`. `UserProfileView` renders user bios through the `RichText` component, which linkifies hashtags, mentions and URLs; library, playlist, album, and track detail views render the owner through the `UserLink` component |
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |

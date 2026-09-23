@@ -15,6 +15,10 @@ import { i18n } from "@/i18n";
 
 const WS_EVENT = "playback_session";
 
+// Volume slider drags emit one update per tick; coalesce them into at most
+// one session command per window (leading + trailing edge).
+const VOLUME_THROTTLE_MS = 250;
+
 let connectionId = "";
 
 function getConnectionId(): string {
@@ -75,6 +79,10 @@ export const usePlaybackStore = defineStore("playback", () => {
     () => activeOutputId.value !== null && activeOutputId.value !== "web",
   );
 
+  let volumeTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingVolume: number | null = null;
+  let volumeDirtyUntil = 0;
+
   const currentOutput = computed(() => {
     if (!session.value) return null;
     return (
@@ -106,6 +114,29 @@ export const usePlaybackStore = defineStore("playback", () => {
       current?.duration ?? 0,
     );
     playerStore.setSessionMode(isSessionMode.value);
+    // Skip self-echoes while a local volume change is in flight so the slider
+    // does not jerk mid-drag; remote controllers' values apply once the
+    // window expires.
+    if (Date.now() >= volumeDirtyUntil) {
+      playerStore.setSessionVolume(state.volume ?? 1);
+    }
+  }
+
+  function sendVolume(volume: number): void {
+    volumeDirtyUntil = Date.now() + VOLUME_THROTTLE_MS * 2;
+    if (volumeTimer !== null) {
+      pendingVolume = volume;
+      return;
+    }
+    volumeTimer = setTimeout(() => {
+      volumeTimer = null;
+      if (pendingVolume !== null) {
+        const v = pendingVolume;
+        pendingVolume = null;
+        sendVolume(v);
+      }
+    }, VOLUME_THROTTLE_MS);
+    void sendCommand("set_volume", { volume });
   }
 
   async function refreshSession(): Promise<void> {
@@ -230,6 +261,9 @@ export const usePlaybackStore = defineStore("playback", () => {
     setRepeat: (repeat: RepeatMode) => {
       void sendCommand("set_repeat", { repeat });
     },
+    setVolume: (volume: number) => {
+      sendVolume(volume);
+    },
     enqueue: (track: QueueTrack) => {
       const current = session.value?.queue || [];
       const next = [...current, queueTrackToTrackData(track)];
@@ -272,6 +306,12 @@ export const usePlaybackStore = defineStore("playback", () => {
     activeOutputId.value = null;
     loading.value = false;
     error.value = null;
+    if (volumeTimer !== null) {
+      clearTimeout(volumeTimer);
+      volumeTimer = null;
+    }
+    pendingVolume = null;
+    volumeDirtyUntil = 0;
     playerStore.setSessionMode(false);
   }
 

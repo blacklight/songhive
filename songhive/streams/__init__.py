@@ -6,7 +6,7 @@ Importing a provider module self-registers it with
 provider is intentionally only registered in test fixtures.
 """
 
-from . import icecast  # noqa: F401
+from . import http, icecast  # noqa: F401
 from .base import AudioOutput
 from .driver import OutputDriver
 from .registry import get_output, is_user_configurable, list_output_types, register_output

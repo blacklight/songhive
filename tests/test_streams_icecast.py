@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from songhive.streams.icecast import IcecastDriver, IcecastOutput
-from songhive.streams.types import AudioSource
+from songhive.streams.types import AudioSource, TrackMeta
 
 
 def _valid_config() -> dict:
@@ -174,3 +174,73 @@ async def test_icecast_decoder_no_source_ended_when_encoder_dead(monkeypatch):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     await driver._run_decoder(AudioSource(kind="path", path=Path("/tmp/track.flac")), 0.0, 1)
     assert driver.events.empty()
+
+
+@pytest.mark.asyncio
+async def test_icecast_decoder_argv_includes_volume_filter():
+    provider = IcecastOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    driver = IcecastDriver(config)
+    argv = driver._decoder_argv(
+        AudioSource(kind="path", path=Path("/tmp/track.flac")),
+        position=0.0,
+    )
+    assert argv.index("-af") < argv.index("-f")
+    assert argv[argv.index("-af") + 1] == "volume=1.0"
+
+
+@pytest.mark.asyncio
+async def test_icecast_set_volume_restarts_decoder_with_new_gain(monkeypatch):
+    """set_volume while playing restarts the decoder with the new gain."""
+    provider = IcecastOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    driver = IcecastDriver(config)
+    driver._encoder = _FakeEncoderProc()
+
+    argvs: list[list[str]] = []
+
+    async def fake_exec(*args, **_kwargs):
+        argvs.append([str(a) for a in args])
+        return _FakeDecoderProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    source = AudioSource(kind="path", path=Path("/tmp/track.flac"))
+    meta = TrackMeta(track_id="t1", title="t", artist="a")
+    await driver.set_source(source, position=5.0, metadata=meta)
+    assert driver._decoder_task is not None
+    await asyncio.sleep(0)
+
+    await driver.set_volume(0.25)
+    await asyncio.sleep(0)
+
+    assert driver._volume == pytest.approx(0.25)
+    decoder_argvs = [a for a in argvs if "pipe:1" in a]
+    assert len(decoder_argvs) >= 2
+    assert f"volume={0.25}" in decoder_argvs[-1]
+
+
+@pytest.mark.asyncio
+async def test_icecast_set_volume_while_paused_only_records(monkeypatch):
+    """set_volume while paused stores the gain without touching the silence."""
+    provider = IcecastOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    driver = IcecastDriver(config)
+    driver._paused = True
+    driver._current_source = AudioSource(kind="path", path=Path("/tmp/track.flac"))
+
+    async def fake_exec(*_args, **_kwargs):
+        return _FakeDecoderProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    await driver.set_volume(0.5)
+
+    assert driver._volume == pytest.approx(0.5)
+    # No new decoder task was spawned for the volume change alone.
+    assert driver._decoder_task is None
+    # The next resume builds its argv with the new gain.
+    argv = driver._decoder_argv(driver._current_source, position=0.0)
+    assert argv[argv.index("-af") + 1] == "volume=0.5"

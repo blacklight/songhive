@@ -658,6 +658,36 @@ class StreamsConfig(BaseSettings):
         ge=10,
         description="Redis TTL for a stream worker output lock.",
     )
+    http_stream_max_entries: int = Field(
+        default=512,
+        ge=16,
+        description=(
+            "Approximate MAXLEN of the Redis stream backing each native HTTP "
+            "mount (each entry is one ~16 KiB encoded chunk)."
+        ),
+    )
+    http_stream_burst_entries: int = Field(
+        default=8,
+        ge=0,
+        description=(
+            "How many recent stream entries a new HTTP listener is bursted "
+            "with on connect (8 entries ≈ 128 KiB at 16 KiB per chunk)."
+        ),
+    )
+    http_stream_max_lag_seconds: float = Field(
+        default=5.0,
+        ge=0,
+        description=(
+            "Maximum age of buffered audio delivered to an HTTP listener. "
+            "Older chunks are skipped so a slow client jumps forward instead "
+            "of accumulating latency; 0 disables lag dropping."
+        ),
+    )
+    http_stream_max_listeners: int = Field(
+        default=64,
+        ge=0,
+        description="Maximum concurrent listeners per native HTTP mount; 0 disables the cap.",
+    )
 
     @field_validator(
         "allowed_user_providers",

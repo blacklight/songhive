@@ -60,6 +60,7 @@ export interface SessionController {
   seek(seconds: number): void;
   toggleShuffle(shuffle: boolean): void;
   setRepeat(repeat: RepeatMode): void;
+  setVolume(volume: number): void;
   enqueue(track: QueueTrack): void;
   enqueueNext(track: QueueTrack): void;
   removeAt(index: number): void;

@@ -357,3 +357,35 @@ async def test_set_queue_reindexes_surviving_track(db_session, session_user, pla
     )
     assert playback_session.state == "playing"
     assert playback_session.current_index == 1
+
+
+@pytest.mark.asyncio
+async def test_set_volume_persists_and_clamps(db_session, session_user, playback_session):
+    """set_volume stores the gain on the session, clamped to [0, 1]."""
+    await handle_command(db_session, playback_session, "set_volume", {"volume": 0.4}, "conn-1")
+    assert playback_session.volume == pytest.approx(0.4)
+
+    state = await session_state_dict(db_session, playback_session)
+    assert state["volume"] == pytest.approx(0.4)
+
+    await handle_command(db_session, playback_session, "set_volume", {"volume": 1.7}, "conn-1")
+    assert playback_session.volume == pytest.approx(1.0)
+
+    await handle_command(db_session, playback_session, "set_volume", {"volume": -0.5}, "conn-1")
+    assert playback_session.volume == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_set_volume_rejects_non_numeric(db_session, session_user, playback_session):
+    """set_volume with a non-numeric argument is a 422."""
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as excinfo:
+        await handle_command(
+            db_session,
+            playback_session,
+            "set_volume",
+            {"volume": "loud"},
+            "conn-1",
+        )
+    assert excinfo.value.status_code == 422

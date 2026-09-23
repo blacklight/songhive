@@ -179,6 +179,25 @@ rate_limit_window_seconds = 60
 # allowed_user_providers.
 # denied_user_providers = []
 
+# Native HTTP outputs (provider_type "http") serve mountpoints at
+# /streams/<mount> on the main server port, fanned out to listeners through a
+# capped Redis stream. These knobs tune that transport.
+#
+# Approximate maximum entries buffered per mount (~16 KiB per chunk).
+# http_stream_max_entries = 512
+
+# Entries bursted to a new listener on connect so it can start decoding
+# immediately (8 ≈ 128 KiB).
+# http_stream_burst_entries = 8
+
+# Maximum age (seconds) of buffered audio delivered to a listener. Chunks
+# older than this are skipped, so a client that falls behind jumps forward
+# instead of accumulating latency. 0 disables lag dropping.
+# http_stream_max_lag_seconds = 5.0
+
+# Maximum concurrent listeners per mount; 0 disables the cap.
+# http_stream_max_listeners = 64
+
 [streaming]
 # Path to the ffmpeg binary. When omitted, Songhive searches PATH.
 # ffmpeg_path = "/usr/bin/ffmpeg"
