@@ -124,6 +124,8 @@ class IcecastDriver(OutputDriver):
         super().__init__(config)
         self._encoder: Optional[asyncio.subprocess.Process] = None
         self._encoder_watch_task: Optional[asyncio.Task] = None
+        self._encoder_stderr_task: Optional[asyncio.Task] = None
+        self._encoder_stderr_tail = bytearray()
         self._decoder_task: Optional[asyncio.Task] = None
         self._current_source: Optional[AudioSource] = None
         self._current_metadata: TrackMeta = TrackMeta(track_id="", title="", artist="")
@@ -351,17 +353,44 @@ class IcecastDriver(OutputDriver):
             *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
         self._encoder = proc
+        self._encoder_stderr_tail = bytearray()
+        self._encoder_stderr_task = asyncio.create_task(self._drain_encoder_stderr(proc))
         self._encoder_watch_task = asyncio.create_task(self._watch_encoder(proc))
+
+    async def _drain_encoder_stderr(self, proc: asyncio.subprocess.Process) -> None:
+        """Keep the tail of the encoder's stderr for post-mortem logging."""
+        stream = proc.stderr
+        if stream is None:
+            return
+        try:
+            while True:
+                chunk = await stream.read(4096)
+                if not chunk:
+                    break
+                self._encoder_stderr_tail += chunk
+                del self._encoder_stderr_tail[:-4096]
+        except Exception:
+            pass
 
     async def _watch_encoder(self, proc: asyncio.subprocess.Process) -> None:
         """Watch the encoder and restart it if it exits unexpectedly."""
         rc = await proc.wait()
         if self._shutting_down or self._encoder is not proc:
             return
-        logger.error("Encoder exited unexpectedly rc=%s; restarting", rc)
+        # Give the stderr drain a moment to flush before reading the tail.
+        stderr_task = self._encoder_stderr_task
+        if stderr_task is not None and not stderr_task.done():
+            try:
+                await asyncio.wait_for(stderr_task, timeout=1.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+        stderr_tail = bytes(self._encoder_stderr_tail).decode("utf-8", "replace").strip()
+        logger.error(
+            "Encoder exited unexpectedly rc=%s; restarting%s", rc, f" (stderr: {stderr_tail})" if stderr_tail else ""
+        )
         self._encoder = None
         self._encoder_watch_task = None
         try:
@@ -400,6 +429,13 @@ class IcecastDriver(OutputDriver):
             except asyncio.CancelledError:
                 pass
             self._encoder_watch_task = None
+        if self._encoder_stderr_task is not None:
+            self._encoder_stderr_task.cancel()
+            try:
+                await self._encoder_stderr_task
+            except asyncio.CancelledError:
+                pass
+            self._encoder_stderr_task = None
         if self._decoder_task is not None:
             self._decoder_task.cancel()
             try:

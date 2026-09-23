@@ -526,3 +526,17 @@ async def update_library(
   across all `http` outputs (enforced in `services/outputs.py`), may carry an
   optional `listen_token` (`?token=`/`Bearer`), and are unreachable in the
   uvicorn fallback like the other native Tornado routes.
+- The `snapcast` provider (`songhive/streams/snapcast.py`) casts to a
+  snapserver via an ffmpeg *passthrough* encoder that copies raw s16le PCM to
+  a `pipe://` source FIFO (`mode=fifo`, auto-created with `mkfifo`; existing
+  non-FIFO paths are rejected both at validation and driver start so a typo
+  can never clobber a regular file) or to a `tcp://` listening source
+  (`mode=tcp`, which allows a remote snapserver). The snapserver source must
+  be declared in `snapserver.conf` — Snapcast registers no streams
+  dynamically, and the TCP `port` is the `tcp://` source listener, not the
+  snapclient port 1704. `listener_count` polls snapserver's JSON-RPC
+  `Server.GetStatus` over raw TCP (`control_host`/`control_port`, default
+  1705; 1780 is the HTTP/snapweb port) and counts connected, unmuted clients
+  — optionally filtered to groups playing `stream_name` — so idle shutdown
+  tracks real listeners. `streams.allowed_output_hosts` applies to the
+  snapcast TCP target the same way as to Icecast hosts.

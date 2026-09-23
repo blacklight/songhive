@@ -232,7 +232,7 @@ class SessionDriver:
             await provider.validate_config(config)
 
             # Allow provider configs to fall back to the configured ffmpeg path.
-            if output_stream.provider_type in ("icecast", "http") and not config.get("ffmpeg_path"):
+            if output_stream.provider_type in ("icecast", "http", "snapcast") and not config.get("ffmpeg_path"):
                 config["ffmpeg_path"] = (
                     self.worker.config.streams.icecast_ffmpeg_path or self.worker.config.streaming.ffmpeg_path
                 )
@@ -358,6 +358,10 @@ class SessionDriver:
         command = envelope.get("command") or ""
         args = envelope.get("args") or {}
 
+        if command == "reload_output":
+            await self._reload_driver()
+            return
+
         try:
             async with get_session() as db:
                 session = await self._load_session(db)
@@ -420,6 +424,19 @@ class SessionDriver:
                 await self.driver.set_volume(session.volume)
             except Exception:
                 logger.exception("Failed to set driver volume for %s", self.session_id)
+
+    async def _reload_driver(self) -> None:
+        """Restart the provider driver after the output's config changed."""
+        logger.info("Reloading driver for output %s", self.output_stream_id)
+        await self._stop_driver()
+        self._active_track_id = None
+        try:
+            await self._start_driver()
+        except Exception as exc:
+            logger.exception("Failed to restart driver for %s", self.output_stream_id)
+            await self._update_output_status(status="error", last_error=str(exc)[:512])
+            return
+        await self._sync_to_session()
 
     async def _apply_command(
         self,

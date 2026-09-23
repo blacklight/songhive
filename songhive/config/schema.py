@@ -625,13 +625,17 @@ class StreamsConfig(BaseSettings):
     allowed_output_hosts: list[str] = Field(
         default_factory=list,
         description=(
-            "Hosts that user-created Icecast outputs may target; empty means no extra "
-            "restriction beyond allow_user_created_outputs. Admins are exempt."
+            "Hosts that user-created remote outputs may target (Icecast mounts, "
+            "Snapcast TCP sources); empty means no extra restriction beyond "
+            "allow_user_created_outputs. Admins are exempt."
         ),
     )
     icecast_ffmpeg_path: Optional[str] = Field(
         default=None,
-        description="Path to the ffmpeg binary for Icecast; falls back to streaming.ffmpeg_path.",
+        description=(
+            "Path to the ffmpeg binary for ffmpeg-backed stream outputs "
+            "(Icecast, native HTTP, Snapcast); falls back to streaming.ffmpeg_path."
+        ),
     )
     background_idle_timeout_seconds: int = Field(
         default=900,

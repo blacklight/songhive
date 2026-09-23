@@ -6,7 +6,7 @@ from fakeredis.aioredis import FakeRedis
 
 from songhive.models.base import get_session, init_db
 from songhive.models.playback_session import PlaybackSession
-from songhive.services.outputs import create_output
+from songhive.services.outputs import create_output, update_output
 from songhive.services.playback import (
     _control_key,
     get_or_create_session,
@@ -646,3 +646,56 @@ async def test_startup_sync_applies_persisted_volume(
     # gain instead of being restarted a moment later.
     commands = [c[0] if isinstance(c, tuple) else c for c in fake.commands]
     assert commands.index("set_volume") < commands.index("set_source")
+
+
+@pytest.mark.asyncio
+async def test_update_output_config_reloads_driver(
+    engine,
+    db_session,
+    worker_config,
+    regular_user,
+    make_session_output,
+    make_worker,
+    monkeypatch,
+    capture_driver,
+    fake_redis_server,
+):
+    """Editing an output's config pushes reload_output and restarts the driver."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    from fakeredis import FakeRedis as SyncFakeRedis
+
+    monkeypatch.setattr(
+        "songhive.services.playback.get_sync_redis_client",
+        lambda config=None: SyncFakeRedis(server=fake_redis_server),
+    )
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    await asyncio.sleep(0.1)
+    first = capture_driver["driver"]
+    assert first is not None
+
+    await update_output(
+        db_session,
+        output,
+        regular_user,
+        worker_config,
+        cfg={"items": {"reloaded": True}},
+    )
+    await db_session.commit()
+    await asyncio.sleep(0.4)
+
+    driver._shutting_down = True
+    await asyncio.wait_for(task, timeout=2.0)
+
+    second = capture_driver["driver"]
+    assert second is not None
+    assert second is not first
+    assert _find_command(first, "stop") is not None
+    assert _find_command(second, "start") is not None
+    assert second.config.get("items") == {"reloaded": True}

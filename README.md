@@ -47,7 +47,7 @@
   * [Mopidy](#mopidy)
 - [🛠️ Development](#%F0%9F%9B%A0%EF%B8%8F-development)
   * [Frontend](#frontend)
-- [🔌 API](#%F0%9F%94%8C-api)
+- [API](#-api)
 - [📜 License](#%F0%9F%93%9C-license)
 
 <!-- tocstop -->
@@ -78,75 +78,76 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
 
 ### 🎵 Music streaming
 
-- **Music Library**: Upload and organize artists, albums, and tracks, with
+- 💿 **Music Library**: Upload and organize artists, albums, and tracks, with
   automatic tag extraction, duplicate detection, and metadata enrichment from
   MusicBrainz and the Cover Art Archive
-- **Streaming**: Audio streaming with on-the-fly transcoding (MP3, OGG, FLAC,
+- ၊၊||၊ **Streaming**: Audio streaming with on-the-fly transcoding (MP3, OGG, FLAC,
   AAC, Opus), range requests, and per-user/per-role bitrate caps
-- **Server-side outputs**: Route playback to persistent audio outputs instead
-  of the browser — stream to an external Icecast server, or host your own
+- 🔀 **Server-side outputs**: Route playback to persistent audio outputs instead
+  of the browser — stream to an external Icecast server, cast to a Snapcast
+  multi-room setup via a snapserver pipe or TCP source, or host your own
   mountpoints entirely inside Songhive (`/streams/<mount>`) with fan-out to
   multiple listeners. Playback keeps running on the server even after you
   close the tab
-- **Playlists & Radios**: Create playlists and dynamic radio stations
-- **Listening history, favorites and scrobbling**: every play is recorded, and
+- 📻 **Playlists & Radios**: Create playlists and dynamic radio stations
+- ❤️ **Listening history, favorites and scrobbling**: every play is recorded, and
   submissions to Last.fm and Libre.fm work out of the box
-- **Subsonic API**: Compatibility layer for Subsonic clients — use the mobile
+- </> **Subsonic API**: Compatibility layer for Subsonic clients — use the mobile
   or desktop player you already have (see
   [Subsonic-compatible clients](#subsonic-compatible-clients))
-- **Mopidy**: browse and play your instance's library from a Mopidy server via
-  the `mopidy-songhive` extension
+- 🐍 **Mopidy**: browse and play your instance's library from a Mopidy server via
+  the [`mopidy-songhive` extension](https://github.com/blacklight/mopidy-songhive)
 
 ### 📢 Social & federated
 
-- **Federation**: Full ActivityPub support via
+- 🌐 **Federation**: Full ActivityPub support via
   [pubby](https://github.com/blacklight/pubby) — federate with Mastodon and
   other AP-compatible services. Follow remote actors, receive their posts in
   your timeline, and reply, boost, quote and like from Songhive or from your
   Mastodon client
-- **Posts & interactions**: Mastodon-style statuses with mentions, hashtags,
+- 👍 **Posts & interactions**: Mastodon-style statuses with mentions, hashtags,
   Markdown support, threaded replies, quotes and link preview cards
-- **Remote discovery**: Explicit lookup of remote actors, posts and resources
+- 🔎 **Remote discovery**: Explicit lookup of remote actors, posts and resources
   by handle or URL — SSRF-guarded, domain-moderated, cached, and gated by a
   per-instance access policy
-- **Notifications**: in-app real-time notifications over WebSocket, with
+- 🔔 **Notifications**: in-app real-time notifications over WebSocket, with
   per-type email and daily-digest preferences
-- **Moderation**: Mastodon-style moderation — users can mute/block local and
+- ⚖️ **Moderation**: Mastodon-style moderation — users can mute/block local and
   remote actors; admins can limit/suspend actors and defederate or restrict
   instances to followers-only delivery. Users can also report accounts to local
   moderators, optionally forwarding the report to the reported actor's home
   instance via ActivityPub `Flag`
-- **RSS/Atom feeds**: every profile, artist, playlist, library, tag and genre
+- 🛜 **RSS/Atom feeds**: every profile, artist, playlist, library, tag and genre
   exposes RSS 2.0 and Atom feeds, with `<link rel="alternate">` discovery tags
   served to feed readers
 
 ### 🔁 Sharing & privacy
 
-- **Fine-grained visibility**: keep tracks, albums, playlists and libraries
+- 🔒 **Fine-grained visibility**: keep tracks, albums, playlists and libraries
   `private`, `local` (instance-only) or `public`
-- **Sharing**: grant access to specific users, or generate revocable short
+- 🔁 **Sharing**: grant access to specific users, or generate revocable short
   links that render a preview page with an audio player for anyone
-- **Embeddables**: embed public tracks and collections on any web page via
+- </> **Embeddables**: embed public tracks and collections on any web page via
   `<audio>` tags, Markdown links, `<script>` widgets or iframes — with
   `Access-Control-Allow-Origin` on media endpoints so Fediverse clients can
   embed your audio too
-- **Webmentions**: bidirectional notifications support for public content. Any
+- 💬 **Webmentions**: bidirectional notifications support for public content. Any
   blog or social media platform that links to your song and supports Webmentions
   will send you a notification. Every content you share, link or comment on on a
   source that supports Webmentions will send a Webmention back to the source
 
 ### 🛠️ Platform
 
-- **Multi-user**: User registration (open, invite-only or closed), profiles
+- 👥 **Multi-user**: User registration (open, invite-only or closed), profiles
   with per-user profile visibility, and admin management
-- **OAuth2 Provider**: Third-party app authorization, plus API tokens for
+- 🔑 **OAuth2 Provider**: Third-party app authorization, plus API tokens for
   scripts and Subsonic clients
-- **Flexible Storage**: Local filesystem or S3-compatible object storage
-- **External Libraries**: Attach external music storage (local folders, S3,
+- 💾 **Flexible Storage**: Local filesystem or S3-compatible object storage
+- 🗃️ **External Libraries**: Attach external music storage (local folders, S3,
   SFTP, cloud adapters) to Songhive libraries; index, stream, and write
   metadata back to the provider.
   See [docs/ARCHITECTURE.md#external-libraries](docs/ARCHITECTURE.md#external-libraries).
-- **Metadata enrichment**: automatic MusicBrainz MBID lookup, cover art from
+- 🏷️ **Metadata enrichment**: automatic MusicBrainz MBID lookup, cover art from
   the Cover Art Archive, and artist image fetching; tags are written back to
   the audio files themselves (content-hashed, so re-tagging never moves files)
 
@@ -322,7 +323,7 @@ described above. Most of them are enabled by default — check
 | `[webmentions]` | Incoming/outgoing Webmention link-backs for public content |
 | `[feeds] enabled` | RSS 2.0 / Atom feeds under `/feeds` |
 | `[streaming]` | Default and max audio bitrate (globally or per user role), transcode cache |
-| `[streams]` | Server-side outputs (Icecast, native HTTP mounts): enable/disable, who may create outputs, allowed Icecast hosts, worker timings, native HTTP stream buffering and listener caps |
+| `[streams]` | Server-side outputs (Icecast, Snapcast, native HTTP mounts): enable/disable, who may create outputs, allowed remote output hosts, worker timings, native HTTP stream buffering and listener caps |
 | `[subsonic] enabled` | The Subsonic compatibility layer (on by default) |
 | `[scrobbling]` | Instance API keys for Last.fm / Libre.fm scrobbling |
 | `[musicbrainz]` | Metadata enrichment: MBID lookup, cover art and artist images |
@@ -386,8 +387,8 @@ workers.
 
 #### Stream worker
 
-Server-side audio outputs (Icecast relays and native HTTP mountpoints) are
-driven by a dedicated process:
+Server-side audio outputs (Icecast relays, Snapcast casting and native HTTP
+mountpoints) are driven by a dedicated process:
 
 ```bash
 songhive stream-worker
@@ -561,7 +562,7 @@ npm run dev     # Development server
 npm run build   # Production build (outputs to songhive/static/)
 ```
 
-## 🔌 API
+## </> API
 
 REST API available at `/api/v1/`:
 
@@ -579,7 +580,7 @@ REST API available at `/api/v1/`:
 | `/api/v1/history/` | Listening history |
 | `/api/v1/radios/` | Dynamic radios |
 | `/api/v1/stream/{id}` | Audio streaming |
-| `/api/v1/outputs/` | Server-side audio outputs (Icecast relays, native HTTP mounts) |
+| `/api/v1/outputs/` | Server-side audio outputs (Icecast relays, Snapcast casting, native HTTP mounts) |
 | `/streams/{mount}` | Native HTTP stream mountpoints (listener-facing) |
 | `/api/v1/admin/` | Admin endpoints |
 

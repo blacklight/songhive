@@ -217,6 +217,7 @@ songhive/
 │   ├── registry.py         # provider_type → AudioOutput registry
 │   ├── icecast.py          # Icecast provider: ffmpeg → icecast:// pipeline
 │   ├── http.py             # Native HTTP provider: ffmpeg → Redis Stream fan-out
+│   ├── snapcast.py         # Snapcast provider: ffmpeg PCM → snapserver FIFO/TCP
 │   ├── fake.py             # In-memory provider for tests
 │   ├── types.py            # AudioSource and related dataclasses
 │   └── worker.py           # `songhive stream-worker` session driver loop
@@ -1511,6 +1512,23 @@ the controlling tab closes.
   Mount slugs must be unique across `http` outputs; an optional
   `listen_token` field gates listeners via `?token=`/`Bearer`. No external
   server or extra port is needed.
+- **Snapcast provider** (`streams/snapcast.py`) — same driver machinery, but
+  the "encoder" is an ffmpeg *passthrough*: raw s16le stereo PCM from stdin is
+  copied unchanged to a snapserver sink — either the named pipe of a
+  snapserver `pipe://` source (`mode=fifo`, auto-created with `mkfifo`,
+  existing non-FIFO paths rejected so a typo can't clobber a regular file) or
+  a snapserver `tcp://` listening source (`mode=tcp`), which also allows a
+  remote snapserver. Snapcast streams are never registered dynamically: the
+  source must already be declared in `snapserver.conf` (e.g.
+  `stream = tcp://0.0.0.0:4953?name=...&sampleformat=...`), the target `port`
+  is that source's listener — *not* the snapclient port 1704 — and
+  `sample_rate` must match the source's `sampleformat`. `listener_count`
+  queries snapserver's JSON-RPC control API (`Server.GetStatus` over raw TCP,
+  default port 1705 — the HTTP/snapweb port 1780 does not speak the
+  newline-delimited protocol; `control_host`/`control_port` fields) and
+  counts connected, unmuted clients — optionally only those in groups playing
+  `stream_name` — so idle shutdown tracks real listeners like the Icecast
+  status endpoint does.
 - **Driver interface** (`streams/driver.py`) — `start`, `stop`,
   `set_source`, `pause`, `resume`, `seek`, `set_volume`, `update_metadata`,
   `health`, `is_paused`, `listener_count`, and an `events` queue. The worker

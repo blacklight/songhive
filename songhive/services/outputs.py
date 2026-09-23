@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
 from ..models.output_stream import OutputStream
+from ..models.playback_session import PlaybackSessionOutput
 from ..models.user import User
 from ..services.secrets import decrypt_json, encrypt_json, redact_config
 from ..streams.registry import get_output, is_user_configurable
@@ -97,15 +98,17 @@ def _provider_allowed_for_create(provider_type: str, user: User, config: Songhiv
 
 
 def _output_host_allowed(provider_type: str, cfg: dict, user: User, config: SonghiveConfig) -> bool:
-    """Enforce the Icecast host allowlist for non-admin users."""
+    """Enforce the remote-host allowlist for non-admin users."""
     if user.is_admin:
         return True
-    if provider_type != "icecast":
+    host: Optional[str] = None
+    if provider_type == "icecast" or (provider_type == "snapcast" and str(cfg.get("mode") or "fifo").strip() == "tcp"):
+        host = cfg.get("host", "")
+    if host is None:
         return True
     allowed_hosts = config.streams.allowed_output_hosts
     if not allowed_hosts:
         return True
-    host = cfg.get("host", "")
     if not host:
         return False
     return host in allowed_hosts
@@ -200,7 +203,7 @@ async def create_output(
     if not _output_host_allowed(provider_type, cfg, user, config):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Icecast host is not in the allowlist",
+            detail="Output host is not in the allowlist",
         )
 
     if provider_type == "http":
@@ -261,10 +264,10 @@ async def update_output(
         old = _decrypt_output_config(output.config)
         merged = _merge_config_preserving_redacted(cfg, old)
 
-        if output.provider_type == "icecast" and not _output_host_allowed(output.provider_type, merged, user, config):
+        if not _output_host_allowed(output.provider_type, merged, user, config):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Icecast host is not in the allowlist",
+                detail="Output host is not in the allowlist",
             )
 
         if output.provider_type == "http":
@@ -274,6 +277,10 @@ async def update_output(
         output.config = encrypted
         output.capabilities = capabilities
 
+        # Running drivers keep the config they were started with; ask any
+        # session using this output to reload so edits take effect.
+        await _notify_output_config_changed(db, output)
+
     if name is not None:
         output.name = name
     if enabled is not None:
@@ -282,6 +289,20 @@ async def update_output(
     output.updated_at = datetime.now(timezone.utc)
     await db.flush()
     return output
+
+
+async def _notify_output_config_changed(db: AsyncSession, output: OutputStream) -> None:
+    """Push a reload_output command to sessions currently using this output."""
+    from ..services.playback import publish_control_command
+
+    result = await db.execute(
+        select(PlaybackSessionOutput.session_id).where(
+            PlaybackSessionOutput.output_kind == "stream",
+            PlaybackSessionOutput.output_stream_id == str(output.id),
+        )
+    )
+    for session_id in result.scalars().all():
+        publish_control_command(str(session_id), "reload_output", {}, None)
 
 
 async def delete_output(db: AsyncSession, output: OutputStream, user: User) -> bool:

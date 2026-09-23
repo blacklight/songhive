@@ -163,8 +163,9 @@ rate_limit_window_seconds = 60
 # disables idle shutdown.
 # background_idle_timeout_seconds = 900
 
-# Hosts that user-created Icecast outputs may target. Empty means all hosts are
-# allowed (not recommended for public instances).
+# Hosts that user-created remote outputs may target (Icecast mounts, Snapcast
+# TCP sources). Empty means all hosts are allowed (not recommended for public
+# instances).
 # allowed_output_hosts = []
 
 # Whether regular users may create server-side outputs. Admins can always

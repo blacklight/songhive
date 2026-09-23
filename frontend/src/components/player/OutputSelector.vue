@@ -56,6 +56,8 @@ function outputIcon(output: OutputResponse): string {
       return "display";
     case "icecast":
       return "tower-broadcast";
+    case "snapcast":
+      return "volume-off";
     default:
       return "server";
   }
