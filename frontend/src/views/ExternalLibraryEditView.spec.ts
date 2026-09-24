@@ -333,6 +333,83 @@ describe("ExternalLibraryEditView", () => {
     );
   });
 
+  it("renders the webdav provider form and submits a structured config", async () => {
+    vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
+      {
+        provider_type: "webdav",
+        user_configurable: true,
+        capabilities_summary: {},
+      },
+    ]);
+    vi.mocked(externalLibrariesApi.createUserExternalLibrary).mockResolvedValue(
+      {
+        id: "el1",
+        library_id: "lib1",
+        provider_type: "webdav",
+        scope: "user",
+        name: "DAV Library",
+        config: { url: "https://dav.example.com/files/alice" },
+        enabled: true,
+        include_in_library_index: false,
+        sync_enabled: true,
+        sync_interval_seconds: null,
+        can_manage: true,
+        can_sync: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    );
+
+    const router = createTestRouter("/settings/external-libraries/new");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      i18n.global.t(
+        "pages.externalLibraries.providers.webdav.fields.url.label",
+      ),
+    );
+    expect(wrapper.text()).not.toContain(
+      i18n.global.t("pages.externalLibraries.configHint"),
+    );
+
+    const urlInput = getInputByLabel(
+      i18n.global.t(
+        "pages.externalLibraries.providers.webdav.fields.url.label",
+      ),
+    );
+    expect(urlInput).not.toBeNull();
+    urlInput!.value = "https://dav.example.com/files/alice";
+    urlInput!.dispatchEvent(new Event("input"));
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("pages.externalLibraries.create"),
+    );
+    expect(saveButton).toBeDefined();
+    await saveButton?.click();
+    await flushPromises();
+
+    expect(externalLibrariesApi.createUserExternalLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider_type: "webdav",
+        config: expect.objectContaining({
+          url: "https://dav.example.com/files/alice",
+          verify_ssl: true,
+          timeout: 30,
+        }),
+      }),
+    );
+    const body = (externalLibrariesApi.createUserExternalLibrary as Mock).mock
+      .calls[0][0];
+    expect(body.config).not.toHaveProperty("ca_bundle");
+  });
+
   it("falls back to raw JSON config when the provider has no template", async () => {
     vi.mocked(externalLibrariesApi.listAdminProviders).mockResolvedValue([
       {
@@ -341,7 +418,7 @@ describe("ExternalLibraryEditView", () => {
         capabilities_summary: {},
       },
       {
-        provider_type: "webdav",
+        provider_type: "custom",
         user_configurable: true,
         capabilities_summary: {},
       },
@@ -364,7 +441,7 @@ describe("ExternalLibraryEditView", () => {
     const providerSelect = document.body.querySelector(
       "select",
     ) as HTMLSelectElement;
-    providerSelect.value = "webdav";
+    providerSelect.value = "custom";
     providerSelect.dispatchEvent(new Event("change"));
     await flushPromises();
 

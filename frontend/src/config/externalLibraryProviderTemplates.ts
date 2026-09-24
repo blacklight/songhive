@@ -15,6 +15,12 @@ export type ProviderFieldType =
 export interface ProviderFieldTemplate {
   /** JSON configuration key for this field. */
   name: string;
+  /**
+   * JSON configuration key the value is written to/read from. Defaults to
+   * ``name``. Useful when a form field shares a union-typed key with another
+   * field (e.g. a CA bundle path that overrides a boolean flag).
+   */
+  configKey?: string;
   type: ProviderFieldType;
   /** i18n key used to look up the display label. */
   labelI18nKey: string;
@@ -454,6 +460,153 @@ export const providerTemplates: Record<string, ProviderTemplate> = {
       },
     ],
   },
+  webdav: {
+    providerType: "webdav",
+    fields: [
+      {
+        name: "url",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.url.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.url.description",
+        required: true,
+      },
+      {
+        name: "root",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.root.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.root.description",
+      },
+      {
+        name: "username",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.username.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.username.description",
+      },
+      {
+        name: "password",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.password.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.password.description",
+      },
+      {
+        name: "token",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.token.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.token.description",
+      },
+      {
+        name: "verify_ssl",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.verify_ssl.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.verify_ssl.description",
+        default: true,
+      },
+      {
+        // The backend's ``verify_ssl`` accepts either a boolean or a CA
+        // bundle path; a non-empty path written here overrides the boolean.
+        name: "ca_bundle",
+        type: "string",
+        configKey: "verify_ssl",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.ca_bundle.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.ca_bundle.description",
+      },
+      {
+        name: "timeout",
+        type: "number",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.timeout.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.timeout.description",
+        default: 30,
+      },
+      {
+        name: "extensions",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.extensions.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.extensions.description",
+        default: DEFAULT_LOCAL_EXTENSIONS,
+      },
+      {
+        name: "exclude",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.exclude.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.exclude.description",
+        default: "",
+      },
+      {
+        name: "recursive",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.recursive.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.recursive.description",
+        default: true,
+      },
+      {
+        name: "allow_hashing",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.allow_hashing.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.allow_hashing.description",
+        default: true,
+      },
+      {
+        name: "fast_hash",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.fast_hash.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.fast_hash.description",
+        default: false,
+      },
+      {
+        name: "allow_write_tags",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.allow_write_tags.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.allow_write_tags.description",
+        default: false,
+      },
+      {
+        name: "allow_rename_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.allow_rename_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.allow_rename_source.description",
+        default: false,
+      },
+      {
+        name: "allow_delete_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.allow_delete_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.webdav.fields.allow_delete_source.description",
+        default: false,
+      },
+    ],
+  },
 };
 
 export function getProviderTemplate(providerType: string): ProviderTemplate {
@@ -468,7 +621,7 @@ export function getFieldInitialValue(
   field: ProviderFieldTemplate,
   source?: Record<string, unknown>,
 ): unknown {
-  const existing = source?.[field.name];
+  const existing = source?.[field.configKey ?? field.name];
 
   if (existing !== undefined && existing !== null) {
     if (field.type === "string-array" && Array.isArray(existing)) {
@@ -480,7 +633,12 @@ export function getFieldInitialValue(
     if (field.type === "number") {
       return typeof existing === "number" ? existing : Number(existing);
     }
-    return String(existing);
+    // String-family fields only prefill from actual strings: when another
+    // field shares the same config key (see ``configKey``), a boolean or
+    // number stored there must not render as text.
+    if (typeof existing === "string") {
+      return existing;
+    }
   }
 
   if (field.default !== undefined) {
@@ -503,9 +661,10 @@ export function buildProviderConfigFromTemplate(
 
   for (const field of template.fields) {
     const raw = values[field.name];
+    const key = field.configKey ?? field.name;
 
     if (field.type === "boolean") {
-      config[field.name] = Boolean(raw);
+      config[key] = Boolean(raw);
       continue;
     }
 
@@ -517,7 +676,7 @@ export function buildProviderConfigFromTemplate(
     ) {
       const str = isEmpty(raw) ? "" : String(raw);
       if (str === "" && !field.required) continue;
-      config[field.name] = str;
+      config[key] = str;
       continue;
     }
 
@@ -527,17 +686,17 @@ export function buildProviderConfigFromTemplate(
         if (!field.required) continue;
         throw new Error(`Invalid number for ${field.name}`);
       }
-      config[field.name] = num;
+      config[key] = num;
       continue;
     }
 
     if (field.type === "string-array") {
       const str = isEmpty(raw) ? "" : String(raw);
       if (str.trim() === "") {
-        if (field.required) config[field.name] = [];
+        if (field.required) config[key] = [];
         continue;
       }
-      config[field.name] = str
+      config[key] = str
         .split(",")
         .map((item) => item.trim())
         .filter(Boolean);

@@ -1126,6 +1126,48 @@ the S3 scheduled-sync model: `iter_items` walks the remote tree with
 `detect_changes`, so unchanged trees cost a directory walk and no file
 transfer.
 
+#### WebDAV provider
+
+The `webdav` provider (`external/_webdav.py`, httpx) indexes audio files
+stored on a remote WebDAV server (Nextcloud, ownCloud, nginx WebDAV, etc.).
+**The server must be reachable from the Songhive instance** — every listing,
+download, and mutation originates server-side, so firewalls/NAT between
+Songhive and the WebDAV host must allow outbound HTTP or HTTPS connections.
+Like S3 and SFTP, both regular users (when `allow_user_created_libraries`
+permits the provider) and admins can attach WebDAV roots.
+
+A WebDAV external library stores the following adapter config:
+
+| Key                        | Required | Default  | Description                                                               |
+|----------------------------|----------|----------|---------------------------------------------------------------------------|
+| `url`                      | yes      | —        | Base WebDAV URL, e.g. `https://nextcloud.example.com/remote.php/dav`.     |
+| `root`                     | no       | `""`     | Remote directory under the base URL to index.                             |
+| `username`                 | no       | —        | HTTP Basic auth username.                                                 |
+| `password`                 | no       | —        | HTTP Basic auth password (stored encrypted).                              |
+| `token`                    | no       | —        | Bearer token sent in the `Authorization` header.                          |
+| `verify_ssl`               | no       | `true`   | Verify TLS; set to `false` to disable or to a CA bundle path.             |
+| `timeout`                  | no       | `30`     | HTTP request timeout in seconds.                                          |
+| `extensions`               | no       | all audio| List of file extensions to index.                                         |
+| `exclude`                  | no       | `[]`     | `fnmatch` patterns applied to root-relative paths.                        |
+| `recursive`                | no       | `true`   | Whether to scan subdirectories.                                           |
+| `allow_hashing`            | no       | `true`   | Whether to compute audio hashes for new/updated files.                    |
+| `fast_hash`                | no       | `false`  | Hash raw file bytes instead of ffmpeg audio-only hashing.                 |
+| `allow_write_tags`         | no       | `false`  | Rewrite embedded tags by re-uploading the file in place.                  |
+| `allow_rename_source`      | no       | `false`  | Allow `rename_source` to rename remote files.                             |
+| `allow_delete_source`      | no       | `false`  | Allow `delete_source` to remove remote files.                             |
+
+Authentication accepts a `username`/`password` pair (HTTP Basic auth) or a
+`token` (Bearer auth). `verify_ssl` defaults on and should only be disabled
+for testing or trusted private networks, since disabling it leaves the
+connection open to MITM impersonation and credential theft.
+
+WebDAV has no presignable URL, so `open_stream` always returns a proxied byte
+iterator with HTTP `Range` support. `iter_items` walks the remote tree with
+WebDAV `PROPFIND` (metadata only) and reports an ETag/mtime/size change token
+via `detect_changes`, so unchanged trees cost a directory walk and no file
+transfer. As with S3 and SFTP, freshness comes from scheduled syncs rather
+than filesystem watching.
+
 #### Visibility, sharing, and secret redaction
 
 Every external library is backed by a normal `Library` row, so visibility
@@ -1149,7 +1191,10 @@ Provider form templates live in
 `frontend/src/config/externalLibraryProviderTemplates.ts`. Each template entry
 lists the JSON property name, i18n label/description keys, field type (string,
 password, number, boolean, enum, comma-separated string array, or multiline
-textarea), and default value.
+textarea), and default value. A field may also declare a `configKey` to
+read/write a different JSON property than its own name — used for union-typed
+keys such as WebDAV's `verify_ssl`, where the optional CA-bundle text field
+shares the key with the verification toggle and overrides it when non-empty.
 `ExternalLibraryEditView` switches the displayed fields whenever the provider
 `<select>` changes, and falls back to a plain JSON textarea for providers that do
 not have a template yet.

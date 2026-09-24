@@ -278,21 +278,22 @@
   profiles (not even to their owner). Individual profile pages stay reachable
   regardless.
 - External libraries (`songhive/external/`) support `s3`
-  (`external/_s3.py`, aioboto3) and `sftp` (`external/_sftp.py`, asyncssh)
-  providers alongside `local`/`fake`. Two traps when
-  touching that code: (1) API responses redact secret config keys to
-  `"<redacted>"`, so PATCH routes must run submitted configs through
+  (`external/_s3.py`, aioboto3), `sftp` (`external/_sftp.py`, asyncssh), and
+  `webdav` (`external/_webdav.py`, httpx) providers alongside `local`/`fake`.
+  Two traps when touching that code: (1) API responses redact secret config
+  keys to `"<redacted>"`, so PATCH routes must run submitted configs through
   `_merge_config_preserving_redacted` or credentials get overwritten with the
   sentinel; (2) sync relies on the adapter's `detect_changes` capability —
   items whose stored `provider_etag` (or mtime+size) still matches the listing
   skip hashing/metadata reads entirely, so adapters must only advertise
   `detect_changes` when listing metadata is a reliable change token (S3
-  uses the object ETag; the fake adapter's etag covers payload+metadata).
-  The filesystem watchdog (`external/watchdog.py`) only applies to `local`
-  libraries; S3 freshness comes from scheduled syncs via
-  `scan_scheduled_syncs_task`. Changing an external library's visibility must
-  go through `services.music.propagate_external_library_visibility` so
-  synced `Track` rows stay consistent with the backing `Library`.
+  uses the object ETag; WebDAV uses ETag/mtime/size; the fake adapter's etag
+  covers payload+metadata). The filesystem watchdog (`external/watchdog.py`)
+  only applies to `local` libraries; S3 and WebDAV freshness comes from
+  scheduled syncs via `scan_scheduled_syncs_task`. Changing an external
+  library's visibility must go through
+  `services.music.propagate_external_library_visibility` so synced `Track`
+  rows stay consistent with the backing `Library`.
 - Outbound follows (a local user following a local or remote actor) live in
   the `follows` table (`models/follow.py`) — pubby's
   `federation_followers`/`federation_follow_requests` tables only track the

@@ -29,6 +29,26 @@ describe("externalLibraryProviderTemplates", () => {
     );
   });
 
+  it("returns a template for the webdav provider", () => {
+    const template = getProviderTemplate("webdav");
+    expect(template.providerType).toBe("webdav");
+    const fields = template.fields.map((f) => f.name);
+    expect(fields).toContain("url");
+    expect(fields).toContain("username");
+    expect(fields).toContain("password");
+    expect(fields).toContain("token");
+    expect(fields).toContain("verify_ssl");
+    expect(fields).toContain("ca_bundle");
+    expect(fields).toContain("timeout");
+    expect(template.fields.find((f) => f.name === "url")!.required).toBe(true);
+    expect(template.fields.find((f) => f.name === "token")!.type).toBe(
+      "password",
+    );
+    expect(template.fields.find((f) => f.name === "ca_bundle")!.configKey).toBe(
+      "verify_ssl",
+    );
+  });
+
   it("returns an empty template for unknown providers", () => {
     const template = getProviderTemplate("unknown");
     expect(template.providerType).toBe("unknown");
@@ -119,6 +139,67 @@ describe("externalLibraryProviderTemplates", () => {
     expect(config).not.toHaveProperty("password");
     expect(config).not.toHaveProperty("known_hosts");
     expect(config).not.toHaveProperty("root");
+  });
+
+  it("writes a field with configKey to the aliased JSON key", () => {
+    const template = getProviderTemplate("webdav");
+    const values: Record<string, unknown> = {
+      url: "https://dav.example.com/files/alice",
+      verify_ssl: false,
+      ca_bundle: "/etc/ssl/private-ca.pem",
+      timeout: 30,
+      recursive: true,
+      allow_hashing: true,
+      fast_hash: false,
+      allow_write_tags: false,
+      allow_rename_source: false,
+      allow_delete_source: false,
+    };
+
+    const config = buildProviderConfigFromTemplate(template, values);
+    // The CA bundle path overrides the boolean on the shared verify_ssl key.
+    expect(config.verify_ssl).toBe("/etc/ssl/private-ca.pem");
+    expect(config).not.toHaveProperty("ca_bundle");
+    expect(config.url).toBe("https://dav.example.com/files/alice");
+  });
+
+  it("keeps the boolean verify_ssl value when the CA bundle field is empty", () => {
+    const template = getProviderTemplate("webdav");
+    const values: Record<string, unknown> = {
+      url: "https://dav.example.com",
+      verify_ssl: false,
+      ca_bundle: "",
+      timeout: 30,
+      recursive: true,
+      allow_hashing: true,
+      fast_hash: false,
+      allow_write_tags: false,
+      allow_rename_source: false,
+      allow_delete_source: false,
+    };
+
+    const config = buildProviderConfigFromTemplate(template, values);
+    expect(config.verify_ssl).toBe(false);
+    expect(config).not.toHaveProperty("ca_bundle");
+  });
+
+  it("prefills a configKey field only from string values on the shared key", () => {
+    const template = getProviderTemplate("webdav");
+    const caField = template.fields.find((f) => f.name === "ca_bundle")!;
+    const verifyField = template.fields.find((f) => f.name === "verify_ssl")!;
+
+    expect(
+      getFieldInitialValue(caField, { verify_ssl: "/etc/ssl/ca.pem" }),
+    ).toBe("/etc/ssl/ca.pem");
+    expect(getFieldInitialValue(caField, { verify_ssl: true })).toBe("");
+    expect(getFieldInitialValue(caField, { verify_ssl: false })).toBe("");
+    // A CA bundle path on verify_ssl still counts as verification enabled.
+    expect(
+      getFieldInitialValue(verifyField, { verify_ssl: "/etc/ssl/ca.pem" }),
+    ).toBe(true);
+    expect(getFieldInitialValue(verifyField, { verify_ssl: false })).toBe(
+      false,
+    );
   });
 
   it("parses comma-separated string arrays and skips empty optional arrays", () => {

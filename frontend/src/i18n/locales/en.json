@@ -1068,6 +1068,74 @@
               "description": "Allow deleting files on the remote server. Requires write permission on the remote server."
             }
           }
+        },
+        "webdav": {
+          "fields": {
+            "url": {
+              "label": "WebDAV URL",
+              "description": "Base URL of the WebDAV server, e.g. https://nextcloud.example.com/remote.php/dav/files/alice. The server must be reachable from the Songhive instance — all file access happens server-side."
+            },
+            "root": {
+              "label": "Remote root",
+              "description": "Directory under the base URL to index (e.g. Music). Leave empty to index the base URL itself."
+            },
+            "username": {
+              "label": "Username",
+              "description": "HTTP Basic auth username."
+            },
+            "password": {
+              "label": "Password",
+              "description": "HTTP Basic auth password. Stored encrypted."
+            },
+            "token": {
+              "label": "Bearer token",
+              "description": "Bearer token sent in the Authorization header. Only used when no username is configured. Stored encrypted."
+            },
+            "verify_ssl": {
+              "label": "Verify TLS certificate",
+              "description": "Verify the server's TLS certificate. Disable only for testing or trusted private networks — disabling leaves the connection open to MITM impersonation and credential theft."
+            },
+            "ca_bundle": {
+              "label": "CA bundle path",
+              "description": "Optional path on the Songhive server to a PEM CA bundle used to verify the server's TLS certificate. Takes precedence over the verification toggle when set."
+            },
+            "timeout": {
+              "label": "Request timeout (seconds)",
+              "description": "How long to wait for each HTTP request to the WebDAV server."
+            },
+            "extensions": {
+              "label": "File extensions",
+              "description": "Comma-separated list of audio file extensions to index (e.g. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Exclude patterns",
+              "description": "Comma-separated glob patterns for remote paths to skip during scanning."
+            },
+            "recursive": {
+              "label": "Recursive scan",
+              "description": "Index audio files in remote subdirectories recursively."
+            },
+            "allow_hashing": {
+              "label": "Allow audio hashing",
+              "description": "Compute a stable audio hash for tracks to detect duplicates and support transcoding. Requires downloading new or changed files once."
+            },
+            "fast_hash": {
+              "label": "Use fast raw hash",
+              "description": "Use raw SHA-256 instead of ffmpeg audio-only hashing. Cheaper but changes when tags or artwork change."
+            },
+            "allow_write_tags": {
+              "label": "Allow metadata write-back",
+              "description": "Allow Songhive to rewrite embedded tags and re-upload files when tracks are edited. Requires write permission on the remote server."
+            },
+            "allow_rename_source": {
+              "label": "Allow source renaming",
+              "description": "Allow Songhive to rename remote files through track edits. Requires write permission on the remote server."
+            },
+            "allow_delete_source": {
+              "label": "Allow source deletion",
+              "description": "Allow deleting files on the remote server. Requires write permission on the remote server."
+            }
+          }
         }
       }
     },
