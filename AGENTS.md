@@ -175,6 +175,16 @@
   elapsed since the stream started — bytes only approximate playback
   position while delivery is consumption-limited, so a client that
   buffers the whole file in seconds must not trip the threshold early.
+  Remote (federated) tracks scrobble through the same machinery: the web
+  player reports `POST /api/v1/remote/objects/{id}/now-playing` on play
+  and `POST /api/v1/remote/objects/{id}/listen` at the threshold —
+  `services.streaming.record_remote_listen` writes a `listening_history`
+  row keyed on `remote_object_id` (the `track_id`/`remote_object_id` XOR
+  constraint) and enqueues the same Celery tasks with
+  `entity_kind="remote"`. `_load_scrobble_fields` then resolves metadata
+  from the `RemoteObject` payload (`scrobbler.remote_object_fields`),
+  folding `Audio`/`Video` renditions onto their media entity so the
+  scrobbled title is the plain track title.
 - RSS/Atom feeds live under `/feeds` (outside `/api/v1`):
   `api/routes/feeds.py` + `services/feeds.py` render the XML, and
   `api/semantic_meta.py` / `api/routes/profile_pages.py` inject the
@@ -294,7 +304,22 @@
   object unknown locally is dereferenced through
   `remote_content.dereference_remote_object` (guarded fetch →
   `remote_objects` row + mirror `Activity`) before the `announce` row is
-  stored; `Undo(Announce)` retracts it. Stale remote activities are pruned by
+  stored; `Undo(Announce)` retracts it.
+- Remote music entities (`remote_objects` rows with a `resource_type`) are
+  first-class members without local catalog rows: `favorites`,
+  `library_tracks`, and `playlist_tracks` each carry a nullable
+  `remote_object_id` FK alongside `track_id` with an exactly-one-reference
+  check constraint. `remote_content.remote_collection_object_ids` computes
+  the collection closure (collected/favorited seeds + cached descendants +
+  ancestors) so a collected remote track surfaces its album and artist;
+  `resolve_remote_track_ids` expands remote containers into cached track
+  descendants on playlist/library adds. Interactions reuse the `Activity`
+  machinery — `ensure_remote_activity` lazily materializes a synthetic
+  `Create` mirror (`POST /api/v1/remote/objects/{id}/activity`), and
+  responses carry `activity_id`/`favorited`/`in_collection` viewer state.
+  `GET /api/v1/remote/objects` supports `collection`, `favorites`, and
+  `library` filters; tombstoned rows are excluded from playback and
+  membership expansion. Stale remote activities are pruned by
   `tasks.federation.prune_remote_activities` / `songhive admin
   prune-remote-activities` / `POST /api/v1/admin/federation/prune-remote-activities`,
   gated on `federation.remote_activity_retention_days` and scheduled via

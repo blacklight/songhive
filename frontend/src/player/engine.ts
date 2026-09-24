@@ -1,5 +1,6 @@
 import { streamUrl } from "@/api/stream";
 import { markEpisodePlayed } from "@/api/podcasts";
+import { addRemoteListen, reportRemoteNowPlaying } from "@/api/remote";
 import { getScrobbleStatus, reportNowPlaying } from "@/api/scrobbling";
 import type { QueueTrack, EngineCallbacks } from "./types";
 import {
@@ -15,7 +16,7 @@ export class PlayerEngine {
   private currentUrl = "";
   private history: HistoryReporter;
   private pendingStartAt: number | undefined;
-  private pendingNowPlaying: string | null = null;
+  private pendingNowPlaying: { id: string; remote: boolean } | null = null;
   private scrobbleActive = false;
 
   private boundTimeUpdate: () => void;
@@ -66,19 +67,27 @@ export class PlayerEngine {
 
   load(track: QueueTrack, startAt?: number) {
     this.pendingStartAt = startAt;
-    // Remote attachment audio has no local track row — there is nothing to
-    // report listen history against. Podcast episodes are remote too, but
-    // report to the podcast played-state endpoint so the unplayed counters
-    // on /podcasts stay accurate.
+    // Podcast episodes report to the played-state endpoint so the unplayed
+    // counters on /podcasts stay accurate. Cached remote objects report
+    // against their ``remote_objects`` row — the remote listen endpoint
+    // records history and enqueues the scrobble. Bare remote attachment
+    // audio has no cached row, so there is nothing to report against.
     if (track.podcast_episode_id) {
       this.history.load(track.podcast_episode_id, markEpisodePlayed);
+    } else if (track.remote) {
+      this.history.load(track.remote_object_id ?? null, addRemoteListen);
     } else {
-      this.history.load(track.remote ? null : track.id);
+      this.history.load(track.id);
     }
     // Stream requests can't signal a real play (preload fetches upcoming
     // tracks too), so now-playing is reported on the first play event.
-    this.pendingNowPlaying =
-      !track.remote && !track.podcast_episode_id ? track.id : null;
+    this.pendingNowPlaying = track.podcast_episode_id
+      ? null
+      : track.remote
+        ? track.remote_object_id
+          ? { id: track.remote_object_id, remote: true }
+          : null
+        : { id: track.id, remote: false };
     this.callbacks.onStateChange?.("loading");
 
     const url = streamUrl(track);
@@ -197,8 +206,9 @@ export class PlayerEngine {
 
   private handlePlay() {
     if (this.pendingNowPlaying && this.scrobbleActive) {
-      const trackId = this.pendingNowPlaying;
-      reportNowPlaying(trackId).catch((err: unknown) => {
+      const pending = this.pendingNowPlaying;
+      const report = pending.remote ? reportRemoteNowPlaying : reportNowPlaying;
+      report(pending.id).catch((err: unknown) => {
         console.warn("Failed to report now playing", err);
       });
     }

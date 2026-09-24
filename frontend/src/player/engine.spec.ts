@@ -3,6 +3,7 @@ import { PlayerEngine } from "./engine";
 import type { QueueTrack } from "./types";
 import * as historyApi from "@/api/history";
 import * as podcastsApi from "@/api/podcasts";
+import * as remoteApi from "@/api/remote";
 import * as scrobblingApi from "@/api/scrobbling";
 
 vi.mock("@/api/stream", () => ({
@@ -15,6 +16,11 @@ vi.mock("@/api/history", () => ({
 
 vi.mock("@/api/podcasts", () => ({
   markEpisodePlayed: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock("@/api/remote", () => ({
+  addRemoteListen: vi.fn(() => Promise.resolve()),
+  reportRemoteNowPlaying: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@/api/scrobbling", () => ({
@@ -46,6 +52,8 @@ describe("PlayerEngine", () => {
   beforeEach(() => {
     vi.mocked(historyApi.addHistory).mockClear();
     vi.mocked(podcastsApi.markEpisodePlayed).mockClear();
+    vi.mocked(remoteApi.addRemoteListen).mockClear();
+    vi.mocked(remoteApi.reportRemoteNowPlaying).mockClear();
     vi.mocked(scrobblingApi.reportNowPlaying).mockClear();
     engine = new PlayerEngine();
     primary = (engine as unknown as { primary: HTMLAudioElement }).primary;
@@ -277,7 +285,7 @@ describe("PlayerEngine", () => {
     expect(scrobblingApi.reportNowPlaying).not.toHaveBeenCalled();
   });
 
-  it("does not report now playing for remote or podcast tracks", async () => {
+  it("reports now playing for cached remote tracks when scrobbling is active", async () => {
     vi.mocked(scrobblingApi.getScrobbleStatus).mockResolvedValueOnce(
       activeScrobbleStatus,
     );
@@ -287,10 +295,32 @@ describe("PlayerEngine", () => {
     engine.load({
       ...makeTrack("r"),
       remote: true,
+      remote_object_id: "remote-obj-1",
+      stream_url: "https://example.com/r.mp3",
+    });
+    primary.dispatchEvent(new Event("play"));
+    expect(remoteApi.reportRemoteNowPlaying).toHaveBeenCalledWith(
+      "remote-obj-1",
+    );
+    expect(scrobblingApi.reportNowPlaying).not.toHaveBeenCalled();
+  });
+
+  it("does not report now playing for uncached remote or podcast tracks", async () => {
+    vi.mocked(scrobblingApi.getScrobbleStatus).mockResolvedValueOnce(
+      activeScrobbleStatus,
+    );
+    engine.init({});
+    await Promise.resolve();
+
+    // Bare remote attachment audio has no cached remote_objects row.
+    engine.load({
+      ...makeTrack("r"),
+      remote: true,
       stream_url: "https://example.com/r.mp3",
     });
     primary.dispatchEvent(new Event("play"));
     expect(scrobblingApi.reportNowPlaying).not.toHaveBeenCalled();
+    expect(remoteApi.reportRemoteNowPlaying).not.toHaveBeenCalled();
 
     engine.load({
       ...makeTrack("ep"),
@@ -300,6 +330,26 @@ describe("PlayerEngine", () => {
     });
     primary.dispatchEvent(new Event("play"));
     expect(scrobblingApi.reportNowPlaying).not.toHaveBeenCalled();
+    expect(remoteApi.reportRemoteNowPlaying).not.toHaveBeenCalled();
+  });
+
+  it("reports cached remote listens via addRemoteListen at the threshold", () => {
+    engine.init({});
+    const track = {
+      ...makeTrack("r"),
+      remote: true,
+      remote_object_id: "remote-obj-1",
+      stream_url: "https://example.com/r.mp3",
+    };
+
+    engine.load(track);
+    (primary as unknown as { duration: number }).duration = 60;
+    primary.currentTime = 31;
+    primary.dispatchEvent(new Event("timeupdate"));
+
+    expect(remoteApi.addRemoteListen).toHaveBeenCalledWith("remote-obj-1");
+    expect(historyApi.addHistory).not.toHaveBeenCalled();
+    expect(podcastsApi.markEpisodePlayed).not.toHaveBeenCalled();
   });
 
   it("does not report generic remote tracks", () => {
@@ -316,6 +366,7 @@ describe("PlayerEngine", () => {
     primary.dispatchEvent(new Event("timeupdate"));
 
     expect(historyApi.addHistory).not.toHaveBeenCalled();
+    expect(remoteApi.addRemoteListen).not.toHaveBeenCalled();
     expect(podcastsApi.markEpisodePlayed).not.toHaveBeenCalled();
   });
 });

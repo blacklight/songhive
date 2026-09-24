@@ -36,9 +36,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_default_user_agent
 from ..config.schema import SonghiveConfig
+from ..models.remote_object import RemoteObject
 from ..models.scrobble import ScrobbleConfig
 from ..models.track import Track
 from ..models.user import User
+from . import remote_content
 from .secrets import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger(__name__)
@@ -374,11 +376,40 @@ def track_fields(track: Track) -> Dict[str, Any]:
     }
 
 
-async def submit_now_playing(config: SonghiveConfig, row: ScrobbleConfig, track: Track) -> None:
+def remote_object_fields(row: RemoteObject) -> Dict[str, Any]:
+    """
+    Map a cached remote music object to scrobble API fields.
+
+    Scrobbles carry metadata only — a remote ``Track`` (or its rendition)
+    resolves title/artist/album/duration from the cached payload, with
+    ``position``/MusicBrainz ids picked up best-effort from the embedded
+    track document.
+    """
+    payload = row.payload if isinstance(row.payload, dict) else {}
+    embedded = payload.get("track")
+    track_doc = embedded if isinstance(embedded, dict) else payload
+    music = remote_content.remote_object_music_fields(row)
+    position = track_doc.get("position")
+    mbid = track_doc.get("musicbrainz_recordingid") or track_doc.get("musicbrainz_id")
+    artist = music["artist_name"] or ""
+    return {
+        "artist": artist,
+        "track": remote_content.remote_object_display_name(row) or row.name or "",
+        "album": music["album_name"],
+        "album_artist": artist or None,
+        "duration": music["duration"],
+        "track_number": (
+            int(position) if isinstance(position, (int, float)) and not isinstance(position, bool) else None
+        ),
+        "mbid": mbid if isinstance(mbid, str) else None,
+    }
+
+
+async def submit_now_playing(config: SonghiveConfig, row: ScrobbleConfig, fields: Dict[str, Any]) -> None:
     """Submit ``track.updateNowPlaying``; records ``last_error`` on failure."""
     client = make_session_client(config, row)
     try:
-        await asyncio.to_thread(client.update_now_playing, **track_fields(track))
+        await asyncio.to_thread(client.update_now_playing, **fields)
     except ScrobblerError as exc:
         row.last_error = str(exc)
         raise
@@ -391,13 +422,13 @@ async def submit_now_playing(config: SonghiveConfig, row: ScrobbleConfig, track:
 async def submit_scrobble(
     config: SonghiveConfig,
     row: ScrobbleConfig,
-    track: Track,
+    fields: Dict[str, Any],
     played_at: int,
 ) -> None:
     """Submit ``track.scrobble``; records ``last_error``/``last_scrobbled_at``."""
     client = make_session_client(config, row)
     try:
-        await asyncio.to_thread(client.scrobble, timestamp=played_at, **track_fields(track))
+        await asyncio.to_thread(client.scrobble, timestamp=played_at, **fields)
     except ScrobblerError as exc:
         row.last_error = str(exc)
         raise
@@ -408,12 +439,16 @@ async def submit_scrobble(
         client.close()
 
 
-def enqueue_now_playing(user_id: str, track_id: str) -> None:
+def enqueue_now_playing(user_id: str, track_id: str, entity_kind: str = "track") -> None:
     """Enqueue a now-playing submission; failures never break playback paths."""
     try:
         from ..tasks.scrobbling import scrobble_now_playing
 
-        scrobble_now_playing.delay(str(user_id), str(track_id))
+        # ``entity_kind`` rides along only for non-default kinds so the task
+        # signature stays wire-compatible with messages queued before it
+        # existed.
+        args = (str(user_id), str(track_id)) if entity_kind == "track" else (str(user_id), str(track_id), entity_kind)
+        scrobble_now_playing.delay(*args)
     except Exception:
         logger.warning("Could not enqueue now-playing scrobble for track %s", track_id, exc_info=True)
 
@@ -424,11 +459,27 @@ async def maybe_enqueue_now_playing(db: AsyncSession, user_id: str, track_id: st
         enqueue_now_playing(user_id, track_id)
 
 
-def enqueue_scrobble(user_id: str, track_id: str, played_at: Optional[int] = None) -> None:
+def enqueue_scrobble(user_id: str, track_id: str, played_at: Optional[int] = None, entity_kind: str = "track") -> None:
     """Enqueue a full scrobble submission; failures never break listen recording."""
     try:
         from ..tasks.scrobbling import scrobble_track
 
-        scrobble_track.delay(str(user_id), str(track_id), played_at or int(time.time()))
+        args = (
+            (str(user_id), str(track_id), played_at or int(time.time()))
+            if entity_kind == "track"
+            else (str(user_id), str(track_id), played_at or int(time.time()), entity_kind)
+        )
+        scrobble_track.delay(*args)
     except Exception:
         logger.warning("Could not enqueue scrobble for track %s", track_id, exc_info=True)
+
+
+async def maybe_enqueue_remote_now_playing(db: AsyncSession, user_id: str, remote_object_id: str) -> None:
+    """Enqueue a remote now-playing submission when the user has an active scrobble config."""
+    if await has_active_config(db, user_id):
+        enqueue_now_playing(user_id, remote_object_id, "remote")
+
+
+def enqueue_remote_scrobble(user_id: str, remote_object_id: str, played_at: Optional[int] = None) -> None:
+    """Enqueue a remote-object scrobble submission; failures never break listen recording."""
+    enqueue_scrobble(user_id, remote_object_id, played_at, "remote")

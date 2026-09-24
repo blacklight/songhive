@@ -27,6 +27,7 @@ import { getApiErrorMessage } from "@/api/client";
 import { removeTracksFromLibrary } from "@/api/libraries";
 import { removeTracksFromPlaylist } from "@/api/playlists";
 import { addFavorite, removeFavorite } from "@/api/favorites";
+import { favoriteRemoteObject, unfavoriteRemoteObject } from "@/api/remote";
 import {
   deleteTrack,
   deleteTracks,
@@ -113,6 +114,7 @@ const bulkAddOpen = ref(false);
 const bulkAddMode = ref<"library" | "playlist">("library");
 const bulkAddIds = ref<string[]>([]);
 const bulkAddEpisodeIds = ref<string[]>([]);
+const bulkAddRemoteIds = ref<string[]>([]);
 
 const selectedIds = ref<Set<string>>(new Set());
 const bulkMode = ref(false);
@@ -184,6 +186,10 @@ function isPodcastEpisode(track: QueueTrack): boolean {
   return !!track.podcast_episode_id;
 }
 
+function isRemoteTrack(track: QueueTrack): boolean {
+  return !!track.remote && !!track.remote_object_id;
+}
+
 function openAddDialog(mode: "library" | "playlist") {
   addDialogMode.value = mode;
   addDialogOpen.value = true;
@@ -198,11 +204,14 @@ function openBulkAddDialog(mode: "library" | "playlist") {
   bulkAddMode.value = mode;
   const selected = selectedQueueTracks();
   bulkAddIds.value = selected
-    .filter((track) => !isPodcastEpisode(track))
+    .filter((track) => !isPodcastEpisode(track) && !isRemoteTrack(track))
     .map((track) => track.id);
   bulkAddEpisodeIds.value = selected
     .filter(isPodcastEpisode)
     .map((track) => track.id);
+  bulkAddRemoteIds.value = selected
+    .filter(isRemoteTrack)
+    .map((track) => track.remote_object_id!);
   bulkAddOpen.value = true;
 }
 
@@ -757,6 +766,13 @@ function canManageTrack(track: QueueTrack): boolean {
 
 const selectedPlainTrackCount = computed(
   () =>
+    selectedQueueTracks().filter(
+      (track) => !isPodcastEpisode(track) && !isRemoteTrack(track),
+    ).length,
+);
+
+const selectedLibraryAddableCount = computed(
+  () =>
     selectedQueueTracks().filter((track) => !isPodcastEpisode(track)).length,
 );
 
@@ -777,7 +793,7 @@ const bulkActions = computed(() => {
       icon: "folder-plus",
       variant: "secondary" as const,
       visible: authStore.isAuthenticated,
-      disabled: noTracks || isRemoving.value,
+      disabled: selectedLibraryAddableCount.value === 0 || isRemoving.value,
     },
     {
       key: "add-to-playlist",
@@ -842,7 +858,7 @@ function onBulkAction(key: string) {
 }
 function openBulkEdit() {
   bulkEditIds.value = selectedQueueTracks()
-    .filter((track) => !isPodcastEpisode(track))
+    .filter((track) => !isPodcastEpisode(track) && !isRemoteTrack(track))
     .map((track) => track.id);
   bulkEditOpen.value = true;
 }
@@ -969,7 +985,7 @@ async function onConfirm() {
         deleted = 1;
       } else {
         const plainIds = selectedQueueTracks()
-          .filter((item) => !isPodcastEpisode(item))
+          .filter((item) => !isPodcastEpisode(item) && !isRemoteTrack(item))
           .map((item) => item.id);
         if (plainIds.length === 0) {
           closeConfirm();
@@ -1016,17 +1032,35 @@ async function onConfirm() {
       const items = enrichedTracks.value.filter((item) => idSet.has(item.id));
       const response = await removeTracksFromPlaylist(props.removableFrom.id, {
         track_ids: items
-          .filter((item) => !isPodcastEpisode(item))
+          .filter((item) => !isPodcastEpisode(item) && !isRemoteTrack(item))
           .map((item) => item.id),
         episode_ids: items.filter(isPodcastEpisode).map((item) => item.id),
+        remote_object_ids: items
+          .filter(isRemoteTrack)
+          .map((item) => item.remote_object_id!),
       });
-      removedIds = [...response.track_ids, ...(response.episode_ids ?? [])];
+      removedIds = [
+        ...response.track_ids,
+        ...(response.episode_ids ?? []),
+        ...(response.remote_object_ids ?? []),
+      ];
       removedCount = response.removed;
     } else {
+      const items = enrichedTracks.value.filter((item) =>
+        new Set(trackIds).has(item.id),
+      );
       const response = await removeTracksFromLibrary(props.removableFrom.id, {
-        track_ids: trackIds,
+        track_ids: items
+          .filter((item) => !isRemoteTrack(item))
+          .map((item) => item.id),
+        remote_object_ids: items
+          .filter(isRemoteTrack)
+          .map((item) => item.remote_object_id!),
       });
-      removedIds = response.track_ids;
+      removedIds = [
+        ...response.track_ids,
+        ...(response.remote_object_ids ?? []),
+      ];
       removedCount = response.removed;
     }
 
@@ -1095,6 +1129,10 @@ const menuItems = computed(() => {
   ];
 
   const isEpisode = isPodcastEpisode(track);
+  // ``track.remote`` covers attachment-only audio too; membership actions
+  // (library/playlist/favorite/remove) need a cached remote object row.
+  const isRemote = !!track.remote;
+  const isMemberable = isRemoteTrack(track);
 
   if (track.audio_url) {
     items.push({
@@ -1104,7 +1142,7 @@ const menuItems = computed(() => {
     });
   }
 
-  if (authStore.isAuthenticated) {
+  if (authStore.isAuthenticated && (!isRemote || isMemberable)) {
     if (!isEpisode) {
       items.push({
         key: "add-to-library",
@@ -1119,7 +1157,7 @@ const menuItems = computed(() => {
     });
   }
 
-  if (props.removableFrom?.canRemove) {
+  if (props.removableFrom?.canRemove && (!isRemote || isMemberable)) {
     const label =
       props.removableFrom.type === "library"
         ? t("browse.contextMenu.removeFromLibrary")
@@ -1132,15 +1170,12 @@ const menuItems = computed(() => {
     });
   }
 
-  if (!isEpisode && track && canManageTrack(track)) {
+  if (!isEpisode && !isRemote && track && canManageTrack(track)) {
     items.push({
       key: "edit-track",
       label: t("browse.contextMenu.editTrack"),
       icon: "pen-to-square",
     });
-  }
-
-  if (!isEpisode && track && canManageTrack(track)) {
     items.push({
       key: "enrich",
       label: t("browse.contextMenu.enrich"),
@@ -1148,7 +1183,13 @@ const menuItems = computed(() => {
     });
   }
 
-  if (!isEpisode && props.deletable && track && canManageTrack(track)) {
+  if (
+    !isEpisode &&
+    !isRemote &&
+    props.deletable &&
+    track &&
+    canManageTrack(track)
+  ) {
     items.push({
       key: "delete-track",
       label: t("browse.contextMenu.deleteTrack"),
@@ -1157,7 +1198,7 @@ const menuItems = computed(() => {
     });
   }
 
-  if (authStore.isAuthenticated && !isEpisode) {
+  if (authStore.isAuthenticated && !isEpisode && (!isRemote || isMemberable)) {
     const favorited = isTrackFavorited(track);
     items.push({
       key: "favorite",
@@ -1168,7 +1209,13 @@ const menuItems = computed(() => {
     });
   }
 
-  if (isEpisode && track.podcast_id) {
+  if (isRemote && track.remote_page_url) {
+    items.push({
+      key: "go-to-remote",
+      label: t("remote.viewResource"),
+      icon: "globe",
+    });
+  } else if (isEpisode && track.podcast_id) {
     items.push({
       key: "go-to-podcast",
       label: t("browse.contextMenu.goToPodcast"),
@@ -1197,7 +1244,7 @@ const menuItems = computed(() => {
     });
   }
 
-  if (!isEpisode) {
+  if (!isEpisode && !isRemote) {
     items.push({
       key: "activities",
       label: t("activities.view"),
@@ -1252,15 +1299,22 @@ async function onMenuSelect(key: string) {
       break;
     case "add-to-library":
       dialogTrack.value = track;
-      addDialogItemType.value = "track";
+      addDialogItemType.value = isRemoteTrack(track) ? "remote" : "track";
       closeMenu();
       openAddDialog("library");
       break;
     case "add-to-playlist":
       dialogTrack.value = track;
-      addDialogItemType.value = isPodcastEpisode(track) ? "episode" : "track";
+      addDialogItemType.value = isRemoteTrack(track)
+        ? "remote"
+        : isPodcastEpisode(track)
+          ? "episode"
+          : "track";
       closeMenu();
       openAddDialog("playlist");
+      break;
+    case "go-to-remote":
+      if (track.remote_page_url) await router.push(track.remote_page_url);
       break;
     case "remove-from-collection":
       openSingleRemove(track);
@@ -1282,19 +1336,23 @@ async function onMenuSelect(key: string) {
 
       const currentlyFavorited = isTrackFavorited(track);
       try {
-        if (currentlyFavorited) {
+        if (isRemoteTrack(track)) {
+          if (currentlyFavorited) {
+            await unfavoriteRemoteObject(track.remote_object_id!);
+          } else {
+            await favoriteRemoteObject(track.remote_object_id!);
+          }
+        } else if (currentlyFavorited) {
           await removeFavorite(track.id);
-          toastStore.push({
-            type: "success",
-            message: t("common.favoriteRemoved"),
-          });
         } else {
           await addFavorite(track.id);
-          toastStore.push({
-            type: "success",
-            message: t("common.favoriteAdded"),
-          });
         }
+        toastStore.push({
+          type: "success",
+          message: currentlyFavorited
+            ? t("common.favoriteRemoved")
+            : t("common.favoriteAdded"),
+        });
         favoritedOverrides.value[track.id] = !currentlyFavorited;
         track.favorited = !currentlyFavorited;
         emit("toggle-favorite", track);
@@ -1592,6 +1650,14 @@ async function onMenuSelect(key: string) {
               :provider="asTrackRow(row).track.external_provider_type"
               :state="asTrackRow(row).track.external_state"
             />
+            <span
+              v-if="asTrackRow(row).track.remote"
+              class="track-list__remote-badge"
+              :title="asTrackRow(row).track.remote_domain"
+            >
+              <AppIcon name="globe" />
+              {{ asTrackRow(row).track.remote_domain }}
+            </span>
           </button>
         </template>
 
@@ -1805,6 +1871,14 @@ async function onMenuSelect(key: string) {
                   :provider="asTrackRow(row).track.external_provider_type"
                   :state="asTrackRow(row).track.external_state"
                 />
+                <span
+                  v-if="asTrackRow(row).track.remote"
+                  class="track-list__remote-badge"
+                  :title="asTrackRow(row).track.remote_domain"
+                >
+                  <AppIcon name="globe" />
+                  {{ asTrackRow(row).track.remote_domain }}
+                </span>
               </button>
               <RouterLink
                 v-if="asTrackRow(row).track.podcast_id"
@@ -1884,12 +1958,17 @@ async function onMenuSelect(key: string) {
     />
 
     <AddToCollectionDialog
-      v-if="canEdit && bulkAddIds.length + bulkAddEpisodeIds.length > 0"
+      v-if="
+        canEdit &&
+        bulkAddIds.length + bulkAddEpisodeIds.length + bulkAddRemoteIds.length >
+          0
+      "
       :open="bulkAddOpen"
       :mode="bulkAddMode"
       item-type="track"
       :item-ids="bulkAddIds"
       :episode-ids="bulkAddEpisodeIds"
+      :remote-ids="bulkAddRemoteIds"
       @close="closeBulkAddDialog"
     />
 
@@ -2048,6 +2127,15 @@ async function onMenuSelect(key: string) {
 
 .track-list__favorite-icon {
   color: var(--color-danger);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.track-list__remote-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
   font-size: 0.75rem;
   flex-shrink: 0;
 }

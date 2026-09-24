@@ -367,3 +367,157 @@ async def test_record_listen_skips_unconfigured_users(db_session, regular_user, 
 
     names = [call[0][0] for call in _no_real_celery_broker.call_args_list]
     assert "songhive.tasks.scrobbling.scrobble" not in names
+
+
+async def test_remote_object_fields_maps_metadata(db_session):
+    """A cached remote ``Audio`` rendition yields clean scrobble fields."""
+    from songhive.models.remote_object import RemoteObject
+
+    row = RemoteObject(
+        canonical_url="https://remote.example/uploads/1",
+        domain="remote.example",
+        object_type="Audio",
+        resource_type="track",
+        actor_url="https://remote.example/users/bob",
+        name="The Band - The Album - The Song",
+        payload={
+            "type": "Audio",
+            "id": "https://remote.example/uploads/1",
+            "name": "The Band - The Album - The Song",
+            "duration": 240,
+            "track": {
+                "type": "Track",
+                "id": "https://remote.example/tracks/1",
+                "name": "The Song",
+                "position": 4,
+                "musicbrainz_recordingid": "mbid-remote",
+                "artists": [{"name": "The Band"}],
+                "album": {"name": "The Album"},
+            },
+        },
+    )
+    db_session.add(row)
+    await db_session.flush()
+
+    fields = scrobbler.remote_object_fields(row)
+    assert fields["artist"] == "The Band"
+    assert fields["track"] == "The Song"
+    assert fields["album"] == "The Album"
+    assert fields["album_artist"] == "The Band"
+    assert fields["duration"] == 240
+    assert fields["track_number"] == 4
+    assert fields["mbid"] == "mbid-remote"
+
+
+async def test_load_scrobble_fields_folds_rendition(db_session):
+    """A rendition id resolves to its media entity's scrobble fields."""
+    from songhive.models.remote_object import RemoteObject
+
+    track = RemoteObject(
+        canonical_url="https://remote.example/tracks/1",
+        domain="remote.example",
+        object_type="Track",
+        resource_type="track",
+        actor_url="https://remote.example/users/bob",
+        name="The Song",
+        payload={
+            "type": "Track",
+            "id": "https://remote.example/tracks/1",
+            "name": "The Song",
+            "artists": [{"name": "The Band"}],
+            "album": {"name": "The Album"},
+        },
+    )
+    rendition = RemoteObject(
+        canonical_url="https://remote.example/uploads/1",
+        domain="remote.example",
+        object_type="Audio",
+        resource_type="track",
+        actor_url="https://remote.example/users/bob",
+        name="The Band - The Album - The Song",
+        media_of_url=track.canonical_url,
+        payload={"type": "Audio", "id": "https://remote.example/uploads/1"},
+    )
+    db_session.add_all([track, rendition])
+    await db_session.flush()
+
+    fields = await scrobble_tasks._load_scrobble_fields(db_session, str(rendition.id), "remote")
+    assert fields is not None
+    # Fields come from the entity row, not the rendition's composite name.
+    assert fields["track"] == "The Song"
+    assert fields["artist"] == "The Band"
+    assert fields["album"] == "The Album"
+
+    assert await scrobble_tasks._load_scrobble_fields(db_session, "missing", "remote") is None
+
+
+def test_enqueue_remote_dispatches_entity_kind(_no_real_celery_broker):
+    scrobbler.enqueue_now_playing("u1", "ro1", "remote")
+    scrobbler.enqueue_remote_scrobble("u1", "ro1", 1700000000)
+    names = [call[0][0] for call in _no_real_celery_broker.call_args_list]
+    assert "songhive.tasks.scrobbling.now_playing" in names
+    assert "songhive.tasks.scrobbling.scrobble" in names
+    for call in _no_real_celery_broker.call_args_list:
+        args = call.kwargs.get("args") or call[0][1]
+        assert args[-1] == "remote"
+
+
+async def test_record_remote_listen_records_history_and_enqueues(db_session, regular_user, _no_real_celery_broker):
+    from sqlalchemy import select
+
+    from songhive.models.history import ListeningHistory
+    from songhive.models.remote_object import RemoteObject
+    from songhive.services.streaming import record_remote_listen
+
+    row = RemoteObject(
+        canonical_url="https://remote.example/tracks/1",
+        domain="remote.example",
+        object_type="Track",
+        resource_type="track",
+        actor_url="https://remote.example/users/bob",
+        name="The Song",
+    )
+    db_session.add(row)
+    db_session.add(
+        ScrobbleConfig(
+            user_id=str(regular_user.id),
+            service="lastfm",
+            username="alice",
+            session_key="sk",
+        )
+    )
+    await db_session.flush()
+
+    await record_remote_listen(db_session, str(regular_user.id), str(row.id))
+
+    entry = await db_session.scalar(select(ListeningHistory).where(ListeningHistory.remote_object_id == str(row.id)))
+    assert entry is not None
+    assert entry.track_id is None
+    names = [call[0][0] for call in _no_real_celery_broker.call_args_list]
+    assert "songhive.tasks.scrobbling.scrobble" in names
+
+
+async def test_record_remote_listen_skips_unconfigured_users(db_session, regular_user, _no_real_celery_broker):
+    from sqlalchemy import select
+
+    from songhive.models.history import ListeningHistory
+    from songhive.models.remote_object import RemoteObject
+    from songhive.services.streaming import record_remote_listen
+
+    row = RemoteObject(
+        canonical_url="https://remote.example/tracks/1",
+        domain="remote.example",
+        object_type="Track",
+        resource_type="track",
+        actor_url="https://remote.example/users/bob",
+        name="The Song",
+    )
+    db_session.add(row)
+    await db_session.flush()
+
+    await record_remote_listen(db_session, str(regular_user.id), str(row.id))
+
+    entry = await db_session.scalar(select(ListeningHistory).where(ListeningHistory.remote_object_id == str(row.id)))
+    assert entry is not None
+    names = [call[0][0] for call in _no_real_celery_broker.call_args_list]
+    assert "songhive.tasks.scrobbling.scrobble" not in names

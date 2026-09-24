@@ -12,6 +12,7 @@ from .base import Base
 
 if TYPE_CHECKING:
     from .podcast import PodcastEpisode
+    from .remote_object import RemoteObject
     from .tag import Tag, TagPlaylist
     from .track import Track
 
@@ -61,17 +62,21 @@ class Playlist(Base):
 
 
 class PlaylistTrack(Base):
-    """One ordered entry in a playlist — either a local track or a podcast episode.
+    """One ordered entry in a playlist — a local track, a podcast episode, or a cached remote object.
 
-    Exactly one of ``track_id`` / ``podcast_episode_id`` is set; episode rows
-    keep the remote enclosure URL on the episode itself and are streamed from
-    the source, never copied locally.
+    Exactly one of ``track_id`` / ``podcast_episode_id`` /
+    ``remote_object_id`` is set; episode rows keep the remote enclosure URL
+    on the episode itself and are streamed from the source, never copied
+    locally. Remote rows reference the ``remote_objects`` cache and are
+    played through the remote stream-resolution endpoint.
     """
 
     __tablename__ = "playlist_tracks"
     __table_args__ = (
         CheckConstraint(
-            "(track_id IS NULL) <> (podcast_episode_id IS NULL)",
+            "(CASE WHEN track_id IS NOT NULL THEN 1 ELSE 0 END"
+            " + CASE WHEN podcast_episode_id IS NOT NULL THEN 1 ELSE 0 END"
+            " + CASE WHEN remote_object_id IS NOT NULL THEN 1 ELSE 0 END) = 1",
             name="ck_playlist_tracks_one_item",
         ),
     )
@@ -83,8 +88,14 @@ class PlaylistTrack(Base):
         nullable=True,
         index=True,
     )
+    remote_object_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("remote_objects.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     position: Mapped[int] = mapped_column(Integer)
 
     playlist: Mapped["Playlist"] = relationship("Playlist", back_populates="tracks", lazy="selectin")
     track: Mapped[Optional["Track"]] = relationship("Track", lazy="selectin")
     episode: Mapped[Optional["PodcastEpisode"]] = relationship("PodcastEpisode", lazy="selectin")
+    remote_object: Mapped[Optional["RemoteObject"]] = relationship("RemoteObject", lazy="selectin")

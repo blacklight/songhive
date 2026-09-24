@@ -31,9 +31,16 @@ const jumpBackIn = useShelfData<JumpBackInItem>(async () => {
   const { items } = await listHistory({ pageSize: 12 });
   const seen = new Set<string>();
   return items
-    .filter((entry) => !seen.has(entry.track_id) && seen.add(entry.track_id))
+    .filter(
+      (entry) =>
+        // Remote plays resolve through ``remote_objects``, not the local
+        // track ids this shelf's cards play by — skip them here.
+        entry.track_id != null &&
+        !seen.has(entry.track_id) &&
+        seen.add(entry.track_id),
+    )
     .map((entry) => ({
-      trackId: entry.track_id,
+      trackId: entry.track_id as string,
       title: entry.title ?? t("pages.history.untitled"),
       artistName: entry.artist,
       imageUrl: entry.image_url,

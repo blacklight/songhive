@@ -11,9 +11,11 @@ import {
   getLibraryStats,
   listLibraryTracks,
   deleteLibrary as deleteLibraryApi,
+  removeTracksFromLibrary,
   type LibraryResponse,
   type LibraryStats,
 } from "@/api/libraries";
+import { listRemoteObjects, type RemoteObject } from "@/api/remote";
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
@@ -24,6 +26,7 @@ import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useFeedLinks } from "@/composables/useFeedLinks";
 import type { QueueTrack } from "@/player/types";
+import { useToastStore } from "@/stores/toast";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
@@ -32,6 +35,7 @@ import FeedButton from "@/components/ui/FeedButton.vue";
 import { libraryFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import CollectionStats from "@/components/library/CollectionStats.vue";
+import RemoteObjectList from "@/components/library/RemoteObjectList.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -42,6 +46,7 @@ import UserLink from "@/components/user/UserLink.vue";
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
+const toastStore = useToastStore();
 const libraryId = computed(() => String(route.params.id));
 const feedUrls = computed(() => libraryFeedUrls(libraryId.value));
 useFeedLinks(feedUrls);
@@ -146,7 +151,37 @@ const removableFrom = computed(() => {
 });
 
 async function onTracksRemoved() {
-  await Promise.all([refreshTracks(), loadStats()]);
+  await Promise.all([refreshTracks(), loadStats(), loadRemoteItems()]);
+}
+
+// Remote (federated) members never join the local tracks table — they are
+// listed separately through the remote-objects cache filtered by library.
+const remoteItems = ref<RemoteObject[]>([]);
+
+async function loadRemoteItems() {
+  try {
+    const res = await listRemoteObjects({ library: libraryId.value });
+    remoteItems.value = res.items;
+  } catch {
+    remoteItems.value = [];
+  }
+}
+
+async function removeRemoteItem(item: RemoteObject) {
+  try {
+    await removeTracksFromLibrary(libraryId.value, {
+      remote_object_ids: [item.id],
+    });
+    remoteItems.value = remoteItems.value.filter((i) => i.id !== item.id);
+    await loadStats();
+  } catch (err) {
+    toastStore.push({
+      type: "error",
+      message: t("browse.removeFromCollection.error", {
+        message: getApiErrorMessage(err) || t("errors.unknown"),
+      }),
+    });
+  }
 }
 
 const trackSortOptions = computed(() => [
@@ -255,7 +290,7 @@ async function load() {
   error.value = null;
   await loadLibrary();
   if (!library.value) return;
-  await Promise.all([loadTracks(true), loadStats()]);
+  await Promise.all([loadTracks(true), loadStats(), loadRemoteItems()]);
 }
 
 onMounted(() => load());
@@ -398,6 +433,26 @@ watch(
             {{ t("browse.list.loadMore") }}
           </AppButton>
         </div>
+      </section>
+
+      <section
+        v-if="remoteItems.length"
+        class="library-detail-view__section"
+        aria-labelledby="library-remote-heading"
+      >
+        <AppPageTitle
+          id="library-remote-heading"
+          :level="2"
+          class="library-detail-view__section-title"
+          icon="globe"
+        >
+          {{ t("remote.libraryItems") }}
+        </AppPageTitle>
+        <RemoteObjectList
+          :items="remoteItems"
+          :removable="!!library.can_write"
+          @remove="removeRemoteItem"
+        />
       </section>
 
       <ShareDialog

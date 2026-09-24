@@ -19,6 +19,32 @@ All notable changes to this project will be documented in this file.
   (`POST/DELETE /api/v1/remote/objects/{id}/follow`) and saved to a
   user's collection (`item_type="remote"`), all without copying remote
   content into local music tables.
+- `federation`: Remote (federated) entities are first-class members of
+  local collections. Collected/favorited remote objects surface in the
+  artists/albums/tracks browse views through a bounded collection
+  closure (a collected remote track also surfaces its cached album and
+  artist). Remote tracks can be added to local libraries and playlists
+  (`remote_object_ids`, with containers expanding to their cached track
+  descendants), favorited (`POST/DELETE
+  /api/v1/remote/objects/{id}/favorite`), and interacted with through
+  the standard activity API — `POST /api/v1/remote/objects/{id}/activity`
+  lazily materializes the `Activity` mirror that like/boost/reply/quote
+  target. Remote rows carry a globe badge and their origin domain in
+  lists. Remote resource pages show one nested level of children (an
+  artist's albums carry their tracks), remote activity cards embed a
+  linked summary of the mirrored object, and rendition rows
+  (Funkwhale `Audio`/`Video` uploads) display the embedded track title
+  and fold onto their `Track` entity in lists and memberships when both
+  are cached.
+- `scrobbling`: Remote (federated) tracks scrobble like local tracks.
+  The web player reports plays of cached remote objects through
+  `POST /api/v1/remote/objects/{id}/now-playing` (on play) and
+  `POST /api/v1/remote/objects/{id}/listen` (at the listen threshold),
+  which record a `listening_history` row keyed on `remote_object_id`
+  and enqueue the same Last.fm/Libre.fm submissions — resolved from the
+  remote object's metadata (plain track title, artist, album, duration)
+  on the worker. Remote plays also appear in `GET /api/v1/history/`
+  with an embedded remote object summary.
 
 ## 0.3.0
 

@@ -2167,7 +2167,7 @@ export interface paths {
     put?: never;
     /**
      * Remove Tracks From Playlist
-     * @description Remove existing tracks or podcast episodes from a playlist.
+     * @description Remove existing tracks, remote objects, or podcast episodes from a playlist.
      */
     post: operations["remove_tracks_from_playlist_api_v1_playlists__playlist_id__tracks_remove_post"];
     delete?: never;
@@ -2371,7 +2371,7 @@ export interface paths {
     put?: never;
     /**
      * Add Tracks To Library
-     * @description Add existing tracks, an album, or an artist to a library.
+     * @description Add existing tracks, an album, an artist, or remote objects to a library.
      */
     post: operations["add_tracks_to_library_api_v1_libraries__library_id__tracks_add_post"];
     delete?: never;
@@ -2391,7 +2391,7 @@ export interface paths {
     put?: never;
     /**
      * Remove Tracks From Library
-     * @description Remove existing tracks from a library.
+     * @description Remove existing tracks or remote objects from a library.
      */
     post: operations["remove_tracks_from_library_api_v1_libraries__library_id__tracks_remove_post"];
     delete?: never;
@@ -2616,6 +2616,35 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/remote/objects": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Remote Objects
+     * @description Browse cached remote resources — never reaches the network.
+     *
+     *     ``collection=true`` restricts the listing to the caller's remote
+     *     collection closure: directly collected rows and remote favorites plus
+     *     their cached children (a collected album's tracks) and ancestors (a
+     *     collected track's album and artist). ``favorites=true`` restricts to
+     *     remote favorites; ``library`` restricts to remote objects that are
+     *     members of a local library (the library's own visibility gates access).
+     *     Anonymous callers have no collection or favorites and get empty pages
+     *     for those filters.
+     */
+    get: operations["list_remote_objects_api_v1_remote_objects_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/remote/objects/{object_id}": {
     parameters: {
       query?: never;
@@ -2635,6 +2664,161 @@ export interface paths {
     get: operations["get_remote_object_api_v1_remote_objects__object_id__get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/remote/objects/{object_id}/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Stream Remote Object
+     * @description Redirect to the object's playable media URL.
+     *
+     *     Resolution happens at play time, never at cache time: the object's own
+     *     ``audio_url`` when present, else a cached rendition embedding the
+     *     entity (``media_of_url``). Providers whose links expire or need
+     *     resolution (e.g. future YouTube/Spotify adapters) plug into
+     *     ``resolve_media_url`` — the client always hits this endpoint.
+     */
+    get: operations["stream_remote_object_api_v1_remote_objects__object_id__stream_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/remote/objects/{object_id}/listen": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Record Remote Listen
+     * @description Record a completed listen of a remote track.
+     *
+     *     The remote counterpart of ``POST /history/{track_id}``: stores a
+     *     ``listening_history`` row keyed on the ``remote_objects`` row and
+     *     enqueues the ``track.scrobble`` submission when the caller has an
+     *     active scrobble config.
+     */
+    post: operations["record_remote_listen_api_v1_remote_objects__object_id__listen_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/remote/objects/{object_id}/now-playing": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Report Remote Now Playing
+     * @description Report that the caller started playing a remote track.
+     *
+     *     The remote counterpart of ``POST /scrobbling/now-playing/{track_id}`` —
+     *     submissions go out only when the caller has an active scrobble config.
+     */
+    post: operations["report_remote_now_playing_api_v1_remote_objects__object_id__now_playing_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/remote/objects/{object_id}/follow": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Follow Remote Object
+     * @description Follow a cached remote resource (e.g. a federated library).
+     *
+     *     Delivers a signed object-scoped ``Follow`` to the resource's
+     *     controlling actor and records the pending relationship; the remote
+     *     ``Accept``/``Reject`` folds back into the row's ``state``. Following a
+     *     remote library subscribes the instance to new items published into it.
+     */
+    post: operations["follow_remote_object_api_v1_remote_objects__object_id__follow_post"];
+    /**
+     * Unfollow Remote Object
+     * @description Unfollow a remote resource — delivers ``Undo(Follow)`` remotely.
+     */
+    delete: operations["unfollow_remote_object_api_v1_remote_objects__object_id__follow_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/remote/objects/{object_id}/favorite": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Favorite Remote Object
+     * @description Favorite a cached remote track.
+     *
+     *     Remote favorites reference the ``remote_objects`` cache row — the remote
+     *     track is never copied into the local catalog. Idempotent.
+     */
+    post: operations["favorite_remote_object_api_v1_remote_objects__object_id__favorite_post"];
+    /**
+     * Unfavorite Remote Object
+     * @description Remove a remote object favorite. Idempotent.
+     */
+    delete: operations["unfavorite_remote_object_api_v1_remote_objects__object_id__favorite_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/remote/objects/{object_id}/activity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ensure Remote Object Activity
+     * @description Materialize the ``Activity`` mirror for a cached remote object.
+     *
+     *     Objects that arrived inside a federated activity already have one;
+     *     resources reached through direct lookup get a synthetic ``Create``
+     *     wrapper so like/boost/reply/quote work through the standard activities
+     *     API. Idempotent.
+     */
+    post: operations["ensure_remote_object_activity_api_v1_remote_objects__object_id__activity_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2819,6 +3003,11 @@ export interface paths {
     /**
      * Add To Collection
      * @description Add an item to the current user's collection.
+     *
+     *     ``remote`` items reference a cached ``remote_objects`` row — federated
+     *     music resources are bookmarked by id without being copied into local
+     *     music tables. Only rows classified as a resource (track, album, artist,
+     *     library, …) are collectable; bare remote posts are not.
      */
     post: operations["add_to_collection_api_v1_collection__item_type___item_id__post"];
     /**
@@ -2931,6 +3120,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/notifications/push-config": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Push Config
+     * @description Return the VAPID public key and whether Web Push is configured.
+     */
+    get: operations["get_push_config_api_v1_notifications_push_config_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/notifications/push-subscription": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Register Push Subscription
+     * @description Store a browser push subscription for the current user.
+     */
+    post: operations["register_push_subscription_api_v1_notifications_push_subscription_post"];
+    /**
+     * Unregister Push Subscription
+     * @description Remove the current user's push subscription for the given endpoint.
+     */
+    delete: operations["unregister_push_subscription_api_v1_notifications_push_subscription_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/notifications/{notification_id}": {
     parameters: {
       query?: never;
@@ -3012,6 +3245,158 @@ export interface paths {
      */
     put: operations["update_preferences_api_v1_notifications_preferences_put"];
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/outputs/providers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Providers
+     * @description List output provider types available to the requester.
+     */
+    get: operations["list_providers_api_v1_outputs_providers_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/outputs/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List User Outputs
+     * @description List the current user's outputs.
+     */
+    get: operations["list_user_outputs_api_v1_outputs__get"];
+    put?: never;
+    /**
+     * Create User Output
+     * @description Create a new server-side output.
+     */
+    post: operations["create_user_output_api_v1_outputs__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/outputs/{output_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get User Output
+     * @description Get a single output.
+     */
+    get: operations["get_user_output_api_v1_outputs__output_id__get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete User Output
+     * @description Delete an output.
+     */
+    delete: operations["delete_user_output_api_v1_outputs__output_id__delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Patch User Output
+     * @description Update an output, preserving redacted sentinels.
+     */
+    patch: operations["patch_user_output_api_v1_outputs__output_id__patch"];
+    trace?: never;
+  };
+  "/api/v1/outputs/{output_id}/validate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Validate User Output
+     * @description Validate an output and refresh stored capabilities.
+     */
+    post: operations["validate_user_output_api_v1_outputs__output_id__validate_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/playback/session": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Session
+     * @description Return the current playback session for the user.
+     */
+    get: operations["get_session_api_v1_playback_session_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/playback/session/outputs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Set Session Outputs
+     * @description Attach one or more outputs to the user's session.
+     */
+    post: operations["set_session_outputs_api_v1_playback_session_outputs_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/playback/session/command": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Post Command
+     * @description Dispatch a playback command to the user's session.
+     */
+    post: operations["post_command_api_v1_playback_session_command_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -3369,6 +3754,85 @@ export interface paths {
      * @description Clear the played mark for an episode.
      */
     delete: operations["mark_episode_unplayed_api_v1_podcasts_episodes__episode_id__played_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/scrobbling/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Scrobbling Status
+     * @description Return the scrobbling capabilities of this instance and the caller's
+     *     configuration, including the effective listen thresholds the player
+     *     should report history/scrobbles at.
+     */
+    get: operations["get_scrobbling_status_api_v1_scrobbling__get"];
+    /**
+     * Update Scrobble Settings
+     * @description Update the caller's scrobble toggle and listen thresholds.
+     */
+    put: operations["update_scrobble_settings_api_v1_scrobbling__put"];
+    post?: never;
+    /**
+     * Delete Scrobble Config
+     * @description Remove the caller's scrobble configuration and stored session key.
+     */
+    delete: operations["delete_scrobble_config_api_v1_scrobbling__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/scrobbling/connect": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Connect Scrobble Account
+     * @description Connect the caller's Last.fm/Libre.fm account.
+     *
+     *     The credentials are verified against the service through
+     *     ``auth.getMobileSession`` before anything is persisted; the returned
+     *     session key is stored encrypted and the password is discarded.
+     */
+    post: operations["connect_scrobble_account_api_v1_scrobbling_connect_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/scrobbling/now-playing/{track_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Report Now Playing
+     * @description Report that the caller started playing a track.
+     *
+     *     Players call this on actual playback start — the stream endpoint cannot
+     *     serve as the signal because clients prefetch and cache audio ahead of
+     *     playback. Submissions go out only when the caller has an active scrobble
+     *     config; otherwise this is a no-op.
+     */
+    post: operations["report_now_playing_api_v1_scrobbling_now_playing__track_id__post"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -5211,6 +5675,32 @@ export interface components {
       user_id?: string | null;
     };
     /**
+     * ActivityRemoteObjectResponse
+     * @description Summary of the remote music object mirrored by an activity.
+     */
+    ActivityRemoteObjectResponse: {
+      /** Id */
+      id: string;
+      /** Name */
+      name?: string | null;
+      /** Resource Type */
+      resource_type?: string | null;
+      /** Object Type */
+      object_type?: string | null;
+      /** Domain */
+      domain?: string | null;
+      /** Image Url */
+      image_url?: string | null;
+      /** Url */
+      url?: string | null;
+      /** Duration */
+      duration?: number | null;
+      /** Artist Name */
+      artist_name?: string | null;
+      /** Album Name */
+      album_name?: string | null;
+    };
+    /**
      * ActivityReplyRequest
      * @description Payload for posting a reply to an activity.
      */
@@ -5327,6 +5817,8 @@ export interface components {
       can_interact: boolean;
       preview_card?: components["schemas"]["PreviewCardResponse"] | null;
       webmention?: components["schemas"]["WebmentionResponse"] | null;
+      remote_object?:
+        components["schemas"]["ActivityRemoteObjectResponse"] | null;
     };
     /**
      * ActivitySubscriptionState
@@ -5358,7 +5850,7 @@ export interface components {
     };
     /**
      * AddLibraryTracksRequest
-     * @description Request body for adding tracks, albums, or artists to a library.
+     * @description Request body for adding tracks, albums, artists, or remote objects to a library.
      */
     AddLibraryTracksRequest: {
       /** Track Ids */
@@ -5367,10 +5859,12 @@ export interface components {
       album_id?: string | null;
       /** Artist Id */
       artist_id?: string | null;
+      /** Remote Object Ids */
+      remote_object_ids?: string[] | null;
     };
     /**
      * AddPlaylistTracksRequest
-     * @description Request body for adding tracks, albums, artists, or podcast episodes to a playlist.
+     * @description Request body for adding tracks, albums, artists, remote objects, or podcast episodes to a playlist.
      */
     AddPlaylistTracksRequest: {
       /** Track Ids */
@@ -5383,6 +5877,8 @@ export interface components {
       episode_ids?: string[] | null;
       /** Podcast Id */
       podcast_id?: string | null;
+      /** Remote Object Ids */
+      remote_object_ids?: string[] | null;
       /**
        * Allow Duplicates
        * @default false
@@ -6306,6 +6802,23 @@ export interface components {
       created_at: string;
     };
     /**
+     * CommandRequest
+     * @description Request body for a playback command.
+     */
+    CommandRequest: {
+      /** Command */
+      command: string;
+      /**
+       * Args
+       * @default {}
+       */
+      args: {
+        [key: string]: unknown;
+      };
+      /** Connection Id */
+      connection_id?: string | null;
+    };
+    /**
      * CreatedShareResponse
      * @description A share grant or share URL token created by the current user.
      */
@@ -6777,12 +7290,17 @@ export interface components {
       /** Display Path */
       display_path?: string | null;
     };
-    /** FavoriteResponse */
+    /**
+     * FavoriteResponse
+     * @description A favorite — either a local track or a cached remote object (exactly one set).
+     */
     FavoriteResponse: {
       /** Id */
       id: string;
       /** Track Id */
-      track_id: string;
+      track_id?: string | null;
+      /** Remote Object Id */
+      remote_object_id?: string | null;
       /** Created At */
       created_at: string;
     };
@@ -6901,13 +7419,14 @@ export interface components {
       /** Id */
       id: string;
       /** Track Id */
-      track_id: string;
+      track_id?: string | null;
       /** Title */
       title?: string | null;
       /** Artist */
       artist?: string | null;
       /** Image Url */
       image_url?: string | null;
+      remote?: components["schemas"]["RemoteObjectResponse"] | null;
       /** Created At */
       created_at: string;
     };
@@ -7382,6 +7901,115 @@ export interface components {
       errors: string[];
     };
     /**
+     * OutputCapabilitiesResponse
+     * @description Capability summary for an output.
+     */
+    OutputCapabilitiesResponse: {
+      /**
+       * Metadata Updates
+       * @default false
+       */
+      metadata_updates: boolean;
+      /**
+       * Pause Supported
+       * @default false
+       */
+      pause_supported: boolean;
+      /**
+       * Seek Supported
+       * @default false
+       */
+      seek_supported: boolean;
+      /**
+       * Multi Listener
+       * @default false
+       */
+      multi_listener: boolean;
+      /**
+       * User Configurable
+       * @default false
+       */
+      user_configurable: boolean;
+    };
+    /**
+     * OutputCreate
+     * @description Request body for creating an output.
+     */
+    OutputCreate: {
+      /** Provider Type */
+      provider_type: string;
+      /** Name */
+      name: string;
+      /** Config */
+      config: {
+        [key: string]: unknown;
+      };
+      /**
+       * Enabled
+       * @default true
+       */
+      enabled: boolean;
+    };
+    /**
+     * OutputResponse
+     * @description Output with redacted config.
+     */
+    OutputResponse: {
+      /** Id */
+      id: string;
+      /** User Id */
+      user_id: string;
+      /** Provider Type */
+      provider_type: string;
+      /** Name */
+      name: string;
+      /** Config */
+      config: {
+        [key: string]: unknown;
+      };
+      capabilities?: components["schemas"]["OutputCapabilitiesResponse"] | null;
+      /** Enabled */
+      enabled: boolean;
+      /** Last Error */
+      last_error?: string | null;
+      /** Stream Url */
+      stream_url?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * OutputSelection
+     * @description Request body for selecting session outputs.
+     */
+    OutputSelection: {
+      /** Output Ids */
+      output_ids: string[];
+      /** Connection Id */
+      connection_id?: string | null;
+    };
+    /**
+     * OutputUpdate
+     * @description Partial update body for an output.
+     */
+    OutputUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Config */
+      config?: {
+        [key: string]: unknown;
+      } | null;
+      /** Enabled */
+      enabled?: boolean | null;
+    };
+    /**
      * PasswordConfirmRequest
      * @description Request body for sensitive actions that re-verify the password.
      */
@@ -7482,7 +8110,7 @@ export interface components {
     };
     /**
      * PlaylistItemResponse
-     * @description One ordered playlist entry — a track or a podcast episode.
+     * @description One ordered playlist entry — a track, a podcast episode, or a remote object.
      */
     PlaylistItemResponse: {
       /** Item Id */
@@ -7493,9 +8121,10 @@ export interface components {
        * Type
        * @enum {string}
        */
-      type: "track" | "episode";
+      type: "track" | "episode" | "remote";
       track?: components["schemas"]["TrackResponse"] | null;
       episode?: components["schemas"]["PlaylistEpisodeItem"] | null;
+      remote?: components["schemas"]["RemoteObjectResponse"] | null;
     };
     /**
      * PlaylistResponse
@@ -7778,6 +8407,24 @@ export interface components {
      */
     ProfileVisibility: "public" | "local" | "private";
     /**
+     * ProviderResponse
+     * @description Available output provider.
+     */
+    ProviderResponse: {
+      /** Provider Type */
+      provider_type: string;
+      /** Label */
+      label: string;
+      /** User Configurable */
+      user_configurable: boolean;
+      /** Can Create */
+      can_create: boolean;
+      /** Fields */
+      fields: {
+        [key: string]: unknown;
+      }[];
+    };
+    /**
      * ProvisionFederationKeysRequest
      * @description Request body for triggering federation key provisioning.
      */
@@ -7859,6 +8506,36 @@ export interface components {
        * @default false
        */
       suspended: boolean;
+    };
+    /**
+     * PushConfigResponse
+     * @description Web Push configuration exposed to the frontend.
+     */
+    PushConfigResponse: {
+      /** Enabled */
+      enabled: boolean;
+      /** Public Key */
+      public_key?: string | null;
+    };
+    /**
+     * PushSubscriptionRemoved
+     * @description Number of push subscriptions removed.
+     */
+    PushSubscriptionRemoved: {
+      /** Removed */
+      removed: number;
+    };
+    /**
+     * PushSubscriptionRequest
+     * @description Payload for registering a browser push subscription.
+     */
+    PushSubscriptionRequest: {
+      /** Endpoint */
+      endpoint: string;
+      /** P256Dh */
+      p256dh: string;
+      /** Auth */
+      auth: string;
     };
     /**
      * QuoteActivityListResponse
@@ -8078,6 +8755,22 @@ export interface components {
       activity?: components["schemas"]["ActivityResponse"] | null;
     };
     /**
+     * RemoteObjectFollowResponse
+     * @description Result of following a remote object/resource.
+     */
+    RemoteObjectFollowResponse: {
+      /** Follow State */
+      follow_state?: string | null;
+    };
+    /**
+     * RemoteObjectListResponse
+     * @description A page of cached remote resources.
+     */
+    RemoteObjectListResponse: {
+      /** Items */
+      items: components["schemas"]["RemoteObjectResponse"][];
+    };
+    /**
      * RemoteObjectResponse
      * @description A cached remote object — content post or resource.
      */
@@ -8106,6 +8799,14 @@ export interface components {
       image_url?: string | null;
       /** Audio Url */
       audio_url?: string | null;
+      /** Stream Url */
+      stream_url?: string | null;
+      /** Duration */
+      duration?: number | null;
+      /** Artist Name */
+      artist_name?: string | null;
+      /** Album Name */
+      album_name?: string | null;
       /** Visibility */
       visibility: string;
       /** Fetched At */
@@ -8117,24 +8818,51 @@ export interface components {
       unavailable: boolean;
       /** Url */
       url: string;
+      /**
+       * In Collection
+       * @default false
+       */
+      in_collection: boolean;
+      /**
+       * Favorited
+       * @default false
+       */
+      favorited: boolean;
+      /** Follow State */
+      follow_state?: string | null;
+      /** Activity Id */
+      activity_id?: string | null;
+      parent?: components["schemas"]["RemoteObjectResponse"] | null;
+      /** Items */
+      items?: components["schemas"]["RemoteObjectResponse"][];
     };
     /**
      * RemoveLibraryTracksRequest
-     * @description Request body for removing tracks from a library.
+     * @description Request body for removing tracks or remote objects from a library.
      */
     RemoveLibraryTracksRequest: {
-      /** Track Ids */
+      /**
+       * Track Ids
+       * @default []
+       */
       track_ids: string[];
+      /**
+       * Remote Object Ids
+       * @default []
+       */
+      remote_object_ids: string[];
     };
     /**
      * RemovePlaylistTracksRequest
-     * @description Request body for removing tracks or podcast episodes from a playlist.
+     * @description Request body for removing tracks, remote objects, or podcast episodes from a playlist.
      */
     RemovePlaylistTracksRequest: {
       /** Track Ids */
       track_ids?: string[] | null;
       /** Episode Ids */
       episode_ids?: string[] | null;
+      /** Remote Object Ids */
+      remote_object_ids?: string[] | null;
     };
     /**
      * ReorderPlaylistTracksRequest
@@ -8298,6 +9026,99 @@ export interface components {
     ScanRequest: {
       /** Path */
       path: string;
+    };
+    /**
+     * ScrobbleConfigResponse
+     * @description The caller's scrobble configuration (session key never returned).
+     */
+    ScrobbleConfigResponse: {
+      /** Service */
+      service: string;
+      /** Username */
+      username: string;
+      /** Enabled */
+      enabled: boolean;
+      /** Min Seconds */
+      min_seconds: number;
+      /** Min Percent */
+      min_percent: number;
+      /** Last Scrobbled At */
+      last_scrobbled_at?: string | null;
+      /** Last Error */
+      last_error?: string | null;
+    };
+    /**
+     * ScrobbleConnectRequest
+     * @description Connect a scrobble account by exchanging credentials for a session.
+     */
+    ScrobbleConnectRequest: {
+      /**
+       * Service
+       * @enum {string}
+       */
+      service: "lastfm" | "librefm";
+      /** Username */
+      username: string;
+      /** Password */
+      password: string;
+    };
+    /**
+     * ScrobbleServiceInfo
+     * @description A scrobble service the instance can submit to.
+     */
+    ScrobbleServiceInfo: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Available */
+      available: boolean;
+    };
+    /**
+     * ScrobbleSettingsRequest
+     * @description Update the caller's scrobble toggle and listen thresholds.
+     */
+    ScrobbleSettingsRequest: {
+      /**
+       * Enabled
+       * @default true
+       */
+      enabled: boolean;
+      /**
+       * Min Seconds
+       * @default 30
+       */
+      min_seconds: number;
+      /**
+       * Min Percent
+       * @default 25
+       */
+      min_percent: number;
+    };
+    /**
+     * ScrobbleStatusResponse
+     * @description Instance capabilities plus the caller's configuration.
+     */
+    ScrobbleStatusResponse: {
+      /** Enabled */
+      enabled: boolean;
+      /** Services */
+      services: components["schemas"]["ScrobbleServiceInfo"][];
+      thresholds: components["schemas"]["ScrobbleThresholdsResponse"];
+      config?: components["schemas"]["ScrobbleConfigResponse"] | null;
+    };
+    /**
+     * ScrobbleThresholdsResponse
+     * @description Effective listen thresholds for the current user.
+     *
+     *     ``min_percent`` is ``None`` when the user has no active scrobble config —
+     *     clients then fall back to their local history default.
+     */
+    ScrobbleThresholdsResponse: {
+      /** Min Seconds */
+      min_seconds: number;
+      /** Min Percent */
+      min_percent?: number | null;
     };
     /**
      * SearchResponse
@@ -9033,6 +9854,17 @@ export interface components {
       input?: unknown;
       /** Context */
       ctx?: Record<string, never>;
+    };
+    /**
+     * ValidationResponse
+     * @description Result of an output validation test.
+     */
+    ValidationResponse: {
+      /** Ok */
+      ok: boolean;
+      capabilities?: components["schemas"]["OutputCapabilitiesResponse"] | null;
+      /** Error */
+      error?: string | null;
     };
     /**
      * VerifyEmailRequest
@@ -14585,12 +15417,294 @@ export interface operations {
       };
     };
   };
+  list_remote_objects_api_v1_remote_objects_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by resource kind */
+        resource_type?: string | null;
+        /** @description Restrict to the caller's collected remote objects */
+        collection?: boolean;
+        /** @description Restrict to the caller's favorited remote objects */
+        favorites?: boolean;
+        /** @description Restrict to remote objects in this local library */
+        library?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RemoteObjectListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_remote_object_api_v1_remote_objects__object_id__get: {
     parameters: {
       query?: {
         /** @description Re-fetch the canonical URL to confirm remote state */
         refresh?: boolean;
       };
+      header?: never;
+      path: {
+        object_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RemoteObjectDetailResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  stream_remote_object_api_v1_remote_objects__object_id__stream_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        object_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  record_remote_listen_api_v1_remote_objects__object_id__listen_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        object_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  report_remote_now_playing_api_v1_remote_objects__object_id__now_playing_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        object_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  follow_remote_object_api_v1_remote_objects__object_id__follow_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        object_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RemoteObjectFollowResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unfollow_remote_object_api_v1_remote_objects__object_id__follow_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        object_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  favorite_remote_object_api_v1_remote_objects__object_id__favorite_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        object_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unfavorite_remote_object_api_v1_remote_objects__object_id__favorite_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        object_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  ensure_remote_object_activity_api_v1_remote_objects__object_id__activity_post: {
+    parameters: {
+      query?: never;
       header?: never;
       path: {
         object_id: string;
@@ -15127,6 +16241,88 @@ export interface operations {
       };
     };
   };
+  get_push_config_api_v1_notifications_push_config_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PushConfigResponse"];
+        };
+      };
+    };
+  };
+  register_push_subscription_api_v1_notifications_push_subscription_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PushSubscriptionRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unregister_push_subscription_api_v1_notifications_push_subscription_delete: {
+    parameters: {
+      query: {
+        endpoint: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PushSubscriptionRemoved"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   delete_notification_api_v1_notifications__notification_id__delete: {
     parameters: {
       query?: never;
@@ -15249,6 +16445,291 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["NotificationPreferencesResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_providers_api_v1_outputs_providers_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProviderResponse"][];
+        };
+      };
+    };
+  };
+  list_user_outputs_api_v1_outputs__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutputResponse"][];
+        };
+      };
+    };
+  };
+  create_user_output_api_v1_outputs__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OutputCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutputResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_user_output_api_v1_outputs__output_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        output_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutputResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_user_output_api_v1_outputs__output_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        output_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  patch_user_output_api_v1_outputs__output_id__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        output_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OutputUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutputResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  validate_user_output_api_v1_outputs__output_id__validate_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        output_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ValidationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_session_api_v1_playback_session_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  set_session_outputs_api_v1_playback_session_outputs_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OutputSelection"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  post_command_api_v1_playback_session_command_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CommandRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Validation Error */
@@ -15898,6 +17379,139 @@ export interface operations {
       header?: never;
       path: {
         episode_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_scrobbling_status_api_v1_scrobbling__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScrobbleStatusResponse"];
+        };
+      };
+    };
+  };
+  update_scrobble_settings_api_v1_scrobbling__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ScrobbleSettingsRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScrobbleConfigResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_scrobble_config_api_v1_scrobbling__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  connect_scrobble_account_api_v1_scrobbling_connect_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ScrobbleConnectRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScrobbleConfigResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  report_now_playing_api_v1_scrobbling_now_playing__track_id__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        track_id: string;
       };
       cookie?: never;
     };

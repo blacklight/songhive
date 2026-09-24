@@ -28,7 +28,7 @@ import AppSpinner from "@/components/feedback/AppSpinner.vue";
 
 export type CollectionMode = "library" | "playlist";
 export type AddableItemType =
-  "track" | "album" | "artist" | "episode" | "podcast";
+  "track" | "album" | "artist" | "episode" | "podcast" | "remote";
 
 export interface Props {
   open: boolean;
@@ -38,6 +38,8 @@ export interface Props {
   itemIds?: string[];
   /** Podcast episode ids added alongside ``itemIds`` (playlist mode only). */
   episodeIds?: string[];
+  /** Cached remote object ids added alongside ``itemIds``. */
+  remoteIds?: string[];
   itemName?: string;
 }
 
@@ -74,7 +76,10 @@ function reset() {
 }
 
 const itemLabel = computed(() => {
-  const count = (props.itemIds?.length ?? 0) + (props.episodeIds?.length ?? 0);
+  const count =
+    (props.itemIds?.length ?? 0) +
+    (props.episodeIds?.length ?? 0) +
+    (props.remoteIds?.length ?? 0);
   if (count > 0) {
     const key =
       props.itemType === "episode"
@@ -173,6 +178,7 @@ function close() {
 function buildRequestBody(): {
   track_ids?: string[];
   episode_ids?: string[];
+  remote_object_ids?: string[];
   album_id?: string;
   artist_id?: string;
   podcast_id?: string;
@@ -180,6 +186,19 @@ function buildRequestBody(): {
 } {
   const allow =
     props.mode === "playlist" && allowDuplicates.value ? true : undefined;
+  if (props.itemType === "remote") {
+    // Remote object ids — the server expands remote containers (albums,
+    // artists, libraries) to their cached track descendants.
+    return {
+      remote_object_ids:
+        props.itemIds && props.itemIds.length > 0
+          ? props.itemIds
+          : props.itemId
+            ? [props.itemId]
+            : [],
+      allow_duplicates: allow,
+    };
+  }
   if (props.itemType === "episode") {
     return {
       episode_ids:
@@ -198,6 +217,7 @@ function buildRequestBody(): {
     const body: {
       track_ids: string[];
       episode_ids?: string[];
+      remote_object_ids?: string[];
       allow_duplicates?: boolean;
     } = {
       track_ids:
@@ -210,6 +230,9 @@ function buildRequestBody(): {
     };
     if (props.mode === "playlist" && props.episodeIds?.length) {
       body.episode_ids = props.episodeIds;
+    }
+    if (props.remoteIds?.length) {
+      body.remote_object_ids = props.remoteIds;
     }
     return body;
   }
@@ -281,6 +304,7 @@ async function onConfirm() {
             track_ids: body.track_ids,
             album_id: body.album_id,
             artist_id: body.artist_id,
+            remote_object_ids: body.remote_object_ids,
           })
         : await addTracksToPlaylist(targetId, body);
     if (response.added === 0) {

@@ -12,7 +12,7 @@ start can fire repeatedly (range requests, seeks).
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,7 @@ from ..config import load_config
 from ..config.schema import SonghiveConfig
 from ..models.album import Album
 from ..models.base import dispose_and_reset, get_session, init_db
+from ..models.remote_object import RemoteObject
 from ..models.scrobble import ScrobbleConfig
 from ..models.track import Track
 from ..models.user import User
@@ -89,6 +90,30 @@ async def _load_track(session: AsyncSession, track_id: str) -> Optional[Track]:
     return result.scalar_one_or_none()
 
 
+async def _load_scrobble_fields(
+    session: AsyncSession,
+    entity_id: str,
+    entity_kind: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Resolve scrobble submission fields for a local track or a remote object.
+
+    Remote rendition rows (Funkwhale ``Audio``/``Video`` uploads) report
+    their media entity's metadata when the entity is also cached —
+    ``_fold_renditions`` performs that swap.
+    """
+    from ..services import remote_content, scrobbler
+
+    if entity_kind == "remote":
+        row = await session.get(RemoteObject, entity_id)
+        if row is None or row.unavailable_at is not None:
+            return None
+        row = (await remote_content._fold_renditions(session, [row]))[0]
+        return scrobbler.remote_object_fields(row)
+    track = await _load_track(session, entity_id)
+    return scrobbler.track_fields(track) if track is not None else None
+
+
 async def _load_active_config(session: AsyncSession, config: SonghiveConfig, user: User) -> Optional[ScrobbleConfig]:
     """Return the user's scrobble config when it can actually submit."""
     from ..services import scrobbler
@@ -108,7 +133,7 @@ async def _load_active_config(session: AsyncSession, config: SonghiveConfig, use
     default_retry_delay=10,
     autoretry_for=(ScrobblerTemporaryError,),
 )
-def scrobble_now_playing(self, user_id: str, track_id: str) -> Optional[str]:
+def scrobble_now_playing(self, user_id: str, entity_id: str, entity_kind: str = "track") -> Optional[str]:
     """Submit ``track.updateNowPlaying`` for a play that just started."""
     from ..services import scrobbler
 
@@ -123,19 +148,23 @@ def scrobble_now_playing(self, user_id: str, track_id: str) -> Optional[str]:
                 user = await session.get(User, user_id)
                 if user is None:
                     return "missing-user"
-                track = await _load_track(session, track_id)
-                if track is None:
+                fields = await _load_scrobble_fields(session, entity_id, entity_kind)
+                if fields is None:
                     return "missing-track"
                 row = await _load_active_config(session, config, user)
                 if row is None:
                     return "disabled"
 
-                dedup_key = _dedup_key("np", user_id, track_id)
+                dedup_key = (
+                    _dedup_key("np", user_id, entity_id)
+                    if entity_kind == "track"
+                    else _dedup_key("np", user_id, entity_kind, entity_id)
+                )
                 if _recently_submitted(config, dedup_key):
                     return "duplicate"
 
                 try:
-                    await scrobbler.submit_now_playing(config, row, track)
+                    await scrobbler.submit_now_playing(config, row, fields)
                 except ScrobblerError:
                     # Persist last_error before propagating/returning.
                     await session.commit()
@@ -149,13 +178,13 @@ def scrobble_now_playing(self, user_id: str, track_id: str) -> Optional[str]:
     try:
         result = asyncio.run(_run())
     except ScrobblerError as exc:
-        logger.info("Now-playing scrobble failed for user %s track %s: %s", user_id, track_id, exc)
+        logger.info("Now-playing scrobble failed for user %s %s %s: %s", user_id, entity_kind, entity_id, exc)
         raise
     if result in ("missing-user", "missing-track"):
         if self.request.retries < self.max_retries:
-            logger.info("Scrobble rows for user %s track %s not committed yet; retrying", user_id, track_id)
+            logger.info("Scrobble rows for user %s %s %s not committed yet; retrying", user_id, entity_kind, entity_id)
             raise self.retry(countdown=5 * 2**self.request.retries)
-        logger.warning("Dropping now-playing scrobble for unknown user %s track %s", user_id, track_id)
+        logger.warning("Dropping now-playing scrobble for unknown user %s %s %s", user_id, entity_kind, entity_id)
         return None
     return result
 
@@ -167,7 +196,7 @@ def scrobble_now_playing(self, user_id: str, track_id: str) -> Optional[str]:
     default_retry_delay=30,
     autoretry_for=(ScrobblerTemporaryError,),
 )
-def scrobble_track(self, user_id: str, track_id: str, played_at: int) -> Optional[str]:
+def scrobble_track(self, user_id: str, entity_id: str, played_at: int, entity_kind: str = "track") -> Optional[str]:
     """Submit ``track.scrobble`` for a play that crossed the listen threshold."""
     from ..services import scrobbler
 
@@ -182,24 +211,29 @@ def scrobble_track(self, user_id: str, track_id: str, played_at: int) -> Optiona
                 user = await session.get(User, user_id)
                 if user is None:
                     return "missing-user"
-                track = await _load_track(session, track_id)
-                if track is None:
+                fields = await _load_scrobble_fields(session, entity_id, entity_kind)
+                if fields is None:
                     return "missing-track"
                 row = await _load_active_config(session, config, user)
                 if row is None:
                     return "disabled"
 
-                dedup_key = _dedup_key("sub", user_id, track_id)
+                dedup_key = (
+                    _dedup_key("sub", user_id, entity_id)
+                    if entity_kind == "track"
+                    else _dedup_key("sub", user_id, entity_kind, entity_id)
+                )
                 if _recently_submitted(config, dedup_key):
                     return "duplicate"
 
                 try:
-                    await scrobbler.submit_scrobble(config, row, track, played_at)
+                    await scrobbler.submit_scrobble(config, row, fields, played_at)
                 except ScrobblerError:
                     await session.commit()
                     raise
                 await session.commit()
-                _mark_submitted(config, dedup_key, _scrobble_dedup_ttl(row, track.duration))
+                duration = fields.get("duration")
+                _mark_submitted(config, dedup_key, _scrobble_dedup_ttl(row, float(duration) if duration else None))
                 return "done"
         finally:
             await dispose_and_reset()
@@ -207,12 +241,12 @@ def scrobble_track(self, user_id: str, track_id: str, played_at: int) -> Optiona
     try:
         result = asyncio.run(_run())
     except ScrobblerError as exc:
-        logger.info("Scrobble failed for user %s track %s: %s", user_id, track_id, exc)
+        logger.info("Scrobble failed for user %s %s %s: %s", user_id, entity_kind, entity_id, exc)
         raise
     if result in ("missing-user", "missing-track"):
         if self.request.retries < self.max_retries:
-            logger.info("Scrobble rows for user %s track %s not committed yet; retrying", user_id, track_id)
+            logger.info("Scrobble rows for user %s %s %s not committed yet; retrying", user_id, entity_kind, entity_id)
             raise self.retry(countdown=5 * 2**self.request.retries)
-        logger.warning("Dropping scrobble for unknown user %s track %s", user_id, track_id)
+        logger.warning("Dropping scrobble for unknown user %s %s %s", user_id, entity_kind, entity_id)
         return None
     return result

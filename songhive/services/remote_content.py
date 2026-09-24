@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -34,6 +34,8 @@ from ..config.schema import SonghiveConfig
 from ..federation.fetch import FetchError, FetchNotFound, FetchResult, guarded_fetch
 from ..models.activity import Activity, ActivityMention
 from ..models.collection_item import CollectionItem
+from ..models.favorite import Favorite
+from ..models.library_track import LibraryTrack
 from ..models.remote_object import RemoteObject
 from ..models.track import Track
 from ..models.user import User
@@ -788,6 +790,14 @@ def _doc_actor(doc: dict) -> Optional[str]:
 
 
 def _object_name(obj: dict) -> Optional[str]:
+    # Rendition documents (Funkwhale ``Audio``/``Video`` uploads) name
+    # themselves "{artist} - {album} - {title}"; the embedded ``track``
+    # document carries the plain title, which is what lists should show.
+    track = obj.get("track")
+    if isinstance(track, dict):
+        name = _object_name(track)
+        if name:
+            return name
     for key in ("name", "title"):
         value = obj.get(key)
         if isinstance(value, str) and value.strip():
@@ -1176,7 +1186,10 @@ def _iter_embedded_music_docs(obj: dict):
     ``Track`` embeds ``album`` and ``artists``; an ``Album`` embeds
     ``artists``; a collection page carries music ``items``. ``container_url``
     is the URL the yielded doc is contained in — used as ``parent_url``
-    when the doc itself does not name its container.
+    when the doc itself does not name its container. Artist embeds pass no
+    container: artists are credited on albums/tracks, not contained in them
+    (the containment edge is inverted — ``_parent_url_of`` maps Album →
+    artist, not the reverse).
     """
     obj_id = obj.get("id") if isinstance(obj.get("id"), str) else None
     obj_type = obj.get("type")
@@ -1197,11 +1210,11 @@ def _iter_embedded_music_docs(obj: dict):
             if isinstance(album, dict):
                 yield album, _as_url(track.get("album"))
                 for artist_doc, _ in _yield_doc(album.get("artists") or album.get("artist_credit"), album.get("id")):
-                    yield artist_doc, album.get("id")
+                    yield artist_doc, None
             for artist_doc, _ in _yield_doc(track.get("artists") or track.get("artist_credit"), track.get("id")):
-                yield artist_doc, track.get("id")
+                yield artist_doc, None
         for artist_doc, _ in _yield_doc(obj.get("artists") or obj.get("artist_credit"), obj_id):
-            yield artist_doc, obj_id
+            yield artist_doc, None
         library = obj.get("library")
         if isinstance(library, dict):
             yield library, None
@@ -1210,12 +1223,12 @@ def _iter_embedded_music_docs(obj: dict):
         if isinstance(album, dict):
             yield album, obj_id
             for artist_doc, _ in _yield_doc(album.get("artists") or album.get("artist_credit"), album.get("id")):
-                yield artist_doc, album.get("id")
+                yield artist_doc, None
         for artist_doc, _ in _yield_doc(obj.get("artists") or obj.get("artist_credit"), obj_id):
-            yield artist_doc, obj_id
+            yield artist_doc, None
     elif obj_type == "Album":
         for artist_doc, _ in _yield_doc(obj.get("artists") or obj.get("artist_credit"), obj_id):
-            yield artist_doc, obj_id
+            yield artist_doc, None
     elif obj_type in _COLLECTION_PAGE_TYPES:
         items = obj.get("items") or obj.get("orderedItems")
         container = _as_url(obj.get("partOf")) or obj_id
@@ -1386,6 +1399,47 @@ async def _scan_library_first_page(
     await _cache_embedded_music_docs(session, page_doc, actor_url, config)
 
 
+def _rendition_target_cached_clause():
+    """
+    Exclude rendition rows whose media-target entity is also cached.
+
+    A Funkwhale ``Audio``/``Video`` upload and the ``Track`` it renders are
+    two rows for one music entity — when both are cached, listings show the
+    entity row only (the rendition still serves playback via
+    ``resolve_media_url``).
+    """
+    return or_(
+        RemoteObject.media_of_url.is_(None),
+        ~RemoteObject.media_of_url.in_(select(RemoteObject.canonical_url).where(RemoteObject.unavailable_at.is_(None))),
+    )
+
+
+async def _fold_renditions(session: AsyncSession, rows: List[RemoteObject]) -> List[RemoteObject]:
+    """
+    Replace rendition rows with their cached media-target entity rows.
+
+    Memberships and listings should reference the entity (``Track``) rather
+    than its upload rendition when both exist in the cache.
+    """
+    targets = {row.media_of_url for row in rows if row.media_of_url}
+    if not targets:
+        return rows
+    target_rows = list(
+        (
+            await session.execute(
+                select(RemoteObject).where(
+                    RemoteObject.canonical_url.in_(targets),
+                    RemoteObject.unavailable_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_url = {row.canonical_url: row for row in target_rows}
+    return [by_url[row.media_of_url] if row.media_of_url in by_url else row for row in rows]
+
+
 async def get_remote_object_children(
     session: AsyncSession,
     remote_object: RemoteObject,
@@ -1407,11 +1461,47 @@ async def get_remote_object_children(
             # Only browsable resources — collection page rows cached by a
             # library scan carry the same ``parent_url`` but are not items.
             RemoteObject.resource_type.isnot(None),
+            _rendition_target_cached_clause(),
         )
         .order_by(RemoteObject.fetched_at.asc())
         .limit(limit)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def get_remote_objects_children_map(
+    session: AsyncSession,
+    parents: List[RemoteObject],
+    *,
+    limit: int = 100,
+) -> Dict[str, List[RemoteObject]]:
+    """
+    Return ``{parent canonical_url: children}`` for a batch of parents.
+
+    One query covers every parent so container pages can nest one level of
+    grandchildren (an artist's albums with their tracks) without N+1.
+    """
+    urls = [p.canonical_url for p in parents]
+    if not urls:
+        return {}
+    stmt = (
+        select(RemoteObject)
+        .where(
+            RemoteObject.parent_url.in_(urls),
+            RemoteObject.unavailable_at.is_(None),
+            RemoteObject.resource_type.isnot(None),
+            _rendition_target_cached_clause(),
+        )
+        .order_by(RemoteObject.fetched_at.asc())
+    )
+    result: Dict[str, List[RemoteObject]] = {}
+    for row in (await session.execute(stmt)).scalars().all():
+        if row.parent_url is None:
+            continue
+        bucket = result.setdefault(row.parent_url, [])
+        if len(bucket) < limit:
+            bucket.append(row)
+    return result
 
 
 async def get_remote_object_parent(
@@ -1628,16 +1718,60 @@ def remote_object_page_url(remote_object: RemoteObject) -> str:
     return f"/activities/@{actor_handle_from_url(remote_object.actor_url)}/{remote_object.id}"
 
 
-def remote_object_music_fields(row: RemoteObject) -> dict:
-    """
-    Playback metadata extracted from a cached document payload.
+def remote_object_payload_name(obj: dict) -> Optional[str]:
+    """Return the display name embedded in a remote object document."""
+    return _object_name(obj)
 
-    Funkwhale ``Audio`` documents embed the music entity under ``track``
-    (with ``artists``/``album``); bare ``Track`` documents carry the same
-    fields at the top level. Returns ``duration`` (seconds), ``artist_name``
-    and ``album_name`` — ``None`` when the payload doesn't declare them.
+
+def activity_remote_object(activity: Activity) -> Optional[dict]:
     """
-    payload = row.payload if isinstance(row.payload, dict) else {}
+    Summarize the remote music object embedded in an activity payload.
+
+    Materialized remote activities wrap the cached object document, so the
+    summary is derivable straight from the payload without a database hit.
+    Only music resources qualify — note-type mirrors render their own
+    content — and the local page URL targets ``entity_id``, the
+    ``remote_objects`` row id for ``entity_type="remote"`` activities.
+    """
+    if activity.entity_type != "remote":
+        return None
+    payload = activity.payload if isinstance(activity.payload, dict) else {}
+    obj = payload.get("object")
+    if not isinstance(obj, dict):
+        return None
+    resource_type = _detect_resource_type(obj)
+    if resource_type is None:
+        return None
+    canonical = obj.get("id")
+    return {
+        "id": str(activity.entity_id),
+        "name": _object_name(obj),
+        "resource_type": resource_type,
+        "object_type": str(obj.get("type") or "Object"),
+        "domain": federation_service.extract_domain(canonical) if isinstance(canonical, str) and canonical else None,
+        "image_url": _media_url(obj.get("image"), "image/"),
+        "url": f"/remote/{resource_type}/{activity.entity_id}",
+        **_music_fields(obj),
+    }
+
+
+def remote_object_display_name(remote_object: RemoteObject) -> Optional[str]:
+    """Return the display name for a cached remote object.
+
+    Rendition rows cached before ``_object_name`` learned to prefer the
+    embedded track title still carry the "{artist} - {album} - {title}"
+    rendition name — normalize at read time so the fix applies to the
+    whole cache without a refetch.
+    """
+    payload = remote_object.payload
+    if isinstance(payload, dict) and isinstance(payload.get("track"), dict):
+        name = _object_name(payload)
+        if name:
+            return name
+    return remote_object.name
+
+
+def _music_fields(payload: dict) -> dict:
     track = payload.get("track")
     if not isinstance(track, dict):
         track = payload
@@ -1661,6 +1795,296 @@ def remote_object_music_fields(row: RemoteObject) -> dict:
     }
 
 
+def remote_object_music_fields(row: RemoteObject) -> dict:
+    """
+    Playback metadata extracted from a cached document payload.
+
+    Funkwhale ``Audio`` documents embed the music entity under ``track``
+    (with ``artists``/``album``); bare ``Track`` documents carry the same
+    fields at the top level. Returns ``duration`` (seconds), ``artist_name``
+    and ``album_name`` — ``None`` when the payload doesn't declare them.
+    """
+    payload = row.payload if isinstance(row.payload, dict) else {}
+    return _music_fields(payload)
+
+
+# Bounds for collection-closure and container-expansion graph walks over
+# cached ``remote_objects`` parent links.
+_REMOTE_CLOSURE_DEPTH = 6
+_REMOTE_CLOSURE_LIMIT = 2000
+_REMOTE_DESCENDANT_LIMIT = 500
+
+
+async def _remote_seed_ids(session: AsyncSession, user: User) -> set:
+    """Remote object ids the user collected directly or favorited."""
+    collected = await session.execute(
+        select(CollectionItem.item_id).where(
+            CollectionItem.user_id == user.id,
+            CollectionItem.item_type == "remote",
+        )
+    )
+    favorited = await session.execute(
+        select(Favorite.remote_object_id).where(
+            Favorite.user_id == user.id,
+            Favorite.remote_object_id.is_not(None),
+        )
+    )
+    return {str(i) for i in collected.scalars().all()} | {str(i) for i in favorited.scalars().all() if i is not None}
+
+
+async def remote_collection_object_ids(session: AsyncSession, user: User) -> set:
+    """
+    Return the ``remote_objects`` ids visible in the user's collection.
+
+    Seeds are the user's ``item_type="remote"`` collection entries and
+    remote favorites. The closure expands to cached children of collected
+    containers (a collected album's tracks) and to cached ancestors of every
+    collected/child row (a collected track's album and artist), so a single
+    collected remote track surfaces its album and artist too — matching how
+    local catalog entities render their containers.
+    """
+    seed_ids = await _remote_seed_ids(session, user)
+    if not seed_ids:
+        return set()
+
+    seeds = (
+        await session.execute(
+            select(
+                RemoteObject.id,
+                RemoteObject.canonical_url,
+                RemoteObject.parent_url,
+                RemoteObject.media_of_url,
+            ).where(
+                RemoteObject.id.in_(seed_ids),
+                RemoteObject.unavailable_at.is_(None),
+            )
+        )
+    ).all()
+
+    # Fold rendition seeds onto their cached targets — collecting a
+    # Funkwhale upload surfaces the ``Track`` it renders instead.
+    rendition_targets = {row.media_of_url for row in seeds if row.media_of_url}
+    target_by_url = {}
+    if rendition_targets:
+        target_rows = (
+            await session.execute(
+                select(RemoteObject.id, RemoteObject.canonical_url, RemoteObject.parent_url).where(
+                    RemoteObject.canonical_url.in_(rendition_targets),
+                    RemoteObject.unavailable_at.is_(None),
+                )
+            )
+        ).all()
+        target_by_url = {row.canonical_url: row for row in target_rows}
+    known = {}
+    for row in seeds:
+        target = target_by_url.get(row.media_of_url) if row.media_of_url else None
+        if target is not None:
+            known[str(target.id)] = (str(target.canonical_url), target.parent_url)
+        else:
+            known[str(row.id)] = (str(row.canonical_url), row.parent_url)
+
+    # Descend from collected containers into their cached children.
+    frontier_urls = {url for url, _ in known.values()}
+    for _ in range(_REMOTE_CLOSURE_DEPTH):
+        if not frontier_urls or len(known) >= _REMOTE_CLOSURE_LIMIT:
+            break
+        children = (
+            await session.execute(
+                select(RemoteObject.id, RemoteObject.canonical_url, RemoteObject.parent_url)
+                .where(
+                    RemoteObject.parent_url.in_(frontier_urls),
+                    RemoteObject.unavailable_at.is_(None),
+                    _rendition_target_cached_clause(),
+                )
+                .limit(_REMOTE_CLOSURE_LIMIT)
+            )
+        ).all()
+        frontier_urls = set()
+        for child in children:
+            key = str(child.id)
+            if key not in known:
+                known[key] = (str(child.canonical_url), child.parent_url)
+                frontier_urls.add(str(child.canonical_url))
+
+    # Ascend from every collected row (and its children) to cached parents.
+    frontier_parents = {str(parent) for _, parent in known.values() if parent}
+    for _ in range(_REMOTE_CLOSURE_DEPTH):
+        if not frontier_parents or len(known) >= _REMOTE_CLOSURE_LIMIT:
+            break
+        parents = (
+            await session.execute(
+                select(RemoteObject.id, RemoteObject.canonical_url, RemoteObject.parent_url)
+                .where(
+                    RemoteObject.canonical_url.in_(frontier_parents),
+                    RemoteObject.unavailable_at.is_(None),
+                )
+                .limit(_REMOTE_CLOSURE_LIMIT)
+            )
+        ).all()
+        frontier_parents = set()
+        for parent_row in parents:
+            key = str(parent_row.id)
+            if key not in known:
+                known[key] = (str(parent_row.canonical_url), parent_row.parent_url)
+                if parent_row.parent_url:
+                    frontier_parents.add(str(parent_row.parent_url))
+
+    return set(known)
+
+
+async def get_favorited_remote_object_ids(
+    session: AsyncSession,
+    user: Optional[User],
+    remote_object_ids: set,
+) -> set:
+    """Return the subset of ``remote_object_ids`` the user has favorited."""
+    if user is None or not remote_object_ids:
+        return set()
+    result = await session.execute(
+        select(Favorite.remote_object_id).where(
+            Favorite.user_id == user.id,
+            Favorite.remote_object_id.in_(remote_object_ids),
+        )
+    )
+    return {str(row) for row in result.scalars().all()}
+
+
+async def remote_activity_ids(session: AsyncSession, canonical_urls: List[str]) -> dict:
+    """Map ``{canonical_url: activity_id}`` for materialized remote activities."""
+    if not canonical_urls:
+        return {}
+    rows = (
+        await session.execute(
+            select(Activity.id, Activity.source_id).where(
+                Activity.source_type == "remote",
+                Activity.source_id.in_(canonical_urls),
+            )
+        )
+    ).all()
+    return {str(source_id): str(activity_id) for activity_id, source_id in rows}
+
+
+async def ensure_remote_activity(session: AsyncSession, remote_object: RemoteObject) -> Activity:
+    """
+    Return the ``Activity`` mirror for a cached remote object.
+
+    Objects that arrived inside a federated ``Create``/``Announce`` already
+    have one; resources reached only through direct lookup or embedded
+    caching get a synthetic ``Create`` wrapper so like/boost/reply/quote work
+    the same way as on local content — the interaction service already
+    federates ``source_type="remote"`` targets.
+    """
+    existing = await get_remote_object_activity(session, remote_object)
+    if existing is not None:
+        return existing
+    obj = remote_object.payload if isinstance(remote_object.payload, dict) else {}
+    wrapper = {
+        "type": "Create",
+        "id": remote_object.activity_url or remote_object.canonical_url,
+        "actor": remote_object.actor_url,
+        "object": obj,
+        "published": obj.get("published"),
+    }
+    return await _materialize_remote_activity(
+        session,
+        remote_object=remote_object,
+        wrapper=wrapper,
+        obj=obj,
+        actor_url=remote_object.actor_url,
+        kind="Create",
+    )
+
+
+# Remote ``resource_type`` values whose cached descendants are tracks.
+_CONTAINER_RESOURCE_TYPES = frozenset({"album", "artist", "library", "playlist"})
+
+
+async def _remote_track_descendants(
+    session: AsyncSession,
+    row: RemoteObject,
+    *,
+    limit: int = _REMOTE_DESCENDANT_LIMIT,
+) -> List[RemoteObject]:
+    """Cached track-shaped descendants of a container remote object."""
+    descendants: List[RemoteObject] = []
+    frontier = [row.canonical_url]
+    for _ in range(_REMOTE_CLOSURE_DEPTH):
+        if not frontier or len(descendants) >= limit:
+            break
+        children = list(
+            (
+                await session.execute(
+                    select(RemoteObject)
+                    .where(
+                        RemoteObject.parent_url.in_(frontier),
+                        RemoteObject.unavailable_at.is_(None),
+                        RemoteObject.resource_type.is_not(None),
+                    )
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        frontier = []
+        for child in children:
+            if child.resource_type == "track":
+                descendants.append(child)
+            else:
+                frontier.append(child.canonical_url)
+    return (await _fold_renditions(session, descendants))[:limit]
+
+
+async def resolve_remote_track_ids(
+    session: AsyncSession,
+    config: SonghiveConfig,
+    object_ids: List[str],
+) -> List[str]:
+    """
+    Resolve ``remote_objects`` ids to track-shaped remote object ids.
+
+    Track resources resolve to themselves; container resources (album,
+    artist, library, playlist) expand to their cached track descendants —
+    adding a remote album to a playlist adds its tracks. Unknown,
+    unavailable, or domain-blocked ids are skipped.
+    """
+    await _refresh_instance_policies(session)
+    rows = list(
+        (
+            await session.execute(
+                select(RemoteObject).where(
+                    RemoteObject.id.in_(object_ids),
+                    RemoteObject.unavailable_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Key by the originally requested id so a rendition id resolves to its
+    # cached entity row.
+    by_id = {str(orig.id): folded for orig, folded in zip(rows, await _fold_renditions(session, rows))}
+    result: List[str] = []
+    seen: set = set()
+
+    def _add(row: RemoteObject) -> None:
+        key = str(row.id)
+        if key not in seen and remote_domain_allowed(row.domain, config):
+            seen.add(key)
+            result.append(key)
+
+    for oid in object_ids:
+        row = by_id.get(str(oid))
+        if row is None:
+            continue
+        if row.resource_type == "track":
+            _add(row)
+        elif row.resource_type in _CONTAINER_RESOURCE_TYPES:
+            for child in await _remote_track_descendants(session, row):
+                _add(child)
+    return result
+
+
 async def list_cached_remote_objects(
     session: AsyncSession,
     config: SonghiveConfig,
@@ -1668,19 +2092,25 @@ async def list_cached_remote_objects(
     resource_type: Optional[str] = None,
     user: Optional[User] = None,
     collection_only: bool = False,
+    favorites_only: bool = False,
+    library_id: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
 ) -> tuple[List[RemoteObject], int]:
     """
     Browse cached remote resources — never fetches remotely.
 
-    ``collection_only`` restricts to ``remote_objects`` rows the user saved
-    via ``item_type="remote"`` collection entries. Anonymous callers see
-    only ``public`` rows and have no collection, so ``collection_only``
-    short-circuits to empty for them.
+    ``collection_only`` restricts to the user's remote collection closure —
+    directly collected rows plus remote favorites, expanded to cached
+    children of collected containers and cached ancestors of every member,
+    so a collected remote track also surfaces its album and artist.
+    ``favorites_only`` restricts to remote favorites; ``library_id``
+    restricts to cached remote objects that are members of a local library.
+    Anonymous callers have no collection or favorites, so both flags
+    short-circuit to empty for them.
     """
     await _refresh_instance_policies(session)
-    if collection_only and user is None:
+    if (collection_only or favorites_only) and user is None:
         return [], 0
 
     conditions: List[Any] = [
@@ -1693,11 +2123,23 @@ async def list_cached_remote_objects(
         conditions.append(RemoteObject.visibility == "public")
     if collection_only:
         assert user is not None
+        closure = await remote_collection_object_ids(session, user)
+        if not closure:
+            return [], 0
+        conditions.append(RemoteObject.id.in_(closure))
+    if favorites_only:
+        assert user is not None
         conditions.append(
             exists().where(
-                CollectionItem.item_id == RemoteObject.id,
-                CollectionItem.user_id == user.id,
-                CollectionItem.item_type == "remote",
+                Favorite.remote_object_id == RemoteObject.id,
+                Favorite.user_id == user.id,
+            )
+        )
+    if library_id:
+        conditions.append(
+            exists().where(
+                LibraryTrack.remote_object_id == RemoteObject.id,
+                LibraryTrack.library_id == library_id,
             )
         )
 

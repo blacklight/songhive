@@ -4,14 +4,17 @@ import { useI18n } from "vue-i18n";
 import { useChunkList } from "@/composables/useChunkList";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { removeFavorite } from "@/api/favorites";
+import { listRemoteObjects, type RemoteObject } from "@/api/remote";
 import { listTracksWithMeta, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import RemoteObjectList from "@/components/library/RemoteObjectList.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import SortControl from "@/components/ui/SortControl.vue";
@@ -95,6 +98,30 @@ async function onToggleFavorite(track: QueueTrack) {
   }
 }
 
+// Remote (federated) favorites live on remote_objects rows — listed
+// separately since the favorites endpoint only covers local tracks.
+const remoteFavorites = ref<RemoteObject[]>([]);
+
+async function loadRemoteFavorites() {
+  try {
+    const res = await listRemoteObjects({
+      favorites: true,
+      resource_type: "track",
+    });
+    remoteFavorites.value = res.items;
+  } catch {
+    remoteFavorites.value = [];
+  }
+}
+
+function onRemoteFavoriteChanged(item: RemoteObject) {
+  if (!item.favorited) {
+    remoteFavorites.value = remoteFavorites.value.filter(
+      (i) => i.id !== item.id,
+    );
+  }
+}
+
 function onTrackShare(track: QueueTrack) {
   openShare(
     "track",
@@ -112,7 +139,10 @@ async function onTracksRemoved(trackIds: string[]) {
   total.value = Math.max(0, total.value - trackIds.length);
 }
 
-onMounted(() => load());
+onMounted(() => {
+  void load();
+  void loadRemoteFavorites();
+});
 </script>
 
 <template>
@@ -174,12 +204,15 @@ onMounted(() => load());
         <SkeletonLoader variant="page" />
       </div>
 
-      <div v-else-if="items.length === 0" class="favorites-view__empty">
+      <div
+        v-else-if="items.length === 0 && remoteFavorites.length === 0"
+        class="favorites-view__empty"
+      >
         {{ t("pages.favorites.empty") }}
       </div>
 
       <TrackList
-        v-else
+        v-if="items.length > 0"
         :tracks="items"
         :loading="loading"
         :loading-more="loadingMore"
@@ -191,6 +224,18 @@ onMounted(() => load());
         @removed="onTracksRemoved"
         @updated="onTracksRemoved"
       />
+
+      <section v-if="remoteFavorites.length" class="favorites-view__remote">
+        <h2 class="favorites-view__remote-title">
+          <AppIcon name="globe" spacing="right" />{{
+            t("remote.favoritesTitle")
+          }}
+        </h2>
+        <RemoteObjectList
+          :items="remoteFavorites"
+          @favorite-changed="onRemoteFavoriteChanged"
+        />
+      </section>
 
       <div v-if="!error && hasMore" class="favorites-view__footer">
         <AppButton
@@ -279,5 +324,18 @@ onMounted(() => load());
 .favorites-view__footer {
   display: flex;
   justify-content: center;
+}
+
+.favorites-view__remote {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 60rem;
+}
+
+.favorites-view__remote-title {
+  margin: 0;
+  font-size: 1.125rem;
+  color: var(--color-text-secondary);
 }
 </style>

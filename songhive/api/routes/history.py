@@ -3,7 +3,7 @@ Listening history routes.
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, field_serializer
@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from ...models.album import Album
 from ...models.history import ListeningHistory
+from ...models.remote_object import RemoteObject
 from ...models.track import Track
 from ...models.user import User
 from ...services import acl
@@ -21,6 +22,7 @@ from ...services.streaming import record_listen as record_listen_service
 from .._common import Pagination, get_pagination
 from ..deps import get_current_user, get_db, get_storage_service
 from ..responses import _track_image_url
+from .remote import RemoteObjectResponse, _object_response, _playable_object_ids
 
 router = APIRouter(prefix="/history")
 
@@ -29,16 +31,27 @@ class HistoryEntry(BaseModel):
     """A single listening-history entry."""
 
     id: str
-    track_id: str
+    track_id: Optional[str] = None
     title: Optional[str] = None
     artist: Optional[str] = None
     image_url: Optional[str] = None
+    remote: Optional[RemoteObjectResponse] = None
     created_at: datetime
 
     @field_serializer("created_at")
     def _serialize_created_at(self, value: datetime) -> str:
         """Serialize the timestamp as an ISO 8601 string."""
         return value.isoformat()
+
+
+async def _remote_history_map(db: AsyncSession, rows: List[ListeningHistory]) -> Dict[str, RemoteObjectResponse]:
+    """Serialize the remote objects referenced by ``rows`` (one batched fetch)."""
+    remote_ids = [str(entry.remote_object_id) for entry in rows if entry.remote_object_id is not None]
+    if not remote_ids:
+        return {}
+    remote_rows = list((await db.execute(select(RemoteObject).where(RemoteObject.id.in_(remote_ids)))).scalars().all())
+    playable = await _playable_object_ids(db, remote_rows)
+    return {str(row.id): _object_response(row, playable=str(row.id) in playable) for row in remote_rows}
 
 
 @router.get("/", response_model=List[HistoryEntry])
@@ -68,17 +81,28 @@ async def list_history(
     )
     rows = result.scalars().all()
     pagination.set_total(response, total)
+    remote_map = await _remote_history_map(db, list(rows))
 
     entries = []
     for entry in rows:
         track = entry.track
+        remote = remote_map.get(str(entry.remote_object_id)) if entry.remote_object_id is not None else None
         entries.append(
             HistoryEntry(
                 id=str(entry.id),
-                track_id=str(entry.track_id),
-                title=track.title if track is not None else None,
-                artist=track.artist.name if track is not None and track.artist is not None else None,
-                image_url=await _track_image_url(track, storage) if track is not None else None,
+                track_id=str(entry.track_id) if entry.track_id is not None else None,
+                title=remote.name if remote is not None else (track.title if track is not None else None),
+                artist=(
+                    remote.artist_name
+                    if remote is not None
+                    else (track.artist.name if track is not None and track.artist is not None else None)
+                ),
+                image_url=(
+                    remote.image_url
+                    if remote is not None
+                    else (await _track_image_url(track, storage) if track is not None else None)
+                ),
+                remote=remote,
                 created_at=entry.created_at,
             )
         )

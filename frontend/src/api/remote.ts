@@ -37,8 +37,12 @@ export interface RemoteObject {
   url: string;
   /** Whether the caller has this object in their collection. */
   in_collection?: boolean;
+  /** Whether the caller favorited this object (remote tracks). */
+  favorited?: boolean;
   /** The caller's object-follow state (``pending``/``accepted``). */
   follow_state?: string | null;
+  /** Materialized activity id — the entry point for like/boost/reply/quote. */
+  activity_id?: string | null;
   /** Containing resource (album of a track, library of an upload). */
   parent?: RemoteObject | null;
   /** Cached children — e.g. the tracks of a remote album or library. */
@@ -163,11 +167,15 @@ export function getRemoteResource(
 
 /**
  * Browse cached remote resources — no remote fetch. ``collection``
- * restricts to remote objects the caller saved to their collection.
+ * restricts to the caller's remote collection closure (collected rows and
+ * favorites plus cached parents/children); ``favorites`` to remote
+ * favorites; ``library`` to remote members of a local library.
  */
 export function listRemoteObjects(options?: {
   resource_type?: RemoteResourceKind;
   collection?: boolean;
+  favorites?: boolean;
+  library?: string;
   limit?: number;
   offset?: number;
 }): Promise<RemoteObjectList> {
@@ -175,6 +183,8 @@ export function listRemoteObjects(options?: {
     query: {
       resource_type: options?.resource_type,
       collection: options?.collection || undefined,
+      favorites: options?.favorites || undefined,
+      library: options?.library,
       limit: options?.limit,
       offset: options?.offset,
     },
@@ -204,5 +214,58 @@ export function unfollowRemoteObject(objectId: string): Promise<void> {
   return apiRequest<void>(
     `/remote/objects/${encodeURIComponent(objectId)}/follow`,
     { method: "DELETE" },
+  );
+}
+
+/** Favorite a cached remote track. Idempotent. */
+export function favoriteRemoteObject(objectId: string): Promise<void> {
+  return apiRequest<void>(
+    `/remote/objects/${encodeURIComponent(objectId)}/favorite`,
+    { method: "POST" },
+  );
+}
+
+/** Remove a remote object favorite. Idempotent. */
+export function unfavoriteRemoteObject(objectId: string): Promise<void> {
+  return apiRequest<void>(
+    `/remote/objects/${encodeURIComponent(objectId)}/favorite`,
+    { method: "DELETE" },
+  );
+}
+
+/**
+ * Materialize the ``Activity`` mirror for a cached remote object so
+ * like/boost/reply/quote work through the standard activities API.
+ * Idempotent — returns the object with its activity.
+ */
+export function ensureRemoteObjectActivity(
+  objectId: string,
+): Promise<RemoteObjectDetail> {
+  return apiRequest<RemoteObjectDetail>(
+    `/remote/objects/${encodeURIComponent(objectId)}/activity`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * Record a completed listen of a remote track — the remote counterpart of
+ * ``addHistory``. Also enqueues the ``track.scrobble`` submission when the
+ * caller has an active scrobble config.
+ */
+export function addRemoteListen(objectId: string): Promise<void> {
+  return apiRequest<void>(
+    `/remote/objects/${encodeURIComponent(objectId)}/listen`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * Report that playback of a remote track started — the remote counterpart
+ * of ``reportNowPlaying``. No-op server-side without a scrobble config.
+ */
+export function reportRemoteNowPlaying(objectId: string): Promise<void> {
+  return apiRequest<void>(
+    `/remote/objects/${encodeURIComponent(objectId)}/now-playing`,
+    { method: "POST" },
   );
 }

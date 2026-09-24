@@ -3,7 +3,7 @@ Favorites routes.
 """
 
 import logging
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
@@ -25,8 +25,11 @@ router = APIRouter(prefix="/favorites")
 
 
 class FavoriteResponse(BaseModel):
+    """A favorite — either a local track or a cached remote object (exactly one set)."""
+
     id: str
-    track_id: str
+    track_id: Optional[str] = None
+    remote_object_id: Optional[str] = None
     created_at: str
 
 
@@ -51,7 +54,8 @@ async def list_favorites(
     return [
         FavoriteResponse(
             id=str(f.id),
-            track_id=str(f.track_id),
+            track_id=str(f.track_id) if f.track_id is not None else None,
+            remote_object_id=str(f.remote_object_id) if f.remote_object_id is not None else None,
             created_at=f.created_at.isoformat(),
         )
         for f in rows

@@ -21,6 +21,7 @@ from ...models.user import User
 from ...services import acl
 from ...services import activities as activity_service
 from ...services import audit
+from ...services import remote_content
 from ...services.federation import ensure_user_actor
 from ...services.mentions import CONTENT_TYPE_MARKDOWN
 from ...services.storage import StorageService
@@ -105,6 +106,21 @@ class WebmentionResponse(BaseModel):
     tags: List[str] = []
 
 
+class ActivityRemoteObjectResponse(BaseModel):
+    """Summary of the remote music object mirrored by an activity."""
+
+    id: str
+    name: Optional[str] = None
+    resource_type: Optional[str] = None
+    object_type: Optional[str] = None
+    domain: Optional[str] = None
+    image_url: Optional[str] = None
+    url: Optional[str] = None
+    duration: Optional[int] = None
+    artist_name: Optional[str] = None
+    album_name: Optional[str] = None
+
+
 class ActivityResponse(BaseModel):
     """Serialized activity."""
 
@@ -141,6 +157,7 @@ class ActivityResponse(BaseModel):
     can_interact: bool = True
     preview_card: Optional[PreviewCardResponse] = None
     webmention: Optional[WebmentionResponse] = None
+    remote_object: Optional[ActivityRemoteObjectResponse] = None
 
 
 class ActivityListResponse(BaseModel):
@@ -308,6 +325,8 @@ def _build_activity_response(
     response.object_url = _activity_object_url(activity)
     response.object_type = activity_service._activity_object_type(activity)
     response.webmention = _activity_webmention(activity)
+    remote_object = remote_content.activity_remote_object(activity)
+    response.remote_object = ActivityRemoteObjectResponse(**remote_object) if remote_object is not None else None
     # Interactions target content activities — reacting to a reaction (or a
     # tombstone) is meaningless, so cards for those types render no action
     # bar; the embedded object's card carries its own.

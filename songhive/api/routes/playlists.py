@@ -29,6 +29,7 @@ from ...models.podcast import PodcastEpisode
 from ...models.user import User
 from ...services import acl, audit, collection, deletion, music
 from ...services import podcasts as podcasts_service
+from ...services import remote_content
 from ...services.auth import get_user_by_username
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
@@ -52,6 +53,7 @@ from ..middleware.rate_limit import rate_limit_account
 from ..responses import TrackResponse, TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
 from ._common import TagListRequest
 from ._images import remove_entity_image, upload_entity_image
+from .remote import RemoteObjectResponse, _object_response, _playable_object_ids
 from .tracks import _build_track_response
 
 router = APIRouter(prefix="/playlists")
@@ -99,7 +101,7 @@ class PlaylistUpdate(BaseModel):
 
 
 class AddPlaylistTracksRequest(BaseModel):
-    """Request body for adding tracks, albums, artists, or podcast episodes to a playlist."""
+    """Request body for adding tracks, albums, artists, remote objects, or podcast episodes to a playlist."""
 
     track_ids: Optional[List[str]] = None
     album_id: Optional[str] = None
@@ -107,14 +109,19 @@ class AddPlaylistTracksRequest(BaseModel):
     episode_ids: Optional[List[str]] = None
     # Adds every cataloged episode of the podcast, oldest first.
     podcast_id: Optional[str] = None
+    # Cached ``remote_objects`` ids — track resources resolve to themselves,
+    # remote containers (album/artist/library/playlist) expand to their
+    # cached track descendants.
+    remote_object_ids: Optional[List[str]] = None
     allow_duplicates: bool = False
 
 
 class RemovePlaylistTracksRequest(BaseModel):
-    """Request body for removing tracks or podcast episodes from a playlist."""
+    """Request body for removing tracks, remote objects, or podcast episodes from a playlist."""
 
     track_ids: Optional[List[str]] = None
     episode_ids: Optional[List[str]] = None
+    remote_object_ids: Optional[List[str]] = None
 
 
 class ReorderPlaylistTracksRequest(BaseModel):
@@ -171,13 +178,14 @@ class PlaylistEpisodeItem(BaseModel):
 
 
 class PlaylistItemResponse(BaseModel):
-    """One ordered playlist entry — a track or a podcast episode."""
+    """One ordered playlist entry — a track, a podcast episode, or a remote object."""
 
     item_id: str
     position: int
-    type: Literal["track", "episode"]
+    type: Literal["track", "episode", "remote"]
     track: Optional[TrackResponse] = None
     episode: Optional[PlaylistEpisodeItem] = None
+    remote: Optional[RemoteObjectResponse] = None
 
 
 async def _playlist_image_url(playlist: Playlist, storage: StorageService) -> Optional[str]:
@@ -644,7 +652,16 @@ async def add_tracks_to_playlist(
             detail="Access denied",
         )
 
-    if not any((body.track_ids, body.album_id, body.artist_id, body.episode_ids, body.podcast_id)):
+    if not any(
+        (
+            body.track_ids,
+            body.album_id,
+            body.artist_id,
+            body.episode_ids,
+            body.podcast_id,
+            body.remote_object_ids,
+        )
+    ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="At least one source must be provided",
@@ -657,12 +674,14 @@ async def add_tracks_to_playlist(
 
     track_ids = await _resolve_track_ids(db, current_user, body)
     episode_ids = await _resolve_episode_ids(db, body)
+    remote_object_ids = await remote_content.resolve_remote_track_ids(db, config, body.remote_object_ids or [])
     try:
-        added_track_ids, added_episode_ids = await music.add_playlist_items(
+        added_track_ids, added_episode_ids, added_remote_ids = await music.add_playlist_items(
             db,
             playlist_id,
             track_ids=track_ids,
             episode_ids=episode_ids,
+            remote_object_ids=remote_object_ids,
             allow_duplicates=body.allow_duplicates,
         )
     except music.DuplicatePlaylistTrackError as exc:
@@ -672,6 +691,7 @@ async def add_tracks_to_playlist(
                 "detail": "Items already in playlist",
                 "track_ids": exc.track_ids,
                 "episode_ids": exc.episode_ids,
+                "remote_object_ids": exc.remote_object_ids,
             },
         )
 
@@ -685,16 +705,18 @@ async def add_tracks_to_playlist(
             "source": body.model_dump(exclude_unset=True),
             "track_ids": added_track_ids,
             "episode_ids": added_episode_ids,
-            "count": len(added_track_ids) + len(added_episode_ids),
+            "remote_object_ids": added_remote_ids,
+            "count": len(added_track_ids) + len(added_episode_ids) + len(added_remote_ids),
         },
         ip_address=client_ip(request),
     )
     await db.commit()
 
     return {
-        "added": len(added_track_ids) + len(added_episode_ids),
+        "added": len(added_track_ids) + len(added_episode_ids) + len(added_remote_ids),
         "track_ids": added_track_ids,
         "episode_ids": added_episode_ids,
+        "remote_object_ids": added_remote_ids,
     }
 
 
@@ -826,8 +848,13 @@ async def list_playlist_items_route(
 
     track_ids = {str(row.track.id) for row in rows if row.track is not None}
     episode_ids = [str(row.episode.id) for row in rows if row.episode is not None]
+    remote_rows = [row.remote_object for row in rows if row.remote_object is not None]
     favorited_ids = await music.get_favorited_track_ids(db, user, track_ids)
     played_ids = await podcasts_service.played_episode_ids(db, user, episode_ids) if user is not None else set()
+    playable_remote = await _playable_object_ids(db, remote_rows)
+    remote_favorited = await remote_content.get_favorited_remote_object_ids(
+        db, user, {str(row.id) for row in remote_rows}
+    )
 
     items: List[PlaylistItemResponse] = []
     for row in rows:
@@ -849,6 +876,20 @@ async def list_playlist_items_route(
                     episode=_episode_item(row.episode, str(row.episode.id) in played_ids),
                 )
             )
+        elif row.remote_object is not None:
+            remote_row = row.remote_object
+            items.append(
+                PlaylistItemResponse(
+                    item_id=str(row.id),
+                    position=row.position,
+                    type="remote",
+                    remote=_object_response(
+                        remote_row,
+                        favorited=str(remote_row.id) in remote_favorited,
+                        playable=str(remote_row.id) in playable_remote,
+                    ),
+                )
+            )
     return items
 
 
@@ -860,7 +901,7 @@ async def remove_tracks_from_playlist(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove existing tracks or podcast episodes from a playlist."""
+    """Remove existing tracks, remote objects, or podcast episodes from a playlist."""
     playlist = await music.get_playlist(db, playlist_id)
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -870,17 +911,23 @@ async def remove_tracks_from_playlist(
             detail="Access denied",
         )
 
-    if not body.track_ids and not body.episode_ids:
+    if not body.track_ids and not body.episode_ids and not body.remote_object_ids:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="track_ids or episode_ids must not be empty",
+            detail="track_ids, episode_ids, or remote_object_ids must not be empty",
         )
 
-    removed_count, removed_track_ids, removed_episode_ids = await music.remove_playlist_items(
+    (
+        removed_count,
+        removed_track_ids,
+        removed_episode_ids,
+        removed_remote_ids,
+    ) = await music.remove_playlist_items(
         db,
         playlist_id,
         track_ids=body.track_ids or [],
         episode_ids=body.episode_ids or [],
+        remote_object_ids=body.remote_object_ids or [],
     )
 
     await audit.log_action(
@@ -892,6 +939,7 @@ async def remove_tracks_from_playlist(
         details={
             "track_ids": removed_track_ids,
             "episode_ids": removed_episode_ids,
+            "remote_object_ids": removed_remote_ids,
             "count": removed_count,
         },
         ip_address=client_ip(request),
@@ -902,6 +950,7 @@ async def remove_tracks_from_playlist(
         "removed": removed_count,
         "track_ids": removed_track_ids,
         "episode_ids": removed_episode_ids,
+        "remote_object_ids": removed_remote_ids,
     }
 
 

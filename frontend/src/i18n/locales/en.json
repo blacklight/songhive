@@ -68,6 +68,7 @@
     "notFound": "Not found",
     "forbidden": "Forbidden",
     "edit": "Edit",
+    "remove": "Remove",
     "play": "Play",
     "pause": "Pause",
     "favorite": "Favorite",
@@ -1871,6 +1872,10 @@
     "followError": "Could not update the follow: {message}",
     "partOf": "Part of",
     "items": "Contents",
+    "interactions": "Interactions",
+    "viewResource": "View remote resource",
+    "libraryItems": "Federated items",
+    "favoritesTitle": "Federated favorites",
     "collectedTitle": "Remote {kind}s in your collection"
   },
   "embed": {

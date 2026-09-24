@@ -19,6 +19,12 @@ export type QueueTrack = TrackResponse & {
   remote?: boolean;
   /** Canonical page URL on the origin instance, for remote queue tracks. */
   remote_url?: string;
+  /** ``remote_objects`` row id for remote queue tracks — membership ops. */
+  remote_object_id?: string;
+  /** Origin instance domain for remote queue tracks — shown as a badge. */
+  remote_domain?: string;
+  /** Internal ``/remote/{kind}/{id}`` page for remote queue tracks. */
+  remote_page_url?: string;
   /**
    * Podcast episode id for remote queue tracks backed by the local podcast
    * catalog — the player marks it played once the listen threshold is met.

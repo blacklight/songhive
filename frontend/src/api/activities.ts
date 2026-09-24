@@ -77,6 +77,24 @@ export interface WebmentionResponse {
   tags: string[];
 }
 
+/**
+ * Summary of the remote music object mirrored by an activity — mirrors
+ * ``ActivityRemoteObjectResponse`` in ``songhive/api/routes/activities.py``.
+ * ``url`` is the internal ``/remote/{kind}/{id}`` page.
+ */
+export interface ActivityRemoteObject {
+  id: string;
+  name?: string | null;
+  resource_type?: string | null;
+  object_type?: string | null;
+  domain?: string | null;
+  image_url?: string | null;
+  url?: string | null;
+  duration?: number | null;
+  artist_name?: string | null;
+  album_name?: string | null;
+}
+
 export interface ActivityResponse {
   id: string;
   entity_type: string;
@@ -115,6 +133,7 @@ export interface ActivityResponse {
   can_interact: boolean;
   preview_card?: PreviewCardResponse | null;
   webmention?: WebmentionResponse | null;
+  remote_object?: ActivityRemoteObject | null;
 }
 
 export interface ActivityListResponse {

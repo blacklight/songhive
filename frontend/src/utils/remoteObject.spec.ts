@@ -33,7 +33,7 @@ describe("remoteObjectToQueueTrack", () => {
       }),
     );
     expect(track).not.toBeNull();
-    expect(track?.id).toBe("https://remote.example/objects/1");
+    expect(track?.id).toBe("obj-1");
     expect(track?.title).toBe("Remote Song");
     expect(track?.stream_url).toBe("https://remote.example/media/song.mp3");
     expect(track?.remote).toBe(true);
@@ -42,6 +42,9 @@ describe("remoteObjectToQueueTrack", () => {
     expect(track?.duration).toBe(250);
     expect(track?.artwork_url).toBe("https://remote.example/media/cover.jpg");
     expect(track?.remote_url).toBe("https://remote.example/objects/1");
+    expect(track?.remote_object_id).toBe("obj-1");
+    expect(track?.remote_domain).toBe("remote.example");
+    expect(track?.remote_page_url).toBe("/remote/track/obj-1");
   });
 
   it("falls back to the parent name for the album title", () => {

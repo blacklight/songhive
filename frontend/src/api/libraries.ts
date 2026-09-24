@@ -202,11 +202,17 @@ export interface AddTracksToLibraryRequest {
   track_ids?: string[];
   album_id?: string;
   artist_id?: string;
+  /**
+   * Cached remote object ids — remote tracks resolve to themselves, remote
+   * containers (album/artist/library) expand to their cached tracks.
+   */
+  remote_object_ids?: string[];
 }
 
 export interface AddTracksToLibraryResponse {
   added: number;
   track_ids: string[];
+  remote_object_ids?: string[];
 }
 
 export function addTracksToLibrary(
@@ -220,12 +226,14 @@ export function addTracksToLibrary(
 }
 
 export interface RemoveTracksFromLibraryRequest {
-  track_ids: string[];
+  track_ids?: string[];
+  remote_object_ids?: string[];
 }
 
 export interface RemoveTracksFromLibraryResponse {
   removed: number;
   track_ids: string[];
+  remote_object_ids?: string[];
 }
 
 export function removeTracksFromLibrary(

@@ -31,7 +31,7 @@ from ...models.audit_log import AuditTargetType
 from ...models.external_library import ExternalLibrary
 from ...models.library import Library
 from ...models.user import User
-from ...services import acl, activities, audit, collection, deletion, music
+from ...services import acl, activities, audit, collection, deletion, music, remote_content
 from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor, unpublish_track_activity
 from ...services.import_ import DuplicateTrackError, ImportResult, import_audio_file
@@ -46,6 +46,7 @@ from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
 from .._sorting import SortParams, get_sort
 from ..deps import (
+    get_config,
     get_current_user,
     get_current_user_optional,
     get_db,
@@ -109,17 +110,22 @@ class LibraryUpdate(BaseModel):
 
 
 class AddLibraryTracksRequest(BaseModel):
-    """Request body for adding tracks, albums, or artists to a library."""
+    """Request body for adding tracks, albums, artists, or remote objects to a library."""
 
     track_ids: Optional[List[str]] = None
     album_id: Optional[str] = None
     artist_id: Optional[str] = None
+    # Cached ``remote_objects`` ids — track resources resolve to themselves,
+    # remote containers (album/artist/library/playlist) expand to their
+    # cached track descendants.
+    remote_object_ids: Optional[List[str]] = None
 
 
 class RemoveLibraryTracksRequest(BaseModel):
-    """Request body for removing tracks from a library."""
+    """Request body for removing tracks or remote objects from a library."""
 
-    track_ids: List[str]
+    track_ids: List[str] = []
+    remote_object_ids: List[str] = []
 
 
 class ScanRequest(BaseModel):
@@ -666,8 +672,9 @@ async def add_tracks_to_library(
     body: AddLibraryTracksRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
 ):
-    """Add existing tracks, an album, or an artist to a library."""
+    """Add existing tracks, an album, an artist, or remote objects to a library."""
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -677,14 +684,21 @@ async def add_tracks_to_library(
             detail="Access denied",
         )
 
-    if not body.track_ids and not body.album_id and not body.artist_id:
+    if not body.track_ids and not body.album_id and not body.artist_id and not body.remote_object_ids:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="At least one source must be provided",
         )
 
     track_ids = await _resolve_track_ids(db, current_user, body)
-    added_ids = await music.add_library_tracks(db, library_id, track_ids, added_by_id=current_user.id)
+    remote_object_ids = await remote_content.resolve_remote_track_ids(db, config, body.remote_object_ids or [])
+    added_ids, added_remote_ids = await music.add_library_tracks(
+        db,
+        library_id,
+        track_ids,
+        remote_object_ids=remote_object_ids,
+        added_by_id=current_user.id,
+    )
 
     await audit.log_action(
         db,
@@ -695,13 +709,18 @@ async def add_tracks_to_library(
         details={
             "source": body.model_dump(exclude_unset=True),
             "track_ids": added_ids,
-            "count": len(added_ids),
+            "remote_object_ids": added_remote_ids,
+            "count": len(added_ids) + len(added_remote_ids),
         },
         ip_address=client_ip(request),
     )
     await db.commit()
 
-    return {"added": len(added_ids), "track_ids": added_ids}
+    return {
+        "added": len(added_ids) + len(added_remote_ids),
+        "track_ids": added_ids,
+        "remote_object_ids": added_remote_ids,
+    }
 
 
 @router.post("/{library_id}/tracks/remove", status_code=status.HTTP_200_OK)
@@ -712,7 +731,7 @@ async def remove_tracks_from_library(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove existing tracks from a library."""
+    """Remove existing tracks or remote objects from a library."""
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -722,13 +741,15 @@ async def remove_tracks_from_library(
             detail="Access denied",
         )
 
-    if not body.track_ids:
+    if not body.track_ids and not body.remote_object_ids:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="track_ids must not be empty",
+            detail="track_ids or remote_object_ids must not be empty",
         )
 
-    removed_ids = await music.remove_library_tracks(db, library_id, body.track_ids)
+    removed_ids, removed_remote_ids = await music.remove_library_tracks(
+        db, library_id, body.track_ids, remote_object_ids=body.remote_object_ids
+    )
 
     await audit.log_action(
         db,
@@ -738,13 +759,18 @@ async def remove_tracks_from_library(
         target_id=library_id,
         details={
             "track_ids": removed_ids,
-            "count": len(removed_ids),
+            "remote_object_ids": removed_remote_ids,
+            "count": len(removed_ids) + len(removed_remote_ids),
         },
         ip_address=client_ip(request),
     )
     await db.commit()
 
-    return {"removed": len(removed_ids), "track_ids": removed_ids}
+    return {
+        "removed": len(removed_ids) + len(removed_remote_ids),
+        "track_ids": removed_ids,
+        "remote_object_ids": removed_remote_ids,
+    }
 
 
 @router.post("/{library_id}/scan")

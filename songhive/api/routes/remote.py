@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...federation.fetch import FetchError, FetchNotFound
+from ...models.favorite import Favorite
 from ...models.moderation import USER_MODERATION_BLOCK, USER_MODERATION_MUTE
 from ...models.user import User
 from ...services import acl
@@ -31,6 +32,8 @@ from ...services import follows as follows_service
 from ...services import moderation as moderation_service
 from ...services import notifications as notifications_service
 from ...services import remote_content
+from ...services import scrobbler as scrobbler_service
+from ...services import streaming as streaming_service
 from .._common import Pagination, get_pagination
 from ..deps import get_config, get_current_user, get_current_user_optional, get_db
 from ..middleware.rate_limit import rate_limit_account
@@ -106,10 +109,14 @@ class RemoteObjectResponse(BaseModel):
     fetched_at: Optional[datetime] = None
     unavailable: bool = False
     url: str  # internal SPA route
-    # Viewer-relative state: collection membership and object follow
-    # (``pending``/``accepted``) when the caller is authenticated.
+    # Viewer-relative state: collection membership, favorite, and object
+    # follow (``pending``/``accepted``) when the caller is authenticated.
     in_collection: bool = False
+    favorited: bool = False
     follow_state: Optional[str] = None
+    # The materialized ``Activity`` mirror id, when one exists — the entry
+    # point for like/boost/reply/quote through the activities API.
+    activity_id: Optional[str] = None
     # Containment for federated music resources: ``parent`` is the
     # containing resource (album of a track, artist of an album, library
     # of an upload), ``items`` its cached children.
@@ -224,7 +231,9 @@ def _object_response(
     row,
     *,
     in_collection: bool = False,
+    favorited: bool = False,
     follow_state: Optional[str] = None,
+    activity_id: Optional[str] = None,
     parent: Optional[RemoteObjectResponse] = None,
     items: Optional[List[RemoteObjectResponse]] = None,
     playable: bool = False,
@@ -238,7 +247,7 @@ def _object_response(
         domain=row.domain,
         actor_url=row.actor_url,
         actor_handle=actor_handle,
-        name=row.name,
+        name=remote_content.remote_object_display_name(row),
         summary=row.summary,
         content=row.content,
         image_url=row.image_url,
@@ -250,10 +259,35 @@ def _object_response(
         unavailable=row.unavailable_at is not None,
         url=remote_content.remote_object_page_url(row),
         in_collection=in_collection,
+        favorited=favorited,
         follow_state=follow_state,
+        activity_id=activity_id,
         parent=parent,
         items=items or [],
     )
+
+
+async def _resource_items(db: AsyncSession, children: List) -> List[RemoteObjectResponse]:
+    """
+    Serialize child rows with one nested level of grandchildren.
+
+    Artist pages show albums; nesting each album's cached tracks keeps the
+    whole container tree browsable from one response.
+    """
+    grandchildren_map = await remote_content.get_remote_objects_children_map(db, children)
+    grandchildren = [gc for gcs in grandchildren_map.values() for gc in gcs]
+    playable = await _playable_object_ids(db, [*children, *grandchildren])
+    return [
+        _object_response(
+            child,
+            playable=str(child.id) in playable,
+            items=[
+                _object_response(gc, playable=str(gc.id) in playable)
+                for gc in grandchildren_map.get(child.canonical_url, [])
+            ],
+        )
+        for child in children
+    ]
 
 
 async def _playable_object_ids(db: AsyncSession, rows) -> set:
@@ -285,13 +319,15 @@ async def _object_viewer_state(
     user: Optional[User],
     row,
 ) -> dict:
-    """Return the caller's collection/follow state on a remote object."""
+    """Return the caller's collection/favorite/follow state on a remote object."""
     if user is None:
-        return {"in_collection": False, "follow_state": None}
+        return {"in_collection": False, "favorited": False, "follow_state": None}
     saved = await collection_service.saved_item_ids(db, user, "remote", [str(row.id)])
+    favorited = await remote_content.get_favorited_remote_object_ids(db, user, {str(row.id)})
     states = await follows_service.follow_states_for(db, user.id, [row.canonical_url])
     return {
         "in_collection": str(row.id) in saved,
+        "favorited": str(row.id) in favorited,
         "follow_state": states.get(row.canonical_url),
     }
 
@@ -547,6 +583,8 @@ async def list_remote_objects(
     response: Response,
     resource_type: Optional[str] = Query(None, description="Filter by resource kind"),
     collection: bool = Query(False, description="Restrict to the caller's collected remote objects"),
+    favorites: bool = Query(False, description="Restrict to the caller's favorited remote objects"),
+    library: Optional[str] = Query(None, description="Restrict to remote objects in this local library"),
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user_optional),
     config: SonghiveConfig = Depends(get_config),
@@ -555,19 +593,28 @@ async def list_remote_objects(
     """
     Browse cached remote resources — never reaches the network.
 
-    ``collection=true`` restricts the listing to ``remote_objects`` rows
-    the caller saved through ``item_type="remote"`` collection entries;
-    anonymous callers have no collection and get an empty page.
+    ``collection=true`` restricts the listing to the caller's remote
+    collection closure: directly collected rows and remote favorites plus
+    their cached children (a collected album's tracks) and ancestors (a
+    collected track's album and artist). ``favorites=true`` restricts to
+    remote favorites; ``library`` restricts to remote objects that are
+    members of a local library (the library's own visibility gates access).
+    Anonymous callers have no collection or favorites and get empty pages
+    for those filters.
     """
     _remote_policy(config, user)
     if resource_type is not None and resource_type not in _REMOTE_RESOURCE_KINDS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid resource type")
+    if library is not None and not await acl.can_access(db, user, "library", library):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
     rows, total = await remote_content.list_cached_remote_objects(
         db,
         config,
         resource_type=resource_type,
         user=user,
         collection_only=collection,
+        favorites_only=favorites,
+        library_id=library,
         limit=pagination.limit,
         offset=pagination.offset,
     )
@@ -577,10 +624,19 @@ async def list_remote_objects(
         if user is not None
         else set()
     )
+    favorited = await remote_content.get_favorited_remote_object_ids(db, user, {str(row.id) for row in rows})
     playable = await _playable_object_ids(db, rows)
+    activity_ids = await remote_content.remote_activity_ids(db, [row.canonical_url for row in rows])
     return RemoteObjectListResponse(
         items=[
-            _object_response(row, in_collection=str(row.id) in saved, playable=str(row.id) in playable) for row in rows
+            _object_response(
+                row,
+                in_collection=str(row.id) in saved,
+                favorited=str(row.id) in favorited,
+                activity_id=activity_ids.get(row.canonical_url),
+                playable=str(row.id) in playable,
+            )
+            for row in rows
         ]
     )
 
@@ -623,19 +679,21 @@ async def get_remote_object(
     parent_row = await remote_content.get_remote_object_parent(db, row)
     children = await remote_content.get_remote_object_children(db, row)
     activity = await remote_content.get_remote_object_activity(db, row)
-    related = [row, *children, *([parent_row] if parent_row is not None else [])]
+    related = [row, *([parent_row] if parent_row is not None else [])]
     playable = await _playable_object_ids(db, related)
     return RemoteObjectDetailResponse(
         object=_object_response(
             row,
             in_collection=viewer["in_collection"],
+            favorited=viewer["favorited"],
             follow_state=viewer["follow_state"],
+            activity_id=str(activity.id) if activity is not None else None,
             parent=(
                 _object_response(parent_row, playable=str(parent_row.id) in playable)
                 if parent_row is not None
                 else None
             ),
-            items=[_object_response(child, playable=str(child.id) in playable) for child in children],
+            items=await _resource_items(db, children),
             playable=str(row.id) in playable,
         ),
         activity=await _activity_response_or_none(request, db, user, activity),
@@ -668,6 +726,70 @@ async def stream_remote_object(
     if media_url is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No playable media for this remote object")
     return RedirectResponse(media_url)
+
+
+async def _remote_track_or_error(db: AsyncSession, user: Optional[User], config: SonghiveConfig, object_id: str):
+    """Load a playable remote track row or raise the matching HTTP error."""
+    row = await remote_content.get_cached_remote_object(db, object_id)
+    if row is None or row.unavailable_at is not None or not remote_content.remote_domain_allowed(row.domain, config):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Remote object not found")
+    if row.resource_type != "track":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only remote tracks can be listened to",
+        )
+    if not await acl.can_access(db, user, "remote", str(row.id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    return row
+
+
+@router.post(
+    "/objects/{object_id}/listen",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def record_remote_listen(
+    object_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Record a completed listen of a remote track.
+
+    The remote counterpart of ``POST /history/{track_id}``: stores a
+    ``listening_history`` row keyed on the ``remote_objects`` row and
+    enqueues the ``track.scrobble`` submission when the caller has an
+    active scrobble config.
+    """
+    _remote_policy(config, user)
+    row = await _remote_track_or_error(db, user, config, object_id)
+    await streaming_service.record_remote_listen(db, str(user.id), str(row.id))
+    await db.commit()
+    return {"id": str(row.id), "recorded": True}
+
+
+@router.post(
+    "/objects/{object_id}/now-playing",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def report_remote_now_playing(
+    object_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Report that the caller started playing a remote track.
+
+    The remote counterpart of ``POST /scrobbling/now-playing/{track_id}`` —
+    submissions go out only when the caller has an active scrobble config.
+    """
+    _remote_policy(config, user)
+    if not config.scrobbling.enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scrobbling is disabled on this instance")
+    row = await _remote_track_or_error(db, user, config, object_id)
+    await scrobbler_service.maybe_enqueue_remote_now_playing(db, str(user.id), str(row.id))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -721,6 +843,111 @@ async def unfollow_remote_object(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post(
+    "/objects/{object_id}/favorite",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def favorite_remote_object(
+    object_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Favorite a cached remote track.
+
+    Remote favorites reference the ``remote_objects`` cache row — the remote
+    track is never copied into the local catalog. Idempotent.
+    """
+    _remote_policy(config, user)
+    row = await remote_content.get_cached_remote_object(db, object_id)
+    if row is None or row.unavailable_at is not None or not remote_content.remote_domain_allowed(row.domain, config):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Remote object not found")
+    if row.resource_type != "track":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only remote tracks can be favorited",
+        )
+    if not await acl.can_access(db, user, "remote", str(row.id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    existing = await db.scalar(
+        select(Favorite.id).where(
+            Favorite.user_id == user.id,
+            Favorite.remote_object_id == str(row.id),
+        )
+    )
+    if existing is None:
+        db.add(Favorite(user_id=user.id, remote_object_id=str(row.id)))
+        await db.commit()
+    return {"id": str(row.id)}
+
+
+@router.delete(
+    "/objects/{object_id}/favorite",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def unfavorite_remote_object(
+    object_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Remove a remote object favorite. Idempotent."""
+    _remote_policy(config, user)
+    row = await db.scalar(
+        select(Favorite).where(
+            Favorite.user_id == user.id,
+            Favorite.remote_object_id == object_id,
+        )
+    )
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/objects/{object_id}/activity",
+    response_model=RemoteObjectDetailResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def ensure_remote_object_activity(
+    object_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Materialize the ``Activity`` mirror for a cached remote object.
+
+    Objects that arrived inside a federated activity already have one;
+    resources reached through direct lookup get a synthetic ``Create``
+    wrapper so like/boost/reply/quote work through the standard activities
+    API. Idempotent.
+    """
+    _remote_policy(config, user)
+    row = await remote_content.get_cached_remote_object(db, object_id)
+    if row is None or row.unavailable_at is not None or not remote_content.remote_domain_allowed(row.domain, config):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Remote object not found")
+    if not await acl.can_access(db, user, "remote", str(row.id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    activity = await remote_content.ensure_remote_activity(db, row)
+    await db.commit()
+    viewer = await _object_viewer_state(db, user, row)
+    return RemoteObjectDetailResponse(
+        object=_object_response(
+            row,
+            in_collection=viewer["in_collection"],
+            favorited=viewer["favorited"],
+            follow_state=viewer["follow_state"],
+            activity_id=str(activity.id),
+            playable=str(row.id) in await _playable_object_ids(db, [row]),
+        ),
+        activity=await _activity_response_or_none(request, db, user, activity),
+    )
+
+
 @router.get("/{kind}/{object_id}", response_model=RemoteObjectResponse)
 async def get_remote_resource(
     kind: str,
@@ -749,15 +976,18 @@ async def get_remote_resource(
     viewer = await _object_viewer_state(db, user, row)
     parent_row = await remote_content.get_remote_object_parent(db, row)
     children = await remote_content.get_remote_object_children(db, row)
-    related = [row, *children, *([parent_row] if parent_row is not None else [])]
+    activity = await remote_content.get_remote_object_activity(db, row)
+    related = [row, *([parent_row] if parent_row is not None else [])]
     playable = await _playable_object_ids(db, related)
     return _object_response(
         row,
         in_collection=viewer["in_collection"],
+        favorited=viewer["favorited"],
         follow_state=viewer["follow_state"],
+        activity_id=str(activity.id) if activity is not None else None,
         parent=(
             _object_response(parent_row, playable=str(parent_row.id) in playable) if parent_row is not None else None
         ),
-        items=[_object_response(child, playable=str(child.id) in playable) for child in children],
+        items=await _resource_items(db, children),
         playable=str(row.id) in playable,
     )

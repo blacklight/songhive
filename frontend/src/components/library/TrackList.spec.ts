@@ -544,6 +544,7 @@ describe("TrackList", () => {
       {
         track_ids: ["track-1"],
         episode_ids: ["ep-1"],
+        remote_object_ids: [],
       },
     );
     expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1", "ep-1"]]);
@@ -661,6 +662,7 @@ describe("TrackList", () => {
       "library-1",
       {
         track_ids: ["track-1"],
+        remote_object_ids: [],
       },
     );
     expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1"]]);
@@ -725,6 +727,7 @@ describe("TrackList", () => {
       "library-1",
       {
         track_ids: ["track-1", "track-2"],
+        remote_object_ids: [],
       },
     );
     expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1", "track-2"]]);

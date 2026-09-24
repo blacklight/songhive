@@ -169,6 +169,33 @@ async def record_listen(
         )
 
 
+async def record_remote_listen(
+    session: AsyncSession,
+    user_id: str,
+    remote_object_id: str,
+    played_at: Optional[datetime] = None,
+) -> None:
+    """
+    Record a listen of a cached remote object (``remote_objects`` row id).
+
+    Remote tracks never get a local ``Track`` row, so there is no play count
+    to bump — the history row references the cached object, and the scrobble
+    submission resolves its metadata (folding renditions onto their music
+    entity) on the worker.
+    """
+    entry = ListeningHistory(user_id=user_id, remote_object_id=remote_object_id)
+    if played_at is not None:
+        entry.created_at = played_at
+    session.add(entry)
+
+    if await scrobbler.has_active_config(session, user_id):
+        scrobbler.enqueue_remote_scrobble(
+            user_id,
+            remote_object_id,
+            int(played_at.timestamp()) if played_at is not None else None,
+        )
+
+
 def _parse_external_range_header(
     range_header: Optional[str],
     size: Optional[int],

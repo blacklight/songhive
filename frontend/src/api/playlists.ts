@@ -1,6 +1,8 @@
 import type { components } from "./types";
 import { apiRequest, apiRequestWithHeaders } from "./client";
+import type { RemoteObject } from "./remote";
 import type { QueueTrack } from "@/player/types";
+import { remoteObjectToQueueTrack } from "@/utils/remoteObject";
 
 export type PlaylistResponse = components["schemas"]["PlaylistResponse"];
 export type PlaylistCreate = components["schemas"]["PlaylistCreate"];
@@ -31,13 +33,17 @@ export interface PlaylistEpisodeItem {
   played: boolean;
 }
 
-/** One ordered playlist entry — a track or a podcast episode. */
+/**
+ * One ordered playlist entry — a local track, a podcast episode, or a
+ * cached remote object (federated track).
+ */
 export interface PlaylistItemResponse {
   item_id: string;
   position: number;
-  type: "track" | "episode";
+  type: "track" | "episode" | "remote";
   track: TrackResponse | null;
   episode: PlaylistEpisodeItem | null;
+  remote?: RemoteObject | null;
 }
 
 export function listPlaylists(params?: {
@@ -132,6 +138,11 @@ export interface AddTracksToPlaylistRequest {
   episode_ids?: string[];
   /** Adds every cataloged episode of the podcast, oldest first. */
   podcast_id?: string;
+  /**
+   * Cached remote object ids — remote tracks resolve to themselves, remote
+   * containers (album/artist/library) expand to their cached tracks.
+   */
+  remote_object_ids?: string[];
   allow_duplicates?: boolean;
 }
 
@@ -139,6 +150,7 @@ export interface AddTracksToPlaylistResponse {
   added: number;
   track_ids: string[];
   episode_ids?: string[];
+  remote_object_ids?: string[];
 }
 
 export function addTracksToPlaylist(
@@ -170,12 +182,14 @@ export function listPlaylistTracks(
 export interface RemoveTracksFromPlaylistRequest {
   track_ids?: string[];
   episode_ids?: string[];
+  remote_object_ids?: string[];
 }
 
 export interface RemoveTracksFromPlaylistResponse {
   removed: number;
   track_ids: string[];
   episode_ids?: string[];
+  remote_object_ids?: string[];
 }
 
 export interface ReorderPlaylistTracksRequest {
@@ -281,13 +295,18 @@ export function listPlaylistItems(
 /**
  * Map a playlist item to a QueueTrack the player can consume: track items
  * carry a full TrackResponse; episode items become remote queue tracks that
- * stream the episode's enclosure URL.
+ * stream the episode's enclosure URL; remote items become remote queue
+ * tracks that play through the remote stream-resolution endpoint.
  */
 export function playlistItemToQueueTrack(
   item: PlaylistItemResponse,
 ): QueueTrack | null {
   if (item.type === "track" && item.track) {
     return item.track as QueueTrack;
+  }
+  if (item.type === "remote" && item.remote) {
+    // Keep unplayable remote items in the list so they can be removed.
+    return remoteObjectToQueueTrack(item.remote, { requirePlayable: false });
   }
   if (item.type === "episode" && item.episode) {
     const episode = item.episode;

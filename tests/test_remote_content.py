@@ -688,6 +688,9 @@ async def _remote_row(db_session, **kwargs) -> RemoteObject:
         summary=kwargs.get("summary"),
         content=kwargs.get("content"),
     )
+    for field in ("parent_url", "media_of_url", "payload", "audio_url"):
+        if field in kwargs:
+            setattr(row, field, kwargs[field])
     db_session.add(row)
     await db_session.flush()
     return row
@@ -924,3 +927,471 @@ class TestRemoteRoutes:
             headers=auth_headers(admin_user),
         )
         assert bad.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Remote objects as first-class members (collection closure, favorites,
+# playlist/library membership, activity mirror for interactions)
+# ---------------------------------------------------------------------------
+
+
+async def _remote_music_tree(db_session):
+    """artist -> album -> track rows, linked through ``parent_url``."""
+    artist = await _remote_row(
+        db_session,
+        canonical_url=f"https://{REMOTE_DOMAIN}/artists/1",
+        object_type="Artist",
+        resource_type="artist",
+        name="Remote Artist",
+    )
+    album = await _remote_row(
+        db_session,
+        canonical_url=f"https://{REMOTE_DOMAIN}/albums/1",
+        object_type="Album",
+        resource_type="album",
+        name="Remote Album",
+    )
+    album.parent_url = artist.canonical_url
+    track = await _remote_row(
+        db_session,
+        canonical_url=f"https://{REMOTE_DOMAIN}/tracks/1",
+        object_type="Track",
+        resource_type="track",
+        name="Remote Track",
+    )
+    track.parent_url = album.canonical_url
+    await db_session.flush()
+    return artist, album, track
+
+
+class TestRemoteMembership:
+    async def test_collection_closure_surfaces_ancestors(self, db_session, remote_config, regular_user):
+        from songhive.models.collection_item import CollectionItem
+
+        artist, album, track = await _remote_music_tree(db_session)
+        db_session.add(CollectionItem(user_id=regular_user.id, item_type="remote", item_id=str(track.id)))
+        await db_session.flush()
+
+        ids = await rc.remote_collection_object_ids(db_session, regular_user)
+        assert ids == {str(artist.id), str(album.id), str(track.id)}
+
+        rows, total = await rc.list_cached_remote_objects(
+            db_session, remote_config, collection_only=True, user=regular_user
+        )
+        assert total == 3
+        assert {r.resource_type for r in rows} == {"artist", "album", "track"}
+
+    async def test_collection_closure_descends_into_containers(self, db_session, remote_config, regular_user):
+        from songhive.models.collection_item import CollectionItem
+
+        artist, album, track = await _remote_music_tree(db_session)
+        db_session.add(CollectionItem(user_id=regular_user.id, item_type="remote", item_id=str(album.id)))
+        await db_session.flush()
+
+        ids = await rc.remote_collection_object_ids(db_session, regular_user)
+        assert ids == {str(artist.id), str(album.id), str(track.id)}
+
+    async def test_collection_route_lists_remote_closure(self, client, db_session, regular_user, auth_headers):
+        from songhive.models.collection_item import CollectionItem
+
+        artist, album, track = await _remote_music_tree(db_session)
+        db_session.add(CollectionItem(user_id=regular_user.id, item_type="remote", item_id=str(track.id)))
+        await db_session.commit()
+
+        for kind, expected in (
+            ("track", "Remote Track"),
+            ("album", "Remote Album"),
+            ("artist", "Remote Artist"),
+        ):
+            res = client.get(
+                "/api/v1/remote/objects",
+                params={"resource_type": kind, "collection": "true"},
+                headers=auth_headers(regular_user),
+            )
+            assert res.status_code == 200
+            assert [i["name"] for i in res.json()["items"]] == [expected]
+
+        # Another user with nothing collected sees an empty closure.
+        anon = client.get("/api/v1/remote/objects", params={"collection": "true"})
+        assert anon.status_code == 401
+
+    async def test_remote_favorite_roundtrip(self, client, db_session, regular_user, auth_headers):
+        _, _, track = await _remote_music_tree(db_session)
+        await db_session.commit()
+
+        fav = client.post(
+            f"/api/v1/remote/objects/{track.id}/favorite",
+            headers=auth_headers(regular_user),
+        )
+        assert fav.status_code == 201
+
+        listed = client.get(
+            "/api/v1/remote/objects",
+            params={"favorites": "true"},
+            headers=auth_headers(regular_user),
+        )
+        assert [i["name"] for i in listed.json()["items"]] == ["Remote Track"]
+        assert listed.json()["items"][0]["favorited"] is True
+
+        # The favorites endpoint exposes the remote membership too.
+        favorites = client.get("/api/v1/favorites/", headers=auth_headers(regular_user))
+        assert favorites.status_code == 200
+        assert favorites.json()[0]["remote_object_id"] == str(track.id)
+        assert favorites.json()[0]["track_id"] is None
+
+        gone = client.delete(
+            f"/api/v1/remote/objects/{track.id}/favorite",
+            headers=auth_headers(regular_user),
+        )
+        assert gone.status_code == 204
+        empty = client.get(
+            "/api/v1/remote/objects",
+            params={"favorites": "true"},
+            headers=auth_headers(regular_user),
+        )
+        assert empty.json()["items"] == []
+
+    async def test_favorite_rejects_non_track(self, client, db_session, regular_user, auth_headers):
+        _, album, _ = await _remote_music_tree(db_session)
+        await db_session.commit()
+        res = client.post(
+            f"/api/v1/remote/objects/{album.id}/favorite",
+            headers=auth_headers(regular_user),
+        )
+        assert res.status_code == 422
+
+    async def test_playlist_remote_container_expands_to_tracks(self, client, db_session, regular_user, auth_headers):
+        from songhive.models.playlist import Playlist
+
+        _, album, track = await _remote_music_tree(db_session)
+        playlist = Playlist(name="Mix", owner_id=regular_user.id, visibility=Visibility.PUBLIC.value)
+        db_session.add(playlist)
+        await db_session.commit()
+
+        added = client.post(
+            f"/api/v1/playlists/{playlist.id}/tracks",
+            json={"remote_object_ids": [str(album.id)]},
+            headers=auth_headers(regular_user),
+        )
+        assert added.status_code == 201, added.json()
+        assert added.json()["remote_object_ids"] == [str(track.id)]
+
+        items = client.get(
+            f"/api/v1/playlists/{playlist.id}/items",
+            headers=auth_headers(regular_user),
+        )
+        assert items.status_code == 200
+        body = items.json()
+        assert len(body) == 1
+        assert body[0]["type"] == "remote"
+        assert body[0]["remote"]["id"] == str(track.id)
+        assert body[0]["remote"]["domain"] == REMOTE_DOMAIN
+
+        removed = client.post(
+            f"/api/v1/playlists/{playlist.id}/tracks/remove",
+            json={"remote_object_ids": [str(track.id)]},
+            headers=auth_headers(regular_user),
+        )
+        assert removed.status_code == 200
+        assert removed.json()["remote_object_ids"] == [str(track.id)]
+        items = client.get(
+            f"/api/v1/playlists/{playlist.id}/items",
+            headers=auth_headers(regular_user),
+        )
+        assert items.json() == []
+
+    async def test_library_remote_membership(self, client, db_session, regular_user, auth_headers):
+        from songhive.models.library import Library
+
+        _, _, track = await _remote_music_tree(db_session)
+        library = Library(
+            name="Shelf",
+            owner_id=regular_user.id,
+            visibility=Visibility.PUBLIC.value,
+        )
+        db_session.add(library)
+        await db_session.commit()
+
+        added = client.post(
+            f"/api/v1/libraries/{library.id}/tracks/add",
+            json={"remote_object_ids": [str(track.id)]},
+            headers=auth_headers(regular_user),
+        )
+        assert added.status_code == 201, added.json()
+        assert added.json()["remote_object_ids"] == [str(track.id)]
+
+        listed = client.get(
+            "/api/v1/remote/objects",
+            params={"library": str(library.id)},
+            headers=auth_headers(regular_user),
+        )
+        assert [i["id"] for i in listed.json()["items"]] == [str(track.id)]
+
+        removed = client.post(
+            f"/api/v1/libraries/{library.id}/tracks/remove",
+            json={"remote_object_ids": [str(track.id)]},
+            headers=auth_headers(regular_user),
+        )
+        assert removed.status_code == 200
+        listed = client.get(
+            "/api/v1/remote/objects",
+            params={"library": str(library.id)},
+            headers=auth_headers(regular_user),
+        )
+        assert listed.json()["items"] == []
+
+    async def test_ensure_activity_and_like(self, client, db_session, regular_user, auth_headers):
+        _, _, track = await _remote_music_tree(db_session)
+        await db_session.commit()
+
+        ensured = client.post(
+            f"/api/v1/remote/objects/{track.id}/activity",
+            headers=auth_headers(regular_user),
+        )
+        assert ensured.status_code == 200, ensured.json()
+        activity_id = ensured.json()["object"]["activity_id"]
+        assert activity_id
+        assert ensured.json()["activity"]["id"] == activity_id
+
+        # Idempotent — same activity row.
+        again = client.post(
+            f"/api/v1/remote/objects/{track.id}/activity",
+            headers=auth_headers(regular_user),
+        )
+        assert again.json()["object"]["activity_id"] == activity_id
+
+        # Standard interactions work against the remote mirror.
+        like = client.post(
+            f"/api/v1/activities/{activity_id}/like",
+            headers=auth_headers(regular_user),
+        )
+        assert like.status_code == 201, like.json()
+
+        likes = client.get(
+            f"/api/v1/activities/{activity_id}/likes",
+            headers=auth_headers(regular_user),
+        )
+        assert likes.status_code == 200
+        assert len(likes.json()["actors"]) == 1
+
+
+async def _remote_rendition(db_session, track: RemoteObject) -> RemoteObject:
+    """A Funkwhale-style ``Audio`` rendition row of ``track``."""
+    return await _remote_row(
+        db_session,
+        canonical_url=f"https://{REMOTE_DOMAIN}/uploads/{track.id}",
+        object_type="Audio",
+        resource_type="track",
+        name=f"Artist - Album - {track.name}",
+        parent_url=track.parent_url,
+        media_of_url=track.canonical_url,
+        audio_url=f"https://{REMOTE_DOMAIN}/listen/{track.id}",
+        payload={
+            "type": "Audio",
+            "id": f"https://{REMOTE_DOMAIN}/uploads/{track.id}",
+            "name": f"Artist - Album - {track.name}",
+            "track": {"type": "Track", "id": track.canonical_url, "name": track.name},
+        },
+    )
+
+
+class TestRemoteRenditions:
+    async def test_object_name_prefers_embedded_track_title(self):
+        doc = {
+            "type": "Audio",
+            "name": "Artist - Album - Title",
+            "track": {"type": "Track", "id": "https://x.invalid/t/1", "name": "Title"},
+        }
+        assert rc._object_name(doc) == "Title"
+        assert rc._object_name({"type": "Audio", "name": "Only name"}) == "Only name"
+
+    async def test_display_name_normalizes_cached_rendition(self, db_session):
+        _, _, track = await _remote_music_tree(db_session)
+        rendition = await _remote_rendition(db_session, track)
+        assert rc.remote_object_display_name(rendition) == track.name
+        assert rc.remote_object_display_name(track) == track.name
+
+    async def test_children_hide_rendition_when_target_cached(self, db_session):
+        _, album, track = await _remote_music_tree(db_session)
+        rendition = await _remote_rendition(db_session, track)
+        children = await rc.get_remote_object_children(db_session, album)
+        assert [c.id for c in children] == [track.id]
+
+        # Tombstoning the target makes the rendition visible again.
+        from datetime import datetime, timezone
+
+        track.unavailable_at = datetime.now(timezone.utc)
+        await db_session.flush()
+        children = await rc.get_remote_object_children(db_session, album)
+        assert [c.id for c in children] == [rendition.id]
+
+    async def test_resolve_track_ids_folds_rendition(self, db_session, remote_config):
+        _, album, track = await _remote_music_tree(db_session)
+        rendition = await _remote_rendition(db_session, track)
+
+        # A rendition id resolves to its entity row.
+        ids = await rc.resolve_remote_track_ids(db_session, remote_config, [str(rendition.id)])
+        assert ids == [str(track.id)]
+
+        # Container expansion lists each entity once.
+        ids = await rc.resolve_remote_track_ids(db_session, remote_config, [str(album.id)])
+        assert ids == [str(track.id)]
+
+    async def test_collection_closure_folds_rendition_seed(self, db_session, remote_config, regular_user):
+        from songhive.models.collection_item import CollectionItem
+
+        artist, album, track = await _remote_music_tree(db_session)
+        rendition = await _remote_rendition(db_session, track)
+        db_session.add(CollectionItem(user_id=regular_user.id, item_type="remote", item_id=str(rendition.id)))
+        await db_session.flush()
+
+        ids = await rc.remote_collection_object_ids(db_session, regular_user)
+        assert str(rendition.id) not in ids
+        assert ids == {str(artist.id), str(album.id), str(track.id)}
+
+    async def test_resource_detail_nests_grandchildren(self, client, db_session, regular_user, auth_headers):
+        artist, album, track = await _remote_music_tree(db_session)
+        await db_session.commit()
+
+        res = client.get(f"/api/v1/remote/artist/{artist.id}", headers=auth_headers(regular_user))
+        assert res.status_code == 200
+        items = res.json()["items"]
+        assert [i["id"] for i in items] == [str(album.id)]
+        assert [t["id"] for t in items[0]["items"]] == [str(track.id)]
+
+    async def test_activity_response_embeds_remote_object(self, client, db_session, regular_user, auth_headers):
+        _, _, track = await _remote_music_tree(db_session)
+        track.payload = {
+            "type": "Track",
+            "id": track.canonical_url,
+            "name": track.name,
+        }
+        await db_session.commit()
+
+        ensured = client.post(
+            f"/api/v1/remote/objects/{track.id}/activity",
+            headers=auth_headers(regular_user),
+        )
+        assert ensured.status_code == 200, ensured.json()
+        remote_object = ensured.json()["activity"]["remote_object"]
+        assert remote_object["name"] == "Remote Track"
+        assert remote_object["resource_type"] == "track"
+        assert remote_object["domain"] == REMOTE_DOMAIN
+        assert remote_object["url"] == f"/remote/track/{track.id}"
+
+        # The same embed is present when fetching the activity directly.
+        activity_id = ensured.json()["activity"]["id"]
+        fetched = client.get(f"/api/v1/activities/{activity_id}", headers=auth_headers(regular_user))
+        assert fetched.json()["remote_object"]["id"] == str(track.id)
+
+
+class TestRemoteListenEndpoints:
+    async def test_listen_records_history_and_enqueues_scrobble(
+        self, client, db_session, regular_user, auth_headers, _no_real_celery_broker
+    ):
+        from sqlalchemy import select
+
+        from songhive.models.history import ListeningHistory
+        from songhive.models.scrobble import ScrobbleConfig
+
+        _, _, track = await _remote_music_tree(db_session)
+        db_session.add(
+            ScrobbleConfig(
+                user_id=str(regular_user.id),
+                service="lastfm",
+                username="alice",
+                session_key="sk",
+            )
+        )
+        await db_session.commit()
+
+        res = client.post(
+            f"/api/v1/remote/objects/{track.id}/listen",
+            headers=auth_headers(regular_user),
+        )
+        assert res.status_code == 201, res.json()
+
+        entry = await db_session.scalar(
+            select(ListeningHistory).where(ListeningHistory.remote_object_id == str(track.id))
+        )
+        assert entry is not None
+        assert entry.track_id is None
+        assert entry.user_id == str(regular_user.id)
+        names = [call[0][0] for call in _no_real_celery_broker.call_args_list]
+        assert "songhive.tasks.scrobbling.scrobble" in names
+
+    async def test_listen_rejects_missing_and_non_track(self, client, db_session, regular_user, auth_headers):
+        _, album, _ = await _remote_music_tree(db_session)
+        await db_session.commit()
+        headers = auth_headers(regular_user)
+
+        assert client.post("/api/v1/remote/objects/nope/listen", headers=headers).status_code == 404
+        assert client.post(f"/api/v1/remote/objects/{album.id}/listen", headers=headers).status_code == 422
+
+    async def test_listen_requires_authentication(self, client, db_session):
+        _, _, track = await _remote_music_tree(db_session)
+        await db_session.commit()
+        assert client.post(f"/api/v1/remote/objects/{track.id}/listen").status_code == 401
+
+    async def test_now_playing_enqueues_remote_submission(
+        self, client, db_session, regular_user, auth_headers, _no_real_celery_broker
+    ):
+        from songhive.models.scrobble import ScrobbleConfig
+
+        _, _, track = await _remote_music_tree(db_session)
+        db_session.add(
+            ScrobbleConfig(
+                user_id=str(regular_user.id),
+                service="lastfm",
+                username="alice",
+                session_key="sk",
+            )
+        )
+        await db_session.commit()
+
+        res = client.post(
+            f"/api/v1/remote/objects/{track.id}/now-playing",
+            headers=auth_headers(regular_user),
+        )
+        assert res.status_code == 204
+        calls = [
+            call
+            for call in _no_real_celery_broker.call_args_list
+            if call[0][0] == "songhive.tasks.scrobbling.now_playing"
+        ]
+        assert len(calls) == 1
+        args = calls[0].kwargs.get("args") or calls[0][0][1]
+        assert args[-1] == "remote"
+        assert str(track.id) in args
+
+    async def test_now_playing_noop_without_config(
+        self, client, db_session, regular_user, auth_headers, _no_real_celery_broker
+    ):
+        _, _, track = await _remote_music_tree(db_session)
+        await db_session.commit()
+
+        res = client.post(
+            f"/api/v1/remote/objects/{track.id}/now-playing",
+            headers=auth_headers(regular_user),
+        )
+        assert res.status_code == 204
+        names = [call[0][0] for call in _no_real_celery_broker.call_args_list]
+        assert "songhive.tasks.scrobbling.now_playing" not in names
+
+    async def test_history_lists_remote_entries(self, client, db_session, regular_user, auth_headers):
+        from songhive.models.history import ListeningHistory
+
+        _, _, track = await _remote_music_tree(db_session)
+        db_session.add(ListeningHistory(user_id=str(regular_user.id), remote_object_id=str(track.id)))
+        await db_session.commit()
+
+        res = client.get("/api/v1/history/", headers=auth_headers(regular_user))
+        assert res.status_code == 200
+        items = res.json()
+        assert len(items) == 1
+        entry = items[0]
+        assert entry["track_id"] is None
+        assert entry["title"] == "Remote Track"
+        assert entry["remote"]["id"] == str(track.id)
+        assert entry["remote"]["resource_type"] == "track"
+        assert entry["remote"]["domain"] == REMOTE_DOMAIN

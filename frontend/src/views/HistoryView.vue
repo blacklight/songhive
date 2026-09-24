@@ -8,8 +8,11 @@ import { usePlayerStore } from "@/stores/player";
 import { useToastStore } from "@/stores/toast";
 import { useMediaQuery } from "@/composables/useMediaQuery";
 import { toQueueTrack } from "@/player/enrich";
+import { remoteObjectToQueueTrack } from "@/utils/remoteObject";
+import type { RemoteObject } from "@/api/remote";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppTable, { type Column } from "@/components/ui/AppTable.vue";
@@ -82,10 +85,22 @@ function onNext() {
   if (hasMore.value) load(page.value + 1);
 }
 
+async function entryToQueueTrack(
+  entry: HistoryEntry,
+): Promise<QueueTrack | null> {
+  if (entry.remote) {
+    return remoteObjectToQueueTrack(entry.remote as RemoteObject);
+  }
+  if (!entry.track_id) return null;
+  const track = await getTrack(entry.track_id);
+  return toQueueTrack(track, { artist_name: entry.artist ?? "" });
+}
+
 async function onPlayAgain(entry: HistoryEntry) {
   try {
-    const track = await getTrack(entry.track_id);
-    player.playTrack(toQueueTrack(track, { artist_name: entry.artist ?? "" }));
+    const queueTrack = await entryToQueueTrack(entry);
+    if (queueTrack === null) throw new Error(t("errors.unknown"));
+    player.playTrack(queueTrack);
   } catch (err) {
     toast.push({
       type: "error",
@@ -103,13 +118,7 @@ async function onPlayAll() {
   if (visible.length === 0) return;
 
   const resolved = await Promise.all(
-    visible.map((entry) =>
-      getTrack(entry.track_id)
-        .then((track) =>
-          toQueueTrack(track, { artist_name: entry.artist ?? "" }),
-        )
-        .catch(() => null),
-    ),
+    visible.map((entry) => entryToQueueTrack(entry).catch(() => null)),
   );
 
   const tracks = resolved.filter(
@@ -220,6 +229,19 @@ onMounted(() => load());
         :loading="loading"
         :empty-label="emptyLabel"
       >
+        <template #row-title="{ row }">
+          <span class="history-view__title-cell">
+            {{ row.title }}
+            <span
+              v-if="asRow(row).entry.remote"
+              class="history-view__remote-badge"
+              :title="asRow(row).entry.remote?.domain ?? ''"
+            >
+              <AppIcon name="globe" class="history-view__remote-icon" />
+              {{ asRow(row).entry.remote?.domain }}
+            </span>
+          </span>
+        </template>
         <template #row-actions="{ row }">
           <AppButton
             size="sm"
@@ -242,6 +264,14 @@ onMounted(() => load());
           <div class="history-view__card-header">
             <span class="history-view__card-title">
               {{ entry.title ?? t("pages.history.untitled") }}
+            </span>
+            <span
+              v-if="entry.remote"
+              class="history-view__remote-badge"
+              :title="entry.remote.domain ?? ''"
+            >
+              <AppIcon name="globe" class="history-view__remote-icon" />
+              {{ entry.remote.domain }}
             </span>
           </div>
 
@@ -378,6 +408,30 @@ onMounted(() => load());
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+}
+
+.history-view__title-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.history-view__remote-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.125rem var(--space-2);
+  border-radius: var(--radius-full, 999px);
+  background-color: var(--color-surface-alt, var(--color-surface));
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.history-view__remote-icon {
+  font-size: 0.7rem;
 }
 
 .history-view__card-title {

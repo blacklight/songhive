@@ -190,6 +190,9 @@ const contentHtml = computed(
 // activity's embedded object — ``Image``/image ``Document`` entries render
 // inline, ``Audio`` entries get a player, and anything else becomes a link.
 const attachments = computed(() => activity.value.attachments ?? []);
+// Remote music mirrors (entity_type "remote") embed the object's summary
+// instead of text content — the card links to the local /remote page.
+const remoteObject = computed(() => activity.value.remote_object ?? null);
 const imageAttachments = computed(() =>
   attachments.value.filter(
     (a) => a.url && (a.mediaType ?? "").startsWith("image/"),
@@ -896,6 +899,44 @@ async function copyUrl() {
       />
     </p>
 
+    <RouterLink
+      v-if="remoteObject?.url"
+      :to="remoteObject.url"
+      class="activity-card__remote-object"
+    >
+      <img
+        v-if="remoteObject.image_url"
+        :src="remoteObject.image_url"
+        :alt="remoteObject.name ?? ''"
+        class="activity-card__remote-object-image"
+        loading="lazy"
+      />
+      <span v-else class="activity-card__remote-object-icon">
+        <AppIcon name="globe" />
+      </span>
+      <span class="activity-card__remote-object-body">
+        <span class="activity-card__remote-object-name">{{
+          remoteObject.name || remoteObject.object_type
+        }}</span>
+        <span
+          v-if="remoteObject.artist_name || remoteObject.album_name"
+          class="activity-card__remote-object-sub"
+        >
+          {{
+            [remoteObject.artist_name, remoteObject.album_name]
+              .filter(Boolean)
+              .join(" — ")
+          }}
+        </span>
+      </span>
+      <span
+        v-if="remoteObject.domain"
+        class="activity-card__remote-object-domain"
+      >
+        <AppIcon name="globe" spacing="right" />{{ remoteObject.domain }}
+      </span>
+    </RouterLink>
+
     <div v-if="attachments.length" class="activity-card__attachments">
       <a
         v-for="(attachment, index) in imageAttachments"
@@ -1490,6 +1531,73 @@ async function copyUrl() {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.activity-card__remote-object {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.activity-card__remote-object:hover {
+  border-color: var(--color-text-muted);
+}
+
+.activity-card__remote-object-image,
+.activity-card__remote-object-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.activity-card__remote-object-image {
+  object-fit: cover;
+}
+
+.activity-card__remote-object-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface);
+  color: var(--color-text-muted);
+}
+
+.activity-card__remote-object-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.activity-card__remote-object-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-card__remote-object-sub {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-card__remote-object-domain {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
 }
 
 .activity-card__mention {
