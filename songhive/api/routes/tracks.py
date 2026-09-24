@@ -72,7 +72,7 @@ from ..deps import (
     get_storage_service,
     require_access,
 )
-from ..middleware.rate_limit import rate_limit_account
+from ..middleware.rate_limit import rate_limit_account, rate_limit_user_or_ip
 from ..responses import (
     TrackResponse,
     _is_loaded,
@@ -535,7 +535,7 @@ def _cleanup_temp_file(path: Union[str, Path]) -> None:
 
 @router.get(
     "/{track_id}/download",
-    dependencies=[Depends(require_access("track")), Depends(rate_limit_account)],
+    dependencies=[Depends(require_access("track")), Depends(rate_limit_user_or_ip)],
 )
 async def download_track(
     track_id: str,

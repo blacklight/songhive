@@ -5,10 +5,12 @@ Only public tracks should be serialized into ActivityPub objects and
 activities. The audio stream URL must point to the public download endpoint.
 """
 
+from songhive.federation._common import get_stream_url
 from songhive.federation.activities import create_audio_activity
-from songhive.federation.serializers import track_to_audio_object
+from songhive.federation.serializers import track_to_attachment, track_to_audio_object, track_to_note_object
 from songhive.models import Visibility
 from songhive.models.artist import Artist
+from songhive.models.external_track import ExternalTrack
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 
@@ -29,6 +31,20 @@ def _make_track(visibility: str, audio_file_id: str = "file-1") -> Track:
         visibility=visibility,
     )
     track.id = "track-1"
+    return track
+
+
+def _make_external_track(visibility: str, state: str = "active") -> Track:
+    """A track whose bytes live on an external provider (e.g. WebDAV)."""
+    track = _make_track(visibility, audio_file_id=None)
+    track.audio_mime_type = "audio/flac"
+    track.external_track = ExternalTrack(
+        external_library_id="lib-1",
+        provider_key="music/song.flac",
+        provider_mime_type="audio/flac",
+        provider_size=30_000_000,
+        state=state,
+    )
     return track
 
 
@@ -256,3 +272,133 @@ def test_create_audio_activity_includes_actor_attribution():
     ]
     assert "attachment" in activity["object"]
     assert activity["object"]["attachment"][0]["type"] == "Document"
+
+
+def test_get_stream_url_external_track():
+    """External tracks stream through the track download endpoint."""
+    track = _make_external_track(Visibility.PUBLIC.value)
+    assert get_stream_url(track, "music.example.com") == "https://music.example.com/api/v1/tracks/track-1/download"
+
+
+def test_get_stream_url_inactive_external_track():
+    """A non-active external backing has no playable media URL."""
+    track = _make_external_track(Visibility.PUBLIC.value, state="missing")
+    assert get_stream_url(track, "music.example.com") is None
+
+
+def test_get_stream_url_without_media():
+    """A track with no stored file and no external backing has no media URL."""
+    track = _make_track(Visibility.PUBLIC.value, audio_file_id=None)
+    assert get_stream_url(track, "music.example.com") is None
+
+
+def test_track_to_audio_object_external_track():
+    """An external track advertises the track download endpoint, not the page."""
+    track = _make_external_track(Visibility.PUBLIC.value)
+    artist = _make_artist()
+    obj = track_to_audio_object(track, artist, "music.example.com")
+
+    assert obj is not None
+    assert obj["url"][0] == {
+        "type": "Link",
+        "href": "https://music.example.com/api/v1/tracks/track-1/download",
+        "mediaType": "audio/flac",
+        "mimeType": "audio/flac",
+    }
+    assert obj["url"][1] == {
+        "type": "Link",
+        "href": "https://music.example.com/tracks/track-1",
+        "mediaType": "text/html",
+        "mimeType": "text/html",
+    }
+    # Provider-reported size stands in for the missing StoredFile.
+    assert obj["size"] == 30_000_000
+    assert obj["bitrate"] == 2_000_000
+    assert obj["attachment"] == [
+        {
+            "type": "Document",
+            "mediaType": "audio/flac",
+            "url": "https://music.example.com/api/v1/tracks/track-1/download",
+            "name": "TestTrack",
+            "songhive:trackTitle": "TestTrack",
+            "songhive:artistName": "TestArtist",
+            "songhive:trackUrl": "https://music.example.com/tracks/track-1",
+        }
+    ]
+
+
+def test_track_to_audio_object_inactive_external_track():
+    """A non-active external track emits only the HTML page link."""
+    track = _make_external_track(Visibility.PUBLIC.value, state="missing")
+    artist = _make_artist()
+    obj = track_to_audio_object(track, artist, "music.example.com")
+
+    assert obj is not None
+    assert obj["url"] == [
+        {
+            "type": "Link",
+            "href": "https://music.example.com/tracks/track-1",
+            "mediaType": "text/html",
+            "mimeType": "text/html",
+        }
+    ]
+    assert "attachment" not in obj
+
+
+def test_track_to_audio_object_no_media_emits_no_audio_link():
+    """A track with no playable media does not label its page as audio."""
+    track = _make_track(Visibility.PUBLIC.value, audio_file_id=None)
+    artist = _make_artist()
+    obj = track_to_audio_object(track, artist, "music.example.com")
+
+    assert obj is not None
+    assert all(link["mediaType"] == "text/html" for link in obj["url"])
+    assert "attachment" not in obj
+
+
+def test_track_to_attachment_external_track():
+    """External tracks produce an Audio status attachment, not a page Document."""
+    track = _make_external_track(Visibility.PUBLIC.value)
+    attachment = track_to_attachment(track, _make_artist(), "music.example.com")
+
+    assert attachment["type"] == "Audio"
+    assert attachment["mediaType"] == "audio/flac"
+    assert attachment["url"] == "https://music.example.com/api/v1/tracks/track-1/download"
+    assert attachment["name"] == "TestArtist - TestTrack"
+    assert attachment["songhive:trackUrl"] == "https://music.example.com/tracks/track-1"
+
+
+def test_track_to_attachment_inactive_external_track_falls_back_to_page():
+    """A non-active external track degrades to the track-page Document."""
+    track = _make_external_track(Visibility.PUBLIC.value, state="missing")
+    attachment = track_to_attachment(track, _make_artist(), "music.example.com")
+
+    assert attachment["type"] == "Document"
+    assert attachment["mediaType"] == "text/html"
+    assert attachment["url"] == "https://music.example.com/tracks/track-1"
+
+
+def test_create_audio_activity_external_track():
+    """Create(Audio) for an external track links the download endpoint."""
+    track = _make_external_track(Visibility.PUBLIC.value)
+    activity = create_audio_activity(
+        "https://music.example.com/users/alice",
+        track,
+        _make_artist(),
+        "music.example.com",
+    )
+
+    assert activity is not None
+    obj = activity["object"]
+    assert obj["url"][0]["href"] == "https://music.example.com/api/v1/tracks/track-1/download"
+    assert obj["attachment"][0]["url"] == "https://music.example.com/api/v1/tracks/track-1/download"
+
+
+def test_track_to_note_object_external_track_attachment():
+    """A Note share of an external track embeds the playable attachment."""
+    track = _make_external_track(Visibility.PUBLIC.value)
+    obj = track_to_note_object(track, _make_artist(), "music.example.com")
+
+    assert obj is not None
+    assert obj["attachment"][0]["type"] == "Audio"
+    assert obj["attachment"][0]["url"] == "https://music.example.com/api/v1/tracks/track-1/download"

@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `federation`: Audio tracks backed by external storage now federate
+  correctly. `Audio`/`Note` objects, status attachments, track summaries
+  and feed enclosures for external tracks previously advertised the HTML
+  track page labeled as `audio/*` (or no playable URL at all); they now
+  point to `/api/v1/tracks/{id}/download` and carry the provider's
+  `size`/`bitrate`/`mediaType` metadata.
+- `api`: `GET /api/v1/tracks/{id}/download` no longer requires
+  authentication for public tracks — the per-account rate limiter was
+  replaced by user-or-IP limiting, so anonymous Fediverse media fetchers
+  (e.g. Mastodon) can retrieve the bytes.
+- `federation`: Remote libraries and collections whose `Audio`/`Video`
+  renditions have cached `Track` entities no longer appear empty —
+  rendition rows fold onto their entity instead of being excluded from
+  children listings.
+
 ## 0.3.1
 
 ### Added

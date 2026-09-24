@@ -13,6 +13,7 @@ from songhive.models._enums import Visibility
 from songhive.models.activity import Activity
 from songhive.models.album import Album
 from songhive.models.artist import Artist
+from songhive.models.external_track import ExternalTrack
 from songhive.models.genre import Genre, GenreTrack
 from songhive.models.library import Library
 from songhive.models.library_track import LibraryTrack
@@ -20,6 +21,7 @@ from songhive.models.playlist import Playlist, PlaylistTrack
 from songhive.models.tag import Tag, TagTrack
 from songhive.models.track import Track
 from songhive.models.user import User
+from songhive.services.feeds import track_item
 
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 
@@ -673,3 +675,37 @@ async def test_feed_links_omitted_when_disabled(client, db_session, regular_user
         assert "/feeds/" not in resp.text
     finally:
         client.app.state.config.feeds.enabled = True
+
+
+def test_track_item_external_enclosure():
+    """An active external track gets a stream enclosure in feed items."""
+    track = Track(title="External Track", artist_id="artist-1", visibility=Visibility.PUBLIC.value)
+    track.id = "track-1"
+    track.external_track = ExternalTrack(
+        external_library_id="lib-1",
+        provider_key="music/song.flac",
+        provider_mime_type="audio/flac",
+        provider_size=30_000_000,
+        state="active",
+    )
+
+    item = track_item(track, "https://local.example")
+
+    assert item.enclosure_url == "https://local.example/api/v1/stream/track-1"
+    assert item.enclosure_type == "audio/flac"
+    assert item.enclosure_length == 30_000_000
+
+
+def test_track_item_inactive_external_track_has_no_enclosure():
+    """A non-active external backing produces no feed enclosure."""
+    track = Track(title="External Track", artist_id="artist-1", visibility=Visibility.PUBLIC.value)
+    track.id = "track-1"
+    track.external_track = ExternalTrack(
+        external_library_id="lib-1",
+        provider_key="music/song.flac",
+        state="missing",
+    )
+
+    item = track_item(track, "https://local.example")
+
+    assert item.enclosure_url is None

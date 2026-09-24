@@ -203,6 +203,10 @@ async def build_track_summary(
     audio_url = None
     if track.audio_file_id and _is_loaded(track, "audio_file") and track.audio_file:
         audio_url = await storage.get_url(track.audio_file)
+    elif _is_loaded(track, "external_track"):
+        external_track = getattr(track, "external_track", None)
+        if external_track is not None and external_track.state == "active":
+            audio_url = f"/api/v1/tracks/{track.id}/download"
 
     artist = None
     if _is_loaded(track, "artist") and track.artist is not None:

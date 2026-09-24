@@ -19,7 +19,7 @@ from sqlalchemy import inspect as sa_inspect
 
 from ..models import Album, Artist, StoredFile, Track, Visibility
 from ..services.genres import extract_genres_from_track, genres_to_tags
-from ._common import get_stream_url, get_tag_url, get_track_url
+from ._common import active_external_track, get_stream_url, get_tag_url, get_track_download_path, get_track_url
 
 # Namespaced keys stamped on attachment docs produced by
 # ``stored_file_to_attachment``/``track_to_attachment`` so edits can tell
@@ -519,10 +519,12 @@ def track_to_audio_object(
     Serialize a Track to an ActivityPub Audio object.
 
     Only ``public`` tracks are serialized into federation payloads. Callers
-    should pass the public download URL for the audio file,
-    ``https://{domain}/api/v1/files/{track.audio_file_id}/download``. If
-    ``stream_url`` is not provided and the track has an ``audio_file_id``,
-    the download URL is computed automatically.
+    should pass the public download URL for the audio bytes —
+    ``https://{domain}/api/v1/files/{track.audio_file_id}/download`` for
+    stored files, ``https://{domain}/api/v1/tracks/{track.id}/download`` for
+    tracks backed by an external library (e.g. WebDAV). If ``stream_url``
+    is not provided it is computed automatically; a track with no playable
+    media emits only the ``text/html`` track-page link and no attachment.
 
     ``ap_object_id`` is the ActivityPub object id used in ``Create``/``Update``
     activities. When omitted the canonical track URL is used, which is the
@@ -552,8 +554,33 @@ def track_to_audio_object(
     # IntegerField; an ISO-8601 duration would fail its import validation.
     duration_seconds = int(track.duration) if track.duration else 0
     audio_file = getattr(track, "audio_file", None) if "audio_file" not in unloaded else None
+    external_track = active_external_track(track)
     size = int(audio_file.size) if audio_file is not None and audio_file.size else 0
+    if not size and external_track is not None and external_track.provider_size:
+        size = int(external_track.provider_size)
     bitrate = int(size * 8 / duration_seconds) if size and duration_seconds else 0
+
+    # The ``text/html`` page link is always present so remote renderers can
+    # link the human page; the media link is only emitted for playable
+    # tracks — an HTML page labeled ``audio/*`` breaks remote media fetches.
+    urls = [
+        {
+            "type": "Link",
+            "href": track_url,
+            "mediaType": "text/html",
+            "mimeType": "text/html",
+        },
+    ]
+    if stream_url:
+        urls.insert(
+            0,
+            {
+                "type": "Link",
+                "href": stream_url,
+                "mediaType": media_type,
+                "mimeType": media_type,
+            },
+        )
 
     obj = {
         "type": "Audio",
@@ -564,20 +591,7 @@ def track_to_audio_object(
         # non-standard ``mimeType`` key and falls back to "text/html" per link,
         # so without it the audio download URL would be picked for display
         # instead of the track page.
-        "url": [
-            {
-                "type": "Link",
-                "href": stream_url,
-                "mediaType": media_type,
-                "mimeType": media_type,
-            },
-            {
-                "type": "Link",
-                "href": track_url,
-                "mediaType": "text/html",
-                "mimeType": "text/html",
-            },
-        ],
+        "url": urls,
         "attributedTo": _track_attributed_to(artist, domain, actor_url),
         # Federated-music (Funkwhale dialect) fields.
         "duration": duration_seconds,
@@ -821,19 +835,20 @@ def track_to_attachment(
     """
     Serialize a hosted track as a status attachment.
 
-    Tracks with an audio file become an ``Audio``-typed media object
-    embedding the stream URL so remote servers render an inline player;
-    ``audio_object_id`` links the attachment to the track's published
-    ``Audio`` object when one exists. Tracks without audio degrade to a
-    ``Document`` link to the track page. Unlike ``track_to_*_object`` this
-    serializes non-public tracks too — the attachment points at
-    access-controlled local endpoints and the author chose to reference it.
+    Tracks with playable media — a stored audio file or an active
+    external-library backing (e.g. WebDAV) — become an ``Audio``-typed
+    media object embedding the stream URL so remote servers render an
+    inline player; ``audio_object_id`` links the attachment to the track's
+    published ``Audio`` object when one exists. Tracks without playable
+    media degrade to a ``Document`` link to the track page. Unlike
+    ``track_to_*_object`` this serializes non-public tracks too — the
+    attachment points at access-controlled local endpoints and the author
+    chose to reference it.
     """
     name = f"{artist.name} - {track.title}" if artist is not None else track.title
-    if track.audio_file_id:
-        stream_url = (
-            get_stream_url(track=track, domain=domain) if domain else f"/api/v1/files/{track.audio_file_id}/download"
-        )
+    stream_path = get_track_download_path(track)
+    if stream_path is not None:
+        stream_url = f"https://{domain}{stream_path}" if domain else stream_path
         attachment: dict = {
             "type": "Audio",
             "mediaType": _track_media_type(track, _unloaded_attrs(track)),

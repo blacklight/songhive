@@ -232,6 +232,12 @@ def track_item(track: Track, base_url: str) -> FeedItem:
         item.enclosure_url = f"{base_url}/api/v1/stream/{track.id}"
         item.enclosure_type = track.audio_mime_type or track.audio_file.content_type
         item.enclosure_length = track.audio_file.size
+    else:
+        external_track = getattr(track, "external_track", None)
+        if external_track is not None and external_track.state == "active":
+            item.enclosure_url = f"{base_url}/api/v1/stream/{track.id}"
+            item.enclosure_type = track.audio_mime_type or external_track.provider_mime_type
+            item.enclosure_length = external_track.provider_size
     return item
 
 

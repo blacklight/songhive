@@ -1,9 +1,10 @@
 """Tests for external-track fields in TrackResponse and write-back enqueue."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from songhive.api.responses import build_track_summary
 from songhive.models._enums import Visibility
 from songhive.models.artist import Artist
 from songhive.models.external_library import ExternalLibrary
@@ -91,6 +92,45 @@ async def test_track_response_includes_external_fields(client, regular_user, db_
     assert data["can_write_tags"] is True
     assert data["can_delete_source"] is False
     assert data["audio_url"] == f"/api/v1/tracks/{track.id}/download"
+
+
+@pytest.mark.asyncio
+async def test_track_summary_includes_external_audio_url():
+    """TrackSummary exposes the download URL for active external tracks."""
+    track = Track(title="External Track", artist_id="artist-1", visibility=Visibility.PUBLIC.value)
+    track.id = "track-1"
+    track.external_track = ExternalTrack(
+        external_library_id="lib-1",
+        provider_key="song.mp3",
+        state="active",
+    )
+    storage = MagicMock()
+    storage.get_url = AsyncMock()
+
+    summary = await build_track_summary(track, storage)
+
+    assert summary is not None
+    assert summary.audio_url == "/api/v1/tracks/track-1/download"
+    storage.get_url.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_track_summary_skips_inactive_external_track():
+    """A non-active external backing produces no summary audio URL."""
+    track = Track(title="External Track", artist_id="artist-1", visibility=Visibility.PUBLIC.value)
+    track.id = "track-1"
+    track.external_track = ExternalTrack(
+        external_library_id="lib-1",
+        provider_key="song.mp3",
+        state="missing",
+    )
+    storage = MagicMock()
+    storage.get_url = AsyncMock()
+
+    summary = await build_track_summary(track, storage)
+
+    assert summary is not None
+    assert summary.audio_url is None
 
 
 @pytest.mark.asyncio

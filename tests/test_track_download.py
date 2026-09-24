@@ -366,3 +366,27 @@ def test_download_tombstoned_external(client, tombstoned_external_track, auth_he
     track = tombstoned_external_track
     response = client.get(f"/api/v1/tracks/{track.id}/download", headers=auth_headers(download_user))
     assert response.status_code == 404
+
+
+def test_download_local_track_anonymous(client, local_track):
+    """Fediverse media fetchers retrieve public track bytes without credentials."""
+    track, data = local_track
+    response = client.get(f"/api/v1/tracks/{track.id}/download")
+    assert response.status_code == 200
+    assert response.content == data
+
+
+def test_download_external_track_anonymous(client, external_iterator_track):
+    track, data = external_iterator_track
+    response = client.get(f"/api/v1/tracks/{track.id}/download")
+    assert response.status_code == 200
+    assert response.content == data
+
+
+def test_download_private_track_anonymous(client, db_session, local_track):
+    track, _data = local_track
+    track.visibility = Visibility.PRIVATE.value
+    db_session.add(track)
+    db_session.commit()
+    response = client.get(f"/api/v1/tracks/{track.id}/download")
+    assert response.status_code == 403

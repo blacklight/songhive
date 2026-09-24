@@ -343,10 +343,11 @@ class TestDereferenceFunkwhaleObjects:
         # ``audience``-only public visibility is honored.
         assert row.visibility == "public"
         # The first collection page was fetched and its item cached under
-        # the library.
+        # the library. The ``Audio`` upload folds onto its embedded
+        # ``Track`` entity — listings show the entity row.
         assert PAGE_URL in fake.calls
         children = await rc.get_remote_object_children(db_session, row)
-        assert [c.canonical_url for c in children] == [AUDIO_URL]
+        assert [c.canonical_url for c in children] == [TRACK_URL]
         assert children[0].resource_type == "track"
 
     async def test_library_frontend_url_dereferences(self, db_session, remote_config, fetcher):

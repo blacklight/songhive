@@ -1399,21 +1399,6 @@ async def _scan_library_first_page(
     await _cache_embedded_music_docs(session, page_doc, actor_url, config)
 
 
-def _rendition_target_cached_clause():
-    """
-    Exclude rendition rows whose media-target entity is also cached.
-
-    A Funkwhale ``Audio``/``Video`` upload and the ``Track`` it renders are
-    two rows for one music entity — when both are cached, listings show the
-    entity row only (the rendition still serves playback via
-    ``resolve_media_url``).
-    """
-    return or_(
-        RemoteObject.media_of_url.is_(None),
-        ~RemoteObject.media_of_url.in_(select(RemoteObject.canonical_url).where(RemoteObject.unavailable_at.is_(None))),
-    )
-
-
 async def _fold_renditions(session: AsyncSession, rows: List[RemoteObject]) -> List[RemoteObject]:
     """
     Replace rendition rows with their cached media-target entity rows.
@@ -1451,7 +1436,10 @@ async def get_remote_object_children(
 
     Children are cached ``remote_objects`` rows whose ``parent_url`` is the
     resource's canonical URL: tracks/uploads under a library, tracks under
-    an album, albums under an artist.
+    an album, albums under an artist. Rendition rows (a Funkwhale
+    ``Audio``/``Video`` upload) fold onto their cached media-target
+    entities — excluding them outright would leave a library whose items
+    all have cached ``Track`` docs looking empty.
     """
     stmt = (
         select(RemoteObject)
@@ -1461,12 +1449,21 @@ async def get_remote_object_children(
             # Only browsable resources — collection page rows cached by a
             # library scan carry the same ``parent_url`` but are not items.
             RemoteObject.resource_type.isnot(None),
-            _rendition_target_cached_clause(),
         )
         .order_by(RemoteObject.fetched_at.asc())
         .limit(limit)
     )
-    return list((await session.execute(stmt)).scalars().all())
+    rows = list((await session.execute(stmt)).scalars().all())
+    folded = await _fold_renditions(session, rows)
+    seen: set = set()
+    children: List[RemoteObject] = []
+    for row in folded:
+        key = str(row.id)
+        if key in seen:
+            continue
+        seen.add(key)
+        children.append(row)
+    return children
 
 
 async def get_remote_objects_children_map(
@@ -1490,16 +1487,24 @@ async def get_remote_objects_children_map(
             RemoteObject.parent_url.in_(urls),
             RemoteObject.unavailable_at.is_(None),
             RemoteObject.resource_type.isnot(None),
-            _rendition_target_cached_clause(),
         )
         .order_by(RemoteObject.fetched_at.asc())
     )
+    rows = list((await session.execute(stmt)).scalars().all())
+    # Fold renditions onto cached entities, but keep the rendition's own
+    # ``parent_url`` as the grouping key — a library's uploads stay listed
+    # under the library even though the folded ``Track``'s parent is its
+    # album.
+    folded = await _fold_renditions(session, rows)
     result: Dict[str, List[RemoteObject]] = {}
-    for row in (await session.execute(stmt)).scalars().all():
-        if row.parent_url is None:
+    seen: Dict[str, set] = {}
+    for orig, row in zip(rows, folded):
+        if orig.parent_url is None:
             continue
-        bucket = result.setdefault(row.parent_url, [])
-        if len(bucket) < limit:
+        bucket = result.setdefault(orig.parent_url, [])
+        bucket_seen = seen.setdefault(orig.parent_url, set())
+        if len(bucket) < limit and str(row.id) not in bucket_seen:
+            bucket_seen.add(str(row.id))
             bucket.append(row)
     return result
 
@@ -1890,21 +1895,41 @@ async def remote_collection_object_ids(session: AsyncSession, user: User) -> set
             break
         children = (
             await session.execute(
-                select(RemoteObject.id, RemoteObject.canonical_url, RemoteObject.parent_url)
+                select(
+                    RemoteObject.id,
+                    RemoteObject.canonical_url,
+                    RemoteObject.parent_url,
+                    RemoteObject.media_of_url,
+                )
                 .where(
                     RemoteObject.parent_url.in_(frontier_urls),
                     RemoteObject.unavailable_at.is_(None),
-                    _rendition_target_cached_clause(),
                 )
                 .limit(_REMOTE_CLOSURE_LIMIT)
             )
         ).all()
+        # Fold rendition children onto their cached targets — a collected
+        # library surfaces the tracks its uploads render.
+        child_targets = {row.media_of_url for row in children if row.media_of_url}
+        child_target_by_url = {}
+        if child_targets:
+            target_rows = (
+                await session.execute(
+                    select(RemoteObject.id, RemoteObject.canonical_url, RemoteObject.parent_url).where(
+                        RemoteObject.canonical_url.in_(child_targets),
+                        RemoteObject.unavailable_at.is_(None),
+                    )
+                )
+            ).all()
+            child_target_by_url = {row.canonical_url: row for row in target_rows}
         frontier_urls = set()
         for child in children:
-            key = str(child.id)
+            folded = child_target_by_url.get(child.media_of_url) if child.media_of_url else None
+            member = folded if folded is not None else child
+            key = str(member.id)
             if key not in known:
-                known[key] = (str(child.canonical_url), child.parent_url)
-                frontier_urls.add(str(child.canonical_url))
+                known[key] = (str(member.canonical_url), member.parent_url)
+                frontier_urls.add(str(member.canonical_url))
 
     # Ascend from every collected row (and its children) to cached parents.
     frontier_parents = {str(parent) for _, parent in known.values() if parent}
