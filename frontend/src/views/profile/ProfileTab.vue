@@ -505,10 +505,23 @@ async function onSubmit() {
   gap: var(--space-4);
 }
 
+@media (max-width: 767px) {
+  .profile-tab {
+    max-width: 90vw;
+  }
+}
+
 .profile-tab__avatar {
   display: flex;
   align-items: center;
   gap: var(--space-4);
+}
+
+@media (max-width: 767px) {
+  .profile-tab__avatar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 .profile-tab__avatar-fields {
@@ -560,6 +573,24 @@ async function onSubmit() {
   grid-template-columns: 1fr 1fr auto;
   gap: var(--space-2);
   align-items: end;
+}
+
+@media (max-width: 767px) {
+  .profile-tab__link-row {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  :deep(.app-input) {
+    width: 90%;
+  }
+
+  :deep(.profile-tab__link-row input[type="text"]),
+  :deep(.profile-tab__link-row input[type="url"]) {
+    width: 100%;
+  }
 }
 
 .profile-tab__error {
