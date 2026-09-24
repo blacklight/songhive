@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate PWA icon variants from frontend/public/logo.png.
+# Generate PWA icon variants from frontend/public/icon.svg.
 #
 # Requires ImageMagick (``magick`` or ``convert``). Run from the repository root:
 #
@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-SRC="${ROOT_DIR}/frontend/public/logo.png"
+SRC="${ROOT_DIR}/frontend/public/icon.svg"
 OUT_DIR="${ROOT_DIR}/frontend/public/pwa"
 
 if ! command -v magick >/dev/null 2>&1 && ! command -v convert >/dev/null 2>&1; then
@@ -25,13 +25,21 @@ else
 fi
 
 if [[ ! -f "${SRC}" ]]; then
-  echo "Error: Source logo not found at ${SRC}" >&2
+  echo "Error: Source icon not found at ${SRC}" >&2
   exit 1
 fi
 
 mkdir -p "${OUT_DIR}"
 
-# Common icon sizes for the manifest. Use a black background to match the logo.
+# Rasterize the SVG at a given size on a transparent background. The density
+# supersamples the 512px viewBox so downscaling stays sharp.
+rasterize() {
+  local size="$1"
+  "${MAGICK}" -background none -density 288 "${SRC}" -resize "${size}x${size}" "png:-"
+}
+
+# Common icon sizes for the manifest. The background is transparent so the
+# icon blends into launchers, splash screens and notifications.
 SIZES=(16 32 72 96 128 144 152 180 192 384 512)
 for size in "${SIZES[@]}"; do
   outfile="${OUT_DIR}/pwa-${size}x${size}.png"
@@ -39,21 +47,23 @@ for size in "${SIZES[@]}"; do
     outfile="${OUT_DIR}/apple-touch-icon.png"
   fi
   if [[ "${size}" == "32" ]]; then
-    "${MAGICK}" "${SRC}" -resize "${size}x${size}" -background black -gravity center -extent "${size}x${size}" "${OUT_DIR}/favicon-32x32.png"
+    rasterize "${size}" > "${OUT_DIR}/favicon-32x32.png"
   fi
   if [[ "${size}" == "16" ]]; then
-    "${MAGICK}" "${SRC}" -resize "${size}x${size}" -background black -gravity center -extent "${size}x${size}" "${OUT_DIR}/favicon-16x16.png"
+    rasterize "${size}" > "${OUT_DIR}/favicon-16x16.png"
   fi
-  "${MAGICK}" "${SRC}" -resize "${size}x${size}" -background black -gravity center -extent "${size}x${size}" "${outfile}"
+  rasterize "${size}" > "${outfile}"
 done
 
-# Maskable variants keep the logo inside the safe zone by scaling it to 66% of
-# the canvas and filling the remainder with a black background.
+# Maskable variants keep the hexagon inside the safe zone by scaling it to 80%
+# of the canvas; the rest stays transparent so launcher masks can clip to any
+# shape without a black background showing through.
 MASKABLE_SIZES=(192 512)
 for size in "${MASKABLE_SIZES[@]}"; do
-  target_size=$(( size * 66 / 100 ))
+  target_size=$(( size * 80 / 100 ))
   outfile="${OUT_DIR}/maskable-${size}x${size}.png"
-  "${MAGICK}" "${SRC}" -resize "${target_size}x${target_size}" -background black -gravity center -extent "${size}x${size}" "${outfile}"
+  rasterize "${target_size}" | \
+    "${MAGICK}" - -background none -gravity center -extent "${size}x${size}" "${outfile}"
 done
 
 echo "PWA icons written to ${OUT_DIR}"
