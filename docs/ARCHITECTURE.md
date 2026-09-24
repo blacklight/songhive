@@ -1997,6 +1997,25 @@ instances and with other Songhive instances.
   `POST/DELETE /api/v1/collection/{item_type}/{item_id}` bookmarks a
   cached `remote_objects` row by id — only rows with a `resource_type`
   are collectable, and nothing is copied into local music tables.
+  `GET /api/v1/remote/objects?collection=true&resource_type=...` lists
+  them (authenticated), and `RemoteCollectionSection.vue` renders them
+  inside the Tracks/Albums/Artists/Libraries/Playlists collection views.
+- Remote media **resolution** happens at play time, never at cache time:
+  a remote *track* is metadata whose media can be a direct `audio/*`
+  link (`audio_url`) or a *rendition* sibling (`Audio`/`Video` document
+  embedding `track`). Rendition rows record that link on the indexed
+  `remote_objects.media_of_url` column (`Audio`→`track.id`), so
+  `media_of_url == track.canonical_url` resolves without payload scans
+  (a bounded JSON-path fallback covers rows cached before the column
+  existed). `GET /api/v1/remote/objects/{id}/stream` resolves through
+  `remote_content.resolve_media_url` — own `audio_url` first, else a
+  cached rendition — and 302s to the media URL (404 when nothing is
+  playable). Responses advertise `stream_url` only when something is
+  resolvable now; it is computed in one batched `rendition_audio_map`
+  query per response. This endpoint is the seam for providers whose
+  links expire or require resolution (e.g. future YouTube/Spotify
+  adapters): they plug into `resolve_media_url` and clients never
+  handle a remote URL directly.
 - Remote object responses (`RemoteObjectResponse`) carry
   `in_collection`, `follow_state`, `parent` and `items` (cached
   children), and `RemoteResourceView.vue` renders them with follow and
