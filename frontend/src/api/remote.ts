@@ -25,11 +25,24 @@ export interface RemoteObject {
   content?: string | null;
   image_url?: string | null;
   audio_url?: string | null;
+  stream_url?: string | null;
+  /** Playback hints from the cached document payload (music resources). */
+  duration?: number | null;
+  artist_name?: string | null;
+  album_name?: string | null;
   visibility: string;
   fetched_at?: string | null;
   unavailable: boolean;
   /** Internal SPA route. */
   url: string;
+  /** Whether the caller has this object in their collection. */
+  in_collection?: boolean;
+  /** The caller's object-follow state (``pending``/``accepted``). */
+  follow_state?: string | null;
+  /** Containing resource (album of a track, library of an upload). */
+  parent?: RemoteObject | null;
+  /** Cached children — e.g. the tracks of a remote album or library. */
+  items?: RemoteObject[];
 }
 
 export interface RemoteLookupResponse {
@@ -45,6 +58,10 @@ export interface RemoteLookupResponse {
 export interface RemoteObjectDetail {
   object: RemoteObject;
   activity?: ActivityResponse | null;
+}
+
+export interface RemoteObjectList {
+  items: RemoteObject[];
 }
 
 export interface RemoteActorActivities {
@@ -141,5 +158,51 @@ export function getRemoteResource(
 ): Promise<RemoteObject> {
   return apiRequest<RemoteObject>(
     `/remote/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}`,
+  );
+}
+
+/**
+ * Browse cached remote resources — no remote fetch. ``collection``
+ * restricts to remote objects the caller saved to their collection.
+ */
+export function listRemoteObjects(options?: {
+  resource_type?: RemoteResourceKind;
+  collection?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<RemoteObjectList> {
+  return apiRequest<RemoteObjectList>("/remote/objects", {
+    query: {
+      resource_type: options?.resource_type,
+      collection: options?.collection || undefined,
+      limit: options?.limit,
+      offset: options?.offset,
+    },
+  });
+}
+
+export interface RemoteObjectFollowState {
+  follow_state?: string | null;
+}
+
+/**
+ * Follow a remote resource — delivers a signed object-scoped ``Follow``
+ * to its controlling actor. Following a remote library subscribes the
+ * instance to new items published into it.
+ */
+export function followRemoteObject(
+  objectId: string,
+): Promise<RemoteObjectFollowState> {
+  return apiRequest<RemoteObjectFollowState>(
+    `/remote/objects/${encodeURIComponent(objectId)}/follow`,
+    { method: "POST" },
+  );
+}
+
+/** Unfollow a remote resource — delivers ``Undo(Follow)`` remotely. */
+export function unfollowRemoteObject(objectId: string): Promise<void> {
+  return apiRequest<void>(
+    `/remote/objects/${encodeURIComponent(objectId)}/follow`,
+    { method: "DELETE" },
   );
 }

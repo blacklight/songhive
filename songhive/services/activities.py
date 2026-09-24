@@ -42,6 +42,7 @@ from ..models.activity import (
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.library import Library
+from ..models.library_track import LibraryTrack
 from ..models.mention_record import MentionSource
 from ..models.notification import NotificationType
 from ..models.playlist import Playlist
@@ -3106,6 +3107,15 @@ async def resolve_audience(
         # where the followed object is updated or a new reply joins the
         # thread. Non-public posts never leak to object followers.
         object_ids = {activity.source_id} | await _ancestor_source_ids(session, activity)
+        # A published track also reaches the remote followers of the
+        # federated music library it names (Funkwhale-style library
+        # follows): the ``library`` field of the embedded ``Audio`` object.
+        payload = activity.payload if isinstance(activity.payload, dict) else {}
+        payload_obj = payload.get("object")
+        if isinstance(payload_obj, dict):
+            library_url = payload_obj.get("library")
+            if isinstance(library_url, str) and library_url.startswith(("http://", "https://")):
+                object_ids.add(library_url)
         inboxes.update(
             await asyncio.to_thread(
                 federation_service.get_object_follower_inboxes,
@@ -3787,6 +3797,36 @@ class _TrackPublicationKwargs(TypedDict):
     mention_actor_urls: Iterable[str]
 
 
+async def _track_library_url(
+    session: AsyncSession,
+    track: Track,
+    actor_url: str,
+    domain: str,
+) -> str:
+    """
+    Return the federated music library URL a published track belongs to.
+
+    A track in a public ``Library`` names ``/libraries/{id}`` — the
+    followable collection remote instances (Funkwhale, other Songhive
+    instances) subscribe to. Tracks not in any public library fall back to
+    the publishing actor's implicit ``{actor_url}/library`` collection,
+    served by the federation routes from their public tracks.
+    """
+    library_id = await session.scalar(
+        select(LibraryTrack.library_id)
+        .join(Library, Library.id == LibraryTrack.library_id)
+        .where(
+            LibraryTrack.track_id == track.id,
+            Library.visibility == Visibility.PUBLIC.value,
+        )
+        .order_by(LibraryTrack.created_at.desc())
+        .limit(1)
+    )
+    if library_id:
+        return f"https://{domain}/libraries/{library_id}"
+    return f"{actor_url}/library"
+
+
 async def record_track_publication(
     session: AsyncSession,
     *,
@@ -3919,11 +3959,11 @@ async def record_track_publication(
         "mention_actor_urls": mention_actor_urls,
     }
 
-    payload = (
-        create_note_activity(**args, audio_object_id=audio_object_id)
-        if object_type == "note"
-        else create_audio_activity(**args)
-    )
+    if object_type == "note":
+        payload = create_note_activity(**args, audio_object_id=audio_object_id)
+    else:
+        library_url = await _track_library_url(session, track, owner.actor_url, config.federation.instance_domain)
+        payload = create_audio_activity(**args, library_url=library_url)
 
     if not payload:
         return None
@@ -4144,6 +4184,7 @@ async def sync_track_publications(
                 domain,
                 actor_url=activity.source_actor,
                 ap_object_id=object_doc.get("id") or activity.source_id,
+                library_url=await _track_library_url(session, track, activity.source_actor, domain),
             )
         if rebuilt is None:
             continue

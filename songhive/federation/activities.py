@@ -15,7 +15,6 @@ from pubby import (
     build_update_activity,
     set_quote_target,
 )
-from pubby.content import format_duration
 
 from ..models import Visibility
 from ..models.activity import Activity
@@ -75,6 +74,7 @@ def create_audio_activity(
     description: Optional[str] = None,
     duration: Optional[float] = None,
     ap_object_id: Optional[str] = None,
+    library_url: Optional[str] = None,
     visibility: "Visibility | str" = Visibility.PUBLIC,
     mention_actor_urls: Iterable[str] = (),
 ) -> Optional[dict]:
@@ -108,6 +108,7 @@ def create_audio_activity(
         stream_url,
         actor_url=actor_url,
         ap_object_id=ap_object_id,
+        library_url=library_url,
     )
     if audio_object is None:
         return None
@@ -116,7 +117,8 @@ def create_audio_activity(
         set_post_content(audio_object, description, domain, link_href=get_track_url(track, domain))
 
     if duration is not None:
-        audio_object["duration"] = format_duration(duration)
+        # Integer seconds — Funkwhale's UploadSerializer requires an int.
+        audio_object["duration"] = int(duration)
 
     return _create_object_activity(actor_url, audio_object, visibility, mention_actor_urls)
 

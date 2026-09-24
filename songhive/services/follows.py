@@ -143,6 +143,21 @@ async def actor_is_followed(session: AsyncSession, actor_url: str) -> bool:
     return await session.scalar(select(Follow.id).where(Follow.target_actor_url == actor_url).limit(1)) is not None
 
 
+async def object_is_followed(session: AsyncSession, object_urls: List[str]) -> bool:
+    """
+    Return whether any local user follows any of the given object URLs.
+
+    Object follows (e.g. a follow of a remote music library) record the
+    followed *object* URL in ``target_actor_url`` — this checks the same
+    column against a set of candidate URLs drawn from an inbound activity's
+    object fields.
+    """
+    urls = [u for u in object_urls if isinstance(u, str) and u]
+    if not urls:
+        return False
+    return await session.scalar(select(Follow.id).where(Follow.target_actor_url.in_(urls)).limit(1)) is not None
+
+
 async def follow_states_for(session: AsyncSession, user_id: str, actor_urls: List[str]) -> dict:
     """Return ``{target_actor_url: state}`` for ``user_id``'s follows on ``actor_urls``."""
     if not actor_urls:
@@ -356,6 +371,115 @@ async def _follow_remote(
     await session.flush()
     _deliver(activity, inbox_url, user)
     return row
+
+
+def _remote_object_actor_url(remote_object) -> Optional[str]:
+    """Return the controlling actor URL of a cached remote object.
+
+    Federated music resources name their owner through ``actor`` (Funkwhale
+    ``Library``) or ``attributedTo``; the cache row's ``actor_url`` is the
+    resolved fallback.
+    """
+    payload = remote_object.payload if isinstance(remote_object.payload, dict) else {}
+    for key in ("actor", "attributedTo"):
+        url = remote_content._as_url(payload.get(key))
+        if url:
+            return url
+    return remote_object.actor_url or None
+
+
+async def follow_remote_object(
+    session: AsyncSession,
+    config: SonghiveConfig,
+    user: User,
+    object_url: str,
+) -> Follow:
+    """
+    Follow a remote object — typically a federated music ``Library``.
+
+    The ``Follow`` targets the object URL itself (object-scoped follow,
+    FEP-efda style), not an actor, and is delivered to the object's
+    controlling actor inbox — for a Funkwhale library that is
+    ``library.actor``. The ``Follow`` row keys ``target_actor_url`` on the
+    object URL so the remote ``Accept`` — issued by the controlling actor,
+    which differs from the object id for libraries — is matched back by
+    :func:`apply_follow_decision`.
+    """
+    if not config.federation.enabled or not config.federation.instance_domain:
+        raise FollowError(status_code=400, detail="Federation is not enabled")
+    await moderation_service.assert_not_suspended(session, user)
+    federation_service.ensure_user_actor(user, config)
+    if not user.actor_url or not user.private_key_pem:
+        raise FollowError(status_code=400, detail="User has no federation actor credentials")
+    await moderation_service.load_instance_policies(session)
+
+    result = await remote_content.dereference_remote_object(session, config, object_url)
+    remote_object = result.remote_object
+    if remote_object.unavailable_at is not None:
+        raise FollowError(status_code=404, detail="Remote object is no longer available")
+    if remote_object.resource_type is None:
+        raise FollowError(status_code=422, detail="Remote object is not a followable resource")
+
+    controller_url = _remote_object_actor_url(remote_object)
+    if not controller_url:
+        raise FollowError(status_code=422, detail="Remote object has no controlling actor")
+    if controller_url == user.actor_url:
+        raise FollowError(status_code=400, detail="Cannot follow your own resource")
+
+    existing = await get_follow(session, user.id, remote_object.canonical_url)
+    if existing is not None:
+        return existing
+
+    inbox_url: Optional[str] = None
+    try:
+        controller = await remote_content.lookup_remote_actor(session, config, controller_url)
+        inbox_url = controller.inbox_url
+    except Exception:
+        inbox_url = None
+    if not inbox_url:
+        inbox_url = await asyncio.to_thread(
+            federation_service.resolve_actor_inbox,
+            controller_url,
+            config,
+            key_id=f"{user.actor_url}#main-key",
+            private_key_pem=user.private_key_pem,
+        )
+    if not inbox_url:
+        raise FollowError(status_code=502, detail="Could not resolve the remote object's inbox")
+
+    activity_id = f"{user.actor_url}/activities/{uuid.uuid4()}"
+    activity = create_follow_activity(user.actor_url, remote_object.canonical_url, activity_id=activity_id)
+    row = Follow(
+        user_id=user.id,
+        actor_url=user.actor_url,
+        target_actor_url=remote_object.canonical_url,
+        target_user_id=None,
+        state=FOLLOW_STATE_PENDING,
+        activity_id=activity_id,
+        actor_data={
+            "id": remote_object.canonical_url,
+            "type": remote_object.object_type,
+            "preferredUsername": remote_object.name or remote_object.canonical_url,
+            "name": remote_object.name or remote_object.canonical_url,
+            "url": remote_object.canonical_url,
+            "inbox": inbox_url,
+        },
+        inbox_url=inbox_url,
+    )
+    session.add(row)
+    await session.flush()
+    _deliver(activity, inbox_url, user)
+    return row
+
+
+async def _followed_object_actor(session: AsyncSession, object_url: str) -> Optional[str]:
+    """Return the controlling actor URL of a followed remote object."""
+    from ..models.remote_object import RemoteObject
+
+    row = await session.scalar(select(RemoteObject).where(RemoteObject.canonical_url == object_url))
+    if row is None:
+        return None
+    return _remote_object_actor_url(row)
 
 
 async def follow_user(
@@ -572,26 +696,48 @@ async def apply_follow_decision(session: AsyncSession, *, activity: dict) -> boo
     obj = activity.get("object")
     follow_id: Optional[str] = None
     inner_actor: Optional[str] = None
+    inner_object: Optional[str] = None
     if isinstance(obj, str):
         follow_id = obj
     elif isinstance(obj, dict):
         if obj.get("type") != "Follow":
             return False
-        inner_object = obj.get("object")
-        if isinstance(inner_object, dict):
-            inner_object = inner_object.get("id")
-        # The decision is only legitimate when issued by the followed actor.
-        if inner_object != actor:
-            return False
+        inner_object_raw = obj.get("object")
+        if isinstance(inner_object_raw, dict):
+            inner_object_raw = inner_object_raw.get("id")
+        inner_object = inner_object_raw if isinstance(inner_object_raw, str) else None
         inner = obj.get("actor")
         inner_actor = inner if isinstance(inner, str) else None
         follow_id = obj.get("id") if isinstance(obj.get("id"), str) else None
     else:
         return False
 
-    rows = (await session.execute(select(Follow).where(Follow.target_actor_url == actor))).scalars()
+    # The decision is only legitimate when issued by the followed target's
+    # controlling actor. For actor follows that is the target itself; for
+    # object follows (e.g. a Funkwhale library) it is the object's owning
+    # actor — Funkwhale issues ``Accept`` from ``library.actor``, which
+    # differs from the followed library URL.
+    candidate_targets = {actor}
+    if inner_object:
+        candidate_targets.add(inner_object)
+    rows = (await session.execute(select(Follow).where(Follow.target_actor_url.in_(candidate_targets)))).scalars()
     matched = False
     for row in rows:
+        if actor != row.target_actor_url:
+            object_actor = await _followed_object_actor(session, row.target_actor_url)
+            # Legitimate when the deciding actor is the followed object's
+            # owning actor, or when it lives on the object's instance —
+            # Funkwhale answers library follows from ``library.actor``, an
+            # actor id not always present in the library document.
+            if not (
+                (object_actor is not None and actor == object_actor)
+                or (
+                    inner_object == row.target_actor_url
+                    and federation_service.extract_domain(actor)
+                    == federation_service.extract_domain(row.target_actor_url)
+                )
+            ):
+                continue
         if (follow_id and row.activity_id == follow_id) or (inner_actor is not None and inner_actor == row.actor_url):
             pass
         else:

@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `federation`: Funkwhale-compatible federated music entities. Songhive
+  now publishes `Artist`, `Album`, `Track`, `Audio` and `Library`
+  ActivityPub documents (`/artists/{id}`, `/albums/{id}`,
+  `/libraries/{id}` with `?page=N` collection pages and `/followers`,
+  plus an implicit per-user library at `/users/{u}/library`), so
+  Funkwhale and other Songhive instances can resolve, scan and follow
+  local music entities. Conversely, remote Funkwhale/Songhive entities
+  resolve through remote lookup into cached `remote_objects` resources
+  (with embedded album/artist/track entities and first-page library
+  contents), can be followed object-scoped
+  (`POST/DELETE /api/v1/remote/objects/{id}/follow`) and saved to a
+  user's collection (`item_type="remote"`), all without copying remote
+  content into local music tables.
+
 ## 0.3.0
 
 ### Added

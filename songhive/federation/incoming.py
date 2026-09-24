@@ -875,6 +875,46 @@ async def apply_quote_authorization(
             logger.warning("Failed to fan out authorized quote %s: %s", quoting_id, exc)
 
 
+def _activity_object_candidates(activity: dict) -> List[str]:
+    """
+    Collect object URLs an inbound activity may be scoped to.
+
+    Used for object-follow admission: a ``Follow`` on a remote music
+    resource (e.g. a Funkwhale/Songhive ``Library``) admits activities
+    whose object *is* the followed resource or names it as its container
+    (``library``, ``context``, ``target``). Bare-string objects (Announces
+    carry one) count directly.
+    """
+    obj = activity.get("object")
+    if isinstance(obj, str):
+        return [obj] if obj.startswith(("http://", "https://")) else []
+    if not isinstance(obj, dict):
+        return []
+    candidates: List[str] = []
+    for key in ("id", "library", "context", "target"):
+        value = obj.get(key)
+        if isinstance(value, dict):
+            value = value.get("id")
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            candidates.append(value)
+    return candidates
+
+
+async def _remote_activity_admitted(session: AsyncSession, activity: dict) -> bool:
+    """
+    Return whether an inbound remote activity is admitted for storage.
+
+    Two admission paths: the publishing actor is followed by a local user
+    (actor follow), or the activity's object is — or belongs to — a
+    followed remote resource (object follow, e.g. a followed federated
+    library delivering ``Create(Audio)`` items).
+    """
+    actor = activity.get("actor")
+    if isinstance(actor, str) and await follows_service.actor_is_followed(session, actor):
+        return True
+    return await follows_service.object_is_followed(session, _activity_object_candidates(activity))
+
+
 async def sync_remote_activity(
     session: AsyncSession,
     *,
@@ -914,9 +954,11 @@ async def sync_remote_activity(
         obj = activity.get("object")
         actor = activity.get("actor")
         # Inbound objects are only stored for actors some local user
-        # follows; objects fetched explicitly through URL lookup arrive
-        # through the dereference path instead.
-        if not isinstance(actor, str) or not await follows_service.actor_is_followed(session, actor):
+        # follows, or objects belonging to a followed remote resource
+        # (e.g. ``Create(Audio)`` into a followed library); objects
+        # fetched explicitly through URL lookup arrive through the
+        # dereference path instead.
+        if not isinstance(actor, str) or not await _remote_activity_admitted(session, activity):
             return
         # Quote fields take precedence over ``inReplyTo`` — mirroring
         # Pubby, which records a note carrying both as a QUOTE interaction.
@@ -938,17 +980,18 @@ async def sync_remote_activity(
         # Revisions to already-stored objects always apply — the row was
         # admitted by the Create gate or explicit lookup. Replaying a
         # missed ``Create`` through the update is subject to the same
-        # followed-actor admission as a fresh ``Create``.
-        if await _find_remote_object(session, object_id, actor) is None and not await follows_service.actor_is_followed(
-            session, actor
+        # admission rules as a fresh ``Create``.
+        if await _find_remote_object(session, object_id, actor) is None and not await _remote_activity_admitted(
+            session, activity
         ):
             return
         await update_remote_object(session, activity=activity, config=config)
     elif activity_type == "Announce":
         actor = activity.get("actor")
-        # Boosts are only stored for actors some local user follows —
-        # the same admission rule as inbound ``Create`` objects.
-        if isinstance(actor, str) and await follows_service.actor_is_followed(session, actor):
+        # Boosts are only stored for actors some local user follows, or
+        # boosts of a followed remote object — the same admission rules
+        # as inbound ``Create`` objects.
+        if isinstance(actor, str) and await _remote_activity_admitted(session, activity):
             await materialize_remote_announce(session, activity=activity, config=config)
     elif activity_type == "Delete":
         await retract_remote_object(session, activity=activity)

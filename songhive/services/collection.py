@@ -18,6 +18,10 @@ from ..models.user import User
 
 # Item types that can be saved to a user's collection.  ``file`` rows are
 # storage internals rather than browsable content and are excluded.
+# ``remote`` entries reference ``remote_objects`` rows — federated music
+# resources (Funkwhale/external-Songhive tracks, albums, artists,
+# libraries) are collected by cache-row id without copying them into local
+# music tables.
 COLLECTION_ITEM_TYPES = frozenset(
     {
         "album",
@@ -25,6 +29,7 @@ COLLECTION_ITEM_TYPES = frozenset(
         "library",
         "playlist",
         "radio",
+        "remote",
         "track",
     }
 )

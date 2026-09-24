@@ -109,7 +109,10 @@ def test_create_audio_activity():
     )
     assert "summary" not in activity["object"]
     assert activity["object"]["published"]
-    assert "PT3M15S" in activity["object"]["duration"]
+    # Integer seconds — the federated-music (Funkwhale) dialect requires
+    # an int ``duration``; the ISO-8601 form only survives on media
+    # attachments.
+    assert activity["object"]["duration"] == 195
     assert any(
         link["href"] == "https://music.example.com/api/v1/files/file-1/download" and link["mediaType"] == "audio/mpeg"
         for link in activity["object"]["url"]
@@ -178,7 +181,7 @@ def test_track_to_audio_object():
     assert obj["type"] == "Audio"
     assert obj["name"] == "TestArtist - TestTrack"
     assert obj["published"]
-    assert obj["duration"] == "PT2M"
+    assert obj["duration"] == 120
     # ``mimeType`` mirrors ``mediaType`` so Mastodon's ``url_to_href`` selects
     # the ``text/html`` track page for display instead of the audio download.
     assert all(link["mimeType"] == link["mediaType"] for link in obj["url"])

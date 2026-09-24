@@ -137,7 +137,7 @@ def test_create_audio_activity_duration_override():
     )
 
     assert activity is not None
-    assert activity["object"]["duration"] == "PT3M15S"
+    assert activity["object"]["duration"] == 195
 
 
 def test_outbox_caller_skips_non_public_tracks():

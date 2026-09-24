@@ -40,7 +40,7 @@ mutagen>=1.47
 musicbrainzngs>=0.7.1
 
 # Federation
-pubby>=0.3.9
+pubby>=0.3.10
 webmentions>=0.1.27
 beautifulsoup4>=4.12
 

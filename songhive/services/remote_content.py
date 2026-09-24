@@ -27,12 +27,13 @@ from pubby import AttributionMismatch, validate_attribution
 from pubby.audience import is_public
 from pubby.client import extract_actor_inbox
 from pubby.quotes import extract_quote_target
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
 from ..federation.fetch import FetchError, FetchNotFound, FetchResult, guarded_fetch
 from ..models.activity import Activity, ActivityMention
+from ..models.collection_item import CollectionItem
 from ..models.remote_object import RemoteObject
 from ..models.track import Track
 from ..models.user import User
@@ -46,7 +47,7 @@ ACTOR_CACHE_TTL_SECONDS = 24 * 3600
 OBJECT_FRESHNESS_SECONDS = 60
 
 _HANDLE_RE = re.compile(r"^@?([A-Za-z0-9_.~-]+)@([A-Za-z0-9.\-]+(?::[0-9]+)?)$")
-_ACTOR_PATH_RE = re.compile(r"^/(?:users|u|actors)/(?P<name>[^/?#]+)/?$|^/@(?P<name2>[^/?#]+)/?$")
+_ACTOR_PATH_RE = re.compile(r"^/(?:users|u|actors|federation/actors)/(?P<name>[^/?#]+)/?$|^/@(?P<name2>[^/?#]+)/?$")
 _SONGHIVE_ACTIVITY_RES = (
     re.compile(r"^/users/[^/?#]+/objects/(?P<object_id>[^/?#]+)/?$"),
     re.compile(r"^/activities/(?P<activity_id>[^/?#]+)/?$"),
@@ -55,6 +56,16 @@ _SONGHIVE_ACTIVITY_RES = (
 _SONGHIVE_RESOURCE_KINDS = ("tracks", "albums", "artists", "playlists", "libraries")
 _SONGHIVE_RESOURCE_RE = re.compile(
     r"^/(?:api/v1/)?(?P<kind>tracks|albums|artists|playlists|libraries)/(?P<rid>[^/?#]+)/?$"
+)
+# Funkwhale exposes music entities under ``/federation/music/{kind}/{uuid}``.
+_FUNKWHALE_RESOURCE_RE = re.compile(
+    r"^/federation/music/(?P<kind>tracks|albums|artists|libraries|uploads)/(?P<rid>[^/?#]+)/?$"
+)
+# Funkwhale's library frontend URL (``/library/{uuid}``) serves plain HTML —
+# it is not dereferenceable, but it shares its uuid with the federation
+# document at ``/federation/music/libraries/{uuid}``, so it can be rewritten.
+_FUNKWHALE_LIBRARY_PAGE_RE = re.compile(
+    r"^/library/(?P<rid>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/?$"
 )
 _ACTOR_TYPES = frozenset({"Person", "Service", "Group", "Application", "Organization"})
 _ACTIVITY_WRAPPER_TYPES = frozenset({"Create", "Announce", "Update", "Delete", "Like"})
@@ -73,6 +84,27 @@ RESOURCE_KIND_PLURALS = {
     "profile": "actors",
 }
 _PLURAL_TO_RESOURCE_KIND = {v: k for k, v in RESOURCE_KIND_PLURALS.items()}
+# Funkwhale path plurals that don't map 1:1 — an ``uploads`` URL dereferences
+# to an ``Audio`` document, which is a track resource.
+_FUNKWHALE_PLURAL_TO_KIND = {**_PLURAL_TO_RESOURCE_KIND, "uploads": "track"}
+
+# ActivityStreams music-entity types in the federated music dialect shared
+# by Funkwhale and Songhive. ``Audio`` is the playable upload; the others
+# are the catalog entities it embeds.
+_MUSIC_RESOURCE_TYPES = {
+    "Audio": "track",
+    "Track": "track",
+    "Album": "album",
+    "Artist": "artist",
+    "Library": "library",
+}
+_MUSIC_OBJECT_TYPES = frozenset(_MUSIC_RESOURCE_TYPES)
+# Collection pages listing music items (Funkwhale library ``?page=N``).
+_COLLECTION_PAGE_TYPES = frozenset({"CollectionPage", "OrderedCollectionPage"})
+
+# Bounded embedded-object caching: a library page may carry up to this many
+# items and each music doc embeds at most a handful of nested entities.
+_MAX_EMBEDDED_OBJECTS = 120
 
 
 async def _refresh_instance_policies(session: AsyncSession) -> None:
@@ -192,6 +224,30 @@ def parse_remote_target(raw: str, config: Optional[SonghiveConfig] = None) -> Re
             domain=domain,
             resource_kind=_PLURAL_TO_RESOURCE_KIND.get(plural),
             resource_id=resource_match.group("rid"),
+        )
+
+    fw_match = _FUNKWHALE_RESOURCE_RE.match(path)
+    if fw_match:
+        plural = fw_match.group("kind")
+        return RemoteTarget(
+            kind=RemoteTargetKind.SONGHIVE_RESOURCE_URL,
+            raw=raw,
+            url=text,
+            domain=domain,
+            resource_kind=_FUNKWHALE_PLURAL_TO_KIND.get(plural),
+            resource_id=fw_match.group("rid"),
+        )
+
+    fw_library_match = _FUNKWHALE_LIBRARY_PAGE_RE.match(path)
+    if fw_library_match:
+        rid = fw_library_match.group("rid")
+        return RemoteTarget(
+            kind=RemoteTargetKind.SONGHIVE_RESOURCE_URL,
+            raw=raw,
+            url=parsed._replace(path=f"/federation/music/libraries/{rid}", query="").geturl(),
+            domain=domain,
+            resource_kind="library",
+            resource_id=rid,
         )
 
     actor_match = _ACTOR_PATH_RE.match(path)
@@ -621,6 +677,21 @@ async def lookup_remote_actor(
             result.unavailable = True
             return result
         raise
+    except FetchError as exc:
+        # Some federated-music actors (Funkwhale channel/library actors)
+        # don't dereference cleanly at their URL — retry once through
+        # WebFinger using the URL's path tail as the account name. A 422
+        # means the document fetched fine but is not an actor — that's a
+        # definitive answer, not a transport failure.
+        if (
+            exc.status_code == 422
+            or target.kind != RemoteTargetKind.ACTOR_URL
+            or not target.username
+            or not target.domain
+        ):
+            raise
+        actor_url = await _webfinger_actor_url(target.username, target.domain, config)
+        doc = await _fetch_actor_document(actor_url, config)
 
     canonical_url = doc["id"]
     if canonical_url != actor_url:
@@ -729,14 +800,63 @@ def _detect_resource_type(obj: dict, target: Optional[RemoteTarget] = None) -> O
     if target is not None and target.resource_kind:
         return target.resource_kind
     obj_type = obj.get("type")
-    # Songhive exposes tracks as ``Audio`` objects; collections map to
-    # albums/playlists only when the URL shape or extension field says so.
-    if obj_type == "Audio":
-        return "track"
+    # Music entities in the shared Funkwhale/Songhive dialect (``Audio`` is
+    # the playable upload; ``Track``/``Album``/``Artist``/``Library`` are
+    # catalog entities). A bare ``Audio`` with no music fields still maps
+    # to ``track`` — matching the pre-existing Songhive-typed heuristic.
+    if obj_type in _MUSIC_RESOURCE_TYPES:
+        return _MUSIC_RESOURCE_TYPES[obj_type]
     resource_hint = obj.get("songhive:resourceType") or obj.get("resourceType")
     if isinstance(resource_hint, str) and resource_hint in RESOURCE_KIND_PLURALS:
         return resource_hint
     return None
+
+
+def _parent_url_of(obj: dict) -> Optional[str]:
+    """
+    Return the containing music resource URL for a federated music doc.
+
+    The containment graph mirrors the Funkwhale dialect: ``Audio`` →
+    ``library``, ``Track`` → ``album``, ``Album`` → first ``artists`` entry,
+    collection pages → ``partOf``. ``None`` for non-music documents.
+    """
+    obj_type = obj.get("type")
+    if obj_type == "Audio":
+        return _as_url(obj.get("library"))
+    if obj_type == "Track":
+        return _as_url(obj.get("album"))
+    if obj_type == "Album":
+        artists = obj.get("artists") or obj.get("artist_credit")
+        if isinstance(artists, list) and artists:
+            return _as_url(artists[0])
+        return _as_url(artists)
+    if obj_type in _COLLECTION_PAGE_TYPES:
+        return _as_url(obj.get("partOf"))
+    return None
+
+
+_PUBLIC_AUDIENCE_URIS = frozenset(
+    {
+        "https://www.w3.org/ns/activitystreams#Public",
+        "as:Public",
+        "Public",
+    }
+)
+
+
+def _doc_is_public(obj: dict) -> bool:
+    """
+    Return whether a document is publicly addressed.
+
+    Extends pubby's ``is_public`` (which scans ``to``/``cc``/``bto``/
+    ``bcc``) with the ``audience`` field — Funkwhale library documents
+    address the public collection through ``audience`` only.
+    """
+    if is_public(obj):
+        return True
+    audience = obj.get("audience")
+    values = audience if isinstance(audience, list) else [audience]
+    return any(v in _PUBLIC_AUDIENCE_URIS for v in values if isinstance(v, str))
 
 
 async def _cached_remote_object(session: AsyncSession, url: str) -> Optional[RemoteObject]:
@@ -956,7 +1076,9 @@ async def _upsert_remote_object_row(
     row.object_type = str(obj.get("type") or "Object")
     row.resource_type = _detect_resource_type(obj, target)
     row.actor_url = actor_url
-    row.visibility = "public" if is_public(obj) or is_public(activity) else "private"
+    row.parent_url = _parent_url_of(obj)
+    row.media_of_url = _media_of_url(obj)
+    row.visibility = "public" if _doc_is_public(obj) or is_public(activity) else "private"
     row.payload = obj
     row.name = _object_name(obj)
     row.summary = obj.get("summary") if isinstance(obj.get("summary"), str) else None
@@ -1045,6 +1167,263 @@ async def materialize_remote_post(
     )
 
 
+def _iter_embedded_music_docs(obj: dict):
+    """
+    Yield ``(doc, container_url)`` for music entities embedded in ``obj``.
+
+    Covers the shared music dialect: an ``Audio`` embeds ``track`` (which
+    embeds ``album`` and ``artists``), ``artists`` and ``library``; a
+    ``Track`` embeds ``album`` and ``artists``; an ``Album`` embeds
+    ``artists``; a collection page carries music ``items``. ``container_url``
+    is the URL the yielded doc is contained in — used as ``parent_url``
+    when the doc itself does not name its container.
+    """
+    obj_id = obj.get("id") if isinstance(obj.get("id"), str) else None
+    obj_type = obj.get("type")
+
+    def _yield_doc(value, container):
+        if isinstance(value, dict):
+            yield value, container
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    yield item, container
+
+    if obj_type == "Audio":
+        track = obj.get("track")
+        if isinstance(track, dict):
+            yield track, obj_id
+            album = track.get("album")
+            if isinstance(album, dict):
+                yield album, _as_url(track.get("album"))
+                for artist_doc, _ in _yield_doc(album.get("artists") or album.get("artist_credit"), album.get("id")):
+                    yield artist_doc, album.get("id")
+            for artist_doc, _ in _yield_doc(track.get("artists") or track.get("artist_credit"), track.get("id")):
+                yield artist_doc, track.get("id")
+        for artist_doc, _ in _yield_doc(obj.get("artists") or obj.get("artist_credit"), obj_id):
+            yield artist_doc, obj_id
+        library = obj.get("library")
+        if isinstance(library, dict):
+            yield library, None
+    elif obj_type == "Track":
+        album = obj.get("album")
+        if isinstance(album, dict):
+            yield album, obj_id
+            for artist_doc, _ in _yield_doc(album.get("artists") or album.get("artist_credit"), album.get("id")):
+                yield artist_doc, album.get("id")
+        for artist_doc, _ in _yield_doc(obj.get("artists") or obj.get("artist_credit"), obj_id):
+            yield artist_doc, obj_id
+    elif obj_type == "Album":
+        for artist_doc, _ in _yield_doc(obj.get("artists") or obj.get("artist_credit"), obj_id):
+            yield artist_doc, obj_id
+    elif obj_type in _COLLECTION_PAGE_TYPES:
+        items = obj.get("items") or obj.get("orderedItems")
+        container = _as_url(obj.get("partOf")) or obj_id
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict) and item.get("type") in _MUSIC_OBJECT_TYPES:
+                    yield item, container
+                    for nested, nested_container in _iter_embedded_music_docs(item):
+                        yield nested, nested_container
+
+
+async def _cache_embedded_music_docs(
+    session: AsyncSession,
+    obj: dict,
+    actor_url: str,
+    config: SonghiveConfig,
+) -> None:
+    """
+    Upsert ``remote_objects`` rows for music entities embedded in ``obj``.
+
+    A single dereference of a Funkwhale/Songhive ``Audio`` or library page
+    yields the whole album/artist/library subtree — caching the embedded
+    docs makes remote album and library pages render without one fetch per
+    child. Only absolute-id, allowed-domain docs with a known music type are
+    stored, bounded by ``_MAX_EMBEDDED_OBJECTS``; embedded docs inherit the
+    parent's actor and visibility.
+    """
+    seen: set = set()
+    count = 0
+    for doc, container_url in _iter_embedded_music_docs(obj):
+        if count >= _MAX_EMBEDDED_OBJECTS:
+            break
+        doc_id = doc.get("id")
+        doc_type = doc.get("type")
+        if (
+            not isinstance(doc_id, str)
+            or not doc_id.startswith(("http://", "https://"))
+            or doc_type not in _MUSIC_OBJECT_TYPES
+            or doc_id in seen
+            or not remote_domain_allowed(doc_id, config)
+        ):
+            continue
+        seen.add(doc_id)
+        count += 1
+        doc_actor = _attributed_to(doc) or actor_url
+        await _upsert_remote_object_row(
+            session,
+            canonical_url=doc_id,
+            activity=doc,
+            obj=doc,
+            actor_url=doc_actor,
+        )
+        row = await _cached_remote_object(session, doc_id)
+        if row is not None and row.parent_url is None:
+            row.parent_url = _parent_url_of(doc) or container_url
+
+
+# ---------------------------------------------------------------------------
+# Remote media resolution
+# ---------------------------------------------------------------------------
+#
+# A remote *track* is metadata — its playable media can be a direct link on
+# the document (``audio_url``) or a *rendition* sibling object that embeds
+# the track (Funkwhale ``Audio``/upload docs carry ``track.id``). Rendition
+# rows record that relationship in ``media_of_url`` so the lookup
+# ``media_of_url == track.canonical_url`` stays an indexed query. Rows
+# cached before the column existed are still found through a bounded
+# JSON-path fallback. Resolution happens at play time
+# (``/remote/objects/{id}/stream``), which is also the seam where provider
+# plugins (external sources whose links are expiring or require resolution,
+# e.g. YouTube) will plug in.
+
+
+def _media_of_url(obj: dict) -> Optional[str]:
+    """Return the URL of the media entity ``obj`` renders, when declared."""
+    return _as_url(obj.get("track"))
+
+
+async def rendition_audio_map(session: AsyncSession, canonical_urls: List[str]) -> dict:
+    """
+    Map ``{entity_url: audio_url}`` for cached renditions of ``canonical_urls``.
+
+    One batched query covers both ``media_of_url``-stamped rows and legacy
+    rows whose only rendition link lives in the payload's ``track.id``.
+    """
+    if not canonical_urls:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                RemoteObject.media_of_url,
+                RemoteObject.audio_url,
+                RemoteObject.payload[("track", "id")].as_string().label("legacy_track_id"),
+            ).where(
+                RemoteObject.audio_url.is_not(None),
+                RemoteObject.unavailable_at.is_(None),
+                or_(
+                    RemoteObject.media_of_url.in_(canonical_urls),
+                    RemoteObject.payload[("track", "id")].as_string().in_(canonical_urls),
+                ),
+            )
+        )
+    ).all()
+    result: dict = {}
+    for media_of, audio_url, legacy_id in rows:
+        key = media_of or legacy_id
+        if key in canonical_urls and audio_url:
+            result.setdefault(key, audio_url)
+    return result
+
+
+async def resolve_media_url(session: AsyncSession, row: RemoteObject) -> Optional[str]:
+    """
+    Resolve the playable media URL for a remote object at request time.
+
+    Direct ``audio_url`` links win; track-shaped rows fall back to their
+    cached rendition's URL. Returns ``None`` when nothing playable is
+    cached — the caller (stream endpoint) turns that into a 404.
+    """
+    if row.unavailable_at is not None:
+        return None
+    if row.audio_url:
+        return row.audio_url
+    if row.object_type in ("Audio", "Track", "Video") or row.resource_type == "track":
+        return (await rendition_audio_map(session, [row.canonical_url])).get(row.canonical_url)
+    return None
+
+
+def remote_object_stream_url(row: RemoteObject) -> str:
+    """Internal playback endpoint for a remote object — resolves at play time."""
+    return f"/api/v1/remote/objects/{row.id}/stream"
+
+
+async def _scan_library_first_page(
+    session: AsyncSession,
+    library_doc: dict,
+    actor_url: str,
+    config: SonghiveConfig,
+) -> None:
+    """
+    Fetch a remote ``Library``'s first collection page and cache its items.
+
+    Funkwhale and Songhive library documents only carry page links — the
+    tracks live under ``?page=N``. One bounded extra fetch populates the
+    library's children so its remote resource page is not empty; deeper
+    pages stay lazily resolvable through explicit lookup.
+    """
+    first = _as_url(library_doc.get("first"))
+    if first is None or not remote_domain_allowed(first, config):
+        return
+    try:
+        result = await fetch_remote_document(first, config)
+        page_doc = result.json()
+    except (FetchError, FetchNotFound):
+        return
+    if not isinstance(page_doc, dict) or page_doc.get("type") not in _COLLECTION_PAGE_TYPES:
+        return
+    # Cache the page itself so its own id resolves, then the items.
+    page_id = page_doc.get("id")
+    if isinstance(page_id, str) and page_id.startswith(("http://", "https://")):
+        await _upsert_remote_object_row(
+            session,
+            canonical_url=page_id,
+            activity=page_doc,
+            obj=page_doc,
+            actor_url=actor_url,
+        )
+    await _cache_embedded_music_docs(session, page_doc, actor_url, config)
+
+
+async def get_remote_object_children(
+    session: AsyncSession,
+    remote_object: RemoteObject,
+    *,
+    limit: int = 100,
+) -> List[RemoteObject]:
+    """
+    Return cached children of a remote music resource — no fetch.
+
+    Children are cached ``remote_objects`` rows whose ``parent_url`` is the
+    resource's canonical URL: tracks/uploads under a library, tracks under
+    an album, albums under an artist.
+    """
+    stmt = (
+        select(RemoteObject)
+        .where(
+            RemoteObject.parent_url == remote_object.canonical_url,
+            RemoteObject.unavailable_at.is_(None),
+            # Only browsable resources — collection page rows cached by a
+            # library scan carry the same ``parent_url`` but are not items.
+            RemoteObject.resource_type.isnot(None),
+        )
+        .order_by(RemoteObject.fetched_at.asc())
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def get_remote_object_parent(
+    session: AsyncSession,
+    remote_object: RemoteObject,
+) -> Optional[RemoteObject]:
+    """Return the cached containing resource of ``remote_object``, if any."""
+    if not remote_object.parent_url:
+        return None
+    return await _cached_remote_object(session, remote_object.parent_url)
+
+
 async def _mark_remote_gone(
     session: AsyncSession,
     cached: Optional[RemoteObject],
@@ -1090,6 +1469,10 @@ async def dereference_remote_object(
     await _refresh_instance_policies(session)
     require_remote_domain(url, config)
     target = parse_remote_target(url, config)
+    # A normalized target (e.g. a Funkwhale ``/library/{uuid}`` page
+    # rewritten to its federation document URL) is what actually gets
+    # fetched; the doc's own ``id`` stays the canonical url either way.
+    url = target.url or url
 
     cached = await _cached_remote_object(session, url)
     if cached is not None and not refresh:
@@ -1125,28 +1508,53 @@ async def dereference_remote_object(
             return gone
         raise FetchNotFound("Remote object no longer exists", url=url)
 
+    # A collection page (``{library}?page=N`` pasted into the lookup box)
+    # is not itself a browsable resource — cache its items under the
+    # parent collection, then keep resolving the parent as the object.
+    page_doc: Optional[dict] = None
+    if wrapper is None and obj.get("type") in _COLLECTION_PAGE_TYPES:
+        part_of = _as_url(obj.get("partOf"))
+        if part_of is not None and remote_domain_allowed(part_of, config):
+            page_doc = obj
+            try:
+                page_result = await fetch_remote_document(part_of, config)
+                parent_doc = page_result.json()
+            except (FetchError, FetchNotFound):
+                parent_doc = None
+            if isinstance(parent_doc, dict):
+                obj = parent_doc
+                kind = "Object"
+
     object_id = obj.get("id")
     if not isinstance(object_id, str) or not object_id.startswith(("http://", "https://")):
         raise FetchError("Remote object has no id", status_code=422, url=result.url)
     require_remote_domain(object_id, config)
 
     actor_url = _doc_actor(wrapper) if wrapper is not None else None
-    actor_url = actor_url or _attributed_to(obj)
+    actor_url = actor_url or _attributed_to(obj) or _doc_actor(obj)
     if actor_url is None:
         raise HTTPException(status_code=422, detail="Remote object has no resolvable author")
     require_remote_domain(actor_url, config)
 
     # ``attributedTo`` must match the publishing actor and the object id
     # must share its authority — pubby's rules for inbound delivery apply
-    # to explicit fetches too.
-    validate_attribution(actor_url, obj)
+    # to explicit fetches too. Music entities carry no ``attributedTo``
+    # requirement of their own; their owning actor is ``actor``.
+    if obj.get("type") not in _MUSIC_OBJECT_TYPES or _attributed_to(obj) is not None:
+        validate_attribution(actor_url, obj)
 
     # Resolve (and cache) the publishing actor through the actor path so
-    # profile rendering and audience checks share one cache.
+    # profile rendering and audience checks share one cache. Music docs
+    # whose actor document is not fetchable (e.g. a Funkwhale library
+    # actor with no WebFinger entry) still cache — the actor URL alone is
+    # enough to render attribution.
     try:
         actor = await lookup_remote_actor(session, config, actor_url)
+        resolved_actor_url = actor.actor_url
     except FetchError as exc:
-        raise FetchError(f"Could not resolve remote object author: {exc}", status_code=exc.status_code) from exc
+        if obj.get("type") not in _MUSIC_OBJECT_TYPES:
+            raise FetchError(f"Could not resolve remote object author: {exc}", status_code=exc.status_code) from exc
+        resolved_actor_url = actor_url
 
     if kind not in ("Create", "Announce", "Update", "Object") or obj.get("type") in _TOMBSTONE_TYPES:
         raise HTTPException(status_code=422, detail=f"Unsupported remote activity type: {kind}")
@@ -1154,13 +1562,38 @@ async def dereference_remote_object(
     row = await _upsert_remote_object_row(
         session,
         canonical_url=object_id,
-        activity=wrapper or doc,
+        # ``activity`` is the wrapping activity doc, else the object itself —
+        # not the originally fetched doc, which may be a collection page
+        # swapped out for its parent collection above.
+        activity=wrapper or obj,
         obj=obj,
-        actor_url=actor.actor_url,
+        actor_url=resolved_actor_url,
         target=target,
         etag=result.headers.get("etag"),
         last_modified=result.headers.get("last_modified"),
     )
+
+    # Music documents embed their catalog entities (track → album →
+    # artists, audio → track/library); cache them so remote album/artist
+    # pages render children without one fetch per entity. Library docs
+    # carry no items — scan their first collection page instead. Both
+    # paths are bounded and re-use the same domain guards.
+    if obj.get("type") in _MUSIC_OBJECT_TYPES:
+        await _cache_embedded_music_docs(session, obj, resolved_actor_url, config)
+        if obj.get("type") == "Library":
+            await _scan_library_first_page(session, obj, resolved_actor_url, config)
+    if page_doc is not None:
+        page_actor = _attributed_to(page_doc) or _doc_actor(page_doc) or resolved_actor_url
+        page_id = page_doc.get("id")
+        if isinstance(page_id, str) and remote_domain_allowed(page_id, config):
+            await _upsert_remote_object_row(
+                session,
+                canonical_url=page_id,
+                activity=page_doc,
+                obj=page_doc,
+                actor_url=page_actor,
+            )
+        await _cache_embedded_music_docs(session, page_doc, page_actor, config)
 
     # Wrapped objects (Create/Announce/…) and bare content objects become
     # feed activities; a bare resource (e.g. a dereferenced ``Audio`` track)
@@ -1172,7 +1605,7 @@ async def dereference_remote_object(
             remote_object=row,
             wrapper=wrapper,
             obj=obj,
-            actor_url=actor.actor_url,
+            actor_url=resolved_actor_url,
             kind=kind,
         )
         if should_materialize
@@ -1193,6 +1626,84 @@ def remote_object_page_url(remote_object: RemoteObject) -> str:
     if remote_object.resource_type:
         return f"/remote/{remote_object.resource_type}/{remote_object.id}"
     return f"/activities/@{actor_handle_from_url(remote_object.actor_url)}/{remote_object.id}"
+
+
+def remote_object_music_fields(row: RemoteObject) -> dict:
+    """
+    Playback metadata extracted from a cached document payload.
+
+    Funkwhale ``Audio`` documents embed the music entity under ``track``
+    (with ``artists``/``album``); bare ``Track`` documents carry the same
+    fields at the top level. Returns ``duration`` (seconds), ``artist_name``
+    and ``album_name`` — ``None`` when the payload doesn't declare them.
+    """
+    payload = row.payload if isinstance(row.payload, dict) else {}
+    track = payload.get("track")
+    if not isinstance(track, dict):
+        track = payload
+    artists = track.get("artists") or track.get("artist_credit") or []
+    artist_name: Optional[str] = None
+    if isinstance(artists, list) and artists:
+        first = artists[0]
+        if isinstance(first, dict):
+            artist_name = first.get("name") if isinstance(first.get("name"), str) else None
+    elif isinstance(artists, dict):
+        artist_name = artists.get("name") if isinstance(artists.get("name"), str) else None
+    album = track.get("album")
+    album_name = album.get("name") if isinstance(album, dict) and isinstance(album.get("name"), str) else None
+    duration = payload.get("duration")
+    if not isinstance(duration, (int, float)) or isinstance(duration, bool):
+        duration = track.get("duration")
+    return {
+        "duration": int(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) else None,
+        "artist_name": artist_name,
+        "album_name": album_name,
+    }
+
+
+async def list_cached_remote_objects(
+    session: AsyncSession,
+    config: SonghiveConfig,
+    *,
+    resource_type: Optional[str] = None,
+    user: Optional[User] = None,
+    collection_only: bool = False,
+    limit: int = 20,
+    offset: int = 0,
+) -> tuple[List[RemoteObject], int]:
+    """
+    Browse cached remote resources — never fetches remotely.
+
+    ``collection_only`` restricts to ``remote_objects`` rows the user saved
+    via ``item_type="remote"`` collection entries. Anonymous callers see
+    only ``public`` rows and have no collection, so ``collection_only``
+    short-circuits to empty for them.
+    """
+    await _refresh_instance_policies(session)
+    if collection_only and user is None:
+        return [], 0
+
+    conditions: List[Any] = [
+        RemoteObject.unavailable_at.is_(None),
+        RemoteObject.resource_type.is_not(None),
+    ]
+    if resource_type:
+        conditions.append(RemoteObject.resource_type == resource_type)
+    if user is None:
+        conditions.append(RemoteObject.visibility == "public")
+    if collection_only:
+        assert user is not None
+        conditions.append(
+            exists().where(
+                CollectionItem.item_id == RemoteObject.id,
+                CollectionItem.user_id == user.id,
+                CollectionItem.item_type == "remote",
+            )
+        )
+
+    stmt = select(RemoteObject).where(*conditions).order_by(RemoteObject.fetched_at.desc())
+    rows = [row for row in (await session.execute(stmt)).scalars().all() if remote_domain_allowed(row.domain, config)]
+    return rows[offset : offset + limit], len(rows)
 
 
 async def search_cached_remote_objects(

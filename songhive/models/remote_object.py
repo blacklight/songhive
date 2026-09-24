@@ -36,6 +36,17 @@ class RemoteObject(Base):
     # Normalized Songhive resource kind when the document maps to one.
     resource_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     actor_url: Mapped[str] = mapped_column(String(512))
+    # Canonical URL of the containing remote resource, when known: the
+    # library of a federated upload, the album of a federated track, the
+    # artist of a federated album. Powers the "contents" listing on remote
+    # library/album/artist pages.
+    parent_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, index=True)
+    # Canonical URL of the media entity this object renders, for rendition
+    # objects (``Audio``/``Video`` → ``track``). The inverse lookup
+    # ``media_of_url == track.canonical_url`` resolves a metadata-only
+    # remote track to a playable rendition without scanning payloads —
+    # indexed, and orthogonal to ``parent_url`` containment.
+    media_of_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, index=True)
     visibility: Mapped[str] = mapped_column(String(16), default="public", server_default="public")
     payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     # Denormalized display fields for cards/search.

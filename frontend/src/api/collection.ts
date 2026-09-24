@@ -5,7 +5,7 @@ export type CollectionItemResponse =
   components["schemas"]["CollectionItemResponse"];
 
 export type CollectionItemType =
-  "album" | "artist" | "library" | "playlist" | "radio" | "track";
+  "album" | "artist" | "library" | "playlist" | "radio" | "remote" | "track";
 
 export function listCollection(params?: {
   item_type?: CollectionItemType;

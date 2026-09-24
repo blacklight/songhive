@@ -111,6 +111,12 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
 - 🔎 **Remote discovery**: Explicit lookup of remote actors, posts and resources
   by handle or URL — SSRF-guarded, domain-moderated, cached, and gated by a
   per-instance access policy
+- 🎶 **Federated music entities**: full bidirectional music federation with
+  Funkwhale and other Songhive instances — remote libraries, albums, artists
+  and tracks resolve as browsable remote resources that can be followed and
+  added to your collection, and local artists, albums, libraries and tracks
+  are published in the Funkwhale-compatible ActivityPub dialect so remote
+  instances can discover and follow them
 - 🔔 **Notifications**: in-app real-time notifications over WebSocket, with
   per-type email and daily-digest preferences
 - ⚖️ **Moderation**: Mastodon-style moderation — users can mute/block local and

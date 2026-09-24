@@ -64,6 +64,13 @@ def user_to_actor_document(user: User, domain: str) -> dict:
         "outbox": get_outbox_url(domain, user.username),
         "followers": f"{actor_url}/followers",
         "following": f"{actor_url}/following",
+        # The shared inbox lets remote servers batch deliveries; the
+        # ``library`` link is the user's implicit federated music library —
+        # the same actor-level ``library`` attribute Funkwhale channels
+        # carry — so a remote instance can resolve a user's music
+        # collection straight from the actor document.
+        "endpoints": {"sharedInbox": f"https://{domain}/ap/inbox"},
+        "library": f"{actor_url}/library",
         "publicKey": {
             "id": f"{actor_url}#main-key",
             "owner": actor_url,

@@ -14,8 +14,9 @@ from datetime import datetime
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import RedirectResponse
 from pubby import AttributionMismatch
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,10 +26,12 @@ from ...models.moderation import USER_MODERATION_BLOCK, USER_MODERATION_MUTE
 from ...models.user import User
 from ...services import acl
 from ...services import activities as activity_service
+from ...services import collection as collection_service
 from ...services import follows as follows_service
 from ...services import moderation as moderation_service
 from ...services import notifications as notifications_service
 from ...services import remote_content
+from .._common import Pagination, get_pagination
 from ..deps import get_config, get_current_user, get_current_user_optional, get_db
 from ..middleware.rate_limit import rate_limit_account
 from .activities import (
@@ -89,10 +92,29 @@ class RemoteObjectResponse(BaseModel):
     content: Optional[str] = None
     image_url: Optional[str] = None
     audio_url: Optional[str] = None
+    # Playback entry point: the internal stream endpoint resolves the
+    # object's own media link or a cached rendition at play time (so
+    # expiring/provider-resolved links stay fresh). ``None`` when nothing
+    # playable is cached — never a stale remote URL.
+    stream_url: Optional[str] = None
+    # Playback hints for music resources, extracted from the cached
+    # document payload (embedded ``track`` on ``Audio`` docs).
+    duration: Optional[int] = None
+    artist_name: Optional[str] = None
+    album_name: Optional[str] = None
     visibility: str
     fetched_at: Optional[datetime] = None
     unavailable: bool = False
     url: str  # internal SPA route
+    # Viewer-relative state: collection membership and object follow
+    # (``pending``/``accepted``) when the caller is authenticated.
+    in_collection: bool = False
+    follow_state: Optional[str] = None
+    # Containment for federated music resources: ``parent`` is the
+    # containing resource (album of a track, artist of an album, library
+    # of an upload), ``items`` its cached children.
+    parent: Optional["RemoteObjectResponse"] = None
+    items: List["RemoteObjectResponse"] = Field(default_factory=list)
 
 
 class RemoteLookupResponse(BaseModel):
@@ -112,11 +134,23 @@ class RemoteObjectDetailResponse(BaseModel):
     activity: Optional[ActivityResponse] = None
 
 
+class RemoteObjectListResponse(BaseModel):
+    """A page of cached remote resources."""
+
+    items: List[RemoteObjectResponse]
+
+
 class RemoteActorActivitiesResponse(BaseModel):
     """Cached activities materialized for a remote actor."""
 
     activities: List[ActivityResponse]
     total: int
+
+
+class RemoteObjectFollowResponse(BaseModel):
+    """Result of following a remote object/resource."""
+
+    follow_state: Optional[str] = None
 
 
 def _remote_policy(config: SonghiveConfig, user: Optional[User]) -> None:
@@ -186,7 +220,15 @@ async def _actor_moderation_flags(db: AsyncSession, user: Optional[User], actor_
     return flags
 
 
-def _object_response(row) -> RemoteObjectResponse:
+def _object_response(
+    row,
+    *,
+    in_collection: bool = False,
+    follow_state: Optional[str] = None,
+    parent: Optional[RemoteObjectResponse] = None,
+    items: Optional[List[RemoteObjectResponse]] = None,
+    playable: bool = False,
+) -> RemoteObjectResponse:
     actor_handle = remote_content.actor_handle_from_url(row.actor_url) if row.actor_url else None
     return RemoteObjectResponse(
         id=str(row.id),
@@ -201,11 +243,57 @@ def _object_response(row) -> RemoteObjectResponse:
         content=row.content,
         image_url=row.image_url,
         audio_url=row.audio_url,
+        stream_url=remote_content.remote_object_stream_url(row) if playable else None,
+        **remote_content.remote_object_music_fields(row),
         visibility=row.visibility,
         fetched_at=row.fetched_at,
         unavailable=row.unavailable_at is not None,
         url=remote_content.remote_object_page_url(row),
+        in_collection=in_collection,
+        follow_state=follow_state,
+        parent=parent,
+        items=items or [],
     )
+
+
+async def _playable_object_ids(db: AsyncSession, rows) -> set:
+    """
+    Return the ids of ``rows`` currently playable through the stream endpoint.
+
+    A row is playable when it carries its own ``audio_url`` or is a
+    media-entity row (``Track``/``Audio``/``Video``, or a ``track``
+    resource) with a cached rendition — resolved in one batched query via
+    ``media_of_url`` (with a payload fallback for rows cached before the
+    column existed).
+    """
+    ids = {str(row.id) for row in rows if row.audio_url and row.unavailable_at is None}
+    candidates = [
+        row.canonical_url
+        for row in rows
+        if not row.audio_url
+        and row.unavailable_at is None
+        and (row.object_type in ("Audio", "Track", "Video") or row.resource_type == "track")
+    ]
+    if candidates:
+        resolved = await remote_content.rendition_audio_map(db, candidates)
+        ids |= {str(row.id) for row in rows if row.canonical_url in resolved}
+    return ids
+
+
+async def _object_viewer_state(
+    db: AsyncSession,
+    user: Optional[User],
+    row,
+) -> dict:
+    """Return the caller's collection/follow state on a remote object."""
+    if user is None:
+        return {"in_collection": False, "follow_state": None}
+    saved = await collection_service.saved_item_ids(db, user, "remote", [str(row.id)])
+    states = await follows_service.follow_states_for(db, user.id, [row.canonical_url])
+    return {
+        "in_collection": str(row.id) in saved,
+        "follow_state": states.get(row.canonical_url),
+    }
 
 
 async def _activity_response_or_none(
@@ -292,7 +380,7 @@ async def remote_lookup(
         return RemoteLookupResponse(
             kind=kind,  # type: ignore[arg-type]
             url=remote_content.remote_object_page_url(row),
-            object=_object_response(row),
+            object=_object_response(row, playable=str(row.id) in await _playable_object_ids(db, [row])),
             activity=activity,
         )
 
@@ -454,6 +542,49 @@ async def list_remote_actor_activities(
     )
 
 
+@router.get("/objects", response_model=RemoteObjectListResponse)
+async def list_remote_objects(
+    response: Response,
+    resource_type: Optional[str] = Query(None, description="Filter by resource kind"),
+    collection: bool = Query(False, description="Restrict to the caller's collected remote objects"),
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+    config: SonghiveConfig = Depends(get_config),
+    pagination: Pagination = Depends(get_pagination),
+):
+    """
+    Browse cached remote resources — never reaches the network.
+
+    ``collection=true`` restricts the listing to ``remote_objects`` rows
+    the caller saved through ``item_type="remote"`` collection entries;
+    anonymous callers have no collection and get an empty page.
+    """
+    _remote_policy(config, user)
+    if resource_type is not None and resource_type not in _REMOTE_RESOURCE_KINDS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid resource type")
+    rows, total = await remote_content.list_cached_remote_objects(
+        db,
+        config,
+        resource_type=resource_type,
+        user=user,
+        collection_only=collection,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+    pagination.set_total(response, total)
+    saved = (
+        await collection_service.saved_item_ids(db, user, "remote", [str(row.id) for row in rows])
+        if user is not None
+        else set()
+    )
+    playable = await _playable_object_ids(db, rows)
+    return RemoteObjectListResponse(
+        items=[
+            _object_response(row, in_collection=str(row.id) in saved, playable=str(row.id) in playable) for row in rows
+        ]
+    )
+
+
 @router.get("/objects/{object_id}", response_model=RemoteObjectDetailResponse)
 async def get_remote_object(
     object_id: str,
@@ -488,11 +619,106 @@ async def get_remote_object(
         await db.commit()
         await db.refresh(row)
 
+    viewer = await _object_viewer_state(db, user, row)
+    parent_row = await remote_content.get_remote_object_parent(db, row)
+    children = await remote_content.get_remote_object_children(db, row)
     activity = await remote_content.get_remote_object_activity(db, row)
+    related = [row, *children, *([parent_row] if parent_row is not None else [])]
+    playable = await _playable_object_ids(db, related)
     return RemoteObjectDetailResponse(
-        object=_object_response(row),
+        object=_object_response(
+            row,
+            in_collection=viewer["in_collection"],
+            follow_state=viewer["follow_state"],
+            parent=(
+                _object_response(parent_row, playable=str(parent_row.id) in playable)
+                if parent_row is not None
+                else None
+            ),
+            items=[_object_response(child, playable=str(child.id) in playable) for child in children],
+            playable=str(row.id) in playable,
+        ),
         activity=await _activity_response_or_none(request, db, user, activity),
     )
+
+
+@router.get("/objects/{object_id}/stream")
+async def stream_remote_object(
+    object_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """
+    Redirect to the object's playable media URL.
+
+    Resolution happens at play time, never at cache time: the object's own
+    ``audio_url`` when present, else a cached rendition embedding the
+    entity (``media_of_url``). Providers whose links expire or need
+    resolution (e.g. future YouTube/Spotify adapters) plug into
+    ``resolve_media_url`` — the client always hits this endpoint.
+    """
+    _remote_policy(config, user)
+    row = await remote_content.get_cached_remote_object(db, object_id)
+    if row is None or not remote_content.remote_domain_allowed(row.domain, config):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Remote object not found")
+    if not await acl.can_access(db, user, "remote", str(row.id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    media_url = await remote_content.resolve_media_url(db, row)
+    if media_url is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No playable media for this remote object")
+    return RedirectResponse(media_url)
+
+
+@router.post(
+    "/objects/{object_id}/follow",
+    response_model=RemoteObjectFollowResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def follow_remote_object(
+    object_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Follow a cached remote resource (e.g. a federated library).
+
+    Delivers a signed object-scoped ``Follow`` to the resource's
+    controlling actor and records the pending relationship; the remote
+    ``Accept``/``Reject`` folds back into the row's ``state``. Following a
+    remote library subscribes the instance to new items published into it.
+    """
+    _remote_policy(config, user)
+    row = await remote_content.get_cached_remote_object(db, object_id)
+    if row is None or not remote_content.remote_domain_allowed(row.domain, config):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Remote object not found")
+    try:
+        follow = await follows_service.follow_remote_object(db, config, user, row.canonical_url)
+    except FetchError as exc:
+        raise _fetch_error(exc) from exc
+    await db.commit()
+    return RemoteObjectFollowResponse(follow_state=follow.state)
+
+
+@router.delete(
+    "/objects/{object_id}/follow",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def unfollow_remote_object(
+    object_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Unfollow a remote resource — delivers ``Undo(Follow)`` remotely."""
+    _remote_policy(config, user)
+    row = await remote_content.get_cached_remote_object(db, object_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Remote object not found")
+    await follows_service.unfollow_user(db, config, user, row.canonical_url)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{kind}/{object_id}", response_model=RemoteObjectResponse)
@@ -520,4 +746,18 @@ async def get_remote_resource(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Remote resource not found")
     if not await acl.can_access(db, user, "remote", str(row.id)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    return _object_response(row)
+    viewer = await _object_viewer_state(db, user, row)
+    parent_row = await remote_content.get_remote_object_parent(db, row)
+    children = await remote_content.get_remote_object_children(db, row)
+    related = [row, *children, *([parent_row] if parent_row is not None else [])]
+    playable = await _playable_object_ids(db, related)
+    return _object_response(
+        row,
+        in_collection=viewer["in_collection"],
+        follow_state=viewer["follow_state"],
+        parent=(
+            _object_response(parent_row, playable=str(parent_row.id) in playable) if parent_row is not None else None
+        ),
+        items=[_object_response(child, playable=str(child.id) in playable) for child in children],
+        playable=str(row.id) in playable,
+    )

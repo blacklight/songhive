@@ -106,7 +106,7 @@ songhive/
 │   │   ├── share.py        # Public token resolver (redirects + sets cookie)
 │   │   ├── reports.py      # Content moderation reports + admin review
 │   │   ├── feeds.py        # RSS/Atom feeds under /feeds (users, entities, tags, genres)
-│   │   ├── federation.py   # ActivityPub object endpoints (tracks, objects) + WebFinger
+│   │   ├── federation.py   # ActivityPub object endpoints (tracks, objects, federated music entities) + WebFinger
 │   │   ├── remote.py       # Explicit remote lookup/dereference + cached remote objects
 │   │   ├── admin.py        # Admin endpoints (settings, stats, user management)
 │   │   ├── external_libraries.py # User external library CRUD, sync, tracks
@@ -1936,6 +1936,71 @@ resources — without crawling remote timelines or indexing the fediverse.
   or the `include_remote` flag) that never performs network access, plus
   a `remote_available` flag telling the UI whether the caller may run an
   explicit lookup.
+
+**Federated music entities (Funkwhale dialect):**
+
+Songhive publishes and consumes a Funkwhale-compatible ActivityPub music
+dialect, so music entities federate bidirectionally with Funkwhale
+instances and with other Songhive instances.
+
+- `federation/serializers.py` serializes `Artist`, `Album`, `Track`,
+  `Audio` and `Library` documents under the `https://funkwhale.audio/ns`
+  context (`MUSIC_ENTITY_CONTEXT`): artists and albums carry
+  `musicbrainzId`/`released`/embedded `artists`, tracks carry
+  `position`/`disc` and a nested `album`, and `Audio` uploads carry an
+  integer `duration` plus `bitrate`/`size`, a `library` reference and the
+  embedded `track` document — the fields Funkwhale's serializers require
+  on import. `create_audio_activity` passes the publishing track's
+  library URL (`/libraries/{id}` for a public `Library`, else the owner's
+  implicit `{actor}/library` collection) so remote library followers
+  receive `Create(Audio)` deliveries.
+- Dereferenceable routes in `api/routes/federation.py` serve the music
+  entities as ActivityPub JSON (HTML requests still get the SPA):
+  `/artists/{id}`, `/albums/{id}` (public albums only), `/libraries/{id}`
+  for public libraries — the collection index, with `?page=N` serving a
+  `CollectionPage` of `Audio` items and `/followers` serving the object's
+  follower collection — and `/users/{username}/library`, an implicit
+  followable library of the user's public tracks. Actor documents
+  advertise `endpoints.sharedInbox` and a `library` link to that implicit
+  collection.
+- `remote_content.py` recognizes Songhive resource URLs and Funkwhale's
+  `/federation/music/{tracks,albums,artists,libraries,uploads}/{id}` and
+  `/federation/actors/{name}` paths. Music documents classify to a
+  normalized `resource_type` (`Audio`→track, `Track`→track,
+  `Album`→album, `Artist`→artist, `Library`→library); `uploads` URLs
+  normalize to `track`. Containment is recorded on the new
+  `remote_objects.parent_url` column (`Audio`→library, `Track`→album,
+  `Album`→first artist, collection pages→`partOf`), and entities embedded
+  in a fetched document (`Audio.track`, `Track.album`, `Album.artists`,
+  page `items`) are cached in the same table — bounded at 120 per fetch —
+  so remote album/library pages render their contents without a fetch
+  per child. `Library` documents additionally trigger one bounded fetch
+  of their first collection page; a pasted `?page=N` URL resolves to its
+  `partOf` collection. Funkwhale's `audience`-only public addressing is
+  honored (`_doc_is_public`), and actor URLs that fail to dereference
+  retry once through WebFinger.
+- Remote resources can be **followed** object-scoped (FEP-efda style):
+  `POST/DELETE /api/v1/remote/objects/{id}/follow` stores a `follows`
+  row keyed on the object URL and delivers `Follow`/`Undo(Follow)` to the
+  object's controlling actor inbox (`actor`/`attributedTo`, e.g. a
+  Funkwhale library's channel actor). Inbound `Accept`/`Reject` are
+  matched in `apply_follow_decision` against the followed object *or* its
+  owning actor. Inbound `Follow`s of a local object delivered to the
+  shared inbox are processed under the object's owning user actor
+  (`_object_follow_owner_username` in `tasks/federation.py`) so the
+  `Accept.actor` matches the library's controlling actor — which Funkwhale
+  requires. Inbound `Create`/`Announce`/`Update` admission accepts
+  activities whose object is — or names as its container (`library`,
+  `context`, `target`) — a followed remote resource, in addition to the
+  followed-actor rule.
+- Remote resources can be **collected**: `item_type="remote"` on
+  `POST/DELETE /api/v1/collection/{item_type}/{item_id}` bookmarks a
+  cached `remote_objects` row by id — only rows with a `resource_type`
+  are collectable, and nothing is copied into local music tables.
+- Remote object responses (`RemoteObjectResponse`) carry
+  `in_collection`, `follow_state`, `parent` and `items` (cached
+  children), and `RemoteResourceView.vue` renders them with follow and
+  collection `EntityActions`, a parent link and a contents list.
 
 ---
 

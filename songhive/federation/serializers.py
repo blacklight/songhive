@@ -36,6 +36,22 @@ ATTACHMENT_ARTIST_KEY = "songhive:artistName"
 ATTACHMENT_ALBUM_KEY = "songhive:albumName"
 ATTACHMENT_TRACK_URL_KEY = "songhive:trackUrl"
 
+# The Funkwhale ActivityPub context — served on music entity documents so
+# the ``Track``/``Album``/``Artist``/``Library`` types and the ``track``/
+# ``album``/``artists``/``bitrate``/``size``/``position``/``disc``/
+# ``released``/``musicbrainzId`` fields expand to their ``fw:`` IRIs when
+# Funkwhale (or another Songhive) parses the document.
+FUNKWHALE_CONTEXT = "https://funkwhale.audio/ns"
+MUSIC_ENTITY_CONTEXT = [
+    "https://www.w3.org/ns/activitystreams",
+    "https://w3id.org/security/v1",
+    FUNKWHALE_CONTEXT,
+    {
+        "manuallyApprovesFollowers": "as:manuallyApprovesFollowers",
+        "Hashtag": "as:Hashtag",
+    },
+]
+
 
 def set_post_content(
     obj: dict,
@@ -239,6 +255,257 @@ def _track_genre_tags(track: Track, domain: str) -> Optional[list]:
     return build_hashtag_tags(genre_tags, partial(get_tag_url, domain))
 
 
+def _entity_published(entity) -> str:
+    """Return an ISO-8601 ``published`` stamp from an entity's ``created_at``."""
+    published = getattr(entity, "created_at", None)
+    if published is None:
+        published = datetime.now(timezone.utc)
+    elif published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    return published.isoformat()
+
+
+def _stored_file_image_doc(stored_file, domain: str) -> dict:
+    """Return an ActivityStreams ``Image`` doc for a stored file."""
+    image = {"type": "Image", "url": _file_download_url(stored_file.id, domain)}
+    if stored_file.content_type:
+        image["mediaType"] = stored_file.content_type
+    return image
+
+
+def artist_to_music_object(
+    artist: Artist,
+    domain: str,
+    actor_url: Optional[str] = None,
+    *,
+    include_context: bool = False,
+) -> dict:
+    """
+    Serialize an Artist to a federated music ``Artist`` document.
+
+    Emits the Funkwhale-dialect shape — ``type: Artist`` under the
+    ``funkwhale.audio/ns`` context — which Funkwhale imports through its
+    ``ArtistSerializer`` and Songhive instances cache as a remote artist
+    resource. ``actor_url`` is the owning/publishing actor, recorded as
+    ``attributedTo``; artists have no local owner, so routes pass the
+    instance actor.
+    """
+    doc: dict = {
+        "type": "Artist",
+        "id": f"https://{domain}/artists/{artist.id}",
+        "name": artist.name,
+        "published": _entity_published(artist),
+        "musicbrainzId": artist.musicbrainz_id or None,
+        "attributedTo": actor_url,
+        "tag": [],
+        "image": None,
+    }
+    if artist.bio:
+        doc["summary"] = artist.bio
+
+    unloaded: frozenset = getattr(sa_inspect(artist), "unloaded", frozenset())
+    image_file = getattr(artist, "image_file", None) if "image_file" not in unloaded else None
+    if image_file is not None:
+        doc["image"] = _stored_file_image_doc(image_file, domain)
+    elif artist.image_url:
+        doc["image"] = {"type": "Image", "url": artist.image_url}
+
+    if include_context:
+        doc["@context"] = MUSIC_ENTITY_CONTEXT
+    return doc
+
+
+def album_to_music_object(
+    album: Album,
+    artist: Optional[Artist],
+    domain: str,
+    actor_url: Optional[str] = None,
+    *,
+    include_context: bool = False,
+) -> dict:
+    """
+    Serialize an Album to a federated music ``Album`` document.
+
+    ``artists`` always carries at least one entry — Funkwhale's
+    ``AlbumSerializer`` requires it — so a missing artist relation produces
+    a stub artist document. ``released`` is derived from ``release_year``
+    (a year-only value serializes as January 1st).
+    """
+    artists = (
+        [artist_to_music_object(artist, domain, actor_url)]
+        if artist is not None
+        else [
+            {
+                "type": "Artist",
+                "id": f"https://{domain}/artists/{album.artist_id}",
+                "name": "Unknown artist",
+                "published": _entity_published(album),
+                "musicbrainzId": None,
+                "attributedTo": actor_url,
+                "tag": [],
+                "image": None,
+            }
+        ]
+    )
+    doc: dict = {
+        "type": "Album",
+        "id": f"https://{domain}/albums/{album.id}",
+        "name": album.title,
+        "published": _entity_published(album),
+        "musicbrainzId": album.musicbrainz_id or None,
+        "released": f"{album.release_year}-01-01" if album.release_year else None,
+        "attributedTo": actor_url,
+        "artists": artists,
+        "tag": [],
+        "image": None,
+    }
+    if album.description:
+        doc["summary"] = album.description
+
+    unloaded: frozenset = getattr(sa_inspect(album), "unloaded", frozenset())
+    cover_file = getattr(album, "cover_file", None) if "cover_file" not in unloaded else None
+    if cover_file is not None:
+        doc["image"] = _stored_file_image_doc(cover_file, domain)
+    elif album.cover_url:
+        doc["image"] = {"type": "Image", "url": album.cover_url}
+
+    if include_context:
+        doc["@context"] = MUSIC_ENTITY_CONTEXT
+    return doc
+
+
+def track_to_music_track_object(
+    track: Track,
+    artist: Optional[Artist],
+    domain: str,
+    actor_url: Optional[str] = None,
+) -> dict:
+    """
+    Serialize a Track to a federated music ``Track`` document.
+
+    This is the structured music metadata embedded in an ``Audio`` object's
+    ``track`` field (and served standalone for ``type: Track`` fetches) —
+    not the ``Audio`` object itself. ``album`` is required by Funkwhale's
+    ``TrackSerializer``; a track without an album gets a synthesized
+    single-track album document.
+    """
+    unloaded = _unloaded_attrs(track)
+    track_url = get_track_url(track=track, domain=domain)
+    album = _loaded_album(track, unloaded)
+    if album is not None:
+        album_doc = album_to_music_object(album, getattr(album, "artist", None) or artist, domain, actor_url)
+    else:
+        album_doc = {
+            "type": "Album",
+            "id": f"{track_url}/album",
+            "name": track.title,
+            "published": _entity_published(track),
+            "musicbrainzId": None,
+            "released": f"{track.release_year}-01-01" if track.release_year else None,
+            "attributedTo": actor_url,
+            "artists": [artist_to_music_object(artist, domain, actor_url)] if artist is not None else [],
+            "tag": [],
+            "image": None,
+        }
+
+    doc: dict = {
+        "type": "Track",
+        "id": track_url,
+        "name": track.title,
+        "published": _entity_published(track),
+        "musicbrainzId": track.musicbrainz_id or None,
+        "position": track.track_number,
+        "disc": track.disc_number,
+        "license": None,
+        "copyright": None,
+        "artists": [artist_to_music_object(artist, domain, actor_url)] if artist is not None else [],
+        "album": album_doc,
+        "attributedTo": actor_url,
+        "tag": [],
+        "image": None,
+    }
+    if track.description:
+        doc["summary"] = track.description
+    return doc
+
+
+def library_to_music_object(
+    collection_id: str,
+    name: str,
+    actor_url: str,
+    total_items: int,
+    *,
+    summary: Optional[str] = None,
+    page_size: int = 100,
+) -> dict:
+    """
+    Serialize a federated music ``Library`` collection document.
+
+    ``collection_id`` is the library's canonical AP URL — either
+    ``/libraries/{id}`` for a named library or ``{actor_url}/library`` for
+    a user's implicit library of public tracks. The document is the
+    collection index; items are served by ``music_collection_page`` at
+    ``{collection_id}?page=N``. ``followers`` is dereferenceable and remote
+    actors may ``Follow`` the library id (object-scoped follows) to receive
+    ``Create(Audio)`` deliveries for new items.
+    """
+    last_page = max(1, -(-total_items // page_size)) if total_items else 1
+    doc: dict = {
+        "type": "Library",
+        "id": collection_id,
+        "name": name,
+        "actor": actor_url,
+        "attributedTo": actor_url,
+        "followers": f"{collection_id}/followers",
+        "audience": "https://www.w3.org/ns/activitystreams#Public",
+        "totalItems": total_items,
+        "first": f"{collection_id}?page=1",
+        "current": f"{collection_id}?page=1",
+        "last": f"{collection_id}?page={last_page}",
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+    }
+    if summary:
+        doc["summary"] = summary
+    return doc
+
+
+def music_collection_page(
+    collection_id: str,
+    page: int,
+    total_items: int,
+    items: list,
+    actor_url: Optional[str] = None,
+    *,
+    page_size: int = 100,
+) -> dict:
+    """
+    Serialize a ``CollectionPage`` of federated music ``Audio`` items.
+
+    Mirrors Funkwhale's library page shape — ``partOf`` the collection id,
+    absolute ``?page=N`` links, embedded ``Audio`` items — so Funkwhale's
+    ``CollectionPageSerializer`` accepts it when scanning a remote library.
+    """
+    last_page = max(1, -(-total_items // page_size)) if total_items else 1
+    doc: dict = {
+        "@context": MUSIC_ENTITY_CONTEXT,
+        "id": f"{collection_id}?page={page}",
+        "type": "CollectionPage",
+        "partOf": collection_id,
+        "totalItems": total_items,
+        "first": f"{collection_id}?page=1",
+        "last": f"{collection_id}?page={last_page}",
+        "items": items,
+    }
+    if page > 1:
+        doc["prev"] = f"{collection_id}?page={page - 1}"
+    if page < last_page:
+        doc["next"] = f"{collection_id}?page={page + 1}"
+    if actor_url:
+        doc["actor"] = actor_url
+        doc["attributedTo"] = actor_url
+    return doc
+
+
 def track_to_audio_object(
     track: Track,
     artist: Artist,
@@ -246,6 +513,7 @@ def track_to_audio_object(
     stream_url: Optional[str] = None,
     actor_url: Optional[str] = None,
     ap_object_id: Optional[str] = None,
+    library_url: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Serialize a Track to an ActivityPub Audio object.
@@ -260,6 +528,12 @@ def track_to_audio_object(
     activities. When omitted the canonical track URL is used, which is the
     legacy behaviour. Per-publication ids are preferred so that a previous
     ``Delete(Tombstone)`` does not block re-publication of the same track.
+
+    ``library_url`` identifies the federated music library the track belongs
+    to — ``/libraries/{id}`` for a public library or the publisher's
+    implicit ``{actor_url}/library`` collection. Together with the embedded
+    ``track`` document and the integer ``duration``/``size``/``bitrate``
+    fields it makes the object importable by Funkwhale's ``UploadSerializer``.
     """
     if artist is None or getattr(track, "visibility", None) != Visibility.PUBLIC.value:
         return None
@@ -273,6 +547,13 @@ def track_to_audio_object(
     # ``published`` feeds the remote post's date (Akkoma falls back to the
     # Unix epoch when it is missing).
     published = _track_published(track, unloaded)
+
+    # Integer seconds — Funkwhale's ``UploadSerializer.duration`` is an
+    # IntegerField; an ISO-8601 duration would fail its import validation.
+    duration_seconds = int(track.duration) if track.duration else 0
+    audio_file = getattr(track, "audio_file", None) if "audio_file" not in unloaded else None
+    size = int(audio_file.size) if audio_file is not None and audio_file.size else 0
+    bitrate = int(size * 8 / duration_seconds) if size and duration_seconds else 0
 
     obj = {
         "type": "Audio",
@@ -298,10 +579,17 @@ def track_to_audio_object(
             },
         ],
         "attributedTo": _track_attributed_to(artist, domain, actor_url),
+        # Federated-music (Funkwhale dialect) fields.
+        "duration": duration_seconds,
+        "bitrate": bitrate,
+        "size": size,
+        "track": track_to_music_track_object(track, artist, domain, actor_url),
     }
 
-    if track.duration:
-        obj["duration"] = format_duration(track.duration)
+    if library_url:
+        obj["library"] = library_url
+    if "updated_at" not in unloaded and getattr(track, "updated_at", None):
+        obj["updated"] = track.updated_at.isoformat()
 
     tags = _track_genre_tags(track, domain)
     if tags:

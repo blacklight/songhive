@@ -4,11 +4,11 @@ Per-user ActivityPub federation routes and WebFinger discovery.
 
 import asyncio
 import base64
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,15 +20,23 @@ from ...federation.activities import (
     build_tombstone_object,
 )
 from ...federation.actors import get_federation_storage
-from ...federation.serializers import track_to_audio_object
-from ...models import Activity, Track, User, Visibility
+from ...federation.serializers import (
+    MUSIC_ENTITY_CONTEXT,
+    album_to_music_object,
+    artist_to_music_object,
+    library_to_music_object,
+    music_collection_page,
+    track_to_audio_object,
+)
+from ...models import Activity, Album, Artist, Library, LibraryTrack, Track, User, Visibility
 from ...models.moderation import ADMIN_ACTION_SUSPEND, AdminUserModeration
+from ...services import activities as activities_service
 from ...services import moderation as moderation_service
 from ...services.auth import get_user_by_id, get_user_by_username
 from ...services.federation import ensure_user_actor, extract_domain, is_domain_allowed
 from ...services.storage import StorageService
 from ...tasks.federation import process_incoming
-from ..deps import get_current_user_optional, get_db, get_storage_service
+from ..deps import get_config, get_current_user_optional, get_db, get_storage_service
 from ..semantic_meta import entity_head_tags
 from .instance import _admin_users
 from .profile_pages import _accepts_activitypub, _accepts_html, _get_active_user, _spa_response
@@ -128,7 +136,7 @@ async def _earliest_track_post(db: AsyncSession, track_id: str) -> Optional[Acti
     return result.scalar_one_or_none()
 
 
-def _track_object_document(track: Track, owner: Any, config: SonghiveConfig) -> Optional[dict]:
+async def _track_object_document(db: AsyncSession, track: Track, owner: Any, config: SonghiveConfig) -> Optional[dict]:
     """
     Build the dereferenceable ``Audio`` document for a published track.
 
@@ -136,9 +144,11 @@ def _track_object_document(track: Track, owner: Any, config: SonghiveConfig) -> 
     the fields remote fetchers require: ``@context`` makes it a valid
     standalone ActivityStreams document (context-less payloads are rejected
     upstream), the ``to``/``cc`` audience lets remote importers classify it
-    as a public status instead of a direct-only one, and ``followers``
-    advertises the object's follower collection so remote servers can
-    subscribe to the thread (FEP-efda followable objects).
+    as a public status instead of a direct-only one, ``library`` names the
+    containing federated music library (required by Funkwhale's
+    ``UploadSerializer`` — uploads always belong to a library), and
+    ``followers`` advertises the object's follower collection so remote
+    servers can subscribe to the thread (FEP-efda followable objects).
     """
     if track.artist is None or owner is None or not owner.actor_url or not track.federation_object_id:
         return None
@@ -152,6 +162,7 @@ def _track_object_document(track: Track, owner: Any, config: SonghiveConfig) -> 
         get_stream_url(track, domain),
         actor_url=owner.actor_url,
         ap_object_id=object_url,
+        library_url=await activities_service._track_library_url(db, track, owner.actor_url, domain),
     )
     if audio_object is None:
         return None
@@ -210,7 +221,7 @@ async def get_object(
             # opening it (e.g. a remote status's "open original" link) land
             # on the track's page.
             return RedirectResponse(url=f"/tracks/{track.id}", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
-        document = _track_object_document(track, user, config)
+        document = await _track_object_document(db, track, user, config)
         if document is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
@@ -430,7 +441,7 @@ async def get_track_page(
         ensure_user_actor(owner, config)
 
     if _accepts_activitypub(request):
-        document = _track_object_document(track, owner, config) if track is not None else None
+        document = await _track_object_document(db, track, owner, config) if track is not None else None
         if document is not None:
             return JSONResponse(content=document, media_type=ACTIVITY_JSON)
         share = await _earliest_track_post(db, track_id)
@@ -692,3 +703,338 @@ async def webfinger(
         },
         media_type=JRD_JSON,
     )
+
+
+# ---------------------------------------------------------------------------
+# Federated music entities (Funkwhale-compatible dialect)
+#
+# Songhive artists/albums/libraries are published as dereferenceable
+# ActivityPub music documents under ``/artists/{id}``, ``/albums/{id}`` and
+# ``/libraries/{id}`` so remote instances — Funkwhale and other Songhive
+# instances alike — can resolve, search and follow them. A user's implicit
+# library of public tracks is served under ``{actor_url}/library``.
+# ---------------------------------------------------------------------------
+
+_LIBRARY_PAGE_SIZE = 100
+
+
+def _instance_actor_url(config: SonghiveConfig) -> str:
+    return f"https://{config.federation.instance_domain}/ap/actor"
+
+
+def _owner_actor_url(owner: Optional[User], config: SonghiveConfig) -> str:
+    if owner is not None:
+        ensure_user_actor(owner, config)
+        if owner.actor_url:
+            return owner.actor_url
+    return _instance_actor_url(config)
+
+
+def _audio_items(
+    tracks: Iterable[Track],
+    domain: str,
+    actor_url: str,
+    library_url: str,
+) -> list[dict]:
+    return [
+        doc
+        for track in tracks
+        if (
+            doc := track_to_audio_object(
+                track,
+                track.artist,
+                domain,
+                actor_url=actor_url,
+                library_url=library_url,
+            )
+        )
+        is not None
+    ]
+
+
+def _library_track_query(library_id: str):
+    return (
+        select(Track)
+        .join(LibraryTrack, LibraryTrack.track_id == Track.id)
+        .where(
+            LibraryTrack.library_id == library_id,
+            Track.visibility == Visibility.PUBLIC.value,
+        )
+        .options(
+            selectinload(Track.artist),
+            selectinload(Track.album),
+            selectinload(Track.audio_file),
+            selectinload(Track.genre_associations),
+        )
+        .order_by(LibraryTrack.created_at.desc())
+    )
+
+
+def _library_track_count(library_id: str):
+    return (
+        select(func.count(Track.id))
+        .join(LibraryTrack, LibraryTrack.track_id == Track.id)
+        .where(
+            LibraryTrack.library_id == library_id,
+            Track.visibility == Visibility.PUBLIC.value,
+        )
+    )
+
+
+async def _followers_collection(
+    storage: Any,
+    object_url: str,
+) -> JSONResponse:
+    """Return an ``OrderedCollection`` of an object's follower actor ids."""
+    followers = await storage.get_followers_of_targets({object_url})
+    actor_ids = sorted({f.actor_id for f in followers})
+    return JSONResponse(
+        {
+            "@context": MUSIC_ENTITY_CONTEXT,
+            "id": f"{object_url}/followers",
+            "type": "OrderedCollection",
+            "totalItems": len(actor_ids),
+            "orderedItems": actor_ids,
+        },
+        media_type=ACTIVITY_JSON,
+    )
+
+
+@router.get("/artists/{artist_id}")
+async def get_artist_document(
+    artist_id: str,
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Serve an Artist as a federated music ``Artist`` document.
+
+    Artists have no visibility of their own (they are public containers),
+    so the document is always dereferenceable. ``attributedTo`` points at
+    the instance actor — artists are shared catalog entities with no owner.
+    """
+    if _accepts_html(request) and not _accepts_activitypub(request):
+        return _spa_response()
+    artist = (
+        await db.execute(select(Artist).options(selectinload(Artist.image_file)).where(Artist.id == artist_id))
+    ).scalar_one_or_none()
+    if artist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    doc = artist_to_music_object(artist, config.federation.instance_domain, _instance_actor_url(config))
+    doc["@context"] = MUSIC_ENTITY_CONTEXT
+    return JSONResponse(doc, media_type=ACTIVITY_JSON)
+
+
+@router.get("/albums/{album_id}")
+async def get_album_document(
+    album_id: str,
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Serve a public Album as a federated music ``Album`` document."""
+    if _accepts_html(request) and not _accepts_activitypub(request):
+        return _spa_response()
+    album = (
+        await db.execute(
+            select(Album)
+            .options(selectinload(Album.artist), selectinload(Album.cover_file))
+            .where(Album.id == album_id, Album.visibility == Visibility.PUBLIC.value)
+        )
+    ).scalar_one_or_none()
+    if album is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    doc = album_to_music_object(album, album.artist, config.federation.instance_domain, _instance_actor_url(config))
+    doc["@context"] = MUSIC_ENTITY_CONTEXT
+    return JSONResponse(doc, media_type=ACTIVITY_JSON)
+
+
+@router.get("/libraries/{library_id}")
+async def get_library_document(
+    library_id: str,
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Serve a public Library as a federated music ``Library`` collection.
+
+    ``GET /libraries/{id}`` returns the collection index; ``?page=N``
+    returns a ``CollectionPage`` of ``Audio`` items — the same shapes
+    Funkwhale exposes under ``/federation/music/libraries/{uuid}``, so a
+    remote Funkwhale or Songhive instance can scan the whole library.
+    Non-public libraries answer 404 so private data is never hinted at.
+    """
+    library = (
+        await db.execute(
+            select(Library)
+            .options(selectinload(Library.owner))
+            .where(
+                Library.id == library_id,
+                Library.visibility == Visibility.PUBLIC.value,
+            )
+        )
+    ).scalar_one_or_none()
+    if library is None:
+        if _accepts_html(request) and not _accepts_activitypub(request):
+            return _spa_response()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    domain = config.federation.instance_domain
+    actor_url = _owner_actor_url(library.owner, config)
+    library_url = f"https://{domain}/libraries/{library.id}"
+    page = request.query_params.get("page")
+    if page is None:
+        if _accepts_html(request) and not _accepts_activitypub(request):
+            return _spa_response()
+        total = (await db.execute(_library_track_count(library.id))).scalar_one()
+        doc = library_to_music_object(
+            library_url,
+            library.name,
+            actor_url,
+            total,
+            summary=library.description,
+            page_size=_LIBRARY_PAGE_SIZE,
+        )
+        doc["@context"] = MUSIC_ENTITY_CONTEXT
+        doc["published"] = library.created_at.isoformat()
+        return JSONResponse(doc, media_type=ACTIVITY_JSON)
+
+    try:
+        page_num = max(1, int(page))
+    except ValueError:
+        page_num = 1
+    total = (await db.execute(_library_track_count(library.id))).scalar_one()
+    tracks = (
+        (
+            await db.execute(
+                _library_track_query(library.id).offset((page_num - 1) * _LIBRARY_PAGE_SIZE).limit(_LIBRARY_PAGE_SIZE)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return JSONResponse(
+        music_collection_page(
+            library_url,
+            page_num,
+            total,
+            _audio_items(tracks, domain, actor_url, library_url),
+            actor_url,
+            page_size=_LIBRARY_PAGE_SIZE,
+        ),
+        media_type=ACTIVITY_JSON,
+    )
+
+
+@router.get("/libraries/{library_id}/followers")
+async def get_library_followers(
+    library_id: str,
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Serve the follower collection of a public federated library."""
+    exists = (
+        await db.execute(
+            select(Library.id).where(
+                Library.id == library_id,
+                Library.visibility == Visibility.PUBLIC.value,
+            )
+        )
+    ).scalar_one_or_none()
+    if exists is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    storage = get_federation_storage(config.database.url)
+    library_url = f"https://{config.federation.instance_domain}/libraries/{library_id}"
+    return await _followers_collection(storage, library_url)
+
+
+@router.get("/users/{username}/library")
+async def get_user_library_document(
+    username: str,
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Serve a user's implicit library of public tracks as a ``Library``.
+
+    ``GET /users/{u}/library`` returns the collection index; ``?page=N``
+    returns a ``CollectionPage`` of ``Audio`` items. This gives every
+    Songhive user a followable federated library without a ``Library``
+    row — the same shape Funkwhale publishes per-channel. The implicit
+    library only contains public tracks, matching the visibility of a
+    public ``Library``.
+    """
+    user = await _get_federating_user(db, username)
+    domain = config.federation.instance_domain
+    actor_url = _owner_actor_url(user, config)
+    library_url = f"{actor_url}/library"
+    base_q = select(Track).where(
+        Track.owner_id == user.id,
+        Track.visibility == Visibility.PUBLIC.value,
+    )
+    count_q = select(func.count(Track.id)).where(
+        Track.owner_id == user.id,
+        Track.visibility == Visibility.PUBLIC.value,
+    )
+
+    page = request.query_params.get("page")
+    if page is None:
+        total = (await db.execute(count_q)).scalar_one()
+        doc = library_to_music_object(
+            library_url,
+            f"{user.display_name or user.username}'s library",
+            actor_url,
+            total,
+            page_size=_LIBRARY_PAGE_SIZE,
+        )
+        doc["@context"] = MUSIC_ENTITY_CONTEXT
+        return JSONResponse(doc, media_type=ACTIVITY_JSON)
+
+    try:
+        page_num = max(1, int(page))
+    except ValueError:
+        page_num = 1
+    total = (await db.execute(count_q)).scalar_one()
+    tracks = (
+        (
+            await db.execute(
+                base_q.options(
+                    selectinload(Track.artist),
+                    selectinload(Track.album),
+                    selectinload(Track.audio_file),
+                    selectinload(Track.genre_associations),
+                )
+                .order_by(Track.created_at.desc())
+                .offset((page_num - 1) * _LIBRARY_PAGE_SIZE)
+                .limit(_LIBRARY_PAGE_SIZE)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return JSONResponse(
+        music_collection_page(
+            library_url,
+            page_num,
+            total,
+            _audio_items(tracks, domain, actor_url, library_url),
+            actor_url,
+            page_size=_LIBRARY_PAGE_SIZE,
+        ),
+        media_type=ACTIVITY_JSON,
+    )
+
+
+@router.get("/users/{username}/library/followers")
+async def get_user_library_followers(
+    username: str,
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Serve the follower collection of a user's implicit library."""
+    user = await _get_federating_user(db, username)
+    actor_url = _owner_actor_url(user, config)
+    storage = get_federation_storage(config.database.url)
+    return await _followers_collection(storage, f"{actor_url}/library")

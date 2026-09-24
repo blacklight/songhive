@@ -3,27 +3,39 @@ import { computed, ref, watch } from "vue";
 import { useRoute, RouterLink } from "vue-router";
 import { useI18n } from "vue-i18n";
 import {
+  followRemoteObject,
   getRemoteResource,
+  unfollowRemoteObject,
   type RemoteObject,
   type RemoteResourceKind,
 } from "@/api/remote";
+import { getApiErrorMessage } from "@/api/client";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import EntityActions from "@/components/ui/EntityActions.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import RichContent from "@/components/RichContent.vue";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
+import { useCollectionItem } from "@/composables/useCollectionItem";
+import { useAuthStore } from "@/stores/auth";
+import { useToastStore } from "@/stores/toast";
 
-// Read-only page for a cached remote resource (track/album/artist/
-// playlist/library). Remote resources never become local rows and carry
-// no local management actions — editing, sharing, and library controls
-// do not apply.
+// Page for a cached remote resource (track/album/artist/playlist/library).
+// Remote resources never become local rows and carry no local management
+// actions — editing, sharing, and library controls do not apply — but the
+// resource can be bookmarked into the caller's collection and followed
+// (object-scoped follow: a followed library delivers new items to the
+// instance).
 const { t } = useI18n();
 const route = useRoute();
 const instanceDomain = useInstanceDomain();
+const authStore = useAuthStore();
+const toastStore = useToastStore();
 
 const object = ref<RemoteObject | null>(null);
 const loading = ref(true);
 const failed = ref(false);
+const followBusy = ref(false);
 
 const kind = computed(
   () => String(route.params.kind ?? "") as RemoteResourceKind,
@@ -36,6 +48,81 @@ const kindLabel = computed(() => t(`remote.kinds.${kind.value}`, kind.value));
 const summaryHtml = computed(
   () => object.value?.summary || object.value?.content || "",
 );
+
+const { collectionAction, toggleCollection } = useCollectionItem(
+  "remote",
+  object,
+);
+
+const followLabel = computed(() => {
+  const state = object.value?.follow_state;
+  if (state === "accepted") return t("remote.unfollow");
+  if (state === "pending") return t("remote.followRequested");
+  return t("remote.follow", { kind: kindLabel.value });
+});
+
+const canFollow = computed(
+  () =>
+    authStore.isAuthenticated &&
+    object.value !== null &&
+    !object.value.unavailable,
+);
+
+const actions = computed(() => [
+  {
+    key: "follow",
+    label: followLabel.value,
+    icon: object.value?.follow_state ? "user-minus" : "user-plus",
+    variant: "secondary" as const,
+    visible: canFollow.value,
+    loading: followBusy.value,
+  },
+  collectionAction.value,
+]);
+
+async function toggleFollow() {
+  const target = object.value;
+  if (!target || followBusy.value || !canFollow.value) return;
+  followBusy.value = true;
+  try {
+    if (target.follow_state) {
+      await unfollowRemoteObject(target.id);
+      target.follow_state = null;
+      toastStore.push({
+        type: "success",
+        message: t("remote.unfollowSuccess"),
+      });
+    } else {
+      const result = await followRemoteObject(target.id);
+      target.follow_state = result.follow_state ?? "pending";
+      toastStore.push({
+        type: "success",
+        message: t("remote.followSuccess"),
+      });
+    }
+  } catch (err) {
+    const message =
+      getApiErrorMessage(err) ||
+      (err instanceof Error ? err.message : t("errors.unknown"));
+    toastStore.push({
+      type: "error",
+      message: t("remote.followError", { message }),
+    });
+  } finally {
+    followBusy.value = false;
+  }
+}
+
+async function onAction(key: string) {
+  if (key === "follow") await toggleFollow();
+  else if (key === "collection") await toggleCollection();
+}
+
+function childKind(item: RemoteObject): string {
+  return item.resource_type
+    ? t(`remote.kinds.${item.resource_type}`, item.resource_type)
+    : item.object_type;
+}
 
 async function load() {
   const id = String(route.params.id ?? "");
@@ -98,6 +185,13 @@ watch(() => [route.params.kind, route.params.id], load, { immediate: true });
           preload="none"
           class="remote-resource__audio"
         />
+        <p v-if="object.parent" class="remote-resource__parent">
+          {{ t("remote.partOf") }}
+          <RouterLink :to="object.parent.url" class="remote-resource__link">
+            {{ object.parent.name || object.parent.canonical_url }}
+          </RouterLink>
+        </p>
+        <EntityActions :actions="actions" @select="onAction" />
         <p class="remote-resource__meta">
           <RouterLink
             v-if="object.actor_handle"
@@ -118,6 +212,26 @@ watch(() => [route.params.kind, route.params.id], load, { immediate: true });
         </p>
       </div>
     </article>
+    <section
+      v-if="object && object.items && object.items.length"
+      class="remote-resource__items"
+    >
+      <h2 class="remote-resource__items-title">
+        {{ t("remote.items", { kind: kindLabel }) }}
+      </h2>
+      <ul class="remote-resource__items-list">
+        <li
+          v-for="item in object.items"
+          :key="item.id"
+          class="remote-resource__item"
+        >
+          <RouterLink :to="item.url" class="remote-resource__link">
+            {{ item.name || item.canonical_url }}
+          </RouterLink>
+          <span class="remote-resource__item-kind">{{ childKind(item) }}</span>
+        </li>
+      </ul>
+    </section>
   </div>
 </template>
 
@@ -218,5 +332,60 @@ watch(() => [route.params.kind, route.params.id], load, { immediate: true });
 .remote-resource__actor:hover,
 .remote-resource__origin:hover {
   text-decoration: underline;
+}
+
+.remote-resource__parent {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.remote-resource__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 60rem;
+}
+
+.remote-resource__items-title {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.remote-resource__items-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.remote-resource__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+}
+
+.remote-resource__link {
+  color: var(--color-text-link);
+  text-decoration: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.remote-resource__link:hover {
+  text-decoration: underline;
+}
+
+.remote-resource__item-kind {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  flex-shrink: 0;
 }
 </style>

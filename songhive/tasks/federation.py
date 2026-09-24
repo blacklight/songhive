@@ -5,7 +5,9 @@ Federation tasks: process incoming and deliver outgoing ActivityPub activities.
 import asyncio
 import base64
 import logging
+import re
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 from pubby import ActivityPubError, FollowPolicy, SignatureVerificationError
@@ -78,6 +80,62 @@ def _follow_policy_for_target(target_actor_id: str, requester_actor_id: str) -> 
             await dispose_and_reset()
 
     return asyncio.run(_load())
+
+
+def _object_follow_owner_username(config, activity: dict) -> Optional[str]:
+    """
+    Resolve the local owner username of an object-scoped inbound ``Follow``.
+
+    Shared-inbox deliveries arrive with ``username=None``, which would make
+    pubby answer the ``Accept(Follow)`` as the instance actor. Remote music
+    servers — Funkwhale in particular — only honor an ``Accept`` whose
+    actor is the followed object's owning actor (``library.actor``), so a
+    ``Follow`` of ``/libraries/{id}`` or ``/users/{u}/library`` must be
+    processed under the owner's actor. Returns ``None`` for non-Follow
+    activities, non-local targets and objects with no resolvable owner.
+    """
+    if activity.get("type") != "Follow":
+        return None
+    target = activity.get("object")
+    if isinstance(target, dict):
+        target = target.get("id")
+    if not isinstance(target, str):
+        return None
+    parsed = urlparse(target)
+    domain = config.federation.instance_domain
+    if parsed.hostname != domain:
+        return None
+    path = parsed.path or ""
+
+    user_match = re.match(r"^/users/(?P<username>[^/?#]+)/", path)
+    if user_match:
+        return user_match.group("username")
+
+    library_match = re.match(r"^/libraries/(?P<library_id>[^/?#]+)/?$", path)
+    if library_match:
+        from ..models.library import Library
+        from ..services import moderation as moderation_service
+        from ..services.auth import get_user_by_id
+
+        init_db(config.database.url)
+
+        async def _load():
+            try:
+                async with get_session() as session:
+                    library = await session.get(Library, library_match.group("library_id"))
+                    if library is None or library.owner_id is None:
+                        return None
+                    owner = await get_user_by_id(session, library.owner_id)
+                    if owner is None or not owner.is_active:
+                        return None
+                    if await moderation_service.user_is_suspended(session, owner.id):
+                        return None
+                    return owner.username
+            finally:
+                await dispose_and_reset()
+
+        return asyncio.run(_load())
+    return None
 
 
 def _load_incoming_moderation(actor: str, username: Optional[str]) -> tuple:
@@ -173,14 +231,21 @@ def process_incoming(
 
     actor_id: Optional[str]
     private_key_pem: Optional[str]
-    if username is None:
+    # A shared-inbox ``Follow`` of a local music object (a federated
+    # library) must be answered by the object's owning actor — Funkwhale
+    # matches ``Accept.actor`` against ``library.actor`` — so the owner's
+    # actor context is resolved before falling back to the instance actor.
+    object_owner = _object_follow_owner_username(config, activity) if username is None else None
+    if username is None and object_owner is None:
         actor_id = f"https://{domain}/ap/actor"
         private_key_path = get_or_create_private_key(config.federation.private_key_path)
         private_key_pem = private_key_path.read_text(encoding="utf-8")
     else:
-        user = _load_user_actor(username)
+        resolved_username = username or object_owner
+        assert resolved_username is not None  # guaranteed by the branch guard
+        user = _load_user_actor(resolved_username)
         if user is None:
-            logger.warning("Local user %r not found; dropping incoming activity", username)
+            logger.warning("Local user %r not found; dropping incoming activity", username or object_owner)
             return None
         actor_id = user.actor_url
         private_key_pem = user.private_key_pem

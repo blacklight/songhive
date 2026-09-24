@@ -1862,7 +1862,16 @@
       "artist": "artist",
       "playlist": "playlist",
       "library": "library"
-    }
+    },
+    "follow": "Follow {kind}",
+    "unfollow": "Unfollow",
+    "followRequested": "Follow requested",
+    "followSuccess": "Follow request sent.",
+    "unfollowSuccess": "Unfollowed.",
+    "followError": "Could not update the follow: {message}",
+    "partOf": "Part of",
+    "items": "Contents",
+    "collectedTitle": "Remote {kind}s in your collection"
   },
   "embed": {
     "unavailable": "This content is not available.",

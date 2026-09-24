@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.user import User
-from ...services import acl, collection
+from ...services import acl, collection, remote_content
 from .._common import Pagination, get_pagination
 from ..deps import get_current_user, get_db
 
@@ -75,12 +75,23 @@ async def add_to_collection(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Add an item to the current user's collection."""
+    """Add an item to the current user's collection.
+
+    ``remote`` items reference a cached ``remote_objects`` row — federated
+    music resources are bookmarked by id without being copied into local
+    music tables. Only rows classified as a resource (track, album, artist,
+    library, …) are collectable; bare remote posts are not.
+    """
     _check_item_type(item_type)
 
-    item = await acl.get_item(db, item_type, item_id)
-    if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if item_type == "remote":
+        row = await remote_content.get_cached_remote_object(db, item_id)
+        if row is None or row.resource_type is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    else:
+        item = await acl.get_item(db, item_type, item_id)
+        if item is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     if not await acl.can_access(db, current_user, item_type, item_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
