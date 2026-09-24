@@ -49,6 +49,42 @@ describe("externalLibraryProviderTemplates", () => {
     );
   });
 
+  it("returns a template for the dropbox provider", () => {
+    const template = getProviderTemplate("dropbox");
+    expect(template.providerType).toBe("dropbox");
+    expect(template.helpI18nKey).toBe(
+      "pages.externalLibraries.providers.dropbox.help",
+    );
+    const fields = template.fields.map((f) => f.name);
+    expect(fields).toContain("access_token");
+    expect(fields).toContain("refresh_token");
+    expect(fields).toContain("app_key");
+    expect(fields).toContain("app_secret");
+    expect(fields).toContain("root");
+    expect(fields).toContain("temporary_links");
+    expect(fields).toContain("timeout");
+    expect(template.fields.find((f) => f.name === "access_token")!.type).toBe(
+      "password",
+    );
+    expect(template.fields.find((f) => f.name === "refresh_token")!.type).toBe(
+      "password",
+    );
+    // Only the app key is truly required — the tokens are granted by the
+    // OAuth connect flow.
+    expect(template.fields.find((f) => f.name === "app_key")!.required).toBe(
+      true,
+    );
+    expect(
+      template.fields.find((f) => f.name === "access_token")!.required,
+    ).toBeFalsy();
+    expect(
+      template.fields.find((f) => f.name === "refresh_token")!.required,
+    ).toBeFalsy();
+    expect(
+      template.fields.find((f) => f.name === "app_secret")!.required,
+    ).toBeFalsy();
+  });
+
   it("returns an empty template for unknown providers", () => {
     const template = getProviderTemplate("unknown");
     expect(template.providerType).toBe("unknown");

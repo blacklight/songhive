@@ -539,9 +539,11 @@ class StreamHandler(tornado.web.RequestHandler):
         self.set_header("Content-Type", mimetype)
         if stream.size is not None:
             self.set_header("Content-Length", stream.size)
+        if stream.content_range:
+            self.set_header("Content-Range", stream.content_range)
         self.set_header("Accept-Ranges", "bytes" if stream.supports_range else "none")
         self.set_header("Cache-Control", "no-store")
-        self.set_status(200)
+        self.set_status(206 if stream.content_range else 200)
 
         bytes_served = 0
         try:
@@ -671,6 +673,9 @@ class StreamHandler(tornado.web.RequestHandler):
                 return
             track, stored_file = track_and_file
 
+            if not await self._check_access(session, track_id, user):
+                return
+
             external_stream: Optional[ExternalStream] = None
             if stored_file is None:
                 try:
@@ -689,9 +694,6 @@ class StreamHandler(tornado.web.RequestHandler):
                 if external_stream is None:
                     self._not_found()
                     return
-
-            if not await self._check_access(session, track_id, user):
-                return
 
             min_seconds, min_percent = await scrobbler.thresholds_for(session, user)
             state = _StreamState(min_seconds=min_seconds, min_percent=min_percent)

@@ -82,6 +82,7 @@
     "yes": "Yes",
     "no": "No",
     "all": "All",
+    "required": "Required",
     "playAll": "Play all"
   },
   "sort": {
@@ -841,6 +842,9 @@
       "syncFailed": "Sync failed.",
       "syncTimeout": "Sync status could not be confirmed.",
       "syncError": "Could not start sync: {message}",
+      "oauthConnect": "Connect {provider} account",
+      "oauthConnected": "Account connected. Review the settings and save to finish.",
+      "oauthFailed": "Connection failed: {message}",
       "tracks": "Tracks",
       "syncRuns": "Sync runs",
       "syncRunStatus": "Status",
@@ -1134,6 +1138,71 @@
             "allow_delete_source": {
               "label": "Allow source deletion",
               "description": "Allow deleting files on the remote server. Requires write permission on the remote server."
+            }
+          }
+        },
+        "dropbox": {
+          "help": "Create your own Dropbox app at {appConsole} (choose \"Scoped access\"). Required permissions: {permissions} — plus {writePermissions} if you want metadata write-back or rename/delete.\nIn the app's OAuth 2 settings, add this redirect URI: {callbackUrl}\nThen enter the app key (and app secret, if shown) below and use the Connect button to authorize your Dropbox account — the access and refresh tokens are filled in automatically.\nIf you change the app's permissions later, connect again: existing tokens keep only the scopes granted when they were issued.",
+          "fields": {
+            "access_token": {
+              "label": "Access token",
+              "description": "Filled automatically by the Connect button. Only enter one manually for a quick test — Dropbox access tokens expire after a few hours. Stored encrypted."
+            },
+            "refresh_token": {
+              "label": "Refresh token",
+              "description": "Filled automatically by the Connect button. The durable credential — mints short-lived access tokens automatically. Requires the app key below. Stored encrypted."
+            },
+            "app_key": {
+              "label": "App key",
+              "description": "App key of your Dropbox app, from its page in the Dropbox App Console. Required."
+            },
+            "app_secret": {
+              "label": "App secret",
+              "description": "App secret of the Dropbox app, shown next to the app key in the App Console. Optional. Stored encrypted."
+            },
+            "root": {
+              "label": "Root folder",
+              "description": "Dropbox folder to index (e.g. /Music). Leave empty to index the whole account."
+            },
+            "timeout": {
+              "label": "Request timeout (seconds)",
+              "description": "How long to wait for each Dropbox API request."
+            },
+            "temporary_links": {
+              "label": "Stream via temporary links",
+              "description": "Redirect clients to short-lived Dropbox download links for playback — offloads bandwidth to Dropbox, but Firefox refuses to play them (Dropbox serves them with a sandbox CSP). Leave off to proxy audio through Songhive, which works in every browser."
+            },
+            "extensions": {
+              "label": "File extensions",
+              "description": "Comma-separated list of audio file extensions to index (e.g. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Exclude patterns",
+              "description": "Comma-separated glob patterns for Dropbox paths to skip during scanning."
+            },
+            "recursive": {
+              "label": "Recursive scan",
+              "description": "Index audio files in subfolders of the root folder recursively."
+            },
+            "allow_hashing": {
+              "label": "Allow audio hashing",
+              "description": "Compute a stable audio hash for tracks to detect duplicates and support transcoding. Requires downloading new or changed files once."
+            },
+            "fast_hash": {
+              "label": "Use fast raw hash",
+              "description": "Use raw SHA-256 instead of ffmpeg audio-only hashing. Cheaper but changes when tags or artwork change."
+            },
+            "allow_write_tags": {
+              "label": "Allow metadata write-back",
+              "description": "Allow Songhive to rewrite embedded tags and re-upload files when tracks are edited. Requires write permission on the account."
+            },
+            "allow_rename_source": {
+              "label": "Allow source renaming",
+              "description": "Allow Songhive to rename Dropbox files through track edits. Requires write permission on the account."
+            },
+            "allow_delete_source": {
+              "label": "Allow source deletion",
+              "description": "Allow deleting files from Dropbox. Requires write permission on the account."
             }
           }
         }

@@ -12,6 +12,7 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import * as externalLibrariesApi from "@/api/externalLibraries";
+import { redirectToOAuthProvider } from "@/utils/externalOAuth";
 import ExternalLibraryEditView from "./ExternalLibraryEditView.vue";
 
 vi.mock("@/api/externalLibraries", () => ({
@@ -35,7 +36,17 @@ vi.mock("@/api/externalLibraries", () => ({
   adminDeleteExternalTrack: vi.fn(),
   listUserSyncRuns: vi.fn(),
   adminListExternalSyncRuns: vi.fn(),
+  beginExternalOAuth: vi.fn(),
+  claimExternalOAuth: vi.fn(),
 }));
+
+vi.mock("@/utils/externalOAuth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/utils/externalOAuth")>();
+  return {
+    ...actual,
+    redirectToOAuthProvider: vi.fn(),
+  };
+});
 
 function getInputByLabel(label: string): HTMLInputElement | null {
   const labels = Array.from(document.body.querySelectorAll("label"));
@@ -410,6 +421,104 @@ describe("ExternalLibraryEditView", () => {
     expect(body.config).not.toHaveProperty("ca_bundle");
   });
 
+  it("renders the dropbox provider form and submits a structured config", async () => {
+    vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
+      {
+        provider_type: "dropbox",
+        user_configurable: true,
+        capabilities_summary: {},
+      },
+    ]);
+    vi.mocked(externalLibrariesApi.createUserExternalLibrary).mockResolvedValue(
+      {
+        id: "el1",
+        library_id: "lib1",
+        provider_type: "dropbox",
+        scope: "user",
+        name: "Dropbox Library",
+        config: { access_token: "token" },
+        enabled: true,
+        include_in_library_index: false,
+        sync_enabled: true,
+        sync_interval_seconds: null,
+        can_manage: true,
+        can_sync: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    );
+
+    const router = createTestRouter("/settings/external-libraries/new");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      i18n.global.t(
+        "pages.externalLibraries.providers.dropbox.fields.access_token.label",
+      ),
+    );
+    expect(wrapper.text()).not.toContain(
+      i18n.global.t("pages.externalLibraries.configHint"),
+    );
+
+    const tokenInput = getInputByLabel(
+      i18n.global.t(
+        "pages.externalLibraries.providers.dropbox.fields.access_token.label",
+      ),
+    );
+    expect(tokenInput).not.toBeNull();
+    tokenInput!.value = "test-token";
+    tokenInput!.dispatchEvent(new Event("input"));
+
+    const appKeyInput = getInputByLabel(
+      i18n.global.t(
+        "pages.externalLibraries.providers.dropbox.fields.app_key.label",
+      ),
+    );
+    expect(appKeyInput).not.toBeNull();
+    appKeyInput!.value = "test-app-key";
+    appKeyInput!.dispatchEvent(new Event("input"));
+
+    const rootInput = getInputByLabel(
+      i18n.global.t(
+        "pages.externalLibraries.providers.dropbox.fields.root.label",
+      ),
+    );
+    expect(rootInput).not.toBeNull();
+    rootInput!.value = "/Music";
+    rootInput!.dispatchEvent(new Event("input"));
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("pages.externalLibraries.create"),
+    );
+    expect(saveButton).toBeDefined();
+    await saveButton?.click();
+    await flushPromises();
+
+    expect(externalLibrariesApi.createUserExternalLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider_type: "dropbox",
+        config: expect.objectContaining({
+          access_token: "test-token",
+          app_key: "test-app-key",
+          root: "/Music",
+          timeout: 30,
+          temporary_links: true,
+        }),
+      }),
+    );
+    const body = (externalLibrariesApi.createUserExternalLibrary as Mock).mock
+      .calls[0][0];
+    expect(body.config).not.toHaveProperty("refresh_token");
+    expect(body.config).not.toHaveProperty("app_secret");
+  });
+
   it("falls back to raw JSON config when the provider has no template", async () => {
     vi.mocked(externalLibrariesApi.listAdminProviders).mockResolvedValue([
       {
@@ -664,5 +773,203 @@ describe("ExternalLibraryEditView", () => {
     expect(cards[0].textContent).toContain("music/song.mp3");
 
     expect(document.body.querySelector("table")).toBeNull();
+  });
+
+  it("shows the connect button for OAuth providers and starts the flow", async () => {
+    vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
+      {
+        provider_type: "dropbox",
+        user_configurable: true,
+        capabilities_summary: {},
+        oauth_supported: true,
+        oauth_callback_url:
+          "https://songhive.example/api/v1/external-libraries/oauth/callback",
+      },
+    ]);
+    vi.mocked(externalLibrariesApi.beginExternalOAuth).mockResolvedValue({
+      authorize_url: "https://www.dropbox.com/oauth2/authorize?state=state-1",
+      state: "state-1",
+    });
+
+    const router = createTestRouter("/settings/external-libraries/new");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const connectButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) =>
+      (b.textContent ?? "").includes(
+        i18n.global.t("pages.externalLibraries.oauthConnect", {
+          provider: "dropbox",
+        }),
+      ),
+    );
+    expect(connectButton).toBeDefined();
+
+    // The provider help explains the Dropbox app setup and shows the
+    // OAuth callback URL to register in the App Console.
+    const help = document.body.querySelector(
+      ".external-library-edit-view__provider-help",
+    );
+    expect(help?.textContent).toContain("dropbox.com/developers/apps");
+    expect(help?.textContent).toContain(
+      "https://songhive.example/api/v1/external-libraries/oauth/callback",
+    );
+
+    const consoleLink = help?.querySelector("a");
+    expect(consoleLink?.getAttribute("href")).toBe(
+      "https://www.dropbox.com/developers/apps",
+    );
+
+    const codeTexts = Array.from(help?.querySelectorAll("code") ?? []).map(
+      (el) => el.textContent ?? "",
+    );
+    expect(codeTexts).toContain(
+      "account_info.read, files.metadata.read, files.content.read",
+    );
+    expect(codeTexts).toContain("files.metadata.write, files.content.write");
+    expect(codeTexts).toContain(
+      "https://songhive.example/api/v1/external-libraries/oauth/callback",
+    );
+
+    // The app key is marked as required; the token fields are not.
+    const requiredBadges = Array.from(
+      document.body.querySelectorAll(".external-library-edit-view__required"),
+    );
+    expect(requiredBadges.length).toBe(1);
+    expect(requiredBadges[0].textContent).toContain(
+      i18n.global.t("common.required"),
+    );
+
+    const appKeyInput = getInputByLabel(
+      i18n.global.t(
+        "pages.externalLibraries.providers.dropbox.fields.app_key.label",
+      ),
+    );
+    expect(appKeyInput).not.toBeNull();
+    appKeyInput!.value = "dbx-key";
+    appKeyInput!.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    await connectButton?.click();
+    await flushPromises();
+
+    expect(externalLibrariesApi.beginExternalOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider_type: "dropbox",
+        return_to: "/settings/external-libraries/new",
+        config: expect.objectContaining({ app_key: "dbx-key" }),
+      }),
+    );
+    expect(redirectToOAuthProvider).toHaveBeenCalledWith(
+      "https://www.dropbox.com/oauth2/authorize?state=state-1",
+    );
+    const stash = sessionStorage.getItem("songhive:external-oauth:state-1");
+    expect(stash).toContain('"providerType":"dropbox"');
+    // Secret-bearing fields are never persisted to browser storage; the
+    // backend carries them back inside the claimed config fragment.
+    expect(stash).not.toContain("dbx-key");
+    expect(stash).not.toContain("app_key");
+  });
+
+  it("does not show the connect button for providers without OAuth", async () => {
+    const router = createTestRouter("/settings/external-libraries/new");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const connectButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) =>
+      (b.textContent ?? "").includes(
+        i18n.global.t("pages.externalLibraries.oauthConnect", {
+          provider: "s3",
+        }),
+      ),
+    );
+    expect(connectButton).toBeUndefined();
+  });
+
+  it("claims granted tokens on return and submits them with the config", async () => {
+    vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
+      {
+        provider_type: "dropbox",
+        user_configurable: true,
+        capabilities_summary: {},
+        oauth_supported: true,
+      },
+    ]);
+    vi.mocked(externalLibrariesApi.claimExternalOAuth).mockResolvedValue({
+      provider_type: "dropbox",
+      config: {
+        access_token: "at-1",
+        refresh_token: "rt-1",
+        account_id: "dbid:42",
+        app_key: "dbx-key",
+        app_secret: "dbx-secret",
+      },
+    });
+
+    const router = createTestRouter(
+      "/settings/external-libraries/new?oauth_state=state-1",
+    );
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(externalLibrariesApi.claimExternalOAuth).toHaveBeenCalledWith(
+      "state-1",
+    );
+
+    const tokenInput = getInputByLabel(
+      i18n.global.t(
+        "pages.externalLibraries.providers.dropbox.fields.access_token.label",
+      ),
+    ) as HTMLInputElement;
+    expect(tokenInput?.value).toBe("at-1");
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("pages.externalLibraries.create"),
+    );
+    await saveButton?.click();
+    await flushPromises();
+
+    expect(externalLibrariesApi.createUserExternalLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider_type: "dropbox",
+        config: expect.objectContaining({
+          access_token: "at-1",
+          refresh_token: "rt-1",
+          account_id: "dbid:42",
+        }),
+      }),
+    );
+  });
+
+  it("shows an error when the provider returns an OAuth error", async () => {
+    const router = createTestRouter(
+      "/settings/external-libraries/new?oauth_error=access_denied",
+    );
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(externalLibrariesApi.claimExternalOAuth).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("access_denied");
   });
 });

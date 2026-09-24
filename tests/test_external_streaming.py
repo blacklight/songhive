@@ -227,6 +227,17 @@ class TestExternalStreamHandler(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(response.body, self.audio_data)
         self.assertEqual(response.headers.get("Content-Type"), "audio/mpeg")
 
+    def test_external_iterator_range_stream(self):
+        headers = dict(self._auth_header())
+        headers["Range"] = "bytes=2-5"
+        response = self.fetch(f"/api/v1/stream/{self.track.id}", headers=headers)
+        self.assertEqual(response.code, 206)
+        self.assertEqual(response.body, self.audio_data[2:6])
+        self.assertEqual(
+            response.headers.get("Content-Range"),
+            f"bytes 2-5/{len(self.audio_data)}",
+        )
+
     def test_external_path_stream(self):
         response = self.fetch(f"/api/v1/stream/{self.path_track.id}", headers=self._auth_header())
         self.assertEqual(response.code, 200)

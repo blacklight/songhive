@@ -732,10 +732,12 @@ class WebDAVExternalAdapter(ExternalLibraryAdapter):
         end: Optional[int] = None
         size: Optional[int] = item.size
         request_headers: dict[str, str] = {}
+        content_range: Optional[str] = None
         if range is not None:
             start, end = range
             request_headers["Range"] = f"bytes={start}-{end}"
             size = end - start + 1
+            content_range = f"bytes {start}-{end}/{item.size if item.size is not None else '*'}"
 
         async def _iter_http() -> AsyncIterator[bytes]:
             async with self._client(config) as client:
@@ -754,6 +756,7 @@ class WebDAVExternalAdapter(ExternalLibraryAdapter):
             supports_range=True,
             headers={},
             temporary=False,
+            content_range=content_range,
         )
 
     async def download(self, config: dict, item: ExternalItemRef) -> ExternalStream:

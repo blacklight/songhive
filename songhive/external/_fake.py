@@ -54,6 +54,7 @@ class FakeExternalAdapter(ExternalLibraryAdapter):
             validate_config=True,
             limits={"checksum_algorithm": "sha256", "max_page_size": 1000},
         )
+        assert self._capabilities
         return self._capabilities
 
     def _get_item(self, config: dict, provider_key: str) -> dict[str, Any]:
@@ -222,12 +223,12 @@ class FakeExternalAdapter(ExternalLibraryAdapter):
                 temporary=True,
             )
 
-        start = 0
-        end = max(len(data) - 1, 0)
+        content_range: Optional[str] = None
         if range is not None:
             start, end = range
             if start < 0 or end >= len(data) or start > end:
                 raise ExternalConfigError(f"Invalid byte range: {range}", field="range")
+            content_range = f"bytes {start}-{end}/{len(data)}"
             data = data[start : end + 1]
 
         return ExternalStream(
@@ -237,6 +238,7 @@ class FakeExternalAdapter(ExternalLibraryAdapter):
             size=len(data),
             supports_range=True,
             headers={},
+            content_range=content_range,
         )
 
     async def _stream_bytes(self, data: bytes) -> AsyncIterator[bytes]:

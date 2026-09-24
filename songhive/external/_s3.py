@@ -423,10 +423,12 @@ class S3ExternalAdapter(ExternalLibraryAdapter):
 
         size: Optional[int] = item.size
         get_kwargs: dict[str, Any] = {"Bucket": bucket, "Key": key}
+        content_range: Optional[str] = None
         if range is not None:
             start, end = range
             get_kwargs["Range"] = f"bytes={start}-{end}"
             size = end - start + 1
+            content_range = f"bytes {start}-{end}/{item.size if item.size is not None else '*'}"
 
         async def _iter_s3() -> AsyncIterator[bytes]:
             async with self._get_client(config) as client:
@@ -452,6 +454,7 @@ class S3ExternalAdapter(ExternalLibraryAdapter):
             supports_range=True,
             headers={},
             temporary=False,
+            content_range=content_range,
         )
 
     async def download(self, config: dict, item: ExternalItemRef) -> ExternalStream:

@@ -4,6 +4,7 @@ import dataclasses
 import logging
 from datetime import datetime, timezone
 from typing import Any, List, Literal, Optional, cast
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import (
     APIRouter,
@@ -16,7 +17,9 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, model_validator
+from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -26,6 +29,16 @@ from ...external.base import ExternalLibraryAdapter
 from ...external.errors import (
     ExternalItemNotFound,
     UnsupportedExternalOperation,
+)
+from ...external.oauth import (
+    OAuthFlowError,
+    begin_flow,
+    claim_result,
+    consume_pending,
+    exchange_code,
+    get_oauth_provider,
+    oauth_supported,
+    store_result,
 )
 from ...external.registry import (
     get_external_adapter,
@@ -50,9 +63,11 @@ from .._common import Pagination, client_ip, get_pagination
 from ..deps import (
     get_current_user,
     get_db,
+    get_redis,
     get_storage_service,
 )
 from ..middleware.rate_limit import rate_limit_account
+from ..semantic_meta import public_base_url
 
 router = APIRouter(prefix="/external-libraries")
 logger = logging.getLogger(__name__)
@@ -230,6 +245,37 @@ class ExternalProviderResponse(BaseModel):
     provider_type: str
     user_configurable: bool
     capabilities_summary: dict
+    oauth_supported: bool = False
+    oauth_callback_url: Optional[str] = None
+
+
+class ExternalOAuthBeginRequest(BaseModel):
+    """Request body for starting an external-provider OAuth flow."""
+
+    provider_type: str
+    config: dict = {}
+    external_library_id: Optional[str] = None
+    return_to: Optional[str] = None
+
+
+class ExternalOAuthBeginResponse(BaseModel):
+    """Authorization URL and state for an in-progress OAuth flow."""
+
+    authorize_url: str
+    state: str
+
+
+class ExternalOAuthClaimRequest(BaseModel):
+    """Request body for claiming a completed OAuth flow result."""
+
+    state: str
+
+
+class ExternalOAuthClaimResponse(BaseModel):
+    """Granted provider config fragment from a completed OAuth flow."""
+
+    provider_type: str
+    config: dict
 
 
 def _utcnow() -> datetime:
@@ -277,6 +323,30 @@ def _merge_config_preserving_redacted(new_config: dict, decrypted_old: dict) -> 
         if value == "<redacted>" and key in decrypted_old:
             merged[key] = decrypted_old[key]
     return merged
+
+
+def _safe_return_to(value: Any) -> str:
+    """Validate a post-OAuth return path; only local paths are allowed."""
+    if not isinstance(value, str):
+        return "/"
+    value = value.strip()
+    if not value.startswith("/") or value.startswith("//"):
+        return "/"
+    return value
+
+
+def _oauth_redirect(return_to: str, **params: str) -> RedirectResponse:
+    """Redirect back to the SPA ``return_to`` path with extra query params."""
+    parts = urlsplit(return_to)
+    query = dict(parse_qsl(parts.query))
+    query.update(params)
+    url = urlunsplit(("", "", parts.path, urlencode(query), parts.fragment))
+    return RedirectResponse(url)
+
+
+def _oauth_callback_url(request: Request) -> str:
+    """Return the public OAuth callback URL for external providers."""
+    return f"{public_base_url(request, request.app.state.config)}" "/api/v1/external-libraries/oauth/callback"
 
 
 def _mutation_to_dict(mutation: ExternalMutationResult) -> dict:
@@ -581,6 +651,8 @@ async def list_providers(
                 provider_type=provider_type,
                 user_configurable=True,
                 capabilities_summary=summary,
+                oauth_supported=oauth_supported(provider_type),
+                oauth_callback_url=(_oauth_callback_url(request) if oauth_supported(provider_type) else None),
             )
         )
 
@@ -652,6 +724,196 @@ async def create_external_library(
         audit_action="external_library.create",
     )
     return await _build_external_library_response(external_library, current_user, db)
+
+
+@router.post(
+    "/oauth/begin",
+    response_model=ExternalOAuthBeginResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def begin_external_oauth(
+    body: ExternalOAuthBeginRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Start an OAuth authorization flow for an external provider."""
+    spec = get_oauth_provider(body.provider_type)
+    if spec is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Provider does not support OAuth: {body.provider_type}",
+        )
+
+    config = dict(body.config or {})
+    if body.external_library_id:
+        external_library = await _load_external_library(db, body.external_library_id)
+        if external_library is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        if external_library.provider_type != body.provider_type:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Provider type does not match the external library",
+            )
+        if external_library.scope == "admin" and not current_user.is_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        if (
+            external_library.scope == "user"
+            and external_library.created_by_id != current_user.id
+            and not current_user.is_admin
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        # The form sends "<redacted>" for stored secrets; resolve them so the
+        # flow can reuse the stored OAuth client credentials.
+        config = _merge_config_preserving_redacted(
+            config,
+            _decrypt_external_config(external_library.config),
+        )
+    elif not _provider_allowed_for_create(
+        body.provider_type,
+        current_user,
+        request.app.state.config,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Provider type not allowed",
+        )
+
+    redirect_uri = _oauth_callback_url(request)
+    try:
+        state, authorize_url = await begin_flow(
+            redis,
+            spec,
+            user_id=str(current_user.id),
+            config=config,
+            redirect_uri=redirect_uri,
+            return_to=_safe_return_to(body.return_to),
+            external_library_id=body.external_library_id,
+        )
+    except OAuthFlowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="external_library.oauth_begin",
+        target_type=AuditTargetType.EXTERNAL_LIBRARY,
+        target_id=body.external_library_id or body.provider_type,
+        details={
+            "provider_type": body.provider_type,
+            "external_library_id": body.external_library_id,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return ExternalOAuthBeginResponse(authorize_url=authorize_url, state=state)
+
+
+@router.get("/oauth/callback")
+async def external_oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+    redis: Redis = Depends(get_redis),
+):
+    """Handle the provider's redirect after user authorization.
+
+    Unauthenticated by design: the ``state`` parameter binds the callback to
+    the pending flow (and its user) stored in Redis at begin time. On success
+    the granted config fragment is stored for the SPA to claim once.
+    """
+    if not state:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing OAuth state",
+        )
+    pending = await consume_pending(redis, state)
+    if pending is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OAuth session expired or is invalid",
+        )
+    return_to = _safe_return_to(pending.get("return_to"))
+
+    provider_error = error_description or error
+    if provider_error:
+        return _oauth_redirect(
+            return_to,
+            oauth_state=state,
+            oauth_error=str(provider_error)[:200],
+        )
+    if not code:
+        return _oauth_redirect(return_to, oauth_state=state, oauth_error="missing_code")
+
+    spec = get_oauth_provider(str(pending.get("provider_type") or ""))
+    if spec is None:
+        return _oauth_redirect(
+            return_to,
+            oauth_state=state,
+            oauth_error="unsupported_provider",
+        )
+
+    try:
+        fragment = await exchange_code(spec, pending, code)
+    except OAuthFlowError as exc:
+        return _oauth_redirect(
+            return_to,
+            oauth_state=state,
+            oauth_error=str(exc)[:200],
+        )
+    except Exception:
+        logger.exception("OAuth token exchange failed for %s", spec.provider_type)
+        return _oauth_redirect(
+            return_to,
+            oauth_state=state,
+            oauth_error="token_exchange_failed",
+        )
+
+    # Carry the client credentials back to the form via the claim so they
+    # never need to be stashed in browser storage while the user is away.
+    fragment[spec.client_id_field] = pending["client_id"]
+    if spec.client_secret_field and pending.get("client_secret"):
+        fragment[spec.client_secret_field] = pending["client_secret"]
+
+    await store_result(
+        redis,
+        state,
+        {
+            "provider_type": spec.provider_type,
+            "user_id": pending.get("user_id"),
+            "config": fragment,
+        },
+    )
+    return _oauth_redirect(return_to, oauth_state=state, oauth_provider=spec.provider_type)
+
+
+@router.post(
+    "/oauth/claim",
+    response_model=ExternalOAuthClaimResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def claim_external_oauth(
+    body: ExternalOAuthClaimRequest,
+    current_user: User = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+):
+    """Claim the granted config fragment of a completed OAuth flow (one-time)."""
+    result = await claim_result(redis, body.state, str(current_user.id))
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="OAuth result not found or expired",
+        )
+    return ExternalOAuthClaimResponse(
+        provider_type=str(result.get("provider_type") or ""),
+        config=result.get("config") or {},
+    )
 
 
 @router.get("/{external_library_id}", response_model=ExternalLibraryResponse)

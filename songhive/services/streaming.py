@@ -293,7 +293,7 @@ async def _load_external_stream_request(
         etag=external_track.provider_etag,
         mtime=external_track.provider_mtime,
         size=external_track.provider_size,
-        mime_type=external_track.provider_mime_type or track.audio_mime_type,
+        mime_type=track.audio_mime_type or external_track.provider_mime_type,
         checksum=external_track.provider_checksum,
         sha256=external_track.sha256,
     )
@@ -352,6 +352,58 @@ async def _ensure_stream_temp_dir(config: SonghiveConfig) -> Path:
         return Path(tempfile.gettempdir())
     path = Path(temp_dir)
     path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+_FTYP_MAJOR_BRAND_OFFSET = 8
+_FTYP_AUDIO_BRANDS = {b"M4A ", b"M4B ", b"M4P "}
+
+
+def _audio_ftyp_major_brand(header: bytes) -> Optional[bytes]:
+    """
+    Return the replacement ``ftyp`` major brand for an audio payload, or None.
+
+    Audio-only MP4/M4A files frequently carry a generic ``isom``/``mp4*`` major
+    brand, which content sniffers (libmagic, and therefore Fediverse media
+    fetchers like Mastodon's Paperclip detector) report as ``video/mp4``
+    regardless of the served Content-Type. Rewriting the major brand to
+    ``M4A `` makes the same bytes sniff as ``audio/x-m4a`` without affecting
+    decoding — the brand is advisory metadata.
+    """
+    if len(header) < 12:
+        return None
+    box_size = int.from_bytes(header[0:4], "big")
+    if box_size < 16 or header[4:8] != b"ftyp":
+        return None
+    if header[8:12] in _FTYP_AUDIO_BRANDS:
+        return None
+    return b"M4A "
+
+
+def _is_audio_content_type(content_type: Optional[str]) -> bool:
+    return (content_type or "").lower().startswith("audio/")
+
+
+def _normalize_audio_container_bytes(data: bytes, content_type: Optional[str]) -> bytes:
+    """Rewrite the MP4 ``ftyp`` major brand to an audio brand when needed."""
+    if not _is_audio_content_type(content_type):
+        return data
+    brand = _audio_ftyp_major_brand(data[:12])
+    if brand is None:
+        return data
+    return data[:_FTYP_MAJOR_BRAND_OFFSET] + brand + data[12:]
+
+
+async def _normalize_audio_container_path(path: Path, content_type: Optional[str]) -> Path:
+    """Rewrite the MP4 ``ftyp`` major brand in a materialized file when needed."""
+    if not _is_audio_content_type(content_type):
+        return path
+    async with aiofiles.open(path, "r+b") as handle:
+        header = await handle.read(12)
+        brand = _audio_ftyp_major_brand(header)
+        if brand is not None:
+            await handle.seek(_FTYP_MAJOR_BRAND_OFFSET)
+            await handle.write(brand)
     return path
 
 
@@ -437,23 +489,37 @@ async def collect_external_stream(
     stream: ExternalStream,
     config: SonghiveConfig,
 ) -> Union[bytes, Path]:
-    """Materialize an external stream into bytes or a local temp file path."""
+    """
+    Materialize an external stream into bytes or a local temp file path.
+
+    Audio-typed payloads in MP4 containers get their ``ftyp`` major brand
+    normalized to ``M4A `` so remote content sniffers (e.g. Mastodon) classify
+    them as audio. Non-temporary ``path`` streams are returned untouched —
+    they reference files owned by the adapter (e.g. the local library) and
+    must not be mutated.
+    """
     if stream.kind == "path":
-        return cast(Path, stream.path)
+        path = cast(Path, stream.path)
+        if stream.temporary:
+            return await _normalize_audio_container_path(path, stream.content_type)
+        return path
 
     temp_dir = await _ensure_stream_temp_dir(config)
     max_bytes = config.external_libraries.stream_max_proxy_bytes
     chunk_size = config.streaming.chunk_size
 
     if stream.kind == "iterator":
-        return await _collect_from_iterator(
+        payload = await _collect_from_iterator(
             cast(AsyncIterator[bytes], stream.iterator),
             max_bytes,
             temp_dir,
             chunk_size,
         )
+    elif stream.kind == "url":
+        payload = await _collect_from_url(stream, max_bytes, temp_dir, chunk_size, config)
+    else:
+        raise ValueError(f"Unsupported external stream kind: {stream.kind}")
 
-    if stream.kind == "url":
-        return await _collect_from_url(stream, max_bytes, temp_dir, chunk_size, config)
-
-    raise ValueError(f"Unsupported external stream kind: {stream.kind}")
+    if isinstance(payload, Path):
+        return await _normalize_audio_container_path(payload, stream.content_type)
+    return _normalize_audio_container_bytes(payload, stream.content_type)

@@ -35,6 +35,14 @@ export interface ProviderFieldTemplate {
 
 export interface ProviderTemplate {
   providerType: string;
+  /** i18n key for an intro/help paragraph shown above the fields. */
+  helpI18nKey?: string;
+  /** Console/documentation URL linkified as the ``{appConsole}`` help placeholder. */
+  helpLinkUrl?: string;
+  /** Scopes the provider app requires, rendered as ``<code>`` via the ``{permissions}`` placeholder. */
+  helpRequiredScopes?: string[];
+  /** Optional scopes, rendered as ``<code>`` via the ``{writePermissions}`` placeholder. */
+  helpOptionalScopes?: string[];
   fields: ProviderFieldTemplate[];
 }
 
@@ -603,6 +611,150 @@ export const providerTemplates: Record<string, ProviderTemplate> = {
           "pages.externalLibraries.providers.webdav.fields.allow_delete_source.label",
         descriptionI18nKey:
           "pages.externalLibraries.providers.webdav.fields.allow_delete_source.description",
+        default: false,
+      },
+    ],
+  },
+  dropbox: {
+    providerType: "dropbox",
+    helpI18nKey: "pages.externalLibraries.providers.dropbox.help",
+    helpLinkUrl: "https://www.dropbox.com/developers/apps",
+    helpRequiredScopes: [
+      "account_info.read",
+      "files.metadata.read",
+      "files.content.read",
+    ],
+    helpOptionalScopes: ["files.metadata.write", "files.content.write"],
+    fields: [
+      {
+        name: "access_token",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.access_token.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.access_token.description",
+      },
+      {
+        name: "refresh_token",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.refresh_token.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.refresh_token.description",
+      },
+      {
+        name: "app_key",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.app_key.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.app_key.description",
+        required: true,
+      },
+      {
+        name: "app_secret",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.app_secret.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.app_secret.description",
+      },
+      {
+        name: "root",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.root.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.root.description",
+      },
+      {
+        name: "timeout",
+        type: "number",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.timeout.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.timeout.description",
+        default: 30,
+      },
+      {
+        name: "temporary_links",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.temporary_links.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.temporary_links.description",
+        default: false,
+      },
+      {
+        name: "extensions",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.extensions.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.extensions.description",
+        default: DEFAULT_LOCAL_EXTENSIONS,
+      },
+      {
+        name: "exclude",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.exclude.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.exclude.description",
+        default: "",
+      },
+      {
+        name: "recursive",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.recursive.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.recursive.description",
+        default: true,
+      },
+      {
+        name: "allow_hashing",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.allow_hashing.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.allow_hashing.description",
+        default: true,
+      },
+      {
+        name: "fast_hash",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.fast_hash.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.fast_hash.description",
+        default: false,
+      },
+      {
+        name: "allow_write_tags",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.allow_write_tags.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.allow_write_tags.description",
+        default: false,
+      },
+      {
+        name: "allow_rename_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.allow_rename_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.allow_rename_source.description",
+        default: false,
+      },
+      {
+        name: "allow_delete_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.allow_delete_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.dropbox.fields.allow_delete_source.description",
         default: false,
       },
     ],

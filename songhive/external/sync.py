@@ -136,6 +136,11 @@ def _set_item_error(
     external_track.last_seen_at = _utcnow()
     external_track.last_synced_at = _utcnow()
     counters.tracks_failed += 1
+    logger.warning(
+        "External item %s failed: %s",
+        external_track.provider_key,
+        external_track.sync_error,
+    )
 
 
 def _item_matches_existing(item: ExternalItemRef, external_track: ExternalTrack) -> bool:

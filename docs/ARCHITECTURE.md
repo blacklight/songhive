@@ -1168,6 +1168,113 @@ via `detect_changes`, so unchanged trees cost a directory walk and no file
 transfer. As with S3 and SFTP, freshness comes from scheduled syncs rather
 than filesystem watching.
 
+#### Dropbox provider
+
+The `dropbox` provider (`external/_dropbox.py`, httpx) indexes audio files
+stored in a Dropbox account through the Dropbox HTTP API v2. All traffic
+originates server-side, so the Songhive instance needs outbound HTTPS access
+to `api.dropboxapi.com` and `content.dropboxapi.com` (plus
+`dl.dropboxusercontent.com` when clients fetch temporary links directly).
+Like the other providers, both regular users (when
+`allow_user_created_libraries` permits the provider) and admins can attach
+Dropbox folders.
+
+A Dropbox external library stores the following adapter config:
+
+| Key                        | Required | Default  | Description                                                               |
+|----------------------------|----------|----------|---------------------------------------------------------------------------|
+| `access_token`             | yes*     | —        | Dropbox OAuth access token (short-lived, ~4 hours).                       |
+| `refresh_token`            | yes*     | —        | OAuth refresh token — the durable option; mints access tokens on demand.  |
+| `app_key`                  | with `refresh_token` | — | App key of the Dropbox app the refresh token was issued to.        |
+| `app_secret`               | no       | —        | App secret of the Dropbox app, if it has one (stored encrypted).          |
+| `account_id`               | no       | —        | Dropbox account id, filled in by the OAuth connect flow.                  |
+| `root`                     | no       | `""`     | Dropbox folder to index (e.g. `/Music`); empty indexes the account root.  |
+| `timeout`                  | no       | `30`     | HTTP request timeout in seconds.                                          |
+| `temporary_links`          | no       | `false`  | Redirect clients to short-lived `get_temporary_link` URLs for playback.   |
+| `extensions`               | no       | all audio| List of file extensions to index.                                         |
+| `exclude`                  | no       | `[]`     | `fnmatch` patterns applied to root-relative paths.                        |
+| `recursive`                | no       | `true`   | Whether to scan subfolders of the root.                                   |
+| `allow_hashing`            | no       | `true`   | Whether to compute audio hashes for new/updated files.                    |
+| `fast_hash`                | no       | `false`  | Hash raw file bytes instead of ffmpeg audio-only hashing.                 |
+| `allow_write_tags`         | no       | `false`  | Rewrite embedded tags by re-uploading the file in place.                  |
+| `allow_rename_source`      | no       | `false`  | Allow `rename_source` to rename Dropbox files.                            |
+| `allow_delete_source`      | no       | `false`  | Allow `delete_source` to remove Dropbox files.                            |
+
+*Exactly one credential path is required: a static `access_token`, or a
+`refresh_token` + `app_key` (+ optional `app_secret`) grant. Since Dropbox
+access tokens only live ~4 hours, the refresh grant is the durable option —
+the adapter exchanges it via `oauth2/token`, caches the minted access token
+process-wide for its declared lifetime, and retries once with a fresh token
+when a cached one is rejected.
+
+The Dropbox app itself must be a "scoped access" app with
+`account_info.read`, `files.metadata.read` and `files.content.read`
+permissions (plus `files.metadata.write` and `files.content.write` when tag
+write-back, rename or delete is wanted). Scope grants are not retroactive:
+enabling a permission on the app does not extend tokens that were already
+issued — after changing app permissions the account must be re-connected so
+a new token is granted with the updated scope set.
+
+Streaming defaults to proxying the file body through `files/download`, which
+honours `Range` headers — it works in every browser. Setting
+`temporary_links` redirects clients to short-lived `get_temporary_link` URLs
+instead (`safe_to_redirect`; the client fetches bytes directly from Dropbox,
+including HTTP ranges; links are valid ~4 hours). That offloads bandwidth to
+Dropbox's CDN but **fails in Firefox**: `dl.dropboxusercontent.com` serves
+`Content-Security-Policy: sandbox`, which Firefox applies to media loads —
+enable it only for Chromium/Safari audiences. Tag write-back re-downloads the
+file, rewrites tags locally, and re-uploads it in place — payloads above
+Dropbox's 150 MiB single-upload cap go through chunked upload sessions
+automatically.
+
+`iter_items` pages `files/list_folder` (metadata only) and reports each
+file's `rev` as the change token via `detect_changes`, so unchanged trees
+cost a listing and no file transfer. The provider `content_hash` (SHA-256 of
+4 MiB block hashes) is kept on `ExternalItemRef.checksum` but is never
+treated as the audio sha256. As with the other remote providers, freshness
+comes from scheduled syncs rather than filesystem watching.
+
+#### OAuth connect flow
+
+Providers that authenticate through OAuth (`dropbox` today; Spotify, Tidal
+and YouTube are planned) offer a "Connect" button in the external-library
+form instead of making users paste tokens by hand. The machinery is
+provider-agnostic (`external/oauth.py`): each provider registers an
+`OAuthProviderSpec` describing its authorize/token endpoints, which config
+keys carry the OAuth client id/secret, and how token-response fields map
+onto adapter config keys. Provider listings report `oauth_supported` and
+`oauth_callback_url` (the public
+`{base}/api/v1/external-libraries/oauth/callback` URL built from
+`public_base_url`) so the frontend only shows the button where it applies
+and can tell the user which redirect URI to register in the provider's app
+console.
+
+The flow runs in three steps:
+
+1. `POST /api/v1/external-libraries/oauth/begin` (authenticated) validates
+   the provider type and stores a pending entry in Redis — bound to the
+   initiating user, the client credentials, a PKCE verifier, the callback
+   `redirect_uri` and the page to return to — under a random `state` key
+   (10-minute TTL). The response carries the provider's authorization URL,
+   which the SPA navigates to after stashing the form in `sessionStorage`.
+2. `GET /api/v1/external-libraries/oauth/callback` (unauthenticated; the
+   `state` parameter binds it to the pending flow) consumes the pending
+   entry once, exchanges the authorization code for tokens server-side and
+   stores the resulting config fragment under a result key (5-minute TTL)
+   before redirecting back to the SPA. Provider errors and exchange
+   failures redirect with `oauth_error` instead; `return_to` is restricted
+   to local paths.
+3. `POST /api/v1/external-libraries/oauth/claim` (authenticated) lets the
+   SPA collect the fragment once — results are deleted on claim and a claim
+   by a different user leaves the entry in place.
+
+The granted fragment is merged into the provider configuration and only
+persisted when the user saves the form, at which point it goes through the
+same validation and Fernet encryption as manually entered credentials.
+Dropbox uses `token_access_type=offline` so the granted `refresh_token` is
+durable; a future provider only needs to register a spec — no new routes,
+Redis plumbing or frontend redirect handling.
+
 #### Visibility, sharing, and secret redaction
 
 Every external library is backed by a normal `Library` row, so visibility
@@ -1224,6 +1331,16 @@ Streaming and downloads:
 - `api/routes/tracks.py` provides `GET /api/v1/tracks/{track_id}/download`,
   proxying external bytes through Songhive and honoring `Content-Disposition`
   and `disposition=inline|attachment`.
+- `services/streaming.collect_external_stream` materializes iterator/url
+  streams into memory or a temp file. Audio-typed payloads in MP4 containers
+  get their `ftyp` major brand rewritten to `M4A ` — audio-only MP4s often
+  carry a generic `isom`/`mp4*` brand that content sniffers (libmagic, and
+  therefore Fediverse media fetchers such as Mastodon) report as
+  `video/mp4` regardless of the served `Content-Type`, which remote servers
+  then process (and reject) as video. Non-temporary `path` streams are never
+  rewritten — they reference files owned by the adapter (e.g. the local
+  library). The same caveat applies to local `StoredFile` downloads, which
+  are served straight from storage and not normalized.
 
 Secrets and audit:
 

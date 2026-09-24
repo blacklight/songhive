@@ -6,6 +6,7 @@ import io
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 
 from songhive.models._enums import Visibility
 from songhive.models.artist import Artist
@@ -15,6 +16,7 @@ from songhive.models.library import Library
 from songhive.models.track import Track
 from songhive.services.auth import create_user
 from songhive.services.storage import StorageService
+from songhive.services.streaming import _normalize_audio_container_bytes
 from songhive.storage import get_storage
 
 
@@ -390,3 +392,67 @@ def test_download_private_track_anonymous(client, db_session, local_track):
     db_session.commit()
     response = client.get(f"/api/v1/tracks/{track.id}/download")
     assert response.status_code == 403
+
+
+async def test_download_external_track_prefers_probed_mime_type(client, db_session, external_iterator_track):
+    """The probed track MIME wins over the provider's extension guess."""
+    track, data = external_iterator_track
+    result = await db_session.execute(select(ExternalTrack).where(ExternalTrack.track_id == track.id))
+    external_track = result.scalar_one()
+    external_track.provider_mime_type = "audio/x-aac"
+    track.audio_mime_type = "audio/mp4"
+
+    result = await db_session.execute(
+        select(ExternalLibrary).where(ExternalLibrary.id == external_track.external_library_id)
+    )
+    library = result.scalar_one()
+    config = dict(library.config)
+    config["items"] = {"download.mp3": {**config["items"]["download.mp3"], "mimetype": None}}
+    library.config = config
+    await db_session.commit()
+
+    response = client.get(f"/api/v1/tracks/{track.id}/download")
+    assert response.status_code == 200
+    assert response.content == data
+    assert "audio/mp4" in response.headers.get("content-type", "")
+    assert response.headers.get("content-disposition", "").startswith("inline")
+
+
+def test_normalize_audio_container_bytes():
+    """The ftyp rewrite applies only to audio-typed MP4 containers."""
+    mp4 = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00isomiso2mp41payload"
+    normalized = _normalize_audio_container_bytes(mp4, "audio/mp4")
+    assert normalized[8:12] == b"M4A "
+    assert normalized[12:] == mp4[12:]
+    assert _normalize_audio_container_bytes(mp4, "video/mp4") == mp4
+    assert _normalize_audio_container_bytes(mp4, None) == mp4
+    assert _normalize_audio_container_bytes(b"not an mp4 payload", "audio/mpeg") == b"not an mp4 payload"
+    m4a = b"\x00\x00\x00\x1cftypM4A \x00\x00\x02\x00isomiso2mp41payload"
+    assert _normalize_audio_container_bytes(m4a, "audio/x-m4a") == m4a
+
+
+async def test_download_external_mp4_audio_rewrites_ftyp_brand(client, db_session, external_iterator_track):
+    """Audio-typed MP4 payloads get an ``M4A `` major brand so remote content
+    sniffers (e.g. Mastodon's libmagic detector) classify them as audio
+    instead of video/mp4."""
+    track, _data = external_iterator_track
+    mp4_data = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00isomiso2mp41" + b"audio-payload"
+    track.audio_mime_type = "audio/mp4"
+
+    result = await db_session.execute(
+        select(ExternalLibrary)
+        .join(ExternalTrack, ExternalTrack.external_library_id == ExternalLibrary.id)
+        .where(ExternalTrack.track_id == track.id)
+    )
+    library = result.scalar_one()
+    config = dict(library.config)
+    config["items"] = {"download.mp3": {"data": list(mp4_data), "mimetype": None}}
+    library.config = config
+    await db_session.commit()
+
+    response = client.get(f"/api/v1/tracks/{track.id}/download")
+    assert response.status_code == 200
+    assert response.content[:8] == mp4_data[:8]
+    assert response.content[8:12] == b"M4A "
+    assert response.content[12:] == mp4_data[12:]
+    assert "audio/mp4" in response.headers.get("content-type", "")

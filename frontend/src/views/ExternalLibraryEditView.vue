@@ -25,6 +25,8 @@ import {
   adminDeleteExternalTrack,
   listUserSyncRuns,
   adminListExternalSyncRuns,
+  beginExternalOAuth,
+  claimExternalOAuth,
   type ExternalLibraryResponse,
   type ExternalProviderResponse,
   type ExternalLibraryCreate,
@@ -32,6 +34,13 @@ import {
   type ExternalTrackResponse,
   type ExternalSyncRunResponse,
 } from "@/api/externalLibraries";
+import {
+  popExternalOAuthForm,
+  redirectToOAuthProvider,
+  stashExternalOAuthForm,
+  stripSecretConfigFields,
+  stripSecretsFromConfigText,
+} from "@/utils/externalOAuth";
 import { getApiErrorMessage } from "@/api/client";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
@@ -84,6 +93,11 @@ const error = ref<string | null>(null);
 const isSaving = ref(false);
 const isDeleting = ref(false);
 const isSyncing = ref(false);
+const oauthConnecting = ref(false);
+// Config fragment granted by a completed OAuth flow; merged into the
+// provider config on submit so fields outside the template (e.g. the
+// provider's account id) are preserved.
+const oauthGrantedConfig = ref<Record<string, unknown>>({});
 
 const providerType = ref("");
 const name = ref("");
@@ -100,6 +114,17 @@ const providerTemplate = computed(() =>
 );
 const hasProviderTemplate = computed(
   () => providerTemplate.value.fields.length > 0,
+);
+const oauthSupported = computed(
+  () =>
+    providers.value.find((p) => p.provider_type === providerType.value)
+      ?.oauth_supported === true,
+);
+const oauthCallbackUrl = computed(
+  () =>
+    providers.value.find((p) => p.provider_type === providerType.value)
+      ?.oauth_callback_url ??
+    `${window.location.origin}/api/v1/external-libraries/oauth/callback`,
 );
 
 const configError = ref<string | null>(null);
@@ -300,6 +325,7 @@ function resetForm() {
 
 function onProviderTypeChanged(newType: string) {
   providerType.value = newType;
+  oauthGrantedConfig.value = {};
   resetProviderConfig();
 }
 
@@ -329,8 +355,11 @@ function validateConfig(): Record<string, unknown> | null {
 
 async function onSubmit() {
   configError.value = null;
-  const config = validateConfig();
-  if (!config) return;
+  const validated = validateConfig();
+  if (!validated) return;
+  // Keep granted values not covered by the form fields (e.g. account_id);
+  // explicit field edits always win over the granted fragment.
+  const config = { ...oauthGrantedConfig.value, ...validated };
 
   isSaving.value = true;
   error.value = null;
@@ -379,6 +408,7 @@ async function onSubmit() {
       });
       void router.replace(`${basePath.value}/${updated.id}`);
     }
+    oauthGrantedConfig.value = {};
   } catch (err) {
     error.value = t("pages.externalLibraries.saveError", {
       message:
@@ -388,6 +418,104 @@ async function onSubmit() {
   } finally {
     isSaving.value = false;
   }
+}
+
+async function onConnectOAuth() {
+  configError.value = null;
+  const config = validateConfig();
+  if (!config) return;
+
+  oauthConnecting.value = true;
+  error.value = null;
+  try {
+    const result = await beginExternalOAuth({
+      provider_type: providerType.value,
+      config,
+      external_library_id: libraryId.value || undefined,
+      return_to: route.path,
+    });
+    // The flow leaves the SPA; stash the form so it can be restored when the
+    // provider redirects back through the API callback. Secret-bearing
+    // fields are left out — the backend carries them inside the claimed
+    // config fragment.
+    stashExternalOAuthForm(result.state, {
+      providerType: providerType.value,
+      name: name.value,
+      providerConfig: stripSecretConfigFields({ ...providerConfig }),
+      configText: stripSecretsFromConfigText(configText.value),
+      visibility: visibility.value,
+      enabled: enabled.value,
+      syncEnabled: syncEnabled.value,
+      syncInterval: syncInterval.value,
+      includeInLibraryIndex: includeInLibraryIndex.value,
+    });
+    redirectToOAuthProvider(result.authorize_url);
+  } catch (err) {
+    oauthConnecting.value = false;
+    error.value = t("pages.externalLibraries.oauthFailed", {
+      message:
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown")),
+    });
+  }
+}
+
+function restoreOAuthStash(state: string) {
+  const stash = popExternalOAuthForm(state);
+  if (!stash) return;
+  if (typeof stash.providerType === "string" && stash.providerType) {
+    providerType.value = stash.providerType;
+  }
+  name.value = typeof stash.name === "string" ? stash.name : name.value;
+  visibility.value =
+    typeof stash.visibility === "string"
+      ? (stash.visibility as Visibility)
+      : visibility.value;
+  enabled.value = stash.enabled !== false;
+  syncEnabled.value = stash.syncEnabled !== false;
+  syncInterval.value =
+    typeof stash.syncInterval === "number" ? stash.syncInterval : null;
+  includeInLibraryIndex.value = stash.includeInLibraryIndex === true;
+  if (typeof stash.configText === "string") {
+    configText.value = stash.configText;
+  }
+  if (stash.providerConfig && typeof stash.providerConfig === "object") {
+    resetProviderConfig(stash.providerConfig as Record<string, unknown>);
+  }
+}
+
+async function handleOAuthReturn() {
+  const state = route.query.oauth_state as string | undefined;
+  const oauthError = route.query.oauth_error as string | undefined;
+  if (!state && !oauthError) return;
+
+  if (state) restoreOAuthStash(state);
+
+  if (oauthError) {
+    error.value = t("pages.externalLibraries.oauthFailed", {
+      message: oauthError,
+    });
+  } else if (state) {
+    try {
+      const result = await claimExternalOAuth(state);
+      oauthGrantedConfig.value = result.config;
+      for (const [key, value] of Object.entries(result.config)) {
+        providerConfig[key] = value;
+      }
+      toast.push({
+        type: "success",
+        message: t("pages.externalLibraries.oauthConnected"),
+      });
+    } catch (err) {
+      error.value = t("pages.externalLibraries.oauthFailed", {
+        message:
+          getApiErrorMessage(err) ||
+          (err instanceof Error ? err.message : t("errors.unknown")),
+      });
+    }
+  }
+
+  void router.replace({ path: route.path });
 }
 
 async function onDelete() {
@@ -682,8 +810,9 @@ watch(
 );
 
 onMounted(() => {
-  void loadProviders().then(() => {
-    void loadLibrary();
+  void loadProviders().then(async () => {
+    await loadLibrary();
+    await handleOAuthReturn();
   });
 });
 
@@ -763,11 +892,47 @@ onUnmounted(() => {
             <p class="external-library-edit-view__provider-config-title">
               {{ t("pages.externalLibraries.providerConfig") }}
             </p>
+            <i18n-t
+              v-if="providerTemplate.helpI18nKey"
+              :keypath="providerTemplate.helpI18nKey"
+              tag="p"
+              scope="global"
+              class="external-library-edit-view__provider-help"
+            >
+              <template #appConsole>
+                <a
+                  v-if="providerTemplate.helpLinkUrl"
+                  :href="providerTemplate.helpLinkUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >{{ providerTemplate.helpLinkUrl }}</a
+                >
+              </template>
+              <template #permissions>
+                <code>{{
+                  (providerTemplate.helpRequiredScopes ?? []).join(", ")
+                }}</code>
+              </template>
+              <template #writePermissions>
+                <code>{{
+                  (providerTemplate.helpOptionalScopes ?? []).join(", ")
+                }}</code>
+              </template>
+              <template #callbackUrl>
+                <code>{{ oauthCallbackUrl }}</code>
+              </template>
+            </i18n-t>
             <div
               v-for="field in providerTemplate.fields"
               :key="field.name"
               class="external-library-edit-view__provider-field"
             >
+              <span
+                v-if="field.required"
+                class="external-library-edit-view__required"
+              >
+                {{ t("common.required") }}
+              </span>
               <AppInput
                 v-if="
                   field.type === 'string' ||
@@ -867,6 +1032,20 @@ onUnmounted(() => {
           />
 
           <div class="external-library-edit-view__actions">
+            <AppButton
+              v-if="oauthSupported"
+              type="button"
+              variant="secondary"
+              :loading="oauthConnecting"
+              icon="link"
+              @click="onConnectOAuth"
+            >
+              {{
+                t("pages.externalLibraries.oauthConnect", {
+                  provider: providerType,
+                })
+              }}
+            </AppButton>
             <AppButton type="submit" :loading="isSaving" icon="floppy-disk">
               {{
                 isNew
@@ -1162,10 +1341,38 @@ onUnmounted(() => {
   margin: 0;
 }
 
+.external-library-edit-view__provider-help {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.external-library-edit-view__provider-help code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  padding: 0 0.2em;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-secondary);
+}
+
 .external-library-edit-view__provider-field {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+.external-library-edit-view__required {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
 }
 
 .external-library-edit-view__loading {

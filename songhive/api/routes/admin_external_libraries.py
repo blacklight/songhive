@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ...config.schema import SonghiveConfig
+from ...external.oauth import oauth_supported
 from ...external.registry import (
     get_external_adapter,
     is_user_configurable,
@@ -60,6 +61,7 @@ from .external_libraries import (
     _mark_track_tombstoned,
     _merge_config_preserving_redacted,
     _mutation_to_dict,
+    _oauth_callback_url,
     _provider_capabilities_summary,
     _provider_item_exists,
     _redact_audit_details,
@@ -77,9 +79,7 @@ admin_router = APIRouter(prefix="/admin/external-libraries")
     response_model=List[ExternalProviderResponse],
     dependencies=[Depends(rate_limit_account), Depends(require_admin)],
 )
-async def list_admin_providers(
-    admin: User = Depends(require_admin),
-):
+async def list_admin_providers(request: Request):
     """List all registered external-library provider types for admins."""
     providers: List[ExternalProviderResponse] = []
     for provider_type in list_external_provider_types():
@@ -89,6 +89,8 @@ async def list_admin_providers(
                 provider_type=provider_type,
                 user_configurable=is_user_configurable(provider_type),
                 capabilities_summary=summary,
+                oauth_supported=oauth_supported(provider_type),
+                oauth_callback_url=(_oauth_callback_url(request) if oauth_supported(provider_type) else None),
             )
         )
     return providers

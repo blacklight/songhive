@@ -525,9 +525,11 @@ class SFTPExternalAdapter(ExternalLibraryAdapter):
         start = 0
         end: Optional[int] = None
         size: Optional[int] = item.size
+        content_range: Optional[str] = None
         if range is not None:
             start, end = range
             size = end - start + 1
+            content_range = f"bytes {start}-{end}/{item.size if item.size is not None else '*'}"
 
         async def _iter_sftp() -> AsyncIterator[bytes]:
             async with self._connect(config) as sftp:
@@ -557,6 +559,7 @@ class SFTPExternalAdapter(ExternalLibraryAdapter):
             supports_range=True,
             headers={},
             temporary=False,
+            content_range=content_range,
         )
 
     async def download(self, config: dict, item: ExternalItemRef) -> ExternalStream:

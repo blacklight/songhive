@@ -151,8 +151,9 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
   scripts and Subsonic clients
 - 💾 **Flexible Storage**: Local filesystem or S3-compatible object storage
 - 🗃️ **External Libraries**: Attach external music storage (local folders, S3,
-  SFTP, WebDAV, cloud adapters) to Songhive libraries; index, stream, and write
-  metadata back to the provider.
+  SFTP, WebDAV, Dropbox, cloud adapters) to Songhive libraries; index, stream,
+  and write metadata back to the provider. OAuth-capable providers (Dropbox
+  today) connect straight from the settings form — no manual token juggling.
   See [docs/ARCHITECTURE.md#external-libraries](docs/ARCHITECTURE.md#external-libraries).
 - 🏷️ **Metadata enrichment**: automatic MusicBrainz MBID lookup, cover art from
   the Cover Art Archive, and artist image fetching; tags are written back to

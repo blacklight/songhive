@@ -55,6 +55,10 @@ class ExternalStream:
     headers: dict[str, str] = field(default_factory=dict)
     temporary: bool = False
     safe_to_redirect: bool = False
+    # Value for the ``Content-Range`` response header (e.g. ``bytes 0-99/200``),
+    # set when the stream was opened with an honoured byte range so the server
+    # can answer with a proper 206 instead of a truncated 200.
+    content_range: Optional[str] = None
 
 
 @dataclass(frozen=True)

@@ -15,7 +15,12 @@ export type ExternalTrackResponse =
 export type ExternalTrackDeleteRequest =
   components["schemas"]["ExternalTrackDeleteRequest"];
 export type ExternalProviderResponse =
-  components["schemas"]["ExternalProviderResponse"];
+  components["schemas"]["ExternalProviderResponse"] & {
+    /** Whether the provider supports the interactive OAuth connect flow. */
+    oauth_supported?: boolean;
+    /** Public callback URL to register in the provider's app console. */
+    oauth_callback_url?: string | null;
+  };
 export type ExternalDuplicateWarning =
   components["schemas"]["ExternalDuplicateWarning"];
 export type ExternalDuplicateResolutionRequest =
@@ -278,6 +283,41 @@ export function adminDeleteExternalTrack(
   return apiRequest<void>(
     `/admin/external-libraries/${externalLibraryId}/tracks/${externalTrackId}`,
     { method: "DELETE", body },
+  );
+}
+
+export interface ExternalOAuthBeginRequest {
+  provider_type: string;
+  config: Record<string, unknown>;
+  external_library_id?: string;
+  return_to?: string;
+}
+
+export interface ExternalOAuthBeginResponse {
+  authorize_url: string;
+  state: string;
+}
+
+export interface ExternalOAuthClaimResponse {
+  provider_type: string;
+  config: Record<string, unknown>;
+}
+
+export function beginExternalOAuth(
+  body: ExternalOAuthBeginRequest,
+): Promise<ExternalOAuthBeginResponse> {
+  return apiRequest<ExternalOAuthBeginResponse>(
+    "/external-libraries/oauth/begin",
+    { method: "POST", body },
+  );
+}
+
+export function claimExternalOAuth(
+  state: string,
+): Promise<ExternalOAuthClaimResponse> {
+  return apiRequest<ExternalOAuthClaimResponse>(
+    "/external-libraries/oauth/claim",
+    { method: "POST", body: { state } },
   );
 }
 

@@ -278,8 +278,11 @@
   profiles (not even to their owner). Individual profile pages stay reachable
   regardless.
 - External libraries (`songhive/external/`) support `s3`
-  (`external/_s3.py`, aioboto3), `sftp` (`external/_sftp.py`, asyncssh), and
-  `webdav` (`external/_webdav.py`, httpx) providers alongside `local`/`fake`.
+  (`external/_s3.py`, aioboto3), `sftp` (`external/_sftp.py`, asyncssh),
+  `webdav` (`external/_webdav.py`, httpx), and `dropbox`
+  (`external/_dropbox.py`, httpx — Dropbox HTTP API v2, OAuth access token or
+  `refresh_token`+`app_key`+`app_secret` grant with a process-wide
+  `_TOKEN_CACHE`) providers alongside `local`/`fake`.
   Two traps when touching that code: (1) API responses redact secret config
   keys to `"<redacted>"`, so PATCH routes must run submitted configs through
   `_merge_config_preserving_redacted` or credentials get overwritten with the
@@ -287,13 +290,23 @@
   items whose stored `provider_etag` (or mtime+size) still matches the listing
   skip hashing/metadata reads entirely, so adapters must only advertise
   `detect_changes` when listing metadata is a reliable change token (S3
-  uses the object ETag; WebDAV uses ETag/mtime/size; the fake adapter's etag
-  covers payload+metadata). The filesystem watchdog (`external/watchdog.py`)
-  only applies to `local` libraries; S3 and WebDAV freshness comes from
-  scheduled syncs via `scan_scheduled_syncs_task`. Changing an external
-  library's visibility must go through
+  uses the object ETag; WebDAV uses ETag/mtime/size; Dropbox uses `rev`; the
+  fake adapter's etag covers payload+metadata). The filesystem watchdog
+  (`external/watchdog.py`) only applies to `local` libraries; remote-provider
+  freshness comes from scheduled syncs via `scan_scheduled_syncs_task`.
+  Dropbox's `content_hash` is stored on `ExternalItemRef.checksum` but is
+  NOT a sha256 — the adapter advertises `checksum_algorithm="dropbox"` so
+  `sync._resolve_sha256` never treats it as an audio hash. Changing an
+  external library's visibility must go through
   `services.music.propagate_external_library_visibility` so synced `Track`
   rows stay consistent with the backing `Library`.
+  OAuth-capable providers register an `OAuthProviderSpec` in
+  `external/oauth.py` (Dropbox does today; Spotify/Tidal/YouTube are
+  planned): the generic begin/callback/claim routes
+  (`/api/v1/external-libraries/oauth/*`) keep pending flows and granted
+  config fragments in short-lived Redis keys bound to the initiating user,
+  and the SPA's "Connect" button merges the claimed fragment into the form
+  for a normal save.
 - Outbound follows (a local user following a local or remote actor) live in
   the `follows` table (`models/follow.py`) — pubby's
   `federation_followers`/`federation_follow_requests` tables only track the
