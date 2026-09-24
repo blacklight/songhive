@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
   (`POST/DELETE /api/v1/remote/objects/{id}/follow`) and saved to a
   user's collection (`item_type="remote"`), all without copying remote
   content into local music tables.
+  ([`6ac7017`](https://git.platypush.tech/blacklight/songhive/commit/6ac701744602f33259c66b231c6a493634178704)).
 - `federation`: Remote (federated) entities are first-class members of
   local collections. Collected/favorited remote objects surface in the
   artists/albums/tracks browse views through a bounded collection
@@ -36,6 +37,8 @@ All notable changes to this project will be documented in this file.
   (Funkwhale `Audio`/`Video` uploads) display the embedded track title
   and fold onto their `Track` entity in lists and memberships when both
   are cached.
+  ([`4ec648b`](https://git.platypush.tech/blacklight/songhive/commit/4ec648b922a71ea2d5f549a49c2ff1314b3a24fb),
+  [`0b64af6`](https://git.platypush.tech/blacklight/songhive/commit/0b64af6bedbdb3e7135a3ef7218e4084cb5d4ca7)).
 - `scrobbling`: Remote (federated) tracks scrobble like local tracks.
   The web player reports plays of cached remote objects through
   `POST /api/v1/remote/objects/{id}/now-playing` (on play) and
@@ -45,6 +48,54 @@ All notable changes to this project will be documented in this file.
   remote object's metadata (plain track title, artist, album, duration)
   on the worker. Remote plays also appear in `GET /api/v1/history/`
   with an embedded remote object summary.
+  ([`4ec648b`](https://git.platypush.tech/blacklight/songhive/commit/4ec648b922a71ea2d5f549a49c2ff1314b3a24fb)).
+- `streams`: Server-side outputs and playback sessions. New `/outputs`
+  CRUD+validate and `/playback` session/command routes manage named
+  outputs through a pluggable provider framework (Icecast included),
+  tracked over websockets.
+  ([`f96978e`](https://git.platypush.tech/blacklight/songhive/commit/f96978ee13f5ad574a90d2a7f03b1285ac9a0ef2)).
+- `streams`: Stream worker and output selection UI. A new
+  `songhive stream-worker` process owns ffmpeg-to-Icecast pipelines —
+  Redis output locking, control commands, autonomous queue
+  advancement, listen recording and idle shutdown — while the player
+  bar gained an output selector and an output management view, and
+  playback persists after the controlling tab closes. Ships with a
+  systemd unit and a docker-compose service.
+  ([`707edde`](https://git.platypush.tech/blacklight/songhive/commit/707edde7639f45d3d17ddf52ca96ca00abcec523)).
+- `streams`: Native HTTP mount outputs and session volume control.
+  Outputs can serve a plain HTTP stream at `/streams/<mount>` via
+  Redis fan-out (with buffering, lag and listener caps), playback
+  session volume is persisted and pushed to workers/drivers, and the
+  outputs API and UI expose provider labels and stream URLs.
+  ([`78e9b8f`](https://git.platypush.tech/blacklight/songhive/commit/78e9b8fda7ef67d5bbfb4e2ed1b0ec4bc03e28c9)).
+- `streams`: Snapcast output provider — outputs can stream to a
+  Snapcast sink over FIFO/TCP with snapserver listener counting.
+  Remote output hosts (Icecast and Snapcast TCP) are restricted by a
+  configurable allowlist, and running drivers reload when an output's
+  config is updated.
+  ([`6d55a30`](https://git.platypush.tech/blacklight/songhive/commit/6d55a3062547018ddc2a29e24bdff02f1ffe8d6e)).
+- `notifications`: Web Push notifications. Users can enable browser
+  push from their profile; subscriptions register through new
+  push-config/subscription API routes and a service worker handles
+  delivery. Admins generate VAPID keys with a new CLI command.
+  ([`b075a19`](https://git.platypush.tech/blacklight/songhive/commit/b075a1984845facb0d276c7fcf438a3b01451a1b)).
+
+### Fixed
+
+- `streams`: Kept Icecast listeners alive across pause/resume — the
+  pause silence generator now runs in realtime (it previously flooded
+  the encoder and dropped lagging listeners), and the decoder
+  restarts on resume instead of leaving silence running.
+  ([`7aaf1b0`](https://git.platypush.tech/blacklight/songhive/commit/7aaf1b047f3f34f1d63ef5bc3e0e0297e1fbee4f)).
+- `profile`: Fixed the profile page overflowing on small viewports.
+  ([`a946abe`](https://git.platypush.tech/blacklight/songhive/commit/a946abed290bd34f7e2f89ecbae9eb131c7b230a)).
+
+### Changed
+
+- `cli`: Unified the root argument parser — `songhive --help` now
+  lists subcommands at every level, and a subcommand must be the
+  first argument (server options before it are rejected).
+  ([`3ffa718`](https://git.platypush.tech/blacklight/songhive/commit/3ffa718fa0b560a81eec687c0e3bd08c5ad39799)).
 
 ## 0.3.0
 
