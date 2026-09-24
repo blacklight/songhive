@@ -30,7 +30,7 @@ import hashlib
 import json
 import secrets
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from urllib.parse import urlencode
 
 import httpx
@@ -62,6 +62,8 @@ class OAuthProviderSpec:
     client_secret_field: str = ""
     """OAuth scopes to request during authorization."""
     scopes: tuple[str, ...] = ()
+    """Derive scopes from the submitted config; overrides ``scopes`` when set."""
+    scopes_for_config: Optional[Callable[[dict], tuple[str, ...]]] = None
     """Extra query parameters for the authorize URL (e.g. offline access)."""
     extra_authorize_params: dict[str, str] = field(default_factory=dict)
     """Map of token-response field -> adapter config key for granted values."""
@@ -154,8 +156,9 @@ async def begin_flow(
         "redirect_uri": redirect_uri,
         "state": state,
     }
-    if spec.scopes:
-        params["scope"] = " ".join(spec.scopes)
+    scopes = spec.scopes_for_config(config) if spec.scopes_for_config is not None else spec.scopes
+    if scopes:
+        params["scope"] = " ".join(scopes)
     if code_verifier:
         params["code_challenge"] = _pkce_challenge(code_verifier)
         params["code_challenge_method"] = "S256"

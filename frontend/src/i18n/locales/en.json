@@ -877,6 +877,91 @@
       "trackExternalBadge": "External: {provider}",
       "trackExternalState": "{state}",
       "providers": {
+        "gdrive": {
+          "help": "Recommended: connect a Google account via OAuth. In the Google Cloud console at {appConsole}: pick or create a project, enable the Google Drive API (APIs & Services → Library), then create an OAuth client of type \"Web application\" (APIs & Services → Credentials → Create credentials → OAuth client ID) and add this authorized redirect URI: {callbackUrl}\nOn APIs & Services → OAuth consent screen → Data access, add the scope {permissions} — or {writePermissions} if you enable write-back, rename or delete below (the Connect flow requests the right scope automatically). While the consent screen is in Testing mode, add the Google account you connect with as a test user.\nEnter the client ID and secret below and use the Connect button — the access and refresh tokens are filled in automatically.\nServer-to-server alternative: create a service account under IAM & Admin → Service Accounts at {appConsole}, download a JSON key from its Keys tab (Add key → Create new key → JSON) and paste the file's contents into the service account field — then share the Drive folder with the service account's email. The OAuth client fields are unused with a service account, so any placeholder (e.g. \"-\") satisfies them.",
+          "fields": {
+            "access_token": {
+              "label": "Access token",
+              "description": "Filled automatically by the Connect button. Only enter one manually for a quick test — Google access tokens expire after about an hour and cannot be refreshed. Stored encrypted."
+            },
+            "refresh_token": {
+              "label": "Refresh token",
+              "description": "Filled automatically by the Connect button. The durable credential — mints short-lived access tokens automatically. Requires the OAuth client ID and secret below. Stored encrypted."
+            },
+            "client_id": {
+              "label": "OAuth client ID",
+              "description": "OAuth 2.0 client ID of your Google Cloud web application (APIs & Services → Credentials → Create credentials → OAuth client ID). Required for the Connect flow — when using a service account key instead, any placeholder (e.g. \"-\") satisfies it."
+            },
+            "client_secret": {
+              "label": "OAuth client secret",
+              "description": "OAuth 2.0 client secret shown with the client ID in the Google Cloud console. Same placeholder rule as the client ID for service-account setups. Stored encrypted."
+            },
+            "service_account_key": {
+              "label": "Service account key (JSON)",
+              "description": "Server-to-server alternative to OAuth: create a service account under IAM & Admin → Service Accounts in the Google Cloud console, download a JSON key from its Keys tab (Add key → Create new key → JSON) and paste the file's full contents here. Share the Drive folder with the service account's email. Takes precedence over the OAuth fields. Stored encrypted."
+            },
+            "root_folder_id": {
+              "label": "Root folder ID",
+              "description": "Drive folder ID to index — the last segment of the folder's URL (drive.google.com/drive/folders/<id>). Leave empty for the My Drive root — or for the shared drive root when a drive ID is set."
+            },
+            "drive_id": {
+              "label": "Shared drive ID",
+              "description": "Optional shared (team) drive ID — the last segment of the shared drive's URL when opened in Drive. Enables shared-drive support in listings and restricts searches to that drive."
+            },
+            "token_uri": {
+              "label": "Token endpoint URL",
+              "description": "OAuth token endpoint used to exchange refresh tokens and service account assertions. Defaults to Google's endpoint; override only for testing or compatible APIs."
+            },
+            "verify_ssl": {
+              "label": "Verify TLS certificate",
+              "description": "Verify the API server's TLS certificate. Disable only for testing or trusted private networks — disabling leaves the connection open to MITM impersonation and credential theft."
+            },
+            "ca_bundle": {
+              "label": "CA bundle path",
+              "description": "Optional path on the Songhive server to a PEM CA bundle used to verify the API server's TLS certificate. Takes precedence over the verification toggle when set."
+            },
+            "timeout": {
+              "label": "Request timeout (seconds)",
+              "description": "How long to wait for each HTTP request to the Google Drive API."
+            },
+            "extensions": {
+              "label": "File extensions",
+              "description": "Comma-separated list of audio file extensions to index (e.g. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Exclude patterns",
+              "description": "Comma-separated glob patterns for remote paths to skip during scanning."
+            },
+            "recursive": {
+              "label": "Recursive scan",
+              "description": "Index audio files in remote subfolders recursively."
+            },
+            "allow_hashing": {
+              "label": "Allow audio hashing",
+              "description": "Compute a stable audio hash for tracks to detect duplicates and support transcoding. Requires downloading new or changed files once."
+            },
+            "fast_hash": {
+              "label": "Use fast raw hash",
+              "description": "Use raw SHA-256 instead of ffmpeg audio-only hashing. Cheaper but changes when tags or artwork change."
+            },
+            "trash_on_delete": {
+              "label": "Trash instead of permanent delete",
+              "description": "Move deleted files to the Drive trash (recoverable) instead of deleting them permanently."
+            },
+            "allow_write_tags": {
+              "label": "Allow metadata write-back",
+              "description": "Allow Songhive to rewrite embedded tags and re-upload files when tracks are edited. Requires the full Drive scope — for OAuth setups, enable this before clicking Connect so the granted token covers it."
+            },
+            "allow_rename_source": {
+              "label": "Allow source renaming",
+              "description": "Allow Songhive to rename remote files through track edits. Requires the full Drive scope — for OAuth setups, enable this before clicking Connect."
+            },
+            "allow_delete_source": {
+              "label": "Allow source deletion",
+              "description": "Allow deleting files in Drive. Requires the full Drive scope — for OAuth setups, enable this before clicking Connect."
+            }
+          }
+        },
         "local": {
           "fields": {
             "root": {

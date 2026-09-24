@@ -279,10 +279,12 @@
   regardless.
 - External libraries (`songhive/external/`) support `s3`
   (`external/_s3.py`, aioboto3), `sftp` (`external/_sftp.py`, asyncssh),
-  `webdav` (`external/_webdav.py`, httpx), and `dropbox`
+  `webdav` (`external/_webdav.py`, httpx), `dropbox`
   (`external/_dropbox.py`, httpx — Dropbox HTTP API v2, OAuth access token or
   `refresh_token`+`app_key`+`app_secret` grant with a process-wide
-  `_TOKEN_CACHE`) providers alongside `local`/`fake`.
+  `_TOKEN_CACHE`), and `gdrive` (`external/_gdrive.py`, httpx — Drive API v3,
+  service account JWT grant or OAuth `refresh_token`+`client_id`+`client_secret`,
+  per-instance `_token_cache`) providers alongside `local`/`fake`.
   Two traps when touching that code: (1) API responses redact secret config
   keys to `"<redacted>"`, so PATCH routes must run submitted configs through
   `_merge_config_preserving_redacted` or credentials get overwritten with the
@@ -301,8 +303,8 @@
   `services.music.propagate_external_library_visibility` so synced `Track`
   rows stay consistent with the backing `Library`.
   OAuth-capable providers register an `OAuthProviderSpec` in
-  `external/oauth.py` (Dropbox does today; Spotify/Tidal/YouTube are
-  planned): the generic begin/callback/claim routes
+  `external/oauth.py` (Dropbox and Google Drive do today;
+  Spotify/Tidal/YouTube are planned): the generic begin/callback/claim routes
   (`/api/v1/external-libraries/oauth/*`) keep pending flows and granted
   config fragments in short-lived Redis keys bound to the initiating user,
   and the SPA's "Connect" button merges the claimed fragment into the form

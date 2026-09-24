@@ -139,6 +139,48 @@ async def test_begin_returns_authorize_url(client, admin_user, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_gdrive_begin_returns_authorize_url(client, admin_user, auth_headers):
+    response = _begin(
+        client,
+        auth_headers(admin_user),
+        provider_type="gdrive",
+        config={"client_id": "google-id", "client_secret": "google-secret"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+
+    parsed = urlsplit(data["authorize_url"])
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == "https://accounts.google.com/o/oauth2/v2/auth"
+    params = parse_qs(parsed.query)
+    assert params["response_type"] == ["code"]
+    assert params["client_id"] == ["google-id"]
+    assert params["state"] == [data["state"]]
+    assert params["scope"] == ["https://www.googleapis.com/auth/drive.readonly"]
+    assert params["access_type"] == ["offline"]
+    assert params["prompt"] == ["consent"]
+    assert params["code_challenge_method"] == ["S256"]
+    assert params["redirect_uri"] == ["http://testserver/api/v1/external-libraries/oauth/callback"]
+
+
+@pytest.mark.asyncio
+async def test_gdrive_begin_scope_follows_write_flags(client, admin_user, auth_headers):
+    """Write flags in the submitted config widen the requested Drive scope."""
+    response = _begin(
+        client,
+        auth_headers(admin_user),
+        provider_type="gdrive",
+        config={
+            "client_id": "google-id",
+            "client_secret": "google-secret",
+            "allow_delete_source": True,
+        },
+    )
+    assert response.status_code == status.HTTP_200_OK
+    params = parse_qs(urlsplit(response.json()["authorize_url"]).query)
+    assert params["scope"] == ["https://www.googleapis.com/auth/drive"]
+
+
+@pytest.mark.asyncio
 async def test_begin_stores_pending_in_redis(client, admin_user, auth_headers, fake_redis):
     response = _begin(client, auth_headers(admin_user))
     assert response.status_code == status.HTTP_200_OK
@@ -394,6 +436,8 @@ async def test_providers_report_oauth_supported(client, admin_user, auth_headers
     providers = {item["provider_type"]: item for item in response.json()}
     assert providers["dropbox"]["oauth_supported"] is True
     assert providers["dropbox"]["oauth_callback_url"].endswith("/api/v1/external-libraries/oauth/callback")
+    assert providers["gdrive"]["oauth_supported"] is True
+    assert providers["gdrive"]["oauth_callback_url"].endswith("/api/v1/external-libraries/oauth/callback")
     assert providers["s3"]["oauth_supported"] is False
     assert providers["s3"]["oauth_callback_url"] is None
 
@@ -408,4 +452,6 @@ async def test_admin_providers_report_oauth_supported(client, admin_user, auth_h
     providers = {item["provider_type"]: item for item in response.json()}
     assert providers["dropbox"]["oauth_supported"] is True
     assert providers["dropbox"]["oauth_callback_url"].endswith("/api/v1/external-libraries/oauth/callback")
+    assert providers["gdrive"]["oauth_supported"] is True
+    assert providers["gdrive"]["oauth_callback_url"].endswith("/api/v1/external-libraries/oauth/callback")
     assert providers["s3"]["oauth_supported"] is False

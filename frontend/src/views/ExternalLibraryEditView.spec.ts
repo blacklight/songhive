@@ -509,7 +509,7 @@ describe("ExternalLibraryEditView", () => {
           app_key: "test-app-key",
           root: "/Music",
           timeout: 30,
-          temporary_links: true,
+          temporary_links: false,
         }),
       }),
     );

@@ -1236,14 +1236,17 @@ comes from scheduled syncs rather than filesystem watching.
 
 #### OAuth connect flow
 
-Providers that authenticate through OAuth (`dropbox` today; Spotify, Tidal
-and YouTube are planned) offer a "Connect" button in the external-library
-form instead of making users paste tokens by hand. The machinery is
-provider-agnostic (`external/oauth.py`): each provider registers an
-`OAuthProviderSpec` describing its authorize/token endpoints, which config
-keys carry the OAuth client id/secret, and how token-response fields map
-onto adapter config keys. Provider listings report `oauth_supported` and
-`oauth_callback_url` (the public
+Providers that authenticate through OAuth (`dropbox` and `gdrive` today;
+Spotify, Tidal and YouTube are planned) offer a "Connect" button in the
+external-library form instead of making users paste tokens by hand. The
+machinery is provider-agnostic (`external/oauth.py`): each provider
+registers an `OAuthProviderSpec` describing its authorize/token endpoints,
+which config keys carry the OAuth client id/secret, and how token-response
+fields map onto adapter config keys. A spec may also set
+`scopes_for_config` to derive the requested OAuth scopes from the submitted
+config — Google Drive uses it to request `drive.readonly` or the full
+`drive` scope depending on the form's write flags. Provider listings report
+`oauth_supported` and `oauth_callback_url` (the public
 `{base}/api/v1/external-libraries/oauth/callback` URL built from
 `public_base_url`) so the frontend only shows the button where it applies
 and can tell the user which redirect URI to register in the provider's app
@@ -1271,9 +1274,72 @@ The flow runs in three steps:
 The granted fragment is merged into the provider configuration and only
 persisted when the user saves the form, at which point it goes through the
 same validation and Fernet encryption as manually entered credentials.
-Dropbox uses `token_access_type=offline` so the granted `refresh_token` is
-durable; a future provider only needs to register a spec — no new routes,
-Redis plumbing or frontend redirect handling.
+Dropbox uses `token_access_type=offline` and Google Drive
+`access_type=offline` with `prompt=consent` so the granted `refresh_token`
+is durable; a future provider only needs to register a spec — no new
+routes, Redis plumbing or frontend redirect handling.
+
+#### Google Drive provider
+
+The `gdrive` provider (`external/_gdrive.py`, httpx) indexes audio files
+stored in a Google Drive folder, including shared (team) drives. **The
+Songhive instance must be able to reach `googleapis.com`** — every listing,
+download, and mutation originates server-side through the Drive API v3.
+Like the other providers, both regular users (when
+`allow_user_created_libraries` permits the provider) and admins can attach
+Drive roots.
+
+A Google Drive external library stores the following adapter config:
+
+| Key                        | Required | Default  | Description                                                             |
+|----------------------------|----------|----------|-------------------------------------------------------------------------|
+| `client_id`                | OAuth    | —        | OAuth 2.0 client ID of a Google Cloud "Web application" client; the     |
+|                            |          |          | Connect flow fills `access_token`/`refresh_token` from it.              |
+| `client_secret`            | OAuth    | —        | OAuth 2.0 client secret (stored encrypted).                             |
+| `refresh_token`            | OAuth    | —        | OAuth refresh token; granted by the Connect flow (stored encrypted).    |
+| `access_token`             | yes*     | —        | Static bearer token; expires after ~1h — testing only.                  |
+| `service_account_key`      | yes*     | —        | Service account JSON (`client_email`/`private_key`); takes precedence.  |
+| `root_folder_id`           | no       | `root`   | Folder ID to index; defaults to the My Drive root, or the shared drive  |
+|                            |          |          | root when `drive_id` is set.                                            |
+| `drive_id`                 | no       | —        | Shared drive ID; enables `supportsAllDrives` and scopes lists to it.    |
+| `token_uri`                | no       | Google   | OAuth token endpoint override.                                          |
+| `verify_ssl`               | no       | `true`   | Verify TLS; set to `false` to disable or to a CA bundle path.           |
+| `timeout`                  | no       | `30`     | HTTP request timeout in seconds.                                        |
+| `extensions`               | no       | all audio| List of file extensions to index.                                       |
+| `exclude`                  | no       | `[]`     | `fnmatch` patterns applied to display paths and file names.             |
+| `recursive`                | no       | `true`   | Whether to scan subfolders.                                             |
+| `allow_hashing`            | no       | `true`   | Whether to compute audio hashes for new/updated files.                  |
+| `fast_hash`                | no       | `false`  | Hash raw file bytes instead of ffmpeg audio-only hashing.               |
+| `trash_on_delete`          | no       | `true`   | Move files to the Drive trash instead of permanently deleting.          |
+| `allow_write_tags`         | no       | `false`  | Rewrite embedded tags by re-uploading the file in place.                |
+| `allow_rename_source`      | no       | `false`  | Allow `rename_source` to rename remote files (file ID stays stable).    |
+| `allow_delete_source`      | no       | `false`  | Allow `delete_source` to trash or remove remote files.                  |
+
+*Exactly one credential mode is required: OAuth user credentials, a service
+account key, or a static access token. The UI "Connect" button runs the
+generic OAuth connect flow against `accounts.google.com` — the user
+registers a "Web application" OAuth client in the Google Cloud console with
+the reported `oauth_callback_url` as an authorized redirect URI, and the
+granted `refresh_token` (requested with `access_type=offline` +
+`prompt=consent`, so re-connects always return one) lands in the config
+automatically. The authorize request asks for `drive.readonly`, or the full
+`drive` scope when any write flag is enabled in the form. Service account
+access tokens are minted locally with an RS256 JWT bearer grant (using the
+`cryptography` package already required for secret-at-rest encryption) and
+request the same scope rule. OAuth tokens are refreshed through the token
+endpoint and cached for their stated lifetime.
+
+Unlike path-addressed providers, Google Drive items are identified by their
+file ID, so `provider_key` carries the ID (stable across renames and moves)
+and `display_path` carries the folder path reported by the last listing.
+`iter_items` walks the folder tree with `files.list` (metadata only) and
+reports the `md5Checksum` — a content-addressed change token — via
+`detect_changes`, so unchanged trees cost a listing walk and no file
+transfer. Google-native documents (`application/vnd.google-apps.*`) have no
+downloadable payload and are skipped. Drive has no presignable URL, so
+`open_stream` always returns a proxied byte iterator with HTTP `Range`
+support; freshness comes from scheduled syncs rather than filesystem
+watching, as with the other remote providers.
 
 #### Visibility, sharing, and secret redaction
 

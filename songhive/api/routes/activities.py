@@ -20,8 +20,7 @@ from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import acl
 from ...services import activities as activity_service
-from ...services import audit
-from ...services import remote_content
+from ...services import audit, remote_content
 from ...services.federation import ensure_user_actor
 from ...services.mentions import CONTENT_TYPE_MARKDOWN
 from ...services.storage import StorageService

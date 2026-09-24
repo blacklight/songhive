@@ -49,6 +49,191 @@ export interface ProviderTemplate {
 const DEFAULT_LOCAL_EXTENSIONS = ".mp3, .flac, .ogg, .opus, .m4a, .aac, .wav";
 
 export const providerTemplates: Record<string, ProviderTemplate> = {
+  gdrive: {
+    providerType: "gdrive",
+    helpI18nKey: "pages.externalLibraries.providers.gdrive.help",
+    helpLinkUrl: "https://console.cloud.google.com/apis/credentials",
+    helpRequiredScopes: ["https://www.googleapis.com/auth/drive.readonly"],
+    helpOptionalScopes: ["https://www.googleapis.com/auth/drive"],
+    fields: [
+      {
+        name: "access_token",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.access_token.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.access_token.description",
+      },
+      {
+        name: "refresh_token",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.refresh_token.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.refresh_token.description",
+      },
+      {
+        name: "client_id",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.client_id.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.client_id.description",
+        required: true,
+      },
+      {
+        name: "client_secret",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.client_secret.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.client_secret.description",
+        required: true,
+      },
+      {
+        name: "service_account_key",
+        type: "textarea",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.service_account_key.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.service_account_key.description",
+      },
+      {
+        name: "root_folder_id",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.root_folder_id.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.root_folder_id.description",
+      },
+      {
+        name: "drive_id",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.drive_id.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.drive_id.description",
+      },
+      {
+        name: "token_uri",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.token_uri.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.token_uri.description",
+      },
+      {
+        name: "verify_ssl",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.verify_ssl.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.verify_ssl.description",
+        default: true,
+      },
+      {
+        // The backend's ``verify_ssl`` accepts either a boolean or a CA
+        // bundle path; a non-empty path written here overrides the boolean.
+        name: "ca_bundle",
+        type: "string",
+        configKey: "verify_ssl",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.ca_bundle.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.ca_bundle.description",
+      },
+      {
+        name: "timeout",
+        type: "number",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.timeout.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.timeout.description",
+        default: 30,
+      },
+      {
+        name: "extensions",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.extensions.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.extensions.description",
+        default: DEFAULT_LOCAL_EXTENSIONS,
+      },
+      {
+        name: "exclude",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.exclude.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.exclude.description",
+        default: "",
+      },
+      {
+        name: "recursive",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.recursive.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.recursive.description",
+        default: true,
+      },
+      {
+        name: "allow_hashing",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.allow_hashing.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.allow_hashing.description",
+        default: true,
+      },
+      {
+        name: "fast_hash",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.fast_hash.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.fast_hash.description",
+        default: false,
+      },
+      {
+        name: "trash_on_delete",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.trash_on_delete.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.trash_on_delete.description",
+        default: true,
+      },
+      {
+        name: "allow_write_tags",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.allow_write_tags.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.allow_write_tags.description",
+        default: false,
+      },
+      {
+        name: "allow_rename_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.allow_rename_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.allow_rename_source.description",
+        default: false,
+      },
+      {
+        name: "allow_delete_source",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.allow_delete_source.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.gdrive.fields.allow_delete_source.description",
+        default: false,
+      },
+    ],
+  },
   local: {
     providerType: "local",
     fields: [

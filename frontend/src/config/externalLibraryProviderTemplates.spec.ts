@@ -85,6 +85,42 @@ describe("externalLibraryProviderTemplates", () => {
     ).toBeFalsy();
   });
 
+  it("returns a template for the gdrive provider", () => {
+    const template = getProviderTemplate("gdrive");
+    expect(template.providerType).toBe("gdrive");
+    expect(template.helpI18nKey).toBe(
+      "pages.externalLibraries.providers.gdrive.help",
+    );
+    expect(template.helpLinkUrl).toBe(
+      "https://console.cloud.google.com/apis/credentials",
+    );
+    const fields = template.fields.map((f) => f.name);
+    expect(fields).toContain("access_token");
+    expect(fields).toContain("refresh_token");
+    expect(fields).toContain("client_id");
+    expect(fields).toContain("client_secret");
+    expect(fields).toContain("service_account_key");
+    expect(fields).toContain("root_folder_id");
+    expect(fields).toContain("drive_id");
+    // The OAuth client credentials are required for the Connect flow; the
+    // tokens are granted by it and the service account key is an alternative.
+    expect(template.fields.find((f) => f.name === "client_id")!.required).toBe(
+      true,
+    );
+    expect(
+      template.fields.find((f) => f.name === "client_secret")!.required,
+    ).toBe(true);
+    expect(
+      template.fields.find((f) => f.name === "access_token")!.required,
+    ).toBeFalsy();
+    expect(
+      template.fields.find((f) => f.name === "refresh_token")!.required,
+    ).toBeFalsy();
+    expect(
+      template.fields.find((f) => f.name === "service_account_key")!.type,
+    ).toBe("textarea");
+  });
+
   it("returns an empty template for unknown providers", () => {
     const template = getProviderTemplate("unknown");
     expect(template.providerType).toBe("unknown");
