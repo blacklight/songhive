@@ -17,7 +17,12 @@ import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import RichContent from "@/components/RichContent.vue";
 import { useInstanceDomain } from "@/composables/useInstanceDomain";
 import { useCollectionItem } from "@/composables/useCollectionItem";
+import {
+  remoteObjectPlayableTracks,
+  remoteObjectToQueueTrack,
+} from "@/utils/remoteObject";
 import { useAuthStore } from "@/stores/auth";
+import { usePlayerStore } from "@/stores/player";
 import { useToastStore } from "@/stores/toast";
 
 // Page for a cached remote resource (track/album/artist/playlist/library).
@@ -30,6 +35,7 @@ const { t } = useI18n();
 const route = useRoute();
 const instanceDomain = useInstanceDomain();
 const authStore = useAuthStore();
+const player = usePlayerStore();
 const toastStore = useToastStore();
 
 const object = ref<RemoteObject | null>(null);
@@ -68,7 +74,21 @@ const canFollow = computed(
     !object.value.unavailable,
 );
 
+// Playable queue: the object's own audio (tracks) or its cached children
+// carrying audio (album/library/playlist items).
+const playableTracks = computed(() =>
+  object.value ? remoteObjectPlayableTracks(object.value) : [],
+);
+
 const actions = computed(() => [
+  {
+    key: "play",
+    label:
+      playableTracks.value.length > 1 ? t("common.playAll") : t("common.play"),
+    icon: "play",
+    variant: "primary" as const,
+    visible: playableTracks.value.length > 0,
+  },
   {
     key: "follow",
     label: followLabel.value,
@@ -113,9 +133,29 @@ async function toggleFollow() {
   }
 }
 
+function playTracks(tracks = playableTracks.value) {
+  if (!tracks.length) return;
+  try {
+    player.playAll(tracks);
+  } catch (err) {
+    toastStore.push({
+      type: "error",
+      message:
+        getApiErrorMessage(err) ||
+        t("pages.home.playError", { message: String(err) }),
+    });
+  }
+}
+
+function playItem(item: RemoteObject) {
+  const track = remoteObjectToQueueTrack(item);
+  if (track) playTracks([track]);
+}
+
 async function onAction(key: string) {
   if (key === "follow") await toggleFollow();
   else if (key === "collection") await toggleCollection();
+  else if (key === "play") playTracks();
 }
 
 function childKind(item: RemoteObject): string {
@@ -178,13 +218,6 @@ watch(() => [route.params.kind, route.params.id], load, { immediate: true });
         <p v-if="summaryHtml" class="remote-resource__summary">
           <RichContent :html="summaryHtml" :instance-domain="instanceDomain" />
         </p>
-        <audio
-          v-if="object.audio_url"
-          :src="object.audio_url"
-          controls
-          preload="none"
-          class="remote-resource__audio"
-        />
         <p v-if="object.parent" class="remote-resource__parent">
           {{ t("remote.partOf") }}
           <RouterLink :to="object.parent.url" class="remote-resource__link">
@@ -225,6 +258,16 @@ watch(() => [route.params.kind, route.params.id], load, { immediate: true });
           :key="item.id"
           class="remote-resource__item"
         >
+          <button
+            v-if="item.stream_url || item.audio_url"
+            type="button"
+            class="remote-resource__item-play"
+            :aria-label="t('common.play')"
+            :title="t('common.play')"
+            @click="playItem(item)"
+          >
+            <AppIcon name="play" />
+          </button>
           <RouterLink :to="item.url" class="remote-resource__link">
             {{ item.name || item.canonical_url }}
           </RouterLink>
@@ -312,9 +355,22 @@ watch(() => [route.params.kind, route.params.id], load, { immediate: true });
   word-break: break-word;
 }
 
-.remote-resource__audio {
-  width: 100%;
-  max-width: 30rem;
+.remote-resource__item-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.remote-resource__item-play:hover {
+  color: var(--color-text);
+  background-color: var(--color-surface-raised);
 }
 
 .remote-resource__meta {

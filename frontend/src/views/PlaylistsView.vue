@@ -19,6 +19,7 @@ import AppSelect from "@/components/ui/AppSelect.vue";
 import PlaylistCard from "@/components/library/PlaylistCard.vue";
 import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
+import RemoteCollectionSection from "@/components/library/RemoteCollectionSection.vue";
 import type { Visibility } from "@/api/playlists";
 
 const { t } = useI18n();
@@ -175,6 +176,7 @@ async function onCreate() {
         />
       </template>
     </BulkEditableGrid>
+    <RemoteCollectionSection kind="playlist" :active="myCollection" />
 
     <AppModal
       :open="isCreateOpen"

@@ -19,6 +19,7 @@ import AppSelect from "@/components/ui/AppSelect.vue";
 import LibraryCard from "@/components/library/LibraryCard.vue";
 import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
+import RemoteCollectionSection from "@/components/library/RemoteCollectionSection.vue";
 import type { Visibility } from "@/api/libraries";
 
 const { t } = useI18n();
@@ -175,6 +176,7 @@ async function onCreate() {
         />
       </template>
     </BulkEditableGrid>
+    <RemoteCollectionSection kind="library" :active="myCollection" />
 
     <AppModal
       :open="isCreateOpen"

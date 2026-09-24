@@ -15,6 +15,7 @@ import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import SortControl from "@/components/ui/SortControl.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
+import RemoteCollectionSection from "@/components/library/RemoteCollectionSection.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -199,6 +200,7 @@ watch(
       </AppButton>
       <AppSpinner v-else-if="loading" />
     </div>
+    <RemoteCollectionSection kind="track" :active="myCollection" />
   </div>
 </template>
 

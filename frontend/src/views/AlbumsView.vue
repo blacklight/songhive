@@ -7,6 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 import AlbumCard from "@/components/library/AlbumCard.vue";
 import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
+import RemoteCollectionSection from "@/components/library/RemoteCollectionSection.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -100,6 +101,7 @@ onMounted(() => load());
         />
       </template>
     </BulkEditableGrid>
+    <RemoteCollectionSection kind="album" :active="myCollection" />
   </div>
 </template>
 
