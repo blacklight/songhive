@@ -4,6 +4,49 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `federation`: Cached remote entities merge into the main browse
+  lists. Remote artists, albums, playlists and tracks render alongside
+  local entries with a globe badge and origin domain, cluster under
+  same-named local entities, and follow the list's search, collection
+  filter and sort. Remote entries stay read-only for bulk
+  edit/delete, unplayable remote tracks navigate to their remote page,
+  and `/remote/objects` accepts the browse sort fields and
+  offset-pages in lockstep with the local list's "Load More".
+  ([`abf22d5`](https://git.platypush.tech/blacklight/songhive/commit/abf22d5f0fcf5fa295d25e79280e1a53f623dee8)).
+- `stats`: Personal listening stats dashboard. New `/api/v1/stats`
+  endpoints (top entities, plays timeline, genres timeline, release
+  years and listening clock) back a new Stats view with ECharts
+  visualizations and a range picker.
+  ([`b1428f0`](https://git.platypush.tech/blacklight/songhive/commit/b1428f0777d2cecaba8687774673a669648dedc0)).
+- `downloads`: Async bulk ZIP download archives. New
+  `/api/v1/downloads` endpoints create, list, track and delete archive
+  builds that run as Celery tasks under a Redis concurrency cap, and
+  the UI gained a Downloads view, download actions and a `download`
+  notification type.
+  ([`2d63537`](https://git.platypush.tech/blacklight/songhive/commit/2d63537c5b5f219882c94bfc89ace1d4d2ccd55c)).
+- `external`: Google Drive external library provider (Drive API v3)
+  with OAuth or service account authentication — listing, streaming,
+  hashing and optional write-back/rename/delete; OAuth scopes are
+  derived from the provider config.
+  ([`ba3ce7a`](https://git.platypush.tech/blacklight/songhive/commit/ba3ce7ab68fba977f8452f708b3fa673f6c685e5)).
+- `external`: Dropbox external library provider. Ships with a
+  reusable OAuth connect flow (begin/callback/claim routes, PKCE,
+  pending state in Redis) that future OAuth providers can reuse,
+  provider help metadata (console link, required/optional scopes) in
+  the edit form, and proper `206`/`Content-Range` semantics for
+  proxied external streams. External downloads now prefer the probed
+  track MIME over the provider's extension guess, and audio-typed MP4
+  payloads get their `ftyp` major brand normalized to M4A so remote
+  content sniffers (e.g. Mastodon) classify them as audio instead of
+  `video/mp4`.
+  ([`9c7e8b6`](https://git.platypush.tech/blacklight/songhive/commit/9c7e8b6566586023fea3c37c8daaf850ea7caf8d)).
+- `external`: WebDAV external library provider. External libraries
+  can now live on WebDAV servers, with listing, HTTP range streaming,
+  hashing and write-back support.
+  ([`cd0921c`](https://git.platypush.tech/blacklight/songhive/commit/cd0921c61d9f715aeb395742cdfcf480d5bb340c)).
+
 ### Fixed
 
 - `federation`: Audio tracks backed by external storage now federate
@@ -12,14 +55,17 @@ All notable changes to this project will be documented in this file.
   track page labeled as `audio/*` (or no playable URL at all); they now
   point to `/api/v1/tracks/{id}/download` and carry the provider's
   `size`/`bitrate`/`mediaType` metadata.
+  ([`c27c191`](https://git.platypush.tech/blacklight/songhive/commit/c27c1912423712c2b86ca50f766ae86b6f331a21)).
 - `api`: `GET /api/v1/tracks/{id}/download` no longer requires
   authentication for public tracks — the per-account rate limiter was
   replaced by user-or-IP limiting, so anonymous Fediverse media fetchers
   (e.g. Mastodon) can retrieve the bytes.
+  ([`c27c191`](https://git.platypush.tech/blacklight/songhive/commit/c27c1912423712c2b86ca50f766ae86b6f331a21)).
 - `federation`: Remote libraries and collections whose `Audio`/`Video`
   renditions have cached `Track` entities no longer appear empty —
   rendition rows fold onto their entity instead of being excluded from
   children listings.
+  ([`c27c191`](https://git.platypush.tech/blacklight/songhive/commit/c27c1912423712c2b86ca50f766ae86b6f331a21)).
 - `federation`: Remote actors with opaque ActivityPub ids — e.g. Mastodon
   4.6+ `…/ap/users/{numeric-id}` actor URIs — no longer display, route or
   prefill replies with their numeric id tail. Follower/follow-request
@@ -29,6 +75,7 @@ All notable changes to this project will be documented in this file.
   resolves both the real handle and the numeric id tail against the
   follower/follow-request/actor-cache tables before WebFinger, fixing the
   404 profile pages and broken actor links first-time followers produced.
+  ([`59db7a8`](https://git.platypush.tech/blacklight/songhive/commit/59db7a8792639b5b36863fdc285f041151881b09)).
 
 ## 0.3.1
 
