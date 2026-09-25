@@ -248,6 +248,7 @@ describe("AppLayout", () => {
       "Stats",
       "Favorites",
       "Files",
+      "Downloads",
       "Shares",
       "Radio",
       "Podcasts",
