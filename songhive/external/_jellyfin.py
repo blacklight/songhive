@@ -167,7 +167,7 @@ class JellyfinExternalAdapter(ExternalLibraryAdapter):
                     f"Could not resolve server_url host {host!r}",
                     field="server_url",
                 ) from exc
-            resolved = sorted({info[4][0] for info in infos})
+            resolved = sorted({str(info[4][0]) for info in infos})
             _is_public_address(host, resolved)
         return url
 
@@ -258,7 +258,7 @@ class JellyfinExternalAdapter(ExternalLibraryAdapter):
                 _is_public_address(host, [str(literal)])
             else:
                 infos = await asyncio.get_running_loop().getaddrinfo(host, request.url.port)
-                _is_public_address(host, sorted({info[4][0] for info in infos}))
+                _is_public_address(host, sorted({str(info[4][0]) for info in infos}))
 
         async with httpx.AsyncClient(
             verify=self._verify(config),
