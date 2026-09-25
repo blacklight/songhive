@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `docker`: Compose deployment fixes — `config.toml` is now read
+  straight from the project directory (bind-mounted at
+  `/etc/songhive/config.toml`) rather than `volumes/config`, missing
+  mount sources fail fast instead of creating root-owned
+  directories, the `setup` service no longer needs
+  `scripts/setup-volumes.sh`, and `SONGHIVE_*` values in `.env` (see
+  the new `.env.example`) are injected into the containers.
+  ([`42ba1b3`](https://git.platypush.tech/blacklight/songhive/commit/42ba1b362355df2c96345df0908e71c54f7c82a1)).
+
 ## 0.3.4
 
 ### Fixed
