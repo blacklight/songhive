@@ -2,6 +2,7 @@
 Artist routes.
 """
 
+from datetime import datetime
 from typing import List, Optional, Set
 
 from fastapi import (
@@ -65,6 +66,10 @@ class ArtistResponse(BaseModel):
     tracks: Optional[List[TrackSummary]] = None
     in_collection: bool = False
     tags: List[str] = []
+    # Exposed so list consumers can interleave remote entities under the
+    # ``created_at``/``updated_at`` sort fields.
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class ArtistUpdate(BaseModel):
@@ -152,6 +157,8 @@ async def _build_artist_response(
         tracks=tracks,
         in_collection=saved_ids is not None and str(artist.id) in saved_ids,
         tags=_artist_tags(artist),
+        created_at=artist.created_at,
+        updated_at=artist.updated_at,
     )
 
 

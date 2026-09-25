@@ -192,6 +192,14 @@ function isRemoteTrack(track: QueueTrack): boolean {
   return !!track.remote && !!track.remote_object_id;
 }
 
+/**
+ * Remote rows cached without playable media can't be queued — clicking
+ * their title opens the remote resource page instead.
+ */
+function isRemoteUnplayable(track: QueueTrack): boolean {
+  return !!track.remote && !track.stream_url && !track.audio_url;
+}
+
 function openAddDialog(mode: "library" | "playlist") {
   addDialogMode.value = mode;
   addDialogOpen.value = true;
@@ -363,11 +371,21 @@ function rowClass(row: Record<string, unknown>): string | undefined {
   return classes.length > 0 ? classes.join(" ") : undefined;
 }
 
+const playableQueue = computed(() =>
+  enrichedTracks.value.filter((track) => !isRemoteUnplayable(track)),
+);
+
 function play(index: number) {
   const track = enrichedTracks.value[index];
   if (!track) return;
+  if (isRemoteUnplayable(track)) {
+    if (track.remote_page_url) {
+      void router.push(track.remote_page_url);
+    }
+    return;
+  }
   const wasCurrent = isCurrentTrack(track);
-  player.playTrack(track, enrichedTracks.value);
+  player.playTrack(track, playableQueue.value);
   if (wasCurrent) {
     void nextTick(scrollToCurrent);
   }
@@ -375,8 +393,8 @@ function play(index: number) {
 }
 
 function playAll() {
-  if (enrichedTracks.value.length === 0) return;
-  player.playAll(enrichedTracks.value);
+  if (playableQueue.value.length === 0) return;
+  player.playAll(playableQueue.value);
   emit("play-all");
 }
 
@@ -947,7 +965,7 @@ const confirmTitle = computed(() => {
       });
     }
     return t("browse.delete.bulkTitle", {
-      count: selectedIds.value.size,
+      count: selectedPlainTrackCount.value,
       entity: t("browse.entities.tracks"),
     });
   }
@@ -1138,30 +1156,33 @@ const menuItems = computed(() => {
   const track = menuTrack.value;
   if (!track) return [];
 
-  const items: {
-    key: string;
-    label: string;
-    icon: string;
-    danger?: boolean;
-  }[] = [
-    { key: "play", label: t("common.play"), icon: "play" },
-    {
-      key: "play-next",
-      label: t("browse.contextMenu.playNext"),
-      icon: "forward-step",
-    },
-    {
-      key: "enqueue",
-      label: t("browse.contextMenu.enqueue"),
-      icon: "plus",
-    },
-  ];
-
   const isEpisode = isPodcastEpisode(track);
   // ``track.remote`` covers attachment-only audio too; membership actions
   // (library/playlist/favorite/remove) need a cached remote object row.
   const isRemote = !!track.remote;
   const isMemberable = isRemoteTrack(track);
+  const playable = !isRemoteUnplayable(track);
+
+  const items: {
+    key: string;
+    label: string;
+    icon: string;
+    danger?: boolean;
+  }[] = playable
+    ? [
+        { key: "play", label: t("common.play"), icon: "play" },
+        {
+          key: "play-next",
+          label: t("browse.contextMenu.playNext"),
+          icon: "forward-step",
+        },
+        {
+          key: "enqueue",
+          label: t("browse.contextMenu.enqueue"),
+          icon: "plus",
+        },
+      ]
+    : [];
 
   if (track.audio_url) {
     items.push({
@@ -1438,7 +1459,7 @@ async function onMenuSelect(key: string) {
         variant="primary"
         size="sm"
         icon="play"
-        :disabled="enrichedTracks.length === 0"
+        :disabled="playableQueue.length === 0"
         @click="playAll"
       >
         {{ t("browse.detail.playAll") }}

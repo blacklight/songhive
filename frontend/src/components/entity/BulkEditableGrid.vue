@@ -33,6 +33,8 @@ export interface Props<T extends ManageableItem> {
   refresh: () => Promise<void> | void;
   getName: (item: T) => string;
   getOwnerId?: (item: T) => string | null | undefined;
+  /** Extra gate on top of the owner/admin check for bulk management. */
+  canManage?: (item: T) => boolean;
   recursive?: boolean;
   recursiveLabel?: string;
   layout?: "grid" | "list";
@@ -51,6 +53,7 @@ const props = withDefaults(defineProps<Props<T>>(), {
   searchPlaceholder: undefined,
   emptyMessage: undefined,
   getOwnerId: undefined,
+  canManage: undefined,
   recursive: false,
   recursiveLabel: undefined,
   layout: "grid",
@@ -88,6 +91,7 @@ const bulk = useBulkDelete<T>({
   entityPlural: props.entityPlural,
   getName: props.getName,
   getOwnerId: props.getOwnerId,
+  canManage: props.canManage,
   recursive: props.recursive,
   recursiveLabel: props.recursiveLabel,
 });

@@ -415,7 +415,9 @@ async def upload_track(
             content={
                 "detail": "duplicate",
                 "existing_track_id": exc.existing_track_id,
-                "track": ((await _track_response(storage, existing, user)).model_dump() if existing else None),
+                "track": (
+                    (await _track_response(storage, existing, user)).model_dump(mode="json") if existing else None
+                ),
             },
         )
 

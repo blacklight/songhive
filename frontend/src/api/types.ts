@@ -2633,6 +2633,11 @@ export interface paths {
      *     collected track's album and artist). ``favorites=true`` restricts to
      *     remote favorites; ``library`` restricts to remote objects that are
      *     members of a local library (the library's own visibility gates access).
+     *     ``q`` narrows the listing to rows whose name, summary, or canonical URL
+     *     contains the term — the remote side of the browse-list search boxes.
+     *     ``sort_by``/``sort_dir`` accept the local browse lists' field names so
+     *     remote pages arrive in the same order the merged view displays them —
+     *     ``limit``/``offset`` then page that order like any local list.
      *     Anonymous callers have no collection or favorites and get empty pages
      *     for those filters.
      */
@@ -6421,6 +6426,10 @@ export interface components {
        * @default []
        */
       genres: string[];
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
     };
     /**
      * AlbumStatsResponse
@@ -6683,6 +6692,10 @@ export interface components {
        * @default []
        */
       tags: string[];
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
     };
     /**
      * ArtistStatsResponse
@@ -8579,6 +8592,10 @@ export interface components {
        * @default []
        */
       tags: string[];
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
     };
     /**
      * PlaylistStatsResponse
@@ -10107,6 +10124,10 @@ export interface components {
       can_rename_source?: boolean | null;
       /** Can Delete Source */
       can_delete_source?: boolean | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
     };
     /**
      * TrackSummary
@@ -15872,6 +15893,8 @@ export interface operations {
       query?: {
         /** @description Filter by resource kind */
         resource_type?: string | null;
+        /** @description Match name, summary or canonical URL (case-insensitive) */
+        q?: string | null;
         /** @description Restrict to the caller's collected remote objects */
         collection?: boolean;
         /** @description Restrict to the caller's favorited remote objects */
@@ -15880,6 +15903,10 @@ export interface operations {
         library?: string | null;
         limit?: number;
         offset?: number;
+        /** @description Field to sort by */
+        sort_by?: string | null;
+        /** @description Sort direction (asc or desc) */
+        sort_dir?: string | null;
       };
       header?: never;
       path?: never;

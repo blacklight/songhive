@@ -66,6 +66,7 @@ function createTestRouter() {
       { path: "/albums/:id", component: { template: "<div/>" } },
       { path: "/tracks/:id", component: { template: "<div/>" } },
       { path: "/podcasts/:id", component: { template: "<div/>" } },
+      { path: "/remote/:kind/:id", component: { template: "<div/>" } },
       {
         path: "/tracks/:id/edit",
         name: "trackEdit",
@@ -90,6 +91,26 @@ function makeTrack(overrides: Partial<TrackResponse> = {}): TrackResponse {
     duration: 185,
     visibility: "public" as const,
     favorited: false,
+    ...overrides,
+  };
+}
+
+function makeRemoteTrack(overrides: Partial<QueueTrack> = {}): QueueTrack {
+  return {
+    ...makeTrack({
+      id: "remote-1",
+      title: "Remote Song",
+      artist_id: "",
+      album_id: null,
+      audio_url: null,
+      owner_id: null,
+    }),
+    artist_name: "Remote Artist",
+    remote: true,
+    remote_object_id: "remote-1",
+    remote_domain: "remote.example",
+    remote_page_url: "/remote/track/remote-1",
+    remote_url: "https://remote.example/tracks/remote-1",
     ...overrides,
   };
 }
@@ -235,6 +256,90 @@ describe("TrackList", () => {
     const player = usePlayerStore();
     expect(player.queue.map((t) => t.id)).toEqual(["track-1", "track-2"]);
     expect(wrapper.emitted("play-all")?.length).toBe(1);
+  });
+
+  it("renders remote tracks with their domain badge", async () => {
+    ({ wrapper } = mountTrackList({
+      tracks: [
+        makeTrack(),
+        makeRemoteTrack({
+          id: "remote-1",
+          stream_url: "/api/v1/remote/objects/remote-1/stream",
+        }),
+      ],
+    }));
+    await flushPromises();
+
+    const badge = wrapper.find(".track-list__remote-badge");
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toContain("remote.example");
+    expect(wrapper.text()).toContain("Remote Song");
+  });
+
+  it("opens the remote page instead of playing a remote row without media", async () => {
+    const { wrapper: w, router } = mountTrackList({
+      tracks: [makeRemoteTrack()],
+    });
+    wrapper = w;
+    await flushPromises();
+
+    await wrapper.find(".track-list__title-btn").trigger("click");
+    await flushPromises();
+
+    const player = usePlayerStore();
+    expect(player.currentTrack).toBeNull();
+    expect(router.currentRoute.value.path).toBe("/remote/track/remote-1");
+  });
+
+  it("plays playable remote tracks normally", async () => {
+    ({ wrapper } = mountTrackList({
+      tracks: [
+        makeRemoteTrack({
+          stream_url: "/api/v1/remote/objects/remote-1/stream",
+        }),
+      ],
+    }));
+    await flushPromises();
+
+    await wrapper.find(".track-list__title-btn").trigger("click");
+    await flushPromises();
+
+    const player = usePlayerStore();
+    expect(player.currentTrack?.id).toBe("remote-1");
+  });
+
+  it("excludes unplayable remote tracks from play-all", async () => {
+    ({ wrapper } = mountTrackList({
+      tracks: [
+        makeTrack(),
+        makeRemoteTrack({ id: "remote-1" }),
+        makeRemoteTrack({
+          id: "remote-2",
+          title: "Remote Two",
+          remote_object_id: "remote-2",
+          remote_page_url: "/remote/track/remote-2",
+          stream_url: "/api/v1/remote/objects/remote-2/stream",
+        }),
+      ],
+    }));
+    await flushPromises();
+
+    await wrapper.findAll("button").at(0)?.trigger("click");
+    await flushPromises();
+
+    const player = usePlayerStore();
+    expect(player.queue.map((t) => t.id)).toEqual(["track-1", "remote-2"]);
+  });
+
+  it("hides playback actions for unplayable remote tracks", async () => {
+    ({ wrapper } = mountTrackList({ tracks: [makeRemoteTrack()] }));
+    await flushPromises();
+
+    await wrapper.find(`[aria-label="${actionsLabel}"]`).trigger("click");
+    await flushPromises();
+
+    expect(findMenuLabel(i18n.global.t("common.play"))).toBeUndefined();
+    expect(findMenuLabel(i18n.global.t("remote.viewResource"))).toBeDefined();
   });
 
   it("adds a favorite and emits toggle-favorite from the context menu", async () => {

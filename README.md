@@ -92,7 +92,8 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
   close the tab
 - 📻 **Playlists & Radios**: Create playlists and dynamic radio stations
 - ❤️ **Listening history, favorites and scrobbling**: every play is recorded, and
-  submissions to Last.fm and Libre.fm work out of the box
+  submissions to Last.fm and Libre.fm work out of the box. You also get fancy
+  listening stats for free.
 - </> **Subsonic API**: Compatibility layer for Subsonic clients — use the mobile
   or desktop player you already have (see
   [Subsonic-compatible clients](#subsonic-compatible-clients))

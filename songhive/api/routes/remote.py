@@ -35,6 +35,7 @@ from ...services import remote_content
 from ...services import scrobbler as scrobbler_service
 from ...services import streaming as streaming_service
 from .._common import Pagination, get_pagination
+from .._sorting import SortParams, get_sort
 from ..deps import get_config, get_current_user, get_current_user_optional, get_db
 from ..middleware.rate_limit import rate_limit_account
 from .activities import (
@@ -600,6 +601,7 @@ async def list_remote_actor_activities(
 async def list_remote_objects(
     response: Response,
     resource_type: Optional[str] = Query(None, description="Filter by resource kind"),
+    q: Optional[str] = Query(None, description="Match name, summary or canonical URL (case-insensitive)"),
     collection: bool = Query(False, description="Restrict to the caller's collected remote objects"),
     favorites: bool = Query(False, description="Restrict to the caller's favorited remote objects"),
     library: Optional[str] = Query(None, description="Restrict to remote objects in this local library"),
@@ -607,6 +609,21 @@ async def list_remote_objects(
     user: Optional[User] = Depends(get_current_user_optional),
     config: SonghiveConfig = Depends(get_config),
     pagination: Pagination = Depends(get_pagination),
+    sort: SortParams = Depends(
+        get_sort(
+            {
+                "name",
+                "title",
+                "artist_name",
+                "album_title",
+                "created_at",
+                "updated_at",
+                "release_year",
+            },
+            "created_at",
+            "desc",
+        )
+    ),
 ):
     """
     Browse cached remote resources — never reaches the network.
@@ -617,6 +634,11 @@ async def list_remote_objects(
     collected track's album and artist). ``favorites=true`` restricts to
     remote favorites; ``library`` restricts to remote objects that are
     members of a local library (the library's own visibility gates access).
+    ``q`` narrows the listing to rows whose name, summary, or canonical URL
+    contains the term — the remote side of the browse-list search boxes.
+    ``sort_by``/``sort_dir`` accept the local browse lists' field names so
+    remote pages arrive in the same order the merged view displays them —
+    ``limit``/``offset`` then page that order like any local list.
     Anonymous callers have no collection or favorites and get empty pages
     for those filters.
     """
@@ -629,12 +651,15 @@ async def list_remote_objects(
         db,
         config,
         resource_type=resource_type,
+        query=q,
         user=user,
         collection_only=collection,
         favorites_only=favorites,
         library_id=library,
         limit=pagination.limit,
         offset=pagination.offset,
+        sort_by=sort.field,
+        sort_dir=sort.direction,
     )
     pagination.set_total(response, total)
     saved = (

@@ -522,6 +522,8 @@ async def _build_track_response(
         can_write_tags=can_write_tags,
         can_rename_source=can_rename_source,
         can_delete_source=can_delete_source,
+        created_at=track.created_at,
+        updated_at=track.updated_at,
     )
 
 

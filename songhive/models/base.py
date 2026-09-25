@@ -44,6 +44,11 @@ class TZDateTime(TypeDecorator):
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
 
+    # Fetch server-generated values (``server_default``/``onupdate``) eagerly
+    # during flush so attributes like ``updated_at`` stay populated after
+    # commit instead of expiring into lazy-load traps outside a greenlet.
+    __mapper_args__ = {"eager_defaults": True}
+
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     created_at: Mapped[datetime] = mapped_column(
         TZDateTime(),

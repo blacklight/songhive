@@ -40,6 +40,7 @@ from ..models.remote_object import RemoteObject
 from ..models.track import Track
 from ..models.user import User
 from . import federation as federation_service
+from ._common import ilike_contains
 
 logger = logging.getLogger(__name__)
 
@@ -2158,17 +2159,34 @@ async def resolve_remote_track_ids(
     return result
 
 
+# Browse-sort fields the frontend browse lists can request, mapped onto
+# the closest ``remote_objects`` column. ``fetched_at`` stands in for the
+# local ``*_at`` timestamps; ``artist_name``/``album_title``/
+# ``release_year`` have no remote column (they are payload-derived) so
+# they fall back to ``fetched_at`` — the client-side merge still positions
+# each loaded page by its own sort key.
+_REMOTE_OBJECT_SORT_FIELDS: Dict[str, Any] = {
+    "name": RemoteObject.name,
+    "title": RemoteObject.name,
+    "created_at": RemoteObject.fetched_at,
+    "updated_at": RemoteObject.fetched_at,
+}
+
+
 async def list_cached_remote_objects(
     session: AsyncSession,
     config: SonghiveConfig,
     *,
     resource_type: Optional[str] = None,
+    query: Optional[str] = None,
     user: Optional[User] = None,
     collection_only: bool = False,
     favorites_only: bool = False,
     library_id: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
 ) -> tuple[List[RemoteObject], int]:
     """
     Browse cached remote resources — never fetches remotely.
@@ -2179,8 +2197,13 @@ async def list_cached_remote_objects(
     so a collected remote track also surfaces its album and artist.
     ``favorites_only`` restricts to remote favorites; ``library_id``
     restricts to cached remote objects that are members of a local library.
-    Anonymous callers have no collection or favorites, so both flags
-    short-circuit to empty for them.
+    ``query`` matches name, summary, and canonical URL case-insensitively —
+    the remote side of the browse-list search box. Anonymous callers have
+    no collection or favorites, so both flags short-circuit to empty for
+    them. ``sort_by`` takes the local browse list's field names — the map
+    above picks the closest ``remote_objects`` column — and ``sort_dir``
+    the direction, so offset pagination walks remote rows in the same
+    order the merged view displays them.
     """
     await _refresh_instance_policies(session)
     if (collection_only or favorites_only) and user is None:
@@ -2192,6 +2215,14 @@ async def list_cached_remote_objects(
     ]
     if resource_type:
         conditions.append(RemoteObject.resource_type == resource_type)
+    if query:
+        conditions.append(
+            or_(
+                ilike_contains(RemoteObject.name, query),
+                ilike_contains(RemoteObject.summary, query),
+                ilike_contains(RemoteObject.canonical_url, query),
+            )
+        )
     if user is None:
         conditions.append(RemoteObject.visibility == "public")
     if collection_only:
@@ -2216,7 +2247,15 @@ async def list_cached_remote_objects(
             )
         )
 
-    stmt = select(RemoteObject).where(*conditions).order_by(RemoteObject.fetched_at.desc())
+    field = _REMOTE_OBJECT_SORT_FIELDS.get(sort_by, RemoteObject.fetched_at)
+    direction = sort_dir if sort_dir in ("asc", "desc") else "desc"
+    # Nulls sink to the end in either direction, matching the merged list's
+    # sort which places keyless remote entries after keyed ones. The id
+    # tiebreak keeps the page order stable so offset pagination cannot
+    # skip or repeat rows that share the primary key.
+    primary = (field.asc() if direction == "asc" else field.desc()).nulls_last()
+    secondary = RemoteObject.id.asc() if direction == "asc" else RemoteObject.id.desc()
+    stmt = select(RemoteObject).where(*conditions).order_by(primary, secondary)
     rows = [row for row in (await session.execute(stmt)).scalars().all() if remote_domain_allowed(row.domain, config)]
     return rows[offset : offset + limit], len(rows)
 

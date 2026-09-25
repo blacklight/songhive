@@ -2,6 +2,7 @@
 Album routes.
 """
 
+from datetime import datetime
 from typing import List, Optional, Set, Tuple
 
 from fastapi import (
@@ -88,6 +89,10 @@ class AlbumResponse(BaseModel):
     tracks: Optional[List[TrackSummary]] = None
     tags: List[str] = []
     genres: List[str] = []
+    # Exposed so list consumers can interleave remote entities under the
+    # ``created_at``/``updated_at`` sort fields.
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class AlbumUpdate(BaseModel):
@@ -184,6 +189,8 @@ async def _build_album_response(
         tracks=tracks,
         tags=_album_tags(album),
         genres=_album_genres(album),
+        created_at=album.created_at,
+        updated_at=album.updated_at,
     )
 
 

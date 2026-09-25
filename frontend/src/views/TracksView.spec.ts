@@ -5,13 +5,20 @@ import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import * as tracksApi from "@/api/tracks";
+import * as remoteApi from "@/api/remote";
 import type { TrackResponse, ListTracksResult } from "@/api/tracks";
+import type { RemoteObject } from "@/api/remote";
 import TracksView from "./TracksView.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 vi.mock("@/api/tracks", () => ({
   listTracksWithMeta: vi.fn(),
   deleteTrack: vi.fn(),
+}));
+
+vi.mock("@/api/remote", () => ({
+  listRemoteObjects: vi.fn(),
+  listRemoteObjectsWithMeta: vi.fn(),
 }));
 
 function createTestRouter() {
@@ -22,6 +29,7 @@ function createTestRouter() {
       { path: "/tracks/:id", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
+      { path: "/remote/:kind/:id", component: { template: "<div/>" } },
     ],
   });
 }
@@ -74,6 +82,28 @@ function createListResult(
   };
 }
 
+function createRemoteTrack(
+  id: string,
+  name: string,
+  artistName?: string,
+): RemoteObject {
+  return {
+    id,
+    canonical_url: `https://remote.example/tracks/${id}`,
+    object_type: "Audio",
+    resource_type: "track",
+    domain: "remote.example",
+    actor_url: "https://remote.example/users/alice",
+    name,
+    artist_name: artistName ?? null,
+    audio_url: "https://remote.example/audio.mp3",
+    stream_url: `/api/v1/remote/objects/${id}/stream`,
+    visibility: "public",
+    unavailable: false,
+    url: `/remote/track/${id}`,
+  };
+}
+
 function setAuthenticated() {
   const authStore = useAuthStore();
   authStore.status = "authenticated";
@@ -90,6 +120,11 @@ describe("TracksView", () => {
     vi.mocked(tracksApi.listTracksWithMeta).mockResolvedValue(
       createListResult([]),
     );
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
+      items: [],
+      offset: 0,
+      total: 0,
+    });
   });
 
   afterEach(() => {
@@ -256,6 +291,90 @@ describe("TracksView", () => {
     expect(wrapper.text()).toContain("Song 20");
   });
 
+  it("keeps remote tracks in the list after loading the next page", async () => {
+    const fetcher = vi.mocked(tracksApi.listTracksWithMeta);
+    fetcher
+      .mockResolvedValueOnce(
+        createListResult(
+          Array.from({ length: 20 }, (_, i) =>
+            createTrack(`track-${i}`, `Song ${i}`),
+          ),
+          21,
+        ),
+      )
+      .mockResolvedValueOnce(
+        createListResult([createTrack("track-20", "Song 20")], 21),
+      );
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
+      items: [createRemoteTrack("ro-1", "Federated Song")],
+      offset: 0,
+      total: 1,
+    });
+
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain("Federated Song");
+
+    const loadMore = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.list.loadMore"));
+    await loadMore?.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Song 20");
+    expect(wrapper.text()).toContain("Federated Song");
+  });
+
+  it("keeps Load More alive on remote pages and fetches them in order", async () => {
+    // Local list is exhausted after page 1 (1 of 1), but the remote
+    // listing still has a second page — the merged list's Load More must
+    // keep pulling remote pages.
+    vi.mocked(tracksApi.listTracksWithMeta).mockResolvedValue(
+      createListResult([createTrack("track-1", "Local Song")], 1),
+    );
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta)
+      .mockResolvedValueOnce({
+        items: [createRemoteTrack("ro-1", "Federated Song")],
+        offset: 0,
+        total: 2,
+      })
+      .mockResolvedValueOnce({
+        items: [createRemoteTrack("ro-2", "Federated Song Two")],
+        offset: 1,
+        total: 2,
+      });
+
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resource_type: "track",
+        offset: 0,
+        sort_by: "created_at",
+        sort_dir: "desc",
+      }),
+    );
+
+    const loadMore = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.list.loadMore"));
+    expect(loadMore).toBeDefined();
+
+    await loadMore?.trigger("click");
+    await flushPromises();
+
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 1 }),
+    );
+    expect(wrapper.text()).toContain("Federated Song");
+    expect(wrapper.text()).toContain("Federated Song Two");
+  });
+
   it("hides the collection toggle when signed out", async () => {
     wrapper = mount(TracksView, {
       global: { plugins: [createTestRouter()] },
@@ -304,6 +423,101 @@ describe("TracksView", () => {
     await flushPromises();
 
     expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ collection: undefined }),
+    );
+  });
+
+  it("renders remote tracks in the list with their domain badge", async () => {
+    vi.mocked(tracksApi.listTracksWithMeta).mockResolvedValue(
+      createListResult([createTrack("track-1", "Local Song")]),
+    );
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
+      items: [createRemoteTrack("ro-1", "Federated Song", "Remote Artist")],
+      offset: 0,
+      total: 1,
+    });
+
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenCalledWith(
+      expect.objectContaining({ resource_type: "track" }),
+    );
+    expect(wrapper.text()).toContain("Local Song");
+    expect(wrapper.text()).toContain("Federated Song");
+    const badge = wrapper.find(".track-list__remote-badge");
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toContain("remote.example");
+  });
+
+  it("forwards the search query to the remote listing", async () => {
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const input = wrapper.find('input[type="search"]');
+    await input.setValue("anthem");
+
+    vi.advanceTimersByTime(300);
+    await flushPromises();
+
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenLastCalledWith(
+      expect.objectContaining({ resource_type: "track", q: "anthem" }),
+    );
+  });
+
+  it("clusters a same-named remote track under the local one", async () => {
+    vi.mocked(tracksApi.listTracksWithMeta).mockResolvedValue(
+      createListResult([
+        createTrack("track-1", "Twin", "The Artist"),
+        createTrack("track-2", "Zebra", "The Artist"),
+      ]),
+    );
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
+      items: [createRemoteTrack("ro-1", "Twin", "The Artist")],
+      offset: 0,
+      total: 1,
+    });
+
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    const titles = wrapper
+      .findAll(".track-list__title-text")
+      .map((el) => el.text());
+    expect(titles).toEqual(["Twin", "Twin", "Zebra"]);
+    const rows = wrapper.findAll("tr");
+    const remoteRow = rows.find(
+      (row) =>
+        row.text().includes("Twin") &&
+        row.find(".track-list__remote-badge").exists(),
+    );
+    expect(remoteRow).toBeDefined();
+  });
+
+  it("forwards the collection toggle to the remote listing", async () => {
+    setAuthenticated();
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenLastCalledWith(
+      expect.objectContaining({ resource_type: "track", collection: true }),
+    );
+
+    const checkbox = wrapper
+      .findComponent(CollectionToggle)
+      .find('input[type="checkbox"]');
+    await checkbox.setValue(false);
+    await flushPromises();
+
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenLastCalledWith(
       expect.objectContaining({ collection: undefined }),
     );
   });

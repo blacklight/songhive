@@ -75,6 +75,10 @@ class PlaylistResponse(BaseModel):
     owner: Optional[UserSummary] = None
     tracks: Optional[List[TrackSummary]] = None
     tags: List[str] = []
+    # Exposed so list consumers can interleave remote entities under the
+    # ``created_at``/``updated_at`` sort fields.
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class PlaylistStatsResponse(BaseModel):
@@ -245,6 +249,8 @@ async def _build_playlist_response(
         owner=owner,
         tracks=tracks,
         tags=_playlist_tags(playlist),
+        created_at=playlist.created_at,
+        updated_at=playlist.updated_at,
     )
 
 
@@ -316,6 +322,8 @@ async def create_playlist(
         description=playlist.description,
         visibility=playlist.visibility,
         in_collection=True,
+        created_at=playlist.created_at,
+        updated_at=playlist.updated_at,
     )
 
 

@@ -1,4 +1,4 @@
-import { apiRequest } from "./client";
+import { apiRequest, apiRequestWithHeaders } from "./client";
 import type { components } from "./types";
 import type { ActivityResponse } from "./activities";
 import type { ActivitySubscriptionState } from "./users";
@@ -169,26 +169,79 @@ export function getRemoteResource(
  * Browse cached remote resources — no remote fetch. ``collection``
  * restricts to the caller's remote collection closure (collected rows and
  * favorites plus cached parents/children); ``favorites`` to remote
- * favorites; ``library`` to remote members of a local library.
+ * favorites; ``library`` to remote members of a local library. ``q``
+ * matches name/summary/canonical URL case-insensitively, mirroring the
+ * local list search boxes.
  */
-export function listRemoteObjects(options?: {
+export interface RemoteObjectListOptions {
   resource_type?: RemoteResourceKind;
+  q?: string;
   collection?: boolean;
   favorites?: boolean;
   library?: string;
   limit?: number;
   offset?: number;
-}): Promise<RemoteObjectList> {
+  /** Local browse-list sort fields — the server maps them onto the
+   * closest ``remote_objects`` column so remote pages arrive in the
+   * merged view's order. */
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
+}
+
+export function listRemoteObjects(
+  options?: RemoteObjectListOptions,
+): Promise<RemoteObjectList> {
   return apiRequest<RemoteObjectList>("/remote/objects", {
     query: {
       resource_type: options?.resource_type,
+      q: options?.q,
       collection: options?.collection || undefined,
       favorites: options?.favorites || undefined,
       library: options?.library,
       limit: options?.limit,
       offset: options?.offset,
+      sort_by: options?.sort_by,
+      sort_dir: options?.sort_dir,
     },
   });
+}
+
+export interface RemoteObjectListMeta {
+  items: RemoteObject[];
+  offset: number;
+  total: number;
+}
+
+/**
+ * Same listing as ``listRemoteObjects`` but surfaces the ``X-Total-Count``
+ * header so callers can drive remote pagination alongside the local
+ * list's Load More.
+ */
+export async function listRemoteObjectsWithMeta(
+  options?: RemoteObjectListOptions,
+): Promise<RemoteObjectListMeta> {
+  const response = await apiRequestWithHeaders<RemoteObjectList>(
+    "/remote/objects",
+    {
+      query: {
+        resource_type: options?.resource_type,
+        q: options?.q,
+        collection: options?.collection || undefined,
+        favorites: options?.favorites || undefined,
+        library: options?.library,
+        limit: options?.limit,
+        offset: options?.offset,
+        sort_by: options?.sort_by,
+        sort_dir: options?.sort_dir,
+      },
+    },
+  );
+  const totalHeader = response.headers.get("X-Total-Count");
+  return {
+    items: response.body.items,
+    offset: options?.offset ?? 0,
+    total: totalHeader ? parseInt(totalHeader, 10) : response.body.items.length,
+  };
 }
 
 export interface RemoteObjectFollowState {

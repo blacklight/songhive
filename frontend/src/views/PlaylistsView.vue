@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useEntityList } from "@/composables/useEntityList";
+import { useRemoteEntities } from "@/composables/useRemoteEntities";
 import {
   listPlaylists,
   createPlaylist,
@@ -9,6 +10,12 @@ import {
   type PlaylistResponse,
   type PlaylistCreate,
 } from "@/api/playlists";
+import {
+  mergeEntityItems,
+  remoteEntityName,
+  remoteEntitySortKey,
+  type EntityListItem,
+} from "@/utils/remoteEntities";
 import { getApiErrorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
@@ -17,9 +24,9 @@ import AppModal from "@/components/feedback/AppModal.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import PlaylistCard from "@/components/library/PlaylistCard.vue";
+import RemoteEntityCard from "@/components/library/RemoteEntityCard.vue";
 import BulkEditableGrid from "@/components/entity/BulkEditableGrid.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
-import RemoteCollectionSection from "@/components/library/RemoteCollectionSection.vue";
 import type { Visibility } from "@/api/playlists";
 
 const { t } = useI18n();
@@ -51,6 +58,47 @@ const {
     defaultSortBy: "name",
     syncQuery: true,
   },
+);
+
+// Federated playlists render in the same grid, marked by RemoteEntityCard's
+// globe badge and domain line. The remote fetch follows the same
+// search/collection/sort state as the local list and pages in lockstep —
+// Load More pulls the next page of each side.
+const {
+  items: remoteItems,
+  hasMore: remoteHasMore,
+  loadMore: loadMoreRemote,
+} = useRemoteEntities("playlist", {
+  collection: myCollection,
+  query,
+  sortBy,
+  sortDir,
+});
+
+const mergedHasMore = computed(() => hasMore.value || remoteHasMore.value);
+
+function loadMoreEntities() {
+  void loadMore();
+  void loadMoreRemote();
+}
+
+const displayItems = computed<EntityListItem<PlaylistResponse>[]>(() =>
+  mergeEntityItems(items.value, remoteItems.value, {
+    sortBy: sortBy.value,
+    sortDir: sortDir.value,
+    nameOf: (item) =>
+      item.remote ? remoteEntityName(item.entity) : item.entity.name,
+    keyOf: (item, field) => {
+      if (item.remote) return remoteEntitySortKey(item.entity, field);
+      const playlist = item.entity;
+      if (field === "created_at") return playlist.created_at ?? null;
+      if (field === "updated_at") return playlist.updated_at ?? null;
+      return playlist.name;
+    },
+    // Same-named remote playlists cluster under their local twin.
+    groupKeyOf: (item) =>
+      item.remote ? remoteEntityName(item.entity) : item.entity.name,
+  }),
 );
 
 const isCreateOpen = ref(false);
@@ -127,18 +175,22 @@ async function onCreate() {
     <BulkEditableGrid
       :title="t('nav.playlists')"
       icon="list"
-      :items="items"
+      :items="displayItems"
       :loading="loading"
       :error="error"
-      :has-more="hasMore"
+      :has-more="mergedHasMore"
       :query="query"
       :entity-singular="t('browse.entities.playlist')"
       :entity-plural="t('browse.entities.playlists')"
       :delete-one="deletePlaylist"
       :refresh="refresh"
-      :get-name="(playlist) => playlist.name"
+      :get-name="
+        (item) =>
+          item.remote ? remoteEntityName(item.entity) : item.entity.name
+      "
+      :can-manage="(item) => !item.remote"
       :search="search"
-      :load-more="loadMore"
+      :load-more="loadMoreEntities"
       :retry="retry"
       :sort-by="sortBy"
       :sort-dir="sortDir"
@@ -169,14 +221,19 @@ async function onCreate() {
       </template>
 
       <template #card="{ item, bulkMode }">
+        <RemoteEntityCard
+          v-if="item.remote"
+          class="playlists-view__card"
+          :object="item.entity"
+        />
         <PlaylistCard
+          v-else
           class="playlists-view__card"
           :class="{ 'playlists-view__card--selectable': bulkMode }"
-          :playlist="item"
+          :playlist="item.entity"
         />
       </template>
     </BulkEditableGrid>
-    <RemoteCollectionSection kind="playlist" :active="myCollection" />
 
     <AppModal
       :open="isCreateOpen"

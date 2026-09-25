@@ -813,6 +813,230 @@ class TestCachedRemoteSearch:
         assert hits == []
 
 
+class TestRemoteListQuery:
+    """``q`` filtering on the cached remote object listing — the remote
+    side of the browse-view search boxes."""
+
+    async def test_query_matches_name_summary_and_url(self, db_session, remote_config):
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/o/1",
+            name="Federated anthem",
+            resource_type="track",
+        )
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/o/2",
+            name="liner notes",
+            summary="about the anthem",
+            resource_type="track",
+        )
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/o/anthem-3",
+            name="untitled",
+            resource_type="track",
+        )
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/o/4",
+            name="unrelated",
+            resource_type="track",
+        )
+        rows, total = await rc.list_cached_remote_objects(
+            db_session, remote_config, resource_type="track", query="anthem"
+        )
+        assert total == 3
+        assert f"https://{REMOTE_DOMAIN}/o/4" not in {r.canonical_url for r in rows}
+
+    async def test_query_combines_with_collection(self, db_session, remote_config, regular_user):
+        from songhive.models.collection_item import CollectionItem
+
+        collected = await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/o/1",
+            name="collected anthem",
+            resource_type="track",
+        )
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/o/2",
+            name="uncollected anthem",
+            resource_type="track",
+        )
+        db_session.add(CollectionItem(user_id=regular_user.id, item_type="remote", item_id=str(collected.id)))
+        await db_session.flush()
+
+        rows, total = await rc.list_cached_remote_objects(
+            db_session,
+            remote_config,
+            resource_type="track",
+            query="anthem",
+            collection_only=True,
+            user=regular_user,
+        )
+        assert total == 1
+        assert rows[0].id == collected.id
+
+    async def test_route_filters_by_q(self, client, db_session, regular_user, auth_headers):
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/artists/1",
+            object_type="Artist",
+            resource_type="artist",
+            name="Remote Artist",
+        )
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/artists/2",
+            object_type="Artist",
+            resource_type="artist",
+            name="Other Artist",
+        )
+        await db_session.commit()
+
+        res = client.get(
+            "/api/v1/remote/objects",
+            params={"resource_type": "artist", "q": "remote artist"},
+            headers=auth_headers(regular_user),
+        )
+        assert res.status_code == 200
+        assert [i["name"] for i in res.json()["items"]] == ["Remote Artist"]
+
+
+class TestRemoteListSort:
+    """``sort_by``/``sort_dir`` on the cached remote listing — remote
+    objects page in the same order the merged browse lists display them."""
+
+    async def _rows(self, db_session, remote_config, **kwargs):
+        rows, _ = await rc.list_cached_remote_objects(db_session, remote_config, resource_type="artist", **kwargs)
+        return rows
+
+    async def test_sort_by_name(self, db_session, remote_config):
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/a/1",
+            object_type="Person",
+            resource_type="artist",
+            name="Zulu",
+        )
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/a/2",
+            object_type="Person",
+            resource_type="artist",
+            name="Alpha",
+        )
+        asc = await self._rows(db_session, remote_config, sort_by="name", sort_dir="asc")
+        assert [r.name for r in asc] == ["Alpha", "Zulu"]
+        desc = await self._rows(db_session, remote_config, sort_by="name", sort_dir="desc")
+        assert [r.name for r in desc] == ["Zulu", "Alpha"]
+
+    async def test_null_sort_keys_sink_to_end_either_direction(self, db_session, remote_config):
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/a/1",
+            object_type="Person",
+            resource_type="artist",
+            name=None,
+        )
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/a/2",
+            object_type="Person",
+            resource_type="artist",
+            name="Alpha",
+        )
+        for direction in ("asc", "desc"):
+            rows = await self._rows(db_session, remote_config, sort_by="name", sort_dir=direction)
+            assert [r.name for r in rows][-1] is None
+
+    async def test_default_order_is_fetched_at_desc(self, db_session, remote_config):
+        from datetime import datetime, timezone
+
+        older = await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/a/1",
+            object_type="Person",
+            resource_type="artist",
+            name="older",
+        )
+        newer = await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/a/2",
+            object_type="Person",
+            resource_type="artist",
+            name="newer",
+        )
+        older.fetched_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        newer.fetched_at = datetime(2021, 1, 1, tzinfo=timezone.utc)
+        await db_session.flush()
+
+        rows = await self._rows(db_session, remote_config)
+        assert [r.name for r in rows] == ["newer", "older"]
+
+    async def test_unknown_sort_falls_back_to_fetched_at(self, db_session, remote_config):
+        rows = await self._rows(db_session, remote_config, sort_by="bogus", sort_dir="sideways")
+        assert isinstance(rows, list)
+
+    async def test_pages_are_stable_when_primary_key_ties(self, db_session, remote_config):
+        for i in range(3):
+            await _remote_row(
+                db_session,
+                canonical_url=f"https://{REMOTE_DOMAIN}/a/{i}",
+                object_type="Person",
+                resource_type="artist",
+                name="same name",
+            )
+        first = await self._rows(db_session, remote_config, sort_by="name", limit=2)
+        second = await self._rows(db_session, remote_config, sort_by="name", limit=2, offset=2)
+        ids = [r.id for r in [*first, *second]]
+        assert len(set(ids)) == 3
+
+    async def test_route_applies_sort(self, client, db_session, regular_user, auth_headers):
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/a/1",
+            object_type="Person",
+            resource_type="artist",
+            name="Zulu",
+        )
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/a/2",
+            object_type="Person",
+            resource_type="artist",
+            name="Alpha",
+        )
+        await db_session.commit()
+
+        res = client.get(
+            "/api/v1/remote/objects",
+            params={"resource_type": "artist", "sort_by": "name", "sort_dir": "asc"},
+            headers=auth_headers(regular_user),
+        )
+        assert res.status_code == 200
+        assert [i["name"] for i in res.json()["items"]] == ["Alpha", "Zulu"]
+
+    async def test_route_unknown_sort_falls_back(self, client, db_session, regular_user, auth_headers):
+        await _remote_row(
+            db_session,
+            canonical_url=f"https://{REMOTE_DOMAIN}/a/1",
+            object_type="Person",
+            resource_type="artist",
+            name="only",
+        )
+        await db_session.commit()
+
+        res = client.get(
+            "/api/v1/remote/objects",
+            params={"resource_type": "artist", "sort_by": "bogus"},
+            headers=auth_headers(regular_user),
+        )
+        assert res.status_code == 200
+        assert [i["name"] for i in res.json()["items"]] == ["only"]
+
+
 # ---------------------------------------------------------------------------
 # HTTP routes
 # ---------------------------------------------------------------------------

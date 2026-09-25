@@ -2,9 +2,16 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useChunkList } from "@/composables/useChunkList";
+import { useRemoteEntities } from "@/composables/useRemoteEntities";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { listTracksWithMeta, type TrackResponse } from "@/api/tracks";
 import type { QueueTrack } from "@/player/types";
+import {
+  mergeEntityItems,
+  remoteEntityName,
+  remoteEntitySortKey,
+} from "@/utils/remoteEntities";
+import { remoteObjectToQueueTrack } from "@/utils/remoteObject";
 import { useAuthStore } from "@/stores/auth";
 import { usePlayerStore } from "@/stores/player";
 import SearchBar from "@/components/ui/SearchBar.vue";
@@ -15,7 +22,6 @@ import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import SortControl from "@/components/ui/SortControl.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
-import RemoteCollectionSection from "@/components/library/RemoteCollectionSection.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -57,6 +63,74 @@ const {
 );
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 
+// Federated tracks render in the same list, marked by TrackList's globe +
+// domain badge. The remote fetch follows the same search/collection/sort
+// state as the local list and pages in lockstep — Load More pulls the
+// next page of each side so remote tracks keep arriving instead of
+// sitting as a fixed first-page set.
+const {
+  items: remoteItems,
+  hasMore: remoteHasMore,
+  loadingMore: remoteLoadingMore,
+  loadMore: loadMoreRemote,
+} = useRemoteEntities("track", {
+  collection: myCollection,
+  query,
+  sortBy,
+  sortDir,
+});
+
+const mergedHasMore = computed(() => hasMore.value || remoteHasMore.value);
+const mergedLoadingMore = computed(
+  () => loadingMore.value || remoteLoadingMore.value,
+);
+
+function loadMoreEntities() {
+  void loadMore();
+  void loadMoreRemote();
+}
+
+const displayTracks = computed<TrackResponse[]>(() =>
+  mergeEntityItems(items.value, remoteItems.value, {
+    sortBy: sortBy.value,
+    sortDir: sortDir.value,
+    nameOf: (item) =>
+      item.remote ? remoteEntityName(item.entity) : item.entity.title,
+    keyOf: (item, field) => {
+      if (item.remote) return remoteEntitySortKey(item.entity, field);
+      const track = item.entity;
+      switch (field) {
+        case "artist_name":
+          return track.artist?.name ?? null;
+        case "album_title":
+          return track.album?.title ?? null;
+        case "release_year":
+          return track.release_year ?? null;
+        case "created_at":
+          return track.created_at ?? null;
+        case "updated_at":
+          return track.updated_at ?? null;
+        default:
+          return track.title;
+      }
+    },
+    // A remote track matching a local one's title and artist clusters
+    // right under it rather than scattering across the list.
+    groupKeyOf: (item) =>
+      item.remote
+        ? `${remoteEntityName(item.entity)}|${item.entity.artist_name ?? ""}`
+        : `${item.entity.title}|${item.entity.artist?.name ?? ""}`,
+  }).flatMap((item) => {
+    if (!item.remote) return [item.entity];
+    // QueueTrack extends TrackResponse, so the row carries its remote
+    // flags (domain badge, remote page link) straight into TrackList.
+    const track = remoteObjectToQueueTrack(item.entity, {
+      requirePlayable: false,
+    });
+    return track ? [track] : [];
+  }),
+);
+
 const sortOptions = computed(() => [
   { value: "created_at", label: t("sort.fields.created_at") },
   { value: "title", label: t("sort.fields.title") },
@@ -87,8 +161,9 @@ function onMyCollectionChange(value: boolean) {
 }
 
 onMounted(() => {
-  if (player.currentTrack?.id) {
-    void loadAround(player.currentTrack.id);
+  const current = player.currentTrack;
+  if (current?.id && !current.remote) {
+    void loadAround(current.id);
   } else {
     void load();
   }
@@ -99,6 +174,9 @@ watch(
   (currentTrackId, previousTrackId) => {
     if (!currentTrackId || currentTrackId === previousTrackId) return;
     const current = player.currentTrack;
+    // Remote queue tracks carry remote_object ids — there is no local page
+    // to center on, so skip the around-load for them.
+    if (current?.remote) return;
     if (current && !items.value.some((t) => t.id === current.id)) {
       void loadAround(current.id);
     }
@@ -164,7 +242,7 @@ watch(
       </div>
 
       <TrackList
-        :tracks="items"
+        :tracks="displayTracks"
         :loading="loading"
         :loading-more="loadingMore"
         :loading-previous="loadingPrevious"
@@ -189,18 +267,17 @@ watch(
 
     <div class="tracks-view__footer">
       <AppButton
-        v-if="hasMore"
+        v-if="mergedHasMore"
         icon="chevron-down"
         variant="secondary"
-        :loading="loadingMore"
+        :loading="mergedLoadingMore"
         :disabled="loading"
-        @click="loadMore"
+        @click="loadMoreEntities"
       >
         {{ t("browse.list.loadMore") }}
       </AppButton>
       <AppSpinner v-else-if="loading" />
     </div>
-    <RemoteCollectionSection kind="track" :active="myCollection" />
   </div>
 </template>
 

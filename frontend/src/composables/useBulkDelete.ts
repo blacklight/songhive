@@ -17,6 +17,12 @@ export interface UseBulkDeleteOptions<T extends ManageableItem> {
   entityPlural: string;
   getName: (item: T) => string;
   getOwnerId?: (item: T) => string | null | undefined;
+  /**
+   * Extra gate applied on top of the owner/admin check — used to exclude
+   * entries that are never locally manageable (e.g. remote entities merged
+   * into the browse grids, which admins must not "delete" either).
+   */
+  canManage?: (item: T) => boolean;
   recursive?: boolean;
   recursiveLabel?: MaybeRef<string | undefined>;
 }
@@ -47,6 +53,7 @@ export function useBulkDelete<T extends ManageableItem>(
   }
 
   function canManage(item: T): boolean {
+    if (options.canManage && !options.canManage(item)) return false;
     return canManageItem(authStore, { owner_id: getOwnerId(item) });
   }
 

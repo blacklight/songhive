@@ -2127,7 +2127,8 @@
     "viewResource": "View remote resource",
     "libraryItems": "Federated items",
     "favoritesTitle": "Federated favorites",
-    "collectedTitle": "Remote {kind}s in your collection"
+    "collectedTitle": "Remote {kind}s in your collection",
+    "hostedOn": "Hosted on {domain}"
   },
   "embed": {
     "unavailable": "This content is not available.",

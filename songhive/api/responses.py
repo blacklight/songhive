@@ -4,6 +4,7 @@ These live outside individual route modules so that nested summary objects can
 be reused across the API without creating import cycles.
 """
 
+from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
@@ -121,6 +122,10 @@ class TrackResponse(BaseModel):
     can_write_tags: Optional[bool] = None
     can_rename_source: Optional[bool] = None
     can_delete_source: Optional[bool] = None
+    # Exposed so list consumers can interleave remote entities under the
+    # ``created_at``/``updated_at`` sort fields.
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 async def build_artist_summary(

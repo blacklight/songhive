@@ -6,11 +6,13 @@ import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
 import * as playlistsApi from "@/api/playlists";
+import * as remoteApi from "@/api/remote";
 import type {
   PlaylistResponse,
   PlaylistCreate,
   Visibility,
 } from "@/api/playlists";
+import type { RemoteObject } from "@/api/remote";
 import PlaylistsView from "./PlaylistsView.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
@@ -20,12 +22,18 @@ vi.mock("@/api/playlists", () => ({
   deletePlaylist: vi.fn(),
 }));
 
+vi.mock("@/api/remote", () => ({
+  listRemoteObjects: vi.fn(),
+  listRemoteObjectsWithMeta: vi.fn(),
+}));
+
 function createTestRouter() {
   return createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: { template: "<div/>" } },
       { path: "/playlists/:id", component: { template: "<div/>" } },
+      { path: "/remote/:kind/:id", component: { template: "<div/>" } },
       {
         path: "/users/:username",
         name: "userProfile",
@@ -45,6 +53,22 @@ function createPlaylist(id: string, name: string): PlaylistResponse {
   };
 }
 
+function createRemotePlaylist(id: string, name: string): RemoteObject {
+  return {
+    id,
+    canonical_url: `https://remote.example/playlists/${id}`,
+    object_type: "Playlist",
+    resource_type: "playlist",
+    domain: "remote.example",
+    actor_url: "https://remote.example/users/alice",
+    actor_handle: "alice@remote.example",
+    name,
+    visibility: "public",
+    unavailable: false,
+    url: `/remote/playlist/${id}`,
+  };
+}
+
 function setAuthenticated() {
   const authStore = useAuthStore();
   authStore.status = "authenticated";
@@ -59,6 +83,11 @@ describe("PlaylistsView", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([]);
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
+      items: [],
+      offset: 0,
+      total: 0,
+    });
     vi.mocked(playlistsApi.createPlaylist).mockResolvedValue(
       createPlaylist("playlist-1", "Road Trip"),
     );
@@ -321,5 +350,80 @@ describe("PlaylistsView", () => {
     expect(fetcher).toHaveBeenLastCalledWith(
       expect.objectContaining({ collection: undefined }),
     );
+  });
+
+  it("renders remote playlists in the grid with their domain", async () => {
+    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([
+      createPlaylist("playlist-1", "Local Mix"),
+    ]);
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
+      items: [createRemotePlaylist("ro-1", "Federated Mix")],
+      offset: 0,
+      total: 1,
+    });
+
+    wrapper = mount(PlaylistsView, {
+      attachTo: document.body,
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenCalledWith(
+      expect.objectContaining({ resource_type: "playlist" }),
+    );
+    const remoteCard = wrapper.find(".remote-entity-card");
+    expect(remoteCard.exists()).toBe(true);
+    expect(remoteCard.text()).toContain("Federated Mix");
+    expect(remoteCard.text()).toContain("remote.example");
+  });
+
+  it("keeps remote playlists through Load More and pages remote in lockstep", async () => {
+    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([
+      createPlaylist("playlist-1", "Local Mix"),
+    ]);
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta)
+      .mockResolvedValueOnce({
+        items: [createRemotePlaylist("ro-1", "Federated Mix")],
+        offset: 0,
+        total: 2,
+      })
+      .mockResolvedValueOnce({
+        items: [createRemotePlaylist("ro-2", "Second Remote Mix")],
+        offset: 1,
+        total: 2,
+      });
+
+    wrapper = mount(PlaylistsView, {
+      attachTo: document.body,
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    // Remote items arrive in the view's sort order so merged pagination
+    // interleaves correctly.
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resource_type: "playlist",
+        offset: 0,
+        sort_by: "name",
+        sort_dir: "asc",
+      }),
+    );
+
+    // The local list is exhausted but remote still has a page — the
+    // merged list's Load More stays available.
+    const loadMore = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.list.loadMore"));
+    expect(loadMore).toBeDefined();
+
+    await loadMore?.trigger("click");
+    await flushPromises();
+
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 1 }),
+    );
+    expect(wrapper.text()).toContain("Federated Mix");
+    expect(wrapper.text()).toContain("Second Remote Mix");
   });
 });

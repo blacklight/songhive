@@ -5,13 +5,20 @@ import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import * as albumsApi from "@/api/albums";
+import * as remoteApi from "@/api/remote";
 import type { AlbumResponse } from "@/api/albums";
+import type { RemoteObject } from "@/api/remote";
 import AlbumsView from "./AlbumsView.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 vi.mock("@/api/albums", () => ({
   listAlbums: vi.fn(),
   deleteAlbum: vi.fn(),
+}));
+
+vi.mock("@/api/remote", () => ({
+  listRemoteObjects: vi.fn(),
+  listRemoteObjectsWithMeta: vi.fn(),
 }));
 
 function createTestRouter() {
@@ -21,6 +28,7 @@ function createTestRouter() {
       { path: "/", component: { template: "<div/>" } },
       { path: "/albums/:id", component: { template: "<div/>" } },
       { path: "/artists/:id", component: { template: "<div/>" } },
+      { path: "/remote/:kind/:id", component: { template: "<div/>" } },
     ],
   });
 }
@@ -33,6 +41,26 @@ function createAlbum(id: string, title: string): AlbumResponse {
     release_year: null,
     cover_url: null,
     visibility: "public",
+  };
+}
+
+function createRemoteAlbum(
+  id: string,
+  name: string,
+  artistName?: string,
+): RemoteObject {
+  return {
+    id,
+    canonical_url: `https://remote.example/albums/${id}`,
+    object_type: "Album",
+    resource_type: "album",
+    domain: "remote.example",
+    actor_url: "https://remote.example/users/alice",
+    name,
+    artist_name: artistName ?? null,
+    visibility: "public",
+    unavailable: false,
+    url: `/remote/album/${id}`,
   };
 }
 
@@ -49,6 +77,11 @@ describe("AlbumsView", () => {
     setActivePinia(createPinia());
     vi.useFakeTimers();
     vi.mocked(albumsApi.listAlbums).mockResolvedValue([]);
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
+      items: [],
+      offset: 0,
+      total: 0,
+    });
   });
 
   afterEach(() => {
@@ -228,5 +261,80 @@ describe("AlbumsView", () => {
     expect(fetcher).toHaveBeenLastCalledWith(
       expect.objectContaining({ collection: undefined }),
     );
+  });
+
+  it("renders remote albums in the grid with their domain", async () => {
+    vi.mocked(albumsApi.listAlbums).mockResolvedValue([
+      createAlbum("album-1", "Local Album"),
+    ]);
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
+      items: [createRemoteAlbum("ro-1", "Federated Album", "Remote Artist")],
+      offset: 0,
+      total: 1,
+    });
+
+    wrapper = mount(AlbumsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenCalledWith(
+      expect.objectContaining({ resource_type: "album" }),
+    );
+    const remoteCard = wrapper.find(".remote-entity-card");
+    expect(remoteCard.exists()).toBe(true);
+    expect(remoteCard.text()).toContain("Federated Album");
+    expect(remoteCard.text()).toContain("remote.example");
+  });
+
+  it("keeps remote albums through Load More and pages remote in lockstep", async () => {
+    vi.mocked(albumsApi.listAlbums).mockResolvedValue([
+      createAlbum("album-1", "Local Album"),
+    ]);
+    vi.mocked(remoteApi.listRemoteObjectsWithMeta)
+      .mockResolvedValueOnce({
+        items: [createRemoteAlbum("ro-1", "Federated Album", "Remote Artist")],
+        offset: 0,
+        total: 2,
+      })
+      .mockResolvedValueOnce({
+        items: [
+          createRemoteAlbum("ro-2", "Second Remote Album", "Remote Artist"),
+        ],
+        offset: 1,
+        total: 2,
+      });
+
+    wrapper = mount(AlbumsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    // Remote items arrive in the view's sort order so merged pagination
+    // interleaves correctly.
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resource_type: "album",
+        offset: 0,
+        sort_by: "title",
+        sort_dir: "asc",
+      }),
+    );
+
+    // The local list is exhausted but remote still has a page — the
+    // merged list's Load More stays available.
+    const loadMore = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.list.loadMore"));
+    expect(loadMore).toBeDefined();
+
+    await loadMore?.trigger("click");
+    await flushPromises();
+
+    expect(remoteApi.listRemoteObjectsWithMeta).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 1 }),
+    );
+    expect(wrapper.text()).toContain("Federated Album");
+    expect(wrapper.text()).toContain("Second Remote Album");
   });
 });
