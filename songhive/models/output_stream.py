@@ -41,7 +41,6 @@ class OutputStream(Base):
     enabled: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        insert_default=True,
         server_default="1",
     )
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

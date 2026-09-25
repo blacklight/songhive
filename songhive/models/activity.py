@@ -88,7 +88,6 @@ class Activity(Base):
         String(64),
         nullable=True,
         default="text/plain",
-        insert_default="text/plain",
         server_default="text/plain",
     )
     language: Mapped[Optional[str]] = mapped_column(String(35), nullable=True)
@@ -106,7 +105,6 @@ class Activity(Base):
     retracted: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
-        insert_default=False,
         server_default="0",
     )
 
@@ -209,13 +207,11 @@ class ActivityTarget(Base):
     state: Mapped[str] = mapped_column(
         String(16),
         default="pending",
-        insert_default="pending",
         server_default="pending",
     )
     attempts: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        insert_default=0,
         server_default="0",
     )
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

@@ -30,7 +30,7 @@ class Podcast(Base):
     language: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     # JSON-encoded list of category strings.
     categories: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    explicit: Mapped[bool] = mapped_column(Boolean, default=False, insert_default=False)
+    explicit: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Conditional-fetch validators from the last successful fetch.
     etag: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
@@ -121,16 +121,16 @@ class PodcastSyncConfig(Base):
     # ``gpodder`` — the gpodder.net API (gpodder.net, opodsync); ``nextcloud``
     # — the Nextcloud gpoddersync app, which replicates the add/remove diff
     # format under ``/index.php/apps/gpoddersync`` with different paths.
-    server_type: Mapped[str] = mapped_column(String(16), default="gpodder", insert_default="gpodder")
+    server_type: Mapped[str] = mapped_column(String(16), default="gpodder")
     server_url: Mapped[str] = mapped_column(String(1024))
     username: Mapped[str] = mapped_column(String(255))
     password: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     # GPodder sync is per-device; each account syncs as its own device id.
-    device_id: Mapped[str] = mapped_column(String(255), default="songhive", insert_default="songhive")
+    device_id: Mapped[str] = mapped_column(String(255), default="songhive")
     # ``pull`` applies remote changes only; ``bidirectional`` also uploads
     # local subscription changes.
-    mode: Mapped[str] = mapped_column(String(16), default="pull", insert_default="pull")
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True, insert_default=True)
+    mode: Mapped[str] = mapped_column(String(16), default="pull")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     last_sync_timestamp: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     last_synced_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
@@ -154,4 +154,4 @@ class PodcastSyncEvent(Base):
     # ``add`` / ``remove``
     action: Mapped[str] = mapped_column(String(16))
     # ``local`` / ``remote``
-    origin: Mapped[str] = mapped_column(String(16), default="local", insert_default="local")
+    origin: Mapped[str] = mapped_column(String(16), default="local")

@@ -103,19 +103,16 @@ class NotificationPreference(Base):
     in_app: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        insert_default=True,
         server_default="1",
     )
     email: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
-        insert_default=False,
         server_default="0",
     )
     email_digest: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
-        insert_default=False,
         server_default="0",
     )
 

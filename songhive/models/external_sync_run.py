@@ -36,43 +36,36 @@ class ExternalSyncRun(Base):
     items_seen: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        insert_default=0,
         server_default="0",
     )
     tracks_created: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        insert_default=0,
         server_default="0",
     )
     tracks_updated: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        insert_default=0,
         server_default="0",
     )
     tracks_shadowed: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        insert_default=0,
         server_default="0",
     )
     tracks_tombstoned: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        insert_default=0,
         server_default="0",
     )
     tracks_missing: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        insert_default=0,
         server_default="0",
     )
     tracks_failed: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        insert_default=0,
         server_default="0",
     )
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

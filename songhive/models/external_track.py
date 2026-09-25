@@ -66,7 +66,6 @@ class ExternalTrack(Base):
     write_back_pending: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
-        insert_default=False,
         server_default="0",
     )
     raw_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

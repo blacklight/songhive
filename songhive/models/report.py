@@ -32,13 +32,12 @@ class Report(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Whether the report was forwarded to the reported actor's home
     # instance as an ActivityPub ``Flag`` (remote targets only).
-    forwarded: Mapped[bool] = mapped_column(Boolean, default=False, insert_default=False, nullable=False)
+    forwarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[str] = mapped_column(
         String(16),
         index=True,
         nullable=False,
         default="pending",
-        insert_default="pending",
     )
     reviewed_by: Mapped[Optional[str]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),

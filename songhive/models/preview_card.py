@@ -30,7 +30,6 @@ class PreviewCard(Base):
     type: Mapped[str] = mapped_column(
         String(32),
         default="link",
-        insert_default="link",
         server_default="link",
     )
     fetched_at: Mapped[datetime] = mapped_column(TZDateTime())

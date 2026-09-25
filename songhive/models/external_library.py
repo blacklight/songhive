@@ -42,19 +42,16 @@ class ExternalLibrary(Base):
     enabled: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        insert_default=True,
         server_default="1",
     )
     include_in_library_index: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
-        insert_default=False,
         server_default="0",
     )
     sync_enabled: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        insert_default=True,
         server_default="1",
     )
     sync_interval_seconds: Mapped[Optional[int]] = mapped_column(

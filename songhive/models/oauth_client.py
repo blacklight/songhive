@@ -56,6 +56,5 @@ class OAuth2Client(Base):
     is_confidential: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        insert_default=True,
         nullable=False,
     )

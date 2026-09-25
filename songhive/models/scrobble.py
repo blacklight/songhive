@@ -34,9 +34,9 @@ class ScrobbleConfig(Base):
     username: Mapped[str] = mapped_column(String(255))
     # Fernet-encrypted Audioscrobbler session key (``sk``).
     session_key: Mapped[str] = mapped_column(Text)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True, insert_default=True)
-    min_seconds: Mapped[int] = mapped_column(Integer, default=30, insert_default=30)
-    min_percent: Mapped[int] = mapped_column(Integer, default=25, insert_default=25)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    min_seconds: Mapped[int] = mapped_column(Integer, default=30)
+    min_percent: Mapped[int] = mapped_column(Integer, default=25)
 
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_scrobbled_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)

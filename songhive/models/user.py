@@ -70,9 +70,9 @@ class User(Base):
     display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, insert_default=True, default=True)
-    role: Mapped[str] = mapped_column(String(32), insert_default="user", default="user", index=True)
-    email_verified: Mapped[bool] = mapped_column(Boolean, insert_default=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    role: Mapped[str] = mapped_column(String(32), default="user", index=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     email_verification_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     email_verification_token_raw: Optional[str] = None
     password_reset_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -80,25 +80,21 @@ class User(Base):
     last_login: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     status_content_type: Mapped[str] = mapped_column(
         String(64),
-        insert_default="text/markdown",
         default="text/markdown",
         server_default="text/markdown",
     )
     preview_cards_enabled: Mapped[bool] = mapped_column(
         Boolean,
-        insert_default=True,
         default=True,
         server_default="1",
     )
     profile_visibility: Mapped[str] = mapped_column(
         String(16),
-        insert_default="public",
         default="public",
         server_default="public",
     )
     followers_approval: Mapped[str] = mapped_column(
         String(16),
-        insert_default="accept",
         default="accept",
         server_default="accept",
     )

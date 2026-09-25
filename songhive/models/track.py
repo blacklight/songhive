@@ -37,7 +37,6 @@ class Track(Base):
     play_count: Mapped[int] = mapped_column(
         Integer,
         default=0,
-        insert_default=0,
         server_default="0",
     )
     musicbrainz_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)

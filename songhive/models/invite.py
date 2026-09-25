@@ -24,6 +24,6 @@ class Invite(Base):
         nullable=False,
     )
     max_uses: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    uses: Mapped[int] = mapped_column(Integer, default=0, insert_default=0, nullable=False)
+    uses: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     creator: Mapped["User"] = relationship("User", back_populates="invites")
