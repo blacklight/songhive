@@ -19,6 +19,7 @@ from songhive.federation.activities import create_object_update_activity
 from songhive.models._enums import Visibility
 from songhive.models.activity import Activity, ActivityMention, ActivityTarget
 from songhive.models.artist import Artist
+from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 from songhive.models.user import User
 from songhive.services.activities import (
@@ -1069,6 +1070,17 @@ async def test_sync_track_publications_rebuilds_note_share(db_session, regular_u
     _federated_user(regular_user)
     track = await _make_track(db_session, regular_user)
     track.federation_object_id = "obj-1"
+    stored = StoredFile(
+        id="file-1",
+        storage_path="/tmp/share-track.mp3",
+        storage_backend="local",
+        content_type="audio/mpeg",
+        size=1234,
+        sha256="1" * 64,
+        owner_id=regular_user.id,
+    )
+    db_session.add(stored)
+    track.audio_file_id = stored.id
     object_id = "https://local.example/users/regular/objects/share-1"
     activity = _publication_activity(
         track,
