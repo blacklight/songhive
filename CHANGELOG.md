@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `models`: Drop the redundant `insert_default` from `mapped_column`
+  calls. Newer SQLAlchemy releases make Column `default` and
+  `insert_default` mutually exclusive, which broke model imports on
+  startup.
+  ([`9a6150d`](https://git.platypush.tech/blacklight/songhive/commit/9a6150dbd57a064f0f36dca3d53233defc932e99)).
+
 ## 0.3.3
 
 ### Added
