@@ -17,8 +17,10 @@
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",
+    "echarts": "^6.1.0",
     "pinia": "^4.0.3",
     "vue": "^3.5.42",
+    "vue-echarts": "^8.3.0",
     "vue-i18n": "^11.4.10",
     "vue-router": "^5.3.1"
   },

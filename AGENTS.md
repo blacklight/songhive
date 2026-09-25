@@ -185,6 +185,17 @@
   from the `RemoteObject` payload (`scrobbler.remote_object_fields`),
   folding `Audio`/`Video` renditions onto their media entity so the
   scrobbled title is the plain track title.
+- Personal listening stats live under `/api/v1/stats`
+  (`api/routes/stats.py` + `services/listening_stats.py`, frontend
+  `views/StatsView.vue` + `components/stats/` on ECharts via `vue-echarts`).
+  Top-N lists and release-year grouping run in SQL; calendar/hour buckets
+  are computed in Python over a `created_at` range scan so the code is
+  portable between PostgreSQL and SQLite and honors the caller's IANA
+  `tz` param. Remote listens count everywhere except genre/release-year
+  charts (no remote metadata); rendition rows fold onto their
+  `media_of_url` entity for artist/album attribution. All queries ride
+  the `ix_listening_history_user_created_at` composite index — never
+  drop it when touching `models/history.py`.
 - RSS/Atom feeds live under `/feeds` (outside `/api/v1`):
   `api/routes/feeds.py` + `services/feeds.py` render the XML, and
   `api/semantic_meta.py` / `api/routes/profile_pages.py` inject the

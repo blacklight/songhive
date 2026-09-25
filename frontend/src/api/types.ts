@@ -3463,6 +3463,106 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/stats/top": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Top Stats
+     * @description Top played artists, albums, tracks and genres over the period.
+     */
+    get: operations["top_stats_api_v1_stats_top_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/stats/plays": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Plays Stats
+     * @description Histogram of plays per day/week/month/year bucket.
+     */
+    get: operations["plays_stats_api_v1_stats_plays_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/stats/genres-timeline": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Genres Timeline Stats
+     * @description Stacked timeline of plays per genre per bucket.
+     */
+    get: operations["genres_timeline_stats_api_v1_stats_genres_timeline_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/stats/releases": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Releases Stats
+     * @description Histogram of plays grouped by release decade or year.
+     */
+    get: operations["releases_stats_api_v1_stats_releases_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/stats/clock": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Clock Stats
+     * @description Plays grouped by local hour of day (24 entries).
+     */
+    get: operations["clock_stats_api_v1_stats_clock_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/radios/": {
     parameters: {
       query?: never;
@@ -4578,6 +4678,70 @@ export interface paths {
      * @description Create a new user-scoped external library.
      */
     post: operations["create_external_library_api_v1_external_libraries__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/external-libraries/oauth/begin": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Begin External Oauth
+     * @description Start an OAuth authorization flow for an external provider.
+     */
+    post: operations["begin_external_oauth_api_v1_external_libraries_oauth_begin_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/external-libraries/oauth/callback": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * External Oauth Callback
+     * @description Handle the provider's redirect after user authorization.
+     *
+     *     Unauthenticated by design: the ``state`` parameter binds the callback to
+     *     the pending flow (and its user) stored in Redis at begin time. On success
+     *     the granted config fragment is stored for the SPA to claim once.
+     */
+    get: operations["external_oauth_callback_api_v1_external_libraries_oauth_callback_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/external-libraries/oauth/claim": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Claim External Oauth
+     * @description Claim the granted config fragment of a completed OAuth flow (one-time).
+     */
+    post: operations["claim_external_oauth_api_v1_external_libraries_oauth_claim_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -6757,6 +6921,16 @@ export interface components {
       file: string;
     };
     /**
+     * BucketCount
+     * @description A calendar bucket with its play count.
+     */
+    BucketCount: {
+      /** Bucket */
+      bucket: string;
+      /** Count */
+      count: number;
+    };
+    /**
      * BulkExternalTrackDeleteRequest
      * @description Request body for bulk external-track deletion.
      */
@@ -6908,6 +7082,16 @@ export interface components {
        * @default true
        */
       success: boolean;
+    };
+    /**
+     * ClockEntry
+     * @description An hour-of-day segment with its play count.
+     */
+    ClockEntry: {
+      /** Hour */
+      hour: number;
+      /** Count */
+      count: number;
     };
     /**
      * CollectionItemResponse
@@ -7291,6 +7475,55 @@ export interface components {
       visibility?: components["schemas"]["Visibility"] | null;
     };
     /**
+     * ExternalOAuthBeginRequest
+     * @description Request body for starting an external-provider OAuth flow.
+     */
+    ExternalOAuthBeginRequest: {
+      /** Provider Type */
+      provider_type: string;
+      /**
+       * Config
+       * @default {}
+       */
+      config: {
+        [key: string]: unknown;
+      };
+      /** External Library Id */
+      external_library_id?: string | null;
+      /** Return To */
+      return_to?: string | null;
+    };
+    /**
+     * ExternalOAuthBeginResponse
+     * @description Authorization URL and state for an in-progress OAuth flow.
+     */
+    ExternalOAuthBeginResponse: {
+      /** Authorize Url */
+      authorize_url: string;
+      /** State */
+      state: string;
+    };
+    /**
+     * ExternalOAuthClaimRequest
+     * @description Request body for claiming a completed OAuth flow result.
+     */
+    ExternalOAuthClaimRequest: {
+      /** State */
+      state: string;
+    };
+    /**
+     * ExternalOAuthClaimResponse
+     * @description Granted provider config fragment from a completed OAuth flow.
+     */
+    ExternalOAuthClaimResponse: {
+      /** Provider Type */
+      provider_type: string;
+      /** Config */
+      config: {
+        [key: string]: unknown;
+      };
+    };
+    /**
      * ExternalProviderResponse
      * @description Provider type available to the requester.
      */
@@ -7303,6 +7536,13 @@ export interface components {
       capabilities_summary: {
         [key: string]: unknown;
       };
+      /**
+       * Oauth Supported
+       * @default false
+       */
+      oauth_supported: boolean;
+      /** Oauth Callback Url */
+      oauth_callback_url?: string | null;
     };
     /**
      * ExternalSyncRequest
@@ -7520,6 +7760,26 @@ export interface components {
       followed_at?: string | null;
       /** Local Username */
       local_username?: string | null;
+    };
+    /**
+     * GenreBucket
+     * @description A calendar bucket with per-genre play counts.
+     */
+    GenreBucket: {
+      /** Bucket */
+      bucket: string;
+      /** Genres */
+      genres: components["schemas"]["GenreCount"][];
+    };
+    /**
+     * GenreCount
+     * @description A genre name with its play count inside a bucket.
+     */
+    GenreCount: {
+      /** Name */
+      name: string;
+      /** Count */
+      count: number;
     };
     /**
      * GenreItemResponse
@@ -9659,6 +9919,38 @@ export interface components {
       token_type: string;
       /** Expires In */
       expires_in: number;
+    };
+    /**
+     * TopEntry
+     * @description A ranked name with its play count and entity link/artwork.
+     */
+    TopEntry: {
+      /** Name */
+      name: string;
+      /** Play Count */
+      play_count: number;
+      /** Url */
+      url?: string | null;
+      /** Image Url */
+      image_url?: string | null;
+      /** Artist Name */
+      artist_name?: string | null;
+      /** Artist Url */
+      artist_url?: string | null;
+    };
+    /**
+     * TopStatsResponse
+     * @description Top played artists, albums, tracks and genres.
+     */
+    TopStatsResponse: {
+      /** Artists */
+      artists: components["schemas"]["TopEntry"][];
+      /** Albums */
+      albums: components["schemas"]["TopEntry"][];
+      /** Tracks */
+      tracks: components["schemas"]["TopEntry"][];
+      /** Genres */
+      genres: components["schemas"]["TopEntry"][];
     };
     /**
      * TotpConfirmRequest
@@ -16990,6 +17282,175 @@ export interface operations {
       };
     };
   };
+  top_stats_api_v1_stats_top_get: {
+    parameters: {
+      query?: {
+        from?: string | null;
+        to?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TopStatsResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  plays_stats_api_v1_stats_plays_get: {
+    parameters: {
+      query?: {
+        group_by?: "day" | "week" | "month" | "year";
+        from?: string | null;
+        to?: string | null;
+        tz?: string | null;
+        week_start?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BucketCount"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  genres_timeline_stats_api_v1_stats_genres_timeline_get: {
+    parameters: {
+      query?: {
+        group_by?: "day" | "week" | "month" | "year";
+        from?: string | null;
+        to?: string | null;
+        tz?: string | null;
+        week_start?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GenreBucket"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  releases_stats_api_v1_stats_releases_get: {
+    parameters: {
+      query?: {
+        group_by?: "decade" | "year";
+        from?: string | null;
+        to?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BucketCount"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  clock_stats_api_v1_stats_clock_get: {
+    parameters: {
+      query?: {
+        from?: string | null;
+        to?: string | null;
+        tz?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ClockEntry"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_radios_api_v1_radios__get: {
     parameters: {
       query?: {
@@ -18973,6 +19434,106 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ExternalLibraryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  begin_external_oauth_api_v1_external_libraries_oauth_begin_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExternalOAuthBeginRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalOAuthBeginResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  external_oauth_callback_api_v1_external_libraries_oauth_callback_get: {
+    parameters: {
+      query?: {
+        code?: string | null;
+        state?: string | null;
+        error?: string | null;
+        error_description?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  claim_external_oauth_api_v1_external_libraries_oauth_claim_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExternalOAuthClaimRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalOAuthClaimResponse"];
         };
       };
       /** @description Validation Error */

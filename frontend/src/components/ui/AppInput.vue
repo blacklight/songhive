@@ -11,6 +11,7 @@ export interface Props {
     | "number"
     | "url"
     | "search"
+    | "date"
     | "datetime-local";
   as?: "input" | "textarea";
   error?: string;

@@ -99,6 +99,7 @@ songhive/
 │   │   ├── tags.py     # Global tag browsing and admin deletion
 │   │   ├── genres.py       # Global genre browsing and admin deletion
 │   │   ├── history.py      # Listening history
+│   │   ├── stats.py        # Personal listening statistics
 │   │   ├── radios.py       # Dynamic radio generation
 │   │   ├── files.py        # Generic file upload/download (StoredFile)
 │   │   ├── downloads.py    # Bulk-download archive requests (ZIP), status, file download, clear
@@ -171,6 +172,7 @@ songhive/
 │   ├── follows.py          # Outbound follow/unfollow, decision folding, follow listings
 │   ├── genres.py           # Genre validation, association and listing
 │   ├── import_.py          # Import pipeline orchestration
+│   ├── listening_stats.py  # Per-user listening stats aggregation (top-N, histograms, clock)
 │   ├── mentions.py         # @handle extraction, local/WebFinger resolution, safe HTML rendering
 │   ├── remote_content.py   # Remote lookup parser, actor/object dereference + cache, cached search
 │   ├── metadata.py         # Tag extraction coordination

@@ -4,7 +4,7 @@ Listening history model.
 
 from typing import Optional
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -12,6 +12,11 @@ from .base import Base
 
 class ListeningHistory(Base):
     __tablename__ = "listening_history"
+    __table_args__ = (
+        # Every per-user stats/history query filters ``user_id = ? AND
+        # created_at BETWEEN ? AND ?``.
+        Index("ix_listening_history_user_created_at", "user_id", "created_at"),
+    )
 
     user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),

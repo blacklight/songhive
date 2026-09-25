@@ -153,6 +153,12 @@ const navItems = computed<NavItem[]>(() => [
     icon: "clock-rotate-left",
   },
   {
+    name: t("nav.stats"),
+    to: "/stats",
+    requiresAuth: true,
+    icon: "chart-column",
+  },
+  {
     name: t("nav.favorites"),
     to: "/favorites",
     requiresAuth: true,

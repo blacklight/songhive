@@ -241,6 +241,7 @@
     "albums": "Albums",
     "tracks": "Tracks",
     "history": "History",
+    "stats": "Stats",
     "favorites": "Favorites",
     "files": "Files",
     "shares": "Shares",
@@ -336,6 +337,30 @@
       "untitled": "Untitled track",
       "playError": "Could not play this track: {message}",
       "playAllPartial": "Could only play {count} of {total} tracks."
+    },
+    "stats": {
+      "title": "Listening stats",
+      "from": "From",
+      "to": "To",
+      "name": "Name",
+      "playsCount": "Plays",
+      "topArtists": "Top artists",
+      "topAlbums": "Top albums",
+      "topTracks": "Top tracks",
+      "topGenres": "Top genres",
+      "plays": "Plays over time",
+      "genresTimeline": "Genres timeline",
+      "releases": "Release years",
+      "clock": "Listening clock",
+      "empty": "No listens recorded in this period.",
+      "emptySection": "No data for this period",
+      "groupBy": {
+        "day": "Day",
+        "week": "Week",
+        "month": "Month",
+        "year": "Year",
+        "decade": "Decade"
+      }
     },
     "favorites": {
       "title": "Favorites",

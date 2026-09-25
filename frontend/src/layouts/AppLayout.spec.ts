@@ -245,6 +245,7 @@ describe("AppLayout", () => {
       "Tags",
       "Genres",
       "History",
+      "Stats",
       "Favorites",
       "Files",
       "Shares",
