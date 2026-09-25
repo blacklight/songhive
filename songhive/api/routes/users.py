@@ -131,6 +131,7 @@ class FollowerResponse(BaseModel):
     """A follower entry on a user's public followers page."""
 
     actor_url: str
+    handle: Optional[str] = None
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     followed_at: Optional[datetime] = None
@@ -140,6 +141,7 @@ class FollowRequestResponse(BaseModel):
     """A pending follow request, visible to the followed user only."""
 
     actor_url: str
+    handle: Optional[str] = None
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     requested_at: Optional[datetime] = None
@@ -193,6 +195,7 @@ def _follower_response(follower) -> FollowerResponse:
     actor_data = follower.actor_data or {}
     return FollowerResponse(
         actor_url=follower.actor_id,
+        handle=federation_service.actor_doc_handle(actor_data, follower.actor_id),
         display_name=activity_service._actor_doc_display_name(actor_data),
         avatar_url=activity_service._actor_doc_avatar_url(actor_data),
         followed_at=follower.followed_at,
@@ -204,6 +207,7 @@ def _follow_request_response(request) -> FollowRequestResponse:
     actor_data = request.actor_data or {}
     return FollowRequestResponse(
         actor_url=request.actor_id,
+        handle=federation_service.actor_doc_handle(actor_data, request.actor_id),
         display_name=activity_service._actor_doc_display_name(actor_data),
         avatar_url=activity_service._actor_doc_avatar_url(actor_data),
         requested_at=request.requested_at,
@@ -216,7 +220,11 @@ def _following_response(row: Follow, local_users: dict) -> FollowingResponse:
     local = local_users.get(row.target_user_id) if row.target_user_id else None
     return FollowingResponse(
         actor_url=row.target_actor_url,
-        handle=follows_service.follow_row_handle(row),
+        # Local targets keep their bare username — ``user@local-domain``
+        # would route to the remote-actor view, which rejects local handles.
+        handle=(local.username if local else None)
+        or follows_service.follow_row_handle(row)
+        or remote_content.actor_handle_from_url(row.target_actor_url),
         display_name=(local.display_name if local else None) or activity_service._actor_doc_display_name(actor_data),
         avatar_url=(local.avatar_url if local else None) or activity_service._actor_doc_avatar_url(actor_data),
         state=row.state,

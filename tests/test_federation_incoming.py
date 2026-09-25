@@ -1796,6 +1796,7 @@ def test_process_incoming_update_actor_refreshes_profile(engine, tmp_path, monke
     rows = _notifications_for(engine, user.id)
     payload = rows[0].payload
     assert payload["actor_name"] == "bobby"
+    assert payload["actor_handle"] == "bobby@remote.example"
     assert payload["actor_display_name"] == "Bob The Rocker"
     assert payload["actor_avatar_url"] == "https://remote.example/avatars/bob2.png"
 
@@ -1843,3 +1844,91 @@ def test_process_incoming_update_ignores_other_actors(engine, tmp_path, monkeypa
     rows = {r.actor_url: r for r in _notifications_for(engine, user.id)}
     assert rows["https://remote.example/users/bob"].payload["object_content"] == "<p>bob edited</p>"
     assert rows["https://remote.example/users/carol"].payload["object_content"] == "<p>hi</p>"
+
+
+def test_process_incoming_follow_opaque_actor_uses_preferred_username(engine, tmp_path, monkeypatch):
+    """A Follow from an opaque ``/ap/users/<id>`` actor stores the real handle."""
+    config = _make_config(tmp_path)
+    user = _seed_alice(engine, config)
+    monkeypatch.setattr("songhive.tasks.federation.load_config", lambda *_, **__: config)
+
+    opaque = "https://remote.example/ap/users/117220292797596489"
+    with (
+        patch("songhive.tasks.federation.InboxProcessor") as mock_processor,
+        patch("songhive.tasks.federation.get_federation_storage") as mock_storage,
+        _patch_db(engine),
+    ):
+        mock_processor.return_value.process.return_value = {"ok": True}
+        mock_storage.return_value.get_cached_actor.return_value = {
+            "preferredUsername": "amber",
+            "url": "https://remote.example/@amber",
+        }
+        process_incoming(
+            {
+                "type": "Follow",
+                "id": "https://remote.example/activities/f1",
+                "actor": opaque,
+                "object": "https://music.example.com/users/alice",
+            },
+            username="alice",
+        )
+
+    rows = _notifications_for(engine, user.id)
+    assert len(rows) == 1
+    assert rows[0].actor_url == opaque
+    payload = rows[0].payload
+    assert payload["actor_name"] == "amber"
+    assert payload["actor_handle"] == "amber@remote.example"
+
+
+def test_tag_mentions_resolve_cached_actor_handles(engine, tmp_path):
+    """A nameless Mention tag on an opaque actor href uses the cached doc."""
+    from songhive.federation.incoming import _tag_mentions
+    from songhive.federation.storage import create_activitypub_storage
+
+    config = _make_config(tmp_path)
+    init_db(engine=engine, force=True)
+    storage = create_activitypub_storage(config.database.url)
+    opaque = "https://remote.example/ap/users/117220292797596489"
+    storage.cache_remote_actor(opaque, {"preferredUsername": "amber"})
+
+    async def _run():
+        async with get_session() as session:
+            return await _tag_mentions(session, {"tag": [{"type": "Mention", "href": opaque}]}, config)
+
+    mentions = asyncio.run(_run())
+    reset_db()
+    assert mentions == [{"handle": "@amber@remote.example", "actor_url": opaque, "user_id": None}]
+
+
+def test_tag_mentions_preserve_valid_names_and_tail_fallback(engine, tmp_path):
+    """A supplied ``name`` wins; uncached actors fall back to the URL tail."""
+    from songhive.federation.incoming import _tag_mentions
+
+    config = _make_config(tmp_path)
+    init_db(engine=engine, force=True)
+    opaque = "https://remote.example/ap/users/117220292797596489"
+
+    async def _run():
+        async with get_session() as session:
+            return await _tag_mentions(
+                session,
+                {
+                    "tag": [
+                        {"type": "Mention", "href": opaque, "name": "@amber@remote.example"},
+                        {"type": "Mention", "href": "https://other.example/ap/users/999"},
+                    ]
+                },
+                config,
+            )
+
+    mentions = asyncio.run(_run())
+    reset_db()
+    assert mentions == [
+        {"handle": "@amber@remote.example", "actor_url": opaque, "user_id": None},
+        {
+            "handle": "@999@other.example",
+            "actor_url": "https://other.example/ap/users/999",
+            "user_id": None,
+        },
+    ]

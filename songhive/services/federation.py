@@ -316,6 +316,72 @@ def _actor_doc_profile_url(actor_doc: Optional[dict], actor_url: str) -> str:
     return actor_url
 
 
+def actor_doc_handle(actor_doc: Optional[dict], actor_url: str) -> Optional[str]:
+    """
+    Return the actor's ``user@domain`` handle.
+
+    ``preferredUsername`` is authoritative — actor ids may be opaque URIs
+    (e.g. Mastodon's ``/ap/users/<id>`` scheme, where the path tail is an
+    internal numeric id rather than the username) — so the URL tail is only
+    a fallback for documents without one.
+    """
+    username = _actor_doc_username(actor_doc, actor_url)
+    domain = extract_domain(actor_url)
+    if not username or not domain:
+        return None
+    return f"{username}@{domain}"
+
+
+def cached_actor_docs(storage, actor_urls: Iterable[str]) -> dict[str, dict]:
+    """
+    Map actor URLs to their cached actor documents.
+
+    Reads pubby's actor cache, followers and follow-request tables — all
+    carry the actor document — without any network fetch. URLs with no
+    cached document are absent from the result.
+    """
+    wanted = {u for u in actor_urls if isinstance(u, str) and u.startswith(("http://", "https://"))}
+    if not wanted:
+        return {}
+    # Only the DB storage adapter exposes the underlying models — file
+    # storage and test doubles may not, in which case there is nothing to
+    # scan beyond ``get_cached_actor`` (handled by the caller).
+    models = [
+        model
+        for model in (
+            getattr(storage, "actor_cache_model", None),
+            getattr(storage, "follower_model", None),
+            getattr(storage, "follow_request_model", None),
+        )
+        if model is not None
+    ]
+    if not models or not hasattr(storage, "session_factory"):
+        return {}
+    docs: dict[str, dict] = {}
+    session = storage.session_factory()
+    try:
+        for model in models:
+            for row in session.query(model).filter(model.actor_id.in_(wanted)).all():
+                if row.actor_id in docs:
+                    continue
+                doc = row.actor_data if isinstance(row.actor_data, dict) else {}
+                docs[row.actor_id] = doc
+    finally:
+        session.close()
+    return docs
+
+
+def cached_actor_handles(storage, actor_urls: Iterable[str]) -> dict[str, str]:
+    """Map actor URLs to ``user@domain`` handles from cached actor documents."""
+    docs = cached_actor_docs(storage, actor_urls)
+    return {url: handle for url, doc in docs.items() if (handle := actor_doc_handle(doc, url))}
+
+
+def cached_actor_handle(storage, actor_url: str) -> Optional[str]:
+    """Return the cached ``user@domain`` handle for one actor URL, if any."""
+    return cached_actor_handles(storage, [actor_url]).get(actor_url)
+
+
 @dataclass(frozen=True)
 class RemoteActorMatch:
     """A cached remote actor matched by :func:`search_remote_actors`."""

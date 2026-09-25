@@ -116,6 +116,47 @@ describe("parseActivityContent", () => {
     });
   });
 
+  it("routes opaque actor mention anchors by the recorded handle", () => {
+    // Mastodon ``/ap/users/<id>`` hrefs carry no username — the mention
+    // entry's recorded handle supplies the route param instead.
+    const segments = parseActivityContent(
+      '<p>hi <a href="https://remote.example/ap/users/117220292797596489" class="u-url mention">@amber</a></p>',
+      {
+        instanceDomain: DOMAIN,
+        mentions: [
+          {
+            handle: "@amber@remote.example",
+            actor_url: "https://remote.example/ap/users/117220292797596489",
+          },
+        ],
+      },
+    );
+    expect(segments[1]).toEqual({
+      type: "mention",
+      handle: "@amber",
+      username: "amber@remote.example",
+      url: "https://remote.example/ap/users/117220292797596489",
+    });
+  });
+
+  it("resolves bare handles whose mention entry has an opaque actor URL", () => {
+    const segments = parseActivityContent("hi @amber@remote.example", {
+      instanceDomain: DOMAIN,
+      mentions: [
+        {
+          handle: "@amber@remote.example",
+          actor_url: "https://remote.example/ap/users/117220292797596489",
+        },
+      ],
+    });
+    expect(segments[1]).toEqual({
+      type: "mention",
+      handle: "@amber@remote.example",
+      username: "amber@remote.example",
+      url: "https://remote.example/ap/users/117220292797596489",
+    });
+  });
+
   it("resolves mention entries pointing at local actors", () => {
     const segments = parseActivityContent("hi @alice", {
       instanceDomain: DOMAIN,

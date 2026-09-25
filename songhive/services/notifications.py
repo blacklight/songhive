@@ -75,6 +75,7 @@ def notification_to_dict(notification: Notification) -> Dict[str, Any]:
         "id": notification.id,
         "type": notification.type,
         "actor_url": notification.actor_url,
+        "actor_handle": (notification.payload or {}).get("actor_handle"),
         "source_url": notification.source_url,
         "payload": notification.payload,
         "seen_at": notification.seen_at.isoformat() if notification.seen_at else None,

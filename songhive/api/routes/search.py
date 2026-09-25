@@ -415,18 +415,21 @@ async def _remote_section(
         return SearchResultSection(entity="remote", total=0, items=[])
 
     rows = await remote_content.search_cached_remote_objects(db, config, term, user=user, limit=limit)
-    items = [
-        SearchResultItem(
-            type=row.resource_type or "remote_object",
-            id=str(row.id),
-            name=row.name or row.domain,
-            title=row.name or row.domain,
-            subtitle=f"{remote_content.actor_handle_from_url(row.actor_url)} · {row.domain}",
-            image_url=row.image_url,
-            url=remote_content.remote_object_page_url(row),
+    actor_handles = await remote_content.resolve_actor_handle_map(config, [row.actor_url for row in rows])
+    items = []
+    for row in rows:
+        actor_handle = actor_handles.get(row.actor_url) or remote_content.actor_handle_from_url(row.actor_url)
+        items.append(
+            SearchResultItem(
+                type=row.resource_type or "remote_object",
+                id=str(row.id),
+                name=row.name or row.domain,
+                title=row.name or row.domain,
+                subtitle=f"{actor_handle} · {row.domain}",
+                image_url=row.image_url,
+                url=remote_content.remote_object_page_url(row, actor_handle=actor_handles.get(row.actor_url)),
+            )
         )
-        for row in rows
-    ]
     return SearchResultSection(entity="remote", total=len(items), items=items)
 
 

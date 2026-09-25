@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config.schema import SonghiveConfig
 from ...models.notification import NotificationType
 from ...models.user import User
-from ...services import notifications
+from ...services import notifications, remote_content
 from ...services.push import (
     get_public_key,
     is_push_available,
@@ -31,6 +31,10 @@ class NotificationResponse(BaseModel):
     id: str
     type: NotificationType
     actor_url: Optional[str] = None
+    # The actor's ``user@domain`` handle, resolved from the cached actor
+    # document — ``actor_url`` may be an opaque id URI whose path tail is
+    # not the username (e.g. Mastodon ``/ap/users/<id>``).
+    actor_handle: Optional[str] = None
     source_url: Optional[str] = None
     payload: Optional[dict] = None
     seen_at: Optional[str] = None
@@ -125,6 +129,7 @@ async def list_notifications(
     current_user: User = Depends(get_current_user),
     pagination: Pagination = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
 ):
     """List the current user's notifications, newest first."""
     rows, total = await notifications.list_notifications(
@@ -136,7 +141,14 @@ async def list_notifications(
         offset=pagination.offset,
     )
     pagination.set_total(response, total)
-    return [NotificationResponse(**notifications.notification_to_dict(row)) for row in rows]
+    actor_handles = await remote_content.resolve_actor_handle_map(config, [row.actor_url for row in rows])
+    items = []
+    for row in rows:
+        item = NotificationResponse(**notifications.notification_to_dict(row))
+        if row.actor_url:
+            item.actor_handle = actor_handles.get(row.actor_url) or item.actor_handle
+        items.append(item)
+    return items
 
 
 @router.get("/unread-count", response_model=UnreadCountResponse)

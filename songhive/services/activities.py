@@ -588,10 +588,12 @@ _actor_doc_display_name = federation_service._actor_doc_display_name
 
 
 class ActorProfile(NamedTuple):
-    """Resolved avatar and display name for an activity's source actor."""
+    """Resolved avatar, display name and handle for an activity's source actor."""
 
     avatar_url: Optional[str] = None
     display_name: Optional[str] = None
+    # The local username for local actors, ``user@domain`` for remote ones.
+    handle: Optional[str] = None
 
 
 async def resolve_source_actor_profiles(
@@ -626,6 +628,7 @@ async def resolve_source_actor_profiles(
                         result[str(activity.id)] = ActorProfile(
                             avatar_url=avatar_url,
                             display_name=display_name or username,
+                            handle=username,
                         )
 
         # Some local activities may use a ``urn:songhive:user:<username>``
@@ -648,6 +651,7 @@ async def resolve_source_actor_profiles(
                         result[str(activity.id)] = ActorProfile(
                             avatar_url=avatar_url,
                             display_name=display_name or username,
+                            handle=username,
                         )
 
     # Webmention activities carry their author metadata in the payload —
@@ -675,19 +679,25 @@ async def resolve_source_actor_profiles(
     if remote_actors:
         try:
             storage = await asyncio.to_thread(create_activitypub_storage, config.database.url)
-
-            async def _get_remote_profile(actor_url: str) -> ActorProfile:
-                doc = await asyncio.to_thread(storage.get_cached_actor, actor_url)
-                return ActorProfile(
+            unique_actors = list(set(remote_actors.values()))
+            docs_by_actor = await asyncio.to_thread(federation_service.cached_actor_docs, storage, unique_actors)
+            # Storage adapters without model access (file storage, test
+            # doubles) yield no docs — fall back to ``get_cached_actor``.
+            missing = [url for url in unique_actors if url not in docs_by_actor]
+            if missing and hasattr(storage, "get_cached_actor"):
+                for url, doc in zip(
+                    missing,
+                    await asyncio.gather(*[asyncio.to_thread(storage.get_cached_actor, url) for url in missing]),
+                ):
+                    if isinstance(doc, dict):
+                        docs_by_actor[url] = doc
+            for activity_id, actor_url in remote_actors.items():
+                doc = docs_by_actor.get(actor_url)
+                result[activity_id] = ActorProfile(
                     avatar_url=_actor_doc_avatar_url(doc),
                     display_name=_actor_doc_display_name(doc),
+                    handle=federation_service.actor_doc_handle(doc, actor_url),
                 )
-
-            unique_actors = list(set(remote_actors.values()))
-            resolved = await asyncio.gather(*[_get_remote_profile(url) for url in unique_actors])
-            profile_by_actor = dict(zip(unique_actors, resolved))
-            for activity_id, actor_url in remote_actors.items():
-                result[activity_id] = profile_by_actor.get(actor_url, ActorProfile())
         except Exception:
             logger.exception("Failed to resolve remote actor profiles")
 
@@ -2119,11 +2129,34 @@ async def _notify_reaction(
         logger.warning("Failed to create %s notification for activity %s: %s", type, activity.id, exc)
 
 
-def _remote_actor_handle(actor_url: str) -> str:
-    """Derive a ``@name@host`` handle from a remote actor URL."""
+def _remote_actor_handle(actor_url: str, actor_doc: Optional[dict] = None) -> str:
+    """
+    Derive a ``@name@host`` handle from a remote actor URL.
+
+    The actor document's ``preferredUsername`` is authoritative when given —
+    opaque actor ids (e.g. Mastodon ``/ap/users/<id>`` URIs) carry an
+    internal id, not the username, in their path tail.
+    """
     parsed = urlparse(actor_url)
-    name = parsed.path.rstrip("/").rsplit("/", 1)[-1] or parsed.netloc
+    name = federation_service._actor_doc_username(actor_doc, actor_url) or parsed.netloc
     return f"@{name}@{parsed.netloc}" if parsed.netloc else f"@{name}"
+
+
+async def _resolve_remote_actor_handle(config: SonghiveConfig, actor_url: str) -> str:
+    """
+    Resolve a remote actor's ``@name@host`` handle from cached actor data.
+
+    Reads the federation actor cache, followers and follow requests — no
+    network fetch — so opaque actor ids map to the actor's real
+    ``preferredUsername``. Falls back to the URL tail on a cache miss.
+    """
+    try:
+        storage = await asyncio.to_thread(create_activitypub_storage, config.database.url)
+        handle = await asyncio.to_thread(federation_service.cached_actor_handle, storage, actor_url)
+    except Exception:
+        logger.debug("Could not resolve cached handle for actor %s", actor_url, exc_info=True)
+        handle = None
+    return f"@{handle}" if handle else _remote_actor_handle(actor_url)
 
 
 async def reply_to_activity(
@@ -2231,7 +2264,7 @@ async def reply_to_activity(
     elif activity.source_actor.startswith(("http://", "https://")) and all(
         m.actor_url != activity.source_actor for m in processed.mentions
     ):
-        handle = _remote_actor_handle(activity.source_actor)
+        handle = await _resolve_remote_actor_handle(config, activity.source_actor)
         mention_dicts.append({"handle": handle, "actor_url": activity.source_actor, "user_id": None})
         mention_actor_urls.append(activity.source_actor)
         extra_tags.append({"type": "Mention", "href": activity.source_actor, "name": handle})
@@ -2494,7 +2527,7 @@ async def quote_activity(
     elif activity.source_actor.startswith(("http://", "https://")) and all(
         m.actor_url != activity.source_actor for m in processed.mentions
     ):
-        handle = _remote_actor_handle(activity.source_actor)
+        handle = await _resolve_remote_actor_handle(config, activity.source_actor)
         mention_dicts.append({"handle": handle, "actor_url": activity.source_actor, "user_id": None})
         mention_actor_urls.append(activity.source_actor)
         extra_tags.append({"type": "Mention", "href": activity.source_actor, "name": handle})
@@ -2937,19 +2970,23 @@ async def notify_remote_activity_subscribers(
         actor_name: Optional[str] = None
         actor_display_name: Optional[str] = None
         actor_avatar_url: Optional[str] = None
+        actor_handle: Optional[str] = None
         if config is not None:
             profiles = await resolve_source_actor_profiles(session, [activity], config)
             profile = profiles.get(str(activity.id))
             if profile is not None:
                 actor_display_name = profile.display_name
                 actor_avatar_url = profile.avatar_url
-        actor_name = actor_display_name or actor_handle_from_url(activity.source_actor)
+                actor_handle = profile.handle
+        actor_name = actor_display_name or actor_handle or actor_handle_from_url(activity.source_actor)
 
         payload: Dict[str, Any] = {
             "activity_id": activity.source_id,
             "activity_type": activity.activity_type,
             "actor_name": actor_name,
         }
+        if actor_handle:
+            payload["actor_handle"] = actor_handle
         if actor_display_name:
             payload["actor_display_name"] = actor_display_name
         if actor_avatar_url:

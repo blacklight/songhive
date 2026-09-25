@@ -60,6 +60,7 @@ from ..models.notification import Notification, NotificationType
 from ..models.track import Track
 from ..models.user import FollowersApproval, User
 from ..services import acl
+from ..services import federation as federation_service
 from ..services import mention_records as mention_records_service
 from ..services.activities import (
     _activity_object_type,
@@ -99,10 +100,21 @@ _PLURAL_TO_ITEM_TYPE = {
 }
 
 
-def _actor_name(actor_url: Optional[str]) -> Optional[str]:
-    """Derive a display name from the last segment of an actor URL."""
+def _actor_name(actor_url: Optional[str], actor_doc: Optional[dict] = None) -> Optional[str]:
+    """
+    Derive a display name for an actor.
+
+    The actor document's ``preferredUsername`` wins — actor ids may be
+    opaque URIs (e.g. Mastodon ``/ap/users/<id>``) whose last segment is
+    an internal id, not the username — and the URL tail is only a
+    fallback when no usable document is at hand.
+    """
     if not actor_url:
         return None
+    if isinstance(actor_doc, dict):
+        preferred = actor_doc.get("preferredUsername")
+        if isinstance(preferred, str) and preferred.strip():
+            return preferred.strip()
     name = actor_url.strip().rstrip("/").rsplit("/", 1)[-1]
     return name or None
 
@@ -824,7 +836,10 @@ async def create_inbox_notifications(
 
     activity_type = activity.get("type")
     obj = activity.get("object")
-    payload: Dict[str, Any] = {"actor_name": _actor_name(actor_url), "activity_id": activity_id}
+    payload: Dict[str, Any] = {"actor_name": _actor_name(actor_url, actor_doc), "activity_id": activity_id}
+    actor_handle = federation_service.actor_doc_handle(actor_doc, actor_url)
+    if actor_handle:
+        payload["actor_handle"] = actor_handle
     if isinstance(actor_doc, dict):
         display_name = _actor_doc_display_name(actor_doc)
         avatar_url = _actor_doc_avatar_url(actor_doc)
@@ -1114,6 +1129,7 @@ async def _update_actor_notifications(
     preferred = obj.get("preferredUsername")
     fields = {
         "actor_name": preferred if isinstance(preferred, str) and preferred else _actor_name(actor_url),
+        "actor_handle": federation_service.actor_doc_handle(obj, actor_url),
         "actor_display_name": _actor_doc_display_name(obj),
         "actor_avatar_url": _actor_doc_avatar_url(obj),
     }

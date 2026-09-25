@@ -2221,6 +2221,18 @@ resources — without crawling remote timelines or indexing the fediverse.
 - Remote actors resolve through WebFinger and are cached in pubby's
   `federation_actor_cache` — a fetch-on-miss cache with freshness checks
   and tombstone markers for gone actors.
+- Remote actor ids are not assumed to carry a username in their path tail:
+  newer Mastodon versions issue opaque `…/ap/users/{id}` URIs. Displayed
+  and routed handles therefore come from the cached actor document's
+  `preferredUsername` — `services/federation.actor_doc_handle` builds the
+  `user@domain` form, and `cached_actor_docs`/`cached_actor_handles`
+  batch-resolve it across the actor cache, follower and follow-request
+  tables without any fetch. API responses expose the resolved handle
+  (`handle`, `actor_handle`, `source_actor_handle`) so the SPA never has
+  to parse the actor URL; handle lookup (`_find_cached_actor_by_handle`)
+  scans the same tables on `preferredUsername` and falls back to matching
+  the actor URL's path tail, so both real handles and legacy numeric-id
+  links resolve to a cached actor before WebFinger is tried.
 - Remote objects are cached in the `remote_objects` table (canonical URL,
   activity URL, domain, type, normalized resource kind, denormalized
   name/summary/content/media URLs, ETag/Last-Modified, content hash,

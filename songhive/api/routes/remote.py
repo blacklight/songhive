@@ -11,7 +11,7 @@ search never reaches the network — it only surfaces these cached rows.
 
 import logging
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
@@ -237,8 +237,14 @@ def _object_response(
     parent: Optional[RemoteObjectResponse] = None,
     items: Optional[List[RemoteObjectResponse]] = None,
     playable: bool = False,
+    actor_handles: Optional[Dict[str, str]] = None,
 ) -> RemoteObjectResponse:
-    actor_handle = remote_content.actor_handle_from_url(row.actor_url) if row.actor_url else None
+    # The cached actor document's ``preferredUsername`` is authoritative for
+    # the handle — actor URLs may be opaque (Mastodon ``/ap/users/<id>``), so
+    # the URL tail is only a fallback.
+    actor_handle = (actor_handles or {}).get(row.actor_url) or (
+        remote_content.actor_handle_from_url(row.actor_url) if row.actor_url else None
+    )
     return RemoteObjectResponse(
         id=str(row.id),
         canonical_url=row.canonical_url,
@@ -257,7 +263,7 @@ def _object_response(
         visibility=row.visibility,
         fetched_at=row.fetched_at,
         unavailable=row.unavailable_at is not None,
-        url=remote_content.remote_object_page_url(row),
+        url=remote_content.remote_object_page_url(row, actor_handle=actor_handle),
         in_collection=in_collection,
         favorited=favorited,
         follow_state=follow_state,
@@ -267,7 +273,12 @@ def _object_response(
     )
 
 
-async def _resource_items(db: AsyncSession, children: List) -> List[RemoteObjectResponse]:
+async def _actor_handle_map(config: SonghiveConfig, rows) -> Dict[str, str]:
+    """Resolve ``user@domain`` handles for the actors behind ``rows``."""
+    return await remote_content.resolve_actor_handle_map(config, [row.actor_url for row in rows])
+
+
+async def _resource_items(db: AsyncSession, children: List, config: SonghiveConfig) -> List[RemoteObjectResponse]:
     """
     Serialize child rows with one nested level of grandchildren.
 
@@ -277,14 +288,16 @@ async def _resource_items(db: AsyncSession, children: List) -> List[RemoteObject
     grandchildren_map = await remote_content.get_remote_objects_children_map(db, children)
     grandchildren = [gc for gcs in grandchildren_map.values() for gc in gcs]
     playable = await _playable_object_ids(db, [*children, *grandchildren])
+    actor_handles = await _actor_handle_map(config, [*children, *grandchildren])
     return [
         _object_response(
             child,
             playable=str(child.id) in playable,
             items=[
-                _object_response(gc, playable=str(gc.id) in playable)
+                _object_response(gc, playable=str(gc.id) in playable, actor_handles=actor_handles)
                 for gc in grandchildren_map.get(child.canonical_url, [])
             ],
+            actor_handles=actor_handles,
         )
         for child in children
     ]
@@ -413,10 +426,15 @@ async def remote_lookup(
         row = result.remote_object
         kind: str = "resource" if row.resource_type else "object"
         activity = await _activity_response_or_none(request, db, user, result.activity)
+        actor_handles = await _actor_handle_map(config, [row])
         return RemoteLookupResponse(
             kind=kind,  # type: ignore[arg-type]
-            url=remote_content.remote_object_page_url(row),
-            object=_object_response(row, playable=str(row.id) in await _playable_object_ids(db, [row])),
+            url=remote_content.remote_object_page_url(row, actor_handle=actor_handles.get(row.actor_url)),
+            object=_object_response(
+                row,
+                playable=str(row.id) in await _playable_object_ids(db, [row]),
+                actor_handles=actor_handles,
+            ),
             activity=activity,
         )
 
@@ -627,6 +645,7 @@ async def list_remote_objects(
     favorited = await remote_content.get_favorited_remote_object_ids(db, user, {str(row.id) for row in rows})
     playable = await _playable_object_ids(db, rows)
     activity_ids = await remote_content.remote_activity_ids(db, [row.canonical_url for row in rows])
+    actor_handles = await _actor_handle_map(config, rows)
     return RemoteObjectListResponse(
         items=[
             _object_response(
@@ -635,6 +654,7 @@ async def list_remote_objects(
                 favorited=str(row.id) in favorited,
                 activity_id=activity_ids.get(row.canonical_url),
                 playable=str(row.id) in playable,
+                actor_handles=actor_handles,
             )
             for row in rows
         ]
@@ -681,6 +701,7 @@ async def get_remote_object(
     activity = await remote_content.get_remote_object_activity(db, row)
     related = [row, *([parent_row] if parent_row is not None else [])]
     playable = await _playable_object_ids(db, related)
+    actor_handles = await _actor_handle_map(config, related)
     return RemoteObjectDetailResponse(
         object=_object_response(
             row,
@@ -689,12 +710,17 @@ async def get_remote_object(
             follow_state=viewer["follow_state"],
             activity_id=str(activity.id) if activity is not None else None,
             parent=(
-                _object_response(parent_row, playable=str(parent_row.id) in playable)
+                _object_response(
+                    parent_row,
+                    playable=str(parent_row.id) in playable,
+                    actor_handles=actor_handles,
+                )
                 if parent_row is not None
                 else None
             ),
-            items=await _resource_items(db, children),
+            items=await _resource_items(db, children, config),
             playable=str(row.id) in playable,
+            actor_handles=actor_handles,
         ),
         activity=await _activity_response_or_none(request, db, user, activity),
     )
@@ -943,6 +969,7 @@ async def ensure_remote_object_activity(
             follow_state=viewer["follow_state"],
             activity_id=str(activity.id),
             playable=str(row.id) in await _playable_object_ids(db, [row]),
+            actor_handles=await _actor_handle_map(config, [row]),
         ),
         activity=await _activity_response_or_none(request, db, user, activity),
     )
@@ -979,6 +1006,7 @@ async def get_remote_resource(
     activity = await remote_content.get_remote_object_activity(db, row)
     related = [row, *([parent_row] if parent_row is not None else [])]
     playable = await _playable_object_ids(db, related)
+    actor_handles = await _actor_handle_map(config, related)
     return _object_response(
         row,
         in_collection=viewer["in_collection"],
@@ -986,8 +1014,11 @@ async def get_remote_resource(
         follow_state=viewer["follow_state"],
         activity_id=str(activity.id) if activity is not None else None,
         parent=(
-            _object_response(parent_row, playable=str(parent_row.id) in playable) if parent_row is not None else None
+            _object_response(parent_row, playable=str(parent_row.id) in playable, actor_handles=actor_handles)
+            if parent_row is not None
+            else None
         ),
-        items=await _resource_items(db, children),
+        items=await _resource_items(db, children, config),
         playable=str(row.id) in playable,
+        actor_handles=actor_handles,
     )

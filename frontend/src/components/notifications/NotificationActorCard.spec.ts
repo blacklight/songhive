@@ -21,6 +21,7 @@ function createTestRouter() {
 
 function mountCard(props: {
   actorUrl?: string | null;
+  handle?: string | null;
   displayName?: string | null;
   avatarUrl?: string | null;
 }) {
@@ -75,6 +76,31 @@ describe("NotificationActorCard", () => {
     const card = wrapper.find("a.actor-card");
     expect(card.attributes("href")).toBe("/@carol");
     expect(card.text()).toContain("Carol");
+  });
+
+  it("prefers an explicit handle over an opaque actor URL tail", async () => {
+    // Mastodon's opaque ``/ap/users/<id>`` actor ids carry no username.
+    const wrapper = mountCard({
+      actorUrl: "https://remote.example/ap/users/117220292797596489",
+      handle: "amber@remote.example",
+    });
+    await flushPromises();
+
+    const card = wrapper.find("a.actor-card");
+    expect(card.attributes("href")).toBe("/@amber@remote.example");
+    expect(card.text()).toContain("amber");
+    expect(card.text()).toContain("@amber@remote.example");
+    expect(card.text()).not.toContain("117220292797596489");
+  });
+
+  it("routes a bare local handle to the local profile", async () => {
+    const wrapper = mountCard({
+      actorUrl: "https://songhive.example/users/alice",
+      handle: "alice",
+    });
+    await flushPromises();
+
+    expect(wrapper.find("a.actor-card").attributes("href")).toBe("/@alice");
   });
 
   it("falls back to the URL-derived handle without a display name", async () => {

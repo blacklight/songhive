@@ -138,6 +138,10 @@ class ActivityResponse(BaseModel):
     owner_user_id: Optional[str] = None
     source_actor_avatar_url: Optional[str] = None
     source_actor_display_name: Optional[str] = None
+    # The author's handle — local username or ``user@domain`` — resolved
+    # from cached actor data so opaque actor ids (e.g. Mastodon
+    # ``/ap/users/<id>``) still map to the real username.
+    source_actor_handle: Optional[str] = None
     visibility: Visibility
     in_reply_to_activity_id: Optional[str] = None
     content: Optional[str] = None
@@ -313,6 +317,7 @@ def _build_activity_response(
     response = ActivityResponse.model_validate(activity)
     response.source_actor_avatar_url = profile.avatar_url if profile else None
     response.source_actor_display_name = profile.display_name if profile else None
+    response.source_actor_handle = profile.handle if profile else None
     response.attachments = _activity_attachments(activity)
     if summary is not None:
         response.like_count = summary.like_count
@@ -949,10 +954,13 @@ async def quote_activity(
     )
 
 
-def _actor_handle(actor: activity_service.InteractionActor) -> str:
+def _actor_handle(actor: activity_service.InteractionActor, actor_handles: Optional[dict] = None) -> str:
     """Derive a display handle: ``@username`` for locals, ``@name@host`` remote."""
     if actor.username:
         return f"@{actor.username}"
+    cached = (actor_handles or {}).get(actor.actor)
+    if cached:
+        return f"@{cached}"
     return activity_service._remote_actor_handle(actor.actor)
 
 
@@ -976,11 +984,12 @@ async def _list_interactors(
     actors = await activity_service.list_activity_interactors(
         db, activity=activity, interaction_type=interaction_type, config=config
     )
+    actor_handles = await remote_content.resolve_actor_handle_map(config, [a.actor for a in actors])
     return ActivityActorListResponse(
         actors=[
             ActivityActorResponse(
                 actor=a.actor,
-                handle=_actor_handle(a),
+                handle=_actor_handle(a, actor_handles),
                 display_name=a.display_name,
                 avatar_url=a.avatar_url,
                 username=a.username,
@@ -1021,7 +1030,7 @@ class ReplyActivityListResponse(BaseModel):
     remote_replies: List[dict] = []
 
 
-def _remote_reply_payload(interaction: Any) -> dict:
+def _remote_reply_payload(interaction: Any, actor_handle: Optional[str] = None) -> dict:
     """Serialize a Pubby reply ``Interaction`` for the reply list."""
     meta = interaction.metadata or {}
     raw = meta.get("raw_object") if isinstance(meta, dict) else None
@@ -1040,6 +1049,7 @@ def _remote_reply_payload(interaction: Any) -> dict:
         "object_id": interaction.object_id or raw.get("id"),
         "in_reply_to": interaction.target_resource or raw.get("inReplyTo"),
         "source_actor": interaction.source_actor_id,
+        "source_actor_handle": actor_handle,
         "source_actor_name": interaction.author_name or None,
         "source_actor_url": interaction.author_url or None,
         "source_actor_avatar_url": interaction.author_photo or None,
@@ -1077,11 +1087,11 @@ async def list_activity_replies(
             detail="Not authorized to view this activity",
         )
 
-    local, remote = await activity_service.list_activity_replies(
-        db, activity=activity, user=user, config=get_config(request)
-    )
-    profile_map = await activity_service.resolve_source_actor_profiles(db, local, get_config(request))
-    summary_map = await activity_service.resolve_interaction_summaries(db, local, user, get_config(request))
+    config = get_config(request)
+    local, remote = await activity_service.list_activity_replies(db, activity=activity, user=user, config=config)
+    profile_map = await activity_service.resolve_source_actor_profiles(db, local, config)
+    summary_map = await activity_service.resolve_interaction_summaries(db, local, user, config)
+    remote_handles = await remote_content.resolve_actor_handle_map(config, [i.source_actor_id for i in remote])
     return ReplyActivityListResponse(
         activities=[
             _build_activity_response(
@@ -1091,7 +1101,7 @@ async def list_activity_replies(
             )
             for a in local
         ],
-        remote_replies=[_remote_reply_payload(i) for i in remote],
+        remote_replies=[_remote_reply_payload(i, remote_handles.get(i.source_actor_id)) for i in remote],
     )
 
 
@@ -1102,7 +1112,7 @@ class QuoteActivityListResponse(BaseModel):
     remote_quotes: List[dict] = []
 
 
-def _remote_quote_payload(interaction: Any) -> dict:
+def _remote_quote_payload(interaction: Any, actor_handle: Optional[str] = None) -> dict:
     """
     Serialize a Pubby quote ``Interaction`` for the quote list.
 
@@ -1111,7 +1121,7 @@ def _remote_quote_payload(interaction: Any) -> dict:
     ``in_reply_to`` parent pointer — quotes attach to the object they
     quote, not to a thread parent.
     """
-    payload = _remote_reply_payload(interaction)
+    payload = _remote_reply_payload(interaction, actor_handle)
     payload.pop("in_reply_to", None)
     payload["quoted"] = interaction.target_resource or None
     return payload
@@ -1146,6 +1156,7 @@ async def list_activity_quotes(
     local, remote = await activity_service.list_activity_quotes(db, activity=activity, user=user, config=config)
     profile_map = await activity_service.resolve_source_actor_profiles(db, local, config)
     summary_map = await activity_service.resolve_interaction_summaries(db, local, user, config)
+    remote_handles = await remote_content.resolve_actor_handle_map(config, [i.source_actor_id for i in remote])
     return QuoteActivityListResponse(
         activities=[
             _build_activity_response(
@@ -1155,5 +1166,5 @@ async def list_activity_quotes(
             )
             for a in local
         ],
-        remote_quotes=[_remote_quote_payload(i) for i in remote],
+        remote_quotes=[_remote_quote_payload(i, remote_handles.get(i.source_actor_id)) for i in remote],
     )

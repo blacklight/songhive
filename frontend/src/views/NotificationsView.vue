@@ -428,6 +428,10 @@ function rawLinkFor(item: NotificationResponse): string | undefined {
     if (actor.startsWith(URN_PREFIX)) {
       return `/@${actor.slice(URN_PREFIX.length)}`;
     }
+    // The resolved handle routes to the internal remote profile — the raw
+    // actor id URI (e.g. an opaque ``/ap/users/<id>``) is not a page.
+    const actorHandle = str(item.actor_handle);
+    if (actorHandle) return `/@${actorHandle}`;
     return actor || undefined;
   }
   if (item.type === "like" || item.type === "boost") {
@@ -496,6 +500,10 @@ function linkFor(item: NotificationResponse): NotificationLink | undefined {
 function actorLinkFor(
   item: NotificationResponse,
 ): NotificationLink | undefined {
+  // A server-resolved ``actor_handle`` (``user@domain`` or a bare local
+  // username) wins — opaque actor ids carry no username in their URL tail.
+  const handle = str(item.actor_handle);
+  if (handle) return { to: `/@${handle}` };
   const parsed = parseActorRef(item.actor_url ?? "", instanceDomain.value);
   if (parsed.routeUsername) return { to: `/@${parsed.routeUsername}` };
   return undefined;
@@ -548,6 +556,8 @@ function noteActivity(item: NotificationResponse): ActivityResponse | null {
     source_actor_avatar_url: str(payload.actor_avatar_url) ?? null,
     source_actor_display_name:
       str(payload.actor_display_name) ?? str(payload.actor_name) ?? null,
+    source_actor_handle:
+      str(payload.actor_handle) ?? str(item.actor_handle) ?? null,
     visibility: "public",
     in_reply_to_activity_id: isQuote
       ? (str(payload.target_object_activity_id) ?? null)
@@ -896,6 +906,7 @@ onBeforeUnmount(() => {
           <NotificationActorCard
             v-else-if="actorCardFor(item)"
             :actor-url="item.actor_url"
+            :handle="item.actor_handle"
             :display-name="
               str(item.payload?.actor_display_name) ??
               str(item.payload?.actor_name)

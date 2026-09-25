@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -542,26 +542,40 @@ def _cached_actor_entry(storage, actor_url: str) -> Optional[tuple]:
 
 
 def _find_cached_actor_by_handle(storage, username: str, domain: str) -> Optional[str]:
-    """Resolve ``username@domain`` to a cached actor URL without any fetch."""
+    """
+    Resolve ``username@domain`` to a cached actor URL without any fetch.
+
+    ``preferredUsername`` is tried first across the actor cache, followers
+    and follow-request tables; the actor URL's path tail is tried as a
+    fallback so opaque actor ids (e.g. Mastodon ``/ap/users/<id>`` URIs)
+    still resolve when the numeric id was used as the handle's user part.
+    """
     host = domain.split(":", 1)[0].lower()
+    models = [storage.actor_cache_model, storage.follower_model]
+    request_model = getattr(storage, "follow_request_model", None)
+    if request_model is not None:
+        models.append(request_model)
+    tail_match: Optional[str] = None
     session = storage.session_factory()
     try:
-        rows = (
-            session.query(storage.actor_cache_model).filter(storage.actor_cache_model.actor_id.ilike(f"%{host}%")).all()
-        )
-        for row in rows:
-            actor_id = row.actor_id
-            if not isinstance(actor_id, str):
-                continue
-            if federation_service.extract_domain(actor_id) != host:
-                continue
-            doc = row.actor_data if isinstance(row.actor_data, dict) else {}
-            preferred = doc.get("preferredUsername")
-            if isinstance(preferred, str) and preferred.lower() == username.lower():
-                return actor_id
+        for model in models:
+            rows = session.query(model).filter(model.actor_id.ilike(f"%{host}%")).all()
+            for row in rows:
+                actor_id = row.actor_id
+                if not isinstance(actor_id, str):
+                    continue
+                if federation_service.extract_domain(actor_id) != host:
+                    continue
+                doc = row.actor_data if isinstance(row.actor_data, dict) else {}
+                preferred = doc.get("preferredUsername")
+                if isinstance(preferred, str) and preferred.lower() == username.lower():
+                    return actor_id
+                tail = urlparse(actor_id).path.rstrip("/").rsplit("/", 1)[-1].lstrip("@")
+                if tail_match is None and tail.lower() == username.lower():
+                    tail_match = actor_id
     finally:
         session.close()
-    return None
+    return tail_match
 
 
 def _cache_actor(storage, actor_url: str, actor_doc: dict, *, unavailable: bool = False) -> None:
@@ -1038,7 +1052,7 @@ async def _materialize_remote_activity(
         session.add(row)
     await session.flush()
 
-    mentions = await _remote_mentions(session, obj)
+    mentions = await _remote_mentions(session, obj, config)
     await session.refresh(row, ["mentions"])
     existing_mentions = {m.handle for m in row.mentions}
     for mention in mentions:
@@ -1716,11 +1730,45 @@ def actor_handle_from_url(actor_url: str) -> str:
     return f"{name}@{parsed.hostname}" if parsed.hostname else name
 
 
-def remote_object_page_url(remote_object: RemoteObject) -> str:
+def remote_object_page_url(remote_object: RemoteObject, *, actor_handle: Optional[str] = None) -> str:
     """Return the internal SPA URL for a cached remote object."""
     if remote_object.resource_type:
         return f"/remote/{remote_object.resource_type}/{remote_object.id}"
-    return f"/activities/@{actor_handle_from_url(remote_object.actor_url)}/{remote_object.id}"
+    handle = actor_handle or actor_handle_from_url(remote_object.actor_url)
+    return f"/activities/@{handle}/{remote_object.id}"
+
+
+async def resolve_actor_handle_map(
+    config: SonghiveConfig,
+    actor_urls: Iterable[Optional[str]],
+) -> dict[str, str]:
+    """
+    Resolve actor URLs to ``user@domain`` handles from cached actor docs.
+
+    ``preferredUsername`` wins over the URL tail, so opaque actor ids (e.g.
+    Mastodon ``/ap/users/<id>`` URIs) map to the real handle. Local-domain
+    actor URLs are excluded — local profiles route by bare username, not
+    ``user@domain``.
+    """
+    local = federation_service.normalize_instance_domain(config.federation.instance_domain or "")
+    urls = {
+        url
+        for url in actor_urls
+        if isinstance(url, str)
+        and url.startswith(("http://", "https://"))
+        and federation_service.extract_domain(url) != local
+    }
+    if not urls:
+        return {}
+    try:
+        storage = await asyncio.to_thread(_federation_storage, config)
+        return await asyncio.to_thread(federation_service.cached_actor_handles, storage, urls)
+    except Exception:
+        # Display-only resolution — a storage error (e.g. a transient lock
+        # while a request transaction is open) must not fail the request;
+        # callers fall back to the actor URL's path tail.
+        logger.debug("Could not resolve cached actor handles", exc_info=True)
+        return {}
 
 
 def remote_object_payload_name(obj: dict) -> Optional[str]:

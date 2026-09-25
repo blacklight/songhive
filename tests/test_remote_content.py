@@ -505,6 +505,81 @@ class TestLookupRemoteActor:
         assert cached is not None and cached.username == "alice"
 
 
+class TestOpaqueActorIds:
+    """Mastodon ``/ap/users/<id>`` actor URIs resolve via cached actor docs."""
+
+    OPAQUE_URL = f"https://{REMOTE_DOMAIN}/ap/users/117220292797596489"
+    OPAQUE_DOC = {**ACTOR_DOC, "id": OPAQUE_URL, "preferredUsername": "amber"}
+
+    def _storage(self, remote_config):
+        from songhive.federation.storage import create_activitypub_storage
+
+        return create_activitypub_storage(remote_config.database.url)
+
+    def _seed_follower(self, remote_config):
+        from datetime import datetime, timezone
+
+        from pubby import Follower
+
+        storage = self._storage(remote_config)
+        storage.store_follower(
+            Follower(
+                actor_id=self.OPAQUE_URL,
+                inbox=f"https://{REMOTE_DOMAIN}/inbox",
+                followed_at=datetime.now(timezone.utc),
+                actor_data=self.OPAQUE_DOC,
+                target_actor_id="https://local.invalid/users/alice",
+            )
+        )
+        return storage
+
+    def test_find_cached_actor_by_handle_scans_followers(self, remote_config):
+        """A real ``user@domain`` handle resolves against a follower's doc."""
+        storage = self._seed_follower(remote_config)
+        assert rc._find_cached_actor_by_handle(storage, "amber", REMOTE_DOMAIN) == self.OPAQUE_URL
+
+    def test_find_cached_actor_by_handle_matches_url_tail(self, remote_config):
+        """The numeric id itself also resolves — via the URL-tail fallback."""
+        storage = self._seed_follower(remote_config)
+        assert rc._find_cached_actor_by_handle(storage, "117220292797596489", REMOTE_DOMAIN) == self.OPAQUE_URL
+
+    async def test_lookup_by_real_handle_uses_follower_doc(self, db_session, remote_config, fetcher):
+        """``@amber@…`` resolves to the opaque actor URL, then fetches it."""
+        self._seed_follower(remote_config)
+        fake = fetcher({self.OPAQUE_URL: self.OPAQUE_DOC})
+        actor = await rc.lookup_remote_actor(db_session, remote_config, "@amber@remote.invalid")
+        assert actor.username == "amber"
+        assert actor.actor_url == self.OPAQUE_URL
+        # The resolved actor URL is fetched directly — no WebFinger call.
+        assert fake.calls == [self.OPAQUE_URL]
+
+    async def test_lookup_by_numeric_id_uses_url_tail(self, db_session, remote_config, fetcher):
+        """``@117…@…`` — the broken legacy link — still resolves the actor."""
+        self._seed_follower(remote_config)
+        fake = fetcher({self.OPAQUE_URL: self.OPAQUE_DOC})
+        actor = await rc.lookup_remote_actor(db_session, remote_config, "@117220292797596489@remote.invalid")
+        assert actor.username == "amber"
+        assert fake.calls == [self.OPAQUE_URL]
+
+    async def test_resolve_actor_handle_map(self, remote_config):
+        """Opaque URLs map to ``preferredUsername@domain``; locals are excluded."""
+        self._seed_follower(remote_config)
+        handles = await rc.resolve_actor_handle_map(
+            remote_config,
+            [self.OPAQUE_URL, "https://local.invalid/users/alice", None],
+        )
+        assert handles == {self.OPAQUE_URL: f"amber@{REMOTE_DOMAIN}"}
+
+    def test_remote_object_page_url_prefers_actor_handle(self, remote_config):
+        """Permalinks embed the real handle, not the opaque URL tail."""
+        row = RemoteObject(id="obj-1", actor_url=self.OPAQUE_URL, canonical_url="https://x")
+        assert (
+            rc.remote_object_page_url(row, actor_handle=f"amber@{REMOTE_DOMAIN}")
+            == "/activities/@amber@remote.invalid/obj-1"
+        )
+        assert rc.remote_object_page_url(row) == "/activities/@117220292797596489@remote.invalid/obj-1"
+
+
 # ---------------------------------------------------------------------------
 # Remote object dereference and materialization
 # ---------------------------------------------------------------------------

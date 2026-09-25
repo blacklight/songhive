@@ -6004,6 +6004,8 @@ export interface components {
       source_actor_avatar_url?: string | null;
       /** Source Actor Display Name */
       source_actor_display_name?: string | null;
+      /** Source Actor Handle */
+      source_actor_handle?: string | null;
       visibility: components["schemas"]["Visibility"];
       /** In Reply To Activity Id */
       in_reply_to_activity_id?: string | null;
@@ -7706,6 +7708,8 @@ export interface components {
     FollowRequestResponse: {
       /** Actor Url */
       actor_url: string;
+      /** Handle */
+      handle?: string | null;
       /** Display Name */
       display_name?: string | null;
       /** Avatar Url */
@@ -7728,6 +7732,8 @@ export interface components {
     FollowerResponse: {
       /** Actor Url */
       actor_url: string;
+      /** Handle */
+      handle?: string | null;
       /** Display Name */
       display_name?: string | null;
       /** Avatar Url */
@@ -8084,6 +8090,8 @@ export interface components {
       source: components["schemas"]["MentionSource"];
       /** Actor Url */
       actor_url?: string | null;
+      /** Actor Handle */
+      actor_handle?: string | null;
       /** Source Url */
       source_url?: string | null;
       /** Activity Id */
@@ -8210,6 +8218,8 @@ export interface components {
       type: components["schemas"]["NotificationType"];
       /** Actor Url */
       actor_url?: string | null;
+      /** Actor Handle */
+      actor_handle?: string | null;
       /** Source Url */
       source_url?: string | null;
       /** Payload */

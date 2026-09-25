@@ -826,6 +826,7 @@ async def list_playlist_items_route(
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     include: IncludeQuery = Depends(get_include({"artist", "album", "owner"})),
+    config: SonghiveConfig = Depends(get_config),
 ):
     """List a playlist's items — tracks and podcast episodes — in order."""
     playlist = await music.get_playlist(db, playlist_id)
@@ -855,6 +856,7 @@ async def list_playlist_items_route(
     remote_favorited = await remote_content.get_favorited_remote_object_ids(
         db, user, {str(row.id) for row in remote_rows}
     )
+    remote_actor_handles = await remote_content.resolve_actor_handle_map(config, [row.actor_url for row in remote_rows])
 
     items: List[PlaylistItemResponse] = []
     for row in rows:
@@ -887,6 +889,7 @@ async def list_playlist_items_route(
                         remote_row,
                         favorited=str(remote_row.id) in remote_favorited,
                         playable=str(remote_row.id) in playable_remote,
+                        actor_handles=remote_actor_handles,
                     ),
                 )
             )

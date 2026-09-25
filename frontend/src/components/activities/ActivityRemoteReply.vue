@@ -16,6 +16,11 @@ const { t } = useI18n();
 const instanceDomain = useInstanceDomain();
 
 const actorName = computed(() => {
+  // The resolved ``user@domain`` handle wins — ``source_actor`` may be an
+  // opaque id URI (e.g. Mastodon ``/ap/users/<id>``) whose tail is not the
+  // username.
+  const handle = props.reply.source_actor_handle?.trim();
+  if (handle) return handle.startsWith("@") ? handle : `@${handle}`;
   const actor = props.reply.source_actor;
   try {
     const url = new URL(actor);

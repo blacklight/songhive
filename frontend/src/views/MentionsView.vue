@@ -135,6 +135,7 @@ function asItem(record: MentionResponse): NotificationResponse {
     id: record.id,
     type: record.source === "webmention" ? "webmention" : "mention",
     actor_url: record.actor_url ?? null,
+    actor_handle: record.actor_handle ?? null,
     source_url: record.source_url ?? null,
     payload: record.payload ?? null,
     seen_at: null,
@@ -235,6 +236,11 @@ function linkFor(record: MentionResponse): MentionLink | undefined {
 }
 
 function actorLinkFor(record: MentionResponse): MentionLink | undefined {
+  // A server-resolved ``actor_handle`` routes to the internal profile —
+  // opaque actor ids carry no username in their URL tail, and the raw actor
+  // URI may not dereference to a browser page.
+  const handle = str(record.actor_handle);
+  if (handle) return { to: `/@${handle}` };
   const parsed = parseActorRef(record.actor_url ?? "", instanceDomain.value);
   if (parsed.username) return { to: `/@${parsed.username}` };
   if (parsed.remoteUrl) return { href: parsed.remoteUrl };
@@ -297,6 +303,8 @@ function noteActivity(record: MentionResponse): ActivityResponse | null {
     source_actor_avatar_url: str(payload.actor_avatar_url) ?? null,
     source_actor_display_name:
       str(payload.actor_display_name) ?? str(payload.actor_name) ?? null,
+    source_actor_handle:
+      str(payload.actor_handle) ?? str(record.actor_handle) ?? null,
     visibility: activityVisibility(record.visibility),
     in_reply_to_activity_id: null,
     content: str(payload.object_content) ?? str(payload.object_name) ?? null,
@@ -544,6 +552,7 @@ onMounted(() => {
           <NotificationActorCard
             v-else
             :actor-url="record.actor_url"
+            :handle="record.actor_handle"
             :display-name="
               str(record.payload?.actor_display_name) ??
               str(record.payload?.actor_name)

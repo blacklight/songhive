@@ -113,7 +113,9 @@ async def _local_addressee_users(session: AsyncSession, obj: dict) -> Dict[str, 
     return {user.actor_url: user for user in rows.scalars().all() if user.actor_url}
 
 
-async def _remote_mentions(session: AsyncSession, obj: dict) -> List[Dict[str, Any]]:
+async def _remote_mentions(
+    session: AsyncSession, obj: dict, config: Optional[SonghiveConfig] = None
+) -> List[Dict[str, Any]]:
     """
     Build ``ActivityMention`` field dicts for the object's audience.
 
@@ -124,7 +126,7 @@ async def _remote_mentions(session: AsyncSession, obj: dict) -> List[Dict[str, A
     addresses even without an explicit ``Mention`` tag. Entries whose
     handle cannot be derived or validated are dropped.
     """
-    mentions = await _tag_mentions(session, obj)
+    mentions = await _tag_mentions(session, obj, config)
     covered = {m["actor_url"] for m in mentions}
     for actor_url, user in (await _local_addressee_users(session, obj)).items():
         if actor_url not in covered:
@@ -132,7 +134,9 @@ async def _remote_mentions(session: AsyncSession, obj: dict) -> List[Dict[str, A
     return mentions
 
 
-async def _tag_mentions(session: AsyncSession, obj: dict) -> List[Dict[str, Any]]:
+async def _tag_mentions(
+    session: AsyncSession, obj: dict, config: Optional[SonghiveConfig] = None
+) -> List[Dict[str, Any]]:
     """Build ``ActivityMention`` field dicts from the object's ``tag`` Mentions."""
     tags = obj.get("tag")
     if not isinstance(tags, list):
@@ -141,8 +145,29 @@ async def _tag_mentions(session: AsyncSession, obj: dict) -> List[Dict[str, Any]
     if not hrefs:
         return []
 
-    rows = await session.execute(select(User.id, User.actor_url).where(User.actor_url.in_(hrefs)))
-    local_users = {actor_url: user_id for user_id, actor_url in rows.all() if actor_url}
+    rows = await session.execute(select(User.id, User.username, User.actor_url).where(User.actor_url.in_(hrefs)))
+    local_users = {actor_url: (user_id, username) for user_id, username, actor_url in rows.all() if actor_url}
+
+    # Mention tags without a usable ``name`` need a derived handle — resolve
+    # them from cached actor documents so opaque actor ids (e.g. Mastodon
+    # ``/ap/users/<id>`` URIs) map to the real ``preferredUsername`` rather
+    # than the URL tail.
+    nameless = [
+        tag["href"]
+        for tag in tags
+        if isinstance(tag, dict)
+        and tag.get("type") == "Mention"
+        and isinstance(tag.get("href"), str)
+        and tag["href"]
+        and not (isinstance(tag.get("name"), str) and _MENTION_HANDLE_RE.match(tag["name"]))
+        and tag["href"] not in local_users
+    ]
+    cached_handles: Dict[str, str] = {}
+    if config is not None and nameless:
+        try:
+            cached_handles = await remote_content_service.resolve_actor_handle_map(config, nameless)
+        except Exception:
+            logger.debug("Could not resolve cached handles for nameless mention tags", exc_info=True)
 
     mentions: List[Dict[str, Any]] = []
     seen: set = set()
@@ -154,15 +179,21 @@ async def _tag_mentions(session: AsyncSession, obj: dict) -> List[Dict[str, Any]
             continue
         handle = tag.get("name")
         if not isinstance(handle, str) or not _MENTION_HANDLE_RE.match(handle):
-            handle = _remote_actor_handle(href)
+            local = local_users.get(href)
+            if local is not None:
+                handle = f"@{local[1]}"
+            else:
+                cached = cached_handles.get(href)
+                handle = f"@{cached}" if cached else _remote_actor_handle(href)
             if not _MENTION_HANDLE_RE.match(handle):
                 continue
         seen.add(href)
+        local = local_users.get(href)
         mentions.append(
             {
                 "handle": handle,
                 "actor_url": href,
-                "user_id": local_users.get(href),
+                "user_id": local[0] if local else None,
             }
         )
     return mentions
@@ -348,7 +379,7 @@ async def _materialize_remote_object(
             return None
 
     public = is_public(obj)
-    mentions = await _remote_mentions(session, obj)
+    mentions = await _remote_mentions(session, obj, config)
     if not public and not any(m["user_id"] for m in mentions):
         # A non-public post addressing no local user has no audience here.
         return None
@@ -598,7 +629,7 @@ async def materialize_remote_announce(
             logger.debug("Could not cache boosting actor %s: %s", actor, exc)
 
     public = is_public(activity)
-    mentions = await _remote_mentions(session, activity)
+    mentions = await _remote_mentions(session, activity, config)
     if not public and not any(m["user_id"] for m in mentions):
         # A non-public boost addressing no local user has no audience here.
         return None
@@ -707,7 +738,7 @@ async def update_remote_object(
         row.published_at = published
 
     await session.execute(delete(ActivityMention).where(ActivityMention.activity_id == row.id))
-    for mention in await _remote_mentions(session, obj):
+    for mention in await _remote_mentions(session, obj, config):
         session.add(ActivityMention(activity_id=row.id, **mention))
     await session.flush()
     await _sync_activity_tags(session, row, _remote_hashtags(obj))

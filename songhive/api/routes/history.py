@@ -11,16 +11,17 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ...config.schema import SonghiveConfig
 from ...models.album import Album
 from ...models.history import ListeningHistory
 from ...models.remote_object import RemoteObject
 from ...models.track import Track
 from ...models.user import User
-from ...services import acl
+from ...services import acl, remote_content
 from ...services.storage import StorageService
 from ...services.streaming import record_listen as record_listen_service
 from .._common import Pagination, get_pagination
-from ..deps import get_current_user, get_db, get_storage_service
+from ..deps import get_config, get_current_user, get_db, get_storage_service
 from ..responses import _track_image_url
 from .remote import RemoteObjectResponse, _object_response, _playable_object_ids
 
@@ -44,14 +45,22 @@ class HistoryEntry(BaseModel):
         return value.isoformat()
 
 
-async def _remote_history_map(db: AsyncSession, rows: List[ListeningHistory]) -> Dict[str, RemoteObjectResponse]:
+async def _remote_history_map(
+    db: AsyncSession,
+    rows: List[ListeningHistory],
+    config: SonghiveConfig,
+) -> Dict[str, RemoteObjectResponse]:
     """Serialize the remote objects referenced by ``rows`` (one batched fetch)."""
     remote_ids = [str(entry.remote_object_id) for entry in rows if entry.remote_object_id is not None]
     if not remote_ids:
         return {}
     remote_rows = list((await db.execute(select(RemoteObject).where(RemoteObject.id.in_(remote_ids)))).scalars().all())
     playable = await _playable_object_ids(db, remote_rows)
-    return {str(row.id): _object_response(row, playable=str(row.id) in playable) for row in remote_rows}
+    actor_handles = await remote_content.resolve_actor_handle_map(config, [row.actor_url for row in remote_rows])
+    return {
+        str(row.id): _object_response(row, playable=str(row.id) in playable, actor_handles=actor_handles)
+        for row in remote_rows
+    }
 
 
 @router.get("/", response_model=List[HistoryEntry])
@@ -61,6 +70,7 @@ async def list_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    config: SonghiveConfig = Depends(get_config),
 ):
     """List listening history for the current user, newest first."""
     total = (
@@ -81,7 +91,7 @@ async def list_history(
     )
     rows = result.scalars().all()
     pagination.set_total(response, total)
-    remote_map = await _remote_history_map(db, list(rows))
+    remote_map = await _remote_history_map(db, list(rows), config)
 
     entries = []
     for entry in rows:

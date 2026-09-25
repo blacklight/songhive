@@ -115,6 +115,11 @@ export interface ActivityResponse {
   owner_user_id?: string | null;
   source_actor_avatar_url?: string | null;
   source_actor_display_name?: string | null;
+  /**
+   * The author's handle — local username or ``user@domain`` — resolved
+   * from cached actor data; ``source_actor`` may be an opaque id URI.
+   */
+  source_actor_handle?: string | null;
   visibility: ActivityVisibility;
   in_reply_to_activity_id?: string | null;
   content?: string | null;
@@ -167,6 +172,8 @@ export interface RemoteReply {
    */
   in_reply_to?: string | null;
   source_actor: string;
+  /** ``user@domain`` handle resolved from the cached actor document. */
+  source_actor_handle?: string | null;
   source_actor_name?: string | null;
   source_actor_url?: string | null;
   source_actor_avatar_url?: string | null;

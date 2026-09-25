@@ -94,13 +94,23 @@ const activity = computed(
 );
 const removed = computed(() => store.isRemoved(props.activity.id));
 
+// The author's resolved handle — a bare username for local actors,
+// ``user@domain`` for remote ones — wins over parsing ``source_actor``,
+// which may be an opaque id URI (e.g. Mastodon ``/ap/users/<id>``).
+const sourceHandle = computed(
+  () => activity.value.source_actor_handle?.trim() || null,
+);
+
 const actorShortName = computed(
-  () => parseActor(activity.value.source_actor).shortName,
+  () =>
+    sourceHandle.value?.replace(/^@/, "").split("@")[0] ??
+    parseActor(activity.value.source_actor).shortName,
 );
 
 // Route param for the ``/@…`` profile link — local username, or
 // ``name@host`` so remote actors open the internal remote profile view.
 const actorRouteName = computed(() => {
+  if (sourceHandle.value) return sourceHandle.value.replace(/^@/, "");
   const { shortName, host } = parseActor(activity.value.source_actor);
   if (host && activity.value.source_type === "remote") {
     return `${shortName}@${host}`;
@@ -125,6 +135,10 @@ const webmentionHost = computed(() => {
 });
 
 const actorName = computed(() => {
+  if (sourceHandle.value) {
+    const handle = sourceHandle.value.replace(/^@/, "");
+    return `@${handle}`;
+  }
   const { shortName, host } = parseActor(activity.value.source_actor);
   if (isWebmention.value) {
     // Webmention authors are site URLs, not fediverse accounts — a bare
@@ -648,18 +662,15 @@ const replyInitialStatus = computed(() => {
     handles.push(normalized);
   };
 
-  const author = parseActorRef(
-    activity.value.source_actor,
-    instanceDomain.value,
-  );
+  // The resolved handle names the author correctly even when
+  // ``source_actor`` is an opaque id URI.
+  const authorHandle = sourceHandle.value
+    ? `@${sourceHandle.value.replace(/^@/, "")}`
+    : parseActorRef(activity.value.source_actor, instanceDomain.value).handle;
   // Webmention authors are plain site URLs — not fediverse handles — so
   // they are never prefilled as mentions.
-  if (
-    !isWebmention.value &&
-    !isOwner.value &&
-    author.username?.toLowerCase() !== selfName
-  ) {
-    push(author.handle, activity.value.source_actor);
+  if (!isWebmention.value && !isOwner.value) {
+    push(authorHandle, activity.value.source_actor);
   }
   for (const mention of activity.value.mentions ?? []) {
     push(mention.handle, mention.actor_url, mention.user_id);

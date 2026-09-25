@@ -20,6 +20,15 @@ All notable changes to this project will be documented in this file.
   renditions have cached `Track` entities no longer appear empty —
   rendition rows fold onto their entity instead of being excluded from
   children listings.
+- `federation`: Remote actors with opaque ActivityPub ids — e.g. Mastodon
+  4.6+ `…/ap/users/{numeric-id}` actor URIs — no longer display, route or
+  prefill replies with their numeric id tail. Follower/follow-request
+  cards, notifications, mentions, activity cards, remote replies/quotes,
+  remote object permalinks and search results now use the cached actor
+  document's `preferredUsername` (`user@domain`), and remote actor lookup
+  resolves both the real handle and the numeric id tail against the
+  follower/follow-request/actor-cache tables before WebFinger, fixing the
+  404 profile pages and broken actor links first-time followers produced.
 
 ## 0.3.1
 

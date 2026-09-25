@@ -220,3 +220,83 @@ def test_search_remote_actors_disabled(config, tmp_path):
     storage = _remote_actor_storage(tmp_path)
     _store_remote_actors(storage)
     assert search_remote_actors(storage, "bob", config) == []
+
+
+def test_actor_doc_handle_prefers_preferred_username():
+    """Opaque actor ids (e.g. Mastodon ``/ap/users/<id>``) resolve to the doc username."""
+    from songhive.services.federation import actor_doc_handle
+
+    assert (
+        actor_doc_handle(
+            {"preferredUsername": "amber"},
+            "https://hear-me.social/ap/users/117220292797596489",
+        )
+        == "amber@hear-me.social"
+    )
+
+
+def test_actor_doc_handle_falls_back_to_url_tail():
+    """Without ``preferredUsername`` the URL tail names the actor, as before."""
+    from songhive.services.federation import actor_doc_handle
+
+    assert actor_doc_handle(None, "https://remote.example/users/bob") == "bob@remote.example"
+    assert actor_doc_handle({}, "https://remote.example/@carol") == "carol@remote.example"
+    assert actor_doc_handle(None, "") is None
+
+
+def test_cached_actor_handles_reads_all_pubby_tables(tmp_path):
+    """Actor cache, follower and follow-request rows all yield handles."""
+    from datetime import datetime, timezone
+
+    from pubby import Follower, FollowRequest
+
+    from songhive.services.federation import cached_actor_handle, cached_actor_handles
+
+    opaque_follower = "https://hear-me.social/ap/users/117220292797596489"
+    opaque_request = "https://spore.social/ap/users/117308811748217043"
+    cached = "https://other.example/users/zed"
+
+    storage = _remote_actor_storage(tmp_path)
+    storage.store_follower(
+        Follower(
+            actor_id=opaque_follower,
+            inbox="https://hear-me.social/inbox",
+            followed_at=datetime.now(timezone.utc),
+            actor_data={"preferredUsername": "amber"},
+            target_actor_id="https://music.example.com/users/alice",
+        )
+    )
+    storage.store_follow_request(
+        FollowRequest(
+            actor_id=opaque_request,
+            target_actor_id="https://music.example.com/users/alice",
+            inbox="https://spore.social/inbox",
+            actor_data={"preferredUsername": "disisdeguey2"},
+        )
+    )
+    storage.cache_remote_actor(
+        cached,
+        {"preferredUsername": "zed"},
+        datetime.now(timezone.utc),
+    )
+
+    urls = [opaque_follower, opaque_request, cached, "https://unknown.example/users/nobody"]
+    assert cached_actor_handles(storage, urls) == {
+        opaque_follower: "amber@hear-me.social",
+        opaque_request: "disisdeguey2@spore.social",
+        cached: "zed@other.example",
+    }
+    assert cached_actor_handle(storage, "https://unknown.example/users/nobody") is None
+
+
+def test_cached_actor_handles_falls_back_to_url_tail(tmp_path):
+    """A cached doc without ``preferredUsername`` still yields a tail handle."""
+    from datetime import datetime, timezone
+
+    from songhive.services.federation import cached_actor_handles
+
+    storage = _remote_actor_storage(tmp_path)
+    storage.cache_remote_actor("https://remote.example/users/dave", {}, datetime.now(timezone.utc))
+    assert cached_actor_handles(storage, ["https://remote.example/users/dave"]) == {
+        "https://remote.example/users/dave": "dave@remote.example"
+    }

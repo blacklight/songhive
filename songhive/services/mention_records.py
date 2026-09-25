@@ -44,6 +44,7 @@ def mention_to_dict(record: MentionRecord) -> Dict[str, Any]:
         "id": record.id,
         "source": record.source,
         "actor_url": record.actor_url,
+        "actor_handle": (record.payload or {}).get("actor_handle"),
         "source_url": record.source_url,
         "activity_id": record.activity_id,
         "visibility": record.visibility,

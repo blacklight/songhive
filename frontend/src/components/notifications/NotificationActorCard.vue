@@ -8,6 +8,13 @@ import { parseActorRef } from "@/utils/actorRef";
 
 const props = defineProps<{
   actorUrl?: string | null;
+  /**
+   * The actor's authoritative handle — ``user@domain`` for remote actors,
+   * the bare username for local ones. Actor URLs can be opaque ids (e.g.
+   * Mastodon ``/ap/users/<id>``) whose tail is not the username, so a
+   * server-provided handle always wins over URL-derived parsing.
+   */
+  handle?: string | null;
   displayName?: string | null;
   avatarUrl?: string | null;
 }>();
@@ -18,22 +25,38 @@ const parsed = computed(() =>
   parseActorRef(props.actorUrl ?? "", instanceDomain.value),
 );
 
+// An explicit handle is the route param verbatim — ``user@domain`` renders
+// the remote profile view, a bare username the local one.
+const routeUsername = computed(
+  () => props.handle?.trim() || parsed.value.routeUsername,
+);
+
+const handleLabel = computed(() => {
+  const handle = props.handle?.trim();
+  if (handle) return handle.startsWith("@") ? handle : `@${handle}`;
+  return parsed.value.handle;
+});
+
 const name = computed(
   () =>
-    props.displayName?.trim() || parsed.value.username || props.actorUrl || "",
+    props.displayName?.trim() ||
+    props.handle?.trim()?.replace(/^@/, "").split("@")[0] ||
+    parsed.value.username ||
+    props.actorUrl ||
+    "",
 );
 </script>
 
 <template>
   <RouterLink
-    v-if="parsed.routeUsername"
-    :to="{ name: 'userProfile', params: { username: parsed.routeUsername } }"
+    v-if="routeUsername"
+    :to="{ name: 'userProfile', params: { username: routeUsername } }"
     class="actor-card"
   >
     <AppAvatar :src="avatarUrl || ''" :name="name" size="sm" />
     <span class="actor-card__meta">
       <span class="actor-card__name">{{ name }}</span>
-      <span class="actor-card__handle">{{ parsed.handle }}</span>
+      <span class="actor-card__handle">{{ handleLabel }}</span>
     </span>
     <AppIcon name="chevron-right" class="actor-card__chevron" />
   </RouterLink>
@@ -41,8 +64,8 @@ const name = computed(
     <AppAvatar :src="avatarUrl || ''" :name="name" size="sm" />
     <span class="actor-card__meta">
       <span class="actor-card__name">{{ name || "—" }}</span>
-      <span v-if="parsed.handle" class="actor-card__handle">{{
-        parsed.handle
+      <span v-if="handleLabel" class="actor-card__handle">{{
+        handleLabel
       }}</span>
     </span>
   </div>

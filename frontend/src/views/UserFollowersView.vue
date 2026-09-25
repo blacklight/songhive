@@ -209,6 +209,7 @@ watch(username, () => {
           <NotificationActorCard
             class="user-followers__card"
             :actor-url="follower.actor_url"
+            :handle="follower.handle"
             :display-name="follower.display_name"
             :avatar-url="follower.avatar_url"
           />
@@ -245,6 +246,7 @@ watch(username, () => {
           <NotificationActorCard
             class="user-followers__card"
             :actor-url="request.actor_url"
+            :handle="request.handle"
             :display-name="request.display_name"
             :avatar-url="request.avatar_url"
           />

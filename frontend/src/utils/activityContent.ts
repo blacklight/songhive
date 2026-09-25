@@ -223,11 +223,19 @@ function classifyAnchor(
     anchor.classList.contains("u-url") ||
     label.startsWith("@");
   if (isMention) {
+    // The mention entry's recorded ``handle`` is authoritative — opaque
+    // actor ids (e.g. Mastodon ``/ap/users/<id>``) have no username in
+    // their URL tail for ``routeUsername`` to find.
+    const entry = mentionByUrl.get(href);
+    const entryRoute = entry?.handle.replace(/^@/, "");
     return [
       {
         type: "mention",
-        handle: label || actor.handle,
-        username: actor.routeUsername ?? undefined,
+        handle: label || entry?.handle || actor.handle,
+        username:
+          entryRoute && entryRoute.includes("@")
+            ? entryRoute
+            : (actor.routeUsername ?? undefined),
         url: href,
       },
     ];
@@ -283,7 +291,12 @@ export function parseActivityContent(
       if (actor?.username) username = actor.username;
       else if (entry.actor_url) {
         url = entry.actor_url;
-        username = actor?.routeUsername ?? undefined;
+        // The recorded handle is authoritative — opaque actor ids carry
+        // no username in their URL tail for ``routeUsername`` to find.
+        const entryRoute = entry.handle.replace(/^@/, "");
+        username = entryRoute.includes("@")
+          ? entryRoute
+          : (actor?.routeUsername ?? undefined);
       } else if (entry.user_id)
         username = handle.replace(/^@/, "").split("@")[0];
     }

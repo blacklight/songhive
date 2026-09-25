@@ -153,6 +153,26 @@ describe("ActivityCard", () => {
     expect(wrapper.find(".activity-card__display-name").text()).toBe("carol");
   });
 
+  it("renders and routes opaque remote actors by their resolved handle", () => {
+    // Mastodon ``/ap/users/<id>`` actor URIs carry no username — the
+    // server-resolved ``source_actor_handle`` supplies display and route.
+    const wrapper = mountCard({
+      source_type: "remote",
+      source_actor: "https://remote.example/ap/users/117220292797596489",
+      source_actor_handle: "amber@remote.example",
+      content: "hi",
+      content_type: "text/html",
+    });
+    expect(wrapper.text()).toContain("@amber@remote.example");
+    expect(wrapper.text()).not.toContain("117220292797596489");
+    expect(wrapper.find(".activity-card__display-name").text()).toBe("amber");
+    const links = wrapper.findAllComponents({ name: "RouterLink" });
+    const author = links.find(
+      (link) => link.props("to") === "/@amber@remote.example",
+    );
+    expect(author).toBeTruthy();
+  });
+
   it("renders the source actor display name when provided", () => {
     const wrapper = mountCard({
       source_actor_display_name: "Alice Display",
