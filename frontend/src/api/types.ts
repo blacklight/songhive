@@ -5052,6 +5052,94 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/downloads/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Download Archives
+     * @description List the current user's download archives, newest first.
+     */
+    get: operations["list_download_archives_api_v1_downloads__get"];
+    put?: never;
+    /**
+     * Create Download Archive
+     * @description Queue a ZIP archive for the requested items/containers.
+     */
+    post: operations["create_download_archive_api_v1_downloads__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/downloads/{archive_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Download Archive
+     * @description Return one of the current user's archives.
+     */
+    get: operations["get_download_archive_api_v1_downloads__archive_id__get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Download Archive
+     * @description Delete one of the current user's archives and its backing ZIP.
+     */
+    delete: operations["delete_download_archive_api_v1_downloads__archive_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/downloads/{archive_id}/file": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download Archive File
+     * @description Download the generated ZIP once the archive is ready.
+     */
+    get: operations["download_archive_file_api_v1_downloads__archive_id__file_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/downloads/clear": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Clear Completed Downloads
+     * @description Delete all of the current user's ready/failed archives.
+     */
+    post: operations["clear_completed_downloads_api_v1_downloads_clear_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/shares/": {
     parameters: {
       query?: never;
@@ -6363,6 +6451,40 @@ export interface components {
       is_active: boolean;
     };
     /**
+     * ArchiveCreateRequest
+     * @description Bulk archive request: pick items directly and/or name a container.
+     */
+    ArchiveCreateRequest: {
+      /** Track Ids */
+      track_ids?: string[];
+      /** Remote Object Ids */
+      remote_object_ids?: string[];
+      /** Episode Ids */
+      episode_ids?: string[];
+      /** Album Id */
+      album_id?: string | null;
+      /** Artist Id */
+      artist_id?: string | null;
+      /** Playlist Id */
+      playlist_id?: string | null;
+      /** Library Id */
+      library_id?: string | null;
+      /** Label */
+      label?: string | null;
+    };
+    /** ArchiveItemResponse */
+    ArchiveItemResponse: {
+      /** Kind */
+      kind: string;
+      /** Title */
+      title: string;
+      /**
+       * Artist
+       * @default
+       */
+      artist: string;
+    };
+    /**
      * ArtistResponse
      * @description Public artist response.
      */
@@ -6887,6 +7009,31 @@ export interface components {
        * @default
        */
       comment: string;
+    };
+    /** DownloadArchiveResponse */
+    DownloadArchiveResponse: {
+      /** Id */
+      id: string;
+      /** Status */
+      status: string;
+      /** Label */
+      label: string;
+      /** Item Count */
+      item_count: number;
+      /** Items */
+      items: components["schemas"]["ArchiveItemResponse"][];
+      /** Item Errors */
+      item_errors?: unknown[] | null;
+      /** Error */
+      error?: string | null;
+      /** Size */
+      size?: number | null;
+      /** Download Url */
+      download_url?: string | null;
+      /** Created At */
+      created_at: string;
+      /** Completed At */
+      completed_at?: string | null;
     };
     /**
      * EnrichImagesRequest
@@ -7829,7 +7976,8 @@ export interface components {
       | "share"
       | "webmention"
       | "activity"
-      | "report";
+      | "report"
+      | "download";
     /**
      * NotificationsPurgeResponse
      * @description Result of a notification purge run.
@@ -19725,6 +19873,182 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_download_archives_api_v1_downloads__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DownloadArchiveResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_download_archive_api_v1_downloads__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ArchiveCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DownloadArchiveResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_download_archive_api_v1_downloads__archive_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        archive_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DownloadArchiveResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_download_archive_api_v1_downloads__archive_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        archive_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  download_archive_file_api_v1_downloads__archive_id__file_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        archive_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  clear_completed_downloads_api_v1_downloads_clear_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
         };
       };
     };

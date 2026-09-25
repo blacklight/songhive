@@ -39,6 +39,7 @@ import {
   adminDeleteExternalTrack,
 } from "@/api/externalLibraries";
 import { canManageItem } from "@/composables/useCanManage";
+import { useDownloadArchive } from "@/composables/useDownloadArchive";
 import ExternalTrackBadge from "@/components/external-libraries/ExternalTrackBadge.vue";
 
 export interface RemovableFrom {
@@ -100,6 +101,7 @@ const router = useRouter();
 const player = usePlayerStore();
 const authStore = useAuthStore();
 const toastStore = useToastStore();
+const { requestArchive } = useDownloadArchive();
 
 const menuOpen = ref(false);
 const menuX = ref(0);
@@ -803,6 +805,14 @@ const bulkActions = computed(() => {
       visible: authStore.isAuthenticated,
       disabled: selectedIds.value.size === 0 || isRemoving.value,
     },
+    {
+      key: "download",
+      label: t("browse.bulkEdit.download"),
+      icon: "download",
+      variant: "secondary" as const,
+      visible: authStore.isAuthenticated,
+      disabled: selectedIds.value.size === 0 || isRemoving.value,
+    },
   ];
 
   if (props.removableFrom?.canRemove) {
@@ -848,6 +858,9 @@ function onBulkAction(key: string) {
     case "add-to-playlist":
       openBulkAddDialog("playlist");
       break;
+    case "download":
+      void downloadSelected();
+      break;
     case "delete":
       openBulkDelete();
       break;
@@ -861,6 +874,22 @@ function openBulkEdit() {
     .filter((track) => !isPodcastEpisode(track) && !isRemoteTrack(track))
     .map((track) => track.id);
   bulkEditOpen.value = true;
+}
+
+async function downloadSelected() {
+  const selected = selectedQueueTracks();
+  const ok = await requestArchive({
+    track_ids: selected
+      .filter((track) => !isPodcastEpisode(track) && !isRemoteTrack(track))
+      .map((track) => track.id),
+    episode_ids: selected.filter(isPodcastEpisode).map((track) => track.id),
+    remote_object_ids: selected
+      .filter(isRemoteTrack)
+      .map((track) => track.remote_object_id!),
+  });
+  if (ok) {
+    selectedIds.value.clear();
+  }
 }
 
 function closeBulkEdit() {

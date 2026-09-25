@@ -107,6 +107,10 @@ def make_celery(
                 "task": "songhive.tasks.podcasts.scan_due_gpodder_syncs",
                 "schedule": crontab(minute="*/15"),
             },
+            "cleanup-completed-downloads": {
+                "task": "songhive.tasks.downloads.cleanup_completed_downloads",
+                "schedule": crontab(minute=35),
+            },
         },
     )
     if remote_activity_prune_schedule:

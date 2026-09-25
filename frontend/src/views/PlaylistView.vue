@@ -18,12 +18,14 @@ import {
   type PlaylistStats,
 } from "@/api/playlists";
 import { useToastStore } from "@/stores/toast";
+import { useAuthStore } from "@/stores/auth";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
 import { useCollectionItem } from "@/composables/useCollectionItem";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
+import { useDownloadArchive } from "@/composables/useDownloadArchive";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useFeedLinks } from "@/composables/useFeedLinks";
 import type { QueueTrack } from "@/player/types";
@@ -57,6 +59,7 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const toastStore = useToastStore();
+const authStore = useAuthStore();
 
 const {
   items: playlistItems,
@@ -139,6 +142,7 @@ const {
 } = deletePlaylist;
 
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
+const { requestArchive } = useDownloadArchive();
 
 const canRemove = computed(() => canManage.value);
 
@@ -222,6 +226,13 @@ const actions = computed(() => [
     visible: true,
   },
   {
+    key: "download",
+    label: t("common.download"),
+    icon: "download",
+    variant: "secondary" as const,
+    visible: authStore.isAuthenticated,
+  },
+  {
     key: "edit",
     label: t("common.edit"),
     icon: "pen-to-square",
@@ -257,6 +268,9 @@ async function onAction(key: string) {
         name: "playlistActivities",
         params: { id: playlist.value.id },
       });
+      break;
+    case "download":
+      await requestArchive({ playlist_id: playlist.value.id });
       break;
     case "edit":
       await router.push({

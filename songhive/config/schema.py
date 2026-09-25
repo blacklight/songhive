@@ -199,6 +199,63 @@ class FederationConfig(BaseSettings):
     )
 
 
+class DownloadsConfig(BaseSettings):
+    """Bulk download archive configuration."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable bulk download archives (ZIP generation for tracks, albums, artists, playlists)",
+    )
+    max_items: int = Field(
+        default=500,
+        ge=1,
+        description="Maximum number of items a single archive request may resolve to",
+    )
+    max_concurrent_archives: int = Field(
+        default=2,
+        ge=1,
+        description="Maximum number of archive builds running concurrently across the instance",
+    )
+    max_active_per_user: int = Field(
+        default=2,
+        ge=1,
+        description="Maximum number of pending/processing archive requests a single user may hold",
+    )
+    retention_hours: int = Field(
+        default=24,
+        ge=1,
+        description="Hours a completed archive is kept before the periodic cleanup deletes it",
+    )
+    stale_run_hours: int = Field(
+        default=6,
+        ge=1,
+        description=(
+            "Hours after which an archive still marked pending/processing is "
+            "considered abandoned (worker crash) and failed by the cleanup task"
+        ),
+    )
+    fetch_attempts: int = Field(
+        default=3,
+        ge=1,
+        description="Attempts per item when fetching remote/external audio before marking it failed",
+    )
+    fetch_backoff_seconds: float = Field(
+        default=2.0,
+        ge=0.0,
+        description="Base delay in seconds for exponential backoff between item fetch attempts",
+    )
+    fetch_timeout_seconds: float = Field(
+        default=30.0,
+        ge=1.0,
+        description="Timeout in seconds for each remote audio fetch hop",
+    )
+    max_item_bytes: int = Field(
+        default=2 * 1024 * 1024 * 1024,
+        ge=1024 * 1024,
+        description="Maximum bytes fetched for a single remote/external item",
+    )
+
+
 class FeedsConfig(BaseSettings):
     """RSS/Atom feed configuration."""
 
@@ -834,6 +891,7 @@ class SonghiveConfig(BaseSettings):
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     musicbrainz: MusicBrainzConfig = Field(default_factory=MusicBrainzConfig)
     imports: ImportConfig = Field(default_factory=ImportConfig)
+    downloads: DownloadsConfig = Field(default_factory=DownloadsConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     external_libraries: ExternalLibrariesConfig = Field(default_factory=ExternalLibrariesConfig)
     streams: StreamsConfig = Field(default_factory=StreamsConfig)

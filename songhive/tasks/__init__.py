@@ -1,5 +1,6 @@
 from . import (
     api_tokens,
+    downloads,
     email,
     external_libraries,
     federation,
@@ -20,6 +21,7 @@ from .celery import celery_app
 __all__ = [
     "celery_app",
     "api_tokens",
+    "downloads",
     "email",
     "external_libraries",
     "federation",

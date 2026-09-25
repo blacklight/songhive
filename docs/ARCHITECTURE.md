@@ -101,6 +101,7 @@ songhive/
 │   │   ├── history.py      # Listening history
 │   │   ├── radios.py       # Dynamic radio generation
 │   │   ├── files.py        # Generic file upload/download (StoredFile)
+│   │   ├── downloads.py    # Bulk-download archive requests (ZIP), status, file download, clear
 │   │   ├── shares.py       # Share grants (owner→specific user) + /shares/mine listing
 │   │   ├── share_urls.py   # Share URL tokens (revocable short links)
 │   │   ├── share.py        # Public token resolver (redirects + sets cookie)
@@ -137,6 +138,7 @@ songhive/
 │   ├── upload.py           # Raw uploaded file reference
 │   ├── stored_file.py      # Content-addressable file (SHA-256, visibility, owner)
 │   ├── transcoded_file.py  # Transcode cache: (track_id, format, bitrate) → StoredFile
+│   ├── download.py         # DownloadArchive — async bulk-download ZIP request (items snapshot, item_errors)
 │   ├── library.py
 │   ├── library_track.py    # Library ↔ Track join table
 │   ├── playlist.py
@@ -162,6 +164,7 @@ songhive/
 │   ├── auth.py             # User lookup, password hashing, session helpers
 │   ├── audit.py            # Audit log helpers
 │   ├── deletion.py         # Cascade deletion + activity retraction fan-out
+│   ├── downloads.py        # Archive item resolution (ACL), ZIP materialization, name sanitization
 │   ├── email.py            # SMTP email (verification, password reset)
 │   ├── federation.py       # Actor provisioning, domain allow/block, inbox dispatch
 │   ├── feeds.py            # RSS 2.0/Atom feed documents + per-entity feed queries
@@ -192,7 +195,7 @@ songhive/
 │   └── types.py            # Adapter dataclasses (ItemRef, TrackMetadata, etc.)
 ├── federation/             # ActivityPub per-user federation
 │   ├── _common.py          # URL builders
-│   ├── fetch.py            # SSRF-guarded remote fetch (DNS/IP checks, redirect revalidation)
+│   ├── fetch.py            # SSRF-guarded remote fetch (DNS/IP checks, redirect revalidation) + guarded binary download
 │   ├── actors.py           # Actor document generation, federation storage helpers
 │   ├── activities.py       # Activity creation (Create, Update, Delete, etc.)
 │   ├── incoming.py         # Materialize inbound remote replies into Activity rows
@@ -236,6 +239,7 @@ songhive/
 │   ├── images.py           # Artist image + album cover enrichment
 │   ├── external_libraries.py # External library sync task
 │   ├── preview_cards.py    # Link-preview fetch + per-URL cache task
+│   ├── downloads.py        # Async ZIP archive builds (Redis concurrency cap) + retention cleanup (scheduled)
 │   └── storage.py          # Orphaned-file cleanup (scheduled via crontab)
 ├── ws/                     # WebSocket support
 │   └── events.py           # Tornado WebSocket handler (JWT auth, CORS origin check)
@@ -326,6 +330,7 @@ these subsections:
 | `musicbrainz`  | enabled, user_agent, cover_art, artist_image settings       |
 | `notifications`| retention_days, purge_hour, digest_hour                     |
 | `imports`      | scan_roots, bulk_import_sync_threshold                        |
+| `downloads`    | enabled, max_items, max_concurrent_archives, max_active_per_user, retention_hours, stale_run_hours, fetch_attempts, fetch_backoff_seconds, fetch_timeout_seconds, max_item_bytes |
 | `streaming`    | max_bitrate, max_bitrate_by_role, default_bitrate, chunk_size, transcode_cache_enabled |
 | `streams`      | enabled, allow_user_created_outputs, allowed/denied_user_providers, allowed_output_hosts, icecast_ffmpeg_path, worker timings, idle timeout, http_stream_* |
 
@@ -1642,7 +1647,9 @@ of the setting.
 
 **Orphan GC** — the `storage.cleanup_orphaned_files` Celery task runs on the
 configured crontab (default: daily at 03:00) and deletes `StoredFile` rows
-(and their backing files) not referenced by any `Track`, `Album`, or `Upload`.
+(and their backing files) not referenced by any `Track`, `Album`, `Upload`,
+or `DownloadArchive` (archive-backed ZIPs are protected until the archive
+row itself is cleaned up).
 
 **Cascade Deletion** — `services/deletion.py` provides centralized deletion
 logic for `Track`, `StoredFile`, `Album`, `Artist`, `Playlist`, and `Library`.
@@ -1763,6 +1770,79 @@ the controlling tab closes.
   uses `driver.is_paused` (not the persisted session state, which is already
   post-command by the time the worker reads it) to detect pause→play
   transitions.
+
+---
+
+## Bulk Downloads
+
+Authenticated users can request ZIP archives of tracks — a selection made in
+the library's bulk-edit mode, or a whole album, artist, playlist, or
+library — which are built asynchronously by a Celery task and downloaded
+from the `/downloads` page when ready.
+
+**Request flow** (`api/routes/downloads.py`,
+`services/downloads.py`):
+
+1. `POST /api/v1/downloads/` accepts explicit references (`track_ids`,
+   `remote_object_ids`, `episode_ids`) and/or containers (`album_id`,
+   `artist_id`, `playlist_id`, `library_id`) plus an optional `label`.
+   `services.downloads.resolve_archive_items` expands containers through
+   the regular ACL — items the requester cannot access are silently
+   skipped — and caps the result at `downloads.max_items` (default 500).
+   A request that resolves to zero accessible items is rejected.
+2. A `DownloadArchive` row (`models/download.py`) is created in `pending`
+   state with a JSON `items` snapshot (kind, id, title, artist, source
+   hints) so the build is reproducible even if the library changes.
+   `downloads.max_active_per_user` (default 2) limits how many
+   pending/processing archives one user may hold. Creation, file download,
+   deletion, and clear go through the shared Redis sliding-window rate
+   limiter; the read-only list/detail endpoints are unthrottled so the
+   page can poll freely.
+3. `tasks/downloads.py`'s `build_download_archive` Celery task materializes
+   each item into a ZIP on local disk, stores it through `StorageService`
+   as a private `StoredFile`, and flips the row to `ready` (or `failed`
+   when no item succeeded). Per-item failures are collected into
+   `item_errors`, so a partially failed archive is still delivered.
+   Instance-wide concurrency is capped at
+   `downloads.max_concurrent_archives` (default 2) by a Redis sorted-set
+   semaphore (`songhive:downloads:archive-slots`) with expiring leases —
+   tasks that can't take a slot requeue themselves; the limiter fails open
+   when Redis is unavailable.
+4. The requester gets a `download` notification (`archive_id` + `label`
+   payload) pointing at the Downloads page.
+
+**Item materialization** covers every playable source:
+
+- Local tracks stream from their `StoredFile` via the storage backend.
+- External-library tracks go through the provider adapter's `download` /
+  `open_stream` (`services/streaming.py`'s external-stream helpers).
+- Remote (federated) objects and podcast episode enclosures are fetched to
+  disk by `federation/fetch.py`'s `guarded_download` — the same SSRF
+  protection as `guarded_fetch` (DNS/IP checks, per-redirect-hop
+  revalidation, remote-domain moderation), streamed with a
+  `fetch_timeout_seconds` budget and a `max_item_bytes` cap (default 2 GiB).
+- Transient remote/external fetches retry `fetch_attempts` times
+  (default 3) with `fetch_backoff_seconds` exponential backoff.
+
+ZIP member names are sanitized (`01 - Artist - Title.mp3`,
+collision-deduped) so archives unzip cleanly on any platform.
+
+**Lifecycle** — `GET /api/v1/downloads/` lists the caller's archives
+(newest first); `GET .../{archive_id}/file` streams a ready ZIP;
+`DELETE .../{archive_id}` removes the row and its backing file;
+`POST .../clear` removes all ready/failed rows. The hourly
+`cleanup_completed_downloads` beat task deletes ready/failed archives
+older than `downloads.retention_hours` (default 24) and marks
+pending/processing rows stale for more than `downloads.stale_run_hours`
+(default 6) as failed.
+
+**Frontend** — `TrackList.vue`'s bulk-edit bar, `AlbumView`, `ArtistView`
+and `PlaylistView` expose a Download action through the shared
+`useDownloadArchive` composable (toast feedback + link to the Downloads
+page). `DownloadsView` (`/downloads`, own nav entry) polls every five
+seconds while archives are active and offers per-archive download/delete
+plus a confirmed "clear completed" action. `api/downloads.ts` and the
+regenerated `types.ts` carry the typed client.
 
 ---
 
@@ -2448,8 +2528,11 @@ user profiles).
 `NotificationPreference` (unique per `(user_id, type)` with `in_app`,
 `email`, and `email_digest` toggles). The notification types are
 `follow`, `like`, `boost`, `quote`, `reply`, `mention`, `share`,
-`webmention`, `activity`, and `report` (admin-only: a user report was
-filed — links to `/admin/reports`). `ActivitySubscription` rows
+`webmention`, `activity`, `report` (admin-only: a user report was
+filed — links to `/admin/reports`), and `download` (a bulk-download ZIP
+archive finished building — the payload carries `archive_id`, `label`,
+`size`, and `item_errors`, and `source_url` points at `/downloads`).
+`ActivitySubscription` rows
 record that a local user wants an `activity` notification for every
 activity another actor authors — the "bell" toggle on a user profile.
 Local users are referenced through `target_user_id`, remote actors through
@@ -2761,6 +2844,7 @@ All background work is handled by Celery workers. Redis is the broker
 | `tasks/musicbrainz.py`| MusicBrainz + Cover Art Archive metadata enrichment      |
 | `tasks/images.py`    | Artist image + Cover Art Archive cover enrichment         |
 | `tasks/preview_cards.py`| Fetch + cache per-URL link-preview cards for activities  |
+| `tasks/downloads.py` | ZIP archive builds behind a Redis concurrency semaphore, archive retention cleanup (hourly) |
 | `tasks/storage.py`   | Orphaned `StoredFile` GC, audio-only hash rehash (scheduled) |
 
 The `cleanup_orphaned_files_schedule` config accepts any 5-field cron
@@ -2950,7 +3034,7 @@ Vue.js 3 + TypeScript SPA, bundled with Vite.
 | `frontend/src/components/admin/` | Admin-specific shared components (e.g. `StatCard` for the dashboard) |
 | `frontend/src/components/player/` | Persistent player bar (`PlayerBar`, `NowPlaying`, `QueuePanel`, `VolumeControl`, `OutputSelector`) mounted in `AppLayout` so playback survives route changes, backed by `stores/player.ts` and the singleton `player/engine.ts` (dual `HTMLAudioElement` primary/preload). `OutputSelector` routes playback between "This device" and configured server-side outputs via `stores/playback.ts`; output management lives in the profile Outputs tab (`views/OutputsView.vue`, `stores/outputs.ts`). `QueueTrack` extends `TrackResponse` with `stream_url` — a direct media URL used instead of `/api/v1/stream/{id}` for audio without a local track row — and `remote`, which suppresses library links and listen-history reporting |
 | `frontend/src/layouts/` | App, auth, and admin layouts |
-| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, `/settings` for the authenticated user, `UserProfileView` for `/@{username}`, `UsersDirectoryView` for `/users`, `SearchView` for the public `/search` page, plus 403/404 and placeholder views). `SearchView` renders grouped, independently sortable and paginated sections for every searchable entity via `useSearchSections`; the shared `SearchBar` supports an optional autocomplete mode backed by the aggregate `/api/v1/search/` endpoint, with `SearchSuggestions` offering arrow-key navigation (Enter picks the highlighted item) via an exposed `handleKeydown` hook the controlling input forwards to. When the caller passes `remote` (the `remote_available` flag from the search response) and the query looks federated — an `https://` URL or an `@user@domain` FQN — `SearchSuggestions` appends a "See on the Fediverse" entry that emits `remote-lookup`; `SearchView` routes it to `/remote/lookup`. `UserProfileView` renders user bios through the `RichText` component, which linkifies hashtags, mentions and URLs; library, playlist, album, and track detail views render the owner through the `UserLink` component |
+| `frontend/src/views/` | Page-level components, including `views/admin/` (Dashboard, Users, Settings, Reports, Invites, Audit, Tasks, Celery) behind the `/admin` guard (Home, Library, Album/Artist/Track/Playlist lists and details, History, Favorites, Files, File detail, Downloads, Radio station list/create/play, About, Login, Register, PasswordReset, VerifyEmail, `/settings` for the authenticated user, `UserProfileView` for `/@{username}`, `UsersDirectoryView` for `/users`, `SearchView` for the public `/search` page, plus 403/404 and placeholder views). `SearchView` renders grouped, independently sortable and paginated sections for every searchable entity via `useSearchSections`; the shared `SearchBar` supports an optional autocomplete mode backed by the aggregate `/api/v1/search/` endpoint, with `SearchSuggestions` offering arrow-key navigation (Enter picks the highlighted item) via an exposed `handleKeydown` hook the controlling input forwards to. When the caller passes `remote` (the `remote_available` flag from the search response) and the query looks federated — an `https://` URL or an `@user@domain` FQN — `SearchSuggestions` appends a "See on the Fediverse" entry that emits `remote-lookup`; `SearchView` routes it to `/remote/lookup`. `UserProfileView` renders user bios through the `RichText` component, which linkifies hashtags, mentions and URLs; library, playlist, album, and track detail views render the owner through the `UserLink` component |
 | `frontend/src/api/` | Typed HTTP client (`openapi-typescript` generated `types.ts`), per-resource modules including `admin.ts` for the admin panel, WebSocket event bus, stream URL helper |
 | `frontend/src/i18n/` | `vue-i18n` setup with lazy-loaded locales |
 | `frontend/src/styles/tokens.css` | CSS custom properties for theming |
@@ -3102,6 +3186,10 @@ REST API under `/api/v1/`:
 │                   #   (federation_followers + federation_actor_cache), returning
 │                   #   'user@domain' handles for mention completion
 ├── files/          # Generic file upload/list/download (StoredFile)
+├── downloads/      # Bulk-download ZIP archives: create (explicit ids or
+│                   #   album/artist/playlist/library container), list, status,
+│                   #   file download, delete, clear completed; per-user active
+│                   #   cap + rate limits, built asynchronously by Celery
 ├── libraries/      # Library management + add/remove tracks/albums/artists
 ├── playlists/      # Playlist CRUD + add/remove/reorder tracks/albums/artists + list tracks
 ├── favorites/      # Favorites/bookmarks

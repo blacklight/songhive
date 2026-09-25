@@ -127,6 +127,29 @@ enabled = true
 # batches are queued as Celery tasks.
 # bulk_import_sync_threshold = 20
 
+[downloads]
+# Enable bulk download archives (ZIP generation for tracks, albums, artists,
+# playlists) and the /api/v1/downloads endpoints.
+# enabled = true
+# Maximum number of items a single archive request may resolve to.
+# max_items = 500
+# Maximum number of archive builds running concurrently across the instance.
+# max_concurrent_archives = 2
+# Maximum number of pending/processing archives a single user may hold.
+# max_active_per_user = 2
+# Hours a completed archive is kept before periodic cleanup removes it.
+# retention_hours = 24
+# Hours after which an archive stuck in pending/processing is marked failed.
+# stale_run_hours = 6
+# Attempts per item for remote/external fetches (exponential backoff).
+# fetch_attempts = 3
+# Base delay in seconds between item fetch attempts.
+# fetch_backoff_seconds = 2.0
+# Timeout in seconds for each remote audio fetch hop.
+# fetch_timeout_seconds = 30.0
+# Maximum bytes fetched for a single remote/external item.
+# max_item_bytes = 2147483648
+
 [auth]
 # Supported: "open", "invite-only", "approval-required", "closed"
 registration_mode = "open"

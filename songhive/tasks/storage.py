@@ -32,6 +32,7 @@ async def _cleanup_orphaned_files(storage: StorageBackend, session: AsyncSession
 
     from ..models.album import Album
     from ..models.artist import Artist
+    from ..models.download import DownloadArchive
     from ..models.library import Library
     from ..models.playlist import Playlist
     from ..models.stored_file import StoredFile
@@ -51,6 +52,7 @@ async def _cleanup_orphaned_files(storage: StorageBackend, session: AsyncSession
         select(Playlist.image_file_id).where(Playlist.image_file_id.is_not(None)),
         select(Playlist.cover_file_id).where(Playlist.cover_file_id.is_not(None)),
         select(TranscodedFile.stored_file_id),
+        select(DownloadArchive.archive_file_id).where(DownloadArchive.archive_file_id.is_not(None)),
     )
 
     stmt = (

@@ -24,6 +24,7 @@ import { useCollectionItem } from "@/composables/useCollectionItem";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
+import { useDownloadArchive } from "@/composables/useDownloadArchive";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useFeedLinks } from "@/composables/useFeedLinks";
 import type { QueueTrack } from "@/player/types";
@@ -124,6 +125,7 @@ const {
 } = deleteAlbum;
 
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
+const { requestArchive } = useDownloadArchive();
 
 function onTrackShare(track: QueueTrack) {
   openShare(
@@ -155,6 +157,13 @@ const actions = computed(() => [
     icon: "comments",
     variant: "secondary" as const,
     visible: true,
+  },
+  {
+    key: "download",
+    label: t("common.download"),
+    icon: "download",
+    variant: "secondary" as const,
+    visible: authStore.isAuthenticated,
   },
   {
     key: "edit",
@@ -210,6 +219,9 @@ async function onAction(key: string) {
         name: "albumActivities",
         params: { id: album.value.id },
       });
+      break;
+    case "download":
+      await requestArchive({ album_id: album.value.id });
       break;
     case "edit":
       await router.push({

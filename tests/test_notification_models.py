@@ -15,7 +15,7 @@ from songhive.models.notification import (
 
 
 def test_notification_type_enum_values():
-    """NotificationType exposes the ten expected string values."""
+    """NotificationType exposes the eleven expected string values."""
     assert [t.value for t in NotificationType] == [
         "follow",
         "like",
@@ -27,6 +27,7 @@ def test_notification_type_enum_values():
         "webmention",
         "activity",
         "report",
+        "download",
     ]
     assert NOTIFICATION_TYPES == tuple(t.value for t in NotificationType)
 

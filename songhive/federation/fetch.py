@@ -22,6 +22,7 @@ import json
 import logging
 import socket
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -232,6 +233,111 @@ def guarded_fetch(
                         "etag": response.headers.get("ETag"),
                         "last_modified": response.headers.get("Last-Modified"),
                     },
+                )
+            finally:
+                response.close()
+    finally:
+        session.close()
+
+    raise FetchError(f"Too many redirects fetching {url}", status_code=502, url=url)
+
+
+@dataclass
+class DownloadResult:
+    """A successful :func:`guarded_download`."""
+
+    url: str  # final URL after redirects
+    status_code: int
+    content_type: str
+    size: int
+
+
+def guarded_download(
+    url: str,
+    dest_path: Path,
+    *,
+    headers: Optional[dict] = None,
+    timeout: float = FETCH_TIMEOUT,
+    max_bytes: int = 0,
+    max_redirects: int = MAX_REDIRECTS,
+    check_url: Optional[Callable[[str], None]] = None,
+) -> DownloadResult:
+    """
+    Stream ``url`` into ``dest_path`` with the same SSRF protection as
+    :func:`guarded_fetch`, for binary payloads (audio media, enclosures).
+
+    Unlike ``guarded_fetch`` the response body is written to disk instead of
+    memory and no ActivityPub content-type allowlist is applied — media
+    servers answer with arbitrary ``audio/*``/``application/octet-stream``
+    types. ``max_bytes`` is a hard cap: exceeding it raises ``FetchError``
+    and removes the partial destination file.
+
+    Every hop — the initial URL and each redirect target — is validated by
+    :func:`validate_fetch_url` and the optional ``check_url`` callback.
+    """
+    base_headers = {
+        "Accept": "*/*",
+        "User-Agent": get_default_user_agent(),
+    }
+    if headers:
+        base_headers.update(headers)
+
+    session = requests.Session()
+    current = url
+    try:
+        for _ in range(max_redirects + 1):
+            validate_fetch_url(current)
+            if check_url is not None:
+                check_url(current)
+            try:
+                response = session.get(
+                    current,
+                    timeout=timeout,
+                    allow_redirects=False,
+                    stream=True,
+                    headers=dict(base_headers),
+                )
+            except requests.RequestException as exc:
+                raise FetchError(f"Remote fetch failed: {exc}", url=current) from exc
+
+            try:
+                if response.is_redirect or response.is_permanent_redirect:
+                    location = response.headers.get("Location")
+                    if not location:
+                        raise FetchError("Redirect without Location header", url=current)
+                    current = urljoin(current, location)
+                    continue
+
+                if response.status_code in (404, 410):
+                    raise FetchNotFound(f"Remote object not found ({response.status_code})", url=current)
+                if response.status_code != 200:
+                    raise FetchError(
+                        f"Remote server returned {response.status_code}",
+                        status_code=502,
+                        url=current,
+                    )
+
+                content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                size = 0
+                try:
+                    with open(dest_path, "wb") as dest:
+                        for chunk in response.iter_content(64 * 1024):
+                            size += len(chunk)
+                            if max_bytes and size > max_bytes:
+                                raise FetchError(
+                                    f"Remote payload exceeds {max_bytes} bytes",
+                                    status_code=502,
+                                    url=current,
+                                )
+                            dest.write(chunk)
+                except Exception:
+                    dest_path.unlink(missing_ok=True)
+                    raise
+                return DownloadResult(
+                    url=current,
+                    status_code=response.status_code,
+                    content_type=content_type,
+                    size=size,
                 )
             finally:
                 response.close()

@@ -259,7 +259,8 @@
     "notifications": "Notifications",
     "mentions": "Mentions",
     "unreadNotifications": "{count} unread notifications",
-    "podcasts": "Podcasts"
+    "podcasts": "Podcasts",
+    "downloads": "Downloads"
   },
   "errors": {
     "unknown": "Something went wrong. Please try again.",
@@ -1761,7 +1762,8 @@
       "saveSuccess": "Updated metadata for {count} tracks.",
       "savePartial": "Updated {updated} of {total} tracks.",
       "saveError": "Could not update {count} tracks: {message}",
-      "empty": "No tracks selected."
+      "empty": "No tracks selected.",
+      "download": "Download"
     },
     "addToCollection": {
       "addToLibrary": "Add to library",
@@ -1991,7 +1993,8 @@
       "activityAnnounce": "boosted {object}",
       "activityReply": "replied to {object}",
       "activityQuote": "quoted {object}",
-      "report": "filed a report"
+      "report": "filed a report",
+      "download": "your download is ready"
     },
     "objects": {
       "post": "post",
@@ -2055,7 +2058,8 @@
         "share": "Shares",
         "webmention": "Webmentions",
         "activity": "User activity",
-        "report": "Reports"
+        "report": "Reports",
+        "download": "Downloads"
       }
     },
     "onItem": "on {title}",
@@ -2197,5 +2201,25 @@
     "deleteError": "Could not delete output: {message}",
     "deleteConfirm": "Delete the output \"{name}\"?",
     "loadError": "Could not load outputs: {message}"
+  },
+  "downloads": {
+    "title": "Downloads",
+    "empty": "No downloads yet. Select tracks or open an album, artist or playlist and choose Download.",
+    "queued": "Download \"{label}\" queued — you will be notified when it is ready.",
+    "requestFailed": "Could not queue the download: {message}",
+    "downloadFailed": "Could not download the archive: {message}",
+    "deleteFailed": "Could not delete the archive: {message}",
+    "clearCompleted": "Clear completed",
+    "clearCompletedConfirm": "Delete all finished downloads? The archive files will be removed.",
+    "cleared": "Cleared {count} download(s).",
+    "itemCount": "{count} item | {count} items",
+    "itemErrors": "{count} item could not be included | {count} items could not be included",
+    "refresh": "Refresh",
+    "status": {
+      "pending": "Queued",
+      "processing": "Building…",
+      "ready": "Ready",
+      "failed": "Failed"
+    }
   }
 }

@@ -18,6 +18,7 @@ import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useShareDialog } from "@/composables/useShareDialog";
+import { useDownloadArchive } from "@/composables/useDownloadArchive";
 import { useFeedLinks } from "@/composables/useFeedLinks";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useCanManage } from "@/composables/useCanManage";
@@ -126,6 +127,7 @@ const {
 );
 
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
+const { requestArchive } = useDownloadArchive();
 
 const deleteArtist = useEntityDelete({
   delete: deleteArtistApi,
@@ -206,6 +208,13 @@ const actions = computed(() => [
     visible: true,
   },
   {
+    key: "download",
+    label: t("common.download"),
+    icon: "download",
+    variant: "secondary" as const,
+    visible: authStore.isAuthenticated,
+  },
+  {
     key: "edit",
     label: t("common.edit"),
     icon: "pen-to-square",
@@ -247,6 +256,9 @@ async function onAction(key: string) {
         name: "artistActivities",
         params: { id: artist.value.id },
       });
+      break;
+    case "download":
+      await requestArchive({ artist_id: artist.value.id });
       break;
     case "edit":
       await router.push({

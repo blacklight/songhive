@@ -57,6 +57,7 @@ const TYPE_ICONS: Record<string, string> = {
   webmention: "link",
   activity: "bell",
   report: "flag",
+  download: "download",
 };
 
 const filters = [
@@ -358,7 +359,11 @@ function str(value: unknown): string | undefined {
 
 function actorName(item: NotificationResponse): string {
   const payload = item.payload ?? {};
-  const name = str(payload.actor_display_name) ?? str(payload.actor_name);
+  const name =
+    str(payload.actor_display_name) ??
+    str(payload.actor_name) ??
+    // Download notifications have no actor; the archive label leads instead.
+    (item.type === "download" ? str(payload.label) : null);
   return name ?? t("notifications.someone");
 }
 
