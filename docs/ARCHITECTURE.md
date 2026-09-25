@@ -3326,8 +3326,13 @@ REST API under `/api/v1/`:
 
 Docker Compose (`docker-compose.yml`) provides a reference deployment:
 
+- `setup` — one-shot root container that creates `./volumes` subdirectories
+  and chowns them to `PUID`/`PGID`, so the other (rootless) services can
+  write to them
 - `songhive` — application container (Tornado server)
-- `celery` — Celery worker container (same image, different entrypoint)
+- `worker` — Celery worker container (same image, different command)
+- `watcher` — external-library filesystem watchdog (same image)
+- `stream-worker` — server-side audio outputs (`streams` profile)
 - `postgres` — PostgreSQL database
 - `redis` — Redis (broker + cache + sessions)
 - `nginx` — Reverse proxy (`docker/nginx.conf`). It proxies everything to the
@@ -3342,7 +3347,11 @@ double as dereferenceable AP objects. Only two paths get special treatment:
 `/ws/` needs the WebSocket upgrade headers and `/api/v1/stream/` disables
 response buffering for real-time audio delivery.
 
-Persistent data is stored under `volumes/`.
+Persistent data is stored under `volumes/`. `config.toml` sits next to
+`docker-compose.yml` and is bind-mounted read-only at
+`/etc/songhive/config.toml`; `.env` (see `.env.example`) holds `PUID`/`PGID`,
+the host HTTP port and `SONGHIVE_*` overrides, which are injected into the
+Songhive containers via `env_file`.
 
 ### systemd
 

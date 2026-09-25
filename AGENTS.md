@@ -455,12 +455,13 @@ When notable sections are added, changed or removed, remember to update
 
 ## Docker
 
-- Build and start all services (set `PUID`/`PGID` to the host user so
-  containers and volumes are owned by the same UID/GID):
+- Start all services (set `PUID`/`PGID` in `.env` — copied from
+  `.env.example` — or export them, so containers and volumes are owned by the
+  same UID/GID as the host user). By default the published image is pulled;
+  `--build` only does something if the `build:` blocks in
+  `docker-compose.yml` are uncommented for a local build:
 
   ```bash
-  export PUID=$(id -u)
-  export PGID=$(id -g)
   docker compose up -d --build
   ```
 
@@ -471,13 +472,15 @@ When notable sections are added, changed or removed, remember to update
   ```
 
 - Prepare volume directories manually (otherwise the `setup` service does it
-  automatically at startup):
+  automatically at startup — its commands are inlined in `docker-compose.yml`,
+  no script mount needed):
 
   ```bash
   PUID=$(id -u) PGID=$(id -g) ./scripts/setup-volumes.sh
   ```
 
-- Restart after source changes:
+- Restart after source changes (requires uncommented `build:` blocks to have
+  any effect):
 
   ```bash
   docker compose up -d --build songhive worker

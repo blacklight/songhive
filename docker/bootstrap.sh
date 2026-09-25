@@ -18,18 +18,14 @@ else
 fi
 
 DOCKER_DIR="./docker"
-SCRIPTS_DIR="./scripts"
 
 echo "Bootstrapping from branch $BRANCH"
 mkdir -p "$DOCKER_DIR"
-mkdir -p "$SCRIPTS_DIR"
 
 echo "Downloading docker-compose.yml"
 $CURL -o docker-compose.yml "$BASE_URL/$BRANCH/docker-compose.yml"
 echo "Downloading nginx configuration"
 $CURL -o "$DOCKER_DIR/nginx.conf" "$BASE_URL/$BRANCH/docker/nginx.conf"
-echo "Downloading setup volumes script"
-$CURL -o "$SCRIPTS_DIR/setup-volumes.sh" "$BASE_URL/$BRANCH/scripts/setup-volumes.sh"
 
 if [ ! -e config.toml ]; then
     echo "Downloading sample configuration"
@@ -38,8 +34,14 @@ else
     echo "Using existing config.toml"
 fi
 
-chmod +x "$SCRIPTS_DIR/setup-volumes.sh"
+if [ ! -e .env ]; then
+    echo "Downloading sample .env"
+    $CURL -o .env "$BASE_URL/$BRANCH/.env.example"
+else
+    echo "Using existing .env"
+fi
 
 echo
-echo "Set up your instance settings in config.toml."
-echo "Then run docker compose up."
+echo "Set your instance settings in config.toml and .env (make sure that PUID"
+echo "and PGID match your host user, e.g. $(id -u) and $(id -g))."
+echo "Then run docker compose up -d."

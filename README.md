@@ -179,11 +179,11 @@ Songhive can be run either as a complete Docker stack or installed locally with
 
 ### 🏗️ Docker
 
-The Docker Compose setup builds the frontend and backend images, starts
-PostgreSQL and Redis, and wires everything together behind an Nginx reverse
-proxy. The `songhive`, `worker`, `postgres` and `redis` services all run as the
-same non-root UID/GID as the host user, so the files in `./volumes` are owned by
-you and are easy to access from the host.
+The Docker Compose setup pulls the published image, starts PostgreSQL and
+Redis, and wires everything together behind an Nginx reverse proxy. The
+`songhive`, `worker`, `postgres` and `redis` services all run as the same
+non-root UID/GID as the host user (set through `PUID`/`PGID` in `.env`), so the
+files in `./volumes` are owned by you and are easy to access from the host.
 
 #### Latest image
 
@@ -191,6 +191,21 @@ you and are easy to access from the host.
 # Run the docker-compose bootstrap script
 curl -fsSL https://git.fabiomanganiello.com/songhive/raw/branch/main/docker/bootstrap.sh | sh
 ```
+
+The script downloads `docker-compose.yml`, `docker/nginx.conf`, a starter
+`config.toml` and a starter `.env` into the current directory. Edit
+`config.toml` and `.env` (in particular, set `PUID`/`PGID` to your host user's
+UID/GID so the bind-mounted volumes are writable), then start the stack:
+
+```bash
+docker compose up -d
+```
+
+If you assemble the deployment manually instead of using the bootstrap script,
+make sure that `docker-compose.yml`, `config.toml` and `docker/nginx.conf` all
+sit next to each other before running `docker compose up` — the compose file
+fails fast on missing files rather than letting Docker auto-create them as
+root-owned directories.
 
 #### From a local checkout
 
@@ -200,14 +215,19 @@ git clone https://git.fabiomanganiello.com/songhive
 # Or from GitHub: git clone https://github.com/blacklight/songhive
 cd songhive
 
-# Set the UID/GID to match the host user (the same value is used by all
-# rootless services and by the setup step that fixes volume permissions).
-export PUID=$(id -u)
-export PGID=$(id -g)
+# Create the compose environment file and set PUID/PGID to match the host
+# user (the same value is used by all rootless services and by the setup
+# step that fixes volume permissions).
+cp .env.example .env
 
-# Build the images
-docker compose build
+# Create the application configuration
+cp config.toml.example config.toml
 ```
+
+Then run `docker compose up -d`. By default the compose file pulls the
+published image — `docker compose build` is a no-op unless you first
+uncomment the `build:` blocks in `docker-compose.yml`, which is what you want
+if you intend to build the image from the local checkout instead.
 
 ### 🐍 pip
 
@@ -264,7 +284,8 @@ If you are planning to serve Songhive behind a reverse proxy, you can reuse the
 
 - If you installed Songhive through the docker-compose bootstrap script, then
   `config.toml` should be already downloaded under the same folder as
-  `docker-compose.yml`.
+  `docker-compose.yml` — the compose file bind-mounts it into the containers
+  at `/etc/songhive/config.toml`.
 - If you built Songhive from a local checkout, then copy the [example
   configuration file](./config.toml.example):
 
@@ -281,6 +302,14 @@ The application looks for `config.toml` in this order: the path given with
 `--config` or the `SONGHIVE_CONFIG` environment variable, then `./config.toml`,
 then `$XDG_CONFIG_HOME/songhive/config.toml` (or `~/.config/songhive/config.toml`),
 and finally `/etc/songhive/config.toml`.
+
+In the Docker stack, the `.env` file next to `docker-compose.yml` (copy
+[`.env.example`](./.env.example) if you don't have one) serves two purposes:
+Compose interpolates `PUID`/`PGID`, `SONGHIVE_HTTP_PORT` and the instance
+identity variables from it, and every `SONGHIVE_*` variable in it is also
+injected into the containers as an environment variable. Use it for secrets
+(`SONGHIVE_AUTH__SECRET_KEY`, `SONGHIVE_EMAIL__SMTP_PASSWORD`, VAPID keys, ...)
+rather than committing them to `config.toml`.
 
 ### Base configuration
 

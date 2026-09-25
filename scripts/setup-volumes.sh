@@ -12,8 +12,7 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
 fi
 
-mkdir -p "$VOLUMES_DIR/config" \
-         "$VOLUMES_DIR/data" \
+mkdir -p "$VOLUMES_DIR/data" \
          "$VOLUMES_DIR/db" \
          "$VOLUMES_DIR/redis"
 
