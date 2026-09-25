@@ -29,6 +29,7 @@ const filename = defineModel<string>("filename", { required: true });
 const visibility = defineModel<string>("visibility", { required: true });
 const tags = defineModel<string[]>("tags", { required: true });
 const description = defineModel<string>("description", { default: "" });
+const extraArtists = defineModel<string>("extraArtists", { default: "" });
 
 const emit = defineEmits<{ submit: [] }>();
 
@@ -67,6 +68,13 @@ const visibilityOptions = computed(() => {
     <AppInput
       v-model="albumTitle"
       :label="t('browse.edit.album')"
+      :disabled="props.disabled"
+    />
+    <AppInput
+      v-if="!props.bulk"
+      v-model="extraArtists"
+      :label="t('browse.edit.extraArtists')"
+      :hint="t('browse.edit.extraArtistsHint')"
       :disabled="props.disabled"
     />
     <GenreInput

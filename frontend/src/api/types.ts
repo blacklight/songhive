@@ -10066,6 +10066,11 @@ export interface components {
       genre?: string | null;
       /** Description */
       description?: string | null;
+      /**
+       * Extra Artists
+       * @default []
+       */
+      extra_artists?: string[];
       /** Audio Url */
       audio_url?: string | null;
       /** Image Url */
@@ -10188,6 +10193,8 @@ export interface components {
       filename?: string | null;
       /** Description */
       description?: string | null;
+      /** Extra Artists */
+      extra_artists?: string[] | null;
     };
     /**
      * TwoFactorStatusResponse

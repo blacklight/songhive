@@ -81,14 +81,26 @@ def _track_album(track: Track) -> Optional[Album]:
     return track.album
 
 
+def _track_external_ref(track: Track):
+    """Return the active external reference (file- or entity-backed)."""
+    external = getattr(track, "external_track", None)
+    if external is not None and external.state == "active":
+        return external
+    entity = getattr(track, "external_item", None)
+    if entity is not None and entity.state == "active":
+        return entity
+    return None
+
+
 def _track_filename(track: Track) -> Optional[str]:
     """Return the best-known filename for a track's audio payload."""
     audio_file = track.audio_file if _is_loaded(track, "audio_file") else None
     if audio_file is not None and audio_file.original_filename:
         return audio_file.original_filename
-    external = getattr(track, "external_track", None)
-    if external is not None and external.state == "active":
-        return PurePosixPath(external.provider_key).name
+    external = _track_external_ref(track)
+    if external is not None:
+        display_path = (external.raw_metadata or {}).get("display_path") or external.provider_key
+        return PurePosixPath(display_path).name
     return None
 
 
@@ -99,8 +111,8 @@ def _track_mime(track: Track) -> str:
     audio_file = track.audio_file if _is_loaded(track, "audio_file") else None
     if audio_file is not None and audio_file.content_type:
         return audio_file.content_type
-    external = getattr(track, "external_track", None)
-    if external is not None and external.provider_mime_type:
+    external = _track_external_ref(track)
+    if external is not None and getattr(external, "provider_mime_type", None):
         return external.provider_mime_type
     return "audio/mpeg"
 
@@ -120,10 +132,17 @@ def _track_size(track: Track) -> Optional[int]:
     audio_file = track.audio_file if _is_loaded(track, "audio_file") else None
     if audio_file is not None:
         return audio_file.size
-    external = getattr(track, "external_track", None)
-    if external is not None and external.provider_size:
-        return external.provider_size
-    return None
+    external = _track_external_ref(track)
+    if external is None:
+        return None
+    provider_size = getattr(external, "provider_size", None)
+    if provider_size:
+        return provider_size
+    raw_size = (getattr(external, "raw_metadata", None) or {}).get("Size")
+    try:
+        return int(raw_size) if raw_size is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _track_release_year(track: Track) -> Optional[int]:

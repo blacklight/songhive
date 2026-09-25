@@ -21,6 +21,7 @@ from ..models.activity import Activity, ActivityTarget
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.collection_item import CollectionItem
+from ..models.external_item import ExternalItem
 from ..models.external_library import ExternalLibrary
 from ..models.external_sync_run import ExternalSyncRun
 from ..models.external_track import ExternalTrack
@@ -612,12 +613,19 @@ async def delete_external_library(
     library_id = str(external_library.library_id)
 
     # Delete all Songhive tracks that were imported through this external
-    # library. This removes playlist entries, library associations, and empty
-    # albums/artists through the existing track deletion helper.
+    # library (file-backed via ``ExternalTrack``, entity-backed via
+    # ``ExternalItem``). This removes playlist entries, library associations,
+    # and empty albums/artists through the existing track deletion helper.
     track_result = await session.execute(
         select(ExternalTrack.track_id)
         .where(ExternalTrack.external_library_id == external_library_id)
         .where(ExternalTrack.track_id.is_not(None))
+        .union(
+            select(ExternalItem.track_id)
+            .where(ExternalItem.external_library_id == external_library_id)
+            .where(ExternalItem.kind == "track")
+            .where(ExternalItem.track_id.is_not(None))
+        )
     )
     track_ids = [str(row[0]) for row in track_result.all()]
 
@@ -626,9 +634,23 @@ async def delete_external_library(
         ups, _ = await delete_tracks_bulk(session, storage, track_ids, user=user)
         unpublish.extend(ups)
 
+    # Provider-owned playlists disappear with the library.
+    playlist_result = await session.execute(
+        select(ExternalItem.playlist_id)
+        .where(ExternalItem.external_library_id == external_library_id)
+        .where(ExternalItem.kind == "playlist")
+        .where(ExternalItem.playlist_id.is_not(None))
+    )
+    for playlist_id in {str(row[0]) for row in playlist_result.all()}:
+        playlist = await session.get(Playlist, playlist_id)
+        if playlist is not None:
+            await session.execute(delete(PlaylistTrack).where(PlaylistTrack.playlist_id == playlist_id))
+            await session.delete(playlist)
+
     # Explicitly remove external-library rows for databases without FK cascade.
     await session.execute(delete(ExternalSyncRun).where(ExternalSyncRun.external_library_id == external_library_id))
     await session.execute(delete(ExternalTrack).where(ExternalTrack.external_library_id == external_library_id))
+    await session.execute(delete(ExternalItem).where(ExternalItem.external_library_id == external_library_id))
     await session.execute(delete(ExternalLibrary).where(ExternalLibrary.id == external_library_id))
 
     # Only delete the underlying library if it is now empty, so an external

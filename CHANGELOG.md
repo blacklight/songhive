@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `external`: Support for Jellyfin external libraries.
+
 ## 0.3.2
 
 ### Added

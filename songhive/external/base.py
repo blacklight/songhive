@@ -9,10 +9,13 @@ from typing import Any, AsyncIterator, ClassVar, Optional
 
 from .errors import ExternalLibraryError, UnsupportedExternalOperation
 from .types import (
+    ExternalAlbumMetadata,
+    ExternalArtistMetadata,
     ExternalHealth,
     ExternalItemRef,
     ExternalLibraryCapabilities,
     ExternalMutationResult,
+    ExternalPlaylistMetadata,
     ExternalStream,
     ExternalTrackMetadata,
 )
@@ -43,6 +46,39 @@ class ExternalLibraryAdapter(ABC):
         """Asynchronously iterate provider items."""
         if False:
             yield ExternalItemRef(provider_key="", display_path="")
+
+    async def iter_albums(
+        self,
+        config: dict,
+        since: Optional[datetime] = None,
+        scope: Optional[str] = None,
+    ) -> AsyncIterator[ExternalAlbumMetadata]:
+        """Asynchronously iterate provider albums (entity-backed providers)."""
+        raise UnsupportedExternalOperation("iter_albums is not supported by this adapter")
+        if False:
+            yield ExternalAlbumMetadata(provider_key="", title="")
+
+    async def iter_artists(
+        self,
+        config: dict,
+        since: Optional[datetime] = None,
+        scope: Optional[str] = None,
+    ) -> AsyncIterator[ExternalArtistMetadata]:
+        """Asynchronously iterate provider artists (entity-backed providers)."""
+        raise UnsupportedExternalOperation("iter_artists is not supported by this adapter")
+        if False:
+            yield ExternalArtistMetadata(provider_key="", name="")
+
+    async def iter_playlists(
+        self,
+        config: dict,
+        since: Optional[datetime] = None,
+        scope: Optional[str] = None,
+    ) -> AsyncIterator[ExternalPlaylistMetadata]:
+        """Asynchronously iterate provider playlists (entity-backed providers)."""
+        raise UnsupportedExternalOperation("iter_playlists is not supported by this adapter")
+        if False:
+            yield ExternalPlaylistMetadata(provider_key="", title="")
 
     def capabilities(self) -> ExternalLibraryCapabilities:
         """Return the cached capabilities populated by validate_config."""

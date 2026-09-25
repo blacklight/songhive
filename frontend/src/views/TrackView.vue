@@ -290,6 +290,9 @@ watch(
               >
                 {{ artist.name }}
               </RouterLink>
+              <span v-if="track.extra_artists?.length"
+                >, {{ track.extra_artists.join(", ") }}</span
+              >
             </span>
             <span v-else-if="track.artist_id" class="track-view__meta-item">
               <AppIcon

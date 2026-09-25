@@ -20,6 +20,7 @@ from ..config.schema import SonghiveConfig
 from ..external.errors import ExternalItemNotFound, UnsupportedExternalOperation
 from ..external.registry import get_external_adapter
 from ..external.types import ExternalItemRef, ExternalStream
+from ..models.external_item import ExternalItem
 from ..models.external_track import ExternalTrack
 from ..models.history import ListeningHistory
 from ..models.stored_file import StoredFile
@@ -244,32 +245,39 @@ async def _load_external_stream_request(
     session: AsyncSession,
     track_id: str,
     range_header: Optional[str],
-) -> Optional[tuple[Track, ExternalTrack, dict, Any, ExternalItemRef, Optional[tuple[int, int]]]]:
-    """Load the track, external item, adapter, and optional byte range."""
+) -> Optional[tuple[Track, Union[ExternalTrack, ExternalItem], dict, Any, ExternalItemRef, Optional[tuple[int, int]]]]:
+    """Load the track, external reference, adapter, and optional byte range."""
     result = await session.execute(
         select(Track)
         .where(Track.id == track_id)
-        .options(selectinload(Track.external_track).selectinload(ExternalTrack.external_library))
+        .options(
+            selectinload(Track.external_track).selectinload(ExternalTrack.external_library),
+            selectinload(Track.external_item).selectinload(ExternalItem.external_library),
+        )
     )
     track = cast(Optional[Track], result.scalar_one_or_none())
     if track is None:
         return None
 
-    external_track = track.external_track
-    if external_track is None:
+    # File-backed providers reference the track via ``ExternalTrack``;
+    # entity-backed providers via ``ExternalItem(kind="track")``.
+    external_ref: Union[ExternalTrack, ExternalItem, None] = track.external_track
+    if external_ref is None:
+        external_ref = track.external_item
+    if external_ref is None:
         return None
 
-    if external_track.state in ("shadowed", "tombstoned", "missing", "error"):
+    if external_ref.state in ("shadowed", "tombstoned", "missing", "error"):
         raise ExternalItemNotFound(
             f"External track {track_id} is not available",
-            provider_key=external_track.provider_key,
+            provider_key=external_ref.provider_key,
         )
 
-    external_library = external_track.external_library
+    external_library = external_ref.external_library
     if external_library is None or not external_library.enabled:
         raise ExternalItemNotFound(
             f"External library for track {track_id} is not available",
-            provider_key=external_track.provider_key,
+            provider_key=external_ref.provider_key,
         )
 
     raw_config = external_library.config
@@ -279,7 +287,7 @@ async def _load_external_stream_request(
         except Exception as exc:
             raise ExternalItemNotFound(
                 f"Could not decrypt external library config for track {track_id}",
-                provider_key=external_track.provider_key,
+                provider_key=external_ref.provider_key,
             ) from exc
     else:
         config = dict(raw_config or {})
@@ -287,26 +295,46 @@ async def _load_external_stream_request(
     adapter_cls = get_external_adapter(external_library.provider_type)
     adapter = adapter_cls()
 
+    provider_size: Optional[int] = None
+    provider_mime_type: Optional[str] = None
+    checksum: Optional[str] = None
+    sha256: Optional[str] = None
+    display_path = external_ref.provider_key
+    if isinstance(external_ref, ExternalTrack):
+        provider_size = external_ref.provider_size
+        provider_mime_type = external_ref.provider_mime_type
+        checksum = external_ref.provider_checksum
+        sha256 = external_ref.sha256
+    else:
+        raw_meta = external_ref.raw_metadata or {}
+        if isinstance(raw_meta.get("display_path"), str):
+            display_path = raw_meta["display_path"]
+        raw_size = raw_meta.get("Size")
+        try:
+            provider_size = int(raw_size) if raw_size is not None else None
+        except (TypeError, ValueError):
+            provider_size = None
+
     item = ExternalItemRef(
-        provider_key=external_track.provider_key,
-        display_path=external_track.provider_key,
-        etag=external_track.provider_etag,
-        mtime=external_track.provider_mtime,
-        size=external_track.provider_size,
-        mime_type=track.audio_mime_type or external_track.provider_mime_type,
-        checksum=external_track.provider_checksum,
-        sha256=external_track.sha256,
+        provider_key=external_ref.provider_key,
+        display_path=display_path,
+        etag=external_ref.provider_etag,
+        mtime=external_ref.provider_mtime,
+        size=provider_size,
+        mime_type=track.audio_mime_type or provider_mime_type,
+        checksum=checksum,
+        sha256=sha256,
     )
 
     capabilities = external_library.capabilities or {}
     range_tuple: Optional[tuple[int, int]] = None
     if capabilities.get("range_read") is not False and range_header:
         try:
-            range_tuple = _parse_external_range_header(range_header, external_track.provider_size)
+            range_tuple = _parse_external_range_header(range_header, provider_size)
         except ValueError:
             range_tuple = None
 
-    return track, external_track, config, adapter, item, range_tuple
+    return track, external_ref, config, adapter, item, range_tuple
 
 
 async def resolve_external_stream(

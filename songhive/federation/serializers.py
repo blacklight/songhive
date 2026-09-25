@@ -19,7 +19,14 @@ from sqlalchemy import inspect as sa_inspect
 
 from ..models import Album, Artist, StoredFile, Track, Visibility
 from ..services.genres import extract_genres_from_track, genres_to_tags
-from ._common import active_external_track, get_stream_url, get_tag_url, get_track_download_path, get_track_url
+from ._common import (
+    active_external_item,
+    active_external_track,
+    get_stream_url,
+    get_tag_url,
+    get_track_download_path,
+    get_track_url,
+)
 
 # Namespaced keys stamped on attachment docs produced by
 # ``stored_file_to_attachment``/``track_to_attachment`` so edits can tell
@@ -555,9 +562,17 @@ def track_to_audio_object(
     duration_seconds = int(track.duration) if track.duration else 0
     audio_file = getattr(track, "audio_file", None) if "audio_file" not in unloaded else None
     external_track = active_external_track(track)
+    external_item = active_external_item(track)
     size = int(audio_file.size) if audio_file is not None and audio_file.size else 0
     if not size and external_track is not None and external_track.provider_size:
         size = int(external_track.provider_size)
+    if not size and external_item is not None:
+        raw_size = (external_item.raw_metadata or {}).get("Size")
+        if raw_size:
+            try:
+                size = int(raw_size)
+            except (TypeError, ValueError):
+                pass
     bitrate = int(size * 8 / duration_seconds) if size and duration_seconds else 0
 
     # The ``text/html`` page link is always present so remote renderers can

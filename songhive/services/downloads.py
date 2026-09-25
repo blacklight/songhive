@@ -369,8 +369,18 @@ async def _materialize_track(
     # Extension hints: the provider's own filename/key beats a MIME guess;
     # the track's recorded mime is the last fallback.
     async with get_session() as session:
-        track = await session.get(Track, item.ref, options=[selectinload(Track.external_track)])
-    name_hint = track.external_track.provider_key if track and track.external_track else None
+        track = await session.get(
+            Track,
+            item.ref,
+            options=[
+                selectinload(Track.external_track),
+                selectinload(Track.external_item),
+            ],
+        )
+    external_ref = None
+    if track is not None:
+        external_ref = track.external_track or track.external_item
+    name_hint = external_ref.provider_key if external_ref is not None else None
     mime_hint = track.audio_mime_type if track else None
 
     external_path, content_type = await _with_retries(config, _fetch_external, retryable=_external_retryable)

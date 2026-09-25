@@ -15,6 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ._enums import Visibility
 from .base import Base, TZDateTime
+from .external_item import ExternalItem
 from .external_track import ExternalTrack
 
 if TYPE_CHECKING:
@@ -43,6 +44,9 @@ class Track(Base):
     musicbrainz_enriched_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
     genre: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Additional credited artists beyond the primary ``artist_id`` (feat./with).
+    # JSON list of artist name strings; None/empty means single-artist.
+    extra_artists: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     audio_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("stored_files.id"), nullable=True, index=True)
     image_file_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("stored_files.id"),
@@ -110,4 +114,16 @@ class Track(Base):
         lazy="selectin",
         primaryjoin="Track.id == ExternalTrack.track_id",
         remote_side=[ExternalTrack.track_id],
+    )
+    external_item: Mapped[Optional["ExternalItem"]] = relationship(
+        "ExternalItem",
+        uselist=False,
+        viewonly=True,
+        lazy="selectin",
+        primaryjoin="and_(Track.id == ExternalItem.track_id, ExternalItem.kind == 'track')",
+        remote_side=[ExternalItem.track_id],
+        # A track may be referenced by more than one entity provider; prefer
+        # the most recently seen reference (active rows are refreshed every
+        # sync, missing/tombstoned ones are not).
+        order_by=ExternalItem.last_seen_at.desc(),
     )

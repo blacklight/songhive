@@ -9,20 +9,6 @@ from typing import Any, AsyncIterator, Literal, Optional
 
 
 @dataclass(frozen=True)
-class ExternalItemRef:
-    """Reference to an item on an external provider."""
-
-    provider_key: str
-    display_path: str
-    etag: Optional[str] = None
-    mtime: Optional[datetime] = None
-    size: Optional[int] = None
-    mime_type: Optional[str] = None
-    checksum: Optional[str] = None
-    sha256: Optional[str] = None
-
-
-@dataclass(frozen=True)
 class ExternalTrackMetadata:
     """Metadata for a track stored on an external provider."""
 
@@ -38,6 +24,88 @@ class ExternalTrackMetadata:
     musicbrainz_id: Optional[str] = None
     cover_art: Optional[bytes] = None
     cover_art_mime: Optional[str] = None
+    raw_metadata: Optional[dict[str, Any]] = None
+    # Entity-provider extensions: richer, multi-valued provider metadata.
+    # File providers leave these unset.
+    artists: tuple[str, ...] = ()
+    album_artists: tuple[str, ...] = ()
+    genres: tuple[str, ...] = ()
+    cover_url: Optional[str] = None
+    description: Optional[str] = None
+    composer: Optional[str] = None
+    disc_count: Optional[int] = None
+    provider_ids: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ExternalItemRef:
+    """Reference to an item on an external provider."""
+
+    provider_key: str
+    display_path: str
+    etag: Optional[str] = None
+    mtime: Optional[datetime] = None
+    size: Optional[int] = None
+    mime_type: Optional[str] = None
+    checksum: Optional[str] = None
+    sha256: Optional[str] = None
+    # Entity-backed providers attach the full metadata inline so the sync
+    # never needs a separate ``read_metadata`` call.
+    metadata: Optional[ExternalTrackMetadata] = None
+
+
+@dataclass(frozen=True)
+class ExternalAlbumMetadata:
+    """Provider-authored metadata for an album entity."""
+
+    provider_key: str
+    title: str
+    artist_names: tuple[str, ...] = ()
+    artist_provider_keys: tuple[str, ...] = ()
+    release_year: Optional[int] = None
+    genres: tuple[str, ...] = ()
+    cover_url: Optional[str] = None
+    description: Optional[str] = None
+    provider_ids: dict[str, str] = field(default_factory=dict)
+    etag: Optional[str] = None
+    mtime: Optional[datetime] = None
+    raw_metadata: Optional[dict[str, Any]] = None
+
+
+@dataclass(frozen=True)
+class ExternalArtistMetadata:
+    """Provider-authored metadata for an artist entity."""
+
+    provider_key: str
+    name: str
+    image_url: Optional[str] = None
+    bio: Optional[str] = None
+    provider_ids: dict[str, str] = field(default_factory=dict)
+    etag: Optional[str] = None
+    mtime: Optional[datetime] = None
+    raw_metadata: Optional[dict[str, Any]] = None
+
+
+@dataclass(frozen=True)
+class ExternalPlaylistEntry:
+    """One ordered entry of a provider playlist."""
+
+    position: int
+    track_provider_key: str
+
+
+@dataclass(frozen=True)
+class ExternalPlaylistMetadata:
+    """Provider-authored metadata for a playlist entity."""
+
+    provider_key: str
+    title: str
+    description: Optional[str] = None
+    cover_url: Optional[str] = None
+    owner_name: Optional[str] = None
+    entries: tuple[ExternalPlaylistEntry, ...] = ()
+    etag: Optional[str] = None
+    mtime: Optional[datetime] = None
     raw_metadata: Optional[dict[str, Any]] = None
 
 
@@ -97,4 +165,9 @@ class ExternalLibraryCapabilities:
     delete_source: bool = False
     detect_changes: bool = False
     validate_config: bool = False
+    # Entity-backed providers advertise which entity kinds they enumerate.
+    # ``list_items`` is reused for tracks.
+    list_albums: bool = False
+    list_artists: bool = False
+    list_playlists: bool = False
     limits: Optional[dict[str, Any]] = None

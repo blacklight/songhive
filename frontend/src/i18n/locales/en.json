@@ -988,6 +988,67 @@
             }
           }
         },
+        "jellyfin": {
+          "help": "Connect to a remote Jellyfin server to import its tracks, albums, artists and playlists as first-class library entries. Metadata is read-only and audio is proxied from the server — nothing is copied into Songhive storage.\nRecommended: create an API key in Jellyfin under Dashboard → API Keys. Alternatively, enter a Jellyfin username and password; they are exchanged for a session token once and are not stored beyond the encrypted library configuration.",
+          "fields": {
+            "server_url": {
+              "label": "Server URL",
+              "description": "Base URL of the Jellyfin server (e.g. https://jellyfin.example.com). Private or loopback addresses are rejected."
+            },
+            "api_key": {
+              "label": "API key",
+              "description": "Jellyfin API key (Dashboard → API Keys). Preferred over username/password. Stored encrypted."
+            },
+            "username": {
+              "label": "Username",
+              "description": "Jellyfin username — used with the password below only when no API key is set."
+            },
+            "password": {
+              "label": "Password",
+              "description": "Jellyfin password, exchanged for a session token when no API key is set. Stored encrypted."
+            },
+            "verify_ssl": {
+              "label": "Verify TLS certificate",
+              "description": "Verify the Jellyfin server's TLS certificate. Disable only for testing or trusted private networks — disabling leaves the connection open to MITM impersonation and credential theft."
+            },
+            "timeout": {
+              "label": "Request timeout (seconds)",
+              "description": "How long to wait for each HTTP request to the Jellyfin server."
+            },
+            "collections": {
+              "label": "Libraries",
+              "description": "Comma-separated list of Jellyfin library names or ids to import. Leave empty to import all music libraries."
+            },
+            "include_tracks": {
+              "label": "Import tracks",
+              "description": "Import Jellyfin audio items as tracks."
+            },
+            "include_artists": {
+              "label": "Import artists",
+              "description": "Import Jellyfin artists as first-class artists."
+            },
+            "include_albums": {
+              "label": "Import albums",
+              "description": "Import Jellyfin albums as first-class albums."
+            },
+            "include_playlists": {
+              "label": "Import playlists",
+              "description": "Import Jellyfin playlists as provider-owned playlists."
+            },
+            "sync_metadata": {
+              "label": "Enrich metadata",
+              "description": "Also run Songhive-side MusicBrainz enrichment on imported tracks. Off by default — provider metadata is authoritative."
+            },
+            "sync_cover_art": {
+              "label": "Import cover art",
+              "description": "Import Jellyfin image URLs as track/album/artist artwork (referenced, not downloaded)."
+            },
+            "dedup_musicbrainz": {
+              "label": "Deduplicate by MusicBrainz id",
+              "description": "Match imported artists/albums to existing rows by MusicBrainz id before falling back to name matching. Off by default — matching is name-only and never calls the MusicBrainz API."
+            }
+          }
+        },
         "local": {
           "fields": {
             "root": {
@@ -1623,6 +1684,8 @@
       "artist": "Artist",
       "album": "Album",
       "description": "Description",
+      "extraArtists": "Additional artists",
+      "extraArtistsHint": "Comma-separated list of additional credited artists (e.g. featured artists)",
       "releaseYear": "Release year",
       "filename": "Filename",
       "name": "Name",

@@ -60,7 +60,7 @@ async def test_admin_providers_lists_all(client, admin_user, auth_headers):
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     provider_types = {item["provider_type"] for item in data}
-    assert provider_types == {"dropbox", "fake", "gdrive", "local", "s3", "sftp", "webdav"}
+    assert provider_types == {"dropbox", "fake", "gdrive", "jellyfin", "local", "s3", "sftp", "webdav"}
     fake_item = next(item for item in data if item["provider_type"] == "fake")
     assert fake_item["user_configurable"] is True
     assert fake_item["capabilities_summary"]["list_items"] is True

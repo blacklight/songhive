@@ -180,6 +180,48 @@ def test_update_track(client, sample_tracks, regular_user, auth_headers):
     assert data["disc_number"] == 2
 
 
+def test_update_track_extra_artists(client, sample_tracks, regular_user, auth_headers):
+    """Owners can set and clear secondary artist names."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"extra_artists": ["Feat One", "Guest Two"]},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["extra_artists"] == ["Feat One", "Guest Two"]
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"extra_artists": []},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["extra_artists"] == []
+
+
+def test_update_track_extra_artists_validated(client, sample_tracks, regular_user, auth_headers):
+    """extra_artists rejects oversized lists and overlong names."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    headers = auth_headers(regular_user)
+
+    too_many = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"extra_artists": [f"Artist {i}" for i in range(21)]},
+        headers=headers,
+    )
+    assert too_many.status_code == 422
+
+    too_long = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"extra_artists": ["x" * 257]},
+        headers=headers,
+    )
+    assert too_long.status_code == 422
+
+
 @pytest.mark.asyncio
 async def test_update_track_title_refreshes_notifications(
     client, sample_tracks, regular_user, db_session, auth_headers

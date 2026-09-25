@@ -121,6 +121,35 @@ describe("externalLibraryProviderTemplates", () => {
     ).toBe("textarea");
   });
 
+  it("returns a template for the jellyfin provider", () => {
+    const template = getProviderTemplate("jellyfin");
+    expect(template.providerType).toBe("jellyfin");
+    expect(template.helpI18nKey).toBe(
+      "pages.externalLibraries.providers.jellyfin.help",
+    );
+    const fields = template.fields.map((f) => f.name);
+    expect(fields).toContain("server_url");
+    expect(fields).toContain("api_key");
+    expect(fields).toContain("username");
+    expect(fields).toContain("password");
+    expect(fields).toContain("collections");
+    expect(fields).toContain("include_tracks");
+    expect(fields).toContain("include_albums");
+    expect(fields).toContain("include_artists");
+    expect(fields).toContain("include_playlists");
+    expect(fields).toContain("sync_metadata");
+    expect(fields).toContain("sync_cover_art");
+    expect(template.fields.find((f) => f.name === "server_url")!.required).toBe(
+      true,
+    );
+    expect(template.fields.find((f) => f.name === "api_key")!.type).toBe(
+      "password",
+    );
+    expect(
+      template.fields.find((f) => f.name === "include_tracks")!.default,
+    ).toBe(true);
+  });
+
   it("returns an empty template for unknown providers", () => {
     const template = getProviderTemplate("unknown");
     expect(template.providerType).toBe("unknown");

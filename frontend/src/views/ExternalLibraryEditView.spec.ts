@@ -421,6 +421,160 @@ describe("ExternalLibraryEditView", () => {
     expect(body.config).not.toHaveProperty("ca_bundle");
   });
 
+  it("renders the jellyfin provider form and submits a structured config", async () => {
+    vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
+      {
+        provider_type: "jellyfin",
+        user_configurable: true,
+        capabilities_summary: {},
+      },
+    ]);
+    vi.mocked(externalLibrariesApi.createUserExternalLibrary).mockResolvedValue(
+      {
+        id: "el1",
+        library_id: "lib1",
+        provider_type: "jellyfin",
+        scope: "user",
+        name: "Jellyfin Library",
+        config: { server_url: "https://jellyfin.example.com" },
+        enabled: true,
+        include_in_library_index: false,
+        sync_enabled: true,
+        sync_interval_seconds: null,
+        can_manage: true,
+        can_sync: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    );
+
+    const router = createTestRouter("/settings/external-libraries/new");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      i18n.global.t(
+        "pages.externalLibraries.providers.jellyfin.fields.server_url.label",
+      ),
+    );
+    expect(wrapper.text()).toContain(
+      i18n.global.t(
+        "pages.externalLibraries.providers.jellyfin.fields.include_playlists.label",
+      ),
+    );
+
+    const urlInput = getInputByLabel(
+      i18n.global.t(
+        "pages.externalLibraries.providers.jellyfin.fields.server_url.label",
+      ),
+    );
+    expect(urlInput).not.toBeNull();
+    urlInput!.value = "https://jellyfin.example.com";
+    urlInput!.dispatchEvent(new Event("input"));
+
+    const keyInput = getInputByLabel(
+      i18n.global.t(
+        "pages.externalLibraries.providers.jellyfin.fields.api_key.label",
+      ),
+    );
+    expect(keyInput).not.toBeNull();
+    keyInput!.value = "jf-key-123";
+    keyInput!.dispatchEvent(new Event("input"));
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("pages.externalLibraries.create"),
+    );
+    expect(saveButton).toBeDefined();
+    await saveButton?.click();
+    await flushPromises();
+
+    expect(externalLibrariesApi.createUserExternalLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider_type: "jellyfin",
+        config: expect.objectContaining({
+          server_url: "https://jellyfin.example.com",
+          api_key: "jf-key-123",
+          verify_ssl: true,
+          timeout: 30,
+          include_tracks: true,
+          include_playlists: true,
+        }),
+      }),
+    );
+  });
+
+  it("keeps a redacted jellyfin api_key on update", async () => {
+    vi.mocked(externalLibrariesApi.getUserExternalLibrary).mockResolvedValue({
+      id: "el1",
+      library_id: "lib1",
+      provider_type: "jellyfin",
+      scope: "user",
+      name: "Jellyfin Library",
+      config: {
+        server_url: "https://jellyfin.example.com",
+        api_key: "<redacted>",
+      },
+      enabled: true,
+      include_in_library_index: false,
+      sync_enabled: true,
+      sync_interval_seconds: 3600,
+      can_manage: true,
+      can_sync: true,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    });
+    vi.mocked(externalLibrariesApi.updateUserExternalLibrary).mockResolvedValue(
+      {
+        id: "el1",
+        library_id: "lib1",
+        provider_type: "jellyfin",
+        scope: "user",
+        name: "Jellyfin Library",
+        config: { server_url: "https://jellyfin.example.com" },
+        enabled: true,
+        include_in_library_index: false,
+        sync_enabled: true,
+        sync_interval_seconds: 3600,
+        can_manage: true,
+        can_sync: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    );
+
+    const router = createTestRouter("/settings/external-libraries/el1");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) =>
+      (b.textContent ?? "").includes(
+        i18n.global.t("pages.externalLibraries.save"),
+      ),
+    );
+    expect(saveButton).toBeDefined();
+    await saveButton?.click();
+    await flushPromises();
+
+    const body = (externalLibrariesApi.updateUserExternalLibrary as Mock).mock
+      .calls[0][1];
+    // The redacted sentinel is sent back verbatim — the backend restores the
+    // stored secret on PATCH.
+    expect(body.config.api_key).toBe("<redacted>");
+  });
+
   it("renders the dropbox provider form and submits a structured config", async () => {
     vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
       {

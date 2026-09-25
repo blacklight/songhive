@@ -96,6 +96,9 @@ from ._images import remove_entity_image, upload_entity_image
 router = APIRouter(prefix="/tracks")
 logger = logging.getLogger(__name__)
 
+_MAX_ARTISTS_PER_TRACK = 20
+_MAX_ARTIST_NAME_LENGTH = 256
+
 
 class TrackUpdate(BaseModel):
     """Track partial update."""
@@ -110,6 +113,7 @@ class TrackUpdate(BaseModel):
     visibility: Optional[Visibility] = None
     filename: Optional[str] = None
     description: Optional[str] = None
+    extra_artists: Optional[List[str]] = None
 
 
 class BulkTrackDeleteRequest(BaseModel):
@@ -247,6 +251,13 @@ async def _rename_track_file(db: AsyncSession, track: Track, new_filename: str) 
     external_track = getattr(track, "external_track", None)
     if external_track is not None and external_track.state == "active":
         return await _rename_external_track_file(db, track, cast(ExternalTrack, external_track), new_filename)
+
+    external_item = getattr(track, "external_item", None)
+    if external_item is not None and external_item.state == "active":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="External library does not support renaming",
+        )
 
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -463,16 +474,19 @@ async def _build_track_response(
     can_write_tags: Optional[bool] = None
     can_delete_source: Optional[bool] = None
     can_rename_source: Optional[bool] = None
-    audio_url: Optional[str] = None
     filename: Optional[str] = None
+    audio_url: Optional[str] = None
 
-    external_track = getattr(track, "external_track", None)
-    if external_track is not None and external_track.state == "active":
+    # A track is external when referenced by a file-backed ``ExternalTrack``
+    # or by an entity-backed ``ExternalItem(kind="track")``; both expose the
+    # same provider fields to the client.
+    external_ref = getattr(track, "external_track", None) or getattr(track, "external_item", None)
+    if external_ref is not None and external_ref.state == "active":
         is_external = True
-        external_library_id = str(external_track.external_library_id)
-        external_track_id = str(external_track.id)
-        external_state = external_track.state
-        external_library = external_track.external_library
+        external_library_id = str(external_ref.external_library_id)
+        external_track_id = str(external_ref.id)
+        external_state = external_ref.state
+        external_library = external_ref.external_library
         if external_library is not None:
             external_provider_type = external_library.provider_type
             capabilities = external_library.capabilities or {}
@@ -482,7 +496,9 @@ async def _build_track_response(
             can_rename_source = bool(capabilities.get("rename_source"))
             can_delete_source = bool(capabilities.get("delete_source"))
         audio_url = f"/api/v1/tracks/{track.id}/download"
-        filename = Path(external_track.provider_key).name
+        raw = external_ref.raw_metadata or {}
+        display_path = raw.get("display_path") or external_ref.provider_key
+        filename = Path(display_path).name
     else:
         audio_url = await storage.get_url(track.audio_file) if track.audio_file_id else None
         if track.audio_file is not None:
@@ -499,6 +515,7 @@ async def _build_track_response(
         duration=track.duration,
         genre=track.genre,
         description=track.description,
+        extra_artists=list(track.extra_artists or []),
         audio_url=audio_url,
         image_url=await _track_image_url(track, storage),
         release_year=_track_release_year(track),
@@ -773,6 +790,18 @@ async def update_track(
     # empty string clears the stored value.
     if "description" in body.model_fields_set:
         track.description = (body.description or "").strip() or None
+    if "extra_artists" in body.model_fields_set:
+        names = [name.strip() for name in (body.extra_artists or [])]
+        if len(names) > _MAX_ARTISTS_PER_TRACK or any(
+            not name or len(name) > _MAX_ARTIST_NAME_LENGTH for name in names
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="extra_artists must contain at most 20 non-empty names of at most 256 characters",
+            )
+
+        track.extra_artists = names or None
+        track.metadata_updated_at = datetime.now(timezone.utc)
     if body.visibility is not None:
         track.visibility = body.visibility.value
 

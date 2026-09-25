@@ -43,6 +43,7 @@ const discNumber = ref("");
 const releaseYear = ref("");
 const filename = ref("");
 const description = ref("");
+const extraArtists = ref("");
 const visibility = ref("private");
 const isSaving = ref(false);
 const isDeleting = ref(false);
@@ -73,6 +74,7 @@ function resetForm() {
     track.value?.release_year != null ? String(track.value.release_year) : "";
   filename.value = track.value?.filename ?? "";
   description.value = track.value?.description ?? "";
+  extraArtists.value = (track.value?.extra_artists ?? []).join(", ");
   visibility.value = toVisibility(track.value?.visibility);
   resetTags(track.value?.tags ?? null);
   resetGenres(track.value?.genres ?? null);
@@ -124,6 +126,10 @@ async function onSubmit() {
     release_year: parseNumber(releaseYear.value),
     visibility: toVisibility(visibility.value),
     description: description.value.trim() || null,
+    extra_artists: extraArtists.value
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0),
   };
 
   if (canRenameFile.value) {
@@ -259,6 +265,7 @@ watch(
         v-model:visibility="visibility"
         v-model:tags="tags"
         v-model:description="description"
+        v-model:extra-artists="extraArtists"
         :can-rename-file="canRenameFile"
         @submit="onSubmit"
       >

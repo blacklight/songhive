@@ -7,6 +7,7 @@ from .audit_log import AuditLog, AuditTargetType
 from .base import Base, get_session, init_db, reset_db
 from .collection_item import CollectionItem
 from .download import DownloadArchive
+from .external_item import ExternalItem
 from .external_library import ExternalLibrary
 from .external_sync_run import ExternalSyncRun
 from .external_track import ExternalTrack
@@ -64,6 +65,7 @@ __all__ = [
     "Base",
     "CollectionItem",
     "DownloadArchive",
+    "ExternalItem",
     "ExternalLibrary",
     "ExternalSyncRun",
     "ExternalTrack",

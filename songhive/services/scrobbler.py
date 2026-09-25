@@ -365,8 +365,11 @@ def track_fields(track: Track) -> Dict[str, Any]:
     """Map a ``Track`` (with artist/album loaded) to scrobble API fields."""
     album = track.album
     album_artist = album.artist.name if album is not None and album.artist is not None else None
+    primary = track.artist.name if track.artist is not None else ""
+    extras = [name for name in (track.extra_artists or []) if name]
+    artist = ", ".join([primary, *extras]) if primary else ", ".join(extras)
     return {
-        "artist": track.artist.name if track.artist is not None else "",
+        "artist": artist,
         "track": track.title,
         "album": album.title if album is not None else None,
         "album_artist": album_artist,

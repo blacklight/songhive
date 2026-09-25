@@ -150,13 +150,15 @@ describe("TrackEditView", () => {
     const inputs = document.body.querySelectorAll(
       'input[type="text"], input[type="number"]',
     );
-    // Order: title, artist, album, track number, disc number, release year
+    // Order: title, artist, album, extra artists, genre, track number,
+    // disc number, release year
     const titleInput = inputs[0] as HTMLInputElement;
     const artistInput = inputs[1] as HTMLInputElement;
     const albumInput = inputs[2] as HTMLInputElement;
-    const trackNumberInput = inputs[4] as HTMLInputElement;
-    const discNumberInput = inputs[5] as HTMLInputElement;
-    const releaseYearInput = inputs[6] as HTMLInputElement;
+    const extraArtistsInput = inputs[3] as HTMLInputElement;
+    const trackNumberInput = inputs[5] as HTMLInputElement;
+    const discNumberInput = inputs[6] as HTMLInputElement;
+    const releaseYearInput = inputs[7] as HTMLInputElement;
     const visibilityInput = document.body.querySelector(
       "select",
     ) as HTMLSelectElement;
@@ -167,6 +169,8 @@ describe("TrackEditView", () => {
     artistInput.dispatchEvent(new Event("input"));
     albumInput.value = "Sample Album";
     albumInput.dispatchEvent(new Event("input"));
+    extraArtistsInput.value = "Guest One, Feat Two";
+    extraArtistsInput.dispatchEvent(new Event("input"));
     trackNumberInput.value = "2";
     trackNumberInput.dispatchEvent(new Event("input"));
     discNumberInput.value = "";
@@ -195,6 +199,7 @@ describe("TrackEditView", () => {
       visibility: "local",
       filename: "Song One.mp3",
       description: null,
+      extra_artists: ["Guest One", "Feat Two"],
     };
     expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-1", expectedBody);
     expect(router.currentRoute.value.path).toBe("/tracks/track-1");

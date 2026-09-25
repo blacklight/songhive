@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from ..models.album import Album
 from ..models.artist import Artist
+from ..models.external_item import ExternalItem
 from ..models.external_library import ExternalLibrary
 from ..models.external_track import ExternalTrack
 from ..models.favorite import Favorite
@@ -55,6 +56,7 @@ def _track_selectin_options(include: Optional[Set[str]]) -> List[Any]:
         selectinload(Track.audio_file),
         selectinload(Track.image_file),
         selectinload(Track.external_track).selectinload(ExternalTrack.external_library),
+        selectinload(Track.external_item).selectinload(ExternalItem.external_library),
     ]
     if include:
         if "artist" in include:
@@ -685,7 +687,18 @@ def _build_tracks_stmt(
                 ExternalTrack.track_id == Track.id,
                 ExternalTrack.state == "active",
             ),
-        )
+        ),
+        or_(
+            ~exists().where(
+                ExternalItem.track_id == Track.id,
+                ExternalItem.kind == "track",
+            ),
+            exists().where(
+                ExternalItem.track_id == Track.id,
+                ExternalItem.kind == "track",
+                ExternalItem.state == "active",
+            ),
+        ),
     )
 
     return stmt
@@ -1151,9 +1164,19 @@ async def propagate_external_library_visibility(
     if library is None:
         return []
 
-    external_track_ids = select(ExternalTrack.track_id).where(
-        ExternalTrack.external_library_id == str(external_library.id),
-        ExternalTrack.track_id.isnot(None),
+    external_track_ids = (
+        select(ExternalTrack.track_id)
+        .where(
+            ExternalTrack.external_library_id == str(external_library.id),
+            ExternalTrack.track_id.isnot(None),
+        )
+        .union(
+            select(ExternalItem.track_id).where(
+                ExternalItem.external_library_id == str(external_library.id),
+                ExternalItem.kind == "track",
+                ExternalItem.track_id.isnot(None),
+            )
+        )
     )
     stmt = select(Track).where(
         Track.id.in_(external_track_ids),

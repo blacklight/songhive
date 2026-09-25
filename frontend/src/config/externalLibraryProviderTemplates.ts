@@ -234,6 +234,135 @@ export const providerTemplates: Record<string, ProviderTemplate> = {
       },
     ],
   },
+  jellyfin: {
+    providerType: "jellyfin",
+    helpI18nKey: "pages.externalLibraries.providers.jellyfin.help",
+    fields: [
+      {
+        name: "server_url",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.server_url.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.server_url.description",
+        required: true,
+      },
+      {
+        name: "api_key",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.api_key.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.api_key.description",
+      },
+      {
+        name: "username",
+        type: "string",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.username.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.username.description",
+      },
+      {
+        name: "password",
+        type: "password",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.password.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.password.description",
+      },
+      {
+        name: "verify_ssl",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.verify_ssl.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.verify_ssl.description",
+        default: true,
+      },
+      {
+        name: "timeout",
+        type: "number",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.timeout.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.timeout.description",
+        default: 30,
+      },
+      {
+        name: "collections",
+        type: "string-array",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.collections.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.collections.description",
+        default: "",
+      },
+      {
+        name: "include_tracks",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.include_tracks.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.include_tracks.description",
+        default: true,
+      },
+      {
+        name: "include_artists",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.include_artists.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.include_artists.description",
+        default: true,
+      },
+      {
+        name: "include_albums",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.include_albums.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.include_albums.description",
+        default: true,
+      },
+      {
+        name: "include_playlists",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.include_playlists.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.include_playlists.description",
+        default: true,
+      },
+      {
+        name: "sync_metadata",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.sync_metadata.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.sync_metadata.description",
+        default: false,
+      },
+      {
+        name: "sync_cover_art",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.sync_cover_art.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.sync_cover_art.description",
+        default: true,
+      },
+      {
+        name: "dedup_musicbrainz",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.dedup_musicbrainz.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.jellyfin.fields.dedup_musicbrainz.description",
+        default: false,
+      },
+    ],
+  },
   local: {
     providerType: "local",
     fields: [

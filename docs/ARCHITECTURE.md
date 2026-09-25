@@ -968,10 +968,27 @@ Models:
 
 - `ExternalLibrary` — adapter instance, encrypted provider config, capabilities,
   and scope (`user` or `admin`).
-- `ExternalTrack` — a track discovered through an external provider, tied to an
-  `ExternalLibrary` and optionally to a Songhive `Track`.
+- `ExternalTrack` — a track discovered through a file-oriented external
+  provider, tied to an `ExternalLibrary` and optionally to a Songhive `Track`.
+- `ExternalItem` — an entity discovered through an entity-backed provider
+  (`kind` in `track`/`album`/`artist`/`playlist`), tying a Songhive entity to
+  its provider-side reference (etag, mtime, raw provider metadata).
 - `ExternalSyncRun` — a record of each sync attempt, including status,
   triggered-by, and error details.
+
+Two provider families exist behind the same adapter interface. *File
+providers* (`local`, `s3`, `gdrive`, `sftp`, `webdav`, `dropbox`, `http`)
+enumerate remote audio files; each produces an `ExternalTrack` row that keeps
+file-oriented state (sha256, mime, size, write-back/rename/delete state), and
+the owning `Track` gets `audio_file_id = NULL`. *Entity-backed providers*
+(identified by `capabilities.limits["entity_import"]`, currently `jellyfin`)
+enumerate tracks, albums, artists, and playlists as provider items; each
+imported Songhive entity gets an `ExternalItem` row in the matching `kind`
+instead. The generic `Track.source` stays `"external"` for both — provenance
+is recovered through `ExternalItem.external_library.provider_type` — and audio
+bytes stay remote: at playback/download time the provider resolves the item
+into a stream that Songhive proxies, so provider credentials never reach the
+client (`safe_to_redirect = False`).
 
 API surfaces:
 
@@ -1348,6 +1365,57 @@ downloadable payload and are skipped. Drive has no presignable URL, so
 support; freshness comes from scheduled syncs rather than filesystem
 watching, as with the other remote providers.
 
+#### Jellyfin provider
+
+The `jellyfin` provider (`external/_jellyfin.py`, httpx) is the first
+*entity-backed* provider: instead of importing remote files, it imports a
+Jellyfin server's music library as first-class Songhive tracks, albums,
+artists, and playlists. Each imported entity is anchored by an `ExternalItem`
+row (`kind` + `provider_key` + etag/mtime/raw provider metadata) instead of
+an `ExternalTrack`, so there is no sha256, write-back, rename, or delete
+state — the provider is strictly read-only, and audio bytes stay on the
+Jellyfin server.
+
+A Jellyfin external library stores the following adapter config:
+
+| Key                  | Required | Default | Description                                                              |
+|----------------------|----------|---------|--------------------------------------------------------------------------|
+| `server_url`         | yes      | —       | Base URL of the Jellyfin server; SSRF-validated (public addresses only). |
+| `api_key`            | yes*     | —       | Jellyfin API key (Dashboard → API Keys).                                 |
+| `username`+`password`| yes*     | —       | Alternative to `api_key`; exchanged for a session token once.            |
+| `verify_ssl`         | no       | `true`  | Verify the server's TLS certificate.                                     |
+| `timeout`            | no       | `30`    | HTTP request timeout in seconds.                                         |
+| `collections`        | no       | `[]`    | Jellyfin library names/ids to import; empty means all music libraries.   |
+| `include_tracks`     | no       | `true`  | Import `Audio` items as tracks.                                          |
+| `include_artists`    | no       | `true`  | Import `MusicArtist` items as artists.                                   |
+| `include_albums`     | no       | `true`  | Import `MusicAlbum` items as albums.                                     |
+| `include_playlists`  | no       | `true`  | Import `Playlist` items as provider-owned playlists.                     |
+| `sync_metadata`      | no       | `false` | Run Songhive-side MusicBrainz enrichment on imported tracks.             |
+| `sync_cover_art`     | no       | `true`  | Reference Jellyfin image URLs as artwork (never downloaded).             |
+| `dedup_musicbrainz`  | no       | `false` | Match artists/albums by MusicBrainz id before name matching (DB-only).   |
+
+*Exactly one auth path is required: `api_key` (preferred) or
+`username`+`password`.
+
+Tracks enumerate `/Items?IncludeItemTypes=Audio&Recursive=true` with
+`Fields=Etag,DateModified,Path,Genres,MediaSources,ProviderIds` and an
+incremental date filter when the previous run supplies `since`; albums,
+artists, and playlists enumerate the matching `IncludeItemTypes`, and
+playlists additionally fetch `/Playlists/{id}/Items` to preserve order.
+Imported entities deduplicate by normalized name (or MusicBrainz id when
+`dedup_musicbrainz` is set — a pure database lookup that never calls the
+MusicBrainz API). Provider-owned albums/artists are deleted on reconciliation
+only when no other provider or non-provider content still references them;
+provider-owned playlists are removed with the library. `raw_metadata` keeps
+the provider's own fields (genre list, cover URL, MusicBrainz ids, stream
+`Size`) so entity tracks carry no local file state.
+
+Playback resolves `GET /Audio/{item_id}/stream` at play time and returns the
+URL with `safe_to_redirect=False`, so Songhive always proxies it and forwards
+the client's `Range` header — the API key never reaches the browser.
+`write_tags`, `rename_source`, `delete_source`, and `compute_hash` are
+unsupported and raise `UnsupportedExternalOperation`.
+
 #### Visibility, sharing, and secret redaction
 
 Every external library is backed by a normal `Library` row, so visibility
@@ -1383,7 +1451,9 @@ Sync and tasks:
 
 - `tasks/external_libraries.py` defines three Celery tasks:
   - `sync_external_library_task` runs a manual or scheduled sync, enumerating
-    provider items through `external/sync.py` and upserting `ExternalTrack` rows.
+    provider items through `external/sync.py` and upserting `ExternalTrack`
+    rows for file providers or `ExternalItem`-backed entities for
+    entity-backed providers.
   - `scan_scheduled_syncs_task` scans for due external libraries and enqueues
     sync tasks while skipping libraries with an active run.
   - `write_back_metadata_task` applies local metadata edits to the provider when
@@ -1397,8 +1467,9 @@ Sync and tasks:
 
 Streaming and downloads:
 
-- `services/streaming.resolve_external_stream` loads an external track and opens
-  a provider stream (`path`, `iterator`, or `url`).
+- `services/streaming.resolve_external_stream` loads an external track
+  (`ExternalTrack` for file providers, `ExternalItem` for entity-backed
+  providers) and opens a provider stream (`path`, `iterator`, or `url`).
 - `streaming/handler.py` falls back from local `StoredFile` playback to external
   streams, preserving auth, ACL, history, and now-playing broadcasts.
 - `api/routes/tracks.py` provides `GET /api/v1/tracks/{track_id}/download`,

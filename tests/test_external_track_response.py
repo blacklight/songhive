@@ -7,6 +7,7 @@ import pytest
 from songhive.api.responses import build_track_summary
 from songhive.models._enums import Visibility
 from songhive.models.artist import Artist
+from songhive.models.external_item import ExternalItem
 from songhive.models.external_library import ExternalLibrary
 from songhive.models.external_track import ExternalTrack
 from songhive.models.library import Library
@@ -91,6 +92,70 @@ async def test_track_response_includes_external_fields(client, regular_user, db_
     assert data["can_download"] is True
     assert data["can_write_tags"] is True
     assert data["can_delete_source"] is False
+    assert data["audio_url"] == f"/api/v1/tracks/{track.id}/download"
+
+
+@pytest.mark.asyncio
+async def test_track_response_includes_entity_external_fields(client, regular_user, db_session, auth_headers):
+    """GET /tracks/{id} treats an active ExternalItem as an external track."""
+    artist = Artist(name="Test Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    library = Library(name="External Library", owner_id=regular_user.id, visibility=Visibility.PUBLIC.value)
+    db_session.add(library)
+    await db_session.flush()
+
+    external_library = ExternalLibrary(
+        library_id=str(library.id),
+        provider_type="jellyfin",
+        scope="user",
+        include_in_library_index=False,
+        capabilities={
+            "read_bytes": False,
+            "stream_url": True,
+            "download": True,
+            "write_tags": False,
+            "delete_source": False,
+            "limits": {"entity_import": True},
+        },
+        created_by_id=regular_user.id,
+    )
+    db_session.add(external_library)
+    await db_session.flush()
+
+    track = Track(
+        title="Entity Track",
+        artist_id=artist.id,
+        owner_id=regular_user.id,
+        visibility=Visibility.PUBLIC.value,
+        source="external",
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    db_session.add(LibraryTrack(library_id=library.id, track_id=track.id, added_by_id=regular_user.id))
+    db_session.add(
+        ExternalItem(
+            external_library_id=str(external_library.id),
+            kind="track",
+            provider_key="jf-item-1",
+            track_id=track.id,
+            state="active",
+        )
+    )
+    await db_session.flush()
+
+    response = client.get(f"/api/v1/tracks/{track.id}", headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["is_external"] is True
+    assert data["external_provider_type"] == "jellyfin"
+    assert data["external_state"] == "active"
+    assert data["can_stream"] is True
+    assert data["can_download"] is True
+    assert data["can_write_tags"] is False
     assert data["audio_url"] == f"/api/v1/tracks/{track.id}/download"
 
 

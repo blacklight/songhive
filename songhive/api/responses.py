@@ -99,6 +99,7 @@ class TrackResponse(BaseModel):
     duration: Optional[float] = None
     genre: Optional[str] = None
     description: Optional[str] = None
+    extra_artists: List[str] = []
     audio_url: Optional[str] = None
     image_url: Optional[str] = None
     release_year: Optional[int] = None
@@ -208,9 +209,9 @@ async def build_track_summary(
     audio_url = None
     if track.audio_file_id and _is_loaded(track, "audio_file") and track.audio_file:
         audio_url = await storage.get_url(track.audio_file)
-    elif _is_loaded(track, "external_track"):
-        external_track = getattr(track, "external_track", None)
-        if external_track is not None and external_track.state == "active":
+    else:
+        external_ref = getattr(track, "external_track", None) or getattr(track, "external_item", None)
+        if external_ref is not None and external_ref.state == "active":
             audio_url = f"/api/v1/tracks/{track.id}/download"
 
     artist = None
