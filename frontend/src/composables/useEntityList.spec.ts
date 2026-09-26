@@ -3,7 +3,11 @@ import { defineComponent, h } from "vue";
 import { mount, flushPromises } from "@vue/test-utils";
 import { useEntityList, type EntityListParams } from "./useEntityList";
 
-function createList(fetcher: (params: EntityListParams) => Promise<string[]>) {
+function createList(
+  fetcher: (
+    params: EntityListParams,
+  ) => Promise<string[] | { items: string[]; total: number }>,
+) {
   const wrapper = mount(
     defineComponent({
       setup() {
@@ -54,6 +58,37 @@ describe("useEntityList", () => {
       sort_by: "name",
       sort_dir: "asc",
     });
+  });
+
+  it("tracks the total and computes hasMore exactly with a meta fetcher", async () => {
+    const page = Array.from({ length: 20 }, (_, i) => `item-${i}`);
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce({ items: page, total: 21 })
+      .mockResolvedValueOnce({ items: ["item-20"], total: 21 });
+    const wrapper = createList(fetcher);
+
+    await wrapper.vm.load();
+
+    expect(wrapper.vm.total).toBe(21);
+    expect(wrapper.vm.hasMore).toBe(true);
+
+    await wrapper.vm.loadMore();
+
+    expect(wrapper.vm.items.length).toBe(21);
+    expect(wrapper.vm.total).toBe(21);
+    expect(wrapper.vm.hasMore).toBe(false);
+  });
+
+  it("clears hasMore on a full final page when the total is reached", async () => {
+    const page = Array.from({ length: 20 }, (_, i) => `item-${i}`);
+    const fetcher = vi.fn().mockResolvedValue({ items: page, total: 20 });
+    const wrapper = createList(fetcher);
+
+    await wrapper.vm.load();
+
+    expect(wrapper.vm.items.length).toBe(20);
+    expect(wrapper.vm.hasMore).toBe(false);
   });
 
   it("appends on loadMore and clears hasMore when the page is short", async () => {

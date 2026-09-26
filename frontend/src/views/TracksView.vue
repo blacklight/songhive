@@ -36,6 +36,7 @@ const {
   query,
   hasMore,
   hasPrevious,
+  total,
   sortBy,
   sortDir,
   load,
@@ -186,9 +187,12 @@ watch(
 
 <template>
   <div class="tracks-view">
-    <AppPageTitle class="tracks-view__title" icon="music">{{
-      t("nav.tracks")
-    }}</AppPageTitle>
+    <AppPageTitle class="tracks-view__title" icon="music">
+      {{ t("nav.tracks") }}
+      <span v-if="total > 0 || !loading" class="tracks-view__count"
+        >({{ total }})</span
+      >
+    </AppPageTitle>
 
     <div class="tracks-view__controls">
       <SortControl
@@ -291,6 +295,11 @@ watch(
 .tracks-view__title {
   margin: 0;
   font-size: 1.5rem;
+}
+
+.tracks-view__count {
+  font-weight: normal;
+  color: var(--color-text-muted);
 }
 
 .tracks-view__controls {

@@ -9,7 +9,7 @@ import {
 import {
   getPlaylist,
   getPlaylistStats,
-  listPlaylistItems,
+  listPlaylistItemsWithMeta,
   playlistItemToQueueTrack,
   reorderPlaylistTracks,
   deletePlaylist as deletePlaylistApi,
@@ -80,7 +80,7 @@ const {
   refresh: refreshTracks,
 } = useEntityList<PlaylistItemResponse>(
   (params: EntityListParams) =>
-    listPlaylistItems(playlistId.value, {
+    listPlaylistItemsWithMeta(playlistId.value, {
       q: params.q,
       limit: params.limit,
       offset: params.offset,

@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useEntityList } from "@/composables/useEntityList";
 import { useRemoteEntities } from "@/composables/useRemoteEntities";
 import {
-  listPlaylists,
+  listPlaylistsWithMeta,
   createPlaylist,
   deletePlaylist,
   type PlaylistResponse,
@@ -39,6 +39,7 @@ const {
   error,
   query,
   hasMore,
+  total,
   sortBy,
   sortDir,
   load,
@@ -49,7 +50,7 @@ const {
   refresh,
 } = useEntityList<PlaylistResponse>(
   (params) =>
-    listPlaylists({
+    listPlaylistsWithMeta({
       ...params,
       include: "owner",
       collection: myCollection.value || undefined,
@@ -175,6 +176,7 @@ async function onCreate() {
     <BulkEditableGrid
       :title="t('nav.playlists')"
       icon="list"
+      :total="total"
       :items="displayItems"
       :loading="loading"
       :error="error"

@@ -6,13 +6,13 @@ import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import * as artistsApi from "@/api/artists";
 import * as remoteApi from "@/api/remote";
-import type { ArtistResponse } from "@/api/artists";
+import type { ArtistResponse, ListArtistsResult } from "@/api/artists";
 import type { RemoteObject } from "@/api/remote";
 import ArtistsView from "./ArtistsView.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 vi.mock("@/api/artists", () => ({
-  listArtists: vi.fn(),
+  listArtistsWithMeta: vi.fn(),
   deleteArtist: vi.fn(),
 }));
 
@@ -38,6 +38,17 @@ function createArtist(id: string, name: string): ArtistResponse {
     name,
     bio: null,
     image_url: null,
+  };
+}
+
+function createListResult(
+  items: ArtistResponse[],
+  total?: number,
+): ListArtistsResult {
+  return {
+    items,
+    offset: 0,
+    total: total ?? items.length,
   };
 }
 
@@ -68,7 +79,9 @@ describe("ArtistsView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.useFakeTimers();
-    vi.mocked(artistsApi.listArtists).mockResolvedValue([]);
+    vi.mocked(artistsApi.listArtistsWithMeta).mockResolvedValue(
+      createListResult([]),
+    );
     vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
       items: [],
       offset: 0,
@@ -83,16 +96,16 @@ describe("ArtistsView", () => {
   });
 
   it("fetches artists on mount", async () => {
-    vi.mocked(artistsApi.listArtists).mockResolvedValue([
-      createArtist("artist-1", "Artist One"),
-    ]);
+    vi.mocked(artistsApi.listArtistsWithMeta).mockResolvedValue(
+      createListResult([createArtist("artist-1", "Artist One")]),
+    );
 
     wrapper = mount(ArtistsView, {
       global: { plugins: [createTestRouter()] },
     });
     await flushPromises();
 
-    expect(artistsApi.listArtists).toHaveBeenCalledWith({
+    expect(artistsApi.listArtistsWithMeta).toHaveBeenCalledWith({
       q: "",
       limit: 20,
       offset: 0,
@@ -100,6 +113,19 @@ describe("ArtistsView", () => {
       sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Artist One");
+  });
+
+  it("shows the total artist count in the header", async () => {
+    vi.mocked(artistsApi.listArtistsWithMeta).mockResolvedValue(
+      createListResult([createArtist("artist-1", "Artist One")], 7),
+    );
+
+    wrapper = mount(ArtistsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".bulk-editable-grid__count").text()).toBe("(7)");
   });
 
   it("shows the empty state", async () => {
@@ -116,7 +142,7 @@ describe("ArtistsView", () => {
   });
 
   it("shows an error banner with a retry button", async () => {
-    vi.mocked(artistsApi.listArtists).mockRejectedValue(
+    vi.mocked(artistsApi.listArtistsWithMeta).mockRejectedValue(
       new Error("network failure"),
     );
 
@@ -127,9 +153,9 @@ describe("ArtistsView", () => {
 
     expect(wrapper.text()).toContain("network failure");
 
-    vi.mocked(artistsApi.listArtists).mockResolvedValue([
-      createArtist("artist-1", "Artist One"),
-    ]);
+    vi.mocked(artistsApi.listArtistsWithMeta).mockResolvedValue(
+      createListResult([createArtist("artist-1", "Artist One")]),
+    );
     await wrapper.find("button").trigger("click");
     await flushPromises();
 
@@ -138,10 +164,14 @@ describe("ArtistsView", () => {
   });
 
   it("debounces search and resets the list", async () => {
-    const fetcher = vi.mocked(artistsApi.listArtists);
+    const fetcher = vi.mocked(artistsApi.listArtistsWithMeta);
     fetcher
-      .mockResolvedValueOnce([createArtist("artist-1", "First Artist")])
-      .mockResolvedValueOnce([createArtist("artist-2", "Searched Artist")]);
+      .mockResolvedValueOnce(
+        createListResult([createArtist("artist-1", "First Artist")]),
+      )
+      .mockResolvedValueOnce(
+        createListResult([createArtist("artist-2", "Searched Artist")]),
+      );
 
     wrapper = mount(ArtistsView, {
       global: { plugins: [createTestRouter()] },
@@ -167,14 +197,19 @@ describe("ArtistsView", () => {
   });
 
   it("loads the next page", async () => {
-    const fetcher = vi.mocked(artistsApi.listArtists);
+    const fetcher = vi.mocked(artistsApi.listArtistsWithMeta);
     fetcher
       .mockResolvedValueOnce(
-        Array.from({ length: 20 }, (_, i) =>
-          createArtist(`artist-${i}`, `Artist ${i}`),
+        createListResult(
+          Array.from({ length: 20 }, (_, i) =>
+            createArtist(`artist-${i}`, `Artist ${i}`),
+          ),
+          21,
         ),
       )
-      .mockResolvedValueOnce([createArtist("artist-20", "Artist 20")]);
+      .mockResolvedValueOnce(
+        createListResult([createArtist("artist-20", "Artist 20")], 21),
+      );
 
     wrapper = mount(ArtistsView, {
       global: { plugins: [createTestRouter()] },
@@ -208,14 +243,14 @@ describe("ArtistsView", () => {
 
     const toggle = wrapper.findComponent(CollectionToggle);
     expect(toggle.find('input[type="checkbox"]').exists()).toBe(false);
-    expect(artistsApi.listArtists).toHaveBeenLastCalledWith(
+    expect(artistsApi.listArtistsWithMeta).toHaveBeenLastCalledWith(
       expect.objectContaining({ collection: undefined }),
     );
   });
 
   it("enables the collection filter by default when signed in", async () => {
     setAuthenticated();
-    const fetcher = vi.mocked(artistsApi.listArtists);
+    const fetcher = vi.mocked(artistsApi.listArtistsWithMeta);
 
     wrapper = mount(ArtistsView, {
       global: { plugins: [createTestRouter()] },
@@ -234,7 +269,7 @@ describe("ArtistsView", () => {
 
   it("drops the collection filter when the toggle is disabled", async () => {
     setAuthenticated();
-    const fetcher = vi.mocked(artistsApi.listArtists);
+    const fetcher = vi.mocked(artistsApi.listArtistsWithMeta);
 
     wrapper = mount(ArtistsView, {
       global: { plugins: [createTestRouter()] },
@@ -253,9 +288,9 @@ describe("ArtistsView", () => {
   });
 
   it("renders remote artists in the grid with their domain", async () => {
-    vi.mocked(artistsApi.listArtists).mockResolvedValue([
-      createArtist("artist-1", "Local Artist"),
-    ]);
+    vi.mocked(artistsApi.listArtistsWithMeta).mockResolvedValue(
+      createListResult([createArtist("artist-1", "Local Artist")]),
+    );
     vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
       items: [createRemoteArtist("ro-1", "Federated Artist")],
       offset: 0,
@@ -277,10 +312,12 @@ describe("ArtistsView", () => {
   });
 
   it("clusters a same-named remote artist under the local one", async () => {
-    vi.mocked(artistsApi.listArtists).mockResolvedValue([
-      createArtist("artist-1", "Twin"),
-      createArtist("artist-2", "Zeta"),
-    ]);
+    vi.mocked(artistsApi.listArtistsWithMeta).mockResolvedValue(
+      createListResult([
+        createArtist("artist-1", "Twin"),
+        createArtist("artist-2", "Zeta"),
+      ]),
+    );
     vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
       items: [createRemoteArtist("ro-1", "Twin")],
       offset: 0,
@@ -319,9 +356,9 @@ describe("ArtistsView", () => {
   });
 
   it("keeps remote artists through Load More and pages remote in lockstep", async () => {
-    vi.mocked(artistsApi.listArtists).mockResolvedValue([
-      createArtist("artist-1", "Local Artist"),
-    ]);
+    vi.mocked(artistsApi.listArtistsWithMeta).mockResolvedValue(
+      createListResult([createArtist("artist-1", "Local Artist")]),
+    );
     vi.mocked(remoteApi.listRemoteObjectsWithMeta)
       .mockResolvedValueOnce({
         items: [createRemoteArtist("ro-1", "Federated Artist")],

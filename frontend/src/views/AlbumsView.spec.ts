@@ -6,13 +6,13 @@ import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import * as albumsApi from "@/api/albums";
 import * as remoteApi from "@/api/remote";
-import type { AlbumResponse } from "@/api/albums";
+import type { AlbumResponse, ListAlbumsResult } from "@/api/albums";
 import type { RemoteObject } from "@/api/remote";
 import AlbumsView from "./AlbumsView.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 vi.mock("@/api/albums", () => ({
-  listAlbums: vi.fn(),
+  listAlbumsWithMeta: vi.fn(),
   deleteAlbum: vi.fn(),
 }));
 
@@ -41,6 +41,17 @@ function createAlbum(id: string, title: string): AlbumResponse {
     release_year: null,
     cover_url: null,
     visibility: "public",
+  };
+}
+
+function createListResult(
+  items: AlbumResponse[],
+  total?: number,
+): ListAlbumsResult {
+  return {
+    items,
+    offset: 0,
+    total: total ?? items.length,
   };
 }
 
@@ -76,7 +87,9 @@ describe("AlbumsView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.useFakeTimers();
-    vi.mocked(albumsApi.listAlbums).mockResolvedValue([]);
+    vi.mocked(albumsApi.listAlbumsWithMeta).mockResolvedValue(
+      createListResult([]),
+    );
     vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
       items: [],
       offset: 0,
@@ -91,16 +104,16 @@ describe("AlbumsView", () => {
   });
 
   it("fetches albums on mount", async () => {
-    vi.mocked(albumsApi.listAlbums).mockResolvedValue([
-      createAlbum("album-1", "Meadowland"),
-    ]);
+    vi.mocked(albumsApi.listAlbumsWithMeta).mockResolvedValue(
+      createListResult([createAlbum("album-1", "Meadowland")]),
+    );
 
     wrapper = mount(AlbumsView, {
       global: { plugins: [createTestRouter()] },
     });
     await flushPromises();
 
-    expect(albumsApi.listAlbums).toHaveBeenCalledWith({
+    expect(albumsApi.listAlbumsWithMeta).toHaveBeenCalledWith({
       q: "",
       limit: 20,
       offset: 0,
@@ -109,6 +122,19 @@ describe("AlbumsView", () => {
       sort_dir: "asc",
     });
     expect(wrapper.text()).toContain("Meadowland");
+  });
+
+  it("shows the total album count in the header", async () => {
+    vi.mocked(albumsApi.listAlbumsWithMeta).mockResolvedValue(
+      createListResult([createAlbum("album-1", "Meadowland")], 42),
+    );
+
+    wrapper = mount(AlbumsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".bulk-editable-grid__count").text()).toBe("(42)");
   });
 
   it("shows the empty state", async () => {
@@ -125,7 +151,7 @@ describe("AlbumsView", () => {
   });
 
   it("shows an error banner with a retry button", async () => {
-    vi.mocked(albumsApi.listAlbums).mockRejectedValue(
+    vi.mocked(albumsApi.listAlbumsWithMeta).mockRejectedValue(
       new Error("network failure"),
     );
 
@@ -136,9 +162,9 @@ describe("AlbumsView", () => {
 
     expect(wrapper.text()).toContain("network failure");
 
-    vi.mocked(albumsApi.listAlbums).mockResolvedValue([
-      createAlbum("album-1", "Meadowland"),
-    ]);
+    vi.mocked(albumsApi.listAlbumsWithMeta).mockResolvedValue(
+      createListResult([createAlbum("album-1", "Meadowland")]),
+    );
     await wrapper.find("button").trigger("click");
     await flushPromises();
 
@@ -147,10 +173,14 @@ describe("AlbumsView", () => {
   });
 
   it("debounces search and resets the list", async () => {
-    const fetcher = vi.mocked(albumsApi.listAlbums);
+    const fetcher = vi.mocked(albumsApi.listAlbumsWithMeta);
     fetcher
-      .mockResolvedValueOnce([createAlbum("album-1", "First Album")])
-      .mockResolvedValueOnce([createAlbum("album-2", "Searched Album")]);
+      .mockResolvedValueOnce(
+        createListResult([createAlbum("album-1", "First Album")]),
+      )
+      .mockResolvedValueOnce(
+        createListResult([createAlbum("album-2", "Searched Album")]),
+      );
 
     wrapper = mount(AlbumsView, {
       global: { plugins: [createTestRouter()] },
@@ -177,14 +207,19 @@ describe("AlbumsView", () => {
   });
 
   it("loads the next page", async () => {
-    const fetcher = vi.mocked(albumsApi.listAlbums);
+    const fetcher = vi.mocked(albumsApi.listAlbumsWithMeta);
     fetcher
       .mockResolvedValueOnce(
-        Array.from({ length: 20 }, (_, i) =>
-          createAlbum(`album-${i}`, `Album ${i}`),
+        createListResult(
+          Array.from({ length: 20 }, (_, i) =>
+            createAlbum(`album-${i}`, `Album ${i}`),
+          ),
+          21,
         ),
       )
-      .mockResolvedValueOnce([createAlbum("album-20", "Album 20")]);
+      .mockResolvedValueOnce(
+        createListResult([createAlbum("album-20", "Album 20")], 21),
+      );
 
     wrapper = mount(AlbumsView, {
       global: { plugins: [createTestRouter()] },
@@ -219,14 +254,14 @@ describe("AlbumsView", () => {
 
     const toggle = wrapper.findComponent(CollectionToggle);
     expect(toggle.find('input[type="checkbox"]').exists()).toBe(false);
-    expect(albumsApi.listAlbums).toHaveBeenLastCalledWith(
+    expect(albumsApi.listAlbumsWithMeta).toHaveBeenLastCalledWith(
       expect.objectContaining({ collection: undefined }),
     );
   });
 
   it("enables the collection filter by default when signed in", async () => {
     setAuthenticated();
-    const fetcher = vi.mocked(albumsApi.listAlbums);
+    const fetcher = vi.mocked(albumsApi.listAlbumsWithMeta);
 
     wrapper = mount(AlbumsView, {
       global: { plugins: [createTestRouter()] },
@@ -245,7 +280,7 @@ describe("AlbumsView", () => {
 
   it("drops the collection filter when the toggle is disabled", async () => {
     setAuthenticated();
-    const fetcher = vi.mocked(albumsApi.listAlbums);
+    const fetcher = vi.mocked(albumsApi.listAlbumsWithMeta);
 
     wrapper = mount(AlbumsView, {
       global: { plugins: [createTestRouter()] },
@@ -264,9 +299,9 @@ describe("AlbumsView", () => {
   });
 
   it("renders remote albums in the grid with their domain", async () => {
-    vi.mocked(albumsApi.listAlbums).mockResolvedValue([
-      createAlbum("album-1", "Local Album"),
-    ]);
+    vi.mocked(albumsApi.listAlbumsWithMeta).mockResolvedValue(
+      createListResult([createAlbum("album-1", "Local Album")]),
+    );
     vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
       items: [createRemoteAlbum("ro-1", "Federated Album", "Remote Artist")],
       offset: 0,
@@ -288,9 +323,9 @@ describe("AlbumsView", () => {
   });
 
   it("keeps remote albums through Load More and pages remote in lockstep", async () => {
-    vi.mocked(albumsApi.listAlbums).mockResolvedValue([
-      createAlbum("album-1", "Local Album"),
-    ]);
+    vi.mocked(albumsApi.listAlbumsWithMeta).mockResolvedValue(
+      createListResult([createAlbum("album-1", "Local Album")]),
+    );
     vi.mocked(remoteApi.listRemoteObjectsWithMeta)
       .mockResolvedValueOnce({
         items: [createRemoteAlbum("ro-1", "Federated Album", "Remote Artist")],

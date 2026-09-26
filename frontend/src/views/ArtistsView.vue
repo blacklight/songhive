@@ -3,7 +3,11 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useEntityList } from "@/composables/useEntityList";
 import { useRemoteEntities } from "@/composables/useRemoteEntities";
-import { listArtists, deleteArtist, type ArtistResponse } from "@/api/artists";
+import {
+  listArtistsWithMeta,
+  deleteArtist,
+  type ArtistResponse,
+} from "@/api/artists";
 import {
   mergeEntityItems,
   remoteEntityName,
@@ -25,6 +29,7 @@ const {
   error,
   query,
   hasMore,
+  total,
   sortBy,
   sortDir,
   load,
@@ -35,7 +40,7 @@ const {
   refresh,
 } = useEntityList<ArtistResponse>(
   (params) =>
-    listArtists({
+    listArtistsWithMeta({
       ...params,
       collection: myCollection.value || undefined,
     }),
@@ -110,6 +115,7 @@ onMounted(() => load());
     <BulkEditableGrid
       :title="t('nav.artists')"
       icon="users"
+      :total="total"
       :items="displayItems"
       :loading="loading"
       :error="error"

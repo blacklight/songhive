@@ -20,8 +20,19 @@ export interface UseEntityListOptions {
   queryKey?: string;
 }
 
+/**
+ * Fetchers may return a bare page of items or a page plus the
+ * ACL-filtered total (e.g. the ``*WithMeta`` API helpers reading
+ * ``X-Total-Count``). With a total, ``hasMore`` is exact and the header
+ * can display the real entity count.
+ */
+export interface EntityListPage<T> {
+  items: T[];
+  total: number;
+}
+
 export function useEntityList<T>(
-  fetcher: (params: EntityListParams) => Promise<T[]>,
+  fetcher: (params: EntityListParams) => Promise<T[] | EntityListPage<T>>,
   options: number | UseEntityListOptions = {},
 ) {
   const opts: UseEntityListOptions =
@@ -94,16 +105,23 @@ export function useEntityList<T>(
         sort_by: sortBy.value,
         sort_dir: sortDir.value,
       });
+      const pageItems = Array.isArray(result) ? result : result.items;
+      const pageTotal = Array.isArray(result) ? null : result.total;
 
       if (reset) {
-        items.value = result;
+        items.value = pageItems;
         offset.value = 0;
       } else {
-        items.value = [...items.value, ...result];
+        items.value = [...items.value, ...pageItems];
         offset.value = targetOffset;
       }
 
-      hasMore.value = result.length === limit.value;
+      if (pageTotal === null) {
+        hasMore.value = pageItems.length === limit.value;
+      } else {
+        total.value = pageTotal;
+        hasMore.value = items.value.length < pageTotal;
+      }
     } catch (err) {
       error.value =
         getApiErrorMessage(err) ||

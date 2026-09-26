@@ -9,6 +9,7 @@ import * as playlistsApi from "@/api/playlists";
 import * as remoteApi from "@/api/remote";
 import type {
   PlaylistResponse,
+  ListPlaylistsResult,
   PlaylistCreate,
   Visibility,
 } from "@/api/playlists";
@@ -17,7 +18,7 @@ import PlaylistsView from "./PlaylistsView.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 vi.mock("@/api/playlists", () => ({
-  listPlaylists: vi.fn(),
+  listPlaylistsWithMeta: vi.fn(),
   createPlaylist: vi.fn(),
   deletePlaylist: vi.fn(),
 }));
@@ -53,6 +54,17 @@ function createPlaylist(id: string, name: string): PlaylistResponse {
   };
 }
 
+function createListResult(
+  items: PlaylistResponse[],
+  total?: number,
+): ListPlaylistsResult {
+  return {
+    items,
+    offset: 0,
+    total: total ?? items.length,
+  };
+}
+
 function createRemotePlaylist(id: string, name: string): RemoteObject {
   return {
     id,
@@ -82,7 +94,9 @@ describe("PlaylistsView", () => {
     setActivePinia(createPinia());
     vi.useFakeTimers();
     vi.clearAllMocks();
-    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([]);
+    vi.mocked(playlistsApi.listPlaylistsWithMeta).mockResolvedValue(
+      createListResult([]),
+    );
     vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
       items: [],
       offset: 0,
@@ -100,9 +114,9 @@ describe("PlaylistsView", () => {
   });
 
   it("fetches playlists on mount", async () => {
-    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([
-      createPlaylist("playlist-1", "Road Trip"),
-    ]);
+    vi.mocked(playlistsApi.listPlaylistsWithMeta).mockResolvedValue(
+      createListResult([createPlaylist("playlist-1", "Road Trip")]),
+    );
 
     wrapper = mount(PlaylistsView, {
       attachTo: document.body,
@@ -110,7 +124,7 @@ describe("PlaylistsView", () => {
     });
     await flushPromises();
 
-    expect(playlistsApi.listPlaylists).toHaveBeenCalledWith({
+    expect(playlistsApi.listPlaylistsWithMeta).toHaveBeenCalledWith({
       q: "",
       limit: 20,
       offset: 0,
@@ -119,6 +133,20 @@ describe("PlaylistsView", () => {
       include: "owner",
     });
     expect(wrapper.text()).toContain("Road Trip");
+  });
+
+  it("shows the total playlist count in the header", async () => {
+    vi.mocked(playlistsApi.listPlaylistsWithMeta).mockResolvedValue(
+      createListResult([createPlaylist("playlist-1", "Road Trip")], 5),
+    );
+
+    wrapper = mount(PlaylistsView, {
+      attachTo: document.body,
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".bulk-editable-grid__count").text()).toBe("(5)");
   });
 
   it("shows the empty state", async () => {
@@ -136,12 +164,14 @@ describe("PlaylistsView", () => {
   });
 
   it("debounces search and resets the list", async () => {
-    const fetcher = vi.mocked(playlistsApi.listPlaylists);
+    const fetcher = vi.mocked(playlistsApi.listPlaylistsWithMeta);
     fetcher
-      .mockResolvedValueOnce([createPlaylist("playlist-1", "First Playlist")])
-      .mockResolvedValueOnce([
-        createPlaylist("playlist-2", "Searched Playlist"),
-      ]);
+      .mockResolvedValueOnce(
+        createListResult([createPlaylist("playlist-1", "First Playlist")]),
+      )
+      .mockResolvedValueOnce(
+        createListResult([createPlaylist("playlist-2", "Searched Playlist")]),
+      );
 
     wrapper = mount(PlaylistsView, {
       attachTo: document.body,
@@ -169,14 +199,19 @@ describe("PlaylistsView", () => {
   });
 
   it("loads the next page", async () => {
-    const fetcher = vi.mocked(playlistsApi.listPlaylists);
+    const fetcher = vi.mocked(playlistsApi.listPlaylistsWithMeta);
     fetcher
       .mockResolvedValueOnce(
-        Array.from({ length: 20 }, (_, i) =>
-          createPlaylist(`playlist-${i}`, `Playlist ${i}`),
+        createListResult(
+          Array.from({ length: 20 }, (_, i) =>
+            createPlaylist(`playlist-${i}`, `Playlist ${i}`),
+          ),
+          21,
         ),
       )
-      .mockResolvedValueOnce([createPlaylist("playlist-20", "Playlist 20")]);
+      .mockResolvedValueOnce(
+        createListResult([createPlaylist("playlist-20", "Playlist 20")], 21),
+      );
 
     wrapper = mount(PlaylistsView, {
       attachTo: document.body,
@@ -206,10 +241,12 @@ describe("PlaylistsView", () => {
 
   it("creates a playlist and refreshes the list", async () => {
     setAuthenticated();
-    const fetcher = vi.mocked(playlistsApi.listPlaylists);
+    const fetcher = vi.mocked(playlistsApi.listPlaylistsWithMeta);
     fetcher
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([createPlaylist("playlist-1", "Road Trip")]);
+      .mockResolvedValueOnce(createListResult([]))
+      .mockResolvedValueOnce(
+        createListResult([createPlaylist("playlist-1", "Road Trip")]),
+      );
 
     wrapper = mount(PlaylistsView, {
       attachTo: document.body,
@@ -308,14 +345,14 @@ describe("PlaylistsView", () => {
 
     const toggle = wrapper.findComponent(CollectionToggle);
     expect(toggle.find('input[type="checkbox"]').exists()).toBe(false);
-    expect(playlistsApi.listPlaylists).toHaveBeenLastCalledWith(
+    expect(playlistsApi.listPlaylistsWithMeta).toHaveBeenLastCalledWith(
       expect.objectContaining({ collection: undefined }),
     );
   });
 
   it("enables the collection filter by default when signed in", async () => {
     setAuthenticated();
-    const fetcher = vi.mocked(playlistsApi.listPlaylists);
+    const fetcher = vi.mocked(playlistsApi.listPlaylistsWithMeta);
 
     wrapper = mount(PlaylistsView, {
       global: { plugins: [createTestRouter()] },
@@ -334,7 +371,7 @@ describe("PlaylistsView", () => {
 
   it("drops the collection filter when the toggle is disabled", async () => {
     setAuthenticated();
-    const fetcher = vi.mocked(playlistsApi.listPlaylists);
+    const fetcher = vi.mocked(playlistsApi.listPlaylistsWithMeta);
 
     wrapper = mount(PlaylistsView, {
       global: { plugins: [createTestRouter()] },
@@ -353,9 +390,9 @@ describe("PlaylistsView", () => {
   });
 
   it("renders remote playlists in the grid with their domain", async () => {
-    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([
-      createPlaylist("playlist-1", "Local Mix"),
-    ]);
+    vi.mocked(playlistsApi.listPlaylistsWithMeta).mockResolvedValue(
+      createListResult([createPlaylist("playlist-1", "Local Mix")]),
+    );
     vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
       items: [createRemotePlaylist("ro-1", "Federated Mix")],
       offset: 0,
@@ -378,9 +415,9 @@ describe("PlaylistsView", () => {
   });
 
   it("keeps remote playlists through Load More and pages remote in lockstep", async () => {
-    vi.mocked(playlistsApi.listPlaylists).mockResolvedValue([
-      createPlaylist("playlist-1", "Local Mix"),
-    ]);
+    vi.mocked(playlistsApi.listPlaylistsWithMeta).mockResolvedValue(
+      createListResult([createPlaylist("playlist-1", "Local Mix")]),
+    );
     vi.mocked(remoteApi.listRemoteObjectsWithMeta)
       .mockResolvedValueOnce({
         items: [createRemotePlaylist("ro-1", "Federated Mix")],

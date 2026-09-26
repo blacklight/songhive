@@ -292,6 +292,36 @@ export function listPlaylistItems(
   });
 }
 
+export interface ListPlaylistItemsResult {
+  items: PlaylistItemResponse[];
+  offset: number;
+  total: number;
+}
+
+export async function listPlaylistItemsWithMeta(
+  id: string,
+  params?: {
+    q?: string;
+    limit?: number;
+    offset?: number;
+    include?: string;
+    sort_by?: string;
+    sort_dir?: "asc" | "desc";
+  },
+): Promise<ListPlaylistItemsResult> {
+  const response = await apiRequestWithHeaders<PlaylistItemResponse[]>(
+    `/playlists/${id}/items`,
+    { query: params },
+  );
+  const offsetHeader = response.headers.get("X-List-Offset");
+  const totalHeader = response.headers.get("X-Total-Count");
+  return {
+    items: response.body,
+    offset: offsetHeader ? parseInt(offsetHeader, 10) : (params?.offset ?? 0),
+    total: totalHeader ? parseInt(totalHeader, 10) : response.body.length,
+  };
+}
+
 /**
  * Map a playlist item to a QueueTrack the player can consume: track items
  * carry a full TrackResponse; episode items become remote queue tracks that

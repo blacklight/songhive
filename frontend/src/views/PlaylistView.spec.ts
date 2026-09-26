@@ -18,7 +18,7 @@ vi.mock("@/api/playlists", async (importOriginal) => {
   return {
     getPlaylist: vi.fn(),
     getPlaylistStats: vi.fn(),
-    listPlaylistItems: vi.fn(),
+    listPlaylistItemsWithMeta: vi.fn(),
     playlistItemToQueueTrack: actual.playlistItemToQueueTrack,
     reorderPlaylistTracks: vi.fn(),
     deletePlaylist: vi.fn(),
@@ -91,6 +91,17 @@ function createTrack(id: string, title: string): TrackResponse {
   };
 }
 
+function createItemsResult(
+  items: PlaylistItemResponse[],
+  total?: number,
+): playlistsApi.ListPlaylistItemsResult {
+  return {
+    items,
+    offset: 0,
+    total: total ?? items.length,
+  };
+}
+
 function createTrackItem(id: string, title: string): PlaylistItemResponse {
   return {
     item_id: `item-${id}`,
@@ -146,7 +157,9 @@ describe("PlaylistView", () => {
       track_count: 0,
       total_duration: 0,
     });
-    vi.mocked(playlistsApi.listPlaylistItems).mockResolvedValue([]);
+    vi.mocked(playlistsApi.listPlaylistItemsWithMeta).mockResolvedValue(
+      createItemsResult([]),
+    );
   });
 
   afterEach(() => {
@@ -165,23 +178,26 @@ describe("PlaylistView", () => {
   }
 
   it("loads playlist and tracks on mount", async () => {
-    vi.mocked(playlistsApi.listPlaylistItems).mockResolvedValue([
-      createTrackItem("track-1", "Song One"),
-    ]);
+    vi.mocked(playlistsApi.listPlaylistItemsWithMeta).mockResolvedValue(
+      createItemsResult([createTrackItem("track-1", "Song One")]),
+    );
 
     await mountAt("/playlists/playlist-1");
 
     expect(playlistsApi.getPlaylist).toHaveBeenCalledWith("playlist-1", {
       include: "owner",
     });
-    expect(playlistsApi.listPlaylistItems).toHaveBeenCalledWith("playlist-1", {
-      q: "",
-      limit: 20,
-      offset: 0,
-      include: "artist,album",
-      sort_by: "position",
-      sort_dir: "asc",
-    });
+    expect(playlistsApi.listPlaylistItemsWithMeta).toHaveBeenCalledWith(
+      "playlist-1",
+      {
+        q: "",
+        limit: 20,
+        offset: 0,
+        include: "artist,album",
+        sort_by: "position",
+        sort_dir: "asc",
+      },
+    );
 
     expect(wrapper.text()).toContain("Road Trip");
     expect(wrapper.text()).toContain("A mix for the highway.");
@@ -222,9 +238,9 @@ describe("PlaylistView", () => {
     vi.mocked(playlistsApi.getPlaylist).mockResolvedValue(
       createPlaylist("playlist-1", "Road Trip"),
     );
-    vi.mocked(playlistsApi.listPlaylistItems).mockResolvedValue([
-      createTrackItem("track-1", "Song One"),
-    ]);
+    vi.mocked(playlistsApi.listPlaylistItemsWithMeta).mockResolvedValue(
+      createItemsResult([createTrackItem("track-1", "Song One")]),
+    );
     await wrapper.find("button").trigger("click");
     await flushPromises();
 
@@ -256,9 +272,13 @@ describe("PlaylistView", () => {
   it("filters tracks by search query", async () => {
     vi.useFakeTimers();
     try {
-      vi.mocked(playlistsApi.listPlaylistItems)
-        .mockResolvedValueOnce([createTrackItem("track-1", "First Song")])
-        .mockResolvedValueOnce([createTrackItem("track-2", "Searched Song")]);
+      vi.mocked(playlistsApi.listPlaylistItemsWithMeta)
+        .mockResolvedValueOnce(
+          createItemsResult([createTrackItem("track-1", "First Song")]),
+        )
+        .mockResolvedValueOnce(
+          createItemsResult([createTrackItem("track-2", "Searched Song")]),
+        );
 
       await mountAt("/playlists/playlist-1");
 
@@ -270,7 +290,7 @@ describe("PlaylistView", () => {
       vi.advanceTimersByTime(300);
       await flushPromises();
 
-      expect(playlistsApi.listPlaylistItems).toHaveBeenLastCalledWith(
+      expect(playlistsApi.listPlaylistItemsWithMeta).toHaveBeenLastCalledWith(
         "playlist-1",
         {
           q: "searched",
@@ -289,10 +309,12 @@ describe("PlaylistView", () => {
   });
 
   it("reorders tracks and refreshes the list", async () => {
-    vi.mocked(playlistsApi.listPlaylistItems).mockResolvedValue([
-      createTrackItem("track-1", "Song One"),
-      createTrackItem("track-2", "Song Two"),
-    ]);
+    vi.mocked(playlistsApi.listPlaylistItemsWithMeta).mockResolvedValue(
+      createItemsResult([
+        createTrackItem("track-1", "Song One"),
+        createTrackItem("track-2", "Song Two"),
+      ]),
+    );
     vi.mocked(playlistsApi.reorderPlaylistTracks).mockResolvedValue({
       reordered: true,
       item_ids: ["track-2"],
@@ -334,14 +356,16 @@ describe("PlaylistView", () => {
       "playlist-1",
       { item_ids: ["track-1"], position: 2 },
     );
-    expect(playlistsApi.listPlaylistItems).toHaveBeenCalledTimes(2);
+    expect(playlistsApi.listPlaylistItemsWithMeta).toHaveBeenCalledTimes(2);
   });
 
   it("renders podcast episodes alongside tracks", async () => {
-    vi.mocked(playlistsApi.listPlaylistItems).mockResolvedValue([
-      createTrackItem("track-1", "Song One"),
-      createEpisodeItem("ep-1", "Episode One"),
-    ]);
+    vi.mocked(playlistsApi.listPlaylistItemsWithMeta).mockResolvedValue(
+      createItemsResult([
+        createTrackItem("track-1", "Song One"),
+        createEpisodeItem("ep-1", "Episode One"),
+      ]),
+    );
 
     await mountAt("/playlists/playlist-1");
 

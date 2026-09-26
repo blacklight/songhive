@@ -155,6 +155,19 @@ describe("TracksView", () => {
     expect(wrapper.text()).toContain("Song One");
   });
 
+  it("shows the total track count in the header", async () => {
+    vi.mocked(tracksApi.listTracksWithMeta).mockResolvedValue(
+      createListResult([createTrack("track-1", "Song One")], 128),
+    );
+
+    wrapper = mount(TracksView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".tracks-view__count").text()).toBe("(128)");
+  });
+
   it("fetches and displays artist and album names", async () => {
     vi.mocked(tracksApi.listTracksWithMeta).mockResolvedValue(
       createListResult([

@@ -20,6 +20,8 @@ import SortControl, {
 export interface Props<T extends ManageableItem> {
   title: string;
   icon?: string;
+  /** Total entities matching the current filters, shown next to the title. */
+  total?: number;
   items: T[];
   loading: boolean;
   error: string | null;
@@ -50,6 +52,7 @@ export interface Props<T extends ManageableItem> {
 
 const props = withDefaults(defineProps<Props<T>>(), {
   icon: undefined,
+  total: undefined,
   searchPlaceholder: undefined,
   emptyMessage: undefined,
   getOwnerId: undefined,
@@ -161,7 +164,14 @@ defineSlots<{
 <template>
   <div class="bulk-editable-grid">
     <div class="bulk-editable-grid__header">
-      <AppPageTitle :icon="icon">{{ title }}</AppPageTitle>
+      <AppPageTitle :icon="icon">
+        {{ title }}
+        <span
+          v-if="total !== undefined && (total > 0 || !loading)"
+          class="bulk-editable-grid__count"
+          >({{ total }})</span
+        >
+      </AppPageTitle>
 
       <div class="bulk-editable-grid__actions">
         <slot name="header-actions" :bulk-mode="bulkMode" />
@@ -373,6 +383,11 @@ defineSlots<{
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+.bulk-editable-grid__count {
+  font-weight: normal;
+  color: var(--color-text-muted);
 }
 
 .bulk-editable-grid__actions {
