@@ -114,6 +114,10 @@ class TrackUpdate(BaseModel):
     filename: Optional[str] = None
     description: Optional[str] = None
     extra_artists: Optional[List[str]] = None
+    # When ``visibility`` transitions to ``public``, ``publish`` also fans out
+    # a ``Create(Audio)`` ActivityPub activity to the owner's followers; when
+    # unset/false the track is only made publicly accessible (its URL resolves).
+    publish: Optional[bool] = None
 
 
 class BulkTrackDeleteRequest(BaseModel):
@@ -381,10 +385,13 @@ async def _handle_visibility_changes(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession,
+    *,
+    publish: bool = False,
 ):
-    """Partially update a track."""
+    """Apply the federation side effects of a track visibility change."""
     if (
-        previous_visibility != Visibility.PUBLIC.value
+        publish
+        and previous_visibility != Visibility.PUBLIC.value
         and track.visibility == Visibility.PUBLIC.value
         and track.owner_id
     ):
@@ -849,7 +856,12 @@ async def update_track(
     )
     await db.commit()
     await _handle_visibility_changes(
-        track, previous_visibility=previous_visibility, request=request, background_tasks=background_tasks, db=db
+        track,
+        previous_visibility=previous_visibility,
+        request=request,
+        background_tasks=background_tasks,
+        db=db,
+        publish=body.publish or False,
     )
 
     # Metadata edits that alter the published ``Audio`` object re-sync the

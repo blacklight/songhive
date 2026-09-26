@@ -761,8 +761,11 @@ reply cannot resurface.
 Track fediverse publications are recorded as activities too: every publish
 path — the manual `POST /api/v1/tracks/{id}/publish`, uploads and imports
 of public tracks that opt in with `publish=true` (including the
-`process_upload` Celery task and bulk library uploads), and entity
-visibility transitions to `public` — calls
+`process_upload` Celery task and bulk library uploads), `PATCH
+/api/v1/tracks/{id}` transitions to `public` that opt in with `publish=true`
+(surfaced as a "Publish on the Fediverse" checkbox on the track metadata
+edit forms; without it the transition only makes the track's URL publicly
+accessible), and album visibility propagation to `public` — calls
 `services/activities.record_track_publication`. Uploads are local-only by
 default: without the flag the track gets no `federation_object_id` and no
 publication activity. `record_track_publication` builds a `Create`
@@ -1995,8 +1998,10 @@ the HTTP routes.
   the raw audio download URL would be chosen for display instead of the
   track page.
 - Each public lifecycle gets a fresh `Track.federation_object_id` (generated
-  on every transition to public) so a previous `Tombstone` at the same URL
-  cannot block re-publication.
+  when a transition to public is published — album propagation or a track
+  `PATCH` with `publish=true` — and re-minted by every `audio`
+  republication) so a previous `Tombstone` at the same URL cannot block
+  re-publication.
 - `POST /api/v1/tracks/{id}/publish` publishes a public track to the
   fediverse at any time (the "Fediverse" tab of the share dialog). Any
   authenticated user may share a public track as a `Create(Note)` post

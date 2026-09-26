@@ -5,6 +5,7 @@ import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
+import { useInstanceStore } from "@/stores/instance";
 import * as tracksApi from "@/api/tracks";
 import type { TrackResponse, TrackUpdate } from "@/api/tracks";
 import TrackEditView from "./TrackEditView.vue";
@@ -197,12 +198,102 @@ describe("TrackEditView", () => {
       disc_number: null,
       release_year: null,
       visibility: "local",
+      publish: false,
       filename: "Song One.mp3",
       description: null,
       extra_artists: ["Guest One", "Feat Two"],
     };
     expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-1", expectedBody);
     expect(router.currentRoute.value.path).toBe("/tracks/track-1");
+  });
+
+  it("offers a fediverse publish option when switching to public", async () => {
+    setAuthenticated("user-1");
+    const instanceStore = useInstanceStore();
+    instanceStore.instance = { federation_enabled: true } as never;
+    vi.mocked(tracksApi.getTrack).mockResolvedValue({
+      ...createTrack("track-1", "Song One"),
+      visibility: "private",
+    });
+    await mountAt("/tracks/track-1/edit");
+
+    expect(document.body.querySelector('input[type="checkbox"]')).toBeNull();
+
+    const visibilitySelect = document.body.querySelector(
+      "select",
+    ) as HTMLSelectElement;
+    visibilitySelect.value = "public";
+    visibilitySelect.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const publishCheckbox = document.body.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+    expect(publishCheckbox).not.toBeNull();
+    publishCheckbox.checked = true;
+    publishCheckbox.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.save"));
+    await saveButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.updateTrack).toHaveBeenCalledWith(
+      "track-1",
+      expect.objectContaining({ visibility: "public", publish: true }),
+    );
+  });
+
+  it("only makes the track public when the publish option is unchecked", async () => {
+    setAuthenticated("user-1");
+    const instanceStore = useInstanceStore();
+    instanceStore.instance = { federation_enabled: true } as never;
+    vi.mocked(tracksApi.getTrack).mockResolvedValue({
+      ...createTrack("track-1", "Song One"),
+      visibility: "private",
+    });
+    await mountAt("/tracks/track-1/edit");
+
+    const visibilitySelect = document.body.querySelector(
+      "select",
+    ) as HTMLSelectElement;
+    visibilitySelect.value = "public";
+    visibilitySelect.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.save"));
+    await saveButton?.click();
+    await flushPromises();
+
+    expect(tracksApi.updateTrack).toHaveBeenCalledWith(
+      "track-1",
+      expect.objectContaining({ visibility: "public", publish: false }),
+    );
+  });
+
+  it("hides the publish option when federation is disabled", async () => {
+    setAuthenticated("user-1");
+    vi.mocked(tracksApi.getTrack).mockResolvedValue({
+      ...createTrack("track-1", "Song One"),
+      visibility: "private",
+    });
+    await mountAt("/tracks/track-1/edit");
+
+    const visibilitySelect = document.body.querySelector(
+      "select",
+    ) as HTMLSelectElement;
+    visibilitySelect.value = "public";
+    visibilitySelect.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(document.body.textContent).not.toContain(
+      i18n.global.t("browse.edit.publishFediverse"),
+    );
+    expect(document.body.querySelector('input[type="checkbox"]')).toBeNull();
   });
 
   it("loads and submits the track description", async () => {

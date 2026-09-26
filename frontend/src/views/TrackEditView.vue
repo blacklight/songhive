@@ -16,6 +16,7 @@ import { useCanManage } from "@/composables/useCanManage";
 import { useEntityTags } from "@/composables/useEntityTags";
 import { useEntityGenres } from "@/composables/useEntityGenres";
 import { useConfirmStore } from "@/stores/confirm";
+import { useInstanceStore } from "@/stores/instance";
 import { useToastStore } from "@/stores/toast";
 import { parseNumber, toVisibility } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -28,6 +29,7 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const confirm = useConfirmStore();
+const instanceStore = useInstanceStore();
 const toast = useToastStore();
 
 const trackId = computed(() => String(route.params.id));
@@ -45,6 +47,7 @@ const filename = ref("");
 const description = ref("");
 const extraArtists = ref("");
 const visibility = ref("private");
+const publish = ref(false);
 const isSaving = ref(false);
 const isDeleting = ref(false);
 const isUploadingImage = ref(false);
@@ -76,6 +79,7 @@ function resetForm() {
   description.value = track.value?.description ?? "";
   extraArtists.value = (track.value?.extra_artists ?? []).join(", ");
   visibility.value = toVisibility(track.value?.visibility);
+  publish.value = false;
   resetTags(track.value?.tags ?? null);
   resetGenres(track.value?.genres ?? null);
   error.value = null;
@@ -125,6 +129,10 @@ async function onSubmit() {
     disc_number: parseNumber(discNumber.value),
     release_year: parseNumber(releaseYear.value),
     visibility: toVisibility(visibility.value),
+    publish:
+      publish.value &&
+      instanceStore.federationEnabled &&
+      visibility.value === "public",
     description: description.value.trim() || null,
     extra_artists: extraArtists.value
       .split(",")
@@ -266,6 +274,8 @@ watch(
         v-model:tags="tags"
         v-model:description="description"
         v-model:extra-artists="extraArtists"
+        v-model:publish="publish"
+        :previous-visibility="track.visibility"
         :can-rename-file="canRenameFile"
         @submit="onSubmit"
       >

@@ -361,6 +361,7 @@ async def update_album(
             request=request,
             background_tasks=background_tasks,
             db=db,
+            publish=True,
         )
 
     if any(field in body.model_dump(exclude_unset=True) for field in ("title", "release_year", "genre")):

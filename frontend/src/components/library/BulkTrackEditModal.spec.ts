@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
+import { useInstanceStore } from "@/stores/instance";
 import { useToastStore } from "@/stores/toast";
 import * as tracksApi from "@/api/tracks";
 import * as tagsApi from "@/api/tags";
@@ -189,6 +190,94 @@ describe("BulkTrackEditModal", () => {
     expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-1", {
       album_title: "",
     });
+  });
+
+  it("offers a fediverse publish option when changing visibility to public", async () => {
+    const instanceStore = useInstanceStore();
+    instanceStore.instance = { federation_enabled: true } as never;
+    const tracks = [
+      makeTrack({ id: "track-1", visibility: "private" }),
+      makeTrack({ id: "track-2", visibility: "private" }),
+    ];
+    for (const track of tracks) {
+      vi.mocked(tracksApi.getTrack).mockResolvedValueOnce(track);
+    }
+    vi.mocked(tracksApi.updateTrack).mockResolvedValue(tracks[0]);
+
+    wrapper = mountModal(["track-1", "track-2"]);
+    await openModal(wrapper);
+
+    expect(document.body.querySelector('input[type="checkbox"]')).toBeNull();
+
+    const select = document.body.querySelector("select") as HTMLSelectElement;
+    select.value = "public";
+    select.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const publishCheckbox = document.body.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+    expect(publishCheckbox).not.toBeNull();
+    publishCheckbox.checked = true;
+    publishCheckbox.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    await clickSave();
+
+    expect(tracksApi.updateTrack).toHaveBeenCalledTimes(2);
+    expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-1", {
+      visibility: "public",
+      publish: true,
+    });
+    expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-2", {
+      visibility: "public",
+      publish: true,
+    });
+  });
+
+  it("only changes visibility when the publish option is unchecked", async () => {
+    const instanceStore = useInstanceStore();
+    instanceStore.instance = { federation_enabled: true } as never;
+    vi.mocked(tracksApi.getTrack).mockResolvedValue(
+      makeTrack({ visibility: "private" }),
+    );
+    vi.mocked(tracksApi.updateTrack).mockResolvedValue(makeTrack());
+
+    wrapper = mountModal(["track-1"]);
+    await openModal(wrapper);
+
+    const select = document.body.querySelector("select") as HTMLSelectElement;
+    select.value = "public";
+    select.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const publishCheckbox = document.body.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+    expect(publishCheckbox).not.toBeNull();
+    expect(publishCheckbox.checked).toBe(false);
+
+    await clickSave();
+
+    expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-1", {
+      visibility: "public",
+    });
+  });
+
+  it("hides the publish option when the shared visibility is already public", async () => {
+    const instanceStore = useInstanceStore();
+    instanceStore.instance = { federation_enabled: true } as never;
+    vi.mocked(tracksApi.getTrack).mockResolvedValue(makeTrack());
+
+    wrapper = mountModal(["track-1"]);
+    await openModal(wrapper);
+
+    const select = document.body.querySelector("select") as HTMLSelectElement;
+    select.value = "public";
+    select.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    expect(document.body.querySelector('input[type="checkbox"]')).toBeNull();
   });
 
   it("does not call the API when nothing changed", async () => {

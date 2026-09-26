@@ -10243,6 +10243,8 @@ export interface components {
       description?: string | null;
       /** Extra Artists */
       extra_artists?: string[] | null;
+      /** Publish */
+      publish?: boolean | null;
     };
     /**
      * TwoFactorStatusResponse

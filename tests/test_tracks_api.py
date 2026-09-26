@@ -402,14 +402,14 @@ def _patch_publish(monkeypatch):
 
 
 def test_update_track_to_public_enqueues_publish(client, sample_tracks, regular_user, auth_headers, monkeypatch):
-    """A private -> public visibility transition enqueues federation publication."""
+    """A private -> public transition with ``publish`` enqueues federation publication."""
     track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
     mock = _patch_publish(monkeypatch)
     headers = auth_headers(regular_user)
 
     response = client.patch(
         f"/api/v1/tracks/{track.id}",
-        json={"visibility": "public"},
+        json={"visibility": "public", "publish": True},
         headers=headers,
     )
     assert response.status_code == 200
@@ -424,6 +424,29 @@ def test_update_track_to_public_enqueues_publish(client, sample_tracks, regular_
     call_object_id = mock.published_object_ids[0]
     assert call_object_id
     uuid.UUID(call_object_id)  # validates the generated publication id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [{"visibility": "public"}, {"visibility": "public", "publish": False}])
+async def test_update_track_to_public_without_publish_does_not_enqueue_publish(
+    client, sample_tracks, regular_user, db_session, auth_headers, monkeypatch, body
+):
+    """A private -> public transition without ``publish`` only makes the URL public."""
+    track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)
+    mock = _patch_publish(monkeypatch)
+    headers = auth_headers(regular_user)
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json=body,
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["visibility"] == "public"
+    assert mock.call_count == 0
+
+    await db_session.refresh(track)
+    assert track.federation_object_id is None
 
 
 def test_update_public_track_does_not_enqueue_publish(client, sample_tracks, regular_user, auth_headers, monkeypatch):
@@ -647,9 +670,9 @@ def test_public_private_public_uses_fresh_object_id(client, sample_tracks, regul
     monkeypatch.setattr("songhive.api.routes.tracks.unpublish_track_activity", unpublish_mock)
     headers = auth_headers(regular_user)
 
-    client.patch(f"/api/v1/tracks/{track.id}", json={"visibility": "public"}, headers=headers)
+    client.patch(f"/api/v1/tracks/{track.id}", json={"visibility": "public", "publish": True}, headers=headers)
     client.patch(f"/api/v1/tracks/{track.id}", json={"visibility": "private"}, headers=headers)
-    client.patch(f"/api/v1/tracks/{track.id}", json={"visibility": "public"}, headers=headers)
+    client.patch(f"/api/v1/tracks/{track.id}", json={"visibility": "public", "publish": True}, headers=headers)
 
     assert publish_mock.call_count == 2
     assert unpublish_mock.call_count == 1

@@ -43,6 +43,7 @@ const discNumber = ref("");
 const releaseYear = ref("");
 const filename = ref("");
 const visibility = ref("");
+const publish = ref(false);
 const tags = ref<string[]>([]);
 
 interface BulkInitialValues {
@@ -129,6 +130,7 @@ function initForm() {
   releaseYear.value = initial.value.releaseYear;
   filename.value = initial.value.filename;
   visibility.value = initial.value.visibility;
+  publish.value = false;
   tags.value = [...initial.value.tags];
 }
 
@@ -164,6 +166,7 @@ watch(
       initial.value = null;
       loaded.value = false;
       error.value = null;
+      publish.value = false;
     }
   },
 );
@@ -207,6 +210,9 @@ function buildUpdate(): TrackUpdate | null {
   }
   if (visibility.value !== init.visibility && visibility.value) {
     body.visibility = visibility.value as Visibility;
+    if (visibility.value === "public" && publish.value) {
+      body.publish = true;
+    }
   }
 
   return Object.keys(body).length > 0 ? body : null;
@@ -323,7 +329,9 @@ async function onSubmit() {
           v-model:filename="filename"
           v-model:visibility="visibility"
           v-model:tags="tags"
+          v-model:publish="publish"
           bulk
+          :previous-visibility="initial?.visibility ?? ''"
           :can-rename-file="canRenameFile"
           :disabled="saving"
           @submit="onSubmit"

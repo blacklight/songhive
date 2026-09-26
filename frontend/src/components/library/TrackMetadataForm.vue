@@ -1,21 +1,26 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
+import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import GenreInput from "@/components/genres/GenreInput.vue";
 import TagInput from "@/components/tags/TagInput.vue";
+import { useInstanceStore } from "@/stores/instance";
 
 export interface Props {
   bulk?: boolean;
   canRenameFile?: boolean;
   disabled?: boolean;
+  /** The persisted visibility, so the publish option only shows on a transition to public. */
+  previousVisibility?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   bulk: false,
   canRenameFile: true,
   disabled: false,
+  previousVisibility: "",
 });
 
 const title = defineModel<string>("title", { required: true });
@@ -30,10 +35,12 @@ const visibility = defineModel<string>("visibility", { required: true });
 const tags = defineModel<string[]>("tags", { required: true });
 const description = defineModel<string>("description", { default: "" });
 const extraArtists = defineModel<string>("extraArtists", { default: "" });
+const publish = defineModel<boolean>("publish", { default: false });
 
 const emit = defineEmits<{ submit: [] }>();
 
 const { t } = useI18n();
+const instanceStore = useInstanceStore();
 
 const visibilityOptions = computed(() => {
   const options = [
@@ -49,6 +56,13 @@ const visibilityOptions = computed(() => {
   }
   return options;
 });
+
+const showPublishOption = computed(
+  () =>
+    instanceStore.federationEnabled &&
+    visibility.value === "public" &&
+    visibility.value !== props.previousVisibility,
+);
 </script>
 
 <template>
@@ -118,6 +132,20 @@ const visibilityOptions = computed(() => {
       v-model="visibility"
       :label="t('browse.detail.visibility')"
       :options="visibilityOptions"
+      :disabled="props.disabled"
+    />
+
+    <AppCheckbox
+      v-if="showPublishOption"
+      v-model="publish"
+      :label="t('browse.edit.publishFediverse')"
+      :hint="
+        t(
+          props.bulk
+            ? 'browse.bulkEdit.publishFediverseHint'
+            : 'browse.edit.publishFediverseHint',
+        )
+      "
       :disabled="props.disabled"
     />
 
