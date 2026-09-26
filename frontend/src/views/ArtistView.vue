@@ -92,7 +92,8 @@ const {
       sort_dir: params.sort_dir,
     }),
   {
-    defaultSortBy: "title",
+    defaultSortBy: "release_year",
+    defaultSortDir: "desc",
     syncQuery: true,
     queryKey: "albums",
   },

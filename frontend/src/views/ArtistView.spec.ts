@@ -161,8 +161,8 @@ describe("ArtistView", () => {
       artist_id: "artist-1",
       limit: 20,
       offset: 0,
-      sort_by: "title",
-      sort_dir: "asc",
+      sort_by: "release_year",
+      sort_dir: "desc",
     });
     expect(tracksApi.listTracks).toHaveBeenCalledWith({
       q: "",
