@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 
 import pytest
@@ -23,6 +24,72 @@ def _sample_queue() -> list[dict]:
         {"id": "t1", "title": "Track One", "artist": "Artist", "duration": 100},
         {"id": "t2", "title": "Track Two", "artist": "Artist", "duration": 100},
     ]
+
+
+def _find_command(driver: OutputDriver, name: str):
+    """Return the first command tuple with the given name."""
+    for cmd in driver.commands:
+        if isinstance(cmd, tuple) and cmd[0] == name:
+            return cmd
+        if cmd == name:
+            return cmd
+    return None
+
+
+def _set_source_commands(driver: OutputDriver) -> list[tuple]:
+    """Return every ``set_source`` command the driver received."""
+    return [cmd for cmd in driver.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
+
+
+async def _wait_until(predicate, *, timeout: float = 10.0, interval: float = 0.02) -> bool:
+    """Poll ``predicate`` until it returns truthy or ``timeout`` seconds elapse.
+
+    The predicate may be synchronous or return an awaitable. Polling on a
+    condition instead of sleeping a fixed delay keeps the tests deterministic
+    under loaded parallel CI workers.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        result = predicate()
+        if inspect.isawaitable(result):
+            result = await result
+        if result:
+            return True
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(interval)
+
+
+async def _send_command(
+    worker: StreamWorker,
+    session_id: str,
+    command: str,
+    args: dict | None = None,
+    issued_by: str = "conn-1",
+) -> None:
+    """Enqueue a control envelope on the session's control list."""
+    await worker.redis.rpush(
+        _control_key(session_id),
+        json.dumps({"command": command, "args": args or {}, "issued_by": issued_by}),
+    )
+
+
+async def _stop_driver_task(driver: SessionDriver, task: asyncio.Task, timeout: float = 10.0) -> None:
+    """Flag the driver's loop to exit and wait for ``run()`` to finish."""
+    driver._shutting_down = True
+    await asyncio.wait_for(task, timeout=timeout)
+
+
+async def _wait_for_session_field(session_id: str, field: str, expected, *, timeout: float = 10.0) -> bool:
+    """Wait until ``PlaybackSession.<field>`` equals ``expected``."""
+
+    async def _check() -> bool:
+        async with get_session() as db:
+            session = await db.get(PlaybackSession, session_id)
+            return session is not None and getattr(session, field) == expected
+
+    return await _wait_until(_check, timeout=timeout)
 
 
 @pytest.fixture
@@ -97,28 +164,51 @@ async def _fake_resolve_source(self, db, session: PlaybackSession):
     )
 
 
+class _DriverCapture:
+    """Records each driver ``SessionDriver`` starts, in start order."""
+
+    def __init__(self) -> None:
+        self.drivers: list[OutputDriver] = []
+        self.error: BaseException | None = None
+
+    @property
+    def latest(self) -> OutputDriver:
+        """The most recently started driver."""
+        if self.error is not None:
+            raise AssertionError("SessionDriver._start_driver failed") from self.error
+        assert self.drivers, "SessionDriver never started a driver"
+        return self.drivers[-1]
+
+    async def wait_for(self, count: int = 1, timeout: float = 10.0) -> OutputDriver:
+        """Wait until the ``count``-th driver has started and return it."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while len(self.drivers) < count:
+            if self.error is not None:
+                raise AssertionError("SessionDriver._start_driver failed") from self.error
+            if loop.time() >= deadline:
+                raise AssertionError(f"Timed out waiting for driver #{count} ({len(self.drivers)} started)")
+            await asyncio.sleep(0.02)
+        return self.drivers[count - 1]
+
+
 @pytest.fixture
 def capture_driver(monkeypatch):
-    """Capture the started OutputDriver so tests can inspect commands after run()."""
-    holder: dict[str, OutputDriver | None] = {}
+    """Capture every OutputDriver the session driver starts so tests can inspect it."""
+    capture = _DriverCapture()
     orig = SessionDriver._start_driver
 
-    async def _wrapped(self) -> None:
-        await orig(self)
-        holder["driver"] = self.driver
+    async def _wrapped(self: SessionDriver) -> None:
+        try:
+            await orig(self)
+        except Exception as exc:
+            capture.error = exc
+            raise
+        if self.driver is not None:
+            capture.drivers.append(self.driver)
 
     monkeypatch.setattr(SessionDriver, "_start_driver", _wrapped)
-    return holder
-
-
-def _find_command(driver: OutputDriver, name: str):
-    """Return the first command tuple with the given name."""
-    for cmd in driver.commands:
-        if isinstance(cmd, tuple) and cmd[0] == name:
-            return cmd
-        if cmd == name:
-            return cmd
-    return None
+    return capture
 
 
 @pytest.mark.asyncio
@@ -134,23 +224,14 @@ async def test_play_command_sets_source(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    # Give the driver a moment to start.
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
 
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "play", "args": {}, "issued_by": "conn-1"}),
-    )
+    await _send_command(worker, session.id, "play")
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
 
-    await asyncio.sleep(0.3)
+    await _stop_driver_task(driver, task)
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
-
-    fake = capture_driver["driver"]
-    assert fake is not None
-    start = _find_command(fake, "start")
-    assert start is not None
+    assert _find_command(fake, "start") is not None
     set_source = _find_command(fake, "set_source")
     assert set_source is not None
     assert set_source[3].track_id == "t1"
@@ -169,22 +250,14 @@ async def test_pause_command_swaps_to_silence(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
 
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "pause", "args": {}, "issued_by": "conn-1"}),
-    )
+    await _send_command(worker, session.id, "pause")
+    assert await _wait_until(lambda: _find_command(fake, "pause") is not None)
 
-    await asyncio.sleep(0.3)
+    await _stop_driver_task(driver, task)
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
-
-    fake = capture_driver["driver"]
-    assert fake is not None
-    pause = _find_command(fake, "pause")
-    assert pause is not None
+    assert _find_command(fake, "pause") is not None
 
 
 @pytest.mark.asyncio
@@ -200,27 +273,20 @@ async def test_source_ended_autonomous_advance(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
 
-    # Put the driver into a playing state with the first track.
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "play", "args": {}, "issued_by": "conn-1"}),
-    )
-    await asyncio.sleep(0.2)
+    # Startup sync puts the driver on the first track (state is "playing").
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    await _send_command(worker, session.id, "play")
 
     # Simulate the decoder finishing the first track.
-    fake = capture_driver["driver"]
-    assert fake is not None
     fake.trigger_source_ended()
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
 
-    await asyncio.sleep(0.4)
+    await _stop_driver_task(driver, task)
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
-
-    set_source_commands = [cmd for cmd in fake.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
-    assert len(set_source_commands) >= 2
+    set_source_commands = _set_source_commands(fake)
     assert set_source_commands[-1][3].track_id == "t2"
 
 
@@ -242,25 +308,18 @@ async def test_source_ended_repeat_one(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
 
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "play", "args": {}, "issued_by": "conn-1"}),
-    )
-    await asyncio.sleep(0.2)
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
 
-    fake = capture_driver["driver"]
-    assert fake is not None
+    await _send_command(worker, session.id, "play")
+
     fake.trigger_source_ended()
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
 
-    await asyncio.sleep(0.4)
+    await _stop_driver_task(driver, task)
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
-
-    set_source_commands = [cmd for cmd in fake.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
-    assert len(set_source_commands) >= 2
+    set_source_commands = _set_source_commands(fake)
     assert set_source_commands[-1][3].track_id == "t1"
 
 
@@ -278,13 +337,11 @@ async def test_idle_timeout_stops_driver(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.5)
+    # The driver stops itself once the idle timeout elapses.
+    await asyncio.wait_for(task, timeout=10.0)
 
-    assert task.done()
-    fake = capture_driver["driver"]
-    assert fake is not None
-    stop = _find_command(fake, "stop")
-    assert stop is not None
+    fake = capture_driver.latest
+    assert _find_command(fake, "stop") is not None
 
 
 @pytest.mark.asyncio
@@ -327,33 +384,23 @@ async def test_controller_loss_autonomous_advance(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
 
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "play", "args": {}, "issued_by": "conn-1"}),
-    )
-    await asyncio.sleep(0.2)
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
 
-    # Controller disconnects.
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "release_control", "args": {}, "issued_by": "conn-1"}),
-    )
-    await asyncio.sleep(0.2)
+    await _send_command(worker, session.id, "play")
 
-    # Track ends while no controller is attached.
-    fake = capture_driver["driver"]
-    assert fake is not None
+    # Controller disconnects; wait until the release has been applied so the
+    # track ends while no controller is attached.
+    await _send_command(worker, session.id, "release_control")
+    assert await _wait_for_session_field(session.id, "controller_connection_id", None)
+
     fake.trigger_source_ended()
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
 
-    await asyncio.sleep(0.4)
+    await _stop_driver_task(driver, task)
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
-
-    set_source_commands = [cmd for cmd in fake.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
-    assert len(set_source_commands) >= 2
+    set_source_commands = _set_source_commands(fake)
     assert set_source_commands[-1][3].track_id == "t2"
 
 
@@ -374,25 +421,18 @@ async def test_source_ended_with_controller_advances(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
 
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "play", "args": {}, "issued_by": "conn-1"}),
-    )
-    await asyncio.sleep(0.2)
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
 
-    fake = capture_driver["driver"]
-    assert fake is not None
+    await _send_command(worker, session.id, "play")
+
     fake.trigger_source_ended()
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
 
-    await asyncio.sleep(0.4)
+    await _stop_driver_task(driver, task)
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
-
-    set_source_commands = [cmd for cmd in fake.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
-    assert len(set_source_commands) >= 2
+    set_source_commands = _set_source_commands(fake)
     assert set_source_commands[-1][3].track_id == "t2"
     assert _find_command(fake, "pause") is None
 
@@ -416,26 +456,20 @@ async def test_take_control_does_not_reset_source(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
 
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "play", "args": {}, "issued_by": "conn-1"}),
-    )
-    await asyncio.sleep(0.2)
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
 
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "take_control", "args": {}, "issued_by": "conn-2"}),
-    )
-    await asyncio.sleep(0.3)
+    await _send_command(worker, session.id, "play")
+    await _send_command(worker, session.id, "take_control", issued_by="conn-2")
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
+    # Commands are drained FIFO; once the controller switch is persisted, the
+    # take_control command has been fully processed.
+    assert await _wait_for_session_field(session.id, "controller_connection_id", "conn-2")
 
-    fake = capture_driver["driver"]
-    set_source_commands = [cmd for cmd in fake.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
-    assert len(set_source_commands) == 1
+    await _stop_driver_task(driver, task)
+
+    assert len(_set_source_commands(fake)) == 1
     assert _find_command(fake, "pause") is None
 
 
@@ -452,26 +486,21 @@ async def test_stale_source_ended_ignored(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
 
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "play", "args": {}, "issued_by": "conn-1"}),
-    )
-    await asyncio.sleep(0.2)
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
 
-    fake = capture_driver["driver"]
-    assert fake is not None
-    # Generation 0 predates the set_source that play triggered.
+    await _send_command(worker, session.id, "play")
+
+    # Generation 0 predates the set_source that play triggered. The stale
+    # event is dropped synchronously while draining, so an empty queue means
+    # it has been processed.
     fake.trigger_source_ended(generation=0)
+    assert await _wait_until(lambda: fake.events.empty())
 
-    await asyncio.sleep(0.4)
+    await _stop_driver_task(driver, task)
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
-
-    set_source_commands = [cmd for cmd in fake.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
-    assert len(set_source_commands) == 1
+    assert len(_set_source_commands(fake)) == 1
 
     async with get_session() as db:
         refreshed = await db.get(PlaybackSession, session.id)
@@ -497,35 +526,28 @@ async def test_play_after_pause_restarts_source(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
+
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
 
     async def _persist_and_notify(command: str) -> None:
         async with get_session() as db:
             persisted = await db.get(PlaybackSession, session.id)
             assert persisted is not None
             await handle_command(db, persisted, command, {}, "conn-1")
-        await worker.redis.rpush(
-            _control_key(session.id),
-            json.dumps({"command": command, "args": {}, "issued_by": "conn-1"}),
-        )
+        await _send_command(worker, session.id, command)
 
     await _persist_and_notify("pause")
-    await asyncio.sleep(0.3)
-
-    fake = capture_driver["driver"]
-    assert fake is not None
+    assert await _wait_until(lambda: fake.is_paused)
     assert _find_command(fake, "pause") is not None
-    assert fake.is_paused
 
     await _persist_and_notify("play")
-    await asyncio.sleep(0.3)
+    assert await _wait_until(lambda: not fake.is_paused and len(_set_source_commands(fake)) >= 2)
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
+    await _stop_driver_task(driver, task)
 
-    set_source_commands = [cmd for cmd in fake.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
     # One set_source from the startup sync, one from the resume.
-    assert len(set_source_commands) == 2
+    assert len(_set_source_commands(fake)) == 2
     assert not fake.is_paused
 
 
@@ -542,13 +564,11 @@ async def test_set_queue_while_playing_keeps_source(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
 
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "play", "args": {}, "issued_by": "conn-1"}),
-    )
-    await asyncio.sleep(0.2)
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    await _send_command(worker, session.id, "play")
 
     # The API persists the new queue before notifying the worker; the current
     # track survives, so state/index are preserved by cmd_set_queue.
@@ -562,19 +582,17 @@ async def test_set_queue_while_playing_keeps_source(
             {"queue": _sample_queue() + [{"id": "t3", "title": "Three", "artist": "a", "duration": 100}]},
             "conn-1",
         )
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "set_queue", "args": {"queue_length": 3}, "issued_by": "conn-1"}),
-    )
+    await _send_command(worker, session.id, "set_queue", {"queue_length": 3})
 
-    await asyncio.sleep(0.3)
+    # set_queue produces no driver command of its own, so wait on a trailing
+    # marker: commands are drained FIFO, one per loop iteration, and once the
+    # set_shuffle write lands every command enqueued before it ran.
+    await _send_command(worker, session.id, "set_shuffle", {"shuffle": True})
+    assert await _wait_for_session_field(session.id, "shuffle", True)
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
+    await _stop_driver_task(driver, task)
 
-    fake = capture_driver["driver"]
-    set_source_commands = [cmd for cmd in fake.commands if isinstance(cmd, tuple) and cmd[0] == "set_source"]
-    assert len(set_source_commands) == 1
+    assert len(_set_source_commands(fake)) == 1
     assert _find_command(fake, "pause") is None
 
 
@@ -591,24 +609,19 @@ async def test_set_volume_command_reaches_driver(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
+    fake = await capture_driver.wait_for()
 
-    await worker.redis.rpush(
-        _control_key(session.id),
-        json.dumps({"command": "set_volume", "args": {"volume": 0.3}, "issued_by": "conn-1"}),
-    )
+    await _send_command(worker, session.id, "set_volume", {"volume": 0.3})
 
-    await asyncio.sleep(0.3)
-
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
-
-    fake = capture_driver["driver"]
-    assert fake is not None
     # The startup sync also pushes a set_volume (default 1.0); the command's
     # value must reach the driver too.
-    vols = [c[1] for c in fake.commands if isinstance(c, tuple) and c[0] == "set_volume"]
-    assert any(v == pytest.approx(0.3) for v in vols)
+    def _volume_applied() -> bool:
+        vols = [c[1] for c in fake.commands if isinstance(c, tuple) and c[0] == "set_volume"]
+        return any(v == pytest.approx(0.3) for v in vols)
+
+    assert await _wait_until(_volume_applied)
+
+    await _stop_driver_task(driver, task)
 
     async with get_session() as db:
         persisted = await db.get(PlaybackSession, session.id)
@@ -632,13 +645,13 @@ async def test_startup_sync_applies_persisted_volume(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.3)
+    fake = await capture_driver.wait_for()
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
+    # Startup completion is marked by the first source reaching the driver.
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
 
-    fake = capture_driver["driver"]
-    assert fake is not None
+    await _stop_driver_task(driver, task)
+
     vol = _find_command(fake, "set_volume")
     assert vol is not None
     assert vol[1] == pytest.approx(0.5)
@@ -658,17 +671,18 @@ async def test_update_output_config_reloads_driver(
     make_worker,
     monkeypatch,
     capture_driver,
-    fake_redis_server,
 ):
     """Editing an output's config pushes reload_output and restarts the driver."""
     init_db(engine=engine, force=True)
     monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
 
-    from fakeredis import FakeRedis as SyncFakeRedis
-
+    # Capture the published envelopes instead of pushing them: the reload
+    # command must only reach the worker after the new config is committed,
+    # or the restarted driver could read the pre-update row.
+    published: list[tuple[str, str, dict]] = []
     monkeypatch.setattr(
-        "songhive.services.playback.get_sync_redis_client",
-        lambda config=None: SyncFakeRedis(server=fake_redis_server),
+        "songhive.services.playback.publish_control_command",
+        lambda session_id, command, args, issued_by: published.append((session_id, command, args)),
     )
 
     session, output = await make_session_output(_sample_queue(), state="playing")
@@ -676,9 +690,7 @@ async def test_update_output_config_reloads_driver(
     driver = SessionDriver(worker, session.id, output.id, session.user_id)
 
     task = asyncio.create_task(driver.run())
-    await asyncio.sleep(0.1)
-    first = capture_driver["driver"]
-    assert first is not None
+    first = await capture_driver.wait_for()
 
     await update_output(
         db_session,
@@ -688,13 +700,14 @@ async def test_update_output_config_reloads_driver(
         cfg={"items": {"reloaded": True}},
     )
     await db_session.commit()
-    await asyncio.sleep(0.4)
 
-    driver._shutting_down = True
-    await asyncio.wait_for(task, timeout=2.0)
+    for session_id, command, args in published:
+        await _send_command(worker, session_id, command, args)
 
-    second = capture_driver["driver"]
-    assert second is not None
+    second = await capture_driver.wait_for(2)
+
+    await _stop_driver_task(driver, task)
+
     assert second is not first
     assert _find_command(first, "stop") is not None
     assert _find_command(second, "start") is not None
