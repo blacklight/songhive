@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `frontend`: Album, artist and track pages now show inline Play and
+  Share actions, with the remaining entity actions collapsed into an
+  overflow menu that gained play-all/enqueue, download, favorite,
+  enrich and RSS/Atom feed items.
+  ([`7b119dd`](https://git.platypush.tech/blacklight/songhive/commit/7b119dd3c650bea39363cc16d9b41db34fed18e1)).
+- `celery`: Tasks now route across three queues — `celery`,
+  `scrobbles` and `bulk` — so a fresh library sync no longer starves
+  scrobbles and interactive work; workers must consume all three via
+  `-Q celery,scrobbles,bulk`. The admin Celery page gained a queue
+  stats header (total, queued, processing, failed/completed and
+  per-task counts) backed by a new
+  `GET /api/v1/admin/celery/queue` endpoint.
+  ([`80203a9`](https://git.platypush.tech/blacklight/songhive/commit/80203a9fe63a9efe61aa673b65ea945190d5a7ee)).
+- `frontend`: List headers now show exact entity totals — albums,
+  artists, playlists and tracks display their total counts (playlist
+  items read the `X-Total-Count`/`X-List-Offset` response headers).
+  ([`6f5b5f0`](https://git.platypush.tech/blacklight/songhive/commit/6f5b5f0d592db9bfc2ca122abbc25a1822245655)).
+
+### Fixed
+
+- `profile`: The profile handle now renders and copies as the
+  fully-qualified `@user@domain` form.
+  ([`5238f05`](https://git.platypush.tech/blacklight/songhive/commit/5238f054d78e34b1ae9f628643410c6dd79a4759)).
+- `scrobbling`: Now-playing status is re-fetched after login and after
+  connect/save/disconnect in the scrobble settings, so reports no
+  longer stay off for the whole session. `users.last_login` and
+  `users.password_reset_expires_at` are also timezone-aware now,
+  fixing Postgres rejecting naive/aware datetime mixing.
+  ([`dd62341`](https://git.platypush.tech/blacklight/songhive/commit/dd6234165a287a3f660db068ef3f4ab19987a368)).
+
 ## 0.3.5
 
 ### Fixed
