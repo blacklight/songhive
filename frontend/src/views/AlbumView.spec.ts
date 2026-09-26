@@ -4,6 +4,7 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
+import { usePlayerStore } from "@/stores/player";
 import * as albumsApi from "@/api/albums";
 import * as artistsApi from "@/api/artists";
 import * as tracksApi from "@/api/tracks";
@@ -16,6 +17,7 @@ vi.mock("@/api/albums", () => ({
   getAlbum: vi.fn(),
   getAlbumStats: vi.fn(),
   deleteAlbum: vi.fn(),
+  enrichAlbum: vi.fn(),
 }));
 
 vi.mock("@/api/artists", () => ({
@@ -293,12 +295,114 @@ describe("AlbumView", () => {
     setAdmin("admin-1");
     await mountAt("/albums/album-1");
 
-    const headerActions = wrapper.find(".album-view__header-actions");
-    expect(headerActions.exists()).toBe(true);
-    expect(
-      headerActions
+    await wrapper.find(".entity-actions__more").trigger("click");
+    await flushPromises();
+
+    const labels = Array.from(
+      document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    ).map((el) => el.textContent?.trim());
+    expect(labels).toContain(i18n.global.t("common.edit"));
+  });
+
+  describe("actions", () => {
+    const t = i18n.global.t;
+
+    async function openMenu() {
+      await wrapper.find(".entity-actions__more").trigger("click");
+      await flushPromises();
+      return Array.from(
+        document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      );
+    }
+
+    async function selectMenuItem(label: string) {
+      const item = (await openMenu()).find((el) =>
+        el.textContent?.includes(label),
+      );
+      expect(item).toBeDefined();
+      item!.dispatchEvent(new MouseEvent("click"));
+      await flushPromises();
+    }
+
+    it("only shows Play and Share inline and collapses the rest", async () => {
+      setAuthenticated("user-1");
+      vi.mocked(tracksApi.listTracks).mockResolvedValue([
+        createTrack("track-1", "Song One"),
+      ]);
+      await mountAt("/albums/album-1");
+
+      const inline = wrapper
+        .findAll(".entity-actions__item")
+        .map((b) => b.text());
+      expect(inline).toEqual([t("common.play"), t("common.share")]);
+
+      const labels = (await openMenu()).map((el) => el.textContent?.trim());
+      expect(labels).toEqual(
+        expect.arrayContaining([
+          t("browse.contextMenu.enqueue"),
+          t("common.download"),
+          t("browse.enrich.metadata"),
+          t("activities.view"),
+          t("common.edit"),
+          t("feeds.rss"),
+          t("feeds.atom"),
+          t("common.delete"),
+        ]),
+      );
+    });
+
+    it("plays all album tracks", async () => {
+      vi.mocked(tracksApi.listTracks).mockResolvedValue([
+        createTrack("track-1", "Song One"),
+        createTrack("track-2", "Song Two"),
+      ]);
+      await mountAt("/albums/album-1");
+
+      const playAll = vi.spyOn(usePlayerStore(), "playAll");
+      const playButton = wrapper
         .findAll("button")
-        .some((b) => b.text() === i18n.global.t("common.edit")),
-    ).toBe(true);
+        .find((b) => b.text() === t("common.play"));
+      expect(playButton).toBeDefined();
+
+      await playButton?.trigger("click");
+      await flushPromises();
+
+      expect(playAll).toHaveBeenCalledOnce();
+      expect(playAll.mock.calls[0]![0].map((track) => track.id)).toEqual([
+        "track-1",
+        "track-2",
+      ]);
+    });
+
+    it("adds all album tracks to the queue", async () => {
+      vi.mocked(tracksApi.listTracks).mockResolvedValue([
+        createTrack("track-1", "Song One"),
+        createTrack("track-2", "Song Two"),
+      ]);
+      await mountAt("/albums/album-1");
+
+      const enqueue = vi.spyOn(usePlayerStore(), "enqueue");
+      await selectMenuItem(t("browse.contextMenu.enqueue"));
+
+      expect(enqueue).toHaveBeenCalledTimes(2);
+      expect(enqueue.mock.calls.map((call) => call[0].id)).toEqual([
+        "track-1",
+        "track-2",
+      ]);
+    });
+
+    it("opens the RSS feed from the menu", async () => {
+      await mountAt("/albums/album-1");
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+      await selectMenuItem(t("feeds.rss"));
+
+      expect(openSpy).toHaveBeenCalledWith(
+        expect.stringContaining("/feeds/"),
+        "_blank",
+        "noopener",
+      );
+      openSpy.mockRestore();
+    });
   });
 });

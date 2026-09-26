@@ -6,7 +6,9 @@ import { i18n } from "@/i18n";
 import * as tracksApi from "@/api/tracks";
 import * as artistsApi from "@/api/artists";
 import * as albumsApi from "@/api/albums";
+import * as favoritesApi from "@/api/favorites";
 import { usePlayerStore } from "@/stores/player";
+import { useAuthStore } from "@/stores/auth";
 import type { TrackResponse } from "@/api/tracks";
 import type { ArtistResponse } from "@/api/artists";
 import type { AlbumResponse } from "@/api/albums";
@@ -15,6 +17,13 @@ import TrackView from "./TrackView.vue";
 vi.mock("@/api/tracks", () => ({
   getTrack: vi.fn(),
   deleteTrack: vi.fn(),
+  downloadTrack: vi.fn(),
+  enrichTrack: vi.fn(),
+}));
+
+vi.mock("@/api/favorites", () => ({
+  addFavorite: vi.fn(),
+  removeFavorite: vi.fn(),
 }));
 
 vi.mock("@/api/artists", () => ({
@@ -260,5 +269,96 @@ describe("TrackView", () => {
 
     expect(wrapper.find("img.track-view__cover").exists()).toBe(false);
     expect(wrapper.find(".track-view__cover").exists()).toBe(true);
+  });
+
+  describe("actions", () => {
+    const t = i18n.global.t;
+
+    function signIn() {
+      useAuthStore().user = { id: "user-1", username: "user-1" } as never;
+    }
+
+    async function openMenu() {
+      await wrapper.find(".entity-actions__more").trigger("click");
+      await flushPromises();
+      return Array.from(
+        document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      );
+    }
+
+    async function selectMenuItem(label: string) {
+      const item = (await openMenu()).find((el) =>
+        el.textContent?.includes(label),
+      );
+      expect(item).toBeDefined();
+      item!.dispatchEvent(new MouseEvent("click"));
+      await flushPromises();
+    }
+
+    it("only shows Play and Share inline and collapses the rest", async () => {
+      signIn();
+      await mountAt("/tracks/track-1");
+
+      const inline = wrapper
+        .findAll(".entity-actions__item")
+        .map((b) => b.text());
+      expect(inline).toEqual([t("common.play"), t("common.share")]);
+
+      const labels = (await openMenu()).map((el) => el.textContent?.trim());
+      expect(labels).toEqual(
+        expect.arrayContaining([
+          t("browse.contextMenu.enqueue"),
+          t("common.download"),
+          t("common.favorite"),
+          t("browse.contextMenu.enrich"),
+          t("activities.view"),
+          t("common.edit"),
+          t("feeds.rss"),
+          t("feeds.atom"),
+          t("common.delete"),
+        ]),
+      );
+    });
+
+    it("adds the track to the queue", async () => {
+      await mountAt("/tracks/track-1");
+      const enqueue = vi.spyOn(player, "enqueue");
+
+      await selectMenuItem(t("browse.contextMenu.enqueue"));
+
+      expect(enqueue).toHaveBeenCalledOnce();
+      expect(enqueue.mock.calls[0]![0].id).toBe("track-1");
+    });
+
+    it("downloads the track audio", async () => {
+      await mountAt("/tracks/track-1");
+
+      await selectMenuItem(t("common.download"));
+
+      expect(tracksApi.downloadTrack).toHaveBeenCalledWith(
+        "https://example.com/audio.mp3",
+        "Song One",
+      );
+    });
+
+    it("toggles the favorite state", async () => {
+      signIn();
+      await mountAt("/tracks/track-1");
+
+      await selectMenuItem(t("common.favorite"));
+      expect(favoritesApi.addFavorite).toHaveBeenCalledWith("track-1");
+
+      await selectMenuItem(t("common.unfavorite"));
+      expect(favoritesApi.removeFavorite).toHaveBeenCalledWith("track-1");
+    });
+
+    it("fetches metadata for managed tracks", async () => {
+      signIn();
+      await mountAt("/tracks/track-1");
+
+      await selectMenuItem(t("browse.contextMenu.enrich"));
+
+      expect(tracksApi.enrichTrack).toHaveBeenCalledWith("track-1");
+    });
   });
 });

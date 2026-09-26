@@ -17,6 +17,7 @@ import {
 import { getArtist, type ArtistResponse } from "@/api/artists";
 import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
+import { usePlayerStore } from "@/stores/player";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
 import { useCanManage } from "@/composables/useCanManage";
@@ -28,11 +29,11 @@ import { useDownloadArchive } from "@/composables/useDownloadArchive";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useFeedLinks } from "@/composables/useFeedLinks";
 import type { QueueTrack } from "@/player/types";
+import { toQueueTrack } from "@/player/enrich";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
-import FeedButton from "@/components/ui/FeedButton.vue";
 import { activityFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import CollectionStats from "@/components/library/CollectionStats.vue";
@@ -49,6 +50,7 @@ const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 const toastStore = useToastStore();
+const player = usePlayerStore();
 const albumId = computed(() => String(route.params.id));
 const feedUrls = computed(() => activityFeedUrls("albums", albumId.value));
 useFeedLinks(feedUrls);
@@ -142,36 +144,48 @@ async function onTracksRemoved() {
   await Promise.all([refreshTracks(), loadStats()]);
 }
 
+const queueTracks = computed<QueueTrack[]>(() =>
+  tracks.value
+    .map((track) =>
+      toQueueTrack(track, {
+        artist_name: artistName.value,
+        album_title: album.value?.title,
+        artwork_url: album.value?.cover_url ?? undefined,
+      }),
+    )
+    .filter((track) => !track.remote || track.stream_url || track.audio_url),
+);
+
+const canShare = computed(() => isOwner.value || isPublic.value);
+
 const actions = computed(() => [
-  collectionAction.value,
+  {
+    key: "play",
+    label: t("common.play"),
+    icon: "play",
+    visible: true,
+    disabled: queueTracks.value.length === 0,
+  },
   {
     key: "share",
     label: t("common.share"),
     icon: "share-nodes",
     variant: "secondary" as const,
-    visible: isOwner.value || isPublic.value,
+    visible: canShare.value,
   },
   {
-    key: "activities",
-    label: t("activities.view"),
-    icon: "comments",
-    variant: "secondary" as const,
-    visible: true,
+    key: "enqueue",
+    label: t("browse.contextMenu.enqueue"),
+    icon: "plus",
+    visible: queueTracks.value.length > 0,
   },
   {
     key: "download",
     label: t("common.download"),
     icon: "download",
-    variant: "secondary" as const,
     visible: authStore.isAuthenticated,
   },
-  {
-    key: "edit",
-    label: t("common.edit"),
-    icon: "pen-to-square",
-    variant: "secondary" as const,
-    visible: canManage.value,
-  },
+  collectionAction.value,
   {
     key: "add-to-library",
     label: t("browse.addToCollection.addToLibrary"),
@@ -185,10 +199,34 @@ const actions = computed(() => [
     visible: authStore.isAuthenticated,
   },
   {
+    key: "activities",
+    label: t("activities.view"),
+    icon: "comments",
+    visible: true,
+  },
+  {
+    key: "edit",
+    label: t("common.edit"),
+    icon: "pen-to-square",
+    visible: canManage.value,
+  },
+  {
     key: "enrich",
     label: t("browse.enrich.metadata"),
     icon: "wand-magic-sparkles",
     visible: canDeleteAlbum.value,
+  },
+  {
+    key: "feed-rss",
+    label: t("feeds.rss"),
+    icon: "rss",
+    visible: true,
+  },
+  {
+    key: "feed-atom",
+    label: t("feeds.atom"),
+    icon: "rss",
+    visible: true,
   },
   {
     key: "delete",
@@ -202,8 +240,24 @@ const actions = computed(() => [
 async function onAction(key: string) {
   if (!album.value) return;
   switch (key) {
+    case "play":
+      player.playAll(queueTracks.value);
+      break;
+    case "enqueue":
+      for (const track of queueTracks.value) player.enqueue(track);
+      toastStore.push({
+        type: "success",
+        message: t("activities.audio.addedToQueue"),
+      });
+      break;
     case "collection":
       await toggleCollection();
+      break;
+    case "feed-rss":
+      window.open(feedUrls.value.rss, "_blank", "noopener");
+      break;
+    case "feed-atom":
+      window.open(feedUrls.value.atom, "_blank", "noopener");
       break;
     case "share":
       openShare(
@@ -391,8 +445,12 @@ watch(
           </p>
 
           <div class="album-view__header-actions">
-            <FeedButton :urls="feedUrls" />
-            <EntityActions :actions="actions" @select="onAction" />
+            <EntityActions
+              :actions="actions"
+              :primary-count="canShare ? 2 : 1"
+              collapsed
+              @select="onAction"
+            />
           </div>
         </div>
       </div>

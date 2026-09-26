@@ -25,12 +25,18 @@ interface Props {
    * viewport size (Mastodon-style ``···`` dropdown).
    */
   menuOnly?: boolean;
+  /**
+   * Always collapse the actions past ``primaryCount`` into the overflow
+   * menu, including on large viewports.
+   */
+  collapsed?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   primaryCount: 2,
   size: "sm",
   menuOnly: false,
+  collapsed: false,
 });
 
 const emit = defineEmits<{ select: [key: string] }>();
@@ -88,7 +94,9 @@ function onMenuSelect(key: string) {
 <template>
   <div
     class="entity-actions"
-    :class="{ 'entity-actions--menu-only': props.menuOnly }"
+    :class="{
+      'entity-actions--menu-only': props.menuOnly || props.collapsed,
+    }"
   >
     <AppButton
       v-for="action in primaryActions"
@@ -104,7 +112,7 @@ function onMenuSelect(key: string) {
       {{ action.label }}
     </AppButton>
 
-    <template v-if="!props.menuOnly">
+    <template v-if="!props.menuOnly && !props.collapsed">
       <AppButton
         v-for="action in menuActions"
         :key="action.key"

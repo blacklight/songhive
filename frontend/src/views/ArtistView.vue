@@ -16,7 +16,9 @@ import {
 import { listAlbums, type AlbumResponse } from "@/api/albums";
 import { listTracks, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
+import { usePlayerStore } from "@/stores/player";
 import { useAuthStore } from "@/stores/auth";
+import { useToastStore } from "@/stores/toast";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useDownloadArchive } from "@/composables/useDownloadArchive";
 import { useFeedLinks } from "@/composables/useFeedLinks";
@@ -24,11 +26,11 @@ import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useCanManage } from "@/composables/useCanManage";
 import { useCollectionItem } from "@/composables/useCollectionItem";
 import type { QueueTrack } from "@/player/types";
+import { toQueueTrack } from "@/player/enrich";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
-import FeedButton from "@/components/ui/FeedButton.vue";
 import { artistFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AlbumCard from "@/components/library/AlbumCard.vue";
@@ -44,6 +46,8 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
+const toastStore = useToastStore();
+const player = usePlayerStore();
 const artistId = computed(() => String(route.params.id));
 const feedUrls = computed(() => artistFeedUrls(artistId.value));
 useFeedLinks(feedUrls);
@@ -191,8 +195,24 @@ function onTrackSort(field: string, direction: "asc" | "desc") {
   void setTrackSort(field, direction);
 }
 
+const queueTracks = computed<QueueTrack[]>(() =>
+  tracks.value
+    .map((track) =>
+      toQueueTrack(track, {
+        artist_name: artist.value?.name ?? "",
+      }),
+    )
+    .filter((track) => !track.remote || track.stream_url || track.audio_url),
+);
+
 const actions = computed(() => [
-  collectionAction.value,
+  {
+    key: "play",
+    label: t("common.play"),
+    icon: "play",
+    visible: true,
+    disabled: queueTracks.value.length === 0,
+  },
   {
     key: "share",
     label: t("common.share"),
@@ -201,26 +221,18 @@ const actions = computed(() => [
     visible: true,
   },
   {
-    key: "activities",
-    label: t("activities.view"),
-    icon: "comments",
-    variant: "secondary" as const,
-    visible: true,
+    key: "enqueue",
+    label: t("browse.contextMenu.enqueue"),
+    icon: "plus",
+    visible: queueTracks.value.length > 0,
   },
   {
     key: "download",
     label: t("common.download"),
     icon: "download",
-    variant: "secondary" as const,
     visible: authStore.isAuthenticated,
   },
-  {
-    key: "edit",
-    label: t("common.edit"),
-    icon: "pen-to-square",
-    variant: "secondary" as const,
-    visible: canManage.value,
-  },
+  collectionAction.value,
   {
     key: "add-to-library",
     label: t("browse.addToCollection.addToLibrary"),
@@ -234,6 +246,30 @@ const actions = computed(() => [
     visible: authStore.isAuthenticated,
   },
   {
+    key: "activities",
+    label: t("activities.view"),
+    icon: "comments",
+    visible: true,
+  },
+  {
+    key: "edit",
+    label: t("common.edit"),
+    icon: "pen-to-square",
+    visible: canManage.value,
+  },
+  {
+    key: "feed-rss",
+    label: t("feeds.rss"),
+    icon: "rss",
+    visible: true,
+  },
+  {
+    key: "feed-atom",
+    label: t("feeds.atom"),
+    icon: "rss",
+    visible: true,
+  },
+  {
     key: "delete",
     label: t("common.delete"),
     icon: "trash",
@@ -245,8 +281,24 @@ const actions = computed(() => [
 async function onAction(key: string) {
   if (!artist.value) return;
   switch (key) {
+    case "play":
+      player.playAll(queueTracks.value);
+      break;
+    case "enqueue":
+      for (const track of queueTracks.value) player.enqueue(track);
+      toastStore.push({
+        type: "success",
+        message: t("activities.audio.addedToQueue"),
+      });
+      break;
     case "collection":
       await toggleCollection();
+      break;
+    case "feed-rss":
+      window.open(feedUrls.value.rss, "_blank", "noopener");
+      break;
+    case "feed-atom":
+      window.open(feedUrls.value.atom, "_blank", "noopener");
       break;
     case "share":
       openShare("artist", artist.value.id, artist.value.name, null, null);
@@ -352,8 +404,12 @@ watch(
           </div>
         </div>
         <div class="artist-view__header-actions">
-          <FeedButton :urls="feedUrls" />
-          <EntityActions :actions="actions" @select="onAction" />
+          <EntityActions
+            :actions="actions"
+            :primary-count="2"
+            collapsed
+            @select="onAction"
+          />
         </div>
       </div>
 

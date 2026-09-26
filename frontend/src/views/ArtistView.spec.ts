@@ -4,6 +4,7 @@ import { createRouter, createMemoryHistory } from "vue-router";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useAuthStore } from "@/stores/auth";
+import { usePlayerStore } from "@/stores/player";
 import * as artistsApi from "@/api/artists";
 import * as albumsApi from "@/api/albums";
 import * as tracksApi from "@/api/tracks";
@@ -279,29 +280,104 @@ describe("ArtistView", () => {
     expect(wrapper.text()).toContain("Night Owls");
   });
 
+  async function openMenu() {
+    await wrapper.find(".entity-actions__more").trigger("click");
+    await flushPromises();
+    return Array.from(
+      document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    );
+  }
+
   it("shows the edit action for an admin", async () => {
     setAdmin("admin-1");
     await mountAt("/artists/artist-1");
 
-    const headerActions = wrapper.find(".artist-view__header-actions");
-    expect(headerActions.exists()).toBe(true);
-    expect(
-      headerActions
-        .findAll("button")
-        .some((b) => b.text() === i18n.global.t("common.edit")),
-    ).toBe(true);
+    const labels = (await openMenu()).map((el) => el.textContent?.trim());
+    expect(labels).toContain(i18n.global.t("common.edit"));
   });
 
   it("hides the edit action for non-admin users", async () => {
     setAuthenticated("user-1");
     await mountAt("/artists/artist-1");
 
-    const headerActions = wrapper.find(".artist-view__header-actions");
-    expect(headerActions.exists()).toBe(true);
-    expect(
-      headerActions
+    const labels = (await openMenu()).map((el) => el.textContent?.trim());
+    expect(labels).not.toContain(i18n.global.t("common.edit"));
+  });
+
+  describe("actions", () => {
+    const t = i18n.global.t;
+
+    async function selectMenuItem(label: string) {
+      const item = (await openMenu()).find((el) =>
+        el.textContent?.includes(label),
+      );
+      expect(item).toBeDefined();
+      item!.dispatchEvent(new MouseEvent("click"));
+      await flushPromises();
+    }
+
+    it("only shows Play and Share inline and collapses the rest", async () => {
+      setAuthenticated("user-1");
+      vi.mocked(tracksApi.listTracks).mockResolvedValue([
+        createTrack("track-1", "Song One"),
+      ]);
+      await mountAt("/artists/artist-1");
+
+      const inline = wrapper
+        .findAll(".entity-actions__item")
+        .map((b) => b.text());
+      expect(inline).toEqual([t("common.play"), t("common.share")]);
+
+      const labels = (await openMenu()).map((el) => el.textContent?.trim());
+      expect(labels).toEqual(
+        expect.arrayContaining([
+          t("browse.contextMenu.enqueue"),
+          t("common.download"),
+          t("activities.view"),
+          t("feeds.rss"),
+          t("feeds.atom"),
+        ]),
+      );
+    });
+
+    it("plays all artist tracks", async () => {
+      vi.mocked(tracksApi.listTracks).mockResolvedValue([
+        createTrack("track-1", "Song One"),
+        createTrack("track-2", "Song Two"),
+      ]);
+      await mountAt("/artists/artist-1");
+
+      const playAll = vi.spyOn(usePlayerStore(), "playAll");
+      const playButton = wrapper
         .findAll("button")
-        .some((b) => b.text() === i18n.global.t("common.edit")),
-    ).toBe(false);
+        .find((b) => b.text() === t("common.play"));
+      expect(playButton).toBeDefined();
+
+      await playButton?.trigger("click");
+      await flushPromises();
+
+      expect(playAll).toHaveBeenCalledOnce();
+      expect(playAll.mock.calls[0]![0].map((track) => track.id)).toEqual([
+        "track-1",
+        "track-2",
+      ]);
+    });
+
+    it("adds all artist tracks to the queue", async () => {
+      vi.mocked(tracksApi.listTracks).mockResolvedValue([
+        createTrack("track-1", "Song One"),
+        createTrack("track-2", "Song Two"),
+      ]);
+      await mountAt("/artists/artist-1");
+
+      const enqueue = vi.spyOn(usePlayerStore(), "enqueue");
+      await selectMenuItem(t("browse.contextMenu.enqueue"));
+
+      expect(enqueue).toHaveBeenCalledTimes(2);
+      expect(enqueue.mock.calls.map((call) => call[0].id)).toEqual([
+        "track-1",
+        "track-2",
+      ]);
+    });
   });
 });

@@ -5,13 +5,17 @@ import { useRoute, useRouter, RouterLink } from "vue-router";
 import {
   getTrack,
   deleteTrack as deleteTrackApi,
+  downloadTrack,
+  enrichTrack,
   type TrackResponse,
 } from "@/api/tracks";
+import { addFavorite, removeFavorite } from "@/api/favorites";
 import { getArtist, type ArtistResponse } from "@/api/artists";
 import { getAlbum, type AlbumResponse } from "@/api/albums";
 import { getApiErrorMessage } from "@/api/client";
 import { usePlayerStore } from "@/stores/player";
 import { useAuthStore } from "@/stores/auth";
+import { useToastStore } from "@/stores/toast";
 import { useCanManage } from "@/composables/useCanManage";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
@@ -29,7 +33,6 @@ import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
-import FeedButton from "@/components/ui/FeedButton.vue";
 import { activityFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -41,6 +44,7 @@ const route = useRoute();
 const router = useRouter();
 const player = usePlayerStore();
 const authStore = useAuthStore();
+const toastStore = useToastStore();
 const trackId = computed(() => String(route.params.id));
 const feedUrls = computed(() => activityFeedUrls("tracks", trackId.value));
 useFeedLinks(feedUrls);
@@ -102,6 +106,8 @@ const durationText = computed(() =>
   track.value?.duration != null ? formatTime(track.value.duration) : "—",
 );
 
+const canShare = computed(() => isOwner.value || isPublic.value);
+
 const actions = computed(() => [
   {
     key: "play",
@@ -115,35 +121,69 @@ const actions = computed(() => [
     label: t("common.share"),
     icon: "share-nodes",
     variant: "secondary" as const,
-    visible: isOwner.value || isPublic.value,
+    visible: canShare.value,
   },
   {
-    key: "activities",
-    label: t("activities.view"),
-    icon: "comments",
-    variant: "secondary" as const,
-    visible: true,
+    key: "enqueue",
+    label: t("browse.contextMenu.enqueue"),
+    icon: "plus",
+    visible: !!queueTrack.value,
   },
   {
-    key: "edit",
-    label: t("common.edit"),
-    icon: "pen-to-square",
-    variant: "secondary" as const,
-    visible: canManage.value,
+    key: "download",
+    label: t("common.download"),
+    icon: "download",
+    visible: !!track.value?.audio_url,
+  },
+  {
+    key: "favorite",
+    label: track.value?.favorited
+      ? t("common.unfavorite")
+      : t("common.favorite"),
+    icon: track.value?.favorited ? "heart-crack" : "heart",
+    visible: authStore.isAuthenticated,
   },
   {
     key: "add-to-library",
     label: t("browse.addToCollection.addToLibrary"),
     icon: "folder-plus",
-    variant: "secondary" as const,
     visible: authStore.isAuthenticated,
   },
   {
     key: "add-to-playlist",
     label: t("browse.addToCollection.addToPlaylist"),
     icon: "list",
-    variant: "secondary" as const,
     visible: authStore.isAuthenticated,
+  },
+  {
+    key: "activities",
+    label: t("activities.view"),
+    icon: "comments",
+    visible: true,
+  },
+  {
+    key: "edit",
+    label: t("common.edit"),
+    icon: "pen-to-square",
+    visible: canManage.value,
+  },
+  {
+    key: "enrich",
+    label: t("browse.contextMenu.enrich"),
+    icon: "wand-magic-sparkles",
+    visible: canManage.value,
+  },
+  {
+    key: "feed-rss",
+    label: t("feeds.rss"),
+    icon: "rss",
+    visible: true,
+  },
+  {
+    key: "feed-atom",
+    label: t("feeds.atom"),
+    icon: "rss",
+    visible: true,
   },
   {
     key: "delete",
@@ -182,15 +222,90 @@ async function onAction(key: string) {
         params: { id: track.value.id },
       });
       break;
+    case "enqueue":
+      if (!queueTrack.value) break;
+      player.enqueue(queueTrack.value);
+      toastStore.push({
+        type: "success",
+        message: t("activities.audio.addedToQueue"),
+      });
+      break;
+    case "download":
+      await download(track.value);
+      break;
+    case "favorite":
+      await toggleFavorite(track.value);
+      break;
     case "add-to-library":
       openAddDialog("library");
       break;
     case "add-to-playlist":
       openAddDialog("playlist");
       break;
+    case "enrich":
+      await enrich(track.value.id);
+      break;
+    case "feed-rss":
+      window.open(feedUrls.value.rss, "_blank", "noopener");
+      break;
+    case "feed-atom":
+      window.open(feedUrls.value.atom, "_blank", "noopener");
+      break;
     case "delete":
       deleteTrack.open(track.value.id);
       break;
+  }
+}
+
+function pushError(key: string, err: unknown) {
+  toastStore.push({
+    type: "error",
+    message: t(key, {
+      message: getApiErrorMessage(err) || t("errors.unknown"),
+    }),
+  });
+}
+
+async function download(target: TrackResponse) {
+  if (!target.audio_url) return;
+  try {
+    await downloadTrack(target.audio_url, target.title);
+  } catch (err) {
+    pushError("browse.download.error", err);
+  }
+}
+
+async function toggleFavorite(target: TrackResponse) {
+  const currentlyFavorited = !!target.favorited;
+  try {
+    if (currentlyFavorited) {
+      await removeFavorite(target.id);
+    } else {
+      await addFavorite(target.id);
+    }
+    target.favorited = !currentlyFavorited;
+    toastStore.push({
+      type: "success",
+      message: currentlyFavorited
+        ? t("common.favoriteRemoved")
+        : t("common.favoriteAdded"),
+    });
+  } catch (err) {
+    pushError(
+      currentlyFavorited
+        ? "common.favoriteRemoveError"
+        : "common.favoriteAddError",
+      err,
+    );
+  }
+}
+
+async function enrich(id: string) {
+  try {
+    await enrichTrack(id);
+    toastStore.push({ type: "success", message: t("browse.enrich.success") });
+  } catch (err) {
+    pushError("browse.enrich.error", err);
   }
 }
 
@@ -389,8 +504,13 @@ watch(
         </div>
 
         <div class="track-view__header-actions">
-          <FeedButton :urls="feedUrls" size="lg" />
-          <EntityActions :actions="actions" size="lg" @select="onAction" />
+          <EntityActions
+            :actions="actions"
+            :primary-count="canShare ? 2 : 1"
+            size="lg"
+            collapsed
+            @select="onAction"
+          />
         </div>
       </div>
     </template>

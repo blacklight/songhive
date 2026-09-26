@@ -136,6 +136,29 @@ describe("EntityActions", () => {
     expect(wrapper.findAll(".entity-actions__item").length).toBe(2);
   });
 
+  it("collapsed never renders overflow actions inline", async () => {
+    wrapper = mount(EntityActions, {
+      props: {
+        actions: makeActions(),
+        primaryCount: 1,
+        collapsed: true,
+      },
+      attachTo: document.body,
+    });
+
+    const items = wrapper.findAll(".entity-actions__item");
+    expect(items.length).toBe(1);
+    expect(items[0]!.text()).toContain("Share");
+    expect(wrapper.classes()).toContain("entity-actions--menu-only");
+
+    await wrapper.find(".entity-actions__more").trigger("click");
+    await flushPromises();
+
+    const menuItems = document.body.querySelectorAll('[role="menuitem"]');
+    expect(menuItems.length).toBe(2);
+    expect(menuItems[0]!.textContent).toContain("Add to library");
+  });
+
   it("menuOnly collapses every action under the More menu", async () => {
     wrapper = mount(EntityActions, {
       props: {
