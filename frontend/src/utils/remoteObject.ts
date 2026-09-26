@@ -29,6 +29,7 @@ export function remoteObjectToQueueTrack(
     visibility: "public",
     tags: [],
     genres: [],
+    extra_artists: [],
     is_external: false,
     stream_url: media ?? undefined,
     remote: true,

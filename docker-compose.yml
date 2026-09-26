@@ -89,7 +89,7 @@ services:
     env_file: *env-file
     environment:
       <<: *songhive-env
-    command: celery -A songhive.tasks worker -B -l info -s /data/celerybeat-schedule
+    command: celery -A songhive.tasks worker -B -l info -s /data/celerybeat-schedule -Q celery,scrobbles,bulk
     volumes:
       - *config-mount
       - ./volumes/data:/data

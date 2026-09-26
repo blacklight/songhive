@@ -5,8 +5,10 @@ import { useConfirm } from "@/composables/useConfirm";
 import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
 import {
+  getCeleryQueueStats,
   listCeleryTasks,
   terminateCeleryTasks,
+  type CeleryQueueStats,
   type CeleryTaskInfo,
 } from "@/api/admin";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -14,12 +16,15 @@ import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
+import AppTable, { type Column } from "@/components/ui/AppTable.vue";
+import StatCard from "@/components/admin/StatCard.vue";
 
 const { t } = useI18n();
 const toastStore = useToastStore();
 const { confirm } = useConfirm();
 
 const tasks = ref<CeleryTaskInfo[]>([]);
+const queueStats = ref<CeleryQueueStats | null>(null);
 const loading = ref(false);
 const terminating = ref(false);
 const error = ref<string | null>(null);
@@ -36,6 +41,16 @@ const someSelected = computed(
 );
 
 const selectedCount = computed(() => selectedIds.value.size);
+
+const queueColumns = computed<Column[]>(() => [
+  { key: "name", label: t("pages.admin.celery.taskName") },
+  { key: "count", label: t("pages.admin.celery.count"), align: "right" },
+]);
+
+const queueRows = computed(
+  () =>
+    (queueStats.value?.by_name ?? []) as unknown as Record<string, unknown>[],
+);
 
 function isSelected(task: CeleryTaskInfo): boolean {
   return selectedIds.value.has(task.task_id);
@@ -68,13 +83,22 @@ function showError(messageKey: string, err: unknown) {
   });
 }
 
+async function loadQueueStats() {
+  try {
+    queueStats.value = await getCeleryQueueStats();
+  } catch {
+    queueStats.value = null;
+  }
+}
+
 async function load() {
   if (loading.value) return;
   loading.value = true;
   error.value = null;
 
   try {
-    tasks.value = await listCeleryTasks();
+    const [taskList] = await Promise.all([listCeleryTasks(), loadQueueStats()]);
+    tasks.value = taskList;
     selectedIds.value.clear();
     selectedIds.value = new Set();
   } catch (err) {
@@ -209,6 +233,59 @@ onMounted(() => void load());
       {{ error }}
     </div>
 
+    <section
+      v-if="queueStats"
+      class="celery-view__stats"
+      :aria-label="t('pages.admin.celery.queueStats.title')"
+    >
+      <h2 class="celery-view__section-title">
+        {{ t("pages.admin.celery.queueStats.title") }}
+      </h2>
+      <div class="celery-view__stat-grid">
+        <StatCard
+          :label="t('pages.admin.celery.queueStats.total')"
+          :value="queueStats.total"
+          icon="list-check"
+          :loading="loading"
+        />
+        <StatCard
+          :label="t('pages.admin.celery.queueStats.processing')"
+          :value="queueStats.processing"
+          icon="gears"
+          :loading="loading"
+        />
+        <StatCard
+          :label="t('pages.admin.celery.queueStats.queued')"
+          :value="queueStats.queued"
+          icon="clock"
+          :loading="loading"
+        />
+        <StatCard
+          :label="t('pages.admin.celery.queueStats.failed')"
+          :value="queueStats.failed ?? '—'"
+          icon="circle-xmark"
+          :loading="loading"
+        />
+        <StatCard
+          v-if="
+            queueStats.completed !== null && queueStats.completed !== undefined
+          "
+          :label="t('pages.admin.celery.queueStats.completed')"
+          :value="queueStats.completed"
+          icon="circle-check"
+          :loading="loading"
+        />
+      </div>
+
+      <AppTable
+        :columns="queueColumns"
+        :rows="queueRows"
+        :row-key="(row) => String(row.name)"
+        :empty-label="t('pages.admin.celery.queueEmpty')"
+        :aria-label="t('pages.admin.celery.byTaskTitle')"
+      />
+    </section>
+
     <div v-if="loading && tasks.length === 0" class="celery-view__loading">
       <AppSpinner />
     </div>
@@ -298,6 +375,25 @@ onMounted(() => void load());
 .celery-view__select-all {
   display: flex;
   align-items: center;
+}
+
+.celery-view__stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.celery-view__section-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.celery-view__stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--space-3);
 }
 
 .celery-view__error {

@@ -141,6 +141,18 @@
   `tasks/federation.py`, `tasks/tags.py`, `tasks/transcoding.py`,
   `tasks/notifications.py` (daily digest + seen-notification purge),
   `tasks/scrobbling.py` (Last.fm/Libre.fm submissions).
+- Celery runs three queues (`tasks/celery.py` `task_routes`): `celery`
+  (default — interactive/low-volume work), `scrobbles` (`tasks/scrobbling.*`
+  — latency-sensitive submissions) and `bulk` (per-item library fan-out:
+  `musicbrainz.*`, `images.*`, `tags.*`, `import_.*`, `transcoding.*`,
+  `external_libraries.sync_external_library`/`write_back_metadata`,
+  `podcasts.refresh_podcast`, `storage.rehash_audio_files`). A fresh external
+  library sync enqueues tens of thousands of enrichment jobs — without the
+  split they starve scrobbles, federation delivery and notifications for
+  hours. Workers MUST consume all three: `celery -A songhive.tasks worker
+  -Q celery,scrobbles,bulk` (compose and `config/systemd/songhive-celery.service`
+  already do). Routing happens at publish time, so a worker that predates the
+  split still drains messages already queued on `celery`.
 - Scrobbling (`services/scrobbler.py`, `tasks/scrobbling.py`,
   `api/routes/scrobbling.py`) targets Audioscrobbler-compatible services
   (Last.fm `https://ws.audioscrobbler.com/2.0/`, Libre.fm
@@ -238,8 +250,9 @@
   re-uploads the file in place for S3 backends.
 - Manual tag sync can be triggered via `songhive admin sync-tags` or
   `POST /api/v1/admin/sync-tags`. For large S3 libraries, the migration and
-  bulk tag rewrites incur download/upload transfer costs; consider routing
-  `sync_track_tags` to a dedicated `tags` Celery queue with limited concurrency.
+  bulk tag rewrites incur download/upload transfer costs; `sync_track_tags`
+  already routes to the `bulk` queue — for very large S3 libraries consider
+  a dedicated worker with limited concurrency consuming just that queue.
 - Celery worker tasks run their async work inside ``asyncio.run(...)``. Each
   ``asyncio.run`` creates and closes a new event loop, and ``asyncpg``
   connections are bound to the loop that opened them. Every task that uses

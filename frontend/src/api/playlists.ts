@@ -320,6 +320,7 @@ export function playlistItemToQueueTrack(
       visibility: "public",
       tags: [],
       genres: [],
+      extra_artists: [],
       is_external: false,
       stream_url: episode.audio_url,
       remote: true,

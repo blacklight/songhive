@@ -4538,6 +4538,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/celery/queue": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Celery Queue Stats
+     * @description Report Celery queue statistics and per-task-name counts (admin only).
+     */
+    get: operations["celery_queue_stats_api_v1_admin_celery_queue_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/celery/terminate": {
     parameters: {
       query?: never;
@@ -7026,6 +7046,24 @@ export interface components {
       }[];
     };
     /**
+     * CeleryQueueStats
+     * @description Aggregated Celery queue statistics for the admin dashboard.
+     */
+    CeleryQueueStats: {
+      /** Total */
+      total: number;
+      /** Processing */
+      processing: number;
+      /** Queued */
+      queued: number;
+      /** Failed */
+      failed?: number | null;
+      /** Completed */
+      completed?: number | null;
+      /** By Name */
+      by_name: components["schemas"]["CeleryTaskNameCount"][];
+    };
+    /**
      * CeleryTaskInfo
      * @description A currently running Celery task reported by the worker inspect API.
      */
@@ -7060,6 +7098,16 @@ export interface components {
       } | null;
       /** Time Start */
       time_start?: number | null;
+    };
+    /**
+     * CeleryTaskNameCount
+     * @description Number of queued or processing tasks sharing the same task name.
+     */
+    CeleryTaskNameCount: {
+      /** Name */
+      name: string;
+      /** Count */
+      count: number;
     };
     /**
      * CeleryTerminateRequest
@@ -10070,7 +10118,7 @@ export interface components {
        * Extra Artists
        * @default []
        */
-      extra_artists?: string[];
+      extra_artists: string[];
       /** Audio Url */
       audio_url?: string | null;
       /** Image Url */
@@ -19153,6 +19201,26 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CeleryTaskInfo"][];
+        };
+      };
+    };
+  };
+  celery_queue_stats_api_v1_admin_celery_queue_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CeleryQueueStats"];
         };
       };
     };

@@ -838,7 +838,19 @@
         "terminateTaskConfirm": "Are you sure you want to terminate task {task_id}?",
         "terminated": "Terminated {count} task(s).",
         "loadError": "Could not load Celery tasks: {message}",
-        "terminateError": "Could not terminate task(s): {message}"
+        "terminateError": "Could not terminate task(s): {message}",
+        "queueStats": {
+          "title": "Queue overview",
+          "total": "Total",
+          "processing": "Processing",
+          "queued": "Queued",
+          "failed": "Failed",
+          "completed": "Completed"
+        },
+        "byTaskTitle": "Tasks by name",
+        "taskName": "Task name",
+        "count": "Count",
+        "queueEmpty": "No queued or running tasks."
       }
     },
     "externalLibraries": {

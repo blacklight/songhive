@@ -7,6 +7,7 @@ from typing import Optional
 
 from celery import Celery
 from celery.schedules import crontab
+from kombu import Queue
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,34 @@ def make_celery(
         timezone="UTC",
         enable_utc=True,
         task_default_queue="celery",
+        # Queue layout — workers must subscribe to all three:
+        #   celery -A songhive.tasks worker -Q celery,scrobbles,bulk
+        #
+        # ``scrobbles``: latency-sensitive Last.fm/Libre.fm submissions. A
+        # now-playing delivered minutes late is worthless, so these must
+        # never wait behind bulk work.
+        # ``bulk``: high-volume per-item jobs (external library sync fan-out,
+        # MusicBrainz enrichment, image/tag rewrites, imports, transcodes).
+        # A fresh library sync can enqueue tens of thousands of these;
+        # without the split they starve everything else on ``celery``.
+        # ``celery``: the default — low-volume and interactive tasks.
+        task_queues=(
+            Queue("celery"),
+            Queue("scrobbles"),
+            Queue("bulk"),
+        ),
+        task_routes={
+            "songhive.tasks.scrobbling.*": {"queue": "scrobbles"},
+            "songhive.tasks.musicbrainz.*": {"queue": "bulk"},
+            "songhive.tasks.images.*": {"queue": "bulk"},
+            "songhive.tasks.tags.*": {"queue": "bulk"},
+            "songhive.tasks.import_.*": {"queue": "bulk"},
+            "songhive.tasks.transcoding.*": {"queue": "bulk"},
+            "songhive.tasks.external_libraries.sync_external_library": {"queue": "bulk"},
+            "songhive.tasks.external_libraries.write_back_metadata": {"queue": "bulk"},
+            "songhive.tasks.podcasts.refresh_podcast": {"queue": "bulk"},
+            "songhive.tasks.storage.rehash_audio_files": {"queue": "bulk"},
+        },
         beat_schedule={
             "cleanup-orphaned-files": {
                 "task": "songhive.tasks.storage.cleanup_orphaned_files",

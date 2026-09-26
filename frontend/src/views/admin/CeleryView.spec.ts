@@ -8,6 +8,7 @@ import CeleryView from "./CeleryView.vue";
 
 vi.mock("@/api/admin", () => ({
   listCeleryTasks: vi.fn(),
+  getCeleryQueueStats: vi.fn(),
   terminateCeleryTasks: vi.fn(),
 }));
 
@@ -26,6 +27,7 @@ describe("CeleryView", () => {
     vi.clearAllMocks();
     confirm.mockResolvedValue(true);
     vi.mocked(useConfirm).mockReturnValue({ confirm, store: {} as never });
+    vi.mocked(adminApi.getCeleryQueueStats).mockResolvedValue(sampleQueueStats);
   });
 
   afterEach(() => {
@@ -43,6 +45,18 @@ describe("CeleryView", () => {
     acknowledged: true,
     delivery_info: { exchange: "", routing_key: "celery" },
     time_start: 1_700_000_000.0,
+  };
+
+  const sampleQueueStats = {
+    total: 9,
+    processing: 2,
+    queued: 7,
+    failed: 2,
+    completed: 1,
+    by_name: [
+      { name: "songhive.task.a", count: 4 },
+      { name: "songhive.task.b", count: 2 },
+    ],
   };
 
   it("renders a list of running Celery tasks", async () => {
@@ -155,5 +169,50 @@ describe("CeleryView", () => {
     expect(adminApi.terminateCeleryTasks).toHaveBeenCalledWith({
       task_ids: expect.arrayContaining(["task-1", "task-2"]),
     });
+  });
+
+  it("renders the queue stats header and per-task counts", async () => {
+    vi.mocked(adminApi.listCeleryTasks).mockResolvedValue([sampleTask]);
+
+    wrapper = mount(CeleryView, { global: { plugins: [i18n] } });
+    await flushPromises();
+
+    expect(adminApi.getCeleryQueueStats).toHaveBeenCalled();
+
+    const text = wrapper.text();
+    for (const key of [
+      "total",
+      "processing",
+      "queued",
+      "failed",
+      "completed",
+    ]) {
+      expect(text).toContain(
+        i18n.global.t(`pages.admin.celery.queueStats.${key}`),
+      );
+    }
+    expect(text).toContain("9");
+    expect(text).toContain("7");
+    expect(text).toContain("2");
+
+    const rows = wrapper.findAll(".celery-view__stats tbody tr");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].text()).toContain("songhive.task.a");
+    expect(rows[0].text()).toContain("4");
+    expect(rows[1].text()).toContain("songhive.task.b");
+    expect(rows[1].text()).toContain("2");
+  });
+
+  it("still renders the task list when queue stats are unavailable", async () => {
+    vi.mocked(adminApi.listCeleryTasks).mockResolvedValue([sampleTask]);
+    vi.mocked(adminApi.getCeleryQueueStats).mockRejectedValue(
+      new Error("broker down"),
+    );
+
+    wrapper = mount(CeleryView, { global: { plugins: [i18n] } });
+    await flushPromises();
+
+    expect(wrapper.find(".celery-view__stats").exists()).toBe(false);
+    expect(wrapper.text()).toContain(sampleTask.task_id);
   });
 });

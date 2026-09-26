@@ -406,8 +406,13 @@ separate container for the Celery workers.
 Start the Celery worker in a second terminal:
 
 ```bash
-celery -A songhive.tasks worker -B -l info
+celery -A songhive.tasks worker -B -l info -Q celery,scrobbles,bulk
 ```
+
+The worker must consume all three queues: ``celery`` (default, interactive
+tasks), ``scrobbles`` (latency-sensitive scrobble submissions) and ``bulk``
+(library sync/enrichment fan-out, which can enqueue tens of thousands of
+jobs at once).
 
 #### Local library watchdog
 
@@ -599,7 +604,7 @@ python -m flake8 songhive tests
 python -m black .
 
 # Start Celery worker
-celery -A songhive.tasks worker -l info
+celery -A songhive.tasks worker -l info -Q celery,scrobbles,bulk
 ```
 
 ### Frontend

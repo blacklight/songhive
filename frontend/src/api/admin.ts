@@ -31,6 +31,8 @@ export type NotificationsPurgeResponse =
 export type AdminTaskQueuedResponse =
   components["schemas"]["AdminTaskQueuedResponse"];
 export type CeleryTaskInfo = components["schemas"]["CeleryTaskInfo"];
+export type CeleryQueueStats = components["schemas"]["CeleryQueueStats"];
+export type CeleryTaskNameCount = components["schemas"]["CeleryTaskNameCount"];
 export type CeleryTerminateRequest =
   components["schemas"]["CeleryTerminateRequest"];
 export type CeleryTerminateResponse =
@@ -262,6 +264,10 @@ export function pruneRemoteActivities(
 
 export function listCeleryTasks(): Promise<CeleryTaskInfo[]> {
   return apiRequest<CeleryTaskInfo[]>("/admin/celery/tasks");
+}
+
+export function getCeleryQueueStats(): Promise<CeleryQueueStats> {
+  return apiRequest<CeleryQueueStats>("/admin/celery/queue");
 }
 
 export function terminateCeleryTasks(

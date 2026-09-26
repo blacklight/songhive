@@ -24,6 +24,7 @@ import {
   rehashAudio,
   provisionFederationKeys,
   listCeleryTasks,
+  getCeleryQueueStats,
   terminateCeleryTasks,
   purgeNotifications,
   type AdminUserResponse,
@@ -348,6 +349,21 @@ describe("admin endpoints", () => {
     const result = await listCeleryTasks();
     expect(apiRequest).toHaveBeenCalledWith("/admin/celery/tasks");
     expect(result).toEqual(tasks);
+  });
+
+  it("getCeleryQueueStats sends GET to /admin/celery/queue", async () => {
+    const stats = {
+      total: 3,
+      processing: 1,
+      queued: 2,
+      failed: 0,
+      completed: 10,
+      by_name: [{ name: "songhive.task.a", count: 2 }],
+    };
+    apiRequest.mockResolvedValueOnce(stats);
+    const result = await getCeleryQueueStats();
+    expect(apiRequest).toHaveBeenCalledWith("/admin/celery/queue");
+    expect(result).toEqual(stats);
   });
 
   it("terminateCeleryTasks sends POST to /admin/celery/terminate", async () => {

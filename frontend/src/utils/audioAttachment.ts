@@ -110,6 +110,7 @@ export function attachmentToQueueTrack(
     visibility: "public",
     tags: [],
     genres: [],
+    extra_artists: [],
     is_external: false,
     stream_url: info.url,
     remote: true,

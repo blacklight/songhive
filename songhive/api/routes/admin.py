@@ -31,7 +31,12 @@ from ...services import remote_content
 from ...services import settings as settings_service
 from ...services import stats as stats_service
 from ...services.admin_tasks import resolve_image_enrichment_targets
-from ...services.celery_admin import CeleryAdminError, list_active_celery_tasks, terminate_celery_tasks
+from ...services.celery_admin import (
+    CeleryAdminError,
+    get_celery_queue_stats,
+    list_active_celery_tasks,
+    terminate_celery_tasks,
+)
 from ...services.federation import unpublish_track_activity
 from ...services.storage import StorageService
 from ...tasks.federation import provision_federation_keys, prune_remote_activities
@@ -1229,6 +1234,26 @@ class CeleryTaskInfo(BaseModel):
     time_start: Optional[float] = None
 
 
+class CeleryTaskNameCount(BaseModel):
+    """Number of queued or processing tasks sharing the same task name."""
+
+    name: str
+    count: int
+
+
+class CeleryQueueStats(BaseModel):
+    """Aggregated Celery queue statistics for the admin dashboard."""
+
+    total: int
+    processing: int
+    queued: int
+    # ``failed``/``completed`` are only available when the result backend can
+    # be enumerated (e.g. Redis); ``None`` means "not available".
+    failed: Optional[int] = None
+    completed: Optional[int] = None
+    by_name: list[CeleryTaskNameCount]
+
+
 class CeleryTerminateRequest(BaseModel):
     """Request body for terminating running Celery tasks."""
 
@@ -1250,6 +1275,22 @@ async def list_celery_tasks():
     """List all Celery tasks currently running on workers (admin only)."""
     try:
         return await list_active_celery_tasks()
+    except CeleryAdminError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/celery/queue",
+    response_model=CeleryQueueStats,
+    dependencies=[Depends(require_admin)],
+)
+async def celery_queue_stats():
+    """Report Celery queue statistics and per-task-name counts (admin only)."""
+    try:
+        return await get_celery_queue_stats()
     except CeleryAdminError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
