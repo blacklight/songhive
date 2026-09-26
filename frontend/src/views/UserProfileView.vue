@@ -33,6 +33,7 @@ import StatusComposer from "@/components/statuses/StatusComposer.vue";
 import RemoteProfileView from "@/views/RemoteProfileView.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useInstanceStore } from "@/stores/instance";
+import { useInstanceDomain } from "@/composables/useInstanceDomain";
 import { useToastStore } from "@/stores/toast";
 import { formatDate } from "@/i18n";
 
@@ -42,16 +43,7 @@ const instanceStore = useInstanceStore();
 const authStore = useAuthStore();
 const toast = useToastStore();
 
-const instanceDomain = computed(() => {
-  if (instanceStore.instance?.uri) {
-    try {
-      return new URL(instanceStore.instance.uri).host;
-    } catch {
-      // fall back to the browser host
-    }
-  }
-  return window.location.host;
-});
+const instanceDomain = useInstanceDomain();
 
 const username = computed(() => String(route.params.username));
 // ``user@domain`` handles route here too — remote actors are resolved
@@ -82,17 +74,13 @@ function onStatusSubmitted() {
   });
 }
 
-const fqn = computed(() => {
-  let instance: string | undefined = undefined;
-  if (instanceStore.instance?.uri) {
-    try {
-      instance = new URL(instanceStore.instance.uri).host;
-    } catch {
-      // Default to username only
-    }
-  }
-  return `@${username.value}` + (instance ? `@{instance}` : "");
-});
+// Fully-qualified ``@user@domain`` handle — pasteable into other
+// federated clients without interpolating the domain by hand.
+const fqn = computed(() =>
+  instanceDomain.value
+    ? `@${username.value}@${instanceDomain.value}`
+    : `@${username.value}`,
+);
 
 const TABS = [
   { key: "posts", label: t("profile.tabs.posts"), name: "userProfilePosts" },

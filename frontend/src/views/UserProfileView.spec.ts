@@ -122,6 +122,24 @@ describe("UserProfileView", () => {
     expect(link.text()).toBe(i18n.global.t("profile.followers", { count: 0 }));
   });
 
+  it("renders the fully-qualified @user@domain handle", async () => {
+    await mountView(createProfile());
+
+    expect(wrapper.find(".user-profile__handle").text()).toContain(
+      "@alice@music.example.com",
+    );
+  });
+
+  it("copies the fully-qualified @user@domain handle", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    await mountView(createProfile());
+
+    await wrapper.find(".user-profile__handle button").trigger("click");
+
+    expect(writeText).toHaveBeenCalledWith("@alice@music.example.com");
+  });
+
   it("dispatches user@domain handles to the remote profile view", async () => {
     const { getRemoteActor, getRemoteActorActivities } =
       await import("@/api/remote");
