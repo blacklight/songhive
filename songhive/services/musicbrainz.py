@@ -32,6 +32,59 @@ logger = logging.getLogger(__name__)
 # redirects before the actual image, so follow them manually up to this many.
 _MAX_COVER_ART_REDIRECTS = 10
 
+# Number of ranked MusicBrainz releases tried when the release linked to an
+# album yields no cover art.
+_MAX_COVER_RELEASE_CANDIDATES = 3
+
+# MusicBrainz release statuses that describe unofficial or promotional
+# products. A missing status is treated as neutral; unknown statuses rank
+# between the two.
+_RELEASE_STATUS_SCORE = {
+    "official": 3,
+    "promotion": -1,
+    "bootleg": -3,
+    "pseudo-release": -3,
+}
+
+# Release-group secondary types marking a derivative product rather than the
+# canonical release (live versions, compilations, remixes, ...).
+_NON_CANONICAL_SECONDARY_TYPES = {
+    "live",
+    "compilation",
+    "remix",
+    "dj-mix",
+    "mixtape/street",
+    "demo",
+    "spokenword",
+    "interview",
+    "audiobook",
+    "audio drama",
+    "field recording",
+}
+
+# Disambiguation comments that strongly suggest the release is not the
+# canonical edition.
+_NON_CANONICAL_DISAMBIGUATION = ("bootleg", "unofficial", "promo")
+
+# Disambiguation comments marking a special edition; the standard edition is
+# preferred because it carries the canonical cover art.
+_SPECIAL_EDITION_DISAMBIGUATION = (
+    "limited",
+    "deluxe",
+    "collector",
+    "box set",
+    "fan club",
+    "special edition",
+    "expanded",
+    "reissue",
+    "remaster",
+    "anniversary",
+)
+
+# Release countries preferred on ties: worldwide digital releases and the
+# major physical markets tend to carry the canonical cover.
+_PREFERRED_RELEASE_COUNTRIES = {"xe", "us", "gb", "jp", "de", "fr", "ca", "au"}
+
 
 def _escape_query_term(term: str) -> str:
     """Quote a MusicBrainz query term so spaces and special chars are handled."""
@@ -112,6 +165,35 @@ class MusicBrainzService:
             ),
         )
 
+    async def search_releases(
+        self,
+        *,
+        query: Optional[str] = None,
+        artist: Optional[str] = None,
+        release: Optional[str] = None,
+        limit: int = 10,
+    ) -> Dict[str, Any]:
+        """Search for releases using a free-form or structured query."""
+        if query is None:
+            parts = []
+            if artist:
+                parts.append(f"artist:{_escape_query_term(artist)}")
+            if release:
+                parts.append(f"release:{_escape_query_term(release)}")
+            query = " ".join(parts)
+
+        if not query:
+            return {}
+
+        return cast(
+            Dict[str, Any],
+            await self._call(
+                musicbrainzngs.search_releases,
+                query=query,
+                limit=limit,
+            ),
+        )
+
     async def fetch_recording(
         self,
         recording_id: str,
@@ -173,38 +255,57 @@ class MusicBrainzService:
             return str(response.headers.get("location") or "")
         return None
 
-    async def fetch_cover_image(self, release_id: str) -> Optional[bytes]:
-        """Download the front cover image bytes for a release."""
+    async def fetch_cover_image(
+        self,
+        release_id: str,
+        release_group_id: Optional[str] = None,
+    ) -> Optional[bytes]:
+        """
+        Download the best-ranked front cover image bytes for a release.
+
+        The Cover Art Archive listing for the release is preferred so that
+        approved front images win over pending or unapproved ones. When no
+        usable front image is found for the release itself, the release
+        group's front image is tried as a last resort — it resolves to the
+        canonical cover of a sibling release in the same group.
+        """
         if not self.config.fetch_cover_art:
             return None
 
-        url = f"https://coverartarchive.org/release/{release_id}/front"
-        for _ in range(_MAX_COVER_ART_REDIRECTS):
-            try:
-                response = await self._client.get(url)
-            except Exception as exc:
-                logger.debug("Could not download cover art for %s: %s", release_id, exc)
-                return None
+        urls: List[str] = []
+        listing = await self._fetch_cover_art_listing(release_id)
+        if listing is not None:
+            urls.extend(_ranked_cover_art_image_urls(listing))
+        if not urls:
+            urls.append(f"https://coverartarchive.org/release/{release_id}/front")
+        if release_group_id:
+            urls.append(f"https://coverartarchive.org/release-group/{release_group_id}/front")
 
-            if 200 <= response.status_code < 300:
-                data = response.content
-                if isinstance(data, bytes) and data:
-                    return data
-                return None
+        for url in urls:
+            data = await self._download_image(url)
+            if data:
+                return data
+        return None
 
-            if 300 <= response.status_code < 400:
-                location = response.headers.get("location")
-                if not location:
-                    logger.debug("Cover art redirect for %s has no Location header", release_id)
-                    return None
-                url = str(location)
-                continue
-
-            logger.debug("Cover art request for %s returned %s", release_id, response.status_code)
+    async def _fetch_cover_art_listing(self, release_id: str) -> Optional[Dict[str, Any]]:
+        """Return the Cover Art Archive image listing for a release, if any."""
+        try:
+            response = await self._client.get(
+                f"https://coverartarchive.org/release/{release_id}",
+                follow_redirects=True,
+            )
+        except Exception as exc:
+            logger.debug("Cover art listing request failed for %s: %s", release_id, exc)
             return None
 
-        logger.debug("Too many cover art redirects for %s", release_id)
-        return None
+        if response.status_code != 200:
+            return None
+
+        try:
+            payload = response.json()
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
 
     async def _store_cover_art(
         self,
@@ -213,12 +314,13 @@ class MusicBrainzService:
         release_id: str,
         storage_service: StorageService,
         owner_id: Optional[str] = None,
+        release_group_id: Optional[str] = None,
     ) -> None:
         """Fetch and store cover art for an album when missing."""
         if album.cover_file_id is not None:
             return
 
-        data = await self.fetch_cover_image(release_id)
+        data = await self.fetch_cover_image(release_id, release_group_id)
         if data is None:
             return
 
@@ -466,25 +568,90 @@ class MusicBrainzService:
         storage_service: StorageService,
         force: bool = False,
     ) -> bool:
-        """Store album cover art when missing and a release ID is known."""
+        """
+        Store album cover art when missing.
+
+        The release already linked to the album is tried first — it was picked
+        by metadata enrichment. When it yields no artwork (or no release is
+        linked at all), MusicBrainz is searched for releases of the same album
+        and the most canonical candidates are tried in ranked order. When a
+        searched release provides the artwork, the album is re-linked to it so
+        later enrichment (and the stored MusicBrainz ID) reflects the better
+        match.
+        """
         if album.cover_file_id is not None and not force:
             return False
         if not force and album.cover_enriched_at is not None:
             return False
-        if not album.musicbrainz_id:
-            return False
 
-        await self._store_cover_art(
-            session,
-            album,
-            album.musicbrainz_id,
-            storage_service,
-            owner_id=album.owner_id,
-        )
-        if album.cover_file_id is not None:
+        if album.musicbrainz_id:
+            await self._store_cover_art(
+                session,
+                album,
+                album.musicbrainz_id,
+                storage_service,
+                owner_id=album.owner_id,
+            )
+            if album.cover_file_id is not None:
+                self._mark_cover_enriched(album)
+                return True
+
+        candidates = await self._ranked_cover_releases(album)
+        for release in candidates[:_MAX_COVER_RELEASE_CANDIDATES]:
+            release_id = release.get("id")
+            if not isinstance(release_id, str) or not release_id or release_id == album.musicbrainz_id:
+                continue
+            had_cover = album.cover_file_id is not None
+            await self._store_cover_art(
+                session,
+                album,
+                release_id,
+                storage_service,
+                owner_id=album.owner_id,
+                release_group_id=_release_group_id(release),
+            )
+            if album.cover_file_id is None:
+                continue
+            if not had_cover:
+                await self._link_album_release(session, album, release_id)
             self._mark_cover_enriched(album)
             return True
+
         return False
+
+    async def _ranked_cover_releases(self, album: Album) -> List[Dict[str, Any]]:
+        """Search MusicBrainz for releases of an album, most canonical first."""
+        if _is_missing_album(album):
+            return []
+
+        artist_name = None
+        if album.artist is not None and not _is_missing_artist(album.artist):
+            artist_name = album.artist.name
+
+        try:
+            results = await self.search_releases(
+                artist=artist_name,
+                release=album.title,
+                limit=10,
+            )
+        except Exception as exc:
+            logger.debug("Release search failed for album %s: %s", album.id, exc)
+            return []
+
+        releases = results.get("release-list") or []
+        candidates = [release for release in releases if isinstance(release, dict) and release.get("id")]
+        return sorted(
+            candidates,
+            key=lambda release: _release_rank(release, album.title),
+            reverse=True,
+        )
+
+    @staticmethod
+    async def _link_album_release(session, album: Album, release_id: str) -> None:
+        """Point an album at a different MusicBrainz release when it is free."""
+        result = await session.execute(select(Album.id).where(Album.musicbrainz_id == release_id).limit(1))
+        if result.scalar_one_or_none() is None:
+            album.musicbrainz_id = release_id
 
     @staticmethod
     def _mark_image_enriched(artist: Artist) -> None:
@@ -552,7 +719,15 @@ class MusicBrainzService:
         details: Dict[str, Any],
         album: Optional[Album],
     ) -> Optional[Dict[str, Any]]:
-        """Return the most relevant release for a recording."""
+        """
+        Return the most canonical release for a recording.
+
+        Releases are ranked by ``_release_rank``: a title match comes first,
+        then unofficial statuses (bootleg, promotion), special-edition
+        disambiguations and secondary release types are penalized, and
+        releases with front artwork, an album primary type and the earliest
+        release date are preferred.
+        """
         rec = details.get("recording") if details else None
         if not rec:
             rec = recording
@@ -563,13 +738,8 @@ class MusicBrainzService:
         if not releases:
             return None
 
-        if album and album.title:
-            for release in releases:
-                title = release.get("title")
-                if title and title.lower() == album.title.lower():
-                    return release
-
-        return releases[0]
+        album_title = album.title if album is not None and not _is_missing_album(album) else None
+        return max(releases, key=lambda release: _release_rank(release, album_title))
 
     async def _apply_metadata(
         self,
@@ -650,6 +820,7 @@ class MusicBrainzService:
                 release_id,
                 storage_service,
                 owner_id=track.owner_id,
+                release_group_id=_release_group_id(release),
             )
 
         self._store_raw_metadata(track, recording, details)
@@ -770,6 +941,7 @@ class MusicBrainzService:
         release_id: str,
         storage_service: StorageService,
         owner_id: Optional[str] = None,
+        release_group_id: Optional[str] = None,
     ) -> None:
         """Store cover art for an album when it is missing and a release ID is known."""
         if album.cover_file_id is not None:
@@ -781,6 +953,7 @@ class MusicBrainzService:
             release_id,
             storage_service,
             owner_id=owner_id,
+            release_group_id=release_group_id,
         )
 
     @staticmethod
@@ -828,23 +1001,29 @@ class MusicBrainzService:
         if not isinstance(relations, list):
             return None
 
+        preferred: List[str] = []
+        deferred: List[str] = []
         for relation in relations:
             if not isinstance(relation, dict):
                 continue
             if not _is_image_relation(relation):
                 continue
+            # Logos are less useful as artist images than photos, so they are
+            # only tried after every other image-like relation.
+            targets = deferred if _is_logo_relation(relation) else preferred
             url = relation.get("url", {})
             if isinstance(url, dict):
                 target = url.get("resource") or url.get("id")
                 if isinstance(target, str) and target.startswith("http"):
-                    resolved = await self._resolve_image_url(target)
-                    if resolved:
-                        return resolved
+                    targets.append(target)
             target = relation.get("target")
             if isinstance(target, str) and target.startswith("http"):
-                resolved = await self._resolve_image_url(target)
-                if resolved:
-                    return resolved
+                targets.append(target)
+
+        for target in preferred + deferred:
+            resolved = await self._resolve_image_url(target)
+            if resolved:
+                return resolved
 
         return None
 
@@ -1182,6 +1361,206 @@ def _release_disc_number(release: Optional[Dict[str, Any]]) -> Optional[int]:
             return 1
 
     return None
+
+
+def _release_group_id(release: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Return the release-group MusicBrainz ID for a release, if present."""
+    if not release:
+        return None
+    group = release.get("release-group")
+    if isinstance(group, dict):
+        group_id = group.get("id")
+        if isinstance(group_id, str) and group_id:
+            return group_id
+    return None
+
+
+def _release_rank(release: Dict[str, Any], album_title: Optional[str]) -> Tuple[int, ...]:
+    """
+    Return a ranking tuple for a release; higher ranks are more canonical.
+
+    Title matches come first, then unofficial statuses (bootleg, promotion),
+    special-edition disambiguation comments and secondary release-group types
+    are penalized, and releases whose group is a plain album, which report
+    front artwork and which have the earliest release date are preferred —
+    i.e. the original press of an album rather than a bootleg, promo or
+    limited reissue.
+    """
+    return (
+        _release_title_score(release, album_title),
+        _release_status_score(release),
+        _release_disambiguation_score(release),
+        _release_primary_type_score(release),
+        _release_secondary_type_score(release),
+        _release_cover_art_score(release),
+        -_release_date_value(release),
+        _release_country_score(release),
+    )
+
+
+def _release_title_score(release: Dict[str, Any], album_title: Optional[str]) -> int:
+    """Score how closely a release title matches the local album title."""
+    title = _release_title(release)
+    if not title or not album_title:
+        return 0
+    if title.strip().lower() == album_title.strip().lower():
+        return 2
+    normalized_title = _normalize_release_title(title)
+    if normalized_title and normalized_title == _normalize_release_title(album_title):
+        return 1
+    return 0
+
+
+_NORMALIZED_TITLE_STRIP_RE = re.compile(r"[(\[][^)\]]*[)\]]")
+_NORMALIZED_TITLE_CHARS_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize_release_title(title: str) -> str:
+    """Normalize a title for fuzzy release/album comparison."""
+    normalized = _NORMALIZED_TITLE_STRIP_RE.sub(" ", title.lower())
+    return _NORMALIZED_TITLE_CHARS_RE.sub(" ", normalized).strip()
+
+
+def _release_status_score(release: Dict[str, Any]) -> int:
+    """Score a release status; unofficial products rank below official ones."""
+    status = release.get("status")
+    if not isinstance(status, str) or not status.strip():
+        return 1
+    return _RELEASE_STATUS_SCORE.get(status.strip().lower(), 0)
+
+
+def _release_disambiguation_score(release: Dict[str, Any]) -> int:
+    """Penalize releases whose disambiguation marks a non-canonical edition."""
+    parts = [release.get("disambiguation")]
+    group = release.get("release-group")
+    if isinstance(group, dict):
+        parts.append(group.get("disambiguation"))
+    text = " ".join(p.lower() for p in parts if isinstance(p, str) and p)
+    if not text:
+        return 0
+    if any(marker in text for marker in _NON_CANONICAL_DISAMBIGUATION):
+        return -3
+    if any(marker in text for marker in _SPECIAL_EDITION_DISAMBIGUATION):
+        return -1
+    return 0
+
+
+def _release_primary_type_score(release: Dict[str, Any]) -> int:
+    """Prefer releases whose group is a plain album over singles, EPs, etc."""
+    group = release.get("release-group")
+    if not isinstance(group, dict):
+        return 1
+    primary = group.get("primary-type") or group.get("type")
+    if not isinstance(primary, str) or not primary.strip():
+        return 1
+    return 2 if primary.strip().lower() == "album" else 0
+
+
+def _release_secondary_type_score(release: Dict[str, Any]) -> int:
+    """Penalize releases whose group is a live, compilation or remix variant."""
+    group = release.get("release-group")
+    if not isinstance(group, dict):
+        return 0
+    secondary = group.get("secondary-type-list") or group.get("secondary-types") or []
+    types = {str(entry).strip().lower() for entry in secondary if entry}
+    return -2 if types & _NON_CANONICAL_SECONDARY_TYPES else 0
+
+
+def _release_cover_art_score(release: Dict[str, Any]) -> int:
+    """Prefer releases the Cover Art Archive reports artwork for."""
+    archive = release.get("cover-art-archive") or release.get("cover_art_archive")
+    if not isinstance(archive, dict):
+        return 0
+    for key in ("front", "artwork"):
+        if str(archive.get(key)).strip().lower() in {"true", "1"}:
+            return 1
+    count = archive.get("count")
+    try:
+        if count is not None and int(count) > 0:
+            return 1
+    except (TypeError, ValueError):
+        pass
+    return -1
+
+
+def _release_date_value(release: Dict[str, Any]) -> int:
+    """Return a sortable ordinal for the release date; missing dates sort last."""
+    date = release.get("date")
+    events = release.get("release-events")
+    if not date and isinstance(events, list):
+        for event in events:
+            if isinstance(event, dict) and event.get("date"):
+                date = event["date"]
+                break
+    if not date:
+        group = release.get("release-group")
+        if isinstance(group, dict):
+            date = group.get("first-release-date")
+
+    match = re.match(r"(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?", str(date or ""))
+    if not match:
+        return 99999999
+    year = int(match.group(1))
+    month = int(match.group(2) or 0)
+    day = int(match.group(3) or 0)
+    return year * 10000 + month * 100 + day
+
+
+def _release_country_score(release: Dict[str, Any]) -> int:
+    """Prefer worldwide and major-market releases on ties."""
+    codes = set()
+    country = release.get("country")
+    if isinstance(country, str) and country.strip():
+        codes.add(country.strip().lower())
+    events = release.get("release-events")
+    if isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            area = event.get("area")
+            if not isinstance(area, dict):
+                continue
+            for code in area.get("iso-3166-1-code-list") or []:
+                if isinstance(code, str):
+                    codes.add(code.lower())
+    if "xw" in codes:
+        return 2
+    if codes & _PREFERRED_RELEASE_COUNTRIES:
+        return 1
+    return 0
+
+
+def _ranked_cover_art_image_urls(payload: Dict[str, Any]) -> List[str]:
+    """Return front-cover image URLs from a Cover Art Archive listing, best first."""
+    images = payload.get("images")
+    if not isinstance(images, list):
+        return []
+
+    fronts = [image for image in images if isinstance(image, dict) and _cover_art_is_front(image)]
+    # Approved edits first; the archive's own ordering is preserved otherwise.
+    fronts.sort(key=lambda image: image.get("approved") is not True)
+
+    urls = []
+    for image in fronts:
+        url = image.get("image")
+        if isinstance(url, str) and url.startswith("http"):
+            urls.append(url)
+    return urls
+
+
+def _cover_art_is_front(image: Dict[str, Any]) -> bool:
+    """Return ``True`` when a Cover Art Archive image is marked as a front."""
+    if image.get("front") is True:
+        return True
+    types = image.get("types")
+    if isinstance(types, list):
+        return any(str(entry).strip().lower() == "front" for entry in types)
+    return False
+
+
+def _is_logo_relation(relation: Dict[str, Any]) -> bool:
+    """Return ``True`` when a URL relation points to a logo rather than a photo."""
+    return str(relation.get("type") or "").strip().lower() == "logo"
 
 
 def _is_missing_title(track: Track) -> bool:

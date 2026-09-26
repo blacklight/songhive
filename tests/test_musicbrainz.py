@@ -17,6 +17,7 @@ from songhive.services.musicbrainz import (
     MusicBrainzService,
     _first_artist_id,
     _guess_image_mime,
+    _release_rank,
 )
 from songhive.services.storage import StorageService
 from songhive.storage import get_storage
@@ -832,3 +833,442 @@ async def test_find_or_create_album_handles_concurrent_insert(
         mbid="release-1",
     )
     assert album is existing
+
+
+# ---------------------------------------------------------------------------
+# Release ranking
+# ---------------------------------------------------------------------------
+
+
+def test_release_rank_prefers_official_over_bootleg():
+    """Bootlegs, promos and pseudo-releases rank below official releases."""
+    official = {"id": "official", "title": "Album", "status": "Official"}
+    promo = {"id": "promo", "title": "Album", "status": "Promotion"}
+    bootleg = {"id": "bootleg", "title": "Album", "status": "Bootleg"}
+
+    assert _release_rank(official, "Album") > _release_rank(promo, "Album")
+    assert _release_rank(promo, "Album") > _release_rank(bootleg, "Album")
+    assert _release_rank(official, "Album") > _release_rank(bootleg, "Album")
+
+
+def test_release_rank_penalizes_special_edition_disambiguation():
+    """Limited/deluxe/reissue editions rank below the standard edition."""
+    standard = {"id": "standard", "title": "Album", "status": "Official"}
+    limited = {
+        "id": "limited",
+        "title": "Album",
+        "status": "Official",
+        "release-group": {
+            "id": "rg",
+            "primary-type": "Album",
+            "disambiguation": "limited edition",
+        },
+    }
+
+    assert _release_rank(standard, "Album") > _release_rank(limited, "Album")
+
+
+def test_release_rank_penalizes_secondary_types():
+    """Live/compilation groups rank below the plain album."""
+    studio = {
+        "id": "studio",
+        "title": "Album",
+        "status": "Official",
+        "release-group": {"primary-type": "Album"},
+    }
+    live = {
+        "id": "live",
+        "title": "Album",
+        "status": "Official",
+        "release-group": {
+            "primary-type": "Album",
+            "secondary-type-list": ["Live"],
+        },
+    }
+
+    assert _release_rank(studio, "Album") > _release_rank(live, "Album")
+
+
+def test_release_rank_prefers_album_primary_type():
+    album = {
+        "id": "album",
+        "title": "Tracks",
+        "status": "Official",
+        "release-group": {"primary-type": "Album"},
+    }
+    single = {
+        "id": "single",
+        "title": "Tracks",
+        "status": "Official",
+        "release-group": {"primary-type": "Single"},
+    }
+
+    assert _release_rank(album, "Tracks") > _release_rank(single, "Tracks")
+
+
+def test_release_rank_prefers_releases_with_front_artwork():
+    with_art = {
+        "id": "art",
+        "title": "Album",
+        "status": "Official",
+        "date": "2000-01-01",
+        "cover-art-archive": {"artwork": True, "front": True, "count": "3"},
+    }
+    without_art = {
+        "id": "noart",
+        "title": "Album",
+        "status": "Official",
+        "date": "2000-01-01",
+        "cover-art-archive": {"artwork": False, "front": False, "count": "0"},
+    }
+
+    assert _release_rank(with_art, "Album") > _release_rank(without_art, "Album")
+
+
+def test_release_rank_prefers_earlier_date():
+    earlier = {"id": "old", "title": "Album", "status": "Official", "date": "1990-05-01"}
+    later = {"id": "new", "title": "Album", "status": "Official", "date": "2015-05-01"}
+
+    assert _release_rank(earlier, "Album") > _release_rank(later, "Album")
+
+
+def test_release_rank_title_match_wins():
+    """A title match is the strongest pertinence signal."""
+    match = {"id": "match", "title": "The Album", "status": "Promotion"}
+    other = {"id": "other", "title": "Other Release", "status": "Official"}
+
+    assert _release_rank(match, "The Album") > _release_rank(other, "The Album")
+
+
+def test_release_rank_normalizes_title():
+    """A title differing only by a parenthetical suffix still matches."""
+    release = {"id": "r", "title": "Album (Deluxe Edition)", "status": "Official"}
+    unrelated = {"id": "o", "title": "Something Else", "status": "Official"}
+
+    assert _release_rank(release, "Album") > _release_rank(unrelated, "Album")
+
+
+def test_release_rank_prefers_worldwide_release():
+    worldwide = {
+        "id": "xw",
+        "title": "Album",
+        "status": "Official",
+        "date": "2000-01-01",
+        "country": "XW",
+    }
+    regional = {
+        "id": "reg",
+        "title": "Album",
+        "status": "Official",
+        "date": "2000-01-01",
+        "country": "BR",
+    }
+
+    assert _release_rank(worldwide, "Album") > _release_rank(regional, "Album")
+
+
+def test_best_release_prefers_official_over_bootleg(musicbrainz_config):
+    """_best_release returns the official release among same-title candidates."""
+    service = MusicBrainzService(musicbrainz_config)
+    details = {
+        "recording": {
+            "id": "rec-1",
+            "release-list": [
+                {
+                    "id": "bootleg",
+                    "title": "Album",
+                    "status": "Bootleg",
+                    "date": "2001-01-01",
+                },
+                {
+                    "id": "official",
+                    "title": "Album",
+                    "status": "Official",
+                    "date": "2000-01-01",
+                },
+            ],
+        }
+    }
+    album = SimpleNamespace(title="Album")
+
+    best = service._best_release({"id": "rec-1"}, details, album)
+
+    assert best is not None
+    assert best["id"] == "official"
+
+
+def test_best_release_falls_back_to_ranking_without_title_match(musicbrainz_config):
+    """With no title match, _best_release still picks the most canonical release."""
+    service = MusicBrainzService(musicbrainz_config)
+    details = {
+        "recording": {
+            "id": "rec-1",
+            "release-list": [
+                {
+                    "id": "promo",
+                    "title": "Other",
+                    "status": "Promotion",
+                    "date": "2001-01-01",
+                },
+                {
+                    "id": "official",
+                    "title": "Other",
+                    "status": "Official",
+                    "date": "2001-01-01",
+                },
+            ],
+        }
+    }
+    album = SimpleNamespace(title="My Album")
+
+    best = service._best_release({"id": "rec-1"}, details, album)
+
+    assert best is not None
+    assert best["id"] == "official"
+
+
+@pytest.mark.asyncio
+async def test_enrich_track_picks_canonical_release(
+    db_session,
+    musicbrainz_config,
+    mock_client,
+    recording_result,
+    local_storage_service,
+    monkeypatch,
+):
+    """Track enrichment stores the official release, not a bootleg."""
+    artist = Artist(name="Test Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(title="Test Album", artist_id=artist.id)
+    db_session.add(album)
+    await db_session.flush()
+
+    track = Track(title="Test Song", artist_id=artist.id, album_id=album.id)
+    db_session.add(track)
+    await db_session.flush()
+
+    details = {
+        "recording": {
+            "id": "recording-1",
+            "title": "Test Song",
+            "release-list": [
+                {
+                    "id": "rel-bootleg",
+                    "title": "Test Album",
+                    "status": "Bootleg",
+                    "date": "2001-01-01",
+                },
+                {
+                    "id": "rel-official",
+                    "title": "Test Album",
+                    "status": "Official",
+                    "date": "2000-01-01",
+                    "release-group": {"id": "rg-1", "primary-type": "Album"},
+                },
+            ],
+        }
+    }
+
+    service = MusicBrainzService(musicbrainz_config, client=mock_client)
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_recordings",
+        lambda **_: recording_result,
+    )
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.get_recording_by_id",
+        lambda *_: details,
+    )
+
+    result = await service.enrich_track(
+        db_session,
+        str(track.id),
+        storage_service=local_storage_service,
+    )
+
+    assert result is True
+    assert album.musicbrainz_id == "rel-official"
+    assert album.cover_file_id is not None
+
+
+# ---------------------------------------------------------------------------
+# Cover Art Archive image ranking
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_cover_image_prefers_approved_front(musicbrainz_config):
+    """The CAA listing is used so approved front images win over unapproved ones."""
+    service = MusicBrainzService(musicbrainz_config, client=AsyncMock())
+    listing = {
+        "images": [
+            {
+                "front": True,
+                "approved": False,
+                "image": "https://caa.example/unapproved.jpg",
+            },
+            {
+                "front": True,
+                "approved": True,
+                "image": "https://caa.example/approved.jpg",
+            },
+            {
+                "front": False,
+                "types": ["Back"],
+                "image": "https://caa.example/back.jpg",
+            },
+        ]
+    }
+
+    async def _get(url, **_):
+        url = str(url)
+        if url == "https://coverartarchive.org/release/rel-1":
+            return Mock(status_code=200, json=Mock(return_value=listing))
+        if url == "https://caa.example/approved.jpg":
+            return Mock(status_code=200, content=b"\x89PNG\r\n\x1a\napproved", headers={})
+        return Mock(status_code=404, content=b"", headers={})
+
+    service._client.get = AsyncMock(side_effect=_get)
+
+    assert await service.fetch_cover_image("rel-1") == b"\x89PNG\r\n\x1a\napproved"
+
+
+@pytest.mark.asyncio
+async def test_fetch_cover_image_falls_back_to_front_without_listing(musicbrainz_config):
+    """When the CAA listing is unavailable, the /front endpoint is used."""
+    service = MusicBrainzService(musicbrainz_config, client=AsyncMock())
+
+    async def _get(url, **_):
+        url = str(url)
+        if url == "https://coverartarchive.org/release/rel-1":
+            return Mock(status_code=404, content=b"", headers={})
+        if url == "https://coverartarchive.org/release/rel-1/front":
+            return Mock(status_code=200, content=b"\xff\xd8front", headers={})
+        return Mock(status_code=404, content=b"", headers={})
+
+    service._client.get = AsyncMock(side_effect=_get)
+
+    assert await service.fetch_cover_image("rel-1") == b"\xff\xd8front"
+
+
+@pytest.mark.asyncio
+async def test_fetch_cover_image_falls_back_to_release_group(musicbrainz_config):
+    """When a release has no art, the release-group front image is tried."""
+    service = MusicBrainzService(musicbrainz_config, client=AsyncMock())
+
+    async def _get(url, **_):
+        url = str(url)
+        if "release-group/rg-1" in url:
+            return Mock(status_code=200, content=b"\xff\xd8group", headers={})
+        return Mock(status_code=404, content=b"", headers={})
+
+    service._client.get = AsyncMock(side_effect=_get)
+
+    assert await service.fetch_cover_image("rel-1", "rg-1") == b"\xff\xd8group"
+
+
+@pytest.mark.asyncio
+async def test_enrich_album_cover_searches_better_release(
+    db_session,
+    musicbrainz_config,
+    local_storage_service,
+    monkeypatch,
+):
+    """When the linked release has no art, a ranked release search is used."""
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-mbid-1")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Test Album",
+        artist_id=artist.id,
+        musicbrainz_id="rel-bootleg",
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config)
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_releases",
+        lambda **_: {
+            "release-list": [
+                {
+                    "id": "rel-official",
+                    "title": "Test Album",
+                    "status": "Official",
+                    "release-group": {"id": "rg-1", "primary-type": "Album"},
+                }
+            ]
+        },
+    )
+
+    listing = {
+        "images": [
+            {
+                "front": True,
+                "approved": True,
+                "image": "https://caa.example/front.jpg",
+            }
+        ]
+    }
+
+    async def _get(url, **_):
+        url = str(url)
+        if url == "https://coverartarchive.org/release/rel-official":
+            return Mock(status_code=200, json=Mock(return_value=listing))
+        if url == "https://caa.example/front.jpg":
+            return Mock(status_code=200, content=b"\x89PNG\r\n\x1a\nfront", headers={})
+        return Mock(status_code=404, content=b"", headers={})
+
+    service._client.get = AsyncMock(side_effect=_get)
+
+    result = await service.enrich_album_cover_by_id(
+        db_session,
+        str(album.id),
+        storage_service=local_storage_service,
+    )
+
+    assert result is True
+    assert album.cover_file_id is not None
+    assert album.musicbrainz_id == "rel-official"
+    assert album.cover_enriched_at is not None
+
+
+@pytest.mark.asyncio
+async def test_enrich_album_cover_uses_linked_release_first(
+    db_session,
+    musicbrainz_config,
+    mock_client,
+    local_storage_service,
+    monkeypatch,
+):
+    """The linked release is tried before any release search is issued."""
+    artist = Artist(name="Test Artist", musicbrainz_id="artist-mbid-1")
+    db_session.add(artist)
+    await db_session.flush()
+
+    album = Album(
+        title="Test Album",
+        artist_id=artist.id,
+        musicbrainz_id="release-1",
+    )
+    db_session.add(album)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config, client=mock_client)
+    search_mock = Mock(return_value={"release-list": []})
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_releases",
+        search_mock,
+    )
+
+    result = await service.enrich_album_cover_by_id(
+        db_session,
+        str(album.id),
+        storage_service=local_storage_service,
+    )
+
+    assert result is True
+    assert album.cover_file_id is not None
+    search_mock.assert_not_called()

@@ -737,6 +737,10 @@ async def test_enrich_album_cover_by_id_download_fails(
 
     service = MusicBrainzService(musicbrainz_config)
     service._client.get = AsyncMock(return_value=Mock(status_code=404, content=b"", headers={}))
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_releases",
+        lambda **_: {"release-list": []},
+    )
 
     result = await service.enrich_album_cover_by_id(
         db_session,
