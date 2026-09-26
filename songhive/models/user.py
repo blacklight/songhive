@@ -9,7 +9,7 @@ from typing import List, Optional
 from sqlalchemy import Boolean, CheckConstraint, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
-from .base import Base
+from .base import Base, TZDateTime
 from .invite import Invite
 from .user_link import UserLink
 
@@ -76,8 +76,8 @@ class User(Base):
     email_verification_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     email_verification_token_raw: Optional[str] = None
     password_reset_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    password_reset_expires_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
-    last_login: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    password_reset_expires_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
+    last_login: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
     status_content_type: Mapped[str] = mapped_column(
         String(64),
         default="text/markdown",

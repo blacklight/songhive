@@ -9,6 +9,8 @@ vi.mock("@/api/scrobbling", () => ({
   connectScrobbler: vi.fn(),
   updateScrobbleSettings: vi.fn(),
   disconnectScrobbler: vi.fn(),
+  // The player engine singleton imports this transitively.
+  reportNowPlaying: vi.fn(() => Promise.resolve()),
 }));
 
 const emptyStatus = {

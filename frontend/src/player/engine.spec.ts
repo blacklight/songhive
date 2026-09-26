@@ -305,6 +305,40 @@ describe("PlayerEngine", () => {
     expect(scrobblingApi.reportNowPlaying).not.toHaveBeenCalled();
   });
 
+  it("reports now playing after a mid-session status refresh", async () => {
+    // Booted without a usable session: the init fetch fails and
+    // scrobbleActive stays false.
+    vi.mocked(scrobblingApi.getScrobbleStatus).mockRejectedValueOnce(
+      new Error("unauthorized"),
+    );
+    engine.init({});
+    await Promise.resolve();
+    engine.load(makeTrack("a"));
+    primary.dispatchEvent(new Event("play"));
+    expect(scrobblingApi.reportNowPlaying).not.toHaveBeenCalled();
+
+    // A later refresh (login, scrobble account connect) flips reporting on.
+    vi.mocked(scrobblingApi.getScrobbleStatus).mockResolvedValueOnce(
+      activeScrobbleStatus,
+    );
+    await engine.refreshScrobbleStatus();
+    engine.load(makeTrack("b"));
+    primary.dispatchEvent(new Event("play"));
+    expect(scrobblingApi.reportNowPlaying).toHaveBeenCalledWith("b");
+  });
+
+  it("resetScrobbleStatus disables now-playing reports", async () => {
+    vi.mocked(scrobblingApi.getScrobbleStatus).mockResolvedValueOnce(
+      activeScrobbleStatus,
+    );
+    engine.init({});
+    await Promise.resolve();
+    engine.resetScrobbleStatus();
+    engine.load(makeTrack("a"));
+    primary.dispatchEvent(new Event("play"));
+    expect(scrobblingApi.reportNowPlaying).not.toHaveBeenCalled();
+  });
+
   it("does not report now playing for uncached remote or podcast tracks", async () => {
     vi.mocked(scrobblingApi.getScrobbleStatus).mockResolvedValueOnce(
       activeScrobbleStatus,

@@ -5,6 +5,7 @@ import { getScrobbleStatus, reportNowPlaying } from "@/api/scrobbling";
 import type { QueueTrack, EngineCallbacks } from "./types";
 import {
   HistoryReporter,
+  HISTORY_DEFAULT_MIN_SECONDS,
   HISTORY_DEFAULT_MIN_PERCENT,
 } from "./historyReporter";
 
@@ -49,20 +50,45 @@ export class PlayerEngine {
     this.callbacks = callbacks;
     this.removeListeners(this.primary);
     this.addListeners(this.primary);
-    // Adopt the user's scrobble thresholds as the listen-report thresholds.
-    // Without a scrobble config the API reports the server defaults
-    // (``min_percent`` null), so the local 50% history default stays.
-    getScrobbleStatus()
-      .then((status) => {
-        // ``min_percent`` is only set for users with an active scrobble
-        // config, so it doubles as the "submit now-playing" signal.
-        this.scrobbleActive = status.thresholds.min_percent != null;
-        this.history.setThresholds(
-          status.thresholds.min_seconds,
-          status.thresholds.min_percent ?? HISTORY_DEFAULT_MIN_PERCENT,
-        );
-      })
-      .catch(() => {});
+    void this.refreshScrobbleStatus();
+  }
+
+  /**
+   * Fetch the instance scrobble status and adopt the user's thresholds.
+   *
+   * Adopt the user's scrobble thresholds as the listen-report thresholds.
+   * Without a scrobble config the API reports the server defaults
+   * (``min_percent`` null), so the local 50% history default stays.
+   *
+   * Safe to re-run: called at boot, when auth flips to "authenticated", and
+   * after scrobble settings change — a session that boots logged out (or
+   * that connects a Last.fm account mid-session) still gets now-playing
+   * reports without a reload.
+   */
+  async refreshScrobbleStatus(): Promise<void> {
+    try {
+      const status = await getScrobbleStatus();
+      // ``min_percent`` is only set for users with an active scrobble
+      // config, so it doubles as the "submit now-playing" signal.
+      this.scrobbleActive = status.thresholds.min_percent != null;
+      this.history.setThresholds(
+        status.thresholds.min_seconds,
+        status.thresholds.min_percent ?? HISTORY_DEFAULT_MIN_PERCENT,
+      );
+    } catch {
+      // Unauthenticated or unreachable — keep now-playing off until the
+      // next successful refresh.
+      this.scrobbleActive = false;
+    }
+  }
+
+  /** Disable now-playing reports and restore default listen thresholds. */
+  resetScrobbleStatus(): void {
+    this.scrobbleActive = false;
+    this.history.setThresholds(
+      HISTORY_DEFAULT_MIN_SECONDS,
+      HISTORY_DEFAULT_MIN_PERCENT,
+    );
   }
 
   load(track: QueueTrack, startAt?: number) {

@@ -10,6 +10,7 @@ import {
 } from "@/api/scrobbling";
 import { getApiErrorMessage } from "@/api/client";
 import { formatDateTime } from "@/i18n";
+import { playerEngine } from "@/player/engine";
 import { useToastStore } from "@/stores/toast";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
@@ -91,6 +92,9 @@ async function connect() {
     });
     password.value = "";
     await fetchStatus();
+    // The engine only samples scrobble status on init/auth change — tell it
+    // the account is now linked so now-playing reports start immediately.
+    void playerEngine.refreshScrobbleStatus();
     toast.push({ type: "success", message: t("pages.scrobbling.connected") });
   } catch (err) {
     toast.push({
@@ -114,6 +118,7 @@ async function save() {
       min_percent: Number(minPercent.value),
     });
     await fetchStatus();
+    void playerEngine.refreshScrobbleStatus();
     toast.push({ type: "success", message: t("pages.scrobbling.saved") });
   } catch (err) {
     toast.push({
@@ -137,6 +142,7 @@ async function remove() {
       : status.value;
     username.value = "";
     password.value = "";
+    void playerEngine.refreshScrobbleStatus();
     toast.push({ type: "success", message: t("pages.scrobbling.deleted") });
   } catch (err) {
     toast.push({

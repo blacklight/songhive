@@ -1,4 +1,4 @@
-import { createApp } from "vue";
+import { createApp, watch } from "vue";
 import { createPinia } from "pinia";
 import App from "./App.vue";
 import router from "./router";
@@ -37,6 +37,21 @@ playerEngine.init({
   },
 });
 playerStore.registerEngine(playerEngine);
+
+// The engine samples scrobble status at boot — before the router guard
+// restores the session and before any mid-session login — so now-playing
+// reports would stay off for the whole session if that first fetch fails.
+// Re-evaluate whenever the auth state settles.
+watch(
+  () => authStore.status,
+  (status) => {
+    if (status === "authenticated") {
+      void playerEngine.refreshScrobbleStatus();
+    } else if (status === "unauthenticated") {
+      playerEngine.resetScrobbleStatus();
+    }
+  },
+);
 
 (async () => {
   await initializeI18n();
