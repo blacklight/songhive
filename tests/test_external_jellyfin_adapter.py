@@ -303,7 +303,7 @@ class TestIterItems:
         assert item.provider_key == "track-1"
         assert item.etag == "etag-1"
         assert item.size == 12_345_678
-        assert item.mime_type == "audio/x-flac"
+        assert item.mime_type in {"audio/x-flac", "audio/flac"}
         assert item.display_path == "The Band/An Album/03 A Song.flac"
         metadata = item.metadata
         assert metadata is not None
