@@ -1,0 +1,2440 @@
+{
+  "tags": {
+    "title": "Etiquetas",
+    "label": "Etiquetas",
+    "placeholder": "Añadir etiquetas…",
+    "ariaLabel": "Etiquetas",
+    "hint": "Letras minúsculas, números y guiones bajos; al menos una letra. Separa con comas o espacios.",
+    "emptyTag": "Introduce una etiqueta.",
+    "tooLong": "La etiqueta debe tener 64 caracteres o menos.",
+    "invalidCharacters": "Las etiquetas solo pueden contener letras minúsculas, números y guiones bajos.",
+    "noLetter": "Las etiquetas deben contener al menos una letra.",
+    "removeTag": "Quitar {tag}",
+    "itemCount": "{count} elementos",
+    "searchPlaceholder": "Buscar etiquetas…",
+    "allTags": "Todas las etiquetas",
+    "taggedItems": "Elementos etiquetados",
+    "empty": "No se encontraron etiquetas.",
+    "emptyItems": "No hay elementos con esta etiqueta.",
+    "deleteConfirm": "¿Eliminar la etiqueta \"{name}\" y quitarla de todos los elementos?",
+    "deleteSuccess": "Etiqueta eliminada.",
+    "deleteError": "No se pudo eliminar la etiqueta: {message}",
+    "saveError": "No se pudieron guardar las etiquetas: {message}"
+  },
+  "genres": {
+    "title": "Géneros",
+    "label": "Géneros",
+    "placeholder": "Añadir géneros…",
+    "ariaLabel": "Géneros",
+    "hint": "Letras minúsculas, números, espacios, guiones bajos, ampersands, guiones y barras; al menos una letra. Separa con comas o punto y coma.",
+    "emptyTag": "Introduce un género.",
+    "tooLong": "El género debe tener 128 caracteres o menos.",
+    "invalidCharacters": "Los géneros solo pueden contener letras minúsculas, números, espacios, guiones bajos, ampersands, guiones y barras.",
+    "noLetter": "Los géneros deben contener al menos una letra.",
+    "removeTag": "Quitar {tag}",
+    "itemCount": "{count} elementos",
+    "searchPlaceholder": "Buscar géneros…",
+    "allGenres": "Todos los géneros",
+    "taggedItems": "Elementos etiquetados",
+    "empty": "No se encontraron géneros.",
+    "emptyItems": "No hay elementos en este género.",
+    "deleteConfirm": "¿Eliminar el género \"{name}\" y quitarlo de todos los elementos?",
+    "deleteSuccess": "Género eliminado.",
+    "deleteError": "No se pudo eliminar el género: {message}",
+    "saveError": "No se pudieron guardar los géneros: {message}"
+  },
+  "feeds": {
+    "subscribe": "Fuente",
+    "rss": "Fuente RSS",
+    "atom": "Fuente Atom"
+  },
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "confirm": "Confirmar",
+    "close": "Cerrar",
+    "openMenu": "Abrir menú",
+    "closeMenu": "Cerrar menú",
+    "clear": "Borrar",
+    "loading": "Cargando",
+    "error": "Error",
+    "retry": "Reintentar",
+    "search": "Buscar",
+    "copy": "Copiar",
+    "loadMore": "Cargar más",
+    "asc": "Ascendente",
+    "desc": "Descendente",
+    "notFound": "No encontrado",
+    "forbidden": "Acceso denegado",
+    "edit": "Editar",
+    "remove": "Quitar",
+    "play": "Reproducir",
+    "pause": "Pausar",
+    "favorite": "Favorito",
+    "unfavorite": "Quitar de favoritos",
+    "favoriteAdded": "Añadido a favoritos.",
+    "favoriteRemoved": "Quitado de favoritos.",
+    "favoriteAddError": "No se pudo añadir a favoritos: {message}",
+    "favoriteRemoveError": "No se pudo quitar de favoritos: {message}",
+    "share": "Compartir",
+    "download": "Descargar",
+    "downloadM3u": "Descargar M3U",
+    "yes": "Sí",
+    "no": "No",
+    "all": "Todo",
+    "required": "Obligatorio",
+    "playAll": "Reproducir todo"
+  },
+  "sort": {
+    "label": "Ordenar por",
+    "ascending": "Ascendente",
+    "descending": "Descendente",
+    "fields": {
+      "name": "Nombre",
+      "title": "Título",
+      "username": "Nombre de usuario",
+      "artist_name": "Artista",
+      "album_title": "Álbum",
+      "created_at": "Fecha de alta",
+      "updated_at": "Fecha de actualización",
+      "release_year": "Año de lanzamiento",
+      "position": "Orden de la lista",
+      "item_count": "Número de elementos",
+      "first_used": "Primer uso",
+      "last_used": "Último uso",
+      "type": "Tipo"
+    }
+  },
+  "search": {
+    "title": "Buscar",
+    "placeholder": "Busca pistas, álbumes, artistas, listas de reproducción, bibliotecas, usuarios, etiquetas y géneros",
+    "start": "Introduce un término de búsqueda arriba para encontrar contenido en Songhive.",
+    "filters": "Buscar en",
+    "loading": "Cargando sugerencias",
+    "error": "No se pudieron cargar las sugerencias.",
+    "noResults": "No se encontraron resultados.",
+    "entities": {
+      "tracks": "Pistas",
+      "albums": "Álbumes",
+      "artists": "Artistas",
+      "playlists": "Listas de reproducción",
+      "libraries": "Bibliotecas",
+      "users": "Usuarios",
+      "tags": "Etiquetas",
+      "genres": "Géneros",
+      "remote": "Remoto"
+    },
+    "providerResults": "Servicios conectados",
+    "providerGroup": "{provider} — {name}",
+    "providerAdd": "Añadir a la biblioteca",
+    "providerAdded": "Añadido",
+    "providerAddFailed": "No se pudo añadir a la biblioteca."
+  },
+  "statusComposer": {
+    "title": "Nueva publicación",
+    "placeholder": "¿En qué estás pensando?",
+    "publish": "Publicar",
+    "published": "Publicación publicada.",
+    "contentType": "Formato",
+    "contentTypes": {
+      "text/markdown": "Markdown",
+      "text/plain": "Texto sin formato"
+    },
+    "visibility": "Visibilidad",
+    "language": "Idioma",
+    "attachFile": "Adjuntar un archivo",
+    "attachTrack": "Adjuntar una pista",
+    "trackSearchPlaceholder": "Busca pistas para adjuntar…",
+    "uploadError": "No se pudo subir el adjunto: {message}",
+    "audioImport": {
+      "uploadToLibrary": "Añadir también los archivos de audio adjuntos a tu biblioteca",
+      "fetchMetadata": "Obtener metadatos de la pista (MusicBrainz)",
+      "fetchMetadataHint": "Busca artista, álbum y título en línea después de la importación.",
+      "targetLibrary": "Biblioteca",
+      "defaultLibrary": "Subidas (predeterminada)"
+    }
+  },
+  "theme": {
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema",
+    "accent": "Color de acento",
+    "accents": {
+      "yellow": "Amarillo",
+      "orange": "Naranja",
+      "red": "Rojo",
+      "green": "Verde",
+      "blue": "Azul",
+      "cyan": "Cian",
+      "purple": "Morado",
+      "gray": "Gris",
+      "olive": "Oliva",
+      "turquoise": "Turquesa"
+    }
+  },
+  "auth": {
+    "login": "Iniciar sesión",
+    "logout": "Cerrar sesión",
+    "register": "Registrarse",
+    "email": "Correo electrónico",
+    "password": "Contraseña",
+    "username": "Nombre de usuario",
+    "loginPage": {
+      "title": "Iniciar sesión",
+      "usernameOrEmail": "Nombre de usuario o correo electrónico",
+      "password": "Contraseña",
+      "submit": "Iniciar sesión",
+      "failed": "Nombre de usuario o contraseña incorrectos.",
+      "emailNotVerified": "Tu dirección de correo electrónico no ha sido verificada.",
+      "forgotPassword": "¿Olvidaste tu contraseña?",
+      "noAccount": "¿No tienes cuenta? Regístrate",
+      "mfa": {
+        "title": "Autenticación en dos pasos",
+        "hint": "Introduce el código de tu aplicación de autenticación o uno de tus códigos de recuperación.",
+        "code": "Código de autenticación o de recuperación",
+        "submit": "Verificar",
+        "useSecurityKey": "Usar una llave de seguridad",
+        "back": "Volver al inicio de sesión",
+        "failed": "La verificación falló. Inicia sesión de nuevo."
+      }
+    },
+    "registerPage": {
+      "title": "Registrarse",
+      "username": "Nombre de usuario",
+      "email": "Correo electrónico",
+      "password": "Contraseña",
+      "confirmPassword": "Confirmar contraseña",
+      "displayName": "Nombre visible",
+      "displayNameHint": "Nombre opcional que se muestra en tu perfil público",
+      "inviteCode": "Código de invitación",
+      "inviteCodeHint": "Obligatorio si esta instancia requiere invitaciones",
+      "submit": "Registrarse",
+      "success": "Registro completado. Inicia sesión.",
+      "emailVerificationNotice": "Revisa tu bandeja de entrada para verificar tu dirección de correo electrónico.",
+      "passwordMismatch": "Las contraseñas no coinciden.",
+      "haveAccount": "¿Ya tienes cuenta? Inicia sesión"
+    },
+    "passwordReset": {
+      "requestTitle": "Restablecer contraseña",
+      "requestHint": "Introduce tu nombre de usuario o correo electrónico y te enviaremos un enlace de restablecimiento si existe una cuenta.",
+      "usernameOrEmail": "Nombre de usuario o correo electrónico",
+      "requestSubmit": "Enviar enlace de restablecimiento",
+      "requestSuccess": "Si existe una cuenta, se ha enviado un enlace de restablecimiento a su dirección de correo electrónico.",
+      "backToLogin": "Volver a iniciar sesión",
+      "confirmTitle": "Establecer nueva contraseña",
+      "newPassword": "Nueva contraseña",
+      "confirmPassword": "Confirmar nueva contraseña",
+      "confirmSubmit": "Restablecer contraseña",
+      "confirmSuccess": "Tu contraseña se ha actualizado. Inicia sesión.",
+      "invalidToken": "Este enlace de restablecimiento no es válido o ha caducado.",
+      "passwordMismatch": "Las contraseñas no coinciden."
+    },
+    "verifyEmail": {
+      "title": "Verificar correo electrónico",
+      "verifying": "Verificando tu dirección de correo electrónico…",
+      "success": "Tu dirección de correo electrónico ha sido verificada. Ya puedes iniciar sesión.",
+      "invalidToken": "Este enlace de verificación no es válido o ha caducado.",
+      "backToLogin": "Volver a iniciar sesión"
+    }
+  },
+  "nav": {
+    "home": "Inicio",
+    "library": "Biblioteca",
+    "libraries": "Bibliotecas",
+    "playlists": "Listas de reproducción",
+    "artists": "Artistas",
+    "albums": "Álbumes",
+    "tracks": "Pistas",
+    "history": "Historial",
+    "stats": "Estadísticas",
+    "favorites": "Favoritos",
+    "files": "Archivos",
+    "shares": "Compartidos",
+    "tags": "Etiquetas",
+    "genres": "Géneros",
+    "radio": "Radio",
+    "about": "Acerca de",
+    "api": "API",
+    "admin": "Administración",
+    "profile": "Perfil",
+    "settings": "Configuración",
+    "users": "Usuarios",
+    "search": "Buscar",
+    "externalLibraries": "Bibliotecas externas",
+    "login": "Iniciar sesión",
+    "notifications": "Notificaciones",
+    "mentions": "Menciones",
+    "unreadNotifications": "{count} notificaciones sin leer",
+    "podcasts": "Podcasts",
+    "downloads": "Descargas"
+  },
+  "errors": {
+    "unknown": "Algo salió mal. Inténtalo de nuevo.",
+    "uploadFailed": "La subida falló. Inténtalo de nuevo.",
+    "uploadAborted": "La subida fue cancelada."
+  },
+  "pages": {
+    "notFound": "Página no encontrada.",
+    "forbidden": "No tienes permiso para ver esta página.",
+    "placeholder": "Página {name} — disponible en la fase {phase}",
+    "goHome": "Ir al inicio",
+    "goLogin": "Iniciar sesión",
+    "home": {
+      "seeAll": "Ver todo",
+      "playError": "No se pudo reproducir esta pista: {message}",
+      "greeting": {
+        "morning": "Buenos días, {name}",
+        "afternoon": "Buenas tardes, {name}",
+        "evening": "Buenas noches, {name}",
+        "fallback": "Hola de nuevo, {name}",
+        "cta": "Publica algo"
+      },
+      "hero": {
+        "defaultTagline": "Un servicio federado para compartir música",
+        "stats": {
+          "tracks": "{count} pistas",
+          "albums": "{count} álbumes",
+          "artists": "{count} artistas",
+          "libraries": "{count} bibliotecas",
+          "users": "{count} personas"
+        }
+      },
+      "tabs": {
+        "music": "Música",
+        "activity": "Actividad"
+      },
+      "shelves": {
+        "jumpBackIn": "Continúa donde lo dejaste",
+        "favorites": "Tus favoritos",
+        "uploads": "Tus subidas",
+        "newOnInstance": "Novedades en esta instancia",
+        "recentAlbums": "Álbumes añadidos recientemente",
+        "recentTracks": "Pistas añadidas recientemente",
+        "publicLibraries": "Bibliotecas públicas",
+        "people": "Personas",
+        "exploreGenres": "Explorar géneros"
+      },
+      "feed": {
+        "title": "Última actividad",
+        "latestOnInstance": "Lo último en esta instancia",
+        "scopes": {
+          "mine": "Mía",
+          "instance": "Esta instancia",
+          "federated": "Federada"
+        },
+        "modes": {
+          "posts": "Publicaciones",
+          "all": "Toda la actividad"
+        },
+        "empty": "Aún no hay actividad.",
+        "signInCta": "Inicia sesión para ver tu propia actividad"
+      }
+    },
+    "history": {
+      "title": "Historial",
+      "searchPlaceholder": "Buscar en el historial…",
+      "playedAt": "Reproducido el",
+      "playAgain": "Reproducir de nuevo",
+      "empty": "Aún no hay historial de escuchas.",
+      "emptySearch": "No hay entradas del historial que coincidan.",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "untitled": "Pista sin título",
+      "playError": "No se pudo reproducir esta pista: {message}",
+      "playAllPartial": "Solo se pudieron reproducir {count} de {total} pistas."
+    },
+    "stats": {
+      "title": "Estadísticas de escucha",
+      "from": "Desde",
+      "to": "Hasta",
+      "name": "Nombre",
+      "playsCount": "Reproducciones",
+      "topArtists": "Artistas más escuchados",
+      "topAlbums": "Álbumes más escuchados",
+      "topTracks": "Pistas más escuchadas",
+      "topGenres": "Géneros más escuchados",
+      "plays": "Reproducciones a lo largo del tiempo",
+      "genresTimeline": "Evolución de géneros",
+      "releases": "Años de lanzamiento",
+      "clock": "Reloj de escuchas",
+      "empty": "No hay escuchas registradas en este periodo.",
+      "emptySection": "No hay datos para este periodo",
+      "groupBy": {
+        "day": "Día",
+        "week": "Semana",
+        "month": "Mes",
+        "year": "Año",
+        "decade": "Década"
+      }
+    },
+    "favorites": {
+      "title": "Favoritos",
+      "tracks": "Pistas",
+      "albums": "Álbumes",
+      "artists": "Artistas",
+      "playlists": "Listas de reproducción",
+      "entityTypesGated": "Marcar álbumes, artistas y listas de reproducción como favoritos aún no está disponible.",
+      "empty": "Aún no tienes pistas favoritas.",
+      "emptyWithFavorites": "No se pudieron cargar tus pistas favoritas."
+    },
+    "shares": {
+      "title": "Compartidos",
+      "empty": "Aún no has compartido nada.",
+      "includeRevoked": "Incluir revocados",
+      "unknownItem": "Elemento sin título",
+      "anyoneWithLink": "Cualquiera con el enlace",
+      "expiresAt": "Caduca el {date}",
+      "columns": {
+        "type": "Tipo",
+        "resource": "Recurso",
+        "sharedWith": "Compartido con",
+        "status": "Estado"
+      },
+      "types": {
+        "grant": "Compartido con usuario",
+        "url": "Enlace público"
+      },
+      "status": {
+        "active": "Activo",
+        "expired": "Caducado",
+        "revoked": "Revocado"
+      }
+    },
+    "files": {
+      "title": "Archivos",
+      "uploadTitle": "Subir un archivo",
+      "visibility": "Visibilidad",
+      "library": "Biblioteca",
+      "defaultLibrary": "Biblioteca predeterminada (Subidas)",
+      "selectFile": "Elige un archivo",
+      "selectedFiles": "{count} archivos seleccionados",
+      "upload": "Subir",
+      "uploading": "Subiendo…",
+      "uploadingFile": "Subiendo archivo {current} de {total}: {name} ({percent}%)",
+      "uploadProgress": "{percent}% subido",
+      "uploadSuccess": "Archivo subido.",
+      "uploadSuccessPlural": "{count} archivos subidos.",
+      "uploadPartial": "Se subieron {success} de {total} archivos.",
+      "uploadAllFailed": "No se pudo subir ningún archivo.",
+      "uploadCancelled": "Subida cancelada.",
+      "publishFediverse": "Publicar en el Fediverso",
+      "publishFediverseHint": "Comparte la pista con tus seguidores del Fediverso como una publicación de audio federada.",
+      "uploadError": "No se pudo subir el archivo: {message}",
+      "fileUploadError": "No se pudo subir \"{name}\": {message}",
+      "detailTitle": "Detalles del archivo",
+      "originalFilename": "Nombre de archivo original",
+      "contentType": "Tipo de contenido",
+      "size": "Tamaño",
+      "sha256": "SHA-256",
+      "owner": "Propietario",
+      "download": "Descargar",
+      "untitledFile": "Archivo sin título",
+      "copySha256": "Copiar SHA-256",
+      "sha256Copied": "SHA-256 copiado al portapapeles.",
+      "copyFailed": "No se pudo copiar el SHA-256.",
+      "empty": "Archivo no encontrado.",
+      "associatedTracks": "Pistas asociadas",
+      "preview": "Vista previa"
+    },
+    "radio": {
+      "title": "Radio",
+      "createTitle": "Crear una emisora",
+      "name": "Nombre",
+      "description": "Descripción",
+      "config": "Configuración",
+      "configHint": "Configuración de radio en bruto, opcional, para usuarios avanzados.",
+      "visibility": "Visibilidad",
+      "create": "Crear emisora",
+      "createSuccess": "Emisora de radio creada.",
+      "createError": "No se pudo crear la emisora: {message}",
+      "playError": "No se pudo iniciar la emisora: {message}",
+      "loadError": "No se pudieron cargar las emisoras: {message}",
+      "emptyTracks": "No se generaron pistas para esta emisora.",
+      "empty": "Aún no hay emisoras de radio.",
+      "loginHint": "Inicia sesión para crear tu propia emisora."
+    },
+    "podcasts": {
+      "title": "Podcasts",
+      "feedUrl": "URL de la fuente RSS",
+      "feedUrlPlaceholder": "https://example.com/feed.xml",
+      "follow": "Seguir podcast",
+      "followSuccess": "Ahora sigues {title}.",
+      "followError": "No se pudo seguir el podcast: {message}",
+      "importOpml": "Importar OPML",
+      "exportOpml": "Exportar OPML",
+      "importResult": "Importación finalizada: {subscribed} seguidos, {skipped} ya seguidos, {failed} fallidos.",
+      "importError": "No se pudo importar el OPML: {message}",
+      "loadError": "No se pudieron cargar los podcasts: {message}",
+      "episodeCount": "{count} episodio | {count} episodios",
+      "feedError": "La actualización de la fuente falló",
+      "empty": "Aún no hay podcasts. Sigue uno con la URL de su fuente RSS arriba, o importa un archivo OPML.",
+      "searchPlaceholder": "Buscar podcasts",
+      "noResults": "Ningún podcast coincide con \"{query}\".",
+      "unplayedCount": "{count} episodio sin escuchar | {count} episodios sin escuchar",
+      "latestEpisodeAt": "Último episodio: {date}",
+      "sort": {
+        "latest": "Último episodio",
+        "unplayed": "Sin escuchar",
+        "episodes": "Episodios"
+      },
+      "sync": {
+        "title": "Sincronización GPodder",
+        "hint": "Sincroniza tus suscripciones a podcasts con un servidor compatible con GPodder (gpodder.net, opodsync, Nextcloud…).",
+        "serverType": "Tipo de servidor",
+        "serverTypeGpodder": "Compatible con gpodder.net",
+        "serverTypeNextcloud": "Nextcloud (aplicación gpoddersync)",
+        "serverUrl": "URL del servidor",
+        "serverUrlHint": "URL base del servidor de sincronización, p. ej. https://gpodder.net",
+        "serverUrlHintNextcloud": "Tu URL de Nextcloud, p. ej. https://cloud.example.com — la aplicación gpoddersync debe estar instalada.",
+        "username": "Nombre de usuario",
+        "password": "Contraseña",
+        "passwordHint": "Tu contraseña del servidor de sincronización, almacenada en esta instancia.",
+        "passwordHintNextcloud": "Una contraseña de aplicación de Nextcloud (Configuración → Seguridad → Dispositivos y sesiones), almacenada en esta instancia.",
+        "passwordKeepHint": "Déjalo vacío para conservar la contraseña almacenada.",
+        "deviceId": "ID de dispositivo",
+        "deviceIdHint": "El nombre de dispositivo con el que esta instancia se sincroniza.",
+        "mode": "Modo de sincronización",
+        "modeHint": "Solo recibir aplica los cambios recibidos del servidor; bidireccional también sube los cambios locales (en caso de conflicto gana el cambio más reciente).",
+        "modePull": "Solo recibir",
+        "modeBidirectional": "Bidireccional",
+        "enabled": "Sincronización activada",
+        "enabledHint": "Si está desactivada, no se ejecutan sincronizaciones automáticas para esta cuenta.",
+        "syncNow": "Sincronizar ahora",
+        "delete": "Quitar sincronización",
+        "saved": "Configuración de sincronización guardada.",
+        "saveError": "No se pudo guardar la configuración de sincronización: {message}",
+        "deleted": "Configuración de sincronización eliminada.",
+        "deleteError": "No se pudo eliminar la configuración de sincronización: {message}",
+        "loadError": "No se pudo cargar la configuración de sincronización: {message}",
+        "syncError": "La sincronización falló: {message}",
+        "lastSynced": "Última sincronización: {date}",
+        "neverSynced": "nunca",
+        "lastError": "Último error de sincronización: {message}",
+        "syncResult": "Sincronización finalizada: {subscribed} suscripciones, {unsubscribed} canceladas, {pushed} subidas, {errors} errores."
+      }
+    },
+    "podcast": {
+      "loadError": "No se pudo cargar el podcast: {message}",
+      "episodesError": "No se pudieron cargar los episodios: {message}",
+      "episodes": "Episodios",
+      "emptyEpisodes": "Aún no hay episodios.",
+      "refresh": "Actualizar fuente",
+      "refreshSuccess": "Fuente actualizada.",
+      "refreshError": "No se pudo actualizar la fuente: {message}",
+      "unfollow": "Dejar de seguir",
+      "unfollowSuccess": "Podcast dejado de seguir.",
+      "unfollowError": "No se pudo dejar de seguir el podcast: {message}",
+      "explicit": "Explícito",
+      "season": "T{n}",
+      "trailer": "Tráiler",
+      "feedErrorDetail": "La última actualización de la fuente falló: {message}",
+      "copyFeedUrl": "Copiar URL de la fuente",
+      "feedUrlCopied": "URL de la fuente copiada al portapapeles.",
+      "feedUrlCopyFailed": "No se pudo copiar la URL de la fuente.",
+      "markPlayed": "Marcar como escuchado",
+      "markUnplayed": "Marcar como no escuchado",
+      "playedError": "No se pudo actualizar el estado de escucha: {message}",
+      "addToPlaylist": "Añadir a la lista"
+    },
+    "about": {
+      "title": "Acerca de",
+      "instanceName": "Nombre de la instancia",
+      "version": "Versión",
+      "description": "Descripción",
+      "documentation": "Documentación",
+      "support": "Soporte",
+      "defaultName": "Songhive",
+      "defaultDescription": "Un servicio federado para compartir música.",
+      "projectUrl": "URL del proyecto",
+      "githubUrl": "Espejo en GitHub",
+      "issueTracker": "Gestor de incidencias",
+      "administrators": "Administradores",
+      "contact": "Contacto",
+      "contactPerson": "Persona de contacto",
+      "contactName": "Nombre",
+      "contactEmail": "Correo electrónico",
+      "contactUrl": "Sitio web",
+      "revealEmail": "Haz clic para revelar la dirección de correo electrónico"
+    },
+    "admin": {
+      "dashboard": {
+        "title": "Panel",
+        "storage": "Almacenamiento",
+        "users": "Usuarios",
+        "content": "Contenido",
+        "federation": "Federación",
+        "totalUsers": "Usuarios totales",
+        "activeUsers": "Usuarios activos",
+        "recentRegistrations": "Registros recientes",
+        "libraries": "Bibliotecas",
+        "federationEnabled": "Activada",
+        "federationDisabled": "Desactivada",
+        "instanceDomain": "Dominio de la instancia",
+        "instanceName": "Nombre de la instancia",
+        "totalFiles": "Archivos totales",
+        "totalSize": "Tamaño total",
+        "refresh": "Actualizar",
+        "loadError": "No se pudieron cargar las estadísticas del panel: {message}"
+      },
+      "users": {
+        "title": "Usuarios",
+        "searchPlaceholder": "Buscar usuarios…",
+        "username": "Nombre de usuario",
+        "email": "Correo electrónico",
+        "role": "Rol",
+        "status": "Estado",
+        "actions": "Acciones",
+        "active": "Activo",
+        "inactive": "Inactivo",
+        "promote": "Promover",
+        "demote": "Degradar",
+        "activate": "Activar",
+        "deactivate": "Desactivar",
+        "approve": "Aprobar",
+        "delete": "Eliminar",
+        "deleteConfirm": "¿Eliminar el usuario \"{username}\"?",
+        "selected": "{count} seleccionados",
+        "bulkDeactivate": "Desactivar seleccionados",
+        "bulkActivate": "Activar seleccionados",
+        "bulkDelete": "Eliminar seleccionados",
+        "bulkActionConfirm": "¿Seguro que quieres {action} a los {count} usuarios seleccionados?",
+        "bulkDeleteConfirm": "¿Eliminar los {count} usuarios seleccionados?",
+        "loadMore": "Cargar más",
+        "empty": "No se encontraron usuarios.",
+        "emptySearch": "No hay usuarios que coincidan.",
+        "promoteSuccess": "Usuario promovido.",
+        "demoteSuccess": "Usuario degradado.",
+        "activateSuccess": "Usuario activado.",
+        "deactivateSuccess": "Usuario desactivado.",
+        "deleteSuccess": "Usuario eliminado.",
+        "bulkSuccess": "{action} a {count} usuarios.",
+        "actionError": "No se pudo actualizar el usuario: {message}"
+      },
+      "settings": {
+        "title": "Configuración",
+        "save": "Guardar",
+        "saved": "Configuración guardada.",
+        "saveError": "No se pudo guardar la configuración: {message}",
+        "instanceName": "Nombre de la instancia",
+        "instanceDescription": "Descripción de la instancia",
+        "instanceContactName": "Nombre de contacto",
+        "instanceContactEmail": "Correo de contacto",
+        "instanceContactUrl": "URL de contacto",
+        "registrationMode": "Modo de registro",
+        "federationEnabled": "Federación activada",
+        "remoteSearchAccess": "Acceso a búsqueda remota",
+        "fetchTimeoutSeconds": "Tiempo de espera de búsqueda remota (segundos)",
+        "remoteSearchAccessHint": "Quién puede consultar actores, actividades y recursos remotos: \"Desactivado\" desactiva la búsqueda remota, \"Autenticado\" la restringe a usuarios con sesión iniciada, \"Público\" también permite consultas anónimas.",
+        "previewCardsEnabled": "Tarjetas de vista previa activadas",
+        "typeString": "Texto",
+        "typeBoolean": "Sí/No",
+        "typeNumber": "Número",
+        "typeJson": "JSON",
+        "registrationOptions": {
+          "open": "Abierto",
+          "invite-only": "Solo con invitación",
+          "approval-required": "Aprobación requerida",
+          "closed": "Cerrado"
+        },
+        "remoteSearchOptions": {
+          "disabled": "Desactivado",
+          "authenticated": "Usuarios autenticados",
+          "public": "Público"
+        },
+        "singleUserUsername": "Activar el modo de usuario único para esta instancia: mostrar la cronología de este usuario por defecto en la página de inicio",
+        "publicStatsEnabled": "Activar estadísticas públicas para esta instancia"
+      },
+      "reports": {
+        "title": "Informes",
+        "targetType": "Tipo de objetivo",
+        "targetId": "ID del objetivo",
+        "reason": "Motivo",
+        "status": "Estado",
+        "reporter": "Informante",
+        "actorUrl": "URL del actor",
+        "forwarded": "Reenviado a la instancia remota",
+        "forwardedYes": "Sí",
+        "createdAt": "Creado",
+        "filterStatus": "Filtrar por estado",
+        "statuses": {
+          "pending": "Pendiente",
+          "reviewed": "Revisado",
+          "resolved": "Resuelto",
+          "dismissed": "Descartado"
+        },
+        "allStatuses": "Todos los estados",
+        "resolutionNotes": "Notas de resolución",
+        "resolve": "Resolver",
+        "dismiss": "Descartar",
+        "details": "Detalles",
+        "loadMore": "Cargar más",
+        "empty": "No se encontraron informes.",
+        "resolveSuccess": "Informe resuelto.",
+        "dismissSuccess": "Informe descartado.",
+        "actionError": "No se pudo actualizar el informe: {message}"
+      },
+      "invites": {
+        "title": "Invitaciones",
+        "url": "Enlace de invitación",
+        "token": "Token",
+        "detailsTitle": "Detalles de la invitación",
+        "code": "Código",
+        "maxUses": "Usos máximos",
+        "uses": "Usos",
+        "expiresAt": "Caduca el",
+        "createdAt": "Creado",
+        "create": "Crear invitación",
+        "createTitle": "Crear código de invitación",
+        "revoke": "Revocar",
+        "revokeConfirm": "¿Revocar la invitación \"{code}\"?",
+        "unlimited": "Ilimitado",
+        "loadMore": "Cargar más",
+        "empty": "No se encontraron códigos de invitación.",
+        "createSuccess": "Invitación creada.",
+        "revokeSuccess": "Invitación revocada.",
+        "actionError": "No se pudo actualizar la invitación: {message}",
+        "maxUsesHint": "Déjalo vacío para usos ilimitados.",
+        "expiresAtHint": "Déjalo vacío para un código que nunca caduca.",
+        "urlCopied": "Enlace de invitación copiado al portapapeles.",
+        "tokenCopied": "Token copiado al portapapeles.",
+        "copyFailed": "No se pudo copiar el enlace de invitación."
+      },
+      "audit": {
+        "title": "Registro de auditoría",
+        "timestamp": "Marca de tiempo",
+        "actor": "Actor",
+        "action": "Acción",
+        "targetType": "Tipo de objetivo",
+        "target": "Objetivo",
+        "targetId": "ID del objetivo",
+        "details": "Detalles",
+        "filterAction": "Filtrar por acción",
+        "filterTargetType": "Filtrar por tipo de objetivo",
+        "loadMore": "Cargar más",
+        "empty": "No hay entradas en el registro de auditoría.",
+        "targetTypes": {
+          "user": "Usuario",
+          "track": "Pista",
+          "playlist": "Lista de reproducción",
+          "album": "Álbum",
+          "artist": "Artista",
+          "library": "Biblioteca",
+          "tag": "Etiqueta",
+          "file": "Archivo",
+          "report": "Informe",
+          "invite": "Invitación",
+          "oauth_client": "Cliente OAuth",
+          "activity": "Actividad",
+          "actor": "Actor",
+          "api_token": "Token de API",
+          "celery": "Tarea de Celery",
+          "external_library": "Biblioteca externa",
+          "external_track": "Pista externa",
+          "federation": "Federación",
+          "genre": "Género",
+          "images": "Imágenes",
+          "instance": "Instancia",
+          "setting": "Configuración",
+          "storage": "Almacenamiento",
+          "user_session": "Sesión de usuario"
+        },
+        "allTargetTypes": "Todos los tipos de objetivo",
+        "targetTypesLoadError": "No se pudieron cargar los tipos de objetivo: {message}"
+      },
+      "tasks": {
+        "title": "Tareas",
+        "storageCleanup": {
+          "title": "Limpieza de almacenamiento",
+          "description": "Ejecuta una tarea de limpieza de archivos huérfanos. Puede tardar un rato y no se puede deshacer.",
+          "trigger": "Ejecutar limpieza",
+          "triggered": "Limpieza de almacenamiento iniciada.",
+          "triggerError": "No se pudo iniciar la limpieza de almacenamiento: {message}"
+        },
+        "syncTags": {
+          "title": "Sincronizar etiquetas",
+          "description": "Reescribe las etiquetas incrustadas de una o más pistas para que coincidan con los metadatos de la base de datos.",
+          "allWarning": "Esto encolará la reescritura de etiquetas de todas las pistas y puede tardar un rato.",
+          "scopeLabel": "Alcance",
+          "scopeAll": "Todas las pistas",
+          "scopeTrack": "Pista",
+          "scopeAlbum": "Álbum",
+          "scopeArtist": "Artista",
+          "scopeLibrary": "Biblioteca",
+          "targetIdLabel": "ID del objetivo",
+          "targetIdHint": "Obligatorio cuando se selecciona una sola pista, álbum, artista o biblioteca.",
+          "targetIdRequired": "Se requiere un ID de objetivo para el alcance seleccionado.",
+          "dryRun": "Simulación",
+          "trigger": "Sincronizar etiquetas",
+          "triggered": "Sincronización de etiquetas encolada para {count} pista(s).",
+          "dryRunTriggered": "Simulación completada: se encolarían {count} pista(s).",
+          "triggerError": "No se pudo iniciar la sincronización de etiquetas: {message}"
+        },
+        "rehashAudio": {
+          "title": "Recalcular hashes de audio",
+          "description": "Migra los archivos de audio a hashes SHA-256 solo de audio. Es una tarea de larga duración.",
+          "dryRun": "Simulación",
+          "trigger": "Recalcular hashes",
+          "triggered": "Tarea de recalculado de audio encolada.",
+          "triggerError": "No se pudo iniciar el recalculado de audio: {message}"
+        },
+        "provisionFederationKeys": {
+          "title": "Aprovisionar claves de federación",
+          "description": "Genera URLs de actor ActivityPub y pares de claves para los usuarios que no los tengan.",
+          "dryRun": "Simulación",
+          "trigger": "Aprovisionar claves",
+          "triggered": "Tarea de aprovisionamiento de claves de federación encolada.",
+          "triggerError": "No se pudo iniciar el aprovisionamiento de claves de federación: {message}"
+        },
+        "enrichImages": {
+          "title": "Enriquecer imágenes",
+          "description": "Obtiene imágenes de artistas y portadas de álbumes desde MusicBrainz para uno o más artistas o álbumes.",
+          "allWarning": "Esto encolará el enriquecimiento de imágenes de todos los artistas y álbumes sin enriquecer que tengan IDs de MusicBrainz y puede tardar un rato.",
+          "scopeLabel": "Alcance",
+          "scopeAll": "Todos los artistas y álbumes",
+          "scopeArtist": "Artista",
+          "scopeAlbum": "Álbum",
+          "targetIdLabel": "ID del objetivo",
+          "targetIdHint": "Obligatorio cuando se selecciona un solo artista o álbum.",
+          "targetIdRequired": "Se requiere un ID de objetivo para el alcance seleccionado.",
+          "force": "Forzar reenriquecimiento",
+          "dryRun": "Simulación",
+          "trigger": "Enriquecer imágenes",
+          "triggered": "Enriquecimiento de imágenes encolado para {artists} artista(s) y {albums} álbum(es).",
+          "dryRunTriggered": "Simulación completada: se enriquecerían {artists} artista(s) y {albums} álbum(es).",
+          "triggerError": "No se pudo iniciar el enriquecimiento de imágenes: {message}"
+        },
+        "notificationPurge": {
+          "title": "Purgar notificaciones",
+          "description": "Elimina las notificaciones vistas con más antigüedad que el periodo de retención configurado. No se puede deshacer.",
+          "trigger": "Purgar notificaciones",
+          "triggered": "{count} notificación(es) purgadas.",
+          "triggerError": "No se pudieron purgar las notificaciones: {message}"
+        },
+        "remoteActivityPurge": {
+          "title": "Podar actividades remotas",
+          "description": "Elimina las actividades y objetos remotos en caché con más antigüedad que el periodo de retención configurado y con los que ningún usuario local haya interactuado. Los objetos podados pueden recuperarse de nuevo mediante la búsqueda por URL remota.",
+          "daysLabel": "Más antiguas que (días)",
+          "daysHint": "Opcional. Déjalo vacío para usar el periodo de retención configurado.",
+          "dryRun": "Simulación",
+          "trigger": "Podar actividades remotas",
+          "triggered": "Poda de actividades remotas encolada.",
+          "dryRunTriggered": "Simulación de poda de actividades remotas encolada.",
+          "triggerError": "No se pudo encolar la poda de actividades remotas: {message}"
+        }
+      },
+      "celery": {
+        "title": "Workers de Celery",
+        "refresh": "Actualizar",
+        "taskId": "ID de tarea",
+        "task": "Tarea",
+        "worker": "Worker",
+        "runtime": "Duración",
+        "runtimeSeconds": "{runtime} s",
+        "details": "Detalles",
+        "args": "args",
+        "kwargs": "kwargs",
+        "actions": "Acciones",
+        "terminate": "Terminar",
+        "empty": "No hay tareas de Celery en ejecución.",
+        "selectAll": "Seleccionar todas las tareas",
+        "selectTask": "Seleccionar tarea {task_id}",
+        "terminateSelected": "Terminar seleccionadas ({count})",
+        "terminateConfirm": "¿Seguro que quieres terminar {count} tarea(s) en ejecución?",
+        "terminateTaskConfirm": "¿Seguro que quieres terminar la tarea {task_id}?",
+        "terminated": "{count} tarea(s) terminadas.",
+        "loadError": "No se pudieron cargar las tareas de Celery: {message}",
+        "terminateError": "No se pudieron terminar las tareas: {message}",
+        "queueStats": {
+          "title": "Resumen de colas",
+          "total": "Total",
+          "processing": "En proceso",
+          "queued": "En cola",
+          "failed": "Fallidas",
+          "completed": "Completadas"
+        },
+        "byTaskTitle": "Tareas por nombre",
+        "taskName": "Nombre de la tarea",
+        "count": "Cantidad",
+        "queueEmpty": "No hay tareas en cola ni en ejecución."
+      }
+    },
+    "externalLibraries": {
+      "title": "Bibliotecas externas",
+      "listTitle": "Bibliotecas externas",
+      "newTitle": "Nueva biblioteca externa",
+      "editTitle": "Editar biblioteca externa",
+      "adminTitle": "Bibliotecas externas",
+      "provider": "Proveedor",
+      "providerHint": "Selecciona un proveedor de almacenamiento externo.",
+      "name": "Nombre",
+      "providerConfig": "Configuración del proveedor",
+      "config": "Configuración (JSON)",
+      "configHint": "Ajustes específicos del proveedor como objeto JSON.",
+      "configError": "La configuración debe ser un JSON válido.",
+      "visibility": "Visibilidad",
+      "enabled": "Activada",
+      "syncEnabled": "Sincronización activada",
+      "syncInterval": "Intervalo de sincronización (segundos)",
+      "includeInLibraryIndex": "Incluir en el índice de la biblioteca",
+      "create": "Crear",
+      "save": "Guardar",
+      "sync": "Sincronizar ahora",
+      "syncing": "Sincronizando…",
+      "syncSuccess": "Sincronización completada.",
+      "syncPartial": "Sincronización completada con avisos.",
+      "syncFailed": "La sincronización falló.",
+      "syncTimeout": "No se pudo confirmar el estado de la sincronización.",
+      "syncError": "No se pudo iniciar la sincronización: {message}",
+      "oauthConnect": "Conectar cuenta de {provider}",
+      "oauthConnected": "Cuenta conectada. Revisa la configuración y guarda para terminar.",
+      "oauthFailed": "La conexión falló: {message}",
+      "tracks": "Pistas",
+      "syncRuns": "Ejecuciones de sincronización",
+      "syncRunStatus": "Estado",
+      "trackState": "Estado",
+      "trackProviderKey": "Clave del proveedor",
+      "trackDisplayPath": "Ruta",
+      "lastSeen": "Visto por última vez",
+      "lastSynced": "Última sincronización",
+      "restore": "Restaurar",
+      "deleteTrack": "Quitar pista",
+      "deleteTrackSource": "Eliminar también el archivo de origen",
+      "removeSonghiveTrack": "Quitar también la pista local",
+      "bulkDelete": "Eliminar seleccionados",
+      "selectAll": "Seleccionar todo",
+      "noProviders": "No hay proveedores externos disponibles.",
+      "noLibraries": "No hay bibliotecas externas configuradas.",
+      "createSuccess": "Biblioteca externa creada.",
+      "saveSuccess": "Biblioteca externa guardada.",
+      "deleteConfirm": "¿Eliminar la biblioteca externa \"{name}\"?",
+      "deleteSuccess": "Biblioteca externa eliminada.",
+      "deleteError": "No se pudo eliminar: {message}",
+      "saveError": "No se pudo guardar: {message}",
+      "loadError": "No se pudo cargar: {message}",
+      "duplicateModalTitle": "La subida coincide con una pista externa",
+      "duplicateModalMessage": "Un archivo que subiste coincide con una pista ya gestionada por una biblioteca externa ({provider}).",
+      "keepLocal": "Conservar pista local",
+      "discardUpload": "Descartar subida",
+      "resolveError": "No se pudo resolver el duplicado: {message}",
+      "external": "Externa",
+      "trackExternalBadge": "Externa: {provider}",
+      "trackExternalState": "{state}",
+      "deviceAuth": {
+        "connect": "Conectar {provider}",
+        "reconnect": "Volver a conectar {provider}",
+        "reconnectHint": "Las credenciales guardadas de {provider} faltan o no se pudieron renovar — vuelve a conectar la cuenta.",
+        "connected": "Conectado a {provider}.",
+        "failed": "No se pudo conectar: {message}",
+        "instructions": "Abre {verificationUrl} e introduce el código {userCode} para autorizar esta instancia de Songhive.",
+        "waiting": "Esperando autorización… ({seconds} s restantes)",
+        "slowDown": "Aún esperando — TIDAL nos pidió reducir la frecuencia de consulta. ({seconds} s restantes)",
+        "expired": "El código de autorización caducó. Inténtalo de nuevo.",
+        "denied": "La autorización fue denegada.",
+        "error": "La autorización falló.",
+        "pkceMode": {
+          "label": "Usar redirección del navegador (PKCE) en lugar de un código de dispositivo",
+          "hint": "Abre una página de inicio de sesión de TIDAL que redirige de vuelta con un código — útil en dispositivos donde introducir un código es incómodo."
+        },
+        "pkce": {
+          "instructions": "Abre {authorizeUrl}, inicia sesión en TIDAL y pega abajo la URL completa de la redirección.",
+          "redirectLabel": "URL de redirección",
+          "redirectHint": "Pega la URL completa a la que el navegador te redirigió tras autorizar.",
+          "complete": "Completar conexión"
+        }
+      },
+      "providers": {
+        "gdrive": {
+          "help": "Recomendado: conecta una cuenta de Google mediante OAuth. En la consola de Google Cloud en {appConsole}: elige o crea un proyecto, activa la API de Google Drive (APIs y servicios → Biblioteca), después crea un cliente OAuth de tipo \"Aplicación web\" (APIs y servicios → Credenciales → Crear credenciales → ID de cliente de OAuth) y añade este URI de redirección autorizado: {callbackUrl}\nEn APIs y servicios → Pantalla de consentimiento de OAuth → Acceso a datos, añade el ámbito {permissions} — o {writePermissions} si activas la reescritura, el renombrado o el borrado más abajo (el flujo de conexión solicita el ámbito adecuado automáticamente). Mientras la pantalla de consentimiento esté en modo de prueba, añade la cuenta de Google con la que te conectas como usuario de prueba.\nIntroduce el ID de cliente y el secreto abajo y usa el botón Conectar — los tokens de acceso y de actualización se rellenan automáticamente.\nAlternativa servidor a servidor: crea una cuenta de servicio en IAM y administración → Cuentas de servicio en {appConsole}, descarga una clave JSON desde su pestaña Claves (Añadir clave → Crear clave nueva → JSON) y pega el contenido del archivo en el campo de cuenta de servicio — después comparte la carpeta de Drive con el correo de la cuenta de servicio. Los campos de cliente OAuth no se usan con una cuenta de servicio, así que cualquier marcador (p. ej. \"-\") los satisface.",
+          "fields": {
+            "access_token": {
+              "label": "Token de acceso",
+              "description": "Se rellena automáticamente con el botón Conectar. Introdúcelo manualmente solo para una prueba rápida — los tokens de acceso de Google caducan al cabo de una hora y no se pueden renovar. Se almacena cifrado."
+            },
+            "refresh_token": {
+              "label": "Token de actualización",
+              "description": "Se rellena automáticamente con el botón Conectar. La credencial duradera — genera tokens de acceso de corta duración automáticamente. Requiere el ID de cliente OAuth y el secreto de abajo. Se almacena cifrado."
+            },
+            "client_id": {
+              "label": "ID de cliente OAuth",
+              "description": "ID de cliente OAuth 2.0 de tu aplicación web de Google Cloud (APIs y servicios → Credenciales → Crear credenciales → ID de cliente de OAuth). Necesario para el flujo de conexión — si usas una clave de cuenta de servicio, cualquier marcador (p. ej. \"-\") lo satisface."
+            },
+            "client_secret": {
+              "label": "Secreto de cliente OAuth",
+              "description": "Secreto de cliente OAuth 2.0 mostrado junto al ID de cliente en la consola de Google Cloud. Misma regla de marcador que el ID de cliente para configuraciones con cuenta de servicio. Se almacena cifrado."
+            },
+            "service_account_key": {
+              "label": "Clave de cuenta de servicio (JSON)",
+              "description": "Alternativa servidor a servidor a OAuth: crea una cuenta de servicio en IAM y administración → Cuentas de servicio en la consola de Google Cloud, descarga una clave JSON desde su pestaña Claves (Añadir clave → Crear clave nueva → JSON) y pega aquí el contenido completo del archivo. Comparte la carpeta de Drive con el correo de la cuenta de servicio. Tiene prioridad sobre los campos OAuth. Se almacena cifrada."
+            },
+            "root_folder_id": {
+              "label": "ID de carpeta raíz",
+              "description": "ID de la carpeta de Drive a indexar — el último segmento de la URL de la carpeta (drive.google.com/drive/folders/<id>). Déjalo vacío para la raíz de Mi unidad — o para la raíz de la unidad compartida cuando se indica un ID de unidad."
+            },
+            "drive_id": {
+              "label": "ID de unidad compartida",
+              "description": "ID opcional de unidad compartida (de equipo) — el último segmento de la URL de la unidad compartida al abrirla en Drive. Activa el soporte de unidades compartidas en los listados y restringe las búsquedas a esa unidad."
+            },
+            "token_uri": {
+              "label": "URL del endpoint de tokens",
+              "description": "Endpoint de tokens OAuth usado para intercambiar tokens de actualización y aserciones de cuenta de servicio. Por defecto es el endpoint de Google; cámbialo solo para pruebas o APIs compatibles."
+            },
+            "verify_ssl": {
+              "label": "Verificar certificado TLS",
+              "description": "Verifica el certificado TLS del servidor de la API. Desactívalo solo para pruebas o redes privadas de confianza — desactivarlo deja la conexión expuesta a suplantación MITM y robo de credenciales."
+            },
+            "ca_bundle": {
+              "label": "Ruta del paquete de CA",
+              "description": "Ruta opcional en el servidor de Songhive a un paquete de CA en formato PEM usado para verificar el certificado TLS del servidor de la API. Tiene prioridad sobre el interruptor de verificación cuando se indica."
+            },
+            "timeout": {
+              "label": "Tiempo de espera de petición (segundos)",
+              "description": "Cuánto esperar por cada petición HTTP a la API de Google Drive."
+            },
+            "extensions": {
+              "label": "Extensiones de archivo",
+              "description": "Lista separada por comas de extensiones de archivos de audio a indexar (p. ej. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Patrones de exclusión",
+              "description": "Patrones glob separados por comas para rutas remotas que se omitirán durante el escaneo."
+            },
+            "recursive": {
+              "label": "Escaneo recursivo",
+              "description": "Indexa archivos de audio en subcarpetas remotas de forma recursiva."
+            },
+            "allow_hashing": {
+              "label": "Permitir hash de audio",
+              "description": "Calcula un hash de audio estable para las pistas a fin de detectar duplicados y permitir la transcodificación. Requiere descargar los archivos nuevos o modificados una vez."
+            },
+            "fast_hash": {
+              "label": "Usar hash rápido en bruto",
+              "description": "Usa SHA-256 en bruto en lugar del hash solo de audio de ffmpeg. Más barato, pero cambia cuando cambian las etiquetas o la carátula."
+            },
+            "trash_on_delete": {
+              "label": "Papelera en lugar de borrado permanente",
+              "description": "Mueve los archivos eliminados a la papelera de Drive (recuperables) en lugar de borrarlos permanentemente."
+            },
+            "allow_write_tags": {
+              "label": "Permitir reescritura de metadatos",
+              "description": "Permite a Songhive reescribir las etiquetas incrustadas y volver a subir los archivos cuando se editan las pistas. Requiere el ámbito completo de Drive — en configuraciones OAuth, actívalo antes de pulsar Conectar para que el token concedido lo cubra."
+            },
+            "allow_rename_source": {
+              "label": "Permitir renombrado de origen",
+              "description": "Permite a Songhive renombrar archivos remotos mediante la edición de pistas. Requiere el ámbito completo de Drive — en configuraciones OAuth, actívalo antes de pulsar Conectar."
+            },
+            "allow_delete_source": {
+              "label": "Permitir borrado de origen",
+              "description": "Permite borrar archivos en Drive. Requiere el ámbito completo de Drive — en configuraciones OAuth, actívalo antes de pulsar Conectar."
+            }
+          }
+        },
+        "jellyfin": {
+          "help": "Conéctate a un servidor Jellyfin remoto para importar sus pistas, álbumes, artistas y listas de reproducción como elementos de biblioteca de primera clase. Los metadatos son de solo lectura y el audio se transmite desde el servidor — nada se copia al almacenamiento de Songhive.\nRecomendado: crea una clave de API en Jellyfin en Panel → Claves de API. Alternativamente, introduce un nombre de usuario y contraseña de Jellyfin; se intercambian por un token de sesión una vez y no se almacenan más allá de la configuración cifrada de la biblioteca.",
+          "fields": {
+            "server_url": {
+              "label": "URL del servidor",
+              "description": "URL base del servidor Jellyfin (p. ej. https://jellyfin.example.com). Las direcciones privadas o de bucle local se rechazan."
+            },
+            "api_key": {
+              "label": "Clave de API",
+              "description": "Clave de API de Jellyfin (Panel → Claves de API). Preferible a nombre de usuario/contraseña. Se almacena cifrada."
+            },
+            "username": {
+              "label": "Nombre de usuario",
+              "description": "Nombre de usuario de Jellyfin — se usa con la contraseña de abajo solo cuando no hay clave de API."
+            },
+            "password": {
+              "label": "Contraseña",
+              "description": "Contraseña de Jellyfin, intercambiada por un token de sesión cuando no hay clave de API. Se almacena cifrada."
+            },
+            "verify_ssl": {
+              "label": "Verificar certificado TLS",
+              "description": "Verifica el certificado TLS del servidor Jellyfin. Desactívalo solo para pruebas o redes privadas de confianza — desactivarlo deja la conexión expuesta a suplantación MITM y robo de credenciales."
+            },
+            "timeout": {
+              "label": "Tiempo de espera de petición (segundos)",
+              "description": "Cuánto esperar por cada petición HTTP al servidor Jellyfin."
+            },
+            "collections": {
+              "label": "Bibliotecas",
+              "description": "Lista separada por comas de nombres o IDs de bibliotecas de Jellyfin a importar. Déjalo vacío para importar todas las bibliotecas de música."
+            },
+            "include_tracks": {
+              "label": "Importar pistas",
+              "description": "Importa los elementos de audio de Jellyfin como pistas."
+            },
+            "include_artists": {
+              "label": "Importar artistas",
+              "description": "Importa los artistas de Jellyfin como artistas de primera clase."
+            },
+            "include_albums": {
+              "label": "Importar álbumes",
+              "description": "Importa los álbumes de Jellyfin como álbumes de primera clase."
+            },
+            "include_playlists": {
+              "label": "Importar listas de reproducción",
+              "description": "Importa las listas de reproducción de Jellyfin como listas gestionadas por el proveedor."
+            },
+            "sync_metadata": {
+              "label": "Enriquecer metadatos",
+              "description": "Ejecuta también el enriquecimiento de MusicBrainz de Songhive sobre las pistas importadas. Desactivado por defecto — los metadatos del proveedor son los autorizativos."
+            },
+            "sync_cover_art": {
+              "label": "Importar carátulas",
+              "description": "Importa las URLs de imágenes de Jellyfin como carátulas de pistas/álbumes/artistas (referenciadas, no descargadas)."
+            },
+            "dedup_musicbrainz": {
+              "label": "Desduplicar por ID de MusicBrainz",
+              "description": "Compara artistas/álbumes importados con filas existentes por ID de MusicBrainz antes de recurrir a la comparación por nombre. Desactivado por defecto — la comparación es solo por nombre y nunca llama a la API de MusicBrainz."
+            }
+          }
+        },
+        "tidal": {
+          "help": "Conecta una cuenta de TIDAL para importar tus pistas, álbumes, artistas y listas de reproducción guardados como elementos de biblioteca de primera clase. Usa el botón Conectar de abajo — Songhive usa la autorización de dispositivo de TIDAL, así que apruebas el acceso en la página de TIDAL y las credenciales se rellenan automáticamente.\nEl contenido de listas y álbumes se obtiene de forma diferida al abrirlos y se guarda en caché durante el TTL configurado — usa \"Sincronizar ahora\" en una lista o álbum para forzar una actualización. Los metadatos de las pistas se consideran inmutables una vez importados; solo las etiquetas y la visibilidad siguen siendo editables localmente.",
+          "fields": {
+            "quality": {
+              "label": "Calidad de streaming",
+              "description": "Calidad de streaming preferida de TIDAL. Hi-Res requiere un nivel de suscripción de TIDAL que lo incluya.",
+              "options": {
+                "low": "Baja (AAC 96 kbps)",
+                "high": "Alta (AAC 320 kbps)",
+                "lossless": "Sin pérdida (FLAC)",
+                "hi_res_lossless": "Hi-Res sin pérdida (FLAC)"
+              }
+            },
+            "include_tracks": {
+              "label": "Importar pistas guardadas",
+              "description": "Importa las pistas guardadas en tu colección de TIDAL como pistas de primera clase."
+            },
+            "include_artists": {
+              "label": "Importar artistas",
+              "description": "Importa los artistas guardados en tu colección de TIDAL como artistas de primera clase."
+            },
+            "include_albums": {
+              "label": "Importar álbumes",
+              "description": "Importa los álbumes guardados en tu colección de TIDAL como álbumes de primera clase. El contenido del álbum se obtiene de forma diferida al abrirlo."
+            },
+            "include_playlists": {
+              "label": "Importar listas de reproducción",
+              "description": "Importa las listas de reproducción que creaste en TIDAL. Su contenido se obtiene de forma diferida al abrir la lista."
+            },
+            "include_followed_playlists": {
+              "label": "Importar listas seguidas",
+              "description": "Importa también las listas de TIDAL que sigues pero no creaste."
+            },
+            "sync_metadata": {
+              "label": "Enriquecer metadatos",
+              "description": "Ejecuta también el enriquecimiento de MusicBrainz de Songhive sobre las pistas importadas. Desactivado por defecto — los metadatos del proveedor son los autorizativos."
+            },
+            "dedup_isrc": {
+              "label": "Desduplicar por ISRC",
+              "description": "Compara las pistas importadas con filas existentes por ISRC antes de crear nuevas. Las pistas coincidentes conservan sus metadatos locales."
+            },
+            "playlist_ttl_seconds": {
+              "label": "TTL de caché de listas/álbumes (segundos)",
+              "description": "Cuánto tiempo permanece fresco el contenido de listas y álbumes en caché antes de volverse a obtener de forma diferida. Mínimo 300."
+            },
+            "mpd_mode": {
+              "label": "Modo de entrega Hi-Res",
+              "description": "Cómo se sirven los streams MPEG-DASH (Hi-Res). \"remux\" necesita ffmpeg.",
+              "options": {
+                "segments": "Segmentos MPEG-DASH en bruto",
+                "remux": "Remultiplexado a FLAC con ffmpeg"
+              }
+            },
+            "redirect_streams": {
+              "label": "Redirigir streams",
+              "description": "Redirige a los clientes a las URLs del CDN de TIDAL en lugar de servir los bytes de audio a través de este servidor."
+            },
+            "download_format": {
+              "label": "Formato de descarga",
+              "description": "Contenedor para las pistas de TIDAL descargadas. Las descargas deben estar activadas en la configuración de la instancia.",
+              "options": {
+                "flac": "FLAC",
+                "aac": "AAC (M4A)"
+              }
+            }
+          }
+        },
+        "local": {
+          "fields": {
+            "root": {
+              "label": "Ruta raíz",
+              "description": "Ruta absoluta o relativa al directorio a indexar. Debe estar dentro de la lista blanca local_roots configurada."
+            },
+            "follow_symlinks": {
+              "label": "Seguir enlaces simbólicos",
+              "description": "Si se siguen los enlaces simbólicos al escanear la biblioteca."
+            },
+            "recursive": {
+              "label": "Escaneo recursivo",
+              "description": "Indexa archivos de audio en subdirectorios de forma recursiva."
+            },
+            "extensions": {
+              "label": "Extensiones de archivo",
+              "description": "Lista separada por comas de extensiones de archivos de audio a indexar (p. ej. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Patrones de exclusión",
+              "description": "Patrones glob separados por comas para rutas que se omitirán durante el escaneo."
+            },
+            "allow_write_tags": {
+              "label": "Permitir reescritura de metadatos",
+              "description": "Permite a Songhive escribir las etiquetas de metadatos de vuelta en los archivos de origen. Requiere permiso de escritura en el directorio raíz."
+            },
+            "allow_rename_source": {
+              "label": "Permitir renombrado de origen",
+              "description": "Permite a Songhive renombrar archivos de origen mediante la edición de pistas. Requiere permiso de escritura en el directorio raíz."
+            },
+            "allow_delete_source": {
+              "label": "Permitir borrado de origen",
+              "description": "Permite borrar archivos de origen del sistema de archivos. Requiere permiso de escritura en el directorio raíz."
+            },
+            "allow_hashing": {
+              "label": "Permitir hash de audio",
+              "description": "Calcula un hash de audio estable para las pistas a fin de detectar duplicados y permitir la transcodificación."
+            },
+            "fast_hash": {
+              "label": "Usar hash rápido en bruto",
+              "description": "Usa SHA-256 en bruto en lugar del hash solo de audio de ffmpeg. Más rápido, pero cambia cuando cambian las etiquetas o la carátula."
+            }
+          }
+        },
+        "s3": {
+          "fields": {
+            "bucket": {
+              "label": "Bucket",
+              "description": "Nombre del bucket S3 que contiene los archivos de audio."
+            },
+            "prefix": {
+              "label": "Prefijo de clave",
+              "description": "Indexa solo los objetos bajo este prefijo (p. ej. music/). Déjalo vacío para escanear todo el bucket."
+            },
+            "endpoint_url": {
+              "label": "URL del endpoint",
+              "description": "Endpoint personalizado para servicios compatibles con S3 (p. ej. MinIO). Déjalo vacío para AWS."
+            },
+            "region": {
+              "label": "Región",
+              "description": "Región de AWS del bucket. Opcional para la mayoría de servicios compatibles con S3."
+            },
+            "access_key": {
+              "label": "Clave de acceso",
+              "description": "ID de clave de acceso. Déjalo vacío para usar las credenciales del entorno del servidor."
+            },
+            "secret_key": {
+              "label": "Clave secreta",
+              "description": "Clave de acceso secreta asociada a la clave de acceso. Se almacena cifrada."
+            },
+            "path_style": {
+              "label": "Direccionamiento estilo ruta",
+              "description": "Usa URLs estilo ruta (bucket/key) en lugar del estilo de host virtual. Requerido por algunos servicios compatibles con S3 como MinIO."
+            },
+            "presigned_urls": {
+              "label": "Streaming mediante URLs prefirmadas",
+              "description": "Redirige a los clientes a URLs prefirmadas de corta duración para la reproducción en lugar de servir el audio a través de Songhive."
+            },
+            "presigned_expiry_seconds": {
+              "label": "Caducidad de las URLs prefirmadas (segundos)",
+              "description": "Cuánto tiempo permanecen válidas las URLs de streaming generadas (60–604800)."
+            },
+            "extensions": {
+              "label": "Extensiones de archivo",
+              "description": "Lista separada por comas de extensiones de archivos de audio a indexar (p. ej. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Patrones de exclusión",
+              "description": "Patrones glob separados por comas para claves de objetos que se omitirán durante el escaneo."
+            },
+            "recursive": {
+              "label": "Escaneo recursivo",
+              "description": "Indexa objetos en prefijos de clave anidados. Desactívalo para indexar solo las claves directamente bajo el prefijo."
+            },
+            "allow_hashing": {
+              "label": "Permitir hash de audio",
+              "description": "Calcula un hash de audio estable para las pistas a fin de detectar duplicados y permitir la transcodificación. Requiere descargar los objetos nuevos o modificados una vez."
+            },
+            "fast_hash": {
+              "label": "Usar hash rápido en bruto",
+              "description": "Usa SHA-256 en bruto en lugar del hash solo de audio de ffmpeg. Más barato, pero cambia cuando cambian las etiquetas o la carátula."
+            },
+            "allow_write_tags": {
+              "label": "Permitir reescritura de metadatos",
+              "description": "Permite a Songhive reescribir las etiquetas incrustadas y volver a subir los objetos cuando se editan las pistas."
+            },
+            "allow_rename_source": {
+              "label": "Permitir renombrado de origen",
+              "description": "Permite a Songhive renombrar objetos mediante la edición de pistas. Requiere permiso de escritura en el bucket."
+            },
+            "allow_delete_source": {
+              "label": "Permitir borrado de origen",
+              "description": "Permite borrar objetos del bucket. Requiere permiso de escritura en el bucket."
+            }
+          }
+        },
+        "sftp": {
+          "fields": {
+            "host": {
+              "label": "Host",
+              "description": "Nombre de host o dirección IP del servidor SFTP/SSH. El host remoto debe ser alcanzable desde el servidor de Songhive — todo el acceso a archivos ocurre en el servidor."
+            },
+            "port": {
+              "label": "Puerto",
+              "description": "Puerto SSH del servidor remoto (normalmente 22)."
+            },
+            "username": {
+              "label": "Nombre de usuario",
+              "description": "Nombre de usuario SSH usado para iniciar sesión en el servidor remoto."
+            },
+            "password": {
+              "label": "Contraseña",
+              "description": "Contraseña SSH. Puede combinarse con una clave privada; el servidor usa el método que acepte. Se almacena cifrada."
+            },
+            "private_key": {
+              "label": "Clave privada",
+              "description": "Clave privada PEM u OpenSSH para autenticación por clave pública. Pega la clave completa incluyendo las líneas BEGIN/END. Se almacena cifrada."
+            },
+            "private_key_passphrase": {
+              "label": "Contraseña de la clave privada",
+              "description": "Contraseña que protege la clave privada, si está cifrada. Se almacena cifrada."
+            },
+            "verify_host_key": {
+              "label": "Verificar clave del host",
+              "description": "Verifica la clave de host SSH del servidor. Si está activada, el host debe figurar en los datos de hosts conocidos de abajo o en el archivo ~/.ssh/known_hosts del servidor."
+            },
+            "known_hosts": {
+              "label": "Hosts conocidos",
+              "description": "Líneas known_hosts de OpenSSH usadas para verificar la clave de host del servidor, p. ej. \"host.example ssh-ed25519 AAAA...\". Solo se usan cuando la verificación de clave de host está activada."
+            },
+            "root": {
+              "label": "Raíz remota",
+              "description": "Directorio del servidor remoto a indexar. Las rutas relativas se resuelven contra el directorio personal del usuario SSH; déjalo vacío para indexar el propio directorio personal."
+            },
+            "connect_timeout": {
+              "label": "Tiempo de espera de conexión (segundos)",
+              "description": "Cuánto esperar a que se complete la conexión SSH y el inicio de sesión."
+            },
+            "follow_symlinks": {
+              "label": "Seguir enlaces simbólicos",
+              "description": "Si se siguen los enlaces simbólicos al escanear la biblioteca remota."
+            },
+            "recursive": {
+              "label": "Escaneo recursivo",
+              "description": "Indexa archivos de audio en subdirectorios remotos de forma recursiva."
+            },
+            "extensions": {
+              "label": "Extensiones de archivo",
+              "description": "Lista separada por comas de extensiones de archivos de audio a indexar (p. ej. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Patrones de exclusión",
+              "description": "Patrones glob separados por comas para rutas remotas que se omitirán durante el escaneo."
+            },
+            "allow_hashing": {
+              "label": "Permitir hash de audio",
+              "description": "Calcula un hash de audio estable para las pistas a fin de detectar duplicados y permitir la transcodificación. Requiere descargar los archivos nuevos o modificados una vez."
+            },
+            "fast_hash": {
+              "label": "Usar hash rápido en bruto",
+              "description": "Usa SHA-256 en bruto en lugar del hash solo de audio de ffmpeg. Más barato, pero cambia cuando cambian las etiquetas o la carátula."
+            },
+            "allow_write_tags": {
+              "label": "Permitir reescritura de metadatos",
+              "description": "Permite a Songhive reescribir las etiquetas incrustadas y volver a subir los archivos cuando se editan las pistas. Requiere permiso de escritura en el servidor remoto."
+            },
+            "allow_rename_source": {
+              "label": "Permitir renombrado de origen",
+              "description": "Permite a Songhive renombrar archivos remotos mediante la edición de pistas. Requiere permiso de escritura en el servidor remoto."
+            },
+            "allow_delete_source": {
+              "label": "Permitir borrado de origen",
+              "description": "Permite borrar archivos en el servidor remoto. Requiere permiso de escritura en el servidor remoto."
+            }
+          }
+        },
+        "webdav": {
+          "fields": {
+            "url": {
+              "label": "URL de WebDAV",
+              "description": "URL base del servidor WebDAV, p. ej. https://nextcloud.example.com/remote.php/dav/files/alice. El servidor debe ser alcanzable desde la instancia de Songhive — todo el acceso a archivos ocurre en el servidor."
+            },
+            "root": {
+              "label": "Raíz remota",
+              "description": "Directorio bajo la URL base a indexar (p. ej. Music). Déjalo vacío para indexar la propia URL base."
+            },
+            "username": {
+              "label": "Nombre de usuario",
+              "description": "Nombre de usuario de autenticación HTTP Basic."
+            },
+            "password": {
+              "label": "Contraseña",
+              "description": "Contraseña de autenticación HTTP Basic. Se almacena cifrada."
+            },
+            "token": {
+              "label": "Token Bearer",
+              "description": "Token Bearer enviado en la cabecera Authorization. Solo se usa cuando no hay nombre de usuario configurado. Se almacena cifrado."
+            },
+            "verify_ssl": {
+              "label": "Verificar certificado TLS",
+              "description": "Verifica el certificado TLS del servidor. Desactívalo solo para pruebas o redes privadas de confianza — desactivarlo deja la conexión expuesta a suplantación MITM y robo de credenciales."
+            },
+            "ca_bundle": {
+              "label": "Ruta del paquete de CA",
+              "description": "Ruta opcional en el servidor de Songhive a un paquete de CA en formato PEM usado para verificar el certificado TLS del servidor. Tiene prioridad sobre el interruptor de verificación cuando se indica."
+            },
+            "timeout": {
+              "label": "Tiempo de espera de petición (segundos)",
+              "description": "Cuánto esperar por cada petición HTTP al servidor WebDAV."
+            },
+            "extensions": {
+              "label": "Extensiones de archivo",
+              "description": "Lista separada por comas de extensiones de archivos de audio a indexar (p. ej. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Patrones de exclusión",
+              "description": "Patrones glob separados por comas para rutas remotas que se omitirán durante el escaneo."
+            },
+            "recursive": {
+              "label": "Escaneo recursivo",
+              "description": "Indexa archivos de audio en subdirectorios remotos de forma recursiva."
+            },
+            "allow_hashing": {
+              "label": "Permitir hash de audio",
+              "description": "Calcula un hash de audio estable para las pistas a fin de detectar duplicados y permitir la transcodificación. Requiere descargar los archivos nuevos o modificados una vez."
+            },
+            "fast_hash": {
+              "label": "Usar hash rápido en bruto",
+              "description": "Usa SHA-256 en bruto en lugar del hash solo de audio de ffmpeg. Más barato, pero cambia cuando cambian las etiquetas o la carátula."
+            },
+            "allow_write_tags": {
+              "label": "Permitir reescritura de metadatos",
+              "description": "Permite a Songhive reescribir las etiquetas incrustadas y volver a subir los archivos cuando se editan las pistas. Requiere permiso de escritura en el servidor remoto."
+            },
+            "allow_rename_source": {
+              "label": "Permitir renombrado de origen",
+              "description": "Permite a Songhive renombrar archivos remotos mediante la edición de pistas. Requiere permiso de escritura en el servidor remoto."
+            },
+            "allow_delete_source": {
+              "label": "Permitir borrado de origen",
+              "description": "Permite borrar archivos en el servidor remoto. Requiere permiso de escritura en el servidor remoto."
+            }
+          }
+        },
+        "dropbox": {
+          "help": "Crea tu propia app de Dropbox en {appConsole} (elige \"Scoped access\"). Permisos requeridos: {permissions} — más {writePermissions} si quieres reescritura de metadatos o renombrar/borrar.\nEn los ajustes OAuth 2 de la app, añade este URI de redirección: {callbackUrl}\nDespués introduce la clave de la app (y el secreto de la app, si se muestra) abajo y usa el botón Conectar para autorizar tu cuenta de Dropbox — los tokens de acceso y de actualización se rellenan automáticamente.\nSi cambias los permisos de la app más adelante, conéctate de nuevo: los tokens existentes conservan solo los ámbitos concedidos cuando se emitieron.",
+          "fields": {
+            "access_token": {
+              "label": "Token de acceso",
+              "description": "Se rellena automáticamente con el botón Conectar. Introdúcelo manualmente solo para una prueba rápida — los tokens de acceso de Dropbox caducan al cabo de unas horas. Se almacena cifrado."
+            },
+            "refresh_token": {
+              "label": "Token de actualización",
+              "description": "Se rellena automáticamente con el botón Conectar. La credencial duradera — genera tokens de acceso de corta duración automáticamente. Requiere la clave de app de abajo. Se almacena cifrado."
+            },
+            "app_key": {
+              "label": "Clave de app",
+              "description": "Clave de tu app de Dropbox, desde su página en la consola de apps de Dropbox. Obligatoria."
+            },
+            "app_secret": {
+              "label": "Secreto de app",
+              "description": "Secreto de tu app de Dropbox, mostrado junto a la clave de app en la consola de apps. Opcional. Se almacena cifrado."
+            },
+            "root": {
+              "label": "Carpeta raíz",
+              "description": "Carpeta de Dropbox a indexar (p. ej. /Music). Déjalo vacío para indexar toda la cuenta."
+            },
+            "timeout": {
+              "label": "Tiempo de espera de petición (segundos)",
+              "description": "Cuánto esperar por cada petición a la API de Dropbox."
+            },
+            "temporary_links": {
+              "label": "Streaming mediante enlaces temporales",
+              "description": "Redirige a los clientes a enlaces de descarga de Dropbox de corta duración para la reproducción — descarga ancho de banda a Dropbox, pero Firefox se niega a reproducirlos (Dropbox los sirve con una CSP de sandbox). Déjalo desactivado para servir el audio a través de Songhive, lo que funciona en todos los navegadores."
+            },
+            "extensions": {
+              "label": "Extensiones de archivo",
+              "description": "Lista separada por comas de extensiones de archivos de audio a indexar (p. ej. .mp3, .flac)."
+            },
+            "exclude": {
+              "label": "Patrones de exclusión",
+              "description": "Patrones glob separados por comas para rutas de Dropbox que se omitirán durante el escaneo."
+            },
+            "recursive": {
+              "label": "Escaneo recursivo",
+              "description": "Indexa archivos de audio en subcarpetas de la carpeta raíz de forma recursiva."
+            },
+            "allow_hashing": {
+              "label": "Permitir hash de audio",
+              "description": "Calcula un hash de audio estable para las pistas a fin de detectar duplicados y permitir la transcodificación. Requiere descargar los archivos nuevos o modificados una vez."
+            },
+            "fast_hash": {
+              "label": "Usar hash rápido en bruto",
+              "description": "Usa SHA-256 en bruto en lugar del hash solo de audio de ffmpeg. Más barato, pero cambia cuando cambian las etiquetas o la carátula."
+            },
+            "allow_write_tags": {
+              "label": "Permitir reescritura de metadatos",
+              "description": "Permite a Songhive reescribir las etiquetas incrustadas y volver a subir los archivos cuando se editan las pistas. Requiere permiso de escritura en la cuenta."
+            },
+            "allow_rename_source": {
+              "label": "Permitir renombrado de origen",
+              "description": "Permite a Songhive renombrar archivos de Dropbox mediante la edición de pistas. Requiere permiso de escritura en la cuenta."
+            },
+            "allow_delete_source": {
+              "label": "Permitir borrado de origen",
+              "description": "Permite borrar archivos de Dropbox. Requiere permiso de escritura en la cuenta."
+            }
+          }
+        }
+      }
+    },
+    "scrobbling": {
+      "title": "Scrobbling",
+      "hint": "Envía las pistas que reproduces a una cuenta de Last.fm o Libre.fm. Se envía una actualización de \"sonando ahora\" al empezar la reproducción y la pista se scrobbled una vez supera los umbrales de abajo.",
+      "disabled": "El scrobbling está desactivado en esta instancia.",
+      "service": "Servicio",
+      "serviceUnavailable": "{name} (no configurado en esta instancia)",
+      "username": "Nombre de usuario",
+      "password": "Contraseña",
+      "passwordHint": "La contraseña de tu cuenta en el servicio de scrobbling. Solo se usa para crear una sesión y nunca se almacena.",
+      "connect": "Conectar cuenta",
+      "connected": "Cuenta de scrobbling conectada.",
+      "connectedAs": "Conectado a {service} como {name}.",
+      "connectError": "No se pudo conectar: {message}",
+      "enabled": "Scrobbling activado",
+      "enabledHint": "Si está desactivado, las reproducciones se registran localmente pero no se envían.",
+      "minSeconds": "Scrobbler tras (segundos)",
+      "minSecondsHint": "Una reproducción cuenta una vez ha transcurrido este tiempo de escucha.",
+      "minPercent": "Scrobbler tras (porcentaje)",
+      "minPercentHint": "Una reproducción cuenta una vez se ha escuchado esta parte de la duración de la pista — gana el umbral que se alcance primero.",
+      "disconnect": "Desconectar",
+      "saved": "Configuración de scrobbling guardada.",
+      "saveError": "No se pudo guardar la configuración de scrobbling: {message}",
+      "deleted": "Cuenta de scrobbling desconectada.",
+      "deleteError": "No se pudo desconectar: {message}",
+      "loadError": "No se pudo cargar la configuración de scrobbling: {message}",
+      "lastScrobbled": "Último scrobble: {date}",
+      "neverScrobbled": "nunca",
+      "lastError": "Último error de scrobbling: {message}"
+    }
+  },
+  "profile": {
+    "title": "Perfil",
+    "tabs": {
+      "profile": "Perfil",
+      "password": "Contraseña",
+      "apiTokens": "Tokens de API",
+      "sessions": "Sesiones",
+      "externalLibraries": "Bibliotecas externas",
+      "posts": "Publicaciones",
+      "activity": "Actividad",
+      "tracks": "Pistas",
+      "albums": "Álbumes",
+      "libraries": "Bibliotecas",
+      "playlists": "Listas de reproducción",
+      "notifications": "Notificaciones",
+      "interface": "Interfaz",
+      "moderation": "Moderación",
+      "security": "Seguridad",
+      "podcastSync": "Sincronización de podcasts",
+      "scrobbling": "Scrobbling",
+      "outputs": "Salidas"
+    },
+    "copyHandle": "Copiar identificador del Fediverso",
+    "compose": "Redactar",
+    "statusContentType": "Formato de publicación predeterminado",
+    "statusContentTypeHint": "Formato usado por defecto al escribir publicaciones.",
+    "previewCards": "Tarjetas de vista previa de enlaces",
+    "previewCardsHint": "Obtiene tarjetas de vista previa para los enlaces de tus publicaciones.",
+    "profileVisibility": "Visibilidad en el directorio",
+    "profileVisibilityHint": "Si tu perfil aparece en el directorio de usuarios.",
+    "visibility": {
+      "public": "Público — visible para todo el mundo",
+      "local": "Local — visible solo para usuarios con sesión iniciada",
+      "private": "Privado — no aparece en el listado"
+    },
+    "followersApproval": "Aprobación de seguidores",
+    "followersApprovalHint": "Cómo se gestionan las nuevas solicitudes de seguimiento.",
+    "followersApprovalOptions": {
+      "accept": "Aceptar — aprueba nuevos seguidores automáticamente",
+      "manual": "Manual — revisa cada solicitud de seguimiento",
+      "reject": "Rechazar — rechaza nuevos seguidores automáticamente"
+    },
+    "followers": "Sin seguidores | {count} seguidor | {count} seguidores",
+    "following": "Sin seguidos | {count} seguido | {count} seguidos",
+    "follow": "Seguir",
+    "unfollow": "Dejar de seguir",
+    "followRequested": "Solicitado",
+    "activityNotifications": {
+      "subscribe": "Notificarme la actividad",
+      "unsubscribe": "Dejar de recibir notificaciones de actividad",
+      "error": "No se pudieron actualizar las notificaciones de actividad: {message}"
+    },
+    "followsPage": {
+      "title": "Seguidos",
+      "empty": "Aún no sigues a nadie.",
+      "pending": "Solicitado",
+      "pendingHint": "Solicitud de seguimiento pendiente de aprobación."
+    },
+    "followersPage": {
+      "title": "Seguidores",
+      "empty": "Aún no tienes seguidores.",
+      "since": "Te sigue desde",
+      "tabs": {
+        "followers": "Seguidores",
+        "requests": "Solicitudes"
+      },
+      "requestsEmpty": "No hay solicitudes de seguimiento pendientes.",
+      "requestsHint": "Solicitudes de seguimiento en espera de tu aprobación.",
+      "accept": "Aceptar",
+      "reject": "Rechazar",
+      "requestAccepted": "Solicitud de seguimiento aceptada.",
+      "requestRejected": "Solicitud de seguimiento rechazada.",
+      "requestError": "No se pudo resolver la solicitud de seguimiento: {message}"
+    },
+    "displayName": "Nombre visible",
+    "bio": "Biografía",
+    "avatar": "Avatar",
+    "avatarUrl": "URL del avatar",
+    "avatarUpload": "Subir avatar",
+    "avatarRemove": "Quitar avatar",
+    "avatarRemoveSuccess": "Avatar eliminado.",
+    "avatarRemoveError": "No se pudo quitar el avatar: {message}",
+    "links": "Enlaces",
+    "linksHint": "Enlaces rel=\"me\" (p. ej. tu sitio web o perfil social)",
+    "addLink": "Añadir enlace",
+    "linkName": "Nombre",
+    "linkUrl": "URL",
+    "removeLink": "Quitar",
+    "save": "Guardar",
+    "saveSuccess": "Perfil guardado.",
+    "saveError": "No se pudo guardar el perfil: {message}",
+    "currentPassword": "Contraseña actual",
+    "newPassword": "Nueva contraseña",
+    "confirmPassword": "Confirmar nueva contraseña",
+    "changePassword": "Cambiar contraseña",
+    "passwordRequired": "Todos los campos de contraseña son obligatorios.",
+    "passwordMismatch": "Las nuevas contraseñas no coinciden.",
+    "passwordTooLong": "La contraseña es demasiado larga (máximo 72 bytes).",
+    "passwordChangeSuccess": "Contraseña cambiada. Inicia sesión de nuevo.",
+    "passwordChangeError": "No se pudo cambiar la contraseña: {message}",
+    "resendVerification": "Reenviar correo de verificación",
+    "resendVerificationSuccess": "Se ha enviado un nuevo correo de verificación. Revisa tu bandeja de entrada.",
+    "resendVerificationError": "No se pudo reenviar el correo de verificación: {message}",
+    "deleteAccount": "Eliminar cuenta",
+    "deleteAccountHint": "Esto eliminará permanentemente tu perfil y tu configuración. Tu contenido puede conservarse o eliminarse abajo.",
+    "deleteAccountDialogTitle": "Eliminar tu cuenta",
+    "deleteAccountWarning": "Esta acción es irreversible. Tus pistas y tu colección quedarán sin propietario a menos que elijas también eliminar todo el contenido que creaste.",
+    "deleteAccountRecursiveLabel": "Eliminar también todo el contenido que creé (pistas, álbumes, listas de reproducción, bibliotecas y radios)",
+    "deleteAccountConfirmationLabel": "Confirmar eliminación de la cuenta",
+    "deleteAccountConfirmationHint": "Escribe \"{phrase}\" para confirmar.",
+    "deleteAccountConfirmationError": "El texto de confirmación no coincide. Escribe exactamente la frase mostrada arriba.",
+    "deleteAccountCancel": "Cancelar",
+    "deleteAccountConfirm": "Eliminar cuenta",
+    "deleteAccountSuccess": "Tu cuenta ha sido eliminada.",
+    "deleteAccountError": "No se pudo eliminar la cuenta: {message}",
+    "apiTokens": {
+      "create": "Crear token",
+      "name": "Nombre",
+      "nameHint": "Un nombre descriptivo para este token",
+      "expiresAt": "Caduca el",
+      "expiresAtHint": "Opcional. Déjalo vacío para un token que nunca caduca.",
+      "tokenCopied": "Token copiado al portapapeles.",
+      "copyFailed": "No se pudo copiar el token. Cópialo manualmente.",
+      "rawTokenLabel": "Tu nuevo token",
+      "rawTokenHint": "Copia este token ahora — no podrá volver a mostrarse.",
+      "revoke": "Revocar",
+      "revokeConfirm": "¿Seguro que quieres revocar \"{name}\"?",
+      "expiresAtInvalid": "La caducidad debe ser en el futuro.",
+      "empty": "No tienes tokens de API.",
+      "createdAt": "Creado",
+      "lastUsedAt": "Último uso",
+      "never": "Nunca"
+    },
+    "sessions": {
+      "device": "Dispositivo",
+      "ipAddress": "Dirección IP",
+      "createdAt": "Creada",
+      "expiresAt": "Caduca",
+      "current": "Sesión actual",
+      "unknown": "Desconocido",
+      "empty": "No tienes sesiones activas.",
+      "revoke": "Revocar",
+      "revokeConfirm": "¿Seguro que quieres revocar la sesión en \"{device}\"?",
+      "revokeCurrentConfirm": "¿Seguro que quieres revocar tu sesión actual? Se cerrará tu sesión.",
+      "revokeSuccess": "Sesión revocada.",
+      "revokeCurrentSuccess": "Sesión revocada. Cerrando sesión..."
+    },
+    "interface": {
+      "title": "Interfaz",
+      "hint": "Personaliza cómo se ve Songhive en este dispositivo.",
+      "themeLabel": "Tema",
+      "themeHint": "\"Sistema\" sigue el ajuste de apariencia de tu dispositivo.",
+      "accentHint": "Se usa para destacados, botones y estados activos.",
+      "languageLabel": "Idioma",
+      "languageHint": "\"Predeterminado del navegador\" sigue el ajuste de idioma de tu navegador.",
+      "languageAuto": "Predeterminado del navegador"
+    },
+    "security": {
+      "passwordLabel": "Contraseña actual",
+      "totp": {
+        "heading": "Aplicación de autenticación",
+        "disabledHint": "Usa una aplicación de autenticación para generar códigos de un solo uso al iniciar sesión.",
+        "enabledHint": "Tu aplicación de autenticación está activa. Introduce tu contraseña para desactivarla.",
+        "setup": "Configurar aplicación de autenticación",
+        "scanHint": "Escanea este código QR con tu aplicación de autenticación e introduce el código que muestra para confirmar la configuración.",
+        "qrAlt": "Código QR para configurar la aplicación de autenticación",
+        "manualEntry": "¿No puedes escanearlo? Introduce esta clave manualmente:",
+        "codeLabel": "Código de autenticación",
+        "codeHint": "Introduce el código de 6 dígitos que muestra tu aplicación.",
+        "confirm": "Confirmar y activar",
+        "enabled": "Autenticación en dos pasos activada.",
+        "disabled": "Aplicación de autenticación desactivada.",
+        "disable": "Desactivar",
+        "disableConfirm": "Esto desactivará el segundo factor de la aplicación de autenticación. ¿Continuar?"
+      },
+      "keys": {
+        "heading": "Llaves de seguridad",
+        "unsupported": "Tu navegador no admite llaves de seguridad (WebAuthn).",
+        "name": "Nombre",
+        "createdAt": "Añadida",
+        "actions": "",
+        "empty": "No hay llaves de seguridad registradas.",
+        "nameLabel": "Nombre de la llave",
+        "nameHint": "Una etiqueta para reconocer esta llave, p. ej. 'YubiKey'.",
+        "add": "Añadir llave de seguridad",
+        "added": "Llave de seguridad registrada.",
+        "cancelled": "El registro de la llave de seguridad fue cancelado.",
+        "remove": "Quitar",
+        "removeConfirm": "¿Quitar la llave de seguridad '{name}'?",
+        "unnamed": "Llave sin nombre"
+      },
+      "recovery": {
+        "heading": "Códigos de recuperación",
+        "remaining": "Quedan {count} códigos de recuperación sin usar.",
+        "regenerate": "Regenerar códigos",
+        "regenerateConfirm": "Esto invalida todos los códigos de recuperación existentes. ¿Continuar?",
+        "newCodes": "Tus nuevos códigos de recuperación",
+        "newCodesHint": "Guarda estos códigos en un lugar seguro. Cada uno puede usarse una vez para iniciar sesión si pierdes tus otros factores.",
+        "copied": "Códigos de recuperación copiados."
+      }
+    }
+  },
+  "users": {
+    "title": "Usuarios",
+    "search": "Buscar usuarios…",
+    "sort": {
+      "label": "Ordenar por",
+      "username": "Nombre de usuario",
+      "createdAt": "Fecha de registro"
+    },
+    "joined": "Se unió",
+    "empty": "No se encontraron usuarios."
+  },
+  "browse": {
+    "entities": {
+      "artists": "Artistas",
+      "albums": "Álbumes",
+      "tracks": "Pistas",
+      "playlists": "Listas de reproducción",
+      "libraries": "Bibliotecas",
+      "activities": "Actividades",
+      "files": "Archivos",
+      "artist": "Artista",
+      "album": "Álbum",
+      "track": "Pista",
+      "playlist": "Lista de reproducción",
+      "library": "Biblioteca",
+      "file": "Archivo",
+      "radio": "Radio",
+      "item": "Elemento",
+      "episode": "Episodio",
+      "share": "Compartido",
+      "shares": "Compartidos"
+    },
+    "list": {
+      "searchPlaceholder": "Buscar {entity}…",
+      "empty": "No se encontraron {entity}.",
+      "loadMore": "Cargar más",
+      "loadPrevious": "Cargar anteriores",
+      "myCollection": "Mi colección",
+      "createPlaylist": "Crear lista de reproducción",
+      "createLibrary": "Crear biblioteca",
+      "newPlaylist": "Nueva lista de reproducción",
+      "newLibrary": "Nueva biblioteca"
+    },
+    "detail": {
+      "tracks": "Pistas",
+      "albums": "Álbumes",
+      "discography": "Discografía",
+      "released": "Publicado",
+      "year": "Año",
+      "genre": "Género",
+      "duration": "Duración",
+      "trackNumber": "Pista",
+      "discNumber": "Disco",
+      "owner": "Propietario",
+      "visibility": "Visibilidad",
+      "actions": "Acciones",
+      "tags": "Etiquetas",
+      "playAll": "Reproducir todo",
+      "trackCount": "Sin pistas | {count} pista | {count} pistas",
+      "albumCount": "Sin álbumes | {count} álbum | {count} álbumes",
+      "episodeCount": "Sin episodios | {count} episodio | {count} episodios"
+    },
+    "visibility": {
+      "private": "Privado",
+      "local": "Local",
+      "public": "Público"
+    },
+    "edit": {
+      "editAlbum": "Editar álbum",
+      "editTrack": "Editar pista",
+      "editLibrary": "Editar biblioteca",
+      "editArtist": "Editar artista",
+      "title": "Título",
+      "artist": "Artista",
+      "album": "Álbum",
+      "description": "Descripción",
+      "extraArtists": "Artistas adicionales",
+      "extraArtistsHint": "Lista separada por comas de artistas acreditados adicionales (p. ej. artistas invitados)",
+      "releaseYear": "Año de lanzamiento",
+      "filename": "Nombre de archivo",
+      "name": "Nombre",
+      "tags": "Etiquetas",
+      "publishFediverse": "Publicar en el Fediverso",
+      "publishFediverseHint": "Emite una publicación de audio ActivityPub a tus seguidores del Fediverso. Si no se marca, la pista solo se hace pública — su URL pasa a ser accesible públicamente sin una publicación en el Fediverso.",
+      "saveSuccess": "Guardado.",
+      "saveError": "No se pudo guardar: {message}",
+      "deleteConfirm": "¿Seguro que quieres eliminar \"{name}\"?",
+      "deleted": "Eliminado.",
+      "providerManaged": "Los metadatos los gestiona {provider} — los campos bloqueados no se pueden editar aquí. Los campos locales como las etiquetas y la visibilidad siguen siendo editables."
+    },
+    "providerSync": {
+      "from": "Proveedor: {provider}",
+      "updated": "Actualizado {time}",
+      "refreshing": "Actualizando el contenido de {provider}…",
+      "loading": "Cargando el contenido de {provider}…",
+      "error": "No se pudo actualizar el contenido de {provider}.",
+      "syncNow": "Sincronizar ahora"
+    },
+    "delete": {
+      "title": "¿Eliminar {entity}?",
+      "confirm": "¿Seguro que quieres eliminar \"{name}\"?",
+      "bulkTitle": "¿Eliminar {count} {entity}?",
+      "bulkConfirm": "¿Seguro que quieres eliminar {count} {entity}?",
+      "recursive": "Eliminar {contents} asociados",
+      "deleteSource": "Eliminar también el archivo de audio de origen",
+      "deleteSourceWarning": "Esta acción es destructiva e irreversible. El archivo de audio de origen se eliminará de la biblioteca externa de {provider} y no se podrá recuperar.",
+      "success": "Se eliminó \"{name}\".",
+      "bulkSuccess": "Se eliminaron {count} {entity}.",
+      "error": "No se pudo eliminar {entity}: {message}"
+    },
+    "download": {
+      "error": "No se pudo descargar la pista: {message}"
+    },
+    "libraryManagement": {
+      "addTracks": "Añadir pistas",
+      "upload": "Subir",
+      "uploadMore": "Subir más",
+      "bulkUpload": "Subida masiva",
+      "scan": "Escanear",
+      "scanPath": "Ruta a escanear",
+      "scanHint": "Ruta del sistema de archivos a escanear en busca de nuevas pistas",
+      "scanning": "Escaneando…",
+      "scanSuccess": "Escaneo iniciado.",
+      "scanError": "No se pudo escanear: {message}",
+      "uploadSuccess": "Subida completada.",
+      "uploadError": "No se pudo subir: {message}",
+      "force": "Sobrescribir archivos existentes",
+      "enrich": "Obtener metadatos",
+      "publish": "Publicar en el Fediverso",
+      "publishHint": "Comparte las subidas públicas con tus seguidores del Fediverso como publicaciones de audio federadas.",
+      "libraryTracks": "Pistas de la biblioteca"
+    },
+    "share": {
+      "shareTitle": "Compartir \"{name}\"",
+      "shareGrants": "Compartido con usuarios",
+      "shareUrls": "Enlaces públicos",
+      "unknownItem": "Elemento sin título",
+      "user": "Usuario",
+      "createGrant": "Conceder acceso",
+      "revoke": "Revocar",
+      "createShareUrl": "Crear enlace público",
+      "expiresAt": "Caduca el",
+      "expiresAtHint": "Opcional. Déjalo vacío para un enlace que nunca caduca.",
+      "copyUrl": "Copiar enlace",
+      "urlCopied": "Enlace copiado al portapapeles.",
+      "copyFailed": "No se pudo copiar el enlace.",
+      "revokeConfirm": "¿Seguro que quieres revocar el acceso de \"{user}\"?",
+      "shareUrlCreated": "Enlace público creado.",
+      "sharedItem": "{type} compartido",
+      "shareExpired": "Este enlace ha caducado.",
+      "shareRevoked": "Este enlace ha sido revocado.",
+      "shareNotFound": "No se encontró este elemento compartido.",
+      "createdAt": "Creado",
+      "expiresAtInvalid": "La caducidad debe ser en el futuro.",
+      "grantCreated": "Acceso concedido.",
+      "grantCreateError": "No se pudo conceder el acceso: {message}",
+      "urlCreateError": "No se pudo crear el enlace: {message}",
+      "revokeError": "No se pudo revocar: {message}",
+      "rawToken": "Token",
+      "rawTokenHint": "Copia este token ahora — no podrá volver a mostrarse.",
+      "revokeUrlConfirm": "¿Seguro que quieres revocar este enlace público?",
+      "emptyGrants": "No se ha compartido con ningún usuario.",
+      "emptyUrls": "No hay enlaces públicos.",
+      "openInApp": "Inicia sesión para abrirlo en la app",
+      "publicUrl": "URL pública",
+      "publicUrlHint": "Cualquiera puede ver esta página pública.",
+      "webUrl": "Web",
+      "downloadUrl": "Descarga directa",
+      "preview": "Vista previa",
+      "fediverse": "Fediverso",
+      "fediverseHint": "Publica esta pista como una publicación de ActivityPub.",
+      "fediverseType": "Tipo de publicación",
+      "fediverseTypeNote": "Publicación (Note)",
+      "fediverseTypeAudio": "Pista (Audio)",
+      "fediverseTypeNoteHint": "Comparte una publicación normal con la pista adjunta — el texto se muestra en todos los servidores del Fediverso.",
+      "fediverseTypeAudioHint": "Publica la pista como un objeto de audio federado. Algunos servidores (p. ej. Mastodon) solo muestran el título y el enlace de la pista — el texto de la publicación no se muestra.",
+      "fediversePublish": "Publicar",
+      "fediversePublished": "Pista publicada en el Fediverso.",
+      "fediverseNotPublic": "Solo se pueden publicar pistas públicas en el Fediverso. Cambia primero la visibilidad de la pista a pública.",
+      "embed": "Insertar",
+      "embedHint": "Pega este fragmento en una página web para insertar este elemento.",
+      "embedFormat": "Formato de inserción",
+      "embedFormatAudio": "Elemento audio HTML",
+      "embedFormatHtmlList": "Lista de pistas HTML",
+      "embedFormatMarkdown": "Enlace Markdown",
+      "embedFormatScript": "Widget de JavaScript",
+      "embedFormatIframe": "Iframe HTML",
+      "embedLoading": "Cargando detalles de la inserción…",
+      "embedNotPublic": "Solo se pueden insertar elementos públicos. Cambia primero la visibilidad a pública."
+    },
+    "contextMenu": {
+      "playNext": "Reproducir a continuación",
+      "enqueue": "Añadir a la cola",
+      "goToAlbum": "Ir al álbum",
+      "goToArtist": "Ir al artista",
+      "goToTrack": "Ir a la pista",
+      "addToLibrary": "Añadir a la biblioteca",
+      "addToPlaylist": "Añadir a la lista",
+      "removeFromLibrary": "Quitar de la biblioteca",
+      "removeFromPlaylist": "Quitar de la lista",
+      "deleteTrack": "Eliminar pista",
+      "editTrack": "Editar pista",
+      "enrich": "Obtener metadatos",
+      "goToPodcast": "Ir al podcast",
+      "openOnProvider": "Abrir en {provider}"
+    },
+    "enrich": {
+      "title": "Obtener metadatos",
+      "metadata": "Obtener metadatos",
+      "success": "Enriquecimiento de metadatos encolado.",
+      "albumSuccess": "Enriquecimiento de metadatos encolado para {count} pistas.",
+      "error": "No se pudieron obtener los metadatos: {message}"
+    },
+    "removeFromCollection": {
+      "singleTitle": "¿Quitar \"{track}\" de \"{collection}\"?",
+      "bulkTitle": "¿Quitar {count} pistas de \"{collection}\"?",
+      "confirm": "Quitar",
+      "cancel": "Cancelar",
+      "singleSuccess": "Se quitó \"{track}\" de \"{collection}\".",
+      "bulkSuccess": "Se quitaron {count} pistas de \"{collection}\".",
+      "error": "No se pudieron quitar las pistas: {message}"
+    },
+    "reorder": {
+      "start": "Reordenar",
+      "done": "Hecho",
+      "moveUp": "Subir",
+      "moveDown": "Bajar",
+      "moveToPosition": "Mover a la posición",
+      "top": "Principio",
+      "bottom": "Final",
+      "drag": "Arrastra para reordenar",
+      "invalidPosition": "Introduce un número positivo, -1 para el final, o 0 para cancelar.",
+      "loadMoreToMove": "Carga más pistas para mover la selección más abajo.",
+      "error": "No se pudieron reordenar las pistas: {message}"
+    },
+    "bulkEdit": {
+      "start": "Edición masiva",
+      "done": "Hecho",
+      "selectAll": "Seleccionar todo",
+      "deselectAll": "Deseleccionar todo",
+      "removeSelected": "Quitar seleccionados",
+      "removeSelectedFromLibrary": "Quitar de la biblioteca",
+      "removeSelectedFromPlaylist": "Quitar de la lista",
+      "deleteSelected": "Eliminar seleccionados",
+      "addToLibrary": "Añadir a la biblioteca",
+      "addToPlaylist": "Añadir a la lista",
+      "editMetadata": "Editar metadatos",
+      "editMetadataTitle": "Editar metadatos de {count} pistas",
+      "editHint": "Solo los campos que cambies se aplican a cada pista seleccionada. Los campos que no toques conservan sus valores actuales.",
+      "keepUnchanged": "Mantener sin cambios",
+      "publishFediverseHint": "Emite una publicación de audio ActivityPub a tus seguidores del Fediverso por cada pista que pase a ser pública. Si no se marca, las pistas solo se hacen públicas — sus URLs pasan a ser accesibles públicamente sin publicaciones en el Fediverso.",
+      "nothingToUpdate": "No hay cambios que aplicar.",
+      "saveSuccess": "Metadatos actualizados en {count} pistas.",
+      "savePartial": "Se actualizaron {updated} de {total} pistas.",
+      "saveError": "No se pudieron actualizar {count} pistas: {message}",
+      "empty": "No hay pistas seleccionadas.",
+      "download": "Descargar"
+    },
+    "addToCollection": {
+      "addToLibrary": "Añadir a la biblioteca",
+      "addToPlaylist": "Añadir a la lista",
+      "trackCount": "{count} pistas",
+      "episodeCount": "{count} episodios",
+      "libraryTitle": "Añadir {name} a la biblioteca",
+      "playlistTitle": "Añadir {name} a la lista",
+      "selectLibrary": "Biblioteca",
+      "selectPlaylist": "Lista de reproducción",
+      "newLibrary": "Crear nueva biblioteca",
+      "newPlaylist": "Crear nueva lista",
+      "nameLabel": "Nombre",
+      "nameRequired": "Introduce un nombre.",
+      "empty": "No hay colecciones disponibles.",
+      "noneAdded": "No se añadió ninguna pista (puede que ya estuvieran presentes).",
+      "librarySuccess": "Se añadieron {count} pistas a la biblioteca.",
+      "playlistSuccess": "Se añadieron {count} pistas a la lista.",
+      "duplicateWarning": "Una o más pistas ya están en esta lista. ¿Añadirlas de todos modos?",
+      "addAnyway": "Añadir de todos modos"
+    },
+    "createPlaylist": "Lista de reproducción creada.",
+    "createLibrary": "Biblioteca creada.",
+    "collection": {
+      "save": "Guardar en mi colección",
+      "remove": "Quitar de mi colección",
+      "saveSuccess": "Guardado en tu colección.",
+      "removeSuccess": "Quitado de tu colección.",
+      "saveError": "No se pudo guardar: {message}",
+      "removeError": "No se pudo quitar: {message}"
+    },
+    "playlist": {
+      "empty": "Aún no hay pistas en esta lista."
+    }
+  },
+  "player": {
+    "player": "Reproductor",
+    "playbackControls": "Controles de reproducción",
+    "shuffle": "Aleatorio",
+    "previousTrack": "Pista anterior",
+    "nextTrack": "Pista siguiente",
+    "repeatOff": "Repetición desactivada",
+    "repeatAll": "Repetir todo",
+    "repeatOne": "Repetir una",
+    "volumeControls": "Controles de volumen",
+    "mute": "Silenciar",
+    "unmute": "Quitar silencio",
+    "volume": "Volumen",
+    "volumeValue": "Volumen {value}%",
+    "progress": "Progreso",
+    "seek": "Buscar posición",
+    "progressValue": "{current} de {duration}",
+    "expandPlayer": "Expandir reproductor",
+    "collapsePlayer": "Contraer reproductor",
+    "openQueue": "Abrir cola",
+    "closeQueue": "Cerrar cola",
+    "clearQueue": "Vaciar cola",
+    "queue": "Cola",
+    "queueTracks": "Pistas en cola",
+    "emptyQueue": "La cola está vacía.",
+    "removeFromQueue": "Quitar {title} de la cola",
+    "nowPlaying": "Sonando ahora",
+    "goToAlbum": "Ir al álbum {title}",
+    "goToArtist": "Ir al artista {name}",
+    "goToTrack": "Ir a la pista {title}",
+    "albumArtwork": "Carátula del álbum"
+  },
+  "activities": {
+    "title": "Actividades",
+    "detailTitle": "Actividad",
+    "view": "Actividades",
+    "backTo": "Volver a {entity}",
+    "empty": "Aún no hay actividades.",
+    "loadMore": "Cargar más",
+    "like": "Me gusta",
+    "liked": "Te gusta",
+    "likeError": "No se pudo marcar esta actividad como me gusta.",
+    "boost": "Impulsar",
+    "boosted": "Impulsado",
+    "boostError": "No se pudo impulsar esta actividad.",
+    "unboost": "Quitar impulso",
+    "unboostError": "No se pudo quitar el impulso.",
+    "unlike": "Quitar me gusta",
+    "unlikeError": "No se pudo quitar el me gusta.",
+    "unlikeConfirm": "¿Quitar tu me gusta?",
+    "unboostConfirm": "¿Quitar tu impulso?",
+    "objectUnavailable": "Este contenido no está disponible.",
+    "reply": "Responder",
+    "replies": "Respuestas",
+    "quote": "Citar",
+    "quotes": "Citas",
+    "noReplies": "Aún no hay respuestas.",
+    "noQuotes": "Aún no hay citas.",
+    "replyPlaceholder": "Escribe tu respuesta…",
+    "replySubmit": "Responder",
+    "quotePlaceholder": "Escribe tu cita…",
+    "quoteSubmit": "Citar",
+    "repliesError": "No se pudieron cargar las respuestas.",
+    "quotesError": "No se pudieron cargar las citas.",
+    "loginToInteract": "Inicia sesión para interactuar",
+    "previewCard": "Vista previa del enlace",
+    "actors": {
+      "likes": "Me gusta de",
+      "boosts": "Impulsado por",
+      "empty": "Aún no hay interacciones conocidas."
+    },
+    "filters": {
+      "all": "Todas",
+      "local": "Locales",
+      "remote": "Remotas",
+      "replies": "Respuestas",
+      "boosts": "Impulsos",
+      "likes": "Me gusta"
+    },
+    "types": {
+      "announce": "Impulsado",
+      "like": "Le gustó esto",
+      "reply": "Respondió",
+      "quote": "Citó",
+      "mention": "Mencionó",
+      "update": "Actualizado",
+      "delete": "Eliminado",
+      "webmention": "Webmention"
+    },
+    "visibility": {
+      "public": "Pública",
+      "followers": "Seguidores",
+      "mentioned": "Mencionados",
+      "local": "Local",
+      "private": "Privada"
+    },
+    "edit": {
+      "title": "Editar actividad",
+      "content": "Contenido",
+      "visibility": "Visibilidad",
+      "error": "No se pudo actualizar esta actividad."
+    },
+    "copyUrl": {
+      "done": "URL de la actividad copiada al portapapeles.",
+      "error": "No se pudo copiar la URL de la actividad."
+    },
+    "delete": {
+      "title": "Eliminar actividad",
+      "confirm": "¿Eliminar esta actividad? Se enviará una retractación al Fediverso si se publicó allí.",
+      "done": "Actividad eliminada.",
+      "error": "No se pudo eliminar esta actividad."
+    },
+    "audio": {
+      "player": "Reproductor de audio",
+      "playInPlayer": "Reproducir en el reproductor",
+      "addToQueue": "Añadir a la cola",
+      "addedToQueue": "Añadido a la cola.",
+      "playError": "No se pudo reproducir este audio.",
+      "downloadError": "No se pudo descargar este audio: {message}"
+    },
+    "webmentionTypes": {
+      "mention": "Webmention",
+      "reply": "Respondió vía Webmention",
+      "like": "Le gustó vía Webmention",
+      "repost": "Republicó vía Webmention",
+      "bookmark": "Guardó en marcadores vía Webmention",
+      "rsvp": "Confirmó asistencia vía Webmention",
+      "follow": "Siguió vía Webmention"
+    }
+  },
+  "mentions": {
+    "title": "Menciones",
+    "empty": "Aún no hay menciones.",
+    "emptyFiltered": "Ninguna mención coincide con los filtros seleccionados.",
+    "loadMore": "Cargar más",
+    "private": "Privada",
+    "filters": {
+      "all": "Todas",
+      "private": "Solo privadas",
+      "sources": "Filtrar por origen",
+      "visibility": "Filtrar por visibilidad"
+    },
+    "sources": {
+      "local": "Locales",
+      "activitypub": "ActivityPub",
+      "webmention": "Webmentions"
+    },
+    "errors": {
+      "loadFailed": "No se pudieron cargar las menciones: {message}"
+    }
+  },
+  "notifications": {
+    "title": "Notificaciones",
+    "empty": "Aún no hay notificaciones.",
+    "emptyUnread": "No hay notificaciones sin leer.",
+    "emptyFiltered": "Ninguna notificación coincide con los tipos seleccionados.",
+    "filters": {
+      "all": "Todas",
+      "unread": "Sin leer",
+      "types": "Filtrar por tipo"
+    },
+    "markAllRead": "Marcar todo como leído",
+    "unreadCount": "{count} notificación sin leer | {count} notificaciones sin leer",
+    "toast": "{actor} {action}",
+    "markRead": "Marcar como leída",
+    "markUnread": "Marcar como no leída",
+    "select": "Seleccionar",
+    "done": "Hecho",
+    "selectAll": "Seleccionar todo",
+    "selectRow": "Seleccionar notificación",
+    "dismiss": "Descartar",
+    "deleteSelected": "Eliminar seleccionadas",
+    "clearAll": "Borrar todas",
+    "clearAllTitle": "¿Borrar todas las notificaciones?",
+    "clearAllConfirm": "Esto elimina permanentemente todas las notificaciones. No se puede deshacer.",
+    "loadMore": "Cargar más",
+    "types": {
+      "follow": "empezó a seguirte",
+      "followObject": "siguió tu {object}",
+      "followRequest": "solicitó seguirte",
+      "like": "le gusta tu {object}",
+      "boost": "impulsó tu {object}",
+      "quote": "citó tu {object}",
+      "reply": "respondió a tu {object}",
+      "mention": "te mencionó",
+      "share": "compartió {object} contigo",
+      "unknown": "te envió una notificación",
+      "webmention": "mencionó tu {object}",
+      "activity": "compartió {object}",
+      "activityCreate": "compartió {object}",
+      "activityLike": "le gusta {object}",
+      "activityAnnounce": "impulsó {object}",
+      "activityReply": "respondió a {object}",
+      "activityQuote": "citó {object}",
+      "report": "envió un informe",
+      "download": "tu descarga está lista"
+    },
+    "objects": {
+      "post": "publicación",
+      "track": "pista",
+      "album": "álbum",
+      "artist": "artista",
+      "playlist": "lista de reproducción",
+      "library": "biblioteca",
+      "radio": "radio",
+      "file": "archivo"
+    },
+    "objectsWithArticle": {
+      "post": "una publicación",
+      "track": "una pista",
+      "album": "un álbum",
+      "artist": "un artista",
+      "playlist": "una lista de reproducción",
+      "library": "una biblioteca",
+      "radio": "una radio",
+      "file": "un archivo"
+    },
+    "someone": "Alguien",
+    "errors": {
+      "updateFailed": "No se pudieron actualizar las notificaciones: {message}",
+      "deleteFailed": "No se pudieron eliminar las notificaciones: {message}"
+    },
+    "settings": {
+      "title": "Configuración de notificaciones",
+      "hint": "Elige cómo quieres recibir notificaciones para cada tipo de actividad.",
+      "type": "Tipo",
+      "inApp": "En la app",
+      "email": "Correo electrónico",
+      "emailDigest": "Resumen diario",
+      "save": "Guardar preferencias",
+      "saved": "Preferencias de notificaciones guardadas.",
+      "saveFailed": "No se pudieron guardar las preferencias de notificaciones: {message}",
+      "loadFailed": "No se pudieron cargar las preferencias de notificaciones: {message}",
+      "emailUnverified": "El envío por correo requiere una dirección verificada. Verifica tu correo electrónico para activar las notificaciones por correo.",
+      "push": {
+        "title": "Notificaciones nativas del sistema",
+        "hint": "Recibe notificaciones push del navegador en dispositivos compatibles aunque Songhive esté cerrado. Tu navegador pedirá permiso al activarlas.",
+        "enable": "Activar",
+        "disable": "Desactivar",
+        "unsupported": "Este navegador no admite notificaciones push.",
+        "status": {
+          "unsupported": "No admitidas por este navegador.",
+          "unavailable": "Las notificaciones push no están configuradas en esta instancia.",
+          "denied": "El permiso fue denegado. Activa las notificaciones en la configuración de tu navegador para usar esta función.",
+          "prompt": "Las notificaciones push están desactivadas.",
+          "subscribed": "Las notificaciones push están activadas.",
+          "loading": "Cargando…"
+        }
+      },
+      "typeNames": {
+        "follow": "Seguimientos",
+        "like": "Me gusta",
+        "boost": "Impulsos",
+        "quote": "Citas",
+        "reply": "Respuestas",
+        "mention": "Menciones",
+        "share": "Compartidos",
+        "webmention": "Webmentions",
+        "activity": "Actividad de usuarios",
+        "report": "Informes",
+        "download": "Descargas"
+      }
+    },
+    "onItem": "en {title}",
+    "followRequest": {
+      "accept": "Aceptar",
+      "reject": "Rechazar",
+      "accepted": "Aceptada",
+      "rejected": "Rechazada",
+      "error": "No se pudo resolver la solicitud de seguimiento: {message}"
+    }
+  },
+  "remote": {
+    "badge": "Remoto",
+    "activityTitle": "Actividad remota",
+    "resourceTitle": "{kind} remoto",
+    "viewOriginal": "Ver el original en {domain}",
+    "actorUnavailable": "Este perfil remoto ya no está disponible.",
+    "objectUnavailable": "Este contenido remoto ya no está disponible.",
+    "cachedActivities": "Actividades",
+    "noCachedActivities": "No hay actividades en caché para este perfil remoto.",
+    "lookupBusy": "Buscando en el Fediverso…",
+    "lookupFailed": "La búsqueda remota falló.",
+    "seeOnFediverse": "Ver {resource} en el Fediverso",
+    "kinds": {
+      "track": "pista",
+      "album": "álbum",
+      "artist": "artista",
+      "playlist": "lista de reproducción",
+      "library": "biblioteca"
+    },
+    "follow": "Seguir {kind}",
+    "unfollow": "Dejar de seguir",
+    "followRequested": "Seguimiento solicitado",
+    "followSuccess": "Solicitud de seguimiento enviada.",
+    "unfollowSuccess": "Dejado de seguir.",
+    "followError": "No se pudo actualizar el seguimiento: {message}",
+    "partOf": "Parte de",
+    "items": "Contenido",
+    "interactions": "Interacciones",
+    "viewResource": "Ver recurso remoto",
+    "libraryItems": "Elementos federados",
+    "favoritesTitle": "Favoritos federados",
+    "collectedTitle": "{kind} remotos en tu colección",
+    "hostedOn": "Alojado en {domain}"
+  },
+  "embed": {
+    "unavailable": "Este contenido no está disponible.",
+    "openIn": "Abrir en {name}"
+  },
+  "moderation": {
+    "mute": "Silenciar",
+    "unmute": "Dejar de silenciar",
+    "block": "Bloquear",
+    "unblock": "Desbloquear",
+    "limit": "Limitar",
+    "suspend": "Suspender",
+    "clear": "Quitar moderación",
+    "defederate": "Desfederar",
+    "followersOnly": "Solo seguidores",
+    "apply": "Aplicar",
+    "actionApplied": "Acción de moderación aplicada.",
+    "mutedBadge": "Silenciado",
+    "blockedBadge": "Bloqueado",
+    "limitedBadge": "Limitado",
+    "suspendedBadge": "Suspendido",
+    "limitedNotice": "Esta cuenta ha sido limitada por los moderadores de esta instancia.",
+    "showAnyway": "Mostrar de todos modos",
+    "reason": "Motivo (opcional)",
+    "reasonPlaceholder": "¿Por qué se toma esta acción?",
+    "muteConfirmTitle": "Silenciar usuario",
+    "muteConfirmMessage": "¿Silenciar a {name}? Su actividad se ocultará para ti, pero seguirá viendo la tuya.",
+    "blockConfirmTitle": "Bloquear usuario",
+    "blockConfirmMessage": "¿Bloquear a {name}? No podrá ver tu actividad ni interactuar contigo, y los seguimientos existentes se eliminarán.",
+    "mutedUsers": "Usuarios silenciados",
+    "mutesHint": "La actividad de los usuarios silenciados se oculta para ti; ellos siguen recibiendo la tuya.",
+    "noMutes": "No hay usuarios silenciados.",
+    "blockedUsers": "Usuarios bloqueados",
+    "blocksHint": "Los usuarios bloqueados no pueden ver tu actividad ni interactuar contigo.",
+    "noBlocks": "No hay usuarios bloqueados.",
+    "adminTitle": "Moderación",
+    "usersSection": "Moderación de usuarios",
+    "instancesSection": "Moderación de instancias",
+    "actorUrlLabel": "Actor",
+    "actorUrlHint": "Nombre de usuario local, identificador {'@'}usuario{'@'}dominio, o URL del actor.",
+    "actionLabel": "Acción",
+    "domainLabel": "Dominio",
+    "domainHint": "Dominio de la instancia remota, p. ej. mastodon.social.",
+    "limitedUsers": "Usuarios limitados",
+    "limitHint": "Los seguimientos requieren aprobación; las actividades solo llegan a sus seguidores.",
+    "noLimited": "No hay usuarios limitados.",
+    "suspendedUsers": "Usuarios suspendidos",
+    "suspendHint": "No pueden interactuar ni recibir actividad; todas las relaciones de seguimiento locales se cortan.",
+    "noSuspended": "No hay usuarios suspendidos.",
+    "defederatedInstances": "Instancias desfederadas",
+    "defederateHint": "Toda la federación con la instancia se corta; sus actores quedan ocultos.",
+    "noDefederated": "No hay instancias desfederadas.",
+    "followersOnlyInstances": "Instancias de solo seguidores",
+    "followersOnlyHint": "Las actividades solo se entregan a usuarios locales que siguen al autor.",
+    "noFollowersOnly": "No hay instancias de solo seguidores.",
+    "report": "Informar",
+    "reportTitle": "Informar sobre un usuario",
+    "reportReason": "¿Por qué informas sobre esta cuenta?",
+    "reportReasons": {
+      "spam": "Spam",
+      "harassment": "Acoso",
+      "copyright": "Violación de derechos de autor",
+      "illegal": "Contenido ilegal",
+      "other": "Otro"
+    },
+    "reportComment": "Comentarios adicionales (opcional)",
+    "reportCommentPlaceholder": "¿Hay algo más que los moderadores deban saber?",
+    "forwardToRemote": "Reenviar también a {domain}",
+    "reportSubmit": "Enviar informe",
+    "reportSubmitted": "Informe enviado. Gracias."
+  },
+  "outputs": {
+    "title": "Salidas",
+    "thisDevice": "Este dispositivo",
+    "select": "Salida de reproducción",
+    "output": "Salida",
+    "new": "Nueva salida",
+    "newTitle": "Nueva salida",
+    "editTitle": "Editar salida",
+    "name": "Nombre",
+    "provider": "Proveedor",
+    "enabled": "Activada",
+    "status": "Estado",
+    "streamUrl": "URL del stream",
+    "ok": "OK",
+    "test": "Probar",
+    "testSuccess": "La configuración de la salida es válida.",
+    "testFailed": "La prueba de la salida falló.",
+    "noProviders": "No hay proveedores de salida disponibles.",
+    "noOutputs": "Aún no hay salidas de servidor configuradas.",
+    "fieldRequired": "{field} es obligatorio.",
+    "createSuccess": "Salida creada.",
+    "saveSuccess": "Salida guardada.",
+    "saveError": "No se pudo guardar la salida: {message}",
+    "deleteSuccess": "Salida eliminada.",
+    "deleteError": "No se pudo eliminar la salida: {message}",
+    "deleteConfirm": "¿Eliminar la salida \"{name}\"?",
+    "loadError": "No se pudieron cargar las salidas: {message}"
+  },
+  "downloads": {
+    "title": "Descargas",
+    "empty": "Aún no hay descargas. Selecciona pistas o abre un álbum, artista o lista y elige Descargar.",
+    "queued": "Descarga \"{label}\" en cola — recibirás una notificación cuando esté lista.",
+    "requestFailed": "No se pudo encolar la descarga: {message}",
+    "m3uFailed": "No se pudo exportar el archivo de lista: {message}",
+    "downloadFailed": "No se pudo descargar el archivo: {message}",
+    "deleteFailed": "No se pudo eliminar el archivo: {message}",
+    "clearCompleted": "Limpiar completadas",
+    "clearCompletedConfirm": "¿Eliminar todas las descargas finalizadas? Los archivos se borrarán.",
+    "cleared": "Se limpiaron {count} descarga(s).",
+    "itemCount": "{count} elemento | {count} elementos",
+    "itemErrors": "{count} elemento no pudo incluirse | {count} elementos no pudieron incluirse",
+    "refresh": "Actualizar",
+    "status": {
+      "pending": "En cola",
+      "processing": "Generando…",
+      "ready": "Lista",
+      "failed": "Fallida"
+    }
+  }
+}

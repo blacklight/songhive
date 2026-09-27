@@ -96,6 +96,31 @@ describe("i18n", () => {
     expect(i18n.global.t("player.shuffle")).toBe("Casuale");
   });
 
+  it("loadLocale loads Spanish messages", async () => {
+    expect(await loadLocale("es")).toBe(true);
+    i18n.global.locale.value = "es" as "en";
+    expect(i18n.global.t("common.save")).toBe("Guardar");
+    expect(i18n.global.t("browse.entities.artists")).toBe("Artistas");
+    expect(i18n.global.t("player.shuffle")).toBe("Aleatorio");
+  });
+
+  it("detects a Spanish browser locale", async () => {
+    stubBrowserLanguages(["es-MX", "en"]);
+    await initializeI18n();
+    expect(i18n.global.locale.value).toBe("es");
+    expect(document.documentElement.lang).toBe("es");
+    expect(document.documentElement.dir).toBe("ltr");
+  });
+
+  it("applies Spanish plural forms", async () => {
+    await loadLocale("es");
+    i18n.global.locale.value = "es" as "en";
+    const key = "browse.detail.trackCount";
+    expect(i18n.global.t(key, 0)).toBe("Sin pistas");
+    expect(i18n.global.t(key, 1)).toBe("1 pista");
+    expect(i18n.global.t(key, 5)).toBe("5 pistas");
+  });
+
   it("loadLocale loads Arabic messages", async () => {
     expect(await loadLocale("ar")).toBe(true);
     i18n.global.locale.value = "ar" as "en";

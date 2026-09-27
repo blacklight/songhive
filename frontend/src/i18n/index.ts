@@ -5,8 +5,9 @@ const STORAGE_LOCALE_KEY = "songhive.locale";
 
 const localeLoaders: Record<string, () => Promise<Record<string, unknown>>> = {
   en: () => Promise.resolve(en),
-  it: () => import("./locales/it.json").then((m) => m.default),
   ar: () => import("./locales/ar.json").then((m) => m.default),
+  es: () => import("./locales/es.json").then((m) => m.default),
+  it: () => import("./locales/it.json").then((m) => m.default),
 };
 
 const RTL_LOCALES = new Set([
