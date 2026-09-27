@@ -30,6 +30,7 @@ import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useDownloadArchive } from "@/composables/useDownloadArchive";
+import { useM3uExport } from "@/composables/useM3uExport";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useFeedLinks } from "@/composables/useFeedLinks";
 import type { QueueTrack } from "@/player/types";
@@ -193,6 +194,7 @@ const {
 
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 const { requestArchive } = useDownloadArchive();
+const { exportM3u } = useM3uExport();
 
 const canRemove = computed(() => canManage.value);
 
@@ -283,6 +285,13 @@ const actions = computed(() => [
     visible: authStore.isAuthenticated,
   },
   {
+    key: "m3u",
+    label: t("common.downloadM3u"),
+    icon: "file-audio",
+    variant: "secondary" as const,
+    visible: true,
+  },
+  {
     key: "edit",
     label: t("common.edit"),
     icon: "pen-to-square",
@@ -321,6 +330,9 @@ async function onAction(key: string) {
       break;
     case "download":
       await requestArchive({ playlist_id: playlist.value.id });
+      break;
+    case "m3u":
+      await exportM3u("playlists", playlist.value.id, canManage.value);
       break;
     case "edit":
       await router.push({

@@ -1,5 +1,5 @@
 import { ApiError, apiRequest } from "./client";
-import { buildUrl } from "./config";
+import { API_PREFIX, buildUrl } from "./config";
 
 export type ArchiveStatus = "pending" | "processing" | "ready" | "failed";
 export type ArchiveItemKind = "track" | "remote" | "episode";
@@ -71,6 +71,19 @@ export function clearCompletedArchives(): Promise<{ cleared: number }> {
   });
 }
 
+async function throwResponseError(response: Response): Promise<never> {
+  let parsed: unknown = null;
+  const text = await response.text();
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+  }
+  throw await ApiError.fromResponse(response, parsed);
+}
+
 /**
  * Fetch a ready archive's ZIP and trigger a browser download.
  *
@@ -86,16 +99,7 @@ export async function downloadArchiveFile(
     credentials: "same-origin",
   });
   if (!response.ok) {
-    let parsed: unknown = null;
-    const text = await response.text();
-    if (text) {
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = null;
-      }
-    }
-    throw await ApiError.fromResponse(response, parsed);
+    await throwResponseError(response);
   }
 
   const blob = await response.blob();
@@ -104,6 +108,61 @@ export async function downloadArchiveFile(
     const link = document.createElement("a");
     link.href = objectUrl;
     link.download = `${archive.label || "download"}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+export type M3uAccess = "exclude" | "token";
+
+function contentDispositionFilename(disposition: string): string | null {
+  const encoded = /filename\*=(?:UTF-8''|utf-8'')([^;]+)/i.exec(disposition);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      return null;
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(disposition);
+  return plain ? plain[1].trim() : null;
+}
+
+/**
+ * Fetch an M3U export of a playlist or album and trigger a browser download.
+ *
+ * Same-origin fetch carries the HttpOnly auth cookies automatically.
+ * ``access="token"`` embeds share tokens in the stream URLs of tracks that
+ * are not anonymously playable (the server requires manage rights or a valid
+ * container share token); ``"exclude"`` simply drops those entries.
+ */
+export async function downloadM3u(
+  kind: "albums" | "playlists",
+  id: string,
+  options?: { access?: M3uAccess },
+): Promise<void> {
+  const response = await fetch(
+    buildUrl(`${API_PREFIX}/${kind}/${id}/m3u`, {
+      access: options?.access === "token" ? "token" : undefined,
+    }),
+    { credentials: "same-origin" },
+  );
+  if (!response.ok) {
+    await throwResponseError(response);
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download =
+      contentDispositionFilename(
+        response.headers.get("content-disposition") ?? "",
+      ) ?? "export.m3u";
     document.body.appendChild(link);
     link.click();
     link.remove();

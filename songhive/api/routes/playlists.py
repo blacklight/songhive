@@ -28,7 +28,7 @@ from ...models.audit_log import AuditTargetType
 from ...models.playlist import Playlist
 from ...models.podcast import PodcastEpisode
 from ...models.user import User
-from ...services import acl, audit, collection, deletion, music
+from ...services import acl, audit, collection, deletion, m3u, music
 from ...services import podcasts as podcasts_service
 from ...services import remote_content
 from ...services.auth import get_user_by_username
@@ -43,6 +43,7 @@ from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
 from .._sorting import SortParams, get_sort
 from ..deps import (
+    _get_share_token,
     get_config,
     get_current_user,
     get_current_user_optional,
@@ -50,8 +51,9 @@ from ..deps import (
     get_storage_service,
     require_access,
 )
-from ..middleware.rate_limit import rate_limit_account
+from ..middleware.rate_limit import rate_limit, rate_limit_account
 from ..responses import TrackResponse, TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
+from ..semantic_meta import public_base_url
 from ._common import TagListRequest
 from ._images import remove_entity_image, upload_entity_image
 from .remote import RemoteObjectResponse, _object_response, _playable_object_ids
@@ -405,6 +407,58 @@ async def get_playlist_stats(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
 
     return await music.get_playlist_stats(db, playlist_id, user=user)
+
+
+@router.get("/{playlist_id}/m3u", dependencies=[Depends(rate_limit)])
+async def export_playlist_m3u(
+    playlist_id: str,
+    request: Request,
+    access: Literal["exclude", "token"] = Query(
+        "exclude",
+        description=(
+            "How to handle tracks that are not anonymously playable: 'exclude' drops them "
+            "from the document; 'token' embeds a share token in their stream URLs, reusing "
+            "a valid container share token or minting a revocable one (manage rights "
+            "required)."
+        ),
+    ),
+    token: Optional[str] = Depends(_get_share_token),
+    user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
+    """Download the playlist as an extended M3U document.
+
+    Entries point at this instance's streaming endpoint, which M3U players
+    fetch without a session — anonymous callers only receive publicly
+    playable entries.
+    """
+    playlist = await music.get_playlist(db, playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+    if not await acl.can_access(db, user, "playlist", playlist_id, share_token=token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    try:
+        embed = await m3u.build_embedder(db, "playlist", playlist_id, user, token, access)
+    except m3u.M3uExportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    document, skipped = await m3u.playlist_document(
+        db,
+        playlist,
+        user,
+        config,
+        public_base_url(request, config),
+        embed=embed,
+    )
+    # Persist a lazily minted share token, if one was embedded.
+    await db.commit()
+
+    headers = {"Content-Disposition": m3u.content_disposition(m3u.download_filename(playlist.name))}
+    if skipped:
+        headers["X-M3U-Skipped"] = str(skipped)
+    return Response(content=document, media_type=m3u.M3U_MEDIA_TYPE, headers=headers)
 
 
 @router.patch("/{playlist_id}", response_model=PlaylistResponse)
