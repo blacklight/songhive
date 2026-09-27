@@ -277,6 +277,19 @@
   ``get_session()`` must therefore call ``await dispose_and_reset()`` in the
   same ``finally`` block that closes the session, so the next task starts with
   a fresh engine instead of reusing connections tied to a closed loop.
+- Async Redis clients have the same loop-binding constraint: a pooled
+  ``redis.asyncio`` connection awaited on a different loop raises
+  ``RuntimeError: ... Future attached to a different loop`` (this produced
+  intermittent 500s on unrelated API calls whenever Tornado-side code —
+  e.g. external-library stream resolution in `StreamHandler` — pulled the
+  shared client onto the Tornado loop). ``get_redis_client`` therefore keeps
+  one shared client per running event loop (``services/redis.py``
+  ``_loop_clients``) plus a ``_redis_client`` default for calls with no
+  running loop — that default is what ``app.state.redis`` points to and must
+  only ever serve the request loop. ``close_redis_client()`` closes the
+  current loop's client and the default; pass an explicit client to close a
+  dedicated instance. Never cache a client across ``asyncio.run`` calls and
+  never share ``app.state.redis`` with Tornado handlers.
 - ``EventWebSocket._connections`` is process-local: ``broadcast`` and
   ``send_to_user`` only reach sockets in their own process. Both also publish
   an envelope to the Redis pub/sub channel ``songhive:ws-events``, and the

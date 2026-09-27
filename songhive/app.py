@@ -182,6 +182,12 @@ def _run_tornado(config: SonghiveConfig):
                 future.result()
             finally:
                 a2wsgi_loop.call_soon_threadsafe(a2wsgi_loop.stop)
+
+            # get_redis_client is per-loop: close any client registered to
+            # this (Tornado) loop too, e.g. the one external-library stream
+            # resolution lazily creates. Runs after the a2wsgi close so the
+            # a2wsgi-bound default client is already gone from the registry.
+            loop.run_until_complete(close_redis_client())
         else:
             loop.run_until_complete(close_redis_client())
         loop.close()
