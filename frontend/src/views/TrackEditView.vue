@@ -181,11 +181,12 @@ async function onSubmit() {
       .map((name) => name.trim())
       .filter((name) => name.length > 0);
   }
-
-  body.publish =
-    publish.value &&
-    instanceStore.federationEnabled &&
-    visibility.value === "public";
+  if (fieldEditable("publish")) {
+    body.publish =
+      publish.value &&
+      instanceStore.federationEnabled &&
+      visibility.value === "public";
+  }
 
   if (canRenameFile.value) {
     body.filename = filename.value.trim() || track.value?.filename || null;
