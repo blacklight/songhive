@@ -21,6 +21,8 @@ import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import type { Visibility } from "@/api/libraries";
 import { parseNumber, toVisibility } from "@/utils/entity";
+import { isFieldEditable, isProviderManaged } from "@/utils/editableFields";
+import { providerDisplayName } from "@/utils/providerName";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
@@ -52,6 +54,14 @@ const coverError = ref<string | null>(null);
 const { canManage } = useCanManage(
   computed(() => album.value?.owner_id ?? null),
 );
+
+const editableFields = computed(() => album.value?.editable_fields ?? null);
+const providerManaged = computed(() => isProviderManaged(editableFields.value));
+const managedByLabel = computed(() =>
+  providerDisplayName(album.value?.external_provider_type),
+);
+const fieldEditable = (cap: string) =>
+  isFieldEditable(editableFields.value, cap);
 
 const { tags, resetTags, syncTags } = useEntityTags();
 const { genres, resetGenres, syncGenres } = useEntityGenres();
@@ -101,23 +111,27 @@ async function load() {
 }
 
 async function onSubmit() {
-  if (!title.value.trim()) return;
+  if (fieldEditable("title") && !title.value.trim()) return;
 
   isSaving.value = true;
   error.value = null;
 
+  // Provider-managed fields are sent only when editable — the backend
+  // rejects locked fields (422) merely for being present in the payload.
   const body: AlbumUpdate = {
-    title: title.value.trim(),
-    release_year: parseNumber(releaseYear.value),
-    description: description.value.trim() || null,
-    genre: genres.value.join("; ") || null,
     visibility: visibility.value,
   };
+  if (fieldEditable("title")) body.title = title.value.trim();
+  if (fieldEditable("release_year"))
+    body.release_year = parseNumber(releaseYear.value);
+  if (fieldEditable("description"))
+    body.description = description.value.trim() || null;
+  if (fieldEditable("genres")) body.genre = genres.value.join("; ") || null;
 
   try {
     await updateAlbum(albumId.value, body);
-    await syncTags("albums", albumId.value);
-    await syncGenres("albums", albumId.value);
+    if (fieldEditable("tags")) await syncTags("albums", albumId.value);
+    if (fieldEditable("genres")) await syncGenres("albums", albumId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/albums/${albumId.value}`);
   } catch (err) {
@@ -231,27 +245,40 @@ watch(
         {{ t("browse.edit.editAlbum") }}
       </AppPageTitle>
 
+      <p
+        v-if="providerManaged"
+        class="album-edit-view__provider-note"
+        role="note"
+      >
+        <i class="fa-solid fa-cloud" aria-hidden="true" />
+        {{ t("browse.edit.providerManaged", { provider: managedByLabel }) }}
+      </p>
+
       <form class="album-edit-view__form" @submit.prevent="onSubmit">
         <AppInput
           v-model="title"
           :label="t('browse.edit.title')"
           :required="true"
+          :disabled="!fieldEditable('title')"
         />
         <AppInput
           v-model="releaseYear"
           type="number"
           :label="t('browse.edit.releaseYear')"
+          :disabled="!fieldEditable('release_year')"
         />
         <AppInput
           v-model="description"
           as="textarea"
           :label="t('browse.edit.description')"
+          :disabled="!fieldEditable('description')"
         />
         <GenreInput
           v-if="canManage"
           v-model="genres"
           :placeholder="t('genres.placeholder')"
           :aria-label="t('genres.ariaLabel')"
+          :disabled="!fieldEditable('genres')"
         />
         <AppSelect
           v-model="visibility"
@@ -264,6 +291,7 @@ watch(
           v-model="tags"
           :placeholder="t('tags.placeholder')"
           :aria-label="t('tags.label')"
+          :disabled="!fieldEditable('tags')"
         />
 
         <div class="album-edit-view__actions">
@@ -303,6 +331,7 @@ watch(
           accept="image/*"
           :loading="isUploadingCover"
           :removing="isRemovingCover"
+          :disabled="!fieldEditable('image')"
           :error="coverError ?? undefined"
           @upload="onUploadCover"
           @remove="onRemoveCover"
@@ -338,6 +367,18 @@ watch(
 .album-edit-view__title {
   margin: 0;
   font-size: 1.75rem;
+}
+
+.album-edit-view__provider-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-secondary);
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
 }
 
 .album-edit-view__form {

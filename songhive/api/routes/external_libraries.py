@@ -26,10 +26,19 @@ from sqlalchemy.orm import selectinload
 
 from ...config.schema import SonghiveConfig
 from ...external.base import ExternalLibraryAdapter
+from ...external.device_auth import (
+    DeviceAuthError,
+)
+from ...external.device_auth import begin_flow as begin_device_auth_flow
+from ...external.device_auth import complete_flow as complete_device_auth_flow
+from ...external.device_auth import device_auth_supported, get_device_auth_provider, pkce_paste_supported
+from ...external.device_auth import poll_flow as poll_device_auth_flow
 from ...external.errors import (
     ExternalItemNotFound,
+    ExternalLibraryError,
     UnsupportedExternalOperation,
 )
+from ...external.materialize import materialize_provider_entity
 from ...external.oauth import (
     OAuthFlowError,
     begin_flow,
@@ -247,6 +256,8 @@ class ExternalProviderResponse(BaseModel):
     capabilities_summary: dict
     oauth_supported: bool = False
     oauth_callback_url: Optional[str] = None
+    device_auth_supported: bool = False
+    pkce_paste_supported: bool = False
 
 
 class ExternalOAuthBeginRequest(BaseModel):
@@ -276,6 +287,57 @@ class ExternalOAuthClaimResponse(BaseModel):
 
     provider_type: str
     config: dict
+
+
+class ExternalDeviceAuthBeginRequest(BaseModel):
+    """Request body for starting a device-auth or PKCE-paste flow."""
+
+    provider_type: str
+    config: dict = {}
+    external_library_id: Optional[str] = None
+    mode: Literal["device", "pkce"] = "device"
+
+
+class ExternalDeviceAuthBeginResponse(BaseModel):
+    """Challenge data for an in-progress device-auth/PKCE flow."""
+
+    state: str
+    mode: Literal["device", "pkce"]
+    user_code: Optional[str] = None
+    verification_uri: Optional[str] = None
+    verification_uri_complete: Optional[str] = None
+    authorize_url: Optional[str] = None
+    expires_in: Optional[int] = None
+    interval: Optional[int] = None
+
+
+class ExternalDeviceAuthPollRequest(BaseModel):
+    """Request body for one device-auth poll."""
+
+    state: str
+
+
+class ExternalDeviceAuthPollResponse(BaseModel):
+    """Outcome of a single device-auth poll."""
+
+    status: Literal["pending", "slow_down", "granted", "expired", "denied", "unknown"]
+    retry_after: Optional[float] = None
+    detail: Optional[str] = None
+
+
+class ExternalDeviceAuthCompleteRequest(BaseModel):
+    """Request body for claiming a granted flow or submitting a PKCE URL."""
+
+    state: str
+    redirect_url: Optional[str] = None
+
+
+class ExternalDeviceAuthCompleteResponse(BaseModel):
+    """Granted provider config fragment from a completed device-auth flow."""
+
+    provider_type: str
+    config: dict
+    display: dict = {}
 
 
 def _utcnow() -> datetime:
@@ -653,6 +715,8 @@ async def list_providers(
                 capabilities_summary=summary,
                 oauth_supported=oauth_supported(provider_type),
                 oauth_callback_url=(_oauth_callback_url(request) if oauth_supported(provider_type) else None),
+                device_auth_supported=device_auth_supported(provider_type),
+                pkce_paste_supported=pkce_paste_supported(provider_type),
             )
         )
 
@@ -916,6 +980,159 @@ async def claim_external_oauth(
     )
 
 
+@router.post(
+    "/device-auth/begin",
+    response_model=ExternalDeviceAuthBeginResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def begin_external_device_auth(
+    body: ExternalDeviceAuthBeginRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Start a device-authorization or paste-redirect PKCE flow."""
+    provider = get_device_auth_provider(body.provider_type)
+    if (
+        provider is None
+        or (body.mode == "device" and not provider.supports_device_code)
+        or (body.mode == "pkce" and not provider.supports_pkce)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Provider does not support this auth flow: {body.provider_type}",
+        )
+
+    config = dict(body.config or {})
+    if body.external_library_id:
+        external_library = await _load_external_library(db, body.external_library_id)
+        if external_library is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        if external_library.provider_type != body.provider_type:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Provider type does not match the external library",
+            )
+        if external_library.scope == "admin" and not current_user.is_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        if (
+            external_library.scope == "user"
+            and external_library.created_by_id != current_user.id
+            and not current_user.is_admin
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        config = _merge_config_preserving_redacted(
+            config,
+            _decrypt_external_config(external_library.config),
+        )
+    elif not _provider_allowed_for_create(
+        body.provider_type,
+        current_user,
+        request.app.state.config,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Provider type not allowed",
+        )
+
+    try:
+        result = await begin_device_auth_flow(
+            redis,
+            provider,
+            user_id=str(current_user.id),
+            config=config,
+            mode=body.mode,
+            external_library_id=body.external_library_id,
+        )
+    except DeviceAuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="external_library.device_auth_begin",
+        target_type=AuditTargetType.EXTERNAL_LIBRARY,
+        target_id=body.external_library_id or body.provider_type,
+        details={
+            "provider_type": body.provider_type,
+            "mode": body.mode,
+            "external_library_id": body.external_library_id,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+
+    return ExternalDeviceAuthBeginResponse(
+        state=result.state,
+        mode=result.mode,
+        user_code=result.user_code,
+        verification_uri=result.verification_uri,
+        verification_uri_complete=result.verification_uri_complete,
+        authorize_url=result.authorize_url,
+        expires_in=result.expires_in,
+        interval=result.interval,
+    )
+
+
+@router.post(
+    "/device-auth/poll",
+    response_model=ExternalDeviceAuthPollResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def poll_external_device_auth(
+    body: ExternalDeviceAuthPollRequest,
+    current_user: User = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+):
+    """Perform one provider token poll for a pending device-auth flow."""
+    try:
+        outcome = await poll_device_auth_flow(redis, body.state, str(current_user.id))
+    except DeviceAuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    return ExternalDeviceAuthPollResponse(
+        status=outcome.status,
+        retry_after=outcome.retry_after,
+        detail=outcome.detail,
+    )
+
+
+@router.post(
+    "/device-auth/complete",
+    response_model=ExternalDeviceAuthCompleteResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def complete_external_device_auth(
+    body: ExternalDeviceAuthCompleteRequest,
+    current_user: User = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+):
+    """Claim a granted device flow or submit a PKCE redirect URL (one-time)."""
+    try:
+        result = await complete_device_auth_flow(
+            redis,
+            body.state,
+            str(current_user.id),
+            redirect_url=body.redirect_url,
+        )
+    except DeviceAuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return ExternalDeviceAuthCompleteResponse(
+        provider_type=result.provider_type,
+        config=result.config,
+        display=result.display,
+    )
+
+
 @router.get("/{external_library_id}", response_model=ExternalLibraryResponse)
 async def get_external_library(
     external_library_id: str,
@@ -1124,6 +1341,88 @@ async def sync_external_library_route(
         ) from exc
 
     return {"sync_run_id": run_id}
+
+
+class ExternalEntityImportRequest(BaseModel):
+    """Request body for materializing one provider entity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["track", "album", "artist", "playlist"]
+    provider_key: str
+
+
+class ExternalEntityImportResponse(BaseModel):
+    """Result of a provider-entity import."""
+
+    kind: str
+    provider_key: str
+    entity_id: str
+
+
+@router.post(
+    "/{external_library_id}/import",
+    response_model=ExternalEntityImportResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def import_external_entity(
+    external_library_id: str,
+    body: ExternalEntityImportRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Materialize one provider entity ("add to my collection").
+
+    Resolves the entity catalog-first — no provider API call when the payload
+    is already cached — and persists it through the sync materialization path
+    with ``membership="saved"``. This is the only route that turns transient
+    provider-search results into local rows.
+    """
+    external_library = await _load_external_library(db, external_library_id)
+    if external_library is None or external_library.scope != "user":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if external_library.created_by_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    if not external_library.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="External library is disabled",
+        )
+
+    config = _decrypt_external_config(external_library.config)
+    try:
+        entity = await materialize_provider_entity(
+            db,
+            external_library,
+            body.kind,
+            body.provider_key,
+            config,
+            current_user,
+        )
+    except UnsupportedExternalOperation as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=_sanitize_error(exc),
+        ) from exc
+    except ExternalLibraryError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=_sanitize_error(exc),
+        ) from exc
+
+    if entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Provider entity not found",
+        )
+
+    await db.commit()
+    return ExternalEntityImportResponse(
+        kind=body.kind,
+        provider_key=body.provider_key,
+        entity_id=str(entity.id),
+    )
 
 
 @router.get("/{external_library_id}/sync-runs", response_model=List[ExternalSyncRunResponse])

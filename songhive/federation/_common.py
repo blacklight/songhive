@@ -97,3 +97,38 @@ def get_stream_url(track: Track, domain: str) -> Optional[str]:
     """
     path = get_track_download_path(track)
     return f"https://{domain}{path}" if path is not None else None
+
+
+def _item_external_library(item: ExternalItem):
+    """Return the item's library when loaded, without implicit IO."""
+    if "external_library" in getattr(sa_inspect(item), "unloaded", frozenset()):
+        return None
+    return getattr(item, "external_library", None)
+
+
+def provider_browse_link(track: Track) -> Optional[str]:
+    """
+    Return the provider's canonical web URL when the track's audio bytes may
+    not be federated, else ``None``.
+
+    A provider can declare ``capabilities["limits"]["federate_audio"] =
+    False`` (e.g. TIDAL — remote servers must never fetch audio through the
+    instance); the returned link (e.g. ``tidal.com/browse/track/…``) is what
+    serializers attach instead of a media URL.
+    """
+    item = active_external_item(track)
+    if item is None:
+        return None
+    library = _item_external_library(item)
+    if library is None:
+        return None
+    limits = (library.capabilities or {}).get("limits") or {}
+    if limits.get("federate_audio", True):
+        return None
+    from ..external.registry import get_external_adapter
+
+    try:
+        adapter = get_external_adapter(library.provider_type)()
+    except Exception:
+        return None
+    return adapter.external_url(item.kind, item.provider_key)

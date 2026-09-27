@@ -21,6 +21,10 @@ import { useToastStore } from "@/stores/toast";
 import { useAuthStore } from "@/stores/auth";
 import { getApiErrorMessage } from "@/api/client";
 import { useCanManage } from "@/composables/useCanManage";
+import { useProviderSync } from "@/composables/useProviderSync";
+import { providerSyncPlaylist } from "@/api/providerSync";
+import { providerDisplayName } from "@/utils/providerName";
+import { formatDateTime } from "@/i18n";
 import { useCollectionItem } from "@/composables/useCollectionItem";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
@@ -113,6 +117,52 @@ const { canManage } = useCanManage(
 );
 
 const isPublic = computed(() => playlist.value?.visibility === "public");
+
+const {
+  syncStatus: providerSync,
+  isRefreshing: providerRefreshing,
+  isNeverFetched: providerNeverFetched,
+  canSync: canSyncProvider,
+  syncing: providerSyncing,
+  syncNow: syncProviderNow,
+} = useProviderSync({
+  kind: "playlist",
+  entityId: playlistId,
+  status: computed(() => playlist.value?.provider_sync),
+  canSync: isOwner,
+  sync: providerSyncPlaylist,
+  onRefreshed: () =>
+    Promise.all([refreshTracks(), loadStats(), loadPlaylist()]).then(
+      () => undefined,
+    ),
+  onError: (message) => toastStore.push({ type: "error", message }),
+});
+
+const providerLabel = computed(() =>
+  providerDisplayName(providerSync.value?.provider_type),
+);
+
+const providerSyncText = computed(() => {
+  const sync = providerSync.value;
+  if (!sync) return "";
+  if (sync.state === "refreshing") {
+    return t("browse.providerSync.refreshing", {
+      provider: providerLabel.value,
+    });
+  }
+  if (sync.state === "never_fetched") {
+    return t("browse.providerSync.loading", { provider: providerLabel.value });
+  }
+  if (sync.state === "error") {
+    return t("browse.providerSync.error", { provider: providerLabel.value });
+  }
+  return sync.fetched_at
+    ? t("browse.providerSync.updated", {
+        provider: providerLabel.value,
+        time: formatDateTime(sync.fetched_at),
+      })
+    : t("browse.providerSync.from", { provider: providerLabel.value });
+});
 
 const { collectionAction, toggleCollection } = useCollectionItem(
   "playlist",
@@ -377,6 +427,27 @@ watch(
             :episode-count="stats.episode_count ?? 0"
             :total-duration="stats.total_duration"
           />
+          <span
+            v-if="providerSync"
+            class="playlist-view__provider-sync"
+            :class="{
+              'playlist-view__provider-sync--error':
+                providerSync.state === 'error',
+            }"
+          >
+            <i class="fa-solid fa-cloud" aria-hidden="true" />
+            {{ providerSyncText }}
+          </span>
+          <AppButton
+            v-if="providerSync && canSyncProvider"
+            size="sm"
+            variant="secondary"
+            icon="rotate"
+            :loading="providerSyncing || providerRefreshing"
+            @click="syncProviderNow"
+          >
+            {{ t("browse.providerSync.syncNow") }}
+          </AppButton>
         </div>
 
         <div class="playlist-view__header-actions">
@@ -432,10 +503,19 @@ watch(
           }}</AppButton>
         </div>
 
+        <p
+          v-if="providerRefreshing"
+          class="playlist-view__provider-refreshing"
+          role="status"
+        >
+          <i class="fa-solid fa-rotate fa-spin" aria-hidden="true" />
+          {{ t("browse.providerSync.refreshing", { provider: providerLabel }) }}
+        </p>
+
         <TrackList
           ref="trackListRef"
           :tracks="tracks"
-          :loading="tracksLoading"
+          :loading="tracksLoading || providerNeverFetched"
           :loading-more="tracksLoadingMore"
           :context="playlist.name"
           :removable-from="removableFrom"
@@ -615,6 +695,25 @@ watch(
   flex: 1;
   min-width: 12rem;
   max-width: 24rem;
+}
+
+.playlist-view__provider-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.playlist-view__provider-sync--error {
+  color: var(--color-danger);
+}
+
+.playlist-view__provider-refreshing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
 }
 
 .playlist-view__footer {

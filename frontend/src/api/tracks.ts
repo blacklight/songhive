@@ -3,7 +3,12 @@ import type { ActivityVisibility, AudioImportOptions } from "./activities";
 import { buildUrl } from "./config";
 import type { components } from "./types";
 
-export type TrackResponse = components["schemas"]["TrackResponse"];
+export type TrackResponse = components["schemas"]["TrackResponse"] & {
+  /** Public provider page URL for externally-backed tracks (e.g. TIDAL). */
+  external_url?: string | null;
+  /** Fields the provider allows editing locally (e.g. ["genres", "tags"]). */
+  editable_fields?: string[] | null;
+};
 export type TrackUpdate = components["schemas"]["TrackUpdate"];
 
 export function listTracks(params?: {

@@ -28,7 +28,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
-from ...external.errors import ExternalItemNotFound, ExternalLibraryError, UnsupportedExternalOperation
+from ...external.errors import (
+    ExternalItemNotFound,
+    ExternalLibraryError,
+    ExternalPermissionDenied,
+    UnsupportedExternalOperation,
+)
 from ...external.registry import get_external_adapter
 from ...external.types import ExternalItemRef
 from ...models import Track, Visibility
@@ -76,6 +81,8 @@ from ..middleware.rate_limit import rate_limit_account, rate_limit_user_or_ip
 from ..responses import (
     TrackResponse,
     _is_loaded,
+    _provider_external_url,
+    _provider_stream_policy,
     _track_image_url,
     _track_release_year,
     build_album_summary,
@@ -90,7 +97,7 @@ from ..routes.files import (
     apply_audio_import,
     plan_audio_import,
 )
-from ._common import AudioImportOptions, GenreListRequest, TagListRequest
+from ._common import AudioImportOptions, GenreListRequest, TagListRequest, enforce_editable_fields
 from ._images import remove_entity_image, upload_entity_image
 
 router = APIRouter(prefix="/tracks")
@@ -175,6 +182,23 @@ def _enqueue_track_enrichment(track_id: str, force: bool = True) -> bool:
         logger.warning("Could not enqueue MusicBrainz enrichment for %s: %s", track_id, exc)
         return False
 
+
+# ``TrackUpdate`` fields mapped onto provider ``editable_fields`` capability
+# names (provider-owned metadata is immutable; TIDAL allows only
+# ``genres``/``tags``). ``visibility`` is local ACL state and stays editable.
+_TRACK_UPDATE_FIELD_MAP = {
+    "title": "title",
+    "artist_name": "artist",
+    "album_title": "album",
+    "genre": "genres",
+    "track_number": "track_number",
+    "disc_number": "disc_number",
+    "release_year": "release_year",
+    "visibility": "visibility",
+    "filename": "filename",
+    "description": "description",
+    "extra_artists": "artists",
+}
 
 _TAG_SYNC_FIELDS = {
     "title",
@@ -453,6 +477,9 @@ async def _build_track_response(
     include: IncludeQuery,
     favorited_track_ids: Optional[Set[str]] = None,
     saved_ids: Optional[Set[str]] = None,
+    *,
+    db: Optional[AsyncSession] = None,
+    policy_cache: Optional[dict] = None,
 ) -> TrackResponse:
     """Build a TrackResponse with optional nested summaries."""
     artist = None
@@ -483,6 +510,8 @@ async def _build_track_response(
     can_rename_source: Optional[bool] = None
     filename: Optional[str] = None
     audio_url: Optional[str] = None
+    external_url: Optional[str] = None
+    editable_fields: Optional[List[str]] = None
 
     # A track is external when referenced by a file-backed ``ExternalTrack``
     # or by an entity-backed ``ExternalItem(kind="track")``; both expose the
@@ -502,7 +531,15 @@ async def _build_track_response(
             can_write_tags = bool(capabilities.get("write_tags"))
             can_rename_source = bool(capabilities.get("rename_source"))
             can_delete_source = bool(capabilities.get("delete_source"))
-        audio_url = f"/api/v1/tracks/{track.id}/download"
+            editable_fields = (capabilities.get("limits") or {}).get("editable_fields")
+            if db is not None and can_stream and _provider_stream_policy(external_library.provider_type):
+                from ...services.streaming import external_stream_allowed
+
+                if not await external_stream_allowed(db, external_library, user, cache=policy_cache):
+                    can_stream = False
+                    can_download = False
+                    external_url = _provider_external_url(external_library, external_ref)
+        audio_url = f"/api/v1/tracks/{track.id}/download" if can_stream is not False else None
         raw = external_ref.raw_metadata or {}
         display_path = raw.get("display_path") or external_ref.provider_key
         filename = Path(display_path).name
@@ -524,6 +561,7 @@ async def _build_track_response(
         description=track.description,
         extra_artists=list(track.extra_artists or []),
         audio_url=audio_url,
+        external_url=external_url,
         image_url=await _track_image_url(track, storage),
         release_year=_track_release_year(track),
         owner_id=owner_id,
@@ -546,6 +584,7 @@ async def _build_track_response(
         can_write_tags=can_write_tags,
         can_rename_source=can_rename_source,
         can_delete_source=can_delete_source,
+        editable_fields=editable_fields,
         created_at=track.created_at,
         updated_at=track.updated_at,
     )
@@ -568,6 +607,7 @@ async def download_track(
     request: Request,
     background_tasks: BackgroundTasks,
     disposition: Literal["inline", "attachment"] = Query("inline"),
+    user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     config: SonghiveConfig = Depends(get_config),
@@ -582,9 +622,11 @@ async def download_track(
         return await _download_stored_file_response(stored_file, disposition, storage)
 
     try:
-        stream = await resolve_external_download_stream(db, track_id)
+        stream = await resolve_external_download_stream(db, track_id, user=user)
     except ExternalItemNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ExternalPermissionDenied as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except UnsupportedExternalOperation as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
@@ -702,7 +744,13 @@ async def list_tracks(
         {str(t.id) for t in rows},
     )
     saved_ids = await collection.saved_item_ids(db, user, "track", {str(t.id) for t in rows})
-    return [await _build_track_response(t, user, storage, include, favorited_ids, saved_ids) for t in rows]
+    policy_cache: dict = {}
+    return [
+        await _build_track_response(
+            t, user, storage, include, favorited_ids, saved_ids, db=db, policy_cache=policy_cache
+        )
+        for t in rows
+    ]
 
 
 @router.get(
@@ -724,7 +772,7 @@ async def get_track(
 
     favorited_ids = await music.get_favorited_track_ids(db, user, {track_id})
     saved_ids = await collection.saved_item_ids(db, user, "track", {track_id})
-    return await _build_track_response(track, user, storage, include, favorited_ids, saved_ids)
+    return await _build_track_response(track, user, storage, include, favorited_ids, saved_ids, db=db)
 
 
 @router.patch("/{track_id}", response_model=TrackResponse)
@@ -749,6 +797,13 @@ async def update_track(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
+
+    await enforce_editable_fields(
+        db,
+        "track",
+        track_id,
+        (_TRACK_UPDATE_FIELD_MAP.get(field, field) for field in body.model_fields_set),
+    )
 
     previous_artist_id = track.artist_id
     previous_album_id = track.album_id
@@ -900,7 +955,7 @@ async def update_track(
     track = await music.get_track(db, track_id, include=set(include.values) | {"artist"})
     assert track  # for mypy
     saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
-    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids, db=db)
 
 
 @router.post("/{track_id}/image", response_model=TrackResponse)
@@ -923,6 +978,8 @@ async def upload_track_image(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
+
+    await enforce_editable_fields(db, "track", track_id, {"image"})
 
     stored = await upload_entity_image(
         db,
@@ -947,7 +1004,7 @@ async def upload_track_image(
     _enqueue_track_tag_sync(track_id)
 
     saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
-    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids, db=db)
 
 
 @router.delete("/{track_id}/image", response_model=TrackResponse)
@@ -970,6 +1027,8 @@ async def delete_track_image(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "track", track_id, {"image"})
+
     await remove_entity_image(track, "image_file_id")
 
     await audit.log_action(
@@ -985,7 +1044,7 @@ async def delete_track_image(
     _enqueue_track_tag_sync(track_id)
 
     saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
-    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids, db=db)
 
 
 @router.delete("/bulk", status_code=status.HTTP_200_OK, dependencies=[Depends(rate_limit_account)])
@@ -1265,6 +1324,8 @@ async def add_track_tags(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "track", track_id, {"tags"})
+
     try:
         await add_tags_to_entity(
             db,
@@ -1292,7 +1353,7 @@ async def add_track_tags(
     await db.commit()
     assert track  # for mypy
     saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
-    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids, db=db)
 
 
 @router.delete("/{track_id}/tags/{tag}", response_model=TrackResponse)
@@ -1316,6 +1377,8 @@ async def remove_track_tag(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "track", track_id, {"tags"})
+
     try:
         await remove_tag_from_entity(db, "track", track_id, tag)
     except ValueError as exc:
@@ -1337,7 +1400,7 @@ async def remove_track_tag(
     await db.commit()
     assert track  # for mypy
     saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
-    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids, db=db)
 
 
 @router.post("/{track_id}/genres", response_model=TrackResponse)
@@ -1360,6 +1423,8 @@ async def set_track_genres(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
+
+    await enforce_editable_fields(db, "track", track_id, {"genres"})
 
     try:
         normalised = []
@@ -1409,7 +1474,7 @@ async def set_track_genres(
         _enqueue_track_tag_sync(track_id)
 
     saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
-    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids, db=db)
 
 
 @router.delete("/{track_id}/genres/{genre}", response_model=TrackResponse)
@@ -1432,6 +1497,8 @@ async def remove_track_genre(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
+
+    await enforce_editable_fields(db, "track", track_id, {"genres"})
 
     try:
         current = split_genre_string(track.genre)
@@ -1475,4 +1542,4 @@ async def remove_track_genre(
         _enqueue_track_tag_sync(track_id)
 
     saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
-    return await _build_track_response(track, current_user, storage, include, None, saved_ids)
+    return await _build_track_response(track, current_user, storage, include, None, saved_ids, db=db)

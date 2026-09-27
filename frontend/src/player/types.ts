@@ -1,6 +1,11 @@
 import type { components } from "@/api/types";
 
-export type TrackResponse = components["schemas"]["TrackResponse"];
+export type TrackResponse = components["schemas"]["TrackResponse"] & {
+  /** Public provider page URL for externally-backed tracks (e.g. TIDAL). */
+  external_url?: string | null;
+  /** Fields the provider allows editing locally (e.g. ["genres", "tags"]). */
+  editable_fields?: string[] | null;
+};
 
 export type QueueTrack = TrackResponse & {
   artist_name: string;

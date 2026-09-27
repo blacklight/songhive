@@ -41,7 +41,16 @@ import {
   stripSecretConfigFields,
   stripSecretsFromConfigText,
 } from "@/utils/externalOAuth";
+import {
+  beginDeviceAuth,
+  completePkceDeviceAuth,
+  pollDeviceAuth,
+  type DeviceAuthFlow,
+  type DeviceAuthFlowStatus,
+  type DeviceAuthPrompt,
+} from "@/utils/externalDeviceAuth";
 import { getApiErrorMessage } from "@/api/client";
+import { providerDisplayName } from "@/utils/providerName";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -99,6 +108,19 @@ const oauthConnecting = ref(false);
 // provider's account id) are preserved.
 const oauthGrantedConfig = ref<Record<string, unknown>>({});
 
+// Device-authorization connect flow (TIDAL): the SPA shows the user code and
+// polls the backend until the session is granted, denied, or expires.
+const deviceAuthPrompt = ref<DeviceAuthPrompt | null>(null);
+const deviceAuthStatus = ref<DeviceAuthFlowStatus | null>(null);
+const deviceAuthDetail = ref<string | null>(null);
+const deviceAuthConnecting = ref(false);
+const deviceAuthRemaining = ref(0);
+const pkceMode = ref(false);
+const pkceRedirectUrl = ref("");
+const pkceCompleting = ref(false);
+let deviceAuthFlow: DeviceAuthFlow | null = null;
+let deviceAuthCountdown: ReturnType<typeof setInterval> | null = null;
+
 const providerType = ref("");
 const name = ref("");
 const configText = ref("{}");
@@ -125,6 +147,19 @@ const oauthCallbackUrl = computed(
     providers.value.find((p) => p.provider_type === providerType.value)
       ?.oauth_callback_url ??
     `${window.location.origin}/api/v1/external-libraries/oauth/callback`,
+);
+const selectedProvider = computed(() =>
+  providers.value.find((p) => p.provider_type === providerType.value),
+);
+const deviceAuthSupported = computed(
+  () => selectedProvider.value?.device_auth_supported === true,
+);
+const pkceSupported = computed(
+  () => selectedProvider.value?.pkce_paste_supported === true,
+);
+const providerLabel = computed(() => providerDisplayName(providerType.value));
+const deviceAuthNeedsReconnect = computed(
+  () => !isNew.value && library.value?.last_sync_status === "failed",
 );
 
 const configError = ref<string | null>(null);
@@ -326,6 +361,8 @@ function resetForm() {
 function onProviderTypeChanged(newType: string) {
   providerType.value = newType;
   oauthGrantedConfig.value = {};
+  pkceMode.value = false;
+  resetDeviceAuthPanel();
   resetProviderConfig();
 }
 
@@ -516,6 +553,120 @@ async function handleOAuthReturn() {
   }
 
   void router.replace({ path: route.path });
+}
+
+function stopDeviceAuthCountdown() {
+  if (deviceAuthCountdown !== null) {
+    clearInterval(deviceAuthCountdown);
+    deviceAuthCountdown = null;
+  }
+}
+
+function stopDeviceAuthFlow() {
+  deviceAuthFlow?.cancel();
+  deviceAuthFlow = null;
+  stopDeviceAuthCountdown();
+}
+
+function resetDeviceAuthPanel() {
+  stopDeviceAuthFlow();
+  deviceAuthPrompt.value = null;
+  deviceAuthStatus.value = null;
+  deviceAuthDetail.value = null;
+  deviceAuthRemaining.value = 0;
+  pkceRedirectUrl.value = "";
+  pkceCompleting.value = false;
+}
+
+function startDeviceAuthCountdown(expiresIn: number) {
+  stopDeviceAuthCountdown();
+  deviceAuthRemaining.value = expiresIn;
+  deviceAuthCountdown = setInterval(() => {
+    deviceAuthRemaining.value = Math.max(0, deviceAuthRemaining.value - 1);
+    if (deviceAuthRemaining.value === 0) stopDeviceAuthCountdown();
+  }, 1000);
+}
+
+async function onDeviceAuthGranted(result: {
+  config: Record<string, unknown>;
+  display?: Record<string, unknown>;
+}) {
+  oauthGrantedConfig.value = { ...oauthGrantedConfig.value, ...result.config };
+  for (const [key, value] of Object.entries(result.config)) {
+    providerConfig[key] = value;
+  }
+  resetDeviceAuthPanel();
+  toast.push({
+    type: "success",
+    message: t("pages.externalLibraries.deviceAuth.connected", {
+      provider: providerLabel.value,
+    }),
+  });
+  await onSubmit();
+}
+
+async function onConnectDeviceAuth() {
+  configError.value = null;
+  const validated = validateConfig();
+  if (!validated) return;
+
+  resetDeviceAuthPanel();
+  deviceAuthConnecting.value = true;
+  error.value = null;
+  try {
+    const prompt = await beginDeviceAuth(
+      providerType.value,
+      { ...oauthGrantedConfig.value, ...validated },
+      {
+        externalLibraryId: libraryId.value || undefined,
+        mode: pkceMode.value && pkceSupported.value ? "pkce" : "device",
+      },
+    );
+    deviceAuthPrompt.value = prompt;
+    startDeviceAuthCountdown(prompt.expiresIn);
+    if (prompt.mode === "pkce") {
+      deviceAuthStatus.value = "pending";
+    } else {
+      deviceAuthFlow = pollDeviceAuth(prompt, (update) => {
+        deviceAuthStatus.value = update.status;
+        if (update.detail) deviceAuthDetail.value = update.detail;
+        if (update.status === "granted" && update.granted) {
+          void onDeviceAuthGranted(update.granted);
+        } else if (["expired", "denied", "error"].includes(update.status)) {
+          stopDeviceAuthCountdown();
+        }
+      });
+    }
+  } catch (err) {
+    error.value = t("pages.externalLibraries.deviceAuth.failed", {
+      message:
+        getApiErrorMessage(err) ||
+        (err instanceof Error ? err.message : t("errors.unknown")),
+    });
+  } finally {
+    deviceAuthConnecting.value = false;
+  }
+}
+
+async function onCompletePkce() {
+  const prompt = deviceAuthPrompt.value;
+  if (!prompt || !pkceRedirectUrl.value.trim()) return;
+  pkceCompleting.value = true;
+  error.value = null;
+  try {
+    const result = await completePkceDeviceAuth(
+      prompt.state,
+      pkceRedirectUrl.value.trim(),
+    );
+    await onDeviceAuthGranted(result);
+  } catch (err) {
+    deviceAuthStatus.value = "error";
+    deviceAuthDetail.value =
+      getApiErrorMessage(err) ||
+      (err instanceof Error ? err.message : t("errors.unknown"));
+  } finally {
+    pkceCompleting.value = false;
+  }
 }
 
 async function onDelete() {
@@ -818,6 +969,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopSyncPolling();
+  stopDeviceAuthFlow();
 });
 </script>
 
@@ -1030,6 +1182,196 @@ onUnmounted(() => {
             v-model="includeInLibraryIndex"
             :label="t('pages.externalLibraries.includeInLibraryIndex')"
           />
+
+          <div
+            v-if="deviceAuthSupported"
+            class="external-library-edit-view__device-auth"
+          >
+            <template v-if="!deviceAuthPrompt">
+              <AppCheckbox
+                v-if="pkceSupported"
+                v-model="pkceMode"
+                :label="t('pages.externalLibraries.deviceAuth.pkceMode.label')"
+                :hint="t('pages.externalLibraries.deviceAuth.pkceMode.hint')"
+              />
+              <p
+                v-if="deviceAuthNeedsReconnect"
+                class="external-library-edit-view__device-auth-hint"
+              >
+                {{
+                  t("pages.externalLibraries.deviceAuth.reconnectHint", {
+                    provider: providerLabel,
+                  })
+                }}
+              </p>
+              <AppButton
+                type="button"
+                variant="secondary"
+                :loading="deviceAuthConnecting"
+                icon="link"
+                @click="onConnectDeviceAuth"
+              >
+                {{
+                  deviceAuthNeedsReconnect
+                    ? t("pages.externalLibraries.deviceAuth.reconnect", {
+                        provider: providerLabel,
+                      })
+                    : t("pages.externalLibraries.deviceAuth.connect", {
+                        provider: providerLabel,
+                      })
+                }}
+              </AppButton>
+            </template>
+
+            <template v-else-if="deviceAuthPrompt.mode === 'pkce'">
+              <i18n-t
+                keypath="pages.externalLibraries.deviceAuth.pkce.instructions"
+                tag="p"
+                scope="global"
+                class="external-library-edit-view__device-auth-hint"
+              >
+                <template #authorizeUrl>
+                  <a
+                    v-if="deviceAuthPrompt.authorizeUrl"
+                    :href="deviceAuthPrompt.authorizeUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >{{ deviceAuthPrompt.authorizeUrl }}</a
+                  >
+                </template>
+              </i18n-t>
+              <AppInput
+                v-model="pkceRedirectUrl"
+                :label="
+                  t('pages.externalLibraries.deviceAuth.pkce.redirectLabel')
+                "
+                :hint="
+                  t('pages.externalLibraries.deviceAuth.pkce.redirectHint')
+                "
+              />
+              <p
+                v-if="deviceAuthStatus === 'error' && deviceAuthDetail"
+                class="external-library-edit-view__device-auth-error"
+                role="alert"
+              >
+                {{ deviceAuthDetail }}
+              </p>
+              <div class="external-library-edit-view__device-auth-actions">
+                <AppButton
+                  type="button"
+                  :loading="pkceCompleting"
+                  :disabled="!pkceRedirectUrl.trim()"
+                  icon="check"
+                  @click="onCompletePkce"
+                >
+                  {{ t("pages.externalLibraries.deviceAuth.pkce.complete") }}
+                </AppButton>
+                <AppButton
+                  type="button"
+                  variant="ghost"
+                  @click="resetDeviceAuthPanel"
+                >
+                  {{ t("common.cancel") }}
+                </AppButton>
+              </div>
+            </template>
+
+            <template v-else>
+              <i18n-t
+                keypath="pages.externalLibraries.deviceAuth.instructions"
+                tag="p"
+                scope="global"
+                class="external-library-edit-view__device-auth-hint"
+              >
+                <template #verificationUrl>
+                  <a
+                    :href="
+                      deviceAuthPrompt.verificationUriComplete ??
+                      deviceAuthPrompt.verificationUri ??
+                      '#'
+                    "
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >{{
+                      deviceAuthPrompt.verificationUriComplete ??
+                      deviceAuthPrompt.verificationUri
+                    }}</a
+                  >
+                </template>
+                <template #userCode>
+                  <code class="external-library-edit-view__device-auth-code">{{
+                    deviceAuthPrompt.userCode
+                  }}</code>
+                </template>
+              </i18n-t>
+
+              <p
+                v-if="
+                  deviceAuthStatus === 'pending' ||
+                  deviceAuthStatus === 'slow_down'
+                "
+                class="external-library-edit-view__device-auth-status"
+                role="status"
+              >
+                <AppSpinner size="sm" />
+                {{
+                  t(
+                    deviceAuthStatus === "slow_down"
+                      ? "pages.externalLibraries.deviceAuth.slowDown"
+                      : "pages.externalLibraries.deviceAuth.waiting",
+                    { seconds: deviceAuthRemaining },
+                  )
+                }}
+              </p>
+              <p
+                v-else-if="deviceAuthStatus === 'expired'"
+                class="external-library-edit-view__device-auth-error"
+                role="alert"
+              >
+                {{ t("pages.externalLibraries.deviceAuth.expired") }}
+              </p>
+              <p
+                v-else-if="deviceAuthStatus === 'denied'"
+                class="external-library-edit-view__device-auth-error"
+                role="alert"
+              >
+                {{ t("pages.externalLibraries.deviceAuth.denied") }}
+              </p>
+              <p
+                v-else-if="deviceAuthStatus === 'error'"
+                class="external-library-edit-view__device-auth-error"
+                role="alert"
+              >
+                {{
+                  deviceAuthDetail ??
+                  t("pages.externalLibraries.deviceAuth.error")
+                }}
+              </p>
+
+              <div class="external-library-edit-view__device-auth-actions">
+                <AppButton
+                  v-if="
+                    deviceAuthStatus === 'expired' ||
+                    deviceAuthStatus === 'denied' ||
+                    deviceAuthStatus === 'error'
+                  "
+                  type="button"
+                  variant="secondary"
+                  icon="rotate-right"
+                  @click="onConnectDeviceAuth"
+                >
+                  {{ t("common.retry") }}
+                </AppButton>
+                <AppButton
+                  type="button"
+                  variant="ghost"
+                  @click="resetDeviceAuthPanel"
+                >
+                  {{ t("common.cancel") }}
+                </AppButton>
+              </div>
+            </template>
+          </div>
 
           <div class="external-library-edit-view__actions">
             <AppButton
@@ -1373,6 +1715,54 @@ onUnmounted(() => {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--color-text-muted);
+}
+
+.external-library-edit-view__device-auth {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-secondary);
+}
+
+.external-library-edit-view__device-auth-hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.external-library-edit-view__device-auth-code {
+  font-family: ui-monospace, monospace;
+  font-size: 1.05em;
+  font-weight: 700;
+  padding: 0 0.3em;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.external-library-edit-view__device-auth-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.external-library-edit-view__device-auth-error {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-danger);
+}
+
+.external-library-edit-view__device-auth-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .external-library-edit-view__loading {

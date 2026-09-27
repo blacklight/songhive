@@ -79,6 +79,7 @@ class TrackSummary(BaseModel):
     disc_number: Optional[int] = None
     duration: Optional[float] = None
     audio_url: Optional[str] = None
+    external_url: Optional[str] = None
     image_url: Optional[str] = None
     release_year: Optional[int] = None
     owner_id: Optional[str] = None
@@ -101,6 +102,7 @@ class TrackResponse(BaseModel):
     description: Optional[str] = None
     extra_artists: List[str] = []
     audio_url: Optional[str] = None
+    external_url: Optional[str] = None
     image_url: Optional[str] = None
     release_year: Optional[int] = None
     owner_id: Optional[str] = None
@@ -123,6 +125,9 @@ class TrackResponse(BaseModel):
     can_write_tags: Optional[bool] = None
     can_rename_source: Optional[bool] = None
     can_delete_source: Optional[bool] = None
+    # Provider-declared list of locally-editable fields (e.g. TIDAL allows
+    # only genres/tags); ``None`` for local or unrestricted tracks.
+    editable_fields: Optional[List[str]] = None
     # Exposed so list consumers can interleave remote entities under the
     # ``created_at``/``updated_at`` sort fields.
     created_at: Optional[datetime] = None
@@ -178,6 +183,30 @@ async def build_album_summary(
     )
 
 
+def _provider_stream_policy(provider_type: str) -> Optional[str]:
+    """Return the instance-configured stream policy for a provider, if any."""
+    try:
+        from ..config.loader import load_config
+
+        provider_cfg = getattr(load_config([]).external_libraries, provider_type, None)
+        policy = getattr(provider_cfg, "stream_policy", None)
+    except Exception:
+        return None
+    return policy if isinstance(policy, str) and policy else None
+
+
+def _provider_external_url(external_library, external_ref) -> Optional[str]:
+    """Return the provider's public browse URL for an entity, when known."""
+    try:
+        from ..external.registry import get_external_adapter
+
+        adapter = get_external_adapter(external_library.provider_type)()
+        kind = getattr(external_ref, "kind", None) or "track"
+        return adapter.external_url(kind, external_ref.provider_key)
+    except Exception:
+        return None
+
+
 def _track_release_year(track) -> Optional[int]:
     """Return the track's year, falling back to the album's year when loaded."""
     if track.release_year is not None:
@@ -201,18 +230,38 @@ async def _track_image_url(track, storage: StorageService) -> Optional[str]:
 async def build_track_summary(
     track,
     storage: StorageService,
+    *,
+    user=None,
+    session=None,
+    policy_cache: Optional[dict] = None,
 ) -> Optional[TrackSummary]:
-    """Build a TrackSummary, resolving the audio URL, cover, and effective year."""
+    """Build a TrackSummary, resolving the audio URL, cover, and effective year.
+
+    When ``session`` and ``user`` are provided, provider stream policies
+    (e.g. TIDAL ``stream_policy``) are applied to ``audio_url``.
+    """
     if track is None:
         return None
 
     audio_url = None
+    external_url = None
     if track.audio_file_id and _is_loaded(track, "audio_file") and track.audio_file:
         audio_url = await storage.get_url(track.audio_file)
     else:
         external_ref = getattr(track, "external_track", None) or getattr(track, "external_item", None)
         if external_ref is not None and external_ref.state == "active":
             audio_url = f"/api/v1/tracks/{track.id}/download"
+            external_library = getattr(external_ref, "external_library", None)
+            if (
+                session is not None
+                and external_library is not None
+                and _provider_stream_policy(external_library.provider_type)
+            ):
+                from ..services.streaming import external_stream_allowed
+
+                if not await external_stream_allowed(session, external_library, user, cache=policy_cache):
+                    audio_url = None
+                    external_url = _provider_external_url(external_library, external_ref)
 
     artist = None
     if _is_loaded(track, "artist") and track.artist is not None:
@@ -233,6 +282,7 @@ async def build_track_summary(
         disc_number=track.disc_number,
         duration=track.duration,
         audio_url=audio_url,
+        external_url=external_url,
         image_url=await _track_image_url(track, storage),
         release_year=_track_release_year(track),
         owner_id=track.owner_id,

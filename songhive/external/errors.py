@@ -47,3 +47,11 @@ class ExternalWriteBackError(ExternalLibraryError):
     def __init__(self, message: str = "", provider_key: Optional[str] = None) -> None:
         self.provider_key = provider_key
         super().__init__(message)
+
+
+class ExternalRateLimited(ExternalLibraryError):
+    """The provider throttled the request; retry after ``retry_after`` seconds."""
+
+    def __init__(self, message: str = "", retry_after: Optional[float] = None) -> None:
+        self.retry_after = retry_after
+        super().__init__(message)

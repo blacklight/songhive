@@ -267,7 +267,7 @@ allow_user_created_libraries = false
 
 # When allow_user_created_libraries is true, restrict non-admin users to these
 # provider types. Empty means all user_configurable providers are allowed.
-# Examples: ["local", "s3", "sftp", "webdav", "gdrive", "jellyfin"]
+# Examples: ["local", "s3", "sftp", "webdav", "gdrive", "jellyfin", "tidal"]
 allowed_user_providers = []
 
 # Provider types non-admin users may never configure, regardless of allow list.
@@ -301,6 +301,50 @@ stream_proxy_timeout_seconds = 60
 # is also accepted from environment variables.
 # Examples: ["/mnt/music", "/media"]
 local_roots = []
+
+[external_libraries.tidal]
+# Instance-level defaults for the TIDAL provider. Users connect their
+# account via the "Connect TIDAL" device-code flow; the optional client
+# overrides below only matter if the built-in tidalapi credentials stop
+# working for your instance.
+# client_id = ""
+# client_secret = ""
+# client_id_pkce = ""
+# client_secret_pkce = ""
+
+# Who may stream TIDAL tracks owned by another user's library:
+#   "owner"            - only the library owner (and admins); recommended.
+#   "listener_account" - non-owners stream through their own TIDAL library.
+#   "anyone"           - any ACL-authorized local user uses the owner's session.
+stream_policy = "owner"
+
+# Lazy playlist/album contents caching.
+playlist_ttl_seconds = 21600
+minimum_playlist_ttl_seconds = 300
+album_contents_ttl_seconds = 2592000
+catalog_ttl_seconds = 2592000
+lazy_contents_wait_seconds = 10
+
+# Per-account client-side request throttle for outbound TIDAL API calls.
+max_requests_per_second = 5
+
+# HTTP timeout applied to every outbound TIDAL request, including token
+# refresh. Bounds the failure mode where a stalled connection would park
+# a sync/stream task forever (requests has no built-in timeout).
+request_timeout_seconds = 30
+
+# TIDAL downloads (FLAC/AAC). Off by default: content is for the
+# subscriber's personal use under TIDAL's terms.
+allow_downloads = false
+download_format = "flac"
+
+# Remote-audio remux cache (segmented/Hi-Res streams, reusable by future
+# providers). Retention by age and a total size cap both apply. Per-library
+# "mpd_mode" chooses "segments" (default, zero storage, no seeking) or
+# "remux" (ffmpeg stream-copy into this cache, seekable).
+# remote_cache_dir = "/var/lib/songhive/remote-audio"
+remote_cache_max_bytes = 524288000
+remote_cache_retention_seconds = 604800
 
 [subsonic]
 # Subsonic/OpenSubsonic-compatible API adapter mounted at /rest. When

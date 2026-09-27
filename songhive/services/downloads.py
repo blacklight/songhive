@@ -318,12 +318,15 @@ async def _materialize_track(
     workdir: Path,
     storage: StorageService,
     config: SonghiveConfig,
+    *,
+    user_id: Optional[str] = None,
 ) -> tuple[Path, str, bool]:
     """
     Materialize a local/external track.
 
     Returns ``(path, extension, temporary)`` — ``temporary`` marks paths
     outside ``workdir`` that must be deleted after the archive is written.
+    ``user_id`` is the archive requester, used for provider stream policies.
     """
     from ..models.base import get_session
     from ..storage.local import LocalStorage
@@ -341,7 +344,8 @@ async def _materialize_track(
 
     async def _fetch_external() -> tuple[Path, Optional[str]]:
         async with get_session() as session:
-            stream = await resolve_external_download_stream(session, item.ref)
+            user = await session.get(User, user_id) if user_id else None
+            stream = await resolve_external_download_stream(session, item.ref, user=user)
         if stream is None:
             raise FileNotFoundError(f"No backing file for track {item.ref}")
         if stream.kind == "url" and stream.url:
@@ -467,6 +471,8 @@ async def materialize_archive(
     config: SonghiveConfig,
     items: Sequence[dict],
     workdir: Path,
+    *,
+    user_id: Optional[str] = None,
 ) -> tuple[Path, list[dict]]:
     """
     Materialize every item under ``workdir`` and return ``(zip_path, item_errors)``.
@@ -485,7 +491,7 @@ async def materialize_archive(
         item = ArchiveItem.from_dict(raw)
         try:
             if item.kind == ITEM_KIND_TRACK:
-                path, ext, temporary = await _materialize_track(item, workdir, storage, config)
+                path, ext, temporary = await _materialize_track(item, workdir, storage, config, user_id=user_id)
                 if temporary:
                     temporary_paths.append(path)
             elif item.kind == ITEM_KIND_REMOTE:

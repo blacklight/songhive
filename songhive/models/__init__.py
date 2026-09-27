@@ -34,6 +34,7 @@ from .podcast import (
     PodcastSyncEvent,
 )
 from .preview_card import PreviewCard
+from .provider_catalog import ProviderCatalogEntry
 from .radio import Radio
 from .remote_object import RemoteObject
 from .report import Report
@@ -104,6 +105,7 @@ __all__ = [
     "PodcastSyncConfig",
     "PodcastSyncEvent",
     "PreviewCard",
+    "ProviderCatalogEntry",
     "PushSubscription",
     "Radio",
     "RecoveryCode",

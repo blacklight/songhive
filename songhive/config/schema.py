@@ -608,6 +608,92 @@ class StreamingConfig(BaseSettings):
     )
 
 
+class TidalConfig(BaseSettings):
+    """Instance-level defaults for the TIDAL external-library provider."""
+
+    client_id: str = Field(
+        default="",
+        description="Override TIDAL client id for device auth; empty uses tidalapi's built-in.",
+    )
+    client_secret: str = Field(
+        default="",
+        description="Override TIDAL client secret for device auth; empty uses tidalapi's built-in.",
+    )
+    client_id_pkce: str = Field(
+        default="",
+        description="Override TIDAL PKCE client id; empty uses tidalapi's built-in.",
+    )
+    client_secret_pkce: str = Field(
+        default="",
+        description="Override TIDAL PKCE client secret; empty uses tidalapi's built-in.",
+    )
+    stream_policy: str = Field(
+        default="owner",
+        description=(
+            "Who may stream TIDAL tracks: 'owner' (library owner only), "
+            "'listener_account' (each listener streams through their own TIDAL library), "
+            "or 'anyone' (any ACL-authorized local user streams through the owner's session)."
+        ),
+    )
+    playlist_ttl_seconds: int = Field(
+        default=21600,
+        ge=0,
+        description="Default TTL for cached playlist contents (lazy fetch refresh interval).",
+    )
+    minimum_playlist_ttl_seconds: int = Field(
+        default=300,
+        ge=0,
+        description="Lower bound a library-level playlist_ttl_seconds override may set.",
+    )
+    album_contents_ttl_seconds: int = Field(
+        default=2592000,
+        ge=0,
+        description="TTL for cached album contents (album track listings rarely change).",
+    )
+    catalog_ttl_seconds: int = Field(
+        default=2592000,
+        ge=0,
+        description="TTL for catalog artist/album/playlist payloads; track payloads are immutable.",
+    )
+    lazy_contents_wait_seconds: int = Field(
+        default=10,
+        ge=0,
+        description="How long first-load handlers may wait for an in-flight contents refresh.",
+    )
+    max_requests_per_second: float = Field(
+        default=5.0,
+        gt=0,
+        description="Per-account client-side throttle for outbound TIDAL API calls.",
+    )
+    request_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="HTTP timeout applied to every outbound TIDAL request, including token refresh.",
+    )
+    allow_downloads: bool = Field(
+        default=False,
+        description="Whether TIDAL tracks may be downloaded (FLAC/AAC). Off by default for ToS safety.",
+    )
+    download_format: str = Field(
+        default="flac",
+        description="Container for TIDAL downloads: 'flac' or 'aac'.",
+    )
+    remote_cache_dir: Optional[Path] = Field(
+        default=None,
+        description="Directory for the remote-audio remux cache; stream_temp_dir/remote-audio when None.",
+    )
+    remote_cache_max_bytes: int = Field(
+        default=500 * 1024 * 1024,
+        ge=0,
+        description="Maximum total bytes held by the remote-audio remux cache.",
+    )
+    remote_cache_retention_seconds: int = Field(
+        default=7 * 24 * 3600,
+        ge=0,
+        description="How long unused remote-audio remux artifacts are retained.",
+    )
+
+
 class ExternalLibrariesConfig(BaseSettings):
     """External library configuration."""
 
@@ -664,6 +750,10 @@ class ExternalLibrariesConfig(BaseSettings):
             "empty denies all. A comma-separated string or JSON list is also "
             "accepted from environment variables."
         ),
+    )
+    tidal: TidalConfig = Field(
+        default_factory=TidalConfig,
+        description="Instance-level defaults for the TIDAL provider.",
     )
 
     @field_validator("allowed_user_providers", "denied_user_providers", "local_roots", mode="before")

@@ -1876,3 +1876,101 @@ def test_deliver_activity_4xx_gives_up(monkeypatch):
     self = _deliver_self()
     assert deliver_activity.run.__func__(self, {"type": "Create"}, "https://example.com/inbox", "key", "pem") is None
     self.retry.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Metadata-only providers (e.g. TIDAL) — federate without hosted audio
+# ---------------------------------------------------------------------------
+
+
+def _tidal_track() -> tuple:
+    """A public track owned by a TIDAL external library (metadata-only)."""
+    from songhive.models.external_item import ExternalItem
+    from songhive.models.external_library import ExternalLibrary
+
+    artist = Artist(name="TidalArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="Tidal Song",
+        artist_id="artist-1",
+        duration=200.0,
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-tidal-1"
+    library = ExternalLibrary(
+        provider_type="tidal",
+        capabilities={"stream_url": True, "limits": {"federate_audio": False}},
+    )
+    library.id = "lib-1"
+    item = ExternalItem(
+        external_library_id="lib-1",
+        kind="track",
+        provider_key="98765",
+        track_id="track-tidal-1",
+        state="active",
+    )
+    item.external_library = library
+    track.external_item = item
+    return track, artist
+
+
+def test_tidal_track_audio_object_is_metadata_only():
+    track, artist = _tidal_track()
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
+    # No Songhive-hosted audio URL anywhere on the object.
+    urls = obj["url"]
+    assert not any("api/v1" in link["href"] and link["mediaType"] != "text/html" for link in urls)
+    assert any(
+        link["href"] == "https://tidal.com/browse/track/98765" and link["mediaType"] == "text/html" for link in urls
+    )
+    # The attachment is a link, not playable media.
+    assert obj["attachment"] == [
+        {
+            "type": "Document",
+            "mediaType": "text/html",
+            "url": "https://tidal.com/browse/track/98765",
+            "name": "Tidal Song",
+        }
+    ]
+
+
+def test_tidal_track_note_object_is_metadata_only():
+    track, artist = _tidal_track()
+    obj = track_to_note_object(track, artist, "music.example.com")
+    assert obj is not None
+    assert "attachment" in obj
+    assert obj["attachment"][0]["url"] == "https://tidal.com/browse/track/98765"
+    assert obj["attachment"][0]["type"] == "Document"
+    assert all("api/v1/tracks" not in a.get("url", "") for a in obj["attachment"])
+
+
+def test_federate_audio_default_keeps_stream_url():
+    """An entity-backed provider without ``federate_audio=False`` still gets audio."""
+    from songhive.models.external_item import ExternalItem
+    from songhive.models.external_library import ExternalLibrary
+
+    artist = Artist(name="JellyArtist")
+    artist.id = "artist-1"
+    track = Track(
+        title="Jellyfin Song",
+        artist_id="artist-1",
+        duration=200.0,
+        visibility=Visibility.PUBLIC.value,
+    )
+    track.id = "track-jf-1"
+    library = ExternalLibrary(provider_type="jellyfin", capabilities={"stream_url": True})
+    library.id = "lib-jf"
+    item = ExternalItem(
+        external_library_id="lib-jf",
+        kind="track",
+        provider_key="jf-1",
+        track_id="track-jf-1",
+        state="active",
+    )
+    item.external_library = library
+    track.external_item = item
+
+    obj = track_to_audio_object(track, artist, "music.example.com")
+    assert obj is not None
+    assert any(link["href"].endswith("/api/v1/tracks/track-jf-1/download") for link in obj["url"])

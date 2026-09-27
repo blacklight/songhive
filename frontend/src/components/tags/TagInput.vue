@@ -9,6 +9,7 @@ export interface Props {
   id?: string;
   inputId?: string;
   ariaLabel?: string;
+  disabled?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -16,6 +17,7 @@ const props = withDefaults(defineProps<Props>(), {
   id: undefined,
   inputId: undefined,
   ariaLabel: undefined,
+  disabled: false,
 });
 
 const emit = defineEmits<{
@@ -174,6 +176,7 @@ function onPaste(event: ClipboardEvent) {
 }
 
 function focusInput() {
+  if (props.disabled) return;
   inputRef.value?.focus();
 }
 
@@ -196,7 +199,10 @@ defineExpose({
     <div
       :id="containerId"
       class="tag-input__container"
-      :class="{ 'tag-input__container--error': !!error }"
+      :class="{
+        'tag-input__container--error': !!error,
+        'tag-input__container--disabled': props.disabled,
+      }"
       @click="focusInput"
     >
       <span
@@ -206,6 +212,7 @@ defineExpose({
       >
         <span class="tag-input__chip-text">{{ tag }}</span>
         <button
+          v-if="!props.disabled"
           type="button"
           class="tag-input__chip-remove"
           :aria-label="t('tags.removeTag', { tag })"
@@ -215,6 +222,7 @@ defineExpose({
         </button>
       </span>
       <input
+        v-if="!props.disabled"
         :id="inputId"
         ref="inputRef"
         v-model="inputValue"
@@ -262,6 +270,11 @@ defineExpose({
 
 .tag-input__container--error {
   border-color: var(--color-danger);
+}
+
+.tag-input__container--disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .tag-input__chip {

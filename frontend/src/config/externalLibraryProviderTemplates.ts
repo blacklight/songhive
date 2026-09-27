@@ -363,6 +363,167 @@ export const providerTemplates: Record<string, ProviderTemplate> = {
       },
     ],
   },
+  tidal: {
+    providerType: "tidal",
+    helpI18nKey: "pages.externalLibraries.providers.tidal.help",
+    helpLinkUrl: "https://tidal.com",
+    fields: [
+      {
+        name: "quality",
+        type: "enum",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.quality.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.quality.description",
+        default: "LOSSLESS",
+        options: [
+          {
+            value: "LOW",
+            labelI18nKey:
+              "pages.externalLibraries.providers.tidal.fields.quality.options.low",
+          },
+          {
+            value: "HIGH",
+            labelI18nKey:
+              "pages.externalLibraries.providers.tidal.fields.quality.options.high",
+          },
+          {
+            value: "LOSSLESS",
+            labelI18nKey:
+              "pages.externalLibraries.providers.tidal.fields.quality.options.lossless",
+          },
+          {
+            value: "HI_RES_LOSSLESS",
+            labelI18nKey:
+              "pages.externalLibraries.providers.tidal.fields.quality.options.hi_res_lossless",
+          },
+        ],
+      },
+      {
+        name: "mpd_mode",
+        type: "enum",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.mpd_mode.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.mpd_mode.description",
+        default: "segments",
+        options: [
+          {
+            value: "segments",
+            labelI18nKey:
+              "pages.externalLibraries.providers.tidal.fields.mpd_mode.options.segments",
+          },
+          {
+            value: "remux",
+            labelI18nKey:
+              "pages.externalLibraries.providers.tidal.fields.mpd_mode.options.remux",
+          },
+        ],
+      },
+      {
+        name: "redirect_streams",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.redirect_streams.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.redirect_streams.description",
+        default: false,
+      },
+      {
+        name: "include_tracks",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.include_tracks.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.include_tracks.description",
+        default: true,
+      },
+      {
+        name: "include_albums",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.include_albums.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.include_albums.description",
+        default: true,
+      },
+      {
+        name: "include_artists",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.include_artists.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.include_artists.description",
+        default: true,
+      },
+      {
+        name: "include_playlists",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.include_playlists.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.include_playlists.description",
+        default: true,
+      },
+      {
+        name: "include_followed_playlists",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.include_followed_playlists.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.include_followed_playlists.description",
+        default: true,
+      },
+      {
+        name: "playlist_ttl_seconds",
+        type: "number",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.playlist_ttl_seconds.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.playlist_ttl_seconds.description",
+        default: 21600,
+      },
+      {
+        name: "sync_metadata",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.sync_metadata.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.sync_metadata.description",
+        default: false,
+      },
+      {
+        name: "dedup_isrc",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.dedup_isrc.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.dedup_isrc.description",
+        default: false,
+      },
+      {
+        name: "download_format",
+        type: "enum",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.download_format.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.download_format.description",
+        default: "flac",
+        options: [
+          {
+            value: "flac",
+            labelI18nKey:
+              "pages.externalLibraries.providers.tidal.fields.download_format.options.flac",
+          },
+          {
+            value: "aac",
+            labelI18nKey:
+              "pages.externalLibraries.providers.tidal.fields.download_format.options.aac",
+          },
+        ],
+      },
+    ],
+  },
   local: {
     providerType: "local",
     fields: [

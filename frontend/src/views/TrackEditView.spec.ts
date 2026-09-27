@@ -400,6 +400,64 @@ describe("TrackEditView", () => {
     expect(router.currentRoute.value.path).toBe("/tracks/track-1/edit");
   });
 
+  it("locks provider-managed fields and submits only editable ones", async () => {
+    setAuthenticated("user-1");
+    vi.mocked(tracksApi.getTrack).mockResolvedValue({
+      ...createTrack("track-1", "Song One"),
+      is_external: true,
+      can_rename_source: false,
+      external_provider_type: "tidal",
+      editable_fields: ["genres", "tags"],
+    });
+    await mountAt("/tracks/track-1/edit");
+
+    // Provider note mentions TIDAL.
+    expect(document.body.textContent).toContain("TIDAL");
+
+    const inputs = document.body.querySelectorAll(
+      'input[type="text"], input[type="number"]',
+    );
+    const titleInput = inputs[0] as HTMLInputElement;
+    const artistInput = inputs[1] as HTMLInputElement;
+    expect(titleInput.disabled).toBe(true);
+    expect(artistInput.disabled).toBe(true);
+
+    // Visibility stays editable (local ACL state).
+    const visibilityInput = document.body.querySelector(
+      "select",
+    ) as HTMLSelectElement;
+    expect(visibilityInput.disabled).toBe(false);
+    visibilityInput.value = "local";
+    visibilityInput.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("common.save"));
+    await saveButton?.click();
+    await flushPromises();
+
+    // Locked fields (title, artist, filename, …) are absent so the backend
+    // editable-field guard never sees them.
+    expect(tracksApi.updateTrack).toHaveBeenCalledWith("track-1", {
+      visibility: "local",
+      genre: "rock",
+    });
+  });
+
+  it("does not render the provider note for local tracks", async () => {
+    setAuthenticated("user-1");
+    await mountAt("/tracks/track-1/edit");
+
+    expect(
+      document.body.querySelector(".track-edit-view__provider-note"),
+    ).toBeNull();
+    const titleInput = document.body.querySelector(
+      'input[type="text"]',
+    ) as HTMLInputElement;
+    expect(titleInput.disabled).toBe(false);
+  });
+
   it("surfaces save errors inline", async () => {
     setAuthenticated("user-1");
     vi.mocked(tracksApi.updateTrack).mockRejectedValue(

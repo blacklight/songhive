@@ -5,6 +5,8 @@ Importing this package registers all built-in adapters so that the API,
 worker, and CLI consistently resolve the same provider types.
 """
 
+import logging
+
 from ._dropbox import DROPBOX_OAUTH_SPEC, DropboxExternalAdapter
 from ._gdrive import GDRIVE_OAUTH_SPEC, GoogleDriveExternalAdapter
 from ._jellyfin import JellyfinExternalAdapter
@@ -14,6 +16,8 @@ from ._sftp import SFTPExternalAdapter
 from ._webdav import WebDAVExternalAdapter
 from .oauth import register_oauth_provider
 from .registry import register_external_adapter
+
+logger = logging.getLogger(__name__)
 
 register_external_adapter("dropbox", DropboxExternalAdapter)
 register_external_adapter("gdrive", GoogleDriveExternalAdapter)
@@ -25,3 +29,12 @@ register_external_adapter("webdav", WebDAVExternalAdapter)
 
 register_oauth_provider(DROPBOX_OAUTH_SPEC)
 register_oauth_provider(GDRIVE_OAUTH_SPEC)
+
+# TIDAL support depends on the optional-heavy ``tidalapi`` install; a broken
+# install disables only this provider rather than the whole package.
+try:
+    from ._tidal import register as _register_tidal
+
+    _register_tidal()
+except ImportError:
+    logger.warning("tidalapi is not installed; the 'tidal' external provider is unavailable")

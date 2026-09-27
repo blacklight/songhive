@@ -13,6 +13,8 @@ import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import * as externalLibrariesApi from "@/api/externalLibraries";
 import { redirectToOAuthProvider } from "@/utils/externalOAuth";
+import * as deviceAuth from "@/utils/externalDeviceAuth";
+import type { DeviceAuthUpdate } from "@/utils/externalDeviceAuth";
 import ExternalLibraryEditView from "./ExternalLibraryEditView.vue";
 
 vi.mock("@/api/externalLibraries", () => ({
@@ -38,6 +40,12 @@ vi.mock("@/api/externalLibraries", () => ({
   adminListExternalSyncRuns: vi.fn(),
   beginExternalOAuth: vi.fn(),
   claimExternalOAuth: vi.fn(),
+}));
+
+vi.mock("@/utils/externalDeviceAuth", () => ({
+  beginDeviceAuth: vi.fn(),
+  pollDeviceAuth: vi.fn(),
+  completePkceDeviceAuth: vi.fn(),
 }));
 
 vi.mock("@/utils/externalOAuth", async (importOriginal) => {
@@ -1108,6 +1116,182 @@ describe("ExternalLibraryEditView", () => {
           refresh_token: "rt-1",
           account_id: "dbid:42",
         }),
+      }),
+    );
+  });
+
+  it("runs the device-auth flow and submits the granted config", async () => {
+    vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
+      {
+        provider_type: "tidal",
+        user_configurable: true,
+        capabilities_summary: {},
+        device_auth_supported: true,
+      },
+    ]);
+    vi.mocked(deviceAuth.beginDeviceAuth).mockResolvedValue({
+      state: "dev-state-1",
+      mode: "device",
+      userCode: "ABCD-EFGH",
+      verificationUri: "https://link.tidal.com",
+      verificationUriComplete: "https://link.tidal.com/ABCD-EFGH",
+      authorizeUrl: null,
+      expiresIn: 300,
+      interval: 5,
+    });
+    let onUpdate: ((u: DeviceAuthUpdate) => void) | undefined;
+    vi.mocked(deviceAuth.pollDeviceAuth).mockImplementation((_prompt, cb) => {
+      onUpdate = cb;
+      return { prompt: _prompt, cancel: vi.fn() };
+    });
+
+    const router = createTestRouter("/settings/external-libraries/new");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const connectButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) =>
+      (b.textContent ?? "").includes(
+        i18n.global.t("pages.externalLibraries.deviceAuth.connect", {
+          provider: "TIDAL",
+        }),
+      ),
+    );
+    expect(connectButton).toBeDefined();
+    await connectButton?.click();
+    await flushPromises();
+
+    expect(deviceAuth.beginDeviceAuth).toHaveBeenCalledWith(
+      "tidal",
+      expect.any(Object),
+      expect.objectContaining({ mode: "device" }),
+    );
+    // User code + verification URL rendered.
+    expect(document.body.textContent).toContain("ABCD-EFGH");
+    expect(document.body.textContent).toContain("https://link.tidal.com");
+
+    // Grant → config merged and the library submitted.
+    onUpdate?.({
+      status: "granted",
+      granted: { config: { access_token: "tok-1", user_id: "42" } },
+    });
+    await flushPromises();
+
+    expect(externalLibrariesApi.createUserExternalLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider_type: "tidal",
+        config: expect.objectContaining({
+          access_token: "tok-1",
+          user_id: "42",
+        }),
+      }),
+    );
+  });
+
+  it("completes the PKCE flow from a pasted redirect URL", async () => {
+    vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
+      {
+        provider_type: "tidal",
+        user_configurable: true,
+        capabilities_summary: {},
+        device_auth_supported: true,
+        pkce_paste_supported: true,
+      },
+    ]);
+    vi.mocked(deviceAuth.beginDeviceAuth).mockResolvedValue({
+      state: "pkce-state-1",
+      mode: "pkce",
+      userCode: null,
+      verificationUri: null,
+      verificationUriComplete: null,
+      authorizeUrl: "https://login.tidal.com/authorize?client_id=x",
+      expiresIn: 600,
+      interval: 5,
+    });
+    vi.mocked(deviceAuth.completePkceDeviceAuth).mockResolvedValue({
+      config: { access_token: "pkce-tok" },
+    });
+
+    const router = createTestRouter("/settings/external-libraries/new");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    // Switch to PKCE mode.
+    const pkceLabel = Array.from(
+      document.body.querySelectorAll("label.app-checkbox__label"),
+    ).find(
+      (el) =>
+        el.textContent?.trim() ===
+        i18n.global.t("pages.externalLibraries.deviceAuth.pkceMode.label"),
+    );
+    expect(pkceLabel).toBeDefined();
+    const pkceCheckbox = document.body.querySelector(
+      `#${pkceLabel!.getAttribute("for")}`,
+    ) as HTMLInputElement;
+    expect(pkceCheckbox).not.toBeNull();
+    pkceCheckbox.checked = true;
+    pkceCheckbox.dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const connectButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) =>
+      (b.textContent ?? "").includes(
+        i18n.global.t("pages.externalLibraries.deviceAuth.connect", {
+          provider: "TIDAL",
+        }),
+      ),
+    );
+    await connectButton?.click();
+    await flushPromises();
+
+    expect(deviceAuth.beginDeviceAuth).toHaveBeenCalledWith(
+      "tidal",
+      expect.any(Object),
+      expect.objectContaining({ mode: "pkce" }),
+    );
+    // Authorize link rendered; no polling started for PKCE.
+    const link = document.body.querySelector(
+      'a[href="https://login.tidal.com/authorize?client_id=x"]',
+    );
+    expect(link).not.toBeNull();
+    expect(deviceAuth.pollDeviceAuth).not.toHaveBeenCalled();
+
+    // Paste the redirect URL and complete.
+    const redirectInput = getInputByLabel(
+      i18n.global.t("pages.externalLibraries.deviceAuth.pkce.redirectLabel"),
+    ) as HTMLInputElement;
+    redirectInput.value = "https://songhive.example/cb?code=abc";
+    redirectInput.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const completeButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) =>
+      (b.textContent ?? "").includes(
+        i18n.global.t("pages.externalLibraries.deviceAuth.pkce.complete"),
+      ),
+    );
+    await completeButton?.click();
+    await flushPromises();
+
+    expect(deviceAuth.completePkceDeviceAuth).toHaveBeenCalledWith(
+      "pkce-state-1",
+      "https://songhive.example/cb?code=abc",
+    );
+    expect(externalLibrariesApi.createUserExternalLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider_type: "tidal",
+        config: expect.objectContaining({ access_token: "pkce-tok" }),
       }),
     );
   });

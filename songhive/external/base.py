@@ -11,6 +11,7 @@ from .errors import ExternalLibraryError, UnsupportedExternalOperation
 from .types import (
     ExternalAlbumMetadata,
     ExternalArtistMetadata,
+    ExternalContents,
     ExternalHealth,
     ExternalItemRef,
     ExternalLibraryCapabilities,
@@ -133,6 +134,97 @@ class ExternalLibraryAdapter(ABC):
     async def healthcheck(self, config: dict) -> ExternalHealth:
         """Check whether the provider is healthy."""
         raise UnsupportedExternalOperation("healthcheck is not supported by this adapter")
+
+    def external_url(self, kind: str, provider_key: str) -> Optional[str]:
+        """Return the provider's public browse URL for an entity, or None."""
+        return None
+
+    async def iter_contents(
+        self,
+        config: dict,
+        kind: str,
+        provider_key: str,
+        *,
+        etag: Optional[str] = None,
+    ) -> "ExternalContents":
+        """
+        Return the ordered track contents of a lazy container.
+
+        Adapters advertising ``limits["lazy_contents"]`` implement this for
+        ``kind`` in ("playlist", "album"). Passing ``etag`` (the previously
+        captured contents etag) makes the request conditional; adapters raise
+        ``ContentsNotModified`` when the provider answers 304.
+        """
+        raise UnsupportedExternalOperation("iter_contents is not supported by this adapter")
+
+    async def search(
+        self,
+        config: dict,
+        query: str,
+        *,
+        limit: int = 20,
+    ) -> list[dict]:
+        """
+        Search the provider for entities without persisting anything.
+
+        Adapters advertising ``limits["search"]`` implement this. Each result
+        is a normalized transient dict::
+
+            {"kind": "track"|"album"|"artist"|"playlist",
+             "provider_key": str, "title": str,
+             "subtitle": Optional[str], "image_url": Optional[str],
+             "external_url": Optional[str]}
+
+        The default implementation returns no results.
+        """
+        return []
+
+    def entity_from_payload(
+        self,
+        config: dict,
+        kind: str,
+        payload: dict,
+    ) -> Optional[Any]:
+        """
+        Re-map a cached raw provider payload onto a metadata object.
+
+        Used by the catalog-first materialization path — ``payload`` is the
+        ``raw_metadata`` dict stored in the provider catalog. Returns an
+        ``ExternalItemRef``/``External*Metadata`` matching ``kind``, or
+        ``None`` when the payload can't be mapped.
+        """
+        return None
+
+    async def fetch_entity_metadata(
+        self,
+        config: dict,
+        kind: str,
+        provider_key: str,
+    ) -> Optional[Any]:
+        """
+        Fetch a single entity's metadata by provider key.
+
+        Used by the import/materialization path when the provider catalog
+        cache misses. Returns an ``ExternalItemRef``/``External*Metadata``
+        matching ``kind``, or ``None`` when unsupported/not found.
+        """
+        return None
+
+    async def fetch_entity_payload(
+        self,
+        config: dict,
+        kind: str,
+        provider_key: str,
+    ) -> Optional[dict]:
+        """
+        Fetch the raw provider payload for an entity.
+
+        Powers admin tooling that force-refreshes ``provider_catalog_entries``
+        — the catalog stores raw payloads (re-mapped through
+        ``entity_from_payload``), so the mapped metadata shape would not
+        round-trip. Returns ``None`` when unsupported or not found.
+        """
+        return None
 
     def sanitize_config_for_response(self, config: dict) -> dict:
         """Return a shallow copy of config with sensitive values redacted."""

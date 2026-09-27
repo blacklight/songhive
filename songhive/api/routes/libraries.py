@@ -177,6 +177,7 @@ async def _build_library_response(
     storage: StorageService,
     include: IncludeQuery,
     saved_ids: Optional[Set[str]] = None,
+    db: Optional[AsyncSession] = None,
 ) -> LibraryResponse:
     """Build a LibraryResponse with optional nested summaries."""
     owner = None
@@ -186,8 +187,9 @@ async def _build_library_response(
     tracks = None
     if "tracks" in include and library.tracks is not None:
         track_list: List[TrackSummary] = []
+        policy_cache: dict = {}
         for t in sorted(library.tracks, key=_library_track_sort_key):
-            summary = await build_track_summary(t, storage)
+            summary = await build_track_summary(t, storage, user=user, session=db, policy_cache=policy_cache)
             if summary is not None:
                 track_list.append(summary)
         tracks = track_list
@@ -265,7 +267,7 @@ async def list_libraries(
     )
     pagination.set_total(response, total)
     saved_ids = await collection.saved_item_ids(db, user, "library", [str(lib.id) for lib in rows])
-    return [await _build_library_response(lib, user, storage, include, saved_ids) for lib in rows]
+    return [await _build_library_response(lib, user, storage, include, saved_ids, db=db) for lib in rows]
 
 
 @router.post("/", response_model=LibraryResponse, status_code=201)
@@ -314,7 +316,7 @@ async def get_library(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     saved_ids = await collection.saved_item_ids(db, user, "library", {library_id})
-    return await _build_library_response(library, user, storage, include, saved_ids)
+    return await _build_library_response(library, user, storage, include, saved_ids, db=db)
 
 
 @router.get(
@@ -920,7 +922,7 @@ async def update_library(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids)
+    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
 
 
 @router.post("/{library_id}/image", response_model=LibraryResponse)
@@ -966,7 +968,7 @@ async def upload_library_image(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids)
+    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
 
 
 @router.post("/{library_id}/cover", response_model=LibraryResponse)
@@ -1012,7 +1014,7 @@ async def upload_library_cover(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids)
+    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{library_id}/image", response_model=LibraryResponse)
@@ -1049,7 +1051,7 @@ async def delete_library_image(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids)
+    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{library_id}/cover", response_model=LibraryResponse)
@@ -1086,7 +1088,7 @@ async def delete_library_cover(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids)
+    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{library_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
@@ -1202,7 +1204,7 @@ async def add_library_tags(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids)
+    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{library_id}/tags/{tag}", response_model=LibraryResponse)
@@ -1248,4 +1250,4 @@ async def remove_library_tag(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids)
+    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)

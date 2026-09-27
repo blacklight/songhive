@@ -984,11 +984,11 @@ providers* (`local`, `s3`, `gdrive`, `sftp`, `webdav`, `dropbox`, `http`)
 enumerate remote audio files; each produces an `ExternalTrack` row that keeps
 file-oriented state (sha256, mime, size, write-back/rename/delete state), and
 the owning `Track` gets `audio_file_id = NULL`. *Entity-backed providers*
-(identified by `capabilities.limits["entity_import"]`, currently `jellyfin`)
-enumerate tracks, albums, artists, and playlists as provider items; each
-imported Songhive entity gets an `ExternalItem` row in the matching `kind`
-instead. The generic `Track.source` stays `"external"` for both — provenance
-is recovered through `ExternalItem.external_library.provider_type` — and audio
+(identified by `capabilities.limits["entity_import"]`, currently `jellyfin`
+and `tidal`) enumerate tracks, albums, artists, and playlists as provider items;
+each imported Songhive entity gets an `ExternalItem` row in the matching `kind`
+instead. The generic `Track.source` stays `"external"` for both — provenance is
+recovered through `ExternalItem.external_library.provider_type` — and audio
 bytes stay remote: at playback/download time the provider resolves the item
 into a stream that Songhive proxies, so provider credentials never reach the
 client (`safe_to_redirect = False`).
@@ -1418,6 +1418,95 @@ URL with `safe_to_redirect=False`, so Songhive always proxies it and forwards
 the client's `Range` header — the API key never reaches the browser.
 `write_tags`, `rename_source`, `delete_source`, and `compute_hash` are
 unsupported and raise `UnsupportedExternalOperation`.
+
+#### TIDAL provider
+
+The `tidal` provider (`external/_tidal/`, `tidalapi` + a throttled raw-JSON
+client) imports a subscriber's TIDAL collection — saved tracks, artists,
+albums, and playlists — as first-class Songhive entities. It is entity-backed
+(`entity_import`), declares `immutable_tracks` (provider metadata is
+write-once), `lazy_contents` for playlists and albums (contents are fetched on
+demand, never eagerly during sync), `editable_fields: ["genres", "tags"]`
+(everything else is provider-owned), `federate_audio: false` (federated
+objects carry metadata and a tidal.com link only — proxied audio bytes never
+leave the instance), and `search`.
+
+**Authentication.** TIDAL credentials come from the device-authorization
+framework (`external/device_auth.py`): the SPA calls
+`POST /external-libraries/device-auth/begin`, the user approves a short code
+on TIDAL's link page, and the SPA polls `/device-auth/poll` until granted;
+`POST /device-auth/complete` then returns the credential fragment merged into
+the library config. A PKCE variant (`mode: "pkce"`, stored server-side code
+verifier, user pastes the final redirect URL) is required for
+`HI_RES_LOSSLESS` streaming — `effective_quality` silently downgrades to
+`LOSSLESS` when `is_pkce` is false. Access/refresh tokens, `is_pkce`,
+`user_id`, `country_code`, and `expiry_time` live in the encrypted library
+config; sessions are cached in Redis and refreshed transparently.
+
+**Catalog cache.** `services/provider_catalog.py` maintains
+`provider_catalog_entries` — instance-wide raw provider payloads keyed by
+`(provider_type, kind, provider_key)`. Track entries are write-once
+(`expires_at = NULL`): TIDAL track metadata is treated as immutable by id, so
+materializing a known id never hits the API, even across users. The cache is
+never exposed through the API and can be force-refreshed with
+`songhive admin tidal-refresh-catalog (--track ID | --album ID | --artist ID | --playlist UUID | --expired)`.
+
+**Lazy contents.** Playlist and album items are not synchronized recursively.
+`ExternalItem.contents_fetched_at`/`contents_error` track freshness; opening a
+provider-backed playlist or album (`GET /playlists/{id}` or
+`/albums/{id}` returns `provider_sync`) calls
+`external/lazy.ensure_contents`, which enqueues `refresh_external_contents`
+(Celery) behind a per-item Redis lock when the TTL
+(`playlist_ttl_seconds`, instance floor 300s) has elapsed. The task fetches
+the ordered track refs (etag-conditional when supported), rewrites
+`PlaylistTrack` rows, materializes missing tracks as
+`membership="referenced"` (full syncs reconcile by membership so referenced
+tracks untouched by the collection are demoted rather than deleted), and
+publishes an `external_contents_refreshed` WebSocket event so the frontend
+reloads. `POST /playlists/{id}/provider-sync` (and the album equivalent)
+forces a refresh for owners/managers.
+
+**Streaming and downloads.** `external/_tidal/stream.py` resolves playback at
+request time: BTS qualities return a redirectable CDN URL (or a proxied
+stream when `redirect_streams` is off); `HI_RES_LOSSLESS` manifests arrive as
+MPEG-DASH — `mpd_mode = "segments"` serves raw segment URLs, `"remux"` feeds
+them through `external/_tidal/remux.py` into the reusable
+`services/remote_audio_cache.py` ffmpeg remux cache (bounded by the instance's
+`remote_cache_dir`/`remote_cache_max_bytes`/`remote_cache_retention_seconds`
+settings). The per-library
+`stream_policy` limit gates every stream entry point through
+`services/streaming.py`. Downloads (`download_format = "flac" | "aac"`) are
+disabled unless `external_libraries.tidal.allow_downloads` is set in the
+instance config.
+
+**Metadata edits.** `limits["editable_fields"]` is enforced by
+`api/routes/_common.enforce_editable_fields` on the track/album/artist update,
+image, tag, and genre endpoints; responses expose `editable_fields` and
+`external_provider_type` so the SPA locks provider-owned inputs while keeping
+tags, genres, and visibility editable.
+
+A TIDAL external library stores the following adapter config:
+
+| Key                          | Required | Default      | Description                                                    |
+|------------------------------|----------|--------------|----------------------------------------------------------------|
+| `access_token`/`refresh_token` | yes*   | —            | OAuth credentials; populated by the Connect flow.              |
+| `is_pkce`                    | no       | `false`      | Set by the PKCE connect flow; gates `HI_RES_LOSSLESS`.         |
+| `user_id`/`country_code`     | auto     | —            | Account identity captured during authorization.                |
+| `session_id`/`token_type`/`expiry_time` | auto | —  | Session bookkeeping refreshed transparently.           |
+| `quality`                    | no       | `LOSSLESS`   | `LOW`, `HIGH`, `LOSSLESS`, or `HI_RES_LOSSLESS` (PKCE only).   |
+| `mpd_mode`                   | no       | `segments`   | `segments` or `remux` for MPEG-DASH (Hi-Res) delivery.          |
+| `redirect_streams`           | no       | `true`       | Redirect clients to TIDAL CDN URLs instead of proxying bytes.  |
+| `download_format`            | no       | `flac`       | `flac` or `aac`; requires `allow_downloads` in instance config.|
+| `include_tracks`/`include_artists`/`include_albums`/`include_playlists` | no | `true` | Which saved collections to import.      |
+| `include_followed_playlists` | no       | `false`      | Also import followed (not owned) playlists.                    |
+| `playlist_ttl_seconds`       | no       | `21600`      | Lazy contents cache TTL; instance floor is 300s.               |
+| `sync_metadata`              | no       | `false`      | Run MusicBrainz enrichment on imported tracks.                 |
+| `dedup_isrc`                 | no       | `false`      | Match imported tracks by ISRC before creating new rows.        |
+| `max_requests_per_second`    | no       | provider     | Throttle for raw API calls.                                    |
+| `request_timeout_seconds`    | no       | provider     | HTTP timeout for API calls and token refresh (default 30s).    |
+
+*Credentials are supplied by the device-auth/PKCE connect flow rather than
+entered manually.
 
 #### Visibility, sharing, and secret redaction
 
@@ -2036,6 +2125,16 @@ the HTTP routes.
   embedded object. Each `audio` publication mints a fresh
   `federation_object_id` so every post is a distinct remote object.
 - `Delete(Tombstone)` is sent when a track is made non-public or deleted.
+- Tracks backed by metadata-only providers (providers declaring
+  `capabilities.limits["federate_audio"] = False`, currently `tidal`)
+  federate without Songhive-hosted audio: `track_to_audio_object` and
+  `track_to_note_object` suppress the stream/download URL and emit a
+  provider browse link instead (e.g. a `Link` to
+  `tidal.com/browse/track/{id}` on the `Audio` object, or a `text/html`
+  `Document` attachment on `Note` shares), so remote servers never fetch
+  proxied provider bytes. The decision lives in
+  `federation/_common.py::provider_browse_link` and is taken at
+  serialization time so local metadata stays complete.
 - Profile changes (display name, bio, avatar, links) refresh the cached actor
   document via `sync_user_actor` and are pushed to follower inboxes as
   `Update(Person)` activities.

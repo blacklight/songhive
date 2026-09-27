@@ -9,6 +9,7 @@ export interface Props {
   id?: string;
   inputId?: string;
   ariaLabel?: string;
+  disabled?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -16,6 +17,7 @@ const props = withDefaults(defineProps<Props>(), {
   id: undefined,
   inputId: undefined,
   ariaLabel: undefined,
+  disabled: false,
 });
 
 const emit = defineEmits<{
@@ -172,6 +174,7 @@ function onPaste(event: ClipboardEvent) {
 }
 
 function focusInput() {
+  if (props.disabled) return;
   inputRef.value?.focus();
 }
 
@@ -194,7 +197,10 @@ defineExpose({
     <div
       :id="containerId"
       class="genre-input__container"
-      :class="{ 'genre-input__container--error': !!error }"
+      :class="{
+        'genre-input__container--error': !!error,
+        'genre-input__container--disabled': props.disabled,
+      }"
       @click="focusInput"
     >
       <span
@@ -204,6 +210,7 @@ defineExpose({
       >
         <span class="genre-input__chip-text">{{ tag }}</span>
         <button
+          v-if="!props.disabled"
           type="button"
           class="genre-input__chip-remove"
           :aria-label="t('genres.removeTag', { tag })"
@@ -213,6 +220,7 @@ defineExpose({
         </button>
       </span>
       <input
+        v-if="!props.disabled"
         :id="inputId"
         ref="inputRef"
         v-model="inputValue"
@@ -260,6 +268,11 @@ defineExpose({
 
 .genre-input__container--error {
   border-color: var(--color-danger);
+}
+
+.genre-input__container--disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .genre-input__chip {

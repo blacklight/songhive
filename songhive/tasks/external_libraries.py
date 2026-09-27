@@ -5,7 +5,7 @@ Celery tasks for external-library sync, scheduled scanning, and metadata write-b
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from kombu.exceptions import OperationalError as KombuOperationalError
 from sqlalchemy import select
@@ -337,4 +337,236 @@ def write_back_metadata_task(external_track_id: str) -> bool:
         return asyncio.run(_write_back_metadata(external_track_id))
     except KombuOperationalError:
         logger.exception("Broker error in write_back_metadata_task for %s", external_track_id)
+        raise
+
+
+async def _publish_contents_event(
+    external_library: ExternalLibrary,
+    kind: str,
+    entity_id: Optional[str],
+    state: str,
+) -> None:
+    """Notify the library owner so clients can reload the container's tracks."""
+    library = external_library.library
+    owner_id = getattr(library, "owner_id", None) if library is not None else None
+    if owner_id is None:
+        return
+    from ..ws.events import EventWebSocket
+
+    try:
+        EventWebSocket.send_to_user(
+            str(owner_id),
+            "external_contents_refreshed",
+            {"kind": kind, "entity_id": entity_id, "state": state},
+        )
+    except Exception:
+        logger.debug("Could not publish external_contents_refreshed", exc_info=True)
+
+
+async def _refresh_external_contents(
+    external_library_id: str,
+    kind: str,
+    provider_key: str,
+) -> dict:
+    """Fetch and materialize a lazy container's ordered track contents."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import delete
+    from sqlalchemy.orm import selectinload
+
+    from ..external.errors import ExternalRateLimited
+    from ..external.lazy import contents_lock_key
+    from ..external.sync import RunCounters, _apply_entity_track, _find_external_item
+    from ..external.types import ContentsNotModified
+    from ..models.playlist import PlaylistTrack
+    from ..services.provider_catalog import (
+        get_catalog_entry,
+        upsert_catalog_contents,
+        upsert_catalog_entries,
+    )
+
+    config = load_config([])
+    redis = get_redis_client(config)
+    lock_key = contents_lock_key(external_library_id, kind, provider_key)
+    entity_id: Optional[str] = None
+    external_library: Optional[ExternalLibrary] = None
+
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(ExternalLibrary)
+                .where(ExternalLibrary.id == external_library_id)
+                .options(selectinload(ExternalLibrary.library))
+            )
+            external_library = result.scalar_one_or_none()
+            if external_library is None or not external_library.enabled:
+                return {"status": "skipped", "reason": "library missing or disabled"}
+
+            item = await _find_external_item(session, external_library_id, kind, provider_key)
+            if item is None:
+                return {"status": "skipped", "reason": "external item missing"}
+
+            entity_id = item.playlist_id if kind == "playlist" else item.album_id if kind == "album" else None
+
+            raw_config = external_library.config
+            decrypted = decrypt_json(raw_config) if isinstance(raw_config, str) else dict(raw_config or {})
+
+            adapter_cls = get_external_adapter(external_library.provider_type)
+            adapter = adapter_cls()
+
+            prior = await get_catalog_entry(
+                session, external_library.provider_type, kind, provider_key, allow_expired=True
+            )
+            etag = prior.contents_etag if prior is not None else None
+
+            try:
+                contents = await adapter.iter_contents(decrypted, kind, provider_key, etag=etag)
+            except ContentsNotModified:
+                item.contents_fetched_at = _utcnow()
+                if item.contents_error == "stale":
+                    item.contents_error = None
+                item.sync_error = None
+                await session.commit()
+                await _publish_contents_event(external_library, kind, entity_id, "fresh")
+                return {"status": "not_modified"}
+            except ExternalRateLimited:
+                raise
+            except Exception as exc:
+                item.contents_error = _sanitize_error(exc)
+                item.sync_error = item.contents_error
+                await session.commit()
+                await _publish_contents_event(external_library, kind, entity_id, "error")
+                logger.exception(
+                    "Contents refresh failed: library=%s %s/%s",
+                    external_library_id,
+                    kind,
+                    provider_key,
+                )
+                return {"status": "failed", "error": item.contents_error}
+
+            # 1. Catalog the inline track payloads — write-once, no expiry.
+            payloads = [
+                dict(e.metadata.raw_metadata)
+                for e in contents.entries
+                if e.metadata is not None
+                and isinstance(e.metadata.raw_metadata, dict)
+                and e.metadata.raw_metadata.get("id") is not None
+            ]
+            try:
+                async with session.begin_nested():
+                    await upsert_catalog_entries(
+                        session,
+                        external_library.provider_type,
+                        "track",
+                        payloads,
+                        write_once=True,
+                    )
+            except Exception:
+                logger.debug("Catalog upsert conflict during contents refresh", exc_info=True)
+
+            # 2. Persist the ordered child refs + etag on the shared catalog row.
+            await upsert_catalog_contents(
+                session,
+                external_library.provider_type,
+                kind,
+                provider_key,
+                [{"id": e.provider_key, "position": e.position} for e in contents.entries],
+                etag=contents.etag,
+            )
+
+            # 3. Materialize local tracks as referenced members.
+            immutable = bool((external_library.capabilities or {}).get("limits", {}).get("immutable_tracks"))
+            run = cast(ExternalSyncRun, SimpleNamespace(triggered_by_user_id=None))
+            counters = RunCounters()
+            for entry in contents.entries:
+                if entry.metadata is None:
+                    continue
+                ref = ExternalItemRef(
+                    provider_key=entry.provider_key,
+                    display_path=entry.provider_key,
+                    metadata=entry.metadata,
+                )
+                try:
+                    async with session.begin_nested():
+                        await _apply_entity_track(
+                            session,
+                            external_library,
+                            ref,
+                            run,
+                            counters,
+                            decrypted,
+                            membership="referenced",
+                            add_to_library=False,
+                            immutable=immutable,
+                        )
+                except Exception:
+                    logger.debug(
+                        "Could not materialize referenced track %s",
+                        entry.provider_key,
+                        exc_info=True,
+                    )
+
+            # 4. Replace the container's local rows in provider order.
+            if kind == "playlist" and item.playlist_id is not None:
+                await session.execute(delete(PlaylistTrack).where(PlaylistTrack.playlist_id == item.playlist_id))
+                for entry in contents.entries:
+                    child = await _find_external_item(session, external_library_id, "track", entry.provider_key)
+                    if child is None or child.track_id is None:
+                        continue
+                    session.add(
+                        PlaylistTrack(
+                            playlist_id=item.playlist_id,
+                            track_id=child.track_id,
+                            position=entry.position,
+                        )
+                    )
+
+            item.contents_fetched_at = _utcnow()
+            item.contents_error = None
+            item.sync_error = None
+            await session.commit()
+
+            await _publish_contents_event(external_library, kind, entity_id, "fresh")
+            return {
+                "status": "ok",
+                "entries": len(contents.entries),
+                "tracks_created": counters.tracks_created,
+            }
+    finally:
+        if redis is not None:
+            try:
+                await redis.delete(lock_key)
+            except Exception:
+                logger.debug("Could not release contents lock %s", lock_key, exc_info=True)
+        await close_redis_client()
+        await dispose_and_reset()
+
+
+@celery_app.task(
+    bind=True,
+    name="songhive.tasks.external_libraries.refresh_external_contents",
+    autoretry_for=(ConnectionError, TimeoutError),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 5},
+)
+def refresh_external_contents_task(
+    self,
+    external_library_id: str,
+    kind: str,
+    provider_key: str,
+    force: bool = False,
+) -> dict:
+    """Celery task entry point for refreshing a lazy container's contents."""
+    from ..external.errors import ExternalRateLimited
+
+    config = load_config([])
+    init_db(config.database.url)
+
+    try:
+        return asyncio.run(_refresh_external_contents(external_library_id, kind, provider_key))
+    except ExternalRateLimited as exc:
+        retry_after = getattr(exc, "retry_after", None)
+        raise self.retry(exc=exc, countdown=retry_after or 30)
+    except KombuOperationalError:
+        logger.exception("Broker error in refresh_external_contents_task for %s", external_library_id)
         raise

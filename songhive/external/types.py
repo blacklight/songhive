@@ -109,6 +109,29 @@ class ExternalPlaylistMetadata:
     raw_metadata: Optional[dict[str, Any]] = None
 
 
+class ContentsNotModified(Exception):
+    """Sentinel raised by ``iter_contents`` when the etag matches (HTTP 304)."""
+
+
+@dataclass(frozen=True)
+class ExternalContentEntry:
+    """One ordered child of a lazy provider container (playlist/album)."""
+
+    position: int
+    provider_key: str
+    # Inline track metadata; ``raw_metadata`` carries the provider JSON so the
+    # provider catalog can be filled from the same response.
+    metadata: Optional[ExternalTrackMetadata] = None
+
+
+@dataclass(frozen=True)
+class ExternalContents:
+    """Ordered contents of a lazy provider container, plus its etag."""
+
+    entries: tuple[ExternalContentEntry, ...] = ()
+    etag: Optional[str] = None
+
+
 @dataclass(frozen=True)
 class ExternalStream:
     """Container describing how to stream a track from an external provider."""

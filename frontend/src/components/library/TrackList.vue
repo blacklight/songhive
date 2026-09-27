@@ -23,6 +23,7 @@ import AddToCollectionDialog, {
 } from "@/components/library/AddToCollectionDialog.vue";
 import BulkTrackEditModal from "@/components/library/BulkTrackEditModal.vue";
 import { formatTime } from "@/utils/time";
+import { providerDisplayName } from "@/utils/providerName";
 import { getApiErrorMessage } from "@/api/client";
 import { removeTracksFromLibrary } from "@/api/libraries";
 import { removeTracksFromPlaylist } from "@/api/playlists";
@@ -200,6 +201,19 @@ function isRemoteUnplayable(track: QueueTrack): boolean {
   return !!track.remote && !track.stream_url && !track.audio_url;
 }
 
+/**
+ * Provider-backed tracks whose media isn't playable for this viewer (e.g.
+ * stream policy denies the proxy URL) still offer the public provider page
+ * — ``external_url`` — as the click target instead of a play action.
+ */
+function isExternalUnplayable(track: QueueTrack): boolean {
+  return !track.audio_url && !track.stream_url && !!track.external_url;
+}
+
+function isUnplayable(track: QueueTrack): boolean {
+  return isRemoteUnplayable(track) || isExternalUnplayable(track);
+}
+
 function openAddDialog(mode: "library" | "playlist") {
   addDialogMode.value = mode;
   addDialogOpen.value = true;
@@ -372,8 +386,14 @@ function rowClass(row: Record<string, unknown>): string | undefined {
 }
 
 const playableQueue = computed(() =>
-  enrichedTracks.value.filter((track) => !isRemoteUnplayable(track)),
+  enrichedTracks.value.filter((track) => !isUnplayable(track)),
 );
+
+function openExternalUrl(track: QueueTrack) {
+  if (track.external_url) {
+    window.open(track.external_url, "_blank", "noopener,noreferrer");
+  }
+}
 
 function play(index: number) {
   const track = enrichedTracks.value[index];
@@ -382,6 +402,10 @@ function play(index: number) {
     if (track.remote_page_url) {
       void router.push(track.remote_page_url);
     }
+    return;
+  }
+  if (isExternalUnplayable(track)) {
+    openExternalUrl(track);
     return;
   }
   const wasCurrent = isCurrentTrack(track);
@@ -1161,7 +1185,7 @@ const menuItems = computed(() => {
   // (library/playlist/favorite/remove) need a cached remote object row.
   const isRemote = !!track.remote;
   const isMemberable = isRemoteTrack(track);
-  const playable = !isRemoteUnplayable(track);
+  const playable = !isUnplayable(track);
 
   const items: {
     key: string;
@@ -1182,7 +1206,17 @@ const menuItems = computed(() => {
           icon: "plus",
         },
       ]
-    : [];
+    : track.external_url
+      ? [
+          {
+            key: "open-on-provider",
+            label: t("browse.contextMenu.openOnProvider", {
+              provider: providerDisplayName(track.external_provider_type),
+            }),
+            icon: "arrow-up-right-from-square",
+          },
+        ]
+      : [];
 
   if (track.audio_url) {
     items.push({
@@ -1365,6 +1399,9 @@ async function onMenuSelect(key: string) {
       break;
     case "go-to-remote":
       if (track.remote_page_url) await router.push(track.remote_page_url);
+      break;
+    case "open-on-provider":
+      openExternalUrl(track);
       break;
     case "remove-from-collection":
       openSingleRemove(track);
@@ -1700,6 +1737,18 @@ async function onMenuSelect(key: string) {
               :provider="asTrackRow(row).track.external_provider_type"
               :state="asTrackRow(row).track.external_state"
             />
+            <AppIcon
+              v-if="isExternalUnplayable(asTrackRow(row).track)"
+              name="arrow-up-right-from-square"
+              class="track-list__external-icon"
+              :aria-label="
+                t('browse.contextMenu.openOnProvider', {
+                  provider: providerDisplayName(
+                    asTrackRow(row).track.external_provider_type,
+                  ),
+                })
+              "
+            />
             <span
               v-if="asTrackRow(row).track.remote"
               class="track-list__remote-badge"
@@ -1920,6 +1969,18 @@ async function onMenuSelect(key: string) {
                   :is-external="asTrackRow(row).track.is_external"
                   :provider="asTrackRow(row).track.external_provider_type"
                   :state="asTrackRow(row).track.external_state"
+                />
+                <AppIcon
+                  v-if="isExternalUnplayable(asTrackRow(row).track)"
+                  name="arrow-up-right-from-square"
+                  class="track-list__external-icon"
+                  :aria-label="
+                    t('browse.contextMenu.openOnProvider', {
+                      provider: providerDisplayName(
+                        asTrackRow(row).track.external_provider_type,
+                      ),
+                    })
+                  "
                 />
                 <span
                   v-if="asTrackRow(row).track.remote"
@@ -2185,6 +2246,14 @@ async function onMenuSelect(key: string) {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.track-list__external-icon {
+  margin-left: calc(0.5 * var(--space-1));
+  padding: calc(1.5 * var(--space-1));
   color: var(--color-text-muted);
   font-size: 0.75rem;
   flex-shrink: 0;

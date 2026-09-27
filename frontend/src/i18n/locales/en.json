@@ -123,7 +123,12 @@
       "tags": "Tags",
       "genres": "Genres",
       "remote": "Remote"
-    }
+    },
+    "providerResults": "Connected services",
+    "providerGroup": "{provider} — {name}",
+    "providerAdd": "Add to library",
+    "providerAdded": "Added",
+    "providerAddFailed": "Could not add to library."
   },
   "statusComposer": {
     "title": "New post",
@@ -914,6 +919,29 @@
       "external": "External",
       "trackExternalBadge": "External: {provider}",
       "trackExternalState": "{state}",
+      "deviceAuth": {
+        "connect": "Connect {provider}",
+        "reconnect": "Reconnect {provider}",
+        "reconnectHint": "The saved {provider} credentials are missing or could not be refreshed — reconnect the account.",
+        "connected": "Connected to {provider}.",
+        "failed": "Could not connect: {message}",
+        "instructions": "Open {verificationUrl} and enter the code {userCode} to authorize this Songhive instance.",
+        "waiting": "Waiting for authorization… ({seconds}s left)",
+        "slowDown": "Still waiting — TIDAL asked us to slow down polling. ({seconds}s left)",
+        "expired": "The authorization code expired. Try again.",
+        "denied": "Authorization was denied.",
+        "error": "Authorization failed.",
+        "pkceMode": {
+          "label": "Use browser redirect (PKCE) instead of a device code",
+          "hint": "Opens a TIDAL login page that redirects back with a code — useful on devices where entering a code is awkward."
+        },
+        "pkce": {
+          "instructions": "Open {authorizeUrl}, sign in to TIDAL, then paste the full redirect URL below.",
+          "redirectLabel": "Redirect URL",
+          "redirectHint": "Paste the full URL your browser was redirected to after authorizing.",
+          "complete": "Complete connection"
+        }
+      },
       "providers": {
         "gdrive": {
           "help": "Recommended: connect a Google account via OAuth. In the Google Cloud console at {appConsole}: pick or create a project, enable the Google Drive API (APIs & Services → Library), then create an OAuth client of type \"Web application\" (APIs & Services → Credentials → Create credentials → OAuth client ID) and add this authorized redirect URI: {callbackUrl}\nOn APIs & Services → OAuth consent screen → Data access, add the scope {permissions} — or {writePermissions} if you enable write-back, rename or delete below (the Connect flow requests the right scope automatically). While the consent screen is in Testing mode, add the Google account you connect with as a test user.\nEnter the client ID and secret below and use the Connect button — the access and refresh tokens are filled in automatically.\nServer-to-server alternative: create a service account under IAM & Admin → Service Accounts at {appConsole}, download a JSON key from its Keys tab (Add key → Create new key → JSON) and paste the file's contents into the service account field — then share the Drive folder with the service account's email. The OAuth client fields are unused with a service account, so any placeholder (e.g. \"-\") satisfies them.",
@@ -1058,6 +1086,73 @@
             "dedup_musicbrainz": {
               "label": "Deduplicate by MusicBrainz id",
               "description": "Match imported artists/albums to existing rows by MusicBrainz id before falling back to name matching. Off by default — matching is name-only and never calls the MusicBrainz API."
+            }
+          }
+        },
+        "tidal": {
+          "help": "Connect a TIDAL account to import your saved tracks, albums, artists and playlists as first-class library entries. Use the Connect button below — Songhive uses TIDAL device authorization, so you approve access on TIDAL's page and the credentials are filled in automatically.\nPlaylist and album contents are fetched lazily when you open them and cached for the configured TTL — use \"Sync now\" on a playlist or album to force a refresh. Track metadata is treated as immutable once imported; only tags and visibility stay editable locally.",
+          "fields": {
+            "quality": {
+              "label": "Streaming quality",
+              "description": "Preferred TIDAL streaming quality. Hi-Res requires a TIDAL subscription tier that includes it.",
+              "options": {
+                "low": "Low (96 kbps AAC)",
+                "high": "High (320 kbps AAC)",
+                "lossless": "Lossless (FLAC)",
+                "hi_res_lossless": "Hi-Res lossless (FLAC)"
+              }
+            },
+            "include_tracks": {
+              "label": "Import saved tracks",
+              "description": "Import tracks saved in your TIDAL collection as first-class tracks."
+            },
+            "include_artists": {
+              "label": "Import artists",
+              "description": "Import artists saved in your TIDAL collection as first-class artists."
+            },
+            "include_albums": {
+              "label": "Import albums",
+              "description": "Import albums saved in your TIDAL collection as first-class albums. Album contents are fetched lazily when the album is opened."
+            },
+            "include_playlists": {
+              "label": "Import playlists",
+              "description": "Import playlists you created on TIDAL. Contents are fetched lazily when the playlist is opened."
+            },
+            "include_followed_playlists": {
+              "label": "Import followed playlists",
+              "description": "Also import TIDAL playlists you follow but did not create."
+            },
+            "sync_metadata": {
+              "label": "Enrich metadata",
+              "description": "Also run Songhive-side MusicBrainz enrichment on imported tracks. Off by default — provider metadata is authoritative."
+            },
+            "dedup_isrc": {
+              "label": "Deduplicate by ISRC",
+              "description": "Match imported tracks to existing rows by ISRC before creating new ones. Matched tracks keep their local metadata."
+            },
+            "playlist_ttl_seconds": {
+              "label": "Playlist/album cache TTL (seconds)",
+              "description": "How long cached playlist and album contents stay fresh before being lazily refetched. Minimum 300."
+            },
+            "mpd_mode": {
+              "label": "Hi-Res delivery mode",
+              "description": "How MPEG-DASH (Hi-Res) streams are served. \"remux\" needs ffmpeg.",
+              "options": {
+                "segments": "Raw MPEG-DASH segments",
+                "remux": "Remuxed to FLAC via ffmpeg"
+              }
+            },
+            "redirect_streams": {
+              "label": "Redirect streams",
+              "description": "Redirect clients to TIDAL CDN URLs instead of proxying audio bytes through this server."
+            },
+            "download_format": {
+              "label": "Download format",
+              "description": "Container for downloaded TIDAL tracks. Downloads must be enabled in the instance configuration.",
+              "options": {
+                "flac": "FLAC",
+                "aac": "AAC (M4A)"
+              }
             }
           }
         },
@@ -1649,6 +1744,7 @@
       "file": "File",
       "radio": "Radio",
       "item": "Item",
+      "episode": "Episode",
       "share": "Share",
       "shares": "Shares"
     },
@@ -1707,7 +1803,16 @@
       "saveSuccess": "Saved.",
       "saveError": "Could not save: {message}",
       "deleteConfirm": "Are you sure you want to delete \"{name}\"?",
-      "deleted": "Deleted."
+      "deleted": "Deleted.",
+      "providerManaged": "Metadata is managed by {provider} — locked fields cannot be edited here. Local fields such as tags and visibility remain editable."
+    },
+    "providerSync": {
+      "from": "Provider: {provider}",
+      "updated": "Updated {time}",
+      "refreshing": "Refreshing {provider} contents…",
+      "loading": "Loading {provider} contents…",
+      "error": "{provider} contents could not be refreshed.",
+      "syncNow": "Sync now"
     },
     "delete": {
       "title": "Delete {entity}?",
@@ -1814,7 +1919,8 @@
       "deleteTrack": "Delete track",
       "editTrack": "Edit track",
       "enrich": "Fetch metadata",
-      "goToPodcast": "Go to podcast"
+      "goToPodcast": "Go to podcast",
+      "openOnProvider": "Open on {provider}"
     },
     "enrich": {
       "title": "Fetch metadata",

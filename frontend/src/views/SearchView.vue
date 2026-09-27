@@ -5,10 +5,13 @@ import { useRoute, useRouter } from "vue-router";
 
 import {
   searchPreview,
+  searchProviders,
+  type ProviderSearchGroup,
   type SearchEntity,
   type SearchResultItem,
   type SearchResultSection,
 } from "@/api/search";
+import { importExternalEntity } from "@/api/externalLibraries";
 import { remoteLookup } from "@/api/remote";
 import { getApiErrorMessage } from "@/api/client";
 import {
@@ -54,6 +57,34 @@ const remoteSection = ref<SearchResultSection | null>(null);
 const remoteAvailable = ref(false);
 const remoteLookupBusy = ref(false);
 const remoteLookupError = ref<string | null>(null);
+
+// External-provider search: fetched alongside local search but rendered as
+// its own grouped sections — a slow provider can never delay local results.
+const providerGroups = ref<ProviderSearchGroup[]>([]);
+const providerLoading = ref(false);
+const providerAdded = ref<Record<string, string>>({});
+const providerImportError = ref<Record<string, string>>({});
+
+function providerResultKey(group: ProviderSearchGroup, providerKey: string) {
+  return `${group.external_library_id}:${providerKey}`;
+}
+
+async function onProviderAdd(group: ProviderSearchGroup, providerKey: string) {
+  const key = providerResultKey(group, providerKey);
+  const result = group.results.find((r) => r.provider_key === providerKey);
+  if (!result || providerAdded.value[key]) return;
+  delete providerImportError.value[key];
+  try {
+    const response = await importExternalEntity(group.external_library_id, {
+      kind: result.kind as "track" | "album" | "artist" | "playlist",
+      provider_key: providerKey,
+    });
+    providerAdded.value[key] = response.entity_id;
+  } catch (err) {
+    providerImportError.value[key] =
+      getApiErrorMessage(err) || t("search.providerAddFailed");
+  }
+}
 
 async function onRemoteLookup(term: string = query.value.trim()) {
   if (!term || remoteLookupBusy.value) return;
@@ -109,7 +140,26 @@ async function performSearch() {
   syncRoute();
   remoteSection.value = null;
   remoteLookupError.value = null;
+  providerGroups.value = [];
+  providerAdded.value = {};
+  providerImportError.value = {};
   const term = query.value.trim();
+  const hashtag = term.startsWith("#");
+  if (term && !hashtag) {
+    providerLoading.value = true;
+    void searchProviders(term, 8)
+      .then((response) => {
+        providerGroups.value = response.providers ?? [];
+      })
+      .catch(() => {
+        providerGroups.value = [];
+      })
+      .finally(() => {
+        providerLoading.value = false;
+      });
+  } else {
+    providerLoading.value = false;
+  }
   await Promise.all([
     searchAll(query.value, activeEntities.value),
     term && !term.startsWith("#")
@@ -505,6 +555,110 @@ const visibleEntities = computed<SearchSectionEntity[]>(() =>
           </span>
         </div>
       </section>
+
+      <section
+        v-for="group in providerGroups"
+        :key="group.external_library_id"
+        class="search-view__section search-view__section--provider"
+      >
+        <header class="search-view__section-header">
+          <h2 class="search-view__section-title">
+            {{
+              t("search.providerGroup", {
+                provider: group.provider_type,
+                name: group.library_name || "",
+              })
+            }}
+            <span class="search-view__section-count">
+              ({{ group.results.length }})
+            </span>
+          </h2>
+        </header>
+
+        <div v-if="group.error" class="search-view__section-error" role="alert">
+          {{ group.error }}
+        </div>
+
+        <p v-else-if="!group.results.length" class="search-view__section-empty">
+          {{ t("search.noResults") }}
+        </p>
+
+        <ul v-else class="search-view__grid search-view__grid--tracks">
+          <li
+            v-for="item in group.results"
+            :key="item.provider_key"
+            class="search-view__item search-view__item--provider"
+          >
+            <img
+              v-if="item.image_url"
+              :src="item.image_url"
+              :alt="item.title"
+              class="search-view__thumb"
+            />
+            <span v-else class="search-view__thumb search-view__thumb--empty" />
+            <span class="search-view__provider-body">
+              <span class="search-view__provider-kind">
+                {{ t(`search.entities.${item.kind}s`, item.kind) }}
+              </span>
+              <a
+                v-if="item.external_url"
+                :href="item.external_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="search-view__link"
+              >
+                {{ item.title }}
+              </a>
+              <span v-else class="search-view__link">{{ item.title }}</span>
+              <span v-if="item.subtitle" class="search-view__meta">
+                {{ item.subtitle }}
+              </span>
+              <span
+                v-if="
+                  providerImportError[
+                    providerResultKey(group, item.provider_key)
+                  ]
+                "
+                class="search-view__provider-error"
+                role="alert"
+              >
+                {{
+                  providerImportError[
+                    providerResultKey(group, item.provider_key)
+                  ]
+                }}
+              </span>
+            </span>
+            <AppButton
+              size="sm"
+              :disabled="
+                !!providerAdded[providerResultKey(group, item.provider_key)]
+              "
+              @click="onProviderAdd(group, item.provider_key)"
+            >
+              {{
+                providerAdded[providerResultKey(group, item.provider_key)]
+                  ? t("search.providerAdded")
+                  : t("search.providerAdd")
+              }}
+            </AppButton>
+          </li>
+        </ul>
+      </section>
+
+      <section
+        v-if="providerLoading"
+        class="search-view__section search-view__section--provider"
+      >
+        <header class="search-view__section-header">
+          <h2 class="search-view__section-title">
+            {{ t("search.providerResults") }}
+          </h2>
+        </header>
+        <div class="search-view__section-loading">
+          {{ t("common.loading") }}
+        </div>
+      </section>
     </div>
   </main>
 </template>
@@ -668,6 +822,36 @@ const visibleEntities = computed<SearchSectionEntity[]>(() =>
 
 .search-view__meta--bio {
   flex: 1 1 auto;
+}
+
+.search-view__item--provider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+}
+
+.search-view__provider-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.search-view__provider-kind {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.search-view__provider-error {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
 }
 
 .search-view__tag-count {

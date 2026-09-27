@@ -1,7 +1,12 @@
 import type { components } from "./types";
 import { apiRequest, apiRequestWithHeaders } from "./client";
 
-export type ArtistResponse = components["schemas"]["ArtistResponse"];
+export type ArtistResponse = components["schemas"]["ArtistResponse"] & {
+  /** Fields the provider allows editing locally (e.g. ["genres", "tags"]). */
+  editable_fields?: string[] | null;
+  /** Provider type backing the artist (e.g. "tidal"); null when local. */
+  external_provider_type?: string | null;
+};
 export type ArtistUpdate = components["schemas"]["ArtistUpdate"];
 
 export function listArtists(params?: {

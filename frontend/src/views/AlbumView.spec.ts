@@ -29,6 +29,19 @@ vi.mock("@/api/tracks", () => ({
   deleteTrack: vi.fn(),
 }));
 
+vi.mock("@/api/providerSync", () => ({
+  providerSyncAlbum: vi.fn(),
+}));
+
+vi.mock("@/api/ws", () => ({
+  eventBus: {
+    on: vi.fn(),
+    off: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  },
+}));
+
 function createTestRouter() {
   return createRouter({
     history: createMemoryHistory(),

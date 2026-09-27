@@ -1,6 +1,6 @@
 """Shared helpers for FastAPI route modules."""
 
-from typing import List, Optional, Protocol
+from typing import Iterable, List, Optional, Protocol
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel
@@ -86,4 +86,32 @@ async def load_and_authorize(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
+        )
+
+
+async def enforce_editable_fields(
+    db: AsyncSession,
+    kind: str,
+    entity_id: str,
+    fields: Iterable[str],
+) -> None:
+    """Reject edits to fields the entity's provider does not allow.
+
+    Provider-backed entities may declare ``editable_fields`` in their
+    library capabilities (e.g. TIDAL allows ``genres``/``tags`` only since
+    provider metadata is immutable). ``visibility`` is local ACL state and
+    always stays editable. ``None`` from the resolver means the entity is
+    not provider-managed and everything is editable.
+    """
+    from ...services.provider_catalog import editable_fields_for_entity
+
+    editable = await editable_fields_for_entity(db, kind, entity_id)
+    if editable is None:
+        return
+    allowed = set(editable) | {"visibility"}
+    blocked = sorted({field for field in fields if field not in allowed})
+    if blocked:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Field(s) {', '.join(blocked)} are managed by the external provider and cannot be edited",
         )

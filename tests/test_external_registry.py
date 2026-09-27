@@ -12,6 +12,7 @@ from songhive.external.registry import (
     is_user_configurable,
     list_external_provider_types,
     register_external_adapter,
+    unregister_external_adapter,
 )
 from songhive.external.types import ExternalItemRef, ExternalLibraryCapabilities
 
@@ -67,6 +68,15 @@ def test_list_external_provider_types():
 def test_is_user_configurable():
     assert is_user_configurable("dummy") is True
     assert is_user_configurable("unknown") is False
+
+
+def test_unregister_external_adapter():
+    register_external_adapter("dummy-temp", _DummyAdapter)
+    assert "dummy-temp" in list_external_provider_types()
+    unregister_external_adapter("dummy-temp")
+    assert "dummy-temp" not in list_external_provider_types()
+    # Unregistering an unknown provider is a no-op.
+    unregister_external_adapter("dummy-temp")
 
 
 async def test_default_method_raises_unsupported():

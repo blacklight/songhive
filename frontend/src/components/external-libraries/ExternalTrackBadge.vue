@@ -18,6 +18,7 @@ interface IconDescriptor {
 const providerIconMap: Record<string, IconDescriptor> = {
   local: { name: "hard-drive", label: "Local storage" },
   s3: { name: "aws", variant: "brand", label: "Amazon S3" },
+  tidal: { name: "cloud", label: "TIDAL" },
 };
 
 function formatLabel(provider: string): string {

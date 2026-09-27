@@ -31,6 +31,12 @@ from ...api._common import client_ip
 from ...api.deps import get_db, get_storage_service
 from ...api.routes.favorites import _notify_favorite, _retract_favorite_notification
 from ...config.schema import SonghiveConfig
+from ...external.lazy import (
+    ensure_contents,
+    find_external_item,
+    lazy_wait_seconds,
+    wait_for_contents,
+)
 from ...models._enums import Visibility
 from ...models.album import Album
 from ...models.artist import Artist
@@ -434,9 +440,28 @@ async def _get_artist(ctx: _Ctx) -> Dict[str, Any]:
     return {"artist": payload}
 
 
+async def _wait_lazy_contents(ctx: _Ctx, kind: str, entity_id: str) -> None:
+    """
+    Trigger + bounded-wait a provider contents refresh.
+
+    Subsonic clients cannot observe the ``external_contents_refreshed``
+    WebSocket event, so on the first load (``never_fetched``/``refreshing``)
+    we poll up to ``lazy_contents_wait_seconds`` for the Celery task to
+    materialize rows, then serve whatever exists.
+    """
+    status = await ensure_contents(ctx.db, kind, entity_id)
+    if status is None or status.state not in ("never_fetched", "refreshing"):
+        return
+    item = await find_external_item(ctx.db, kind, entity_id)
+    if item is None:
+        return
+    await wait_for_contents(ctx.db, item, lazy_wait_seconds(status.provider_type))
+
+
 @_endpoint("getAlbum")
 async def _get_album(ctx: _Ctx) -> Dict[str, Any]:
     album = await _require_album(ctx)
+    await _wait_lazy_contents(ctx, "album", str(album.id))
     tracks, _ = await music.list_tracks(
         ctx.db,
         album_id=str(album.id),
@@ -877,6 +902,7 @@ async def _playlists(ctx: _Ctx) -> Dict[str, Any]:
 @_endpoint("getPlaylist")
 async def _get_playlist(ctx: _Ctx) -> Dict[str, Any]:
     playlist = await _require_playlist(ctx)
+    await _wait_lazy_contents(ctx, "playlist", str(playlist.id))
     stats = await music.get_playlist_stats(ctx.db, str(playlist.id), user=ctx.user)
     payload = sz.playlist_dict(
         playlist,

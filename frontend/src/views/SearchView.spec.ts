@@ -256,4 +256,109 @@ describe("SearchView", () => {
 
     expect(wrapper.find(".search-view__remote-error").exists()).toBe(true);
   });
+
+  function makeProviderFetch(options: {
+    groups?: unknown[];
+    importStatus?: number;
+  }) {
+    return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes("/search/providers")) {
+        return Promise.resolve(
+          makeResponse({ query: "q", providers: options.groups ?? [] }),
+        );
+      }
+      if (url.includes("/import") && init?.method === "POST") {
+        if (options.importStatus && options.importStatus !== 200) {
+          return Promise.resolve({
+            status: options.importStatus,
+            ok: false,
+            text: () => Promise.resolve(JSON.stringify({ detail: "nope" })),
+            headers: new Headers(),
+          });
+        }
+        return Promise.resolve(
+          makeResponse({ kind: "track", provider_key: "p1", entity_id: "e1" }),
+        );
+      }
+      return Promise.resolve(makeResponse([], { "X-Total-Count": "0" }));
+    });
+  }
+
+  const providerGroup = {
+    external_library_id: "lib-1",
+    provider_type: "tidal",
+    library_name: "My TIDAL",
+    results: [
+      {
+        kind: "track",
+        provider_key: "p1",
+        title: "Provider Song",
+        subtitle: "Artist",
+        external_url: "https://tidal.com/browse/track/p1",
+      },
+    ],
+    error: null,
+  };
+
+  it("renders provider result groups with an add action", async () => {
+    vi.stubGlobal("fetch", makeProviderFetch({ groups: [providerGroup] }));
+    const wrapper = await mountView({ q: "song", entities: "tracks" });
+    await flushPromises();
+
+    const section = wrapper.find(".search-view__section--provider");
+    expect(section.exists()).toBe(true);
+    expect(section.text()).toContain("Provider Song");
+    const link = section.find("a.search-view__link");
+    expect(link.attributes("href")).toBe("https://tidal.com/browse/track/p1");
+
+    const addButton = section.findComponent({ name: "AppButton" });
+    await addButton.trigger("click");
+    await flushPromises();
+
+    const importCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url).includes("/import"));
+    expect(importCall).toBeDefined();
+    expect(String(importCall![0])).toContain(
+      "/external-libraries/lib-1/import",
+    );
+    expect(JSON.parse(String(importCall![1]?.body))).toEqual({
+      kind: "track",
+      provider_key: "p1",
+    });
+    expect(addButton.text()).toContain("Added");
+    expect(addButton.props("disabled")).toBe(true);
+  });
+
+  it("surfaces a provider group error without breaking the page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      makeProviderFetch({
+        groups: [{ ...providerGroup, results: [], error: "provider exploded" }],
+      }),
+    );
+    const wrapper = await mountView({ q: "song", entities: "tracks" });
+    await flushPromises();
+
+    const section = wrapper.find(".search-view__section--provider");
+    expect(section.exists()).toBe(true);
+    expect(section.find(".search-view__section-error").text()).toContain(
+      "provider exploded",
+    );
+  });
+
+  it("shows an inline error when the import fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      makeProviderFetch({ groups: [providerGroup], importStatus: 422 }),
+    );
+    const wrapper = await mountView({ q: "song", entities: "tracks" });
+    await flushPromises();
+
+    const section = wrapper.find(".search-view__section--provider");
+    await section.findComponent({ name: "AppButton" }).trigger("click");
+    await flushPromises();
+
+    expect(section.find(".search-view__provider-error").exists()).toBe(true);
+  });
 });

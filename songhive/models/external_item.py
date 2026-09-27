@@ -78,6 +78,16 @@ class ExternalItem(Base):
     )
     provider_etag: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     provider_mtime: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
+    # ``saved`` = the entity is part of the provider collection the sync
+    # enumerated (favorites, own/followed playlists); ``referenced`` = it was
+    # materialized because something else points at it (a lazy playlist/album
+    # contents fetch, a local playlist/favorite) and is not library membership.
+    membership: Mapped[str] = mapped_column(
+        String(16),
+        default="saved",
+        server_default="saved",
+        index=True,
+    )
     state: Mapped[str] = mapped_column(
         String(16),
         default="active",
@@ -88,6 +98,12 @@ class ExternalItem(Base):
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
     last_synced_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
     sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Per-library lazy-contents bookkeeping for container kinds (playlist,
+    # album): when this library last fetched the entity's contents and the
+    # latest error, while the shared payload/contents live in
+    # ``provider_catalog_entries``.
+    contents_fetched_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(), nullable=True)
+    contents_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     external_library = relationship(
         "ExternalLibrary",

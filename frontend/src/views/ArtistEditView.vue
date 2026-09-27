@@ -19,6 +19,8 @@ import { useEntityTags } from "@/composables/useEntityTags";
 import TagInput from "@/components/tags/TagInput.vue";
 import { useConfirmStore } from "@/stores/confirm";
 import { useToastStore } from "@/stores/toast";
+import { isFieldEditable, isProviderManaged } from "@/utils/editableFields";
+import { providerDisplayName } from "@/utils/providerName";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
@@ -48,6 +50,14 @@ const imageError = ref<string | null>(null);
 const coverError = ref<string | null>(null);
 
 const { canManage } = useCanManage();
+
+const editableFields = computed(() => artist.value?.editable_fields ?? null);
+const providerManaged = computed(() => isProviderManaged(editableFields.value));
+const managedByLabel = computed(() =>
+  providerDisplayName(artist.value?.external_provider_type),
+);
+const fieldEditable = (cap: string) =>
+  isFieldEditable(editableFields.value, cap);
 
 const { tags, resetTags, syncTags } = useEntityTags();
 
@@ -86,19 +96,22 @@ async function load() {
 }
 
 async function onSubmit() {
-  if (!name.value.trim()) return;
+  if (fieldEditable("name") && !name.value.trim()) return;
 
   isSaving.value = true;
   error.value = null;
 
-  const body: ArtistUpdate = {
-    name: name.value.trim(),
-    bio: bio.value.trim() || null,
-  };
+  // Provider-managed fields are sent only when editable — the backend
+  // rejects locked fields (422) merely for being present in the payload.
+  const body: ArtistUpdate = {};
+  if (fieldEditable("name")) body.name = name.value.trim();
+  if (fieldEditable("bio")) body.bio = bio.value.trim() || null;
 
   try {
-    await updateArtist(artistId.value, body);
-    await syncTags("artists", artistId.value);
+    if (Object.keys(body).length > 0) {
+      await updateArtist(artistId.value, body);
+    }
+    if (fieldEditable("tags")) await syncTags("artists", artistId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/artists/${artistId.value}`);
   } catch (err) {
@@ -250,19 +263,36 @@ watch(
         {{ t("browse.edit.editArtist") }}
       </AppPageTitle>
 
+      <p
+        v-if="providerManaged"
+        class="artist-edit-view__provider-note"
+        role="note"
+      >
+        <i class="fa-solid fa-cloud" aria-hidden="true" />
+        {{ t("browse.edit.providerManaged", { provider: managedByLabel }) }}
+      </p>
+
       <form class="artist-edit-view__form" @submit.prevent="onSubmit">
         <AppInput
           v-model="name"
           :label="t('browse.edit.name')"
           :required="true"
+          :disabled="!fieldEditable('name')"
         />
-        <AppInput v-model="bio" as="textarea" :label="'Bio'" :rows="6" />
+        <AppInput
+          v-model="bio"
+          as="textarea"
+          :label="'Bio'"
+          :rows="6"
+          :disabled="!fieldEditable('bio')"
+        />
 
         <TagInput
           v-if="canManage"
           v-model="tags"
           :placeholder="t('tags.placeholder')"
           :aria-label="t('tags.label')"
+          :disabled="!fieldEditable('tags')"
         />
 
         <div class="artist-edit-view__actions">
@@ -303,6 +333,7 @@ watch(
             accept="image/*"
             :loading="isUploadingImage"
             :removing="isRemovingImage"
+            :disabled="!fieldEditable('image')"
             :error="imageError ?? undefined"
             @upload="onUploadImage"
             @remove="onRemoveImage"
@@ -315,6 +346,7 @@ watch(
             accept="image/*"
             :loading="isUploadingCover"
             :removing="isRemovingCover"
+            :disabled="!fieldEditable('image')"
             :error="coverError ?? undefined"
             @upload="onUploadCover"
             @remove="onRemoveCover"
@@ -351,6 +383,18 @@ watch(
 .artist-edit-view__title {
   margin: 0;
   font-size: 1.75rem;
+}
+
+.artist-edit-view__provider-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-secondary);
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
 }
 
 .artist-edit-view__form {

@@ -32,3 +32,37 @@ export function searchPreview(
   }
   return apiRequest<SearchResponse>("/search/", { query: params });
 }
+
+// External-provider search — transient metadata grouped by connected
+// library; nothing is persisted until the caller imports an entity via
+// ``importExternalEntity`` in ``./externalLibraries``.
+export interface ProviderSearchResultItem {
+  kind: string;
+  provider_key: string;
+  title: string;
+  subtitle?: string | null;
+  image_url?: string | null;
+  external_url?: string | null;
+}
+
+export interface ProviderSearchGroup {
+  external_library_id: string;
+  provider_type: string;
+  library_name?: string | null;
+  results: ProviderSearchResultItem[];
+  error?: string | null;
+}
+
+export interface ProviderSearchResponse {
+  query: string;
+  providers: ProviderSearchGroup[];
+}
+
+export function searchProviders(
+  q: string,
+  limit = 10,
+): Promise<ProviderSearchResponse> {
+  return apiRequest<ProviderSearchResponse>("/search/providers", {
+    query: { q, limit },
+  });
+}

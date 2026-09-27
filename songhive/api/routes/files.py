@@ -447,6 +447,7 @@ async def upload_file(
             current_user,
             storage,
             IncludeQuery({"artist", "album"}),
+            db=db,
         )
 
     if outcome.is_duplicate:
@@ -651,6 +652,7 @@ async def resolve_upload_duplicate(
             current_user,
             storage,
             IncludeQuery({"artist", "album"}),
+            db=db,
         )
 
     db.add(result.stored_file)
@@ -713,7 +715,10 @@ async def get_file_metadata(
         limit=1000,
         include={"artist", "album"},
     )
-    track_summaries = [await build_track_summary(t, storage) for t in track_rows]
+    policy_cache: dict = {}
+    track_summaries = [
+        await build_track_summary(t, storage, user=user, session=db, policy_cache=policy_cache) for t in track_rows
+    ]
     tracks = [t for t in track_summaries if t is not None]
 
     url = await storage.get_url(stored_file)

@@ -682,7 +682,14 @@ class SessionDriver:
                     metadata,
                 )
 
-        external_stream = await resolve_external_stream(db, track_id)
+        from ..models.user import User as _User
+
+        session_user = await db.get(_User, session.user_id) if session.user_id else None
+        try:
+            external_stream = await resolve_external_stream(db, track_id, user=session_user)
+        except Exception:
+            logger.warning("External stream resolution failed for track %s", track_id, exc_info=True)
+            external_stream = None
         if external_stream is not None:
             if external_stream.path is not None:
                 return (

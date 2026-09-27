@@ -64,7 +64,11 @@ class FakeEntityAdapter(ExternalLibraryAdapter):
             list_albums=bool(config.get("include_albums", True)),
             list_artists=bool(config.get("include_artists", True)),
             list_playlists=bool(config.get("include_playlists", True)),
-            limits={"checksum_algorithm": None, "entity_import": True},
+            limits={
+                "checksum_algorithm": None,
+                "entity_import": True,
+                "immutable_tracks": bool(config.get("immutable_tracks", False)),
+            },
         )
         return self._capabilities
 
@@ -114,6 +118,10 @@ class FakeEntityAdapter(ExternalLibraryAdapter):
 @pytest.fixture(autouse=True)
 def _register_fake_entity_adapter():
     register_external_adapter("fake-entity", FakeEntityAdapter)
+    yield
+    from songhive.external.registry import unregister_external_adapter
+
+    unregister_external_adapter("fake-entity")
 
 
 @pytest.fixture
@@ -439,3 +447,58 @@ async def test_entity_track_missing_state_blocks_stream(db_session, fake_redis, 
     track = (await db_session.execute(select(Track))).scalar_one()
     with pytest.raises(ExternalItemNotFound):
         await resolve_external_stream(db_session, str(track.id))
+
+
+@pytest.mark.asyncio
+async def test_entity_track_cover_populates_album(db_session, fake_redis, _make_entity_library):
+    """Track-metadata ``cover_url`` lands on the materialized album."""
+    external_library, _, _ = await _make_entity_library(
+        {"tracks": [_track("jf-1", cover_url="https://img.example/cover.jpg")]}
+    )
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+
+    album = (await db_session.execute(select(Album))).scalar_one()
+    assert album.cover_url == "https://img.example/cover.jpg"
+
+
+@pytest.mark.asyncio
+async def test_entity_track_cover_heals_coverless_album(db_session, fake_redis, _make_entity_library):
+    """An unchanged re-sync still fills an album cover that was missing.
+
+    Albums created before track-derived covers were applied stay empty even on
+    re-sync (the track early-returns as immutable/unchanged); the sync must
+    backfill ``cover_url`` from the provider payload regardless.
+    """
+    external_library, _, _ = await _make_entity_library({"tracks": [_track("jf-1")]}, {"immutable_tracks": True})
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    album = (await db_session.execute(select(Album))).scalar_one()
+    assert not album.cover_url
+
+    config = secrets.decrypt_json(external_library.config)
+    config["entities"]["tracks"][0]["metadata"]["cover_url"] = "https://img.example/late.jpg"
+    external_library.config = secrets.encrypt_json(config)
+    await db_session.flush()
+
+    run = await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    assert run.status == "success"
+    await db_session.refresh(album)
+    assert album.cover_url == "https://img.example/late.jpg"
+
+
+@pytest.mark.asyncio
+async def test_entity_track_cover_does_not_overwrite(db_session, fake_redis, _make_entity_library):
+    """A provider cover never replaces an album's existing cover."""
+    external_library, _, _ = await _make_entity_library({"tracks": [_track("jf-1")]}, {"immutable_tracks": True})
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    album = (await db_session.execute(select(Album))).scalar_one()
+    album.cover_url = "https://img.example/local.jpg"
+    await db_session.flush()
+
+    config = secrets.decrypt_json(external_library.config)
+    config["entities"]["tracks"][0]["metadata"]["cover_url"] = "https://img.example/provider.jpg"
+    external_library.config = secrets.encrypt_json(config)
+    await db_session.flush()
+
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    await db_session.refresh(album)
+    assert album.cover_url == "https://img.example/local.jpg"

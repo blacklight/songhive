@@ -20,6 +20,7 @@ from fastapi import (
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...external.lazy import ensure_contents
 from ...models._enums import Visibility
 from ...models.audit_log import AuditTargetType
 from ...models.track import Track
@@ -61,7 +62,7 @@ from ..responses import (
     build_track_summary,
     build_user_summary,
 )
-from ._common import GenreListRequest, TagListRequest
+from ._common import GenreListRequest, TagListRequest, enforce_editable_fields
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import _enqueue_track_enrichment, _enqueue_track_tag_sync, _handle_visibility_changes
 
@@ -93,6 +94,15 @@ class AlbumResponse(BaseModel):
     # ``created_at``/``updated_at`` sort fields.
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Lazy provider-contents state; None for albums that are not
+    # provider-backed (``{"provider_type", "state", "fetched_at",
+    # "ttl_seconds", "error"}``).
+    provider_sync: Optional[dict] = None
+    # Provider-declared list of locally-editable fields; ``None`` for local
+    # or unrestricted albums.
+    editable_fields: Optional[List[str]] = None
+    # Provider type backing the album (e.g. ``"tidal"``); ``None`` when local.
+    external_provider_type: Optional[str] = None
 
 
 class AlbumUpdate(BaseModel):
@@ -103,6 +113,17 @@ class AlbumUpdate(BaseModel):
     description: Optional[str] = None
     genre: Optional[str] = None
     visibility: Optional[Visibility] = None
+
+
+# ``AlbumUpdate`` fields mapped onto provider ``editable_fields`` capability
+# names; ``visibility`` is local ACL state and stays editable.
+_ALBUM_UPDATE_FIELD_MAP = {
+    "title": "title",
+    "release_year": "release_year",
+    "description": "description",
+    "genre": "genres",
+    "visibility": "visibility",
+}
 
 
 class AlbumEnrichResponse(BaseModel):
@@ -151,6 +172,8 @@ async def _build_album_response(
     storage: StorageService,
     include: IncludeQuery,
     saved_ids: Optional[Set[str]] = None,
+    db: Optional[AsyncSession] = None,
+    provider_sync: Optional[dict] = None,
 ) -> AlbumResponse:
     """Build an AlbumResponse with optional nested summaries."""
     artist = None
@@ -165,11 +188,24 @@ async def _build_album_response(
         album_tracks = getattr(album, "tracks", None)
         if album_tracks is not None:
             track_list: List[TrackSummary] = []
+            policy_cache: dict = {}
             for t in sorted(album_tracks, key=_album_track_sort_key):
-                summary = await build_track_summary(t, storage)
+                summary = await build_track_summary(t, storage, user=user, session=db, policy_cache=policy_cache)
                 if summary is not None:
                     track_list.append(summary)
             tracks = track_list
+
+    editable_fields = None
+    external_provider_type = None
+    if db is not None:
+        from ...services.provider_catalog import (
+            editable_fields_for_entity,
+            provider_type_for_entity,
+        )
+
+        editable_fields = await editable_fields_for_entity(db, "album", str(album.id))
+        if editable_fields is not None:
+            external_provider_type = await provider_type_for_entity(db, "album", str(album.id))
 
     return AlbumResponse(
         id=str(album.id),
@@ -191,6 +227,9 @@ async def _build_album_response(
         genres=_album_genres(album),
         created_at=album.created_at,
         updated_at=album.updated_at,
+        provider_sync=provider_sync,
+        editable_fields=editable_fields,
+        external_provider_type=external_provider_type,
     )
 
 
@@ -253,7 +292,7 @@ async def list_albums(
     )
     pagination.set_total(response, total)
     saved_ids = await collection.saved_item_ids(db, user, "album", [str(a.id) for a in rows])
-    return [await _build_album_response(a, user, storage, include, saved_ids) for a in rows]
+    return [await _build_album_response(a, user, storage, include, saved_ids, db=db) for a in rows]
 
 
 @router.get(
@@ -274,7 +313,38 @@ async def get_album(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     saved_ids = await collection.saved_item_ids(db, user, "album", {album_id})
-    return await _build_album_response(album, user, storage, include, saved_ids)
+    provider_status = await ensure_contents(db, "album", album_id)
+    return await _build_album_response(
+        album,
+        user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        provider_sync=provider_status.to_dict() if provider_status is not None else None,
+    )
+
+
+@router.post("/{album_id}/provider-sync", status_code=status.HTTP_202_ACCEPTED)
+async def provider_sync_album(
+    album_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Force a refresh of a provider-backed album's contents."""
+    album = await music.get_album(db, album_id)
+    if album is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if not await acl.can_manage(db, current_user, "album", album_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    provider_status = await ensure_contents(db, "album", album_id, force=True)
+    if provider_status is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Album is not provider-backed",
+        )
+    return provider_status.to_dict()
 
 
 @router.get(
@@ -316,6 +386,13 @@ async def update_album(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
+
+    await enforce_editable_fields(
+        db,
+        "album",
+        album_id,
+        (_ALBUM_UPDATE_FIELD_MAP.get(field, field) for field in body.model_fields_set),
+    )
 
     if body.title is not None:
         album.title = body.title
@@ -371,7 +448,7 @@ async def update_album(
 
     album = await music.get_album(db, album_id, include=set(include.values) | {"artist"})
     saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
-    return await _build_album_response(album, current_user, storage, include, saved_ids)
+    return await _build_album_response(album, current_user, storage, include, saved_ids, db=db)
 
 
 @router.post("/{album_id}/cover", response_model=AlbumResponse)
@@ -394,6 +471,8 @@ async def upload_album_cover(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
+
+    await enforce_editable_fields(db, "album", album_id, {"image"})
 
     stored = await upload_entity_image(
         db,
@@ -420,7 +499,7 @@ async def upload_album_cover(
         _enqueue_track_tag_sync(track_id)
 
     saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
-    return await _build_album_response(album, current_user, storage, include, saved_ids)
+    return await _build_album_response(album, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{album_id}/cover", response_model=AlbumResponse)
@@ -443,6 +522,8 @@ async def delete_album_cover(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "album", album_id, {"image"})
+
     await remove_entity_image(album, "cover_file_id")
 
     await audit.log_action(
@@ -460,7 +541,7 @@ async def delete_album_cover(
         _enqueue_track_tag_sync(track_id)
 
     saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
-    return await _build_album_response(album, current_user, storage, include, saved_ids)
+    return await _build_album_response(album, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{album_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
@@ -592,6 +673,8 @@ async def add_album_tags(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "album", album_id, {"tags"})
+
     try:
         await add_tags_to_entity(
             db,
@@ -618,7 +701,7 @@ async def add_album_tags(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
-    return await _build_album_response(album, current_user, storage, include, saved_ids)
+    return await _build_album_response(album, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{album_id}/tags/{tag}", response_model=AlbumResponse)
@@ -642,6 +725,8 @@ async def remove_album_tag(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "album", album_id, {"tags"})
+
     try:
         await remove_tag_from_entity(db, "album", album_id, tag)
     except ValueError as exc:
@@ -662,7 +747,7 @@ async def remove_album_tag(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
-    return await _build_album_response(album, current_user, storage, include, saved_ids)
+    return await _build_album_response(album, current_user, storage, include, saved_ids, db=db)
 
 
 @router.post("/{album_id}/genres", response_model=AlbumResponse)
@@ -685,6 +770,8 @@ async def set_album_genres(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
+
+    await enforce_editable_fields(db, "album", album_id, {"genres"})
 
     try:
         normalised = []
@@ -726,7 +813,7 @@ async def set_album_genres(
         _enqueue_track_tag_sync(track_id)
 
     saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
-    return await _build_album_response(album, current_user, storage, include, saved_ids)
+    return await _build_album_response(album, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{album_id}/genres/{genre}", response_model=AlbumResponse)
@@ -749,6 +836,8 @@ async def remove_album_genre(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
+
+    await enforce_editable_fields(db, "album", album_id, {"genres"})
 
     try:
         current = split_genre_string(album.genre)
@@ -783,4 +872,4 @@ async def remove_album_genre(
         _enqueue_track_tag_sync(track_id)
 
     saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})
-    return await _build_album_response(album, current_user, storage, include, saved_ids)
+    return await _build_album_response(album, current_user, storage, include, saved_ids, db=db)

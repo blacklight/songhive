@@ -19,6 +19,11 @@ def register_external_adapter(provider_type: str, adapter_cls: type[ExternalLibr
     _REGISTRY[provider_type] = adapter_cls
 
 
+def unregister_external_adapter(provider_type: str) -> None:
+    """Remove the adapter registered under the given provider type."""
+    _REGISTRY.pop(provider_type, None)
+
+
 def get_external_adapter(provider_type: str) -> type[ExternalLibraryAdapter]:
     """Return the adapter class registered for the given provider type."""
     try:

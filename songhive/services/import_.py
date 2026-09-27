@@ -20,7 +20,7 @@ import aiofiles.os
 from redis.asyncio import Redis
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import raiseload, selectinload
 
 from ..config.schema import SonghiveConfig
 from ..models._enums import Visibility
@@ -100,7 +100,12 @@ async def _find_or_create_artist(
     name: str,
 ) -> Artist:
     """Find an artist by case-insensitive name, or create one."""
-    result = await session.execute(select(Artist).where(func.lower(Artist.name) == name.lower()).limit(1))
+    # ``raiseload("*")`` keeps this lookup from cascading into dozens of
+    # ``lazy="selectin"`` queries (artist → albums → tracks → …); callers
+    # only need columns from the returned row.
+    result = await session.execute(
+        select(Artist).options(raiseload("*")).where(func.lower(Artist.name) == name.lower()).limit(1)
+    )
     artist = cast(Optional[Artist], result.scalar_one_or_none())
     if artist:
         return artist
@@ -121,8 +126,10 @@ async def _find_or_create_album(
     visibility: str = Visibility.PRIVATE.value,
 ) -> Album:
     """Find an album by title + artist, or create one."""
+    # See ``_find_or_create_artist``: suppress the selectin cascade.
     result = await session.execute(
         select(Album)
+        .options(raiseload("*"))
         .where(
             func.lower(Album.title) == title.lower(),
             Album.artist_id == artist_id,

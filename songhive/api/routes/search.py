@@ -6,7 +6,9 @@ from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ...config.schema import SonghiveConfig
 from ...federation.actors import get_federation_storage
@@ -18,7 +20,7 @@ from ...services.auth import list_public_users
 from ...services.genres import list_genres
 from ...services.storage import StorageService
 from ...services.tags import list_tags
-from ..deps import get_config, get_current_user_optional, get_db, get_storage_service
+from ..deps import get_config, get_current_user, get_current_user_optional, get_db, get_storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -167,8 +169,9 @@ async def _track_section(
         include={"artist", "album"},
     )
     items: List[SearchResultItem] = []
+    policy_cache: dict = {}
     for track in rows:
-        summary = await build_track_summary(track, storage)
+        summary = await build_track_summary(track, storage, user=user, session=db, policy_cache=policy_cache)
         artist_name = summary.artist.name if summary and summary.artist else None
         album_title = summary.album.title if summary and summary.album else None
         if artist_name and album_title:
@@ -519,3 +522,141 @@ async def search(
         sections=sections,
         remote_available=remote_content.remote_lookup_allowed(user, config),
     )
+
+
+# --------------------------------------------------------------------------
+# External-provider search
+# --------------------------------------------------------------------------
+#
+# Provider results are transient metadata only — nothing is persisted until
+# the caller explicitly imports an entity via
+# ``POST /api/v1/external-libraries/{id}/import``. This endpoint is separate
+# from the local search so provider latency can never delay local results.
+
+
+class ProviderSearchResultItem(BaseModel):
+    """One transient provider-search result."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: str
+    provider_key: str
+    title: str
+    subtitle: Optional[str] = None
+    image_url: Optional[str] = None
+    external_url: Optional[str] = None
+
+
+class ProviderSearchGroup(BaseModel):
+    """Results from one connected external library."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    external_library_id: str
+    provider_type: str
+    library_name: Optional[str] = None
+    results: List[ProviderSearchResultItem]
+    error: Optional[str] = None
+
+
+class ProviderSearchResponse(BaseModel):
+    """Provider-side search grouped by connected library."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    query: str
+    providers: List[ProviderSearchGroup]
+
+
+_PROVIDER_SEARCH_TIMEOUT = 3.0
+
+
+@router.get("/providers", response_model=ProviderSearchResponse)
+async def search_providers(
+    q: Optional[str] = Query(None, description="Search term"),
+    limit: int = Query(10, ge=1, le=50, description="Per-library result limit"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Fan out the query to the caller's own connected external libraries.
+
+    Each library is searched with an individual timeout; a slow or failing
+    provider surfaces as ``error`` on its group and never fails the whole
+    request. Results are transient — no rows are created.
+    """
+    from ...external.base import ExternalLibraryAdapter
+    from ...external.registry import get_external_adapter
+    from ...models.external_library import ExternalLibrary
+    from .external_libraries import _decrypt_external_config, _sanitize_error
+
+    term = (q or "").strip()
+    if not term:
+        return ProviderSearchResponse(query=term, providers=[])
+
+    rows = (
+        (
+            await db.execute(
+                select(ExternalLibrary)
+                .where(
+                    ExternalLibrary.enabled.is_(True),
+                    ExternalLibrary.created_by_id == str(user.id),
+                )
+                .options(selectinload(ExternalLibrary.library))
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    searchable = []
+    for row in rows:
+        try:
+            adapter_cls = get_external_adapter(row.provider_type)
+        except KeyError:
+            continue
+        if adapter_cls.search is not ExternalLibraryAdapter.search:
+            searchable.append((row, adapter_cls))
+
+    async def _fan_out(row, adapter_cls) -> ProviderSearchGroup:
+        library_name = row.name or (row.library.name if row.library is not None else None)
+        group = ProviderSearchGroup(
+            external_library_id=str(row.id),
+            provider_type=row.provider_type,
+            library_name=library_name,
+            results=[],
+        )
+        try:
+            config = _decrypt_external_config(row.config)
+            adapter = adapter_cls()
+            raw = await asyncio.wait_for(
+                adapter.search(config, term, limit=limit),
+                timeout=_PROVIDER_SEARCH_TIMEOUT,
+            )
+            for item in raw or []:
+                if not isinstance(item, dict) or not item.get("provider_key"):
+                    continue
+                group.results.append(
+                    ProviderSearchResultItem(
+                        kind=str(item.get("kind") or "track"),
+                        provider_key=str(item["provider_key"]),
+                        title=str(item.get("title") or item["provider_key"]),
+                        subtitle=item.get("subtitle"),
+                        image_url=item.get("image_url"),
+                        external_url=item.get("external_url"),
+                    )
+                )
+        except asyncio.TimeoutError:
+            group.error = "provider search timed out"
+        except Exception as exc:
+            logger.warning(
+                "Provider search failed for library %s (%s)",
+                row.id,
+                row.provider_type,
+                exc_info=True,
+            )
+            group.error = _sanitize_error(exc)
+        return group
+
+    groups = await asyncio.gather(*[_fan_out(row, cls) for row, cls in searchable])
+    return ProviderSearchResponse(query=term, providers=list(groups))

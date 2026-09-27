@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
+from ...external.lazy import ensure_contents
 from ...models._enums import Visibility
 from ...models.audit_log import AuditTargetType
 from ...models.playlist import Playlist
@@ -79,6 +80,10 @@ class PlaylistResponse(BaseModel):
     # ``created_at``/``updated_at`` sort fields.
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Lazy provider-contents state; None for playlists that are not
+    # provider-backed (``{"provider_type", "state", "fetched_at",
+    # "ttl_seconds", "error"}``).
+    provider_sync: Optional[dict] = None
 
 
 class PlaylistStatsResponse(BaseModel):
@@ -219,6 +224,8 @@ async def _build_playlist_response(
     storage: StorageService,
     include: IncludeQuery,
     saved_ids: Optional[Set[str]] = None,
+    db: Optional[AsyncSession] = None,
+    provider_sync: Optional[dict] = None,
 ) -> PlaylistResponse:
     """Build a PlaylistResponse with optional nested summaries."""
     owner = None
@@ -230,8 +237,9 @@ async def _build_playlist_response(
         playlist_tracks = getattr(playlist, "tracks", None)
         if playlist_tracks is not None:
             track_list: List[TrackSummary] = []
+            policy_cache: dict = {}
             for pt in sorted(playlist_tracks, key=lambda pt: pt.position):
-                summary = await build_track_summary(pt.track, storage)
+                summary = await build_track_summary(pt.track, storage, user=user, session=db, policy_cache=policy_cache)
                 if summary is not None:
                     track_list.append(summary)
             tracks = track_list
@@ -251,6 +259,7 @@ async def _build_playlist_response(
         tags=_playlist_tags(playlist),
         created_at=playlist.created_at,
         updated_at=playlist.updated_at,
+        provider_sync=provider_sync,
     )
 
 
@@ -295,7 +304,7 @@ async def list_playlists(
     )
     pagination.set_total(response, total)
     saved_ids = await collection.saved_item_ids(db, user, "playlist", [str(p.id) for p in rows])
-    return [await _build_playlist_response(p, user, storage, include, saved_ids) for p in rows]
+    return [await _build_playlist_response(p, user, storage, include, saved_ids, db=db) for p in rows]
 
 
 @router.post("/", response_model=PlaylistResponse, status_code=201)
@@ -346,7 +355,38 @@ async def get_playlist(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
 
     saved_ids = await collection.saved_item_ids(db, user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, user, storage, include, saved_ids)
+    provider_status = await ensure_contents(db, "playlist", playlist_id)
+    return await _build_playlist_response(
+        playlist,
+        user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        provider_sync=provider_status.to_dict() if provider_status is not None else None,
+    )
+
+
+@router.post("/{playlist_id}/provider-sync", status_code=status.HTTP_202_ACCEPTED)
+async def provider_sync_playlist(
+    playlist_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Force a refresh of a provider-backed playlist's contents."""
+    playlist = await music.get_playlist(db, playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    provider_status = await ensure_contents(db, "playlist", playlist_id, force=True)
+    if provider_status is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Playlist is not provider-backed",
+        )
+    return provider_status.to_dict()
 
 
 @router.get(
@@ -412,7 +452,7 @@ async def update_playlist(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
 
 
 @router.post("/{playlist_id}/image", response_model=PlaylistResponse)
@@ -458,7 +498,7 @@ async def upload_playlist_image(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
 
 
 @router.post("/{playlist_id}/cover", response_model=PlaylistResponse)
@@ -504,7 +544,7 @@ async def upload_playlist_cover(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{playlist_id}/image", response_model=PlaylistResponse)
@@ -541,7 +581,7 @@ async def delete_playlist_image(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{playlist_id}/cover", response_model=PlaylistResponse)
@@ -578,7 +618,7 @@ async def delete_playlist_cover(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
 
 
 async def _resolve_track_ids(
@@ -636,9 +676,13 @@ async def _track_response(
     user: Optional[User],
     include: IncludeQuery,
     favorited_track_ids: Optional[Set[str]] = None,
+    db: Optional[AsyncSession] = None,
+    policy_cache: Optional[dict] = None,
 ) -> TrackResponse:
     """Build a TrackResponse with audio URL."""
-    return await _build_track_response(track, user, storage, include, favorited_track_ids)
+    return await _build_track_response(
+        track, user, storage, include, favorited_track_ids, db=db, policy_cache=policy_cache
+    )
 
 
 @router.post("/{playlist_id}/tracks", status_code=status.HTTP_201_CREATED)
@@ -780,7 +824,11 @@ async def list_playlist_tracks_route(
         user,
         {str(row.id) for row in rows},
     )
-    return [await _track_response(storage, row, user, include, favorited_ids) for row in rows]
+    policy_cache: dict = {}
+    return [
+        await _track_response(storage, row, user, include, favorited_ids, db=db, policy_cache=policy_cache)
+        for row in rows
+    ]
 
 
 def _episode_item(episode: PodcastEpisode, played: bool) -> PlaylistEpisodeItem:
@@ -867,6 +915,7 @@ async def list_playlist_items_route(
     remote_actor_handles = await remote_content.resolve_actor_handle_map(config, [row.actor_url for row in remote_rows])
 
     items: List[PlaylistItemResponse] = []
+    policy_cache: dict = {}
     for row in rows:
         if row.track is not None:
             items.append(
@@ -874,7 +923,15 @@ async def list_playlist_items_route(
                     item_id=str(row.id),
                     position=row.position,
                     type="track",
-                    track=await _track_response(storage, row.track, user, include, favorited_ids),
+                    track=await _track_response(
+                        storage,
+                        row.track,
+                        user,
+                        include,
+                        favorited_ids,
+                        db=db,
+                        policy_cache=policy_cache,
+                    ),
                 )
             )
         elif row.episode is not None:
@@ -1139,7 +1196,7 @@ async def add_playlist_tags(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
 
 
 @router.delete("/{playlist_id}/tags/{tag}", response_model=PlaylistResponse)
@@ -1185,4 +1242,4 @@ async def remove_playlist_tag(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids)
+    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)

@@ -18,7 +18,12 @@ import tornado.web
 
 from ..api.middleware.auth import decode_access_token, get_access_token_jti
 from ..config.schema import SonghiveConfig, effective_bitrate
-from ..external.errors import ExternalItemNotFound, ExternalLibraryError, UnsupportedExternalOperation
+from ..external.errors import (
+    ExternalItemNotFound,
+    ExternalLibraryError,
+    ExternalPermissionDenied,
+    UnsupportedExternalOperation,
+)
 from ..external.types import ExternalStream
 from ..models.base import get_session
 from ..models.stored_file import StoredFile
@@ -679,9 +684,12 @@ class StreamHandler(tornado.web.RequestHandler):
             external_stream: Optional[ExternalStream] = None
             if stored_file is None:
                 try:
-                    external_stream = await resolve_external_stream(session, track_id, range_header)
+                    external_stream = await resolve_external_stream(session, track_id, range_header, user=user)
                 except ExternalItemNotFound as exc:
                     self._not_found(str(exc))
+                    return
+                except ExternalPermissionDenied:
+                    self._forbidden()
                     return
                 except UnsupportedExternalOperation as exc:
                     self._unprocessable(str(exc))

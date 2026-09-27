@@ -43,7 +43,7 @@ from ..responses import (
     build_album_summary,
     build_track_summary,
 )
-from ._common import TagListRequest
+from ._common import TagListRequest, enforce_editable_fields
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import _enqueue_track_tag_sync
 
@@ -70,6 +70,11 @@ class ArtistResponse(BaseModel):
     # ``created_at``/``updated_at`` sort fields.
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Provider-declared list of locally-editable fields; ``None`` for local
+    # or unrestricted artists.
+    editable_fields: Optional[List[str]] = None
+    # Provider type backing the artist (e.g. ``"tidal"``); ``None`` when local.
+    external_provider_type: Optional[str] = None
 
 
 class ArtistUpdate(BaseModel):
@@ -122,6 +127,8 @@ async def _build_artist_response(
     storage: StorageService,
     include: IncludeQuery,
     saved_ids: Optional[Set[str]] = None,
+    user: Optional[User] = None,
+    db: Optional[AsyncSession] = None,
 ) -> ArtistResponse:
     """Build an ArtistResponse with optional nested summaries."""
     albums = None
@@ -139,11 +146,24 @@ async def _build_artist_response(
         artist_tracks = getattr(artist, "tracks", None)
         if artist_tracks is not None:
             track_list: List[TrackSummary] = []
+            policy_cache: dict = {}
             for t in sorted(artist_tracks, key=_artist_track_sort_key):
-                track_summary = await build_track_summary(t, storage)
+                track_summary = await build_track_summary(t, storage, user=user, session=db, policy_cache=policy_cache)
                 if track_summary is not None:
                     track_list.append(track_summary)
             tracks = track_list
+
+    editable_fields = None
+    external_provider_type = None
+    if db is not None:
+        from ...services.provider_catalog import (
+            editable_fields_for_entity,
+            provider_type_for_entity,
+        )
+
+        editable_fields = await editable_fields_for_entity(db, "artist", str(artist.id))
+        if editable_fields is not None:
+            external_provider_type = await provider_type_for_entity(db, "artist", str(artist.id))
 
     return ArtistResponse(
         id=str(artist.id),
@@ -159,6 +179,8 @@ async def _build_artist_response(
         tags=_artist_tags(artist),
         created_at=artist.created_at,
         updated_at=artist.updated_at,
+        editable_fields=editable_fields,
+        external_provider_type=external_provider_type,
     )
 
 
@@ -203,7 +225,7 @@ async def list_artists(
     )
     pagination.set_total(response, total)
     saved_ids = await collection.saved_item_ids(db, user, "artist", [str(a.id) for a in rows])
-    return [await _build_artist_response(a, storage, include, saved_ids) for a in rows]
+    return [await _build_artist_response(a, storage, include, saved_ids, user=user, db=db) for a in rows]
 
 
 @router.get("/{artist_id}", response_model=ArtistResponse)
@@ -220,7 +242,7 @@ async def get_artist(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     saved_ids = await collection.saved_item_ids(db, user, "artist", {artist_id})
-    return await _build_artist_response(artist, storage, include, saved_ids)
+    return await _build_artist_response(artist, storage, include, saved_ids, user=user, db=db)
 
 
 @router.get("/{artist_id}/stats", response_model=ArtistStatsResponse)
@@ -258,6 +280,8 @@ async def update_artist(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "artist", artist_id, body.model_fields_set)
+
     if body.name is not None:
         artist.name = body.name
     if body.bio is not None:
@@ -284,7 +308,7 @@ async def update_artist(
             _enqueue_track_tag_sync(track_id)
 
     saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
-    return await _build_artist_response(artist, storage, include, saved_ids)
+    return await _build_artist_response(artist, storage, include, saved_ids, user=current_user, db=db)
 
 
 @router.post("/{artist_id}/image", response_model=ArtistResponse)
@@ -308,6 +332,8 @@ async def upload_artist_image(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "artist", artist_id, {"image"})
+
     stored = await upload_entity_image(
         db,
         storage,
@@ -329,7 +355,7 @@ async def upload_artist_image(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
-    return await _build_artist_response(artist, storage, include, saved_ids)
+    return await _build_artist_response(artist, storage, include, saved_ids, user=current_user, db=db)
 
 
 @router.post("/{artist_id}/cover", response_model=ArtistResponse)
@@ -353,6 +379,8 @@ async def upload_artist_cover(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "artist", artist_id, {"image"})
+
     stored = await upload_entity_image(
         db,
         storage,
@@ -374,7 +402,7 @@ async def upload_artist_cover(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
-    return await _build_artist_response(artist, storage, include, saved_ids)
+    return await _build_artist_response(artist, storage, include, saved_ids, user=current_user, db=db)
 
 
 @router.delete("/{artist_id}/image", response_model=ArtistResponse)
@@ -397,6 +425,8 @@ async def delete_artist_image(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "artist", artist_id, {"image"})
+
     await remove_entity_image(artist, "image_file_id")
 
     await audit.log_action(
@@ -411,7 +441,7 @@ async def delete_artist_image(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
-    return await _build_artist_response(artist, storage, include, saved_ids)
+    return await _build_artist_response(artist, storage, include, saved_ids, user=current_user, db=db)
 
 
 @router.delete("/{artist_id}/cover", response_model=ArtistResponse)
@@ -434,6 +464,8 @@ async def delete_artist_cover(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "artist", artist_id, {"image"})
+
     await remove_entity_image(artist, "cover_file_id")
 
     await audit.log_action(
@@ -448,7 +480,7 @@ async def delete_artist_cover(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
-    return await _build_artist_response(artist, storage, include, saved_ids)
+    return await _build_artist_response(artist, storage, include, saved_ids, user=current_user, db=db)
 
 
 @router.delete("/{artist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
@@ -534,6 +566,8 @@ async def add_artist_tags(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "artist", artist_id, {"tags"})
+
     try:
         await add_tags_to_entity(
             db,
@@ -560,7 +594,7 @@ async def add_artist_tags(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
-    return await _build_artist_response(artist, storage, include, saved_ids)
+    return await _build_artist_response(artist, storage, include, saved_ids, user=current_user, db=db)
 
 
 @router.delete("/{artist_id}/tags/{tag}", response_model=ArtistResponse)
@@ -584,6 +618,8 @@ async def remove_artist_tag(
             detail="Access denied",
         )
 
+    await enforce_editable_fields(db, "artist", artist_id, {"tags"})
+
     try:
         await remove_tag_from_entity(db, "artist", artist_id, tag)
     except ValueError as exc:
@@ -604,4 +640,4 @@ async def remove_artist_tag(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "artist", {artist_id})
-    return await _build_artist_response(artist, storage, include, saved_ids)
+    return await _build_artist_response(artist, storage, include, saved_ids, user=current_user, db=db)

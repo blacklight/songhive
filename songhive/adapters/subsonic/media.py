@@ -21,7 +21,12 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.deps import get_db, get_storage_service
-from ...external.errors import ExternalItemNotFound, ExternalLibraryError, UnsupportedExternalOperation
+from ...external.errors import (
+    ExternalItemNotFound,
+    ExternalLibraryError,
+    ExternalPermissionDenied,
+    UnsupportedExternalOperation,
+)
 from ...external.types import ExternalStream
 from ...models.artist import Artist
 from ...models.stored_file import StoredFile
@@ -137,9 +142,11 @@ async def _stream(ctx: _Ctx, *, download: bool = False) -> Response:
 async def _resolve_external(ctx: _Ctx, track_id: str, range_header: Optional[str]) -> Optional[ExternalStream]:
     """Resolve an external stream, translating adapter errors to protocol codes."""
     try:
-        return await resolve_external_stream(ctx.db, track_id, range_header)
+        return await resolve_external_stream(ctx.db, track_id, range_header, user=ctx.user)
     except ExternalItemNotFound as exc:
         raise SubsonicError(NOT_FOUND, str(exc) or "Media file not found") from exc
+    except ExternalPermissionDenied as exc:
+        raise SubsonicError(NOT_AUTHORIZED, "Streaming is restricted for this track") from exc
     except UnsupportedExternalOperation as exc:
         raise SubsonicError(GENERIC_ERROR, str(exc) or "Streaming unsupported") from exc
     except ExternalLibraryError as exc:

@@ -1,10 +1,14 @@
 import type { components } from "./types";
 import { apiRequest, apiRequestWithHeaders } from "./client";
+import type { ProviderSyncStatus } from "./providerSync";
 import type { RemoteObject } from "./remote";
 import type { QueueTrack } from "@/player/types";
 import { remoteObjectToQueueTrack } from "@/utils/remoteObject";
 
-export type PlaylistResponse = components["schemas"]["PlaylistResponse"];
+export type PlaylistResponse = components["schemas"]["PlaylistResponse"] & {
+  /** Lazy-contents state for provider-backed playlists (see Section 6). */
+  provider_sync?: ProviderSyncStatus | null;
+};
 export type PlaylistCreate = components["schemas"]["PlaylistCreate"];
 export type PlaylistUpdate = components["schemas"]["PlaylistUpdate"];
 export type Visibility = components["schemas"]["Visibility"];
@@ -362,3 +366,5 @@ export function playlistItemToQueueTrack(
   }
   return null;
 }
+
+export { providerSyncPlaylist } from "./providerSync";

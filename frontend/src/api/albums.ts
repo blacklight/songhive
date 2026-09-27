@@ -1,7 +1,15 @@
 import type { components } from "./types";
 import { apiRequest, apiRequestWithHeaders } from "./client";
+import type { ProviderSyncStatus } from "./providerSync";
 
-export type AlbumResponse = components["schemas"]["AlbumResponse"];
+export type AlbumResponse = components["schemas"]["AlbumResponse"] & {
+  /** Lazy-contents state for provider-backed albums (see Section 6). */
+  provider_sync?: ProviderSyncStatus | null;
+  /** Fields the provider allows editing locally (e.g. ["genres", "tags"]). */
+  editable_fields?: string[] | null;
+  /** Provider type backing the album (e.g. "tidal"); null when local. */
+  external_provider_type?: string | null;
+};
 export type AlbumUpdate = components["schemas"]["AlbumUpdate"];
 
 export function listAlbums(params?: {
@@ -114,3 +122,5 @@ export function enrichAlbum(id: string): Promise<AlbumEnrichResponse> {
     method: "POST",
   });
 }
+
+export { providerSyncAlbum } from "./providerSync";

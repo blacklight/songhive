@@ -19,6 +19,8 @@ import { useConfirmStore } from "@/stores/confirm";
 import { useInstanceStore } from "@/stores/instance";
 import { useToastStore } from "@/stores/toast";
 import { parseNumber, toVisibility } from "@/utils/entity";
+import { isFieldEditable, isProviderManaged } from "@/utils/editableFields";
+import { providerDisplayName } from "@/utils/providerName";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ImageUploadField from "@/components/ui/ImageUploadField.vue";
@@ -59,8 +61,38 @@ const { canManage } = useCanManage(
 );
 
 const canRenameFile = computed(
-  () => !track.value?.is_external || track.value?.can_rename_source !== false,
+  () =>
+    (!track.value?.is_external || track.value?.can_rename_source !== false) &&
+    isFieldEditable(track.value?.editable_fields, "filename"),
 );
+
+const editableFields = computed(() => track.value?.editable_fields ?? null);
+const providerManaged = computed(() => isProviderManaged(editableFields.value));
+const managedByLabel = computed(() =>
+  providerDisplayName(track.value?.external_provider_type),
+);
+/** Capability names the provider locks (empty when unrestricted). */
+const TRACK_CAPABILITIES = [
+  "title",
+  "artist",
+  "album",
+  "artists",
+  "genres",
+  "track_number",
+  "disc_number",
+  "release_year",
+  "filename",
+  "description",
+  "tags",
+  "image",
+];
+const lockedFields = computed(() =>
+  TRACK_CAPABILITIES.filter(
+    (cap) => !isFieldEditable(editableFields.value, cap),
+  ),
+);
+const fieldEditable = (cap: string) =>
+  isFieldEditable(editableFields.value, cap);
 
 const { tags, resetTags, syncTags } = useEntityTags();
 const { genres, resetGenres, syncGenres } = useEntityGenres();
@@ -115,30 +147,45 @@ async function load() {
 }
 
 async function onSubmit() {
-  if (!title.value.trim() || !artistName.value.trim()) return;
+  if (
+    (fieldEditable("title") && !title.value.trim()) ||
+    (fieldEditable("artist") && !artistName.value.trim())
+  ) {
+    return;
+  }
 
   isSaving.value = true;
   error.value = null;
 
+  // Provider-managed fields are sent only when editable — the backend
+  // rejects locked fields (422) merely for being present in the payload.
   const body: TrackUpdate = {
-    title: title.value.trim(),
-    artist_name: artistName.value.trim(),
-    album_title: albumTitle.value.trim() || null,
-    genre: genres.value.join("; ") || null,
-    track_number: parseNumber(trackNumber.value),
-    disc_number: parseNumber(discNumber.value),
-    release_year: parseNumber(releaseYear.value),
     visibility: toVisibility(visibility.value),
-    publish:
-      publish.value &&
-      instanceStore.federationEnabled &&
-      visibility.value === "public",
-    description: description.value.trim() || null,
-    extra_artists: extraArtists.value
+  };
+  if (fieldEditable("title")) body.title = title.value.trim();
+  if (fieldEditable("artist")) body.artist_name = artistName.value.trim();
+  if (fieldEditable("album"))
+    body.album_title = albumTitle.value.trim() || null;
+  if (fieldEditable("genres")) body.genre = genres.value.join("; ") || null;
+  if (fieldEditable("track_number"))
+    body.track_number = parseNumber(trackNumber.value);
+  if (fieldEditable("disc_number"))
+    body.disc_number = parseNumber(discNumber.value);
+  if (fieldEditable("release_year"))
+    body.release_year = parseNumber(releaseYear.value);
+  if (fieldEditable("description"))
+    body.description = description.value.trim() || null;
+  if (fieldEditable("artists")) {
+    body.extra_artists = extraArtists.value
       .split(",")
       .map((name) => name.trim())
-      .filter((name) => name.length > 0),
-  };
+      .filter((name) => name.length > 0);
+  }
+
+  body.publish =
+    publish.value &&
+    instanceStore.federationEnabled &&
+    visibility.value === "public";
 
   if (canRenameFile.value) {
     body.filename = filename.value.trim() || track.value?.filename || null;
@@ -146,8 +193,8 @@ async function onSubmit() {
 
   try {
     await updateTrack(trackId.value, body);
-    await syncTags("tracks", trackId.value);
-    await syncGenres("tracks", trackId.value);
+    if (fieldEditable("tags")) await syncTags("tracks", trackId.value);
+    if (fieldEditable("genres")) await syncGenres("tracks", trackId.value);
     toast.push({ type: "success", message: t("browse.edit.saveSuccess") });
     await router.push(`/tracks/${trackId.value}`);
   } catch (err) {
@@ -261,6 +308,15 @@ watch(
         {{ t("browse.edit.editTrack") }}
       </AppPageTitle>
 
+      <p
+        v-if="providerManaged"
+        class="track-edit-view__provider-note"
+        role="note"
+      >
+        <i class="fa-solid fa-cloud" aria-hidden="true" />
+        {{ t("browse.edit.providerManaged", { provider: managedByLabel }) }}
+      </p>
+
       <TrackMetadataForm
         v-model:title="title"
         v-model:artist-name="artistName"
@@ -277,6 +333,7 @@ watch(
         v-model:publish="publish"
         :previous-visibility="track.visibility"
         :can-rename-file="canRenameFile"
+        :disabled-fields="lockedFields"
         @submit="onSubmit"
       >
         <AppButton type="submit" :loading="isSaving" icon="floppy-disk">
@@ -314,6 +371,7 @@ watch(
           accept="image/*"
           :loading="isUploadingImage"
           :removing="isRemovingImage"
+          :disabled="!fieldEditable('image')"
           :error="imageError ?? undefined"
           @upload="onUploadImage"
           @remove="onRemoveImage"
@@ -349,6 +407,18 @@ watch(
 .track-edit-view__title {
   margin: 0;
   font-size: 1.75rem;
+}
+
+.track-edit-view__provider-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-secondary);
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
 }
 
 .track-edit-view__section {

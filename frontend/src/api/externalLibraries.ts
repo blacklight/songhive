@@ -20,6 +20,10 @@ export type ExternalProviderResponse =
     oauth_supported?: boolean;
     /** Public callback URL to register in the provider's app console. */
     oauth_callback_url?: string | null;
+    /** Whether the provider offers the OAuth device-authorization flow. */
+    device_auth_supported?: boolean;
+    /** Whether the provider offers the paste-the-redirect-URL PKCE flow. */
+    pkce_paste_supported?: boolean;
   };
 export type ExternalDuplicateWarning =
   components["schemas"]["ExternalDuplicateWarning"];
@@ -342,6 +346,94 @@ export function resolveUploadDuplicate(
   const body: ExternalDuplicateResolutionRequest = { token, action };
   return apiRequest<ExternalDuplicateResolutionResponse>(
     "/files/upload/resolve-duplicate",
+    { method: "POST", body },
+  );
+}
+
+export interface ExternalEntityImportRequest {
+  kind: "track" | "album" | "artist" | "playlist";
+  provider_key: string;
+}
+
+export interface ExternalEntityImportResponse {
+  kind: string;
+  provider_key: string;
+  entity_id: string;
+}
+
+export function importExternalEntity(
+  externalLibraryId: string,
+  body: ExternalEntityImportRequest,
+): Promise<ExternalEntityImportResponse> {
+  return apiRequest<ExternalEntityImportResponse>(
+    `/external-libraries/${externalLibraryId}/import`,
+    { method: "POST", body },
+  );
+}
+
+export type ExternalDeviceAuthMode = "device" | "pkce";
+
+export interface ExternalDeviceAuthBeginRequest {
+  provider_type: string;
+  config?: Record<string, unknown>;
+  external_library_id?: string;
+  mode?: ExternalDeviceAuthMode;
+}
+
+export interface ExternalDeviceAuthBeginResponse {
+  state: string;
+  mode: ExternalDeviceAuthMode;
+  user_code?: string | null;
+  verification_uri?: string | null;
+  verification_uri_complete?: string | null;
+  authorize_url?: string | null;
+  expires_in?: number | null;
+  interval?: number | null;
+}
+
+export type ExternalDeviceAuthPollStatus =
+  "pending" | "slow_down" | "granted" | "expired" | "denied" | "unknown";
+
+export interface ExternalDeviceAuthPollResponse {
+  status: ExternalDeviceAuthPollStatus;
+  retry_after?: number | null;
+  detail?: string | null;
+}
+
+export interface ExternalDeviceAuthCompleteRequest {
+  state: string;
+  redirect_url?: string;
+}
+
+export interface ExternalDeviceAuthCompleteResponse {
+  provider_type: string;
+  config: Record<string, unknown>;
+  display?: Record<string, unknown>;
+}
+
+export function beginExternalDeviceAuth(
+  body: ExternalDeviceAuthBeginRequest,
+): Promise<ExternalDeviceAuthBeginResponse> {
+  return apiRequest<ExternalDeviceAuthBeginResponse>(
+    "/external-libraries/device-auth/begin",
+    { method: "POST", body },
+  );
+}
+
+export function pollExternalDeviceAuth(
+  state: string,
+): Promise<ExternalDeviceAuthPollResponse> {
+  return apiRequest<ExternalDeviceAuthPollResponse>(
+    "/external-libraries/device-auth/poll",
+    { method: "POST", body: { state } },
+  );
+}
+
+export function completeExternalDeviceAuth(
+  body: ExternalDeviceAuthCompleteRequest,
+): Promise<ExternalDeviceAuthCompleteResponse> {
+  return apiRequest<ExternalDeviceAuthCompleteResponse>(
+    "/external-libraries/device-auth/complete",
     { method: "POST", body },
   );
 }

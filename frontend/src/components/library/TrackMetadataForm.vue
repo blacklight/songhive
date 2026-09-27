@@ -14,6 +14,11 @@ export interface Props {
   disabled?: boolean;
   /** The persisted visibility, so the publish option only shows on a transition to public. */
   previousVisibility?: string;
+  /**
+   * Provider ``editable_fields`` capability names that are locked for this
+   * entity (e.g. ``["title", "artist"]``). ``visibility`` is always editable.
+   */
+  disabledFields?: string[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -21,7 +26,12 @@ const props = withDefaults(defineProps<Props>(), {
   canRenameFile: true,
   disabled: false,
   previousVisibility: "",
+  disabledFields: () => [],
 });
+
+function fieldDisabled(capability: string): boolean {
+  return props.disabled || props.disabledFields.includes(capability);
+}
 
 const title = defineModel<string>("title", { required: true });
 const artistName = defineModel<string>("artistName", { required: true });
@@ -71,62 +81,63 @@ const showPublishOption = computed(
       v-model="title"
       :label="t('browse.edit.title')"
       :required="!props.bulk"
-      :disabled="props.disabled"
+      :disabled="fieldDisabled('title')"
     />
     <AppInput
       v-model="artistName"
       :label="t('browse.edit.artist')"
       :required="!props.bulk"
-      :disabled="props.disabled"
+      :disabled="fieldDisabled('artist')"
     />
     <AppInput
       v-model="albumTitle"
       :label="t('browse.edit.album')"
-      :disabled="props.disabled"
+      :disabled="fieldDisabled('album')"
     />
     <AppInput
       v-if="!props.bulk"
       v-model="extraArtists"
       :label="t('browse.edit.extraArtists')"
       :hint="t('browse.edit.extraArtistsHint')"
-      :disabled="props.disabled"
+      :disabled="fieldDisabled('artists')"
     />
     <GenreInput
       v-model="genres"
       :placeholder="t('genres.placeholder')"
       :aria-label="t('genres.ariaLabel')"
+      :disabled="fieldDisabled('genres')"
     />
     <div class="track-metadata-form__row">
       <AppInput
         v-model="trackNumber"
         type="number"
         :label="t('browse.detail.trackNumber')"
-        :disabled="props.disabled"
+        :disabled="fieldDisabled('track_number')"
       />
       <AppInput
         v-model="discNumber"
         type="number"
         :label="t('browse.detail.discNumber')"
-        :disabled="props.disabled"
+        :disabled="fieldDisabled('disc_number')"
       />
     </div>
     <AppInput
       v-model="releaseYear"
       type="number"
       :label="t('browse.edit.releaseYear')"
-      :disabled="props.disabled"
+      :disabled="fieldDisabled('release_year')"
     />
     <AppInput
       v-model="filename"
       :label="t('browse.edit.filename')"
-      :disabled="props.disabled || !props.canRenameFile"
+      :disabled="fieldDisabled('filename') || !props.canRenameFile"
     />
     <AppInput
       v-if="!props.bulk"
       v-model="description"
       as="textarea"
       :label="t('browse.edit.description')"
-      :disabled="props.disabled"
+      :disabled="fieldDisabled('description')"
     />
     <AppSelect
       v-model="visibility"
@@ -153,6 +164,7 @@ const showPublishOption = computed(
       v-model="tags"
       :placeholder="t('tags.placeholder')"
       :aria-label="t('tags.label')"
+      :disabled="fieldDisabled('tags')"
     />
 
     <div v-if="$slots.default" class="track-metadata-form__actions">

@@ -3,6 +3,7 @@ Streaming service: resolve track backing files, transcode cache, and listen hist
 """
 
 import io
+import logging
 import os
 import tempfile
 from datetime import datetime
@@ -14,13 +15,14 @@ import httpx
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import raiseload, selectinload
 
 from ..config.schema import SonghiveConfig
-from ..external.errors import ExternalItemNotFound, UnsupportedExternalOperation
+from ..external.errors import ExternalItemNotFound, ExternalPermissionDenied, UnsupportedExternalOperation
 from ..external.registry import get_external_adapter
 from ..external.types import ExternalItemRef, ExternalStream
 from ..models.external_item import ExternalItem
+from ..models.external_library import ExternalLibrary
 from ..models.external_track import ExternalTrack
 from ..models.history import ListeningHistory
 from ..models.stored_file import StoredFile
@@ -31,6 +33,8 @@ from . import scrobbler
 from .secrets import decrypt_json
 from .storage import StorageService
 
+logger = logging.getLogger(__name__)
+
 
 async def get_upload_for_track(session: AsyncSession, track_id: str) -> Optional[Upload]:
     """Get the best available upload for a track."""
@@ -40,7 +44,9 @@ async def get_upload_for_track(session: AsyncSession, track_id: str) -> Optional
 
 async def resolve_track_file(session: AsyncSession, track_id: str) -> Optional[StoredFile]:
     """Return the StoredFile backing a track, falling back to an upload."""
-    result = await session.execute(select(Track).where(Track.id == track_id).options(selectinload(Track.audio_file)))
+    result = await session.execute(
+        select(Track).where(Track.id == track_id).options(raiseload("*"), selectinload(Track.audio_file))
+    )
     track = result.scalar_one_or_none()
     if track is None:
         return None
@@ -241,18 +247,168 @@ def _parse_external_range_header(
     return start, end
 
 
+def _provider_stream_policy(provider_type: str) -> Optional[str]:
+    """Return the configured stream policy for a provider type, if any.
+
+    Provider configs live under ``external_libraries.<provider>``; only
+    providers that define a ``stream_policy`` setting (TIDAL) participate.
+    """
+    try:
+        from ..config.loader import load_config
+
+        cfg = load_config([])
+    except Exception:
+        return None
+    provider_cfg = getattr(cfg.external_libraries, provider_type, None)
+    policy = getattr(provider_cfg, "stream_policy", None)
+    return policy if isinstance(policy, str) and policy else None
+
+
+async def _listener_library_config(session: AsyncSession, provider_type: str, user_id: str) -> Optional[dict]:
+    """Return the decrypted config of an enabled provider library owned by ``user_id``."""
+    from ..models.library import Library
+
+    result = await session.execute(
+        select(ExternalLibrary)
+        .join(Library, ExternalLibrary.library_id == Library.id)
+        .where(
+            ExternalLibrary.provider_type == provider_type,
+            ExternalLibrary.enabled.is_(True),
+            Library.owner_id == str(user_id),
+        )
+        .limit(1)
+    )
+    library = result.scalar_one_or_none()
+    if library is None:
+        return None
+    raw = library.config
+    if isinstance(raw, str):
+        try:
+            return decrypt_json(raw)
+        except Exception:
+            return None
+    return dict(raw or {})
+
+
+async def _enforce_stream_policy(
+    session: AsyncSession,
+    external_library: ExternalLibrary,
+    config: dict,
+    user,
+) -> dict:
+    """Enforce the provider's stream policy, returning the config to stream with.
+
+    Policies (configured per provider, e.g. ``external_libraries.tidal``):
+
+    - ``owner``: only the library owner (and admins) stream the account's bytes.
+    - ``listener_account``: a non-owner streams through their own provider
+      library when they have one; otherwise denied.
+    - ``anyone``: any authenticated local user streams through the owner's
+      session — anonymous requests are still refused.
+    """
+    policy = _provider_stream_policy(external_library.provider_type)
+    if policy is None:
+        return config
+
+    library = external_library.library
+    owner_id = library.owner_id if library is not None else external_library.created_by_id
+    is_admin = user is not None and getattr(user, "role", None) == "admin"
+
+    if policy == "anyone":
+        if user is None:
+            raise ExternalPermissionDenied("Streaming this track requires a local account", operation="stream")
+        return config
+
+    if user is not None and (str(user.id) == str(owner_id) or is_admin):
+        return config
+
+    if policy == "listener_account" and user is not None:
+        own_config = await _listener_library_config(session, external_library.provider_type, str(user.id))
+        if own_config is not None:
+            return own_config
+
+    raise ExternalPermissionDenied(
+        "Streaming this track is restricted to the library owner's provider account",
+        operation="stream",
+    )
+
+
+async def external_stream_allowed(
+    session: AsyncSession,
+    external_library: ExternalLibrary,
+    user,
+    *,
+    cache: Optional[dict] = None,
+) -> bool:
+    """Return whether ``user`` may stream from ``external_library``.
+
+    Read-path predicate used by response builders; ``cache`` (keyed by
+    provider type + user) lets list endpoints avoid repeated lookups.
+    """
+    policy = _provider_stream_policy(external_library.provider_type)
+    if policy is None:
+        return True
+    key = f"{external_library.provider_type}:{getattr(user, 'id', None)}"
+    if cache is not None and key in cache:
+        return cache[key]
+    try:
+        await _enforce_stream_policy(session, external_library, {}, user)
+        allowed = True
+    except ExternalPermissionDenied:
+        allowed = False
+    if cache is not None:
+        cache[key] = allowed
+    return allowed
+
+
+async def _mark_unavailable(
+    session: AsyncSession,
+    external_library: ExternalLibrary,
+    external_ref: Union[ExternalTrack, ExternalItem],
+    exc: Exception,
+) -> None:
+    """Flag an entity-backed provider object that reported itself unavailable."""
+    if not isinstance(external_ref, ExternalItem):
+        return
+    try:
+        async with session.begin_nested():
+            external_ref.state = "error"
+            external_ref.sync_error = str(exc)[:500]
+            from .provider_catalog import mark_unavailable
+
+            await mark_unavailable(
+                session,
+                external_library.provider_type,
+                external_ref.kind,
+                external_ref.provider_key,
+            )
+    except Exception:
+        logger.debug("Failed to flag unavailable provider item", exc_info=True)
+
+
 async def _load_external_stream_request(
     session: AsyncSession,
     track_id: str,
     range_header: Optional[str],
+    *,
+    user=None,
 ) -> Optional[tuple[Track, Union[ExternalTrack, ExternalItem], dict, Any, ExternalItemRef, Optional[tuple[int, int]]]]:
-    """Load the track, external reference, adapter, and optional byte range."""
+    """Load the track, external reference, adapter, and optional byte range.
+
+    ``user`` is the requesting local user; provider stream policies
+    (``external_libraries.<provider>.stream_policy``) are enforced against it.
+    """
     result = await session.execute(
         select(Track)
         .where(Track.id == track_id)
         .options(
-            selectinload(Track.external_track).selectinload(ExternalTrack.external_library),
-            selectinload(Track.external_item).selectinload(ExternalItem.external_library),
+            raiseload("*"),
+            selectinload(Track.external_track)
+            .selectinload(ExternalTrack.external_library)
+            .selectinload(ExternalLibrary.library),
+            selectinload(Track.external_item)
+            .selectinload(ExternalItem.external_library)
+            .selectinload(ExternalLibrary.library),
         )
     )
     track = cast(Optional[Track], result.scalar_one_or_none())
@@ -294,6 +450,10 @@ async def _load_external_stream_request(
 
     adapter_cls = get_external_adapter(external_library.provider_type)
     adapter = adapter_cls()
+
+    # Per-provider stream policy (e.g. TIDAL): may swap ``config`` for the
+    # listener's own account or raise ``ExternalPermissionDenied``.
+    config = await _enforce_stream_policy(session, external_library, config, user)
 
     provider_size: Optional[int] = None
     provider_mime_type: Optional[str] = None
@@ -341,36 +501,59 @@ async def resolve_external_stream(
     session: AsyncSession,
     track_id: str,
     range_header: Optional[str] = None,
+    *,
+    user=None,
 ) -> Optional[ExternalStream]:
     """Resolve an external byte stream for the given track, or return None."""
-    loaded = await _load_external_stream_request(session, track_id, range_header)
+    loaded = await _load_external_stream_request(session, track_id, range_header, user=user)
     if loaded is None:
         return None
-    _, _, config, adapter, item, range_tuple = loaded
-    return await adapter.open_stream(config, item, range=range_tuple)
+    track, external_ref, config, adapter, item, range_tuple = loaded
+    try:
+        stream = await adapter.open_stream(config, item, range=range_tuple)
+    except ExternalItemNotFound as exc:
+        await _mark_unavailable(session, external_ref.external_library, external_ref, exc)
+        raise
+    # Adopt the provider-reported content type the first time we see it.
+    if stream is not None and stream.content_type and not track.audio_mime_type:
+        try:
+            async with session.begin_nested():
+                track.audio_mime_type = stream.content_type
+        except Exception:
+            logger.debug("Failed to persist audio_mime_type for track %s", track_id, exc_info=True)
+    return stream
 
 
 async def resolve_external_download_stream(
     session: AsyncSession,
     track_id: str,
     range_header: Optional[str] = None,
+    *,
+    user=None,
 ) -> Optional[ExternalStream]:
     """Resolve an external download stream, preferring ``download`` over ``open_stream``."""
-    loaded = await _load_external_stream_request(session, track_id, range_header)
+    loaded = await _load_external_stream_request(session, track_id, range_header, user=user)
     if loaded is None:
         return None
-    track, external_track, config, adapter, item, range_tuple = loaded
+    track, external_ref, config, adapter, item, range_tuple = loaded
 
     try:
         return await adapter.download(config, item)
     except UnsupportedExternalOperation:
         pass
+    except ExternalItemNotFound as exc:
+        await _mark_unavailable(session, external_ref.external_library, external_ref, exc)
+        raise
 
-    capabilities = (external_track.external_library.capabilities or {}) if external_track.external_library else {}
+    capabilities = (external_ref.external_library.capabilities or {}) if external_ref.external_library else {}
     if not (capabilities.get("read_bytes") or capabilities.get("stream_url")):
         raise UnsupportedExternalOperation("download is not supported by this adapter")
 
-    return await adapter.open_stream(config, item, range=range_tuple)
+    try:
+        return await adapter.open_stream(config, item, range=range_tuple)
+    except ExternalItemNotFound as exc:
+        await _mark_unavailable(session, external_ref.external_library, external_ref, exc)
+        raise
 
 
 async def _ensure_stream_temp_dir(config: SonghiveConfig) -> Path:

@@ -39,6 +39,9 @@ asyncssh>=2.14.2
 mutagen>=1.47
 musicbrainzngs>=0.7.1
 
+# External library providers
+tidalapi==0.8.10
+
 # Federation
 pubby>=0.3.10
 webmentions>=0.1.27

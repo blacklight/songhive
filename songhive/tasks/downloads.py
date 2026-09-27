@@ -131,6 +131,7 @@ async def _build_archive(archive_id: str, config: SonghiveConfig, storage_servic
                 return
             archive.status = "processing"
             items = list(archive.items or [])
+            archive_user_id = archive.user_id
 
         with tempfile.TemporaryDirectory(prefix="songhive-dl-") as tmp:
             zip_path, item_errors = await downloads_service.materialize_archive(
@@ -138,6 +139,7 @@ async def _build_archive(archive_id: str, config: SonghiveConfig, storage_servic
                 config,
                 items,
                 Path(tmp),
+                user_id=archive_user_id,
             )
             async with get_session() as session:
                 archive = await session.get(DownloadArchive, archive_id)

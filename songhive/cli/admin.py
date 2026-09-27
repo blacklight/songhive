@@ -22,6 +22,8 @@ Usage:
         (--track-id <id> | --album-id <id> | --artist-id <id> | --library-id <id> | --all) [--dry-run]
     songhive admin enrich-images \
         (--artist-id <id> | --album-id <id> | --all) [--force] [--dry-run]
+    songhive admin tidal-refresh-catalog \
+        (--track <id> | --album <id> | --artist <id> | --playlist <uuid> | --expired)
 """
 
 import argparse
@@ -33,6 +35,7 @@ from pathlib import Path
 from typing import Iterable
 
 from kombu.exceptions import OperationalError as KombuOperationalError
+from sqlalchemy import select
 
 from ..config import AUDIO_EXTENSIONS, load_config
 from ..migrations import ensure_migrated
@@ -220,6 +223,23 @@ def _add_enrich_image_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
+def _add_tidal_refresh_catalog_command(subparsers: argparse._SubParsersAction) -> None:
+    tidal_parser = subparsers.add_parser(
+        "tidal-refresh-catalog",
+        help="Force-refresh cached TIDAL catalog payloads (tracks are otherwise write-once)",
+    )
+    tidal_group = tidal_parser.add_mutually_exclusive_group(required=True)
+    tidal_group.add_argument("--track", metavar="ID", help="TIDAL track id")
+    tidal_group.add_argument("--album", metavar="ID", help="TIDAL album id")
+    tidal_group.add_argument("--artist", metavar="ID", help="TIDAL artist id")
+    tidal_group.add_argument("--playlist", metavar="UUID", help="TIDAL playlist uuid")
+    tidal_group.add_argument(
+        "--expired",
+        action="store_true",
+        help="Refresh every expired TIDAL catalog entry",
+    )
+
+
 def _add_admin_commands(parser: argparse.ArgumentParser) -> None:
     """Add the admin subcommands to an ``admin`` (sub)parser."""
     subparsers = parser.add_subparsers(dest="command")
@@ -243,6 +263,7 @@ def _add_admin_commands(parser: argparse.ArgumentParser) -> None:
     _add_prune_remote_activities_command(subparsers)
     _add_sync_tags_command(subparsers)
     _add_enrich_image_parser(subparsers)
+    _add_tidal_refresh_catalog_command(subparsers)
 
 
 def _create_admin_parser() -> argparse.ArgumentParser:
@@ -694,6 +715,62 @@ async def _handle_enrich_images(args):
     )
 
 
+async def _handle_tidal_refresh_catalog(args):
+    """Force-refetch provider payloads into the shared catalog cache."""
+    from ..external.registry import get_external_adapter
+    from ..external.sync import _decrypt_config
+    from ..models.external_library import ExternalLibrary
+    from ..services import provider_catalog
+
+    config = load_config([])
+    init_db(config.database.url)
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(ExternalLibrary).where(
+                ExternalLibrary.provider_type == "tidal",
+                ExternalLibrary.enabled.is_(True),
+            )
+        )
+        library = result.scalars().first()
+        if library is None:
+            print("Error: no enabled TIDAL external library found", file=sys.stderr)
+            sys.exit(1)
+        credentials = _decrypt_config(library.config)
+        adapter = get_external_adapter("tidal")()
+
+        if args.expired:
+            targets = [
+                (entry.kind, entry.provider_key)
+                for entry in await provider_catalog.expired_catalog_entries(session, "tidal")
+            ]
+            if not targets:
+                print("No expired TIDAL catalog entries.")
+                return
+        else:
+            kind = next(name for name in ("track", "album", "artist", "playlist") if getattr(args, name))
+            targets = [(kind, getattr(args, kind))]
+
+        refreshed = 0
+        failed = 0
+        for kind, provider_key in targets:
+            try:
+                payload = await adapter.fetch_entity_payload(credentials, kind, provider_key)
+            except Exception as exc:  # network/session failure — keep the entry
+                print(f"  {kind} {provider_key}: fetch failed: {exc.__class__.__name__}", file=sys.stderr)
+                failed += 1
+                continue
+            if payload is None:
+                print(f"  {kind} {provider_key}: not found on TIDAL", file=sys.stderr)
+                failed += 1
+                continue
+            await provider_catalog.refresh_catalog_entry(session, "tidal", kind, provider_key, payload)
+            refreshed += 1
+        await session.commit()
+
+    print(f"Refreshed {refreshed} TIDAL catalog entry(ies); {failed} failed.")
+
+
 def admin_main(argv=None):
     """Entry point for admin CLI commands."""
     parser = _create_admin_parser()
@@ -735,6 +812,7 @@ def admin_main(argv=None):
         "prune-remote-activities": _handle_prune_remote_activities,
         "sync-tags": _handle_sync_tags,
         "enrich-images": _handle_enrich_images,
+        "tidal-refresh-catalog": _handle_tidal_refresh_catalog,
     }
 
     handler = handlers.get(args.command)

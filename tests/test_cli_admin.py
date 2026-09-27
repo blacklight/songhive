@@ -1310,3 +1310,178 @@ def test_admin_main_rehash_audio_dry_run(tmp_path, monkeypatch, capsys):
     cli_admin.admin_main(["rehash-audio", "--dry-run"])
     captured = capsys.readouterr()
     assert "Would rehash 1 audio file(s)" in captured.out
+
+
+class _FakeTidalAdapter:
+    """Adapter stub serving raw payloads for catalog refresh tests."""
+
+    provider_type = "tidal"
+
+    def __init__(self, payloads):
+        self._payloads = payloads
+
+    async def fetch_entity_payload(self, config, kind, provider_key):
+        return self._payloads.get((kind, provider_key))
+
+
+async def _seed_tidal_library(db_session, admin_user):
+    """Create a Library + enabled TIDAL ExternalLibrary."""
+    from songhive.models.external_library import ExternalLibrary
+    from songhive.models.library import Library
+
+    library = Library(name="Tidal Lib", owner_id=str(admin_user.id), visibility="private")
+    db_session.add(library)
+    await db_session.flush()
+    external = ExternalLibrary(
+        library_id=str(library.id),
+        provider_type="tidal",
+        scope="admin",
+        name="Tidal Lib",
+        enabled=True,
+        config={"access_token": "tok"},
+        created_by_id=str(admin_user.id),
+    )
+    db_session.add(external)
+    await db_session.commit()
+    return external
+
+
+def _patch_tidal_env(monkeypatch, db_session, adapter):
+    monkeypatch.setattr(cli_admin, "load_config", lambda argv: SonghiveConfig())
+    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
+    monkeypatch.setattr(
+        "songhive.external.registry.get_external_adapter",
+        lambda provider_type: (lambda: adapter),
+    )
+
+
+@pytest.mark.asyncio
+async def test_tidal_refresh_catalog_track(db_session, admin_user, monkeypatch, capsys):
+    """--track force-refreshes the catalog payload."""
+    from songhive.models.provider_catalog import ProviderCatalogEntry
+
+    await _seed_tidal_library(db_session, admin_user)
+    db_session.add(
+        ProviderCatalogEntry(
+            provider_type="tidal",
+            kind="track",
+            provider_key="123",
+            payload={"id": 123, "title": "Old"},
+        )
+    )
+    await db_session.commit()
+
+    adapter = _FakeTidalAdapter({("track", "123"): {"id": 123, "title": "New"}})
+    _patch_tidal_env(monkeypatch, db_session, adapter)
+
+    args = _make_args(track="123", album=None, artist=None, playlist=None, expired=False)
+    await cli_admin._handle_tidal_refresh_catalog(args)
+
+    captured = capsys.readouterr()
+    assert "Refreshed 1 TIDAL catalog entry(ies); 0 failed" in captured.out
+    from sqlalchemy import select
+
+    entry = (
+        await db_session.execute(select(ProviderCatalogEntry).where(ProviderCatalogEntry.provider_key == "123"))
+    ).scalar_one()
+    assert entry.payload["title"] == "New"
+
+
+@pytest.mark.asyncio
+async def test_tidal_refresh_catalog_expired(db_session, admin_user, monkeypatch, capsys):
+    """--expired refreshes all entries whose expires_at has passed."""
+    from songhive.models.provider_catalog import ProviderCatalogEntry
+
+    await _seed_tidal_library(db_session, admin_user)
+    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    db_session.add(
+        ProviderCatalogEntry(
+            provider_type="tidal",
+            kind="album",
+            provider_key="a1",
+            payload={"id": "a1"},
+            expires_at=past,
+        )
+    )
+    db_session.add(
+        ProviderCatalogEntry(
+            provider_type="tidal",
+            kind="album",
+            provider_key="a2",
+            payload={"id": "a2"},
+            expires_at=future,
+        )
+    )
+    # A non-TIDAL expired entry must not be touched.
+    db_session.add(
+        ProviderCatalogEntry(
+            provider_type="jellyfin",
+            kind="track",
+            provider_key="x",
+            payload={"id": "x"},
+            expires_at=past,
+        )
+    )
+    await db_session.commit()
+
+    adapter = _FakeTidalAdapter({("album", "a1"): {"id": "a1", "fresh": True}})
+    _patch_tidal_env(monkeypatch, db_session, adapter)
+
+    args = _make_args(track=None, album=None, artist=None, playlist=None, expired=True)
+    await cli_admin._handle_tidal_refresh_catalog(args)
+
+    captured = capsys.readouterr()
+    assert "Refreshed 1 TIDAL catalog entry(ies); 0 failed" in captured.out
+    from sqlalchemy import select
+
+    a1 = (
+        await db_session.execute(
+            select(ProviderCatalogEntry).where(
+                ProviderCatalogEntry.provider_type == "tidal",
+                ProviderCatalogEntry.provider_key == "a1",
+            )
+        )
+    ).scalar_one()
+    assert a1.payload == {"id": "a1", "fresh": True}
+    assert a1.expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_tidal_refresh_catalog_missing_key(db_session, admin_user, monkeypatch, capsys):
+    """Provider misses count as failures without touching the entry."""
+    from songhive.models.provider_catalog import ProviderCatalogEntry
+
+    await _seed_tidal_library(db_session, admin_user)
+    db_session.add(
+        ProviderCatalogEntry(
+            provider_type="tidal",
+            kind="track",
+            provider_key="gone",
+            payload={"id": "gone"},
+        )
+    )
+    await db_session.commit()
+
+    adapter = _FakeTidalAdapter({})
+    _patch_tidal_env(monkeypatch, db_session, adapter)
+
+    args = _make_args(track="gone", album=None, artist=None, playlist=None, expired=False)
+    await cli_admin._handle_tidal_refresh_catalog(args)
+
+    captured = capsys.readouterr()
+    assert "0 failed" not in captured.out.splitlines()[-1]
+    assert "1 failed" in captured.out
+    assert "not found" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_tidal_refresh_catalog_no_library(db_session, monkeypatch, capsys):
+    """Missing TIDAL library exits with a clear error."""
+    _patch_tidal_env(monkeypatch, db_session, _FakeTidalAdapter({}))
+    args = _make_args(track="1", album=None, artist=None, playlist=None, expired=False)
+    with pytest.raises(SystemExit):
+        await cli_admin._handle_tidal_refresh_catalog(args)
+    captured = capsys.readouterr()
+    assert "no enabled TIDAL external library" in captured.err

@@ -379,6 +379,14 @@ class MusicBrainzService:
 
         details = await self._fetch_recording_details(recording_id, recording)
         release = self._best_release(recording, details, album)
+
+        # Provider-managed tracks (e.g. TIDAL) declare ``editable_fields``;
+        # their provider metadata is immutable, so enrichment may only set
+        # the MusicBrainz recording id and raw metadata — never title,
+        # artist, album, or numbering.
+        from .provider_catalog import editable_fields_for_entity
+
+        provider_locked = await editable_fields_for_entity(session, "track", str(track.id)) is not None
         await self._apply_metadata(
             session,
             track,
@@ -388,6 +396,7 @@ class MusicBrainzService:
             details,
             release,
             storage_service,
+            provider_locked=provider_locked,
         )
 
         self._mark_enriched(track)
@@ -751,11 +760,16 @@ class MusicBrainzService:
         details: Dict[str, Any],
         release: Optional[Dict[str, Any]],
         storage_service: Optional[StorageService],
+        provider_locked: bool = False,
     ) -> None:
         """Populate missing metadata from a MusicBrainz recording and release."""
         recording_id = recording.get("id")
         if recording_id and track.musicbrainz_id is None:
             track.musicbrainz_id = recording_id
+
+        if provider_locked:
+            self._store_raw_metadata(track, recording, details)
+            return
 
         recording_title = _recording_title(recording)
         if recording_title and _is_missing_title(track):

@@ -21,7 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import raiseload, selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..models.album import Album
@@ -262,7 +262,8 @@ async def add_genres_to_entity(
         raise ValueError(f"Unknown entity type: {entity_type!r}")
 
     model, assoc_class, entity_col, _ = _GENRE_ENTITY_REGISTRY[entity_type]
-    entity = await session.get(model, entity_id)
+    # Existence check only — no need for the entity's relationship graph.
+    entity = await session.get(model, entity_id, options=[raiseload("*")])
     if entity is None:
         raise ValueError(f"{entity_type} not found")
 
@@ -343,7 +344,8 @@ async def set_genres_for_entity(
         raise ValueError(f"Unknown entity type: {entity_type!r}")
 
     model, assoc_class, entity_col, _ = _GENRE_ENTITY_REGISTRY[entity_type]
-    entity = await session.get(model, entity_id)
+    # Existence check only — no need for the entity's relationship graph.
+    entity = await session.get(model, entity_id, options=[raiseload("*")])
     if entity is None:
         raise ValueError(f"{entity_type} not found")
 

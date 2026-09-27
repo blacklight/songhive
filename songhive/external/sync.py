@@ -14,8 +14,9 @@ from enum import Enum
 from typing import Any, Optional
 
 from redis.asyncio import Redis
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import raiseload
 
 from ..config.loader import load_config
 from ..models.album import Album
@@ -174,6 +175,19 @@ def _item_matches_existing(item: ExternalItemRef, external_track: ExternalTrack)
     )
 
 
+def _lean(stmt):
+    """Suppress relationship eager-loads on a per-item entity select.
+
+    Model relationships are almost all ``lazy="selectin"`` and selectin
+    loading cascades: a single ``select(Track)`` otherwise detonates into
+    dozens of secondary queries pulling the whole reachable graph — a
+    catastrophic per-item cost inside sync loops. Sync code only touches
+    mapped columns on these entities; ``raiseload`` makes any relationship
+    access fail loudly instead of degenerating into an N+1.
+    """
+    return stmt.options(raiseload("*"))
+
+
 async def _load_existing_track(
     session: AsyncSession,
     external_track: ExternalTrack,
@@ -181,7 +195,7 @@ async def _load_existing_track(
     """Return the Songhive track linked by ``external_track.track_id`` if any."""
     if external_track.track_id is None:
         return None
-    result = await session.execute(select(Track).where(Track.id == external_track.track_id))
+    result = await session.execute(_lean(select(Track)).where(Track.id == external_track.track_id))
     return result.scalar_one_or_none()
 
 
@@ -193,7 +207,7 @@ async def _find_or_create_library_track(
 ) -> LibraryTrack:
     """Return the LibraryTrack row for the pair, creating one if absent."""
     result = await session.execute(
-        select(LibraryTrack)
+        _lean(select(LibraryTrack))
         .where(
             LibraryTrack.library_id == library_id,
             LibraryTrack.track_id == track_id,
@@ -256,6 +270,8 @@ async def _apply_metadata(
                 owner_id=owner_id,
                 visibility=visibility,
             )
+            if metadata.cover_url and not album.cover_url:
+                album.cover_url = metadata.cover_url
 
         mime_type = metadata.raw_metadata.get("mimetype") if metadata.raw_metadata else None
         if mime_type is None:
@@ -316,6 +332,8 @@ async def _apply_metadata(
                 owner_id=track.owner_id,
                 visibility=track.visibility,
             )
+            if metadata.cover_url and not album.cover_url:
+                album.cover_url = metadata.cover_url
 
         track.title = metadata.title
         track.artist_id = str(artist.id)
@@ -383,7 +401,7 @@ async def _process_item(
 ) -> None:
     """Process a single provider item inside a savepoint."""
     result = await session.execute(
-        select(ExternalTrack)
+        _lean(select(ExternalTrack))
         .where(
             ExternalTrack.external_library_id == str(external_library.id),
             ExternalTrack.provider_key == item.provider_key,
@@ -551,7 +569,7 @@ async def _find_external_item(
     provider_key: str,
 ) -> Optional[ExternalItem]:
     result = await session.execute(
-        select(ExternalItem)
+        _lean(select(ExternalItem))
         .where(
             ExternalItem.external_library_id == external_library_id,
             ExternalItem.kind == kind,
@@ -573,8 +591,14 @@ async def _upsert_external_item(
     mtime: Optional[datetime],
     raw_metadata: Optional[dict],
     fingerprint: str,
+    membership: Optional[str] = None,
 ) -> ExternalItem:
-    """Create or refresh the ``ExternalItem`` reference for an entity."""
+    """Create or refresh the ``ExternalItem`` reference for an entity.
+
+    ``membership=None`` keeps the existing value; ``"saved"`` promotes a
+    ``referenced`` row (the provider collection listed it), ``"referenced"``
+    materializes without claiming membership.
+    """
     entity_column = {
         "track": "track_id",
         "album": "album_id",
@@ -587,11 +611,18 @@ async def _upsert_external_item(
             external_library_id=external_library_id,
             kind=kind,
             provider_key=provider_key,
+            membership=membership or "saved",
             **{entity_column: entity_id},
         )
         session.add(item)
     else:
         setattr(item, entity_column, entity_id)
+        if membership is not None and membership != item.membership:
+            # Only ever promote on a fresh listing; demotion is reconciliation's job.
+            if membership == "saved":
+                item.membership = "saved"
+            elif item.membership != "saved":
+                item.membership = membership
     item.provider_etag = etag
     item.provider_mtime = mtime
     item.raw_metadata = {**(raw_metadata or {}), "_fingerprint": fingerprint}
@@ -607,6 +638,17 @@ def _entity_bump(counters: RunCounters, key: str) -> None:
     counters.entity_counts[key] = counters.entity_counts.get(key, 0) + 1
 
 
+async def _fill_album_cover(session: AsyncSession, album_id: Optional[str], cover_url: Optional[str]) -> None:
+    """Populate an empty ``Album.cover_url`` from provider track metadata."""
+    if not album_id or not cover_url:
+        return
+    await session.execute(
+        update(Album)
+        .where(Album.id == album_id, or_(Album.cover_url.is_(None), Album.cover_url == ""))
+        .values(cover_url=cover_url)
+    )
+
+
 async def _find_entity_artist(
     session: AsyncSession,
     name: str,
@@ -616,7 +658,7 @@ async def _find_entity_artist(
 ) -> Artist:
     """Find-or-create an artist, optionally matching on a MusicBrainz id first."""
     if match_musicbrainz and musicbrainz_id:
-        result = await session.execute(select(Artist).where(Artist.musicbrainz_id == musicbrainz_id).limit(1))
+        result = await session.execute(_lean(select(Artist)).where(Artist.musicbrainz_id == musicbrainz_id).limit(1))
         artist = result.scalar_one_or_none()
         if artist is not None:
             return artist
@@ -636,7 +678,7 @@ async def _find_entity_album(
 ) -> Album:
     """Find-or-create an album, optionally matching on a MusicBrainz id first."""
     if match_musicbrainz and musicbrainz_id:
-        result = await session.execute(select(Album).where(Album.musicbrainz_id == musicbrainz_id).limit(1))
+        result = await session.execute(_lean(select(Album)).where(Album.musicbrainz_id == musicbrainz_id).limit(1))
         album = result.scalar_one_or_none()
         if album is not None:
             return album
@@ -657,8 +699,19 @@ async def _apply_entity_track(
     run: ExternalSyncRun,
     counters: RunCounters,
     config: dict,
+    *,
+    membership: str = "saved",
+    add_to_library: bool = True,
+    immutable: bool = False,
 ) -> Optional[Track]:
-    """Materialize or update a local ``Track`` from an entity-provider item."""
+    """Materialize or update a local ``Track`` from an entity-provider item.
+
+    ``membership="referenced"`` materializes the track without a
+    ``LibraryTrack`` row (e.g. lazy playlist/album contents). ``immutable``
+    providers treat already-known tracks as write-once: only ``last_seen_at``
+    and a membership promotion are applied — metadata and fingerprint/conflict
+    logic are skipped entirely.
+    """
     metadata = item.metadata
     if metadata is None:
         return None
@@ -673,23 +726,54 @@ async def _apply_entity_track(
 
     track: Optional[Track] = None
     if external_item is not None and external_item.track_id is not None:
-        result = await session.execute(select(Track).where(Track.id == external_item.track_id))
+        result = await session.execute(_lean(select(Track)).where(Track.id == external_item.track_id))
         track = result.scalar_one_or_none()
 
     counters.items_seen += 1
 
-    if (
-        external_item is not None
-        and external_item.state == "active"
-        and track is not None
-        and _entity_unchanged(external_item, item.etag, fingerprint)
-    ):
-        external_item.last_seen_at = _utcnow()
-        external_item.last_synced_at = _utcnow()
-        external_item.sync_error = None
-        if config.get("sync_metadata") and track.musicbrainz_enriched_at is None:
-            counters.enrich_queue.add(str(track.id))
-        return track
+    if track is not None:
+        # Heal albums that were created coverless before track-derived covers
+        # were applied (immutable/unchanged tracks never re-resolve the album).
+        await _fill_album_cover(session, track.album_id, metadata.cover_url)
+
+    if external_item is not None and track is not None:
+        if immutable:
+            # Immutable provider track: never rewrite metadata. Refresh the
+            # seen marker, honor a saved→/referenced→saved membership flip,
+            # and ensure library membership matches the requested state.
+            external_item.last_seen_at = _utcnow()
+            external_item.last_synced_at = _utcnow()
+            external_item.sync_error = None
+            if external_item.state != "active":
+                external_item.state = "active"
+            if membership == "saved" and external_item.membership != "saved":
+                external_item.membership = "saved"
+            if add_to_library and membership == "saved":
+                added_by_id = run.triggered_by_user_id or external_library.created_by_id
+                await _find_or_create_library_track(
+                    session,
+                    str(external_library.library_id),
+                    str(track.id),
+                    added_by_id,
+                )
+            return track
+        if external_item.state == "active" and _entity_unchanged(external_item, item.etag, fingerprint):
+            external_item.last_seen_at = _utcnow()
+            external_item.last_synced_at = _utcnow()
+            external_item.sync_error = None
+            if membership == "saved" and external_item.membership != "saved":
+                external_item.membership = "saved"
+            if add_to_library and membership == "saved":
+                added_by_id = run.triggered_by_user_id or external_library.created_by_id
+                await _find_or_create_library_track(
+                    session,
+                    str(external_library.library_id),
+                    str(track.id),
+                    added_by_id,
+                )
+            if config.get("sync_metadata") and track.musicbrainz_enriched_at is None:
+                counters.enrich_queue.add(str(track.id))
+            return track
 
     extra_artists = list(metadata.artists[1:]) if len(metadata.artists) > 1 else None
     track_genres = list(metadata.genres) or ([metadata.genre] if metadata.genre else [])
@@ -702,6 +786,14 @@ async def _apply_entity_track(
         # it for Range parsing, and providers nest it differently (Jellyfin
         # puts it under MediaSources).
         raw_track_metadata["Size"] = item.size
+
+    if track is None and config.get("dedup_isrc"):
+        isrc = (metadata.provider_ids or {}).get("isrc")
+        if isrc:
+            result = await session.execute(
+                _lean(select(Track)).where(Track.raw_metadata["isrc"].astext == isrc).limit(1)
+            )
+            track = result.scalar_one_or_none()
 
     if track is None:
         artist = await _find_entity_artist(
@@ -728,6 +820,8 @@ async def _apply_entity_track(
                 musicbrainz_id=(metadata.provider_ids or {}).get("MusicBrainzAlbum"),
                 match_musicbrainz=match_musicbrainz,
             )
+            if metadata.cover_url and not album.cover_url:
+                album.cover_url = metadata.cover_url
 
         track = Track(
             title=metadata.title,
@@ -753,6 +847,10 @@ async def _apply_entity_track(
         session.add(track)
         await session.flush()
         _entity_bump(counters, "tracks_created")
+    elif immutable:
+        # ISRC-dedup link on an immutable provider: attach the provider
+        # reference without rewriting the existing local metadata.
+        await _fill_album_cover(session, track.album_id, metadata.cover_url)
     else:
         local_edited = track.metadata_updated_at is not None and (
             track.external_metadata_synced_at is None or track.metadata_updated_at > track.external_metadata_synced_at
@@ -798,6 +896,8 @@ async def _apply_entity_track(
                 musicbrainz_id=(metadata.provider_ids or {}).get("MusicBrainzAlbum"),
                 match_musicbrainz=match_musicbrainz,
             )
+            if album is not None and metadata.cover_url and not album.cover_url:
+                album.cover_url = metadata.cover_url
 
         track.title = metadata.title
         track.artist_id = str(artist.id)
@@ -819,13 +919,14 @@ async def _apply_entity_track(
     if track_genres:
         await set_genres_for_entity(session, "track", track.id, track_genres)
 
-    added_by_id = run.triggered_by_user_id or external_library.created_by_id
-    await _find_or_create_library_track(
-        session,
-        str(external_library.library_id),
-        str(track.id),
-        added_by_id,
-    )
+    if add_to_library and membership == "saved":
+        added_by_id = run.triggered_by_user_id or external_library.created_by_id
+        await _find_or_create_library_track(
+            session,
+            str(external_library.library_id),
+            str(track.id),
+            added_by_id,
+        )
 
     await _upsert_external_item(
         session,
@@ -837,6 +938,7 @@ async def _apply_entity_track(
         mtime=item.mtime,
         raw_metadata=raw_track_metadata,
         fingerprint=fingerprint,
+        membership=membership,
     )
 
     if config.get("sync_metadata") and track.musicbrainz_enriched_at is None:
@@ -859,7 +961,7 @@ async def _apply_entity_artist(
 
     artist: Optional[Artist] = None
     if external_item is not None and external_item.artist_id is not None:
-        artist = await session.get(Artist, external_item.artist_id)
+        artist = await session.get(Artist, external_item.artist_id, options=[raiseload("*")])
 
     if (
         external_item is not None
@@ -906,8 +1008,14 @@ async def _apply_entity_album(
     item: ExternalAlbumMetadata,
     counters: RunCounters,
     config: dict,
+    *,
+    lazy: bool = False,
 ) -> Optional[Album]:
-    """Materialize or update a local ``Album`` from a provider album."""
+    """Materialize or update a local ``Album`` from a provider album.
+
+    ``lazy`` providers never enumerate album contents during sync; a newer
+    provider mtime marks the cached contents stale for the lazy refresh path.
+    """
     library = external_library.library
     owner_id = library.owner_id if library is not None else None
     visibility = library.visibility if library is not None else "private"
@@ -919,7 +1027,7 @@ async def _apply_entity_album(
 
     album: Optional[Album] = None
     if external_item is not None and external_item.album_id is not None:
-        album = await session.get(Album, external_item.album_id)
+        album = await session.get(Album, external_item.album_id, options=[raiseload("*")])
 
     if (
         external_item is not None
@@ -957,6 +1065,13 @@ async def _apply_entity_album(
     if item.genres:
         await set_genres_for_entity(session, "album", album.id, list(item.genres))
 
+    if lazy and external_item is not None:
+        provider_updated = item.mtime or _entity_mtime_from_raw(item.raw_metadata)
+        if provider_updated and (
+            external_item.contents_fetched_at is None or provider_updated > external_item.contents_fetched_at
+        ):
+            external_item.contents_error = external_item.contents_error or "stale"
+
     await _upsert_external_item(
         session,
         str(external_library.id),
@@ -976,8 +1091,15 @@ async def _apply_entity_playlist(
     external_library: ExternalLibrary,
     item: ExternalPlaylistMetadata,
     counters: RunCounters,
+    *,
+    lazy: bool = False,
 ) -> Optional[Playlist]:
-    """Materialize or update a local ``Playlist`` from a provider playlist."""
+    """Materialize or update a local ``Playlist`` from a provider playlist.
+
+    ``lazy`` providers (``limits["lazy_contents"]``) enumerate playlists
+    without entries: only metadata is updated here and ``PlaylistTrack`` rows
+    are never touched — contents arrive through the lazy refresh path.
+    """
     library = external_library.library
     owner_id = library.owner_id if library is not None else None
     visibility = library.visibility if library is not None else "private"
@@ -995,7 +1117,7 @@ async def _apply_entity_playlist(
 
     playlist: Optional[Playlist] = None
     if external_item is not None and external_item.playlist_id is not None:
-        playlist = await session.get(Playlist, external_item.playlist_id)
+        playlist = await session.get(Playlist, external_item.playlist_id, options=[raiseload("*")])
 
     if (
         external_item is not None
@@ -1023,31 +1145,43 @@ async def _apply_entity_playlist(
         if item.description is not None:
             playlist.description = item.description
 
-    # Provider playlists are authoritative: replace the ordered entries.
-    await session.execute(delete(PlaylistTrack).where(PlaylistTrack.playlist_id == str(playlist.id)))
-    skipped = 0
-    for entry in item.entries:
-        ref = await _find_external_item(session, str(external_library.id), "track", entry.track_provider_key)
-        if ref is None or ref.track_id is None:
-            skipped += 1
-            continue
-        session.add(
-            PlaylistTrack(
-                playlist_id=str(playlist.id),
-                track_id=ref.track_id,
-                position=entry.position,
+    if not lazy:
+        # Provider playlists are authoritative: replace the ordered entries.
+        await session.execute(delete(PlaylistTrack).where(PlaylistTrack.playlist_id == str(playlist.id)))
+        skipped = 0
+        for entry in item.entries:
+            ref = await _find_external_item(session, str(external_library.id), "track", entry.track_provider_key)
+            if ref is None or ref.track_id is None:
+                skipped += 1
+                continue
+            session.add(
+                PlaylistTrack(
+                    playlist_id=str(playlist.id),
+                    track_id=ref.track_id,
+                    position=entry.position,
+                )
             )
-        )
-    if skipped:
-        logger.info(
-            "Playlist %s: skipped %d provider entries with no imported track",
-            item.provider_key,
-            skipped,
-        )
-        counters.entity_counts["playlist_entries_skipped"] = (
-            counters.entity_counts.get("playlist_entries_skipped", 0) + skipped
-        )
-    await session.flush()
+        if skipped:
+            logger.info(
+                "Playlist %s: skipped %d provider entries with no imported track",
+                item.provider_key,
+                skipped,
+            )
+            counters.entity_counts["playlist_entries_skipped"] = (
+                counters.entity_counts.get("playlist_entries_skipped", 0) + skipped
+            )
+        await session.flush()
+    else:
+        # Lazy container: mark contents stale when the provider's lastUpdated
+        # advanced past the cached fetch timestamp. Never fetch here.
+        provider_updated = item.mtime or _entity_mtime_from_raw(item.raw_metadata)
+        if (
+            external_item is not None
+            and provider_updated
+            and (external_item.contents_fetched_at is None or provider_updated > external_item.contents_fetched_at)
+        ):
+            external_item.contents_error = external_item.contents_error or "stale"
+
     _entity_bump(counters, "playlists_synced")
 
     await _upsert_external_item(
@@ -1060,8 +1194,87 @@ async def _apply_entity_playlist(
         mtime=item.mtime,
         raw_metadata=item.raw_metadata,
         fingerprint=fingerprint,
+        membership="saved",
     )
     return playlist
+
+
+def _entity_mtime_from_raw(raw_metadata: Optional[dict]) -> Optional[datetime]:
+    """Best-effort provider mtime from common last-updated fields."""
+    if not isinstance(raw_metadata, dict):
+        return None
+    for key in ("lastUpdated", "last_updated", "updated", "modified"):
+        raw = raw_metadata.get(key)
+        if isinstance(raw, str) and raw:
+            try:
+                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed
+    return None
+
+
+def _catalog_ttl_seconds(provider_type: str, config: dict) -> Optional[int]:
+    """Resolve the non-track catalog TTL: library override → provider/instance default."""
+    raw = config.get("catalog_ttl_seconds")
+    if isinstance(raw, int) and raw >= 0:
+        return raw
+    try:
+        songhive_config = load_config([])
+    except Exception:
+        return None
+    if provider_type == "tidal":
+        return songhive_config.external_libraries.tidal.catalog_ttl_seconds
+    return None
+
+
+async def _track_is_referenced(session: AsyncSession, track_id: str) -> bool:
+    """Return whether a track is still referenced outside the sync'd collection.
+
+    References that justify keeping a demoted ``referenced`` row: playlist
+    entries, favorites, listening history, and share/publication tokens.
+    """
+    from ..models.favorite import Favorite
+    from ..models.history import ListeningHistory
+    from ..models.share_token import ShareToken
+
+    if await session.scalar(select(func.count()).select_from(PlaylistTrack).where(PlaylistTrack.track_id == track_id)):
+        return True
+    if await session.scalar(select(func.count()).select_from(Favorite).where(Favorite.track_id == track_id)):
+        return True
+    if await session.scalar(
+        select(func.count()).select_from(ListeningHistory).where(ListeningHistory.track_id == track_id)
+    ):
+        return True
+    if await session.scalar(
+        select(func.count())
+        .select_from(ShareToken)
+        .where(ShareToken.item_type == "track", ShareToken.item_id == track_id)
+    ):
+        return True
+    return False
+
+
+async def _playlist_is_referenced(session: AsyncSession, playlist_id: str) -> bool:
+    """Return whether a provider playlist is referenced by local state."""
+    from ..models.collection_item import CollectionItem
+    from ..models.share_token import ShareToken
+
+    if await session.scalar(
+        select(func.count())
+        .select_from(CollectionItem)
+        .where(CollectionItem.item_type == "playlist", CollectionItem.item_id == playlist_id)
+    ):
+        return True
+    if await session.scalar(
+        select(func.count())
+        .select_from(ShareToken)
+        .where(ShareToken.item_type == "playlist", ShareToken.item_id == playlist_id)
+    ):
+        return True
+    return False
 
 
 async def _reconcile_missing_entities(
@@ -1074,10 +1287,15 @@ async def _reconcile_missing_entities(
     """Mark ``ExternalItem`` rows absent from the listing as missing and
     reconcile the local entities they reference.
 
-    Playlists are provider-owned and deleted. Albums/artists are deleted only
-    when no other track/album still references them (guard against orphaning
-    local content sharing the entity). Tracks keep their row — favorites,
-    history and publications may reference it.
+    Only ``membership="saved"`` rows are sync-visible — ``referenced`` rows
+    were materialized by a relationship and are unaffected by collection
+    listings. A saved track that drops out of the collection is demoted to
+    ``referenced`` (losing its ``LibraryTrack``) when something still
+    references it; otherwise it follows the missing path.
+
+    Playlists are provider-owned and deleted unless Songhive-side references
+    (favorites/shares) keep them frozen as ``state="missing"``. Albums/artists
+    are deleted only when no other track/album still references them.
 
     Only kinds whose listing pass ran this sync are reconciled: a disabled
     ``include_*`` toggle must not tombstone previously imported entities.
@@ -1096,28 +1314,45 @@ async def _reconcile_missing_entities(
         return
 
     library_id = str(external_library.library_id)
+    immutable_tracks = bool((capabilities.limits or {}).get("immutable_tracks"))
     result = await session.execute(
-        select(ExternalItem).where(
+        _lean(select(ExternalItem)).where(
             ExternalItem.external_library_id == str(external_library.id),
             ExternalItem.kind.in_(kinds),
             ExternalItem.state == "active",
+            ExternalItem.membership == "saved",
             ExternalItem.last_seen_at < run.started_at,
         )
     )
     for item in result.scalars().all():
-        item.state = "missing"
-        item.sync_error = None
         counters.tracks_missing += 1
 
         if item.kind == "track" and item.track_id is not None:
+            # Dropping out of the collection is a membership change, not a
+            # content change — demote while referenced, else mark missing.
+            if immutable_tracks and await _track_is_referenced(session, str(item.track_id)):
+                item.membership = "referenced"
+                item.sync_error = None
+                await _remove_library_track(session, library_id, item.track_id)
+                continue
+            item.state = "missing"
+            item.sync_error = None
             await _remove_library_track(session, library_id, item.track_id)
         elif item.kind == "playlist" and item.playlist_id is not None:
+            # Provider-owned playlist gone upstream: delete unless local
+            # references (favorites/shares) freeze it in place as missing.
+            if await _playlist_is_referenced(session, str(item.playlist_id)):
+                item.state = "missing"
+                item.sync_error = None
+                continue
             playlist = await session.get(Playlist, item.playlist_id)
             if playlist is not None:
                 await session.execute(delete(PlaylistTrack).where(PlaylistTrack.playlist_id == str(playlist.id)))
                 await session.delete(playlist)
             await session.delete(item)
         elif item.kind == "album" and item.album_id is not None:
+            item.state = "missing"
+            item.sync_error = None
             still_used = await session.scalar(
                 select(func.count()).select_from(Track).where(Track.album_id == item.album_id)
             )
@@ -1127,6 +1362,8 @@ async def _reconcile_missing_entities(
                     await session.delete(album)
                     await session.delete(item)
         elif item.kind == "artist" and item.artist_id is not None:
+            item.state = "missing"
+            item.sync_error = None
             track_refs = await session.scalar(
                 select(func.count()).select_from(Track).where(Track.artist_id == item.artist_id)
             )
@@ -1138,6 +1375,9 @@ async def _reconcile_missing_entities(
                 if artist is not None:
                     await session.delete(artist)
                     await session.delete(item)
+        else:
+            item.state = "missing"
+            item.sync_error = None
 
 
 async def _sync_entity_library(
@@ -1152,47 +1392,137 @@ async def _sync_entity_library(
     scope: Optional[str],
 ) -> None:
     """Run the entity-import passes for an entity-backed provider."""
+    from ..services.provider_catalog import upsert_catalog_entries
+
+    limits = capabilities.limits or {}
+    immutable_tracks = bool(limits.get("immutable_tracks"))
+    lazy_kinds = set(limits.get("lazy_contents") or ())
+    lazy_playlists = "playlist" in lazy_kinds
+    provider_type = external_library.provider_type
+    catalog_ttl = _catalog_ttl_seconds(provider_type, config)
+    catalog_batch: list[dict] = []
+
+    async def _flush_catalog() -> None:
+        """Write queued raw provider payloads to the catalog (write-once for tracks).
+
+        Runs inside a savepoint so a concurrent-writer ``IntegrityError``
+        drops only the batch, never the sync run.
+        """
+        nonlocal catalog_batch
+        if not catalog_batch:
+            return
+        batch, catalog_batch = catalog_batch, []
+        try:
+            async with session.begin_nested():
+                track_payloads = [p for p in batch if p.get("_kind") == "track"]
+                other = [p for p in batch if p.get("_kind") != "track"]
+                if track_payloads:
+                    await upsert_catalog_entries(
+                        session, provider_type, "track", track_payloads, key_field="_key", write_once=True
+                    )
+                for kind in ("album", "artist", "playlist"):
+                    kind_payloads = [p for p in other if p.get("_kind") == kind]
+                    if kind_payloads:
+                        await upsert_catalog_entries(
+                            session,
+                            provider_type,
+                            kind,
+                            kind_payloads,
+                            key_field="_key",
+                            ttl_seconds=catalog_ttl,
+                        )
+        except Exception:
+            logger.warning("Provider catalog batch write failed; continuing sync", exc_info=True)
+
+    async def _queue_catalog(kind: str, provider_key: str, raw: Optional[dict]) -> None:
+        if isinstance(raw, dict):
+            catalog_batch.append({**raw, "_kind": kind, "_key": str(provider_key)})
+        if len(catalog_batch) >= 100:
+            await _flush_catalog()
 
     async def _guard(label: str, provider_key: str, coro: Any) -> Any:
-        async with session.begin_nested():
-            try:
+        # The try must wrap ``begin_nested``: letting the exception propagate
+        # through the context manager is what rolls back the savepoint.
+        try:
+            async with session.begin_nested():
                 return await coro
-            except Exception:
-                logger.exception("Unexpected failure processing %s %s", label, provider_key)
-                counters.tracks_failed += 1
-                return None
+        except Exception:
+            logger.exception("Unexpected failure processing %s %s", label, provider_key)
+            counters.tracks_failed += 1
+            return None
+
+    _checkpoint_every = 250
+    _pending_checkpoint = 0
+
+    async def _checkpoint() -> None:
+        """Periodically commit progress so long syncs are observable and
+        resumable instead of one giant invisible transaction."""
+        nonlocal _pending_checkpoint
+        _pending_checkpoint += 1
+        if _pending_checkpoint < _checkpoint_every:
+            return
+        _pending_checkpoint = 0
+        run.items_seen = counters.items_seen
+        run.tracks_created = counters.tracks_created
+        run.tracks_updated = counters.tracks_updated
+        run.tracks_missing = counters.tracks_missing
+        run.tracks_failed = counters.tracks_failed
+        await session.commit()
 
     if capabilities.list_items:
         async for item in adapter.iter_items(config, since=since, scope=scope):
+            if immutable_tracks and item.metadata and item.metadata.raw_metadata:
+                await _queue_catalog("track", item.provider_key, item.metadata.raw_metadata)
             await _guard(
                 "track",
                 item.provider_key,
-                _apply_entity_track(session, external_library, item, run, counters, config),
+                _apply_entity_track(
+                    session,
+                    external_library,
+                    item,
+                    run,
+                    counters,
+                    config,
+                    membership="saved",
+                    add_to_library=True,
+                    immutable=immutable_tracks,
+                ),
             )
+            await _checkpoint()
+        await _flush_catalog()
 
     if capabilities.list_artists:
         async for item in adapter.iter_artists(config, since=since, scope=scope):
+            await _queue_catalog("artist", item.provider_key, item.raw_metadata)
             await _guard(
                 "artist",
                 item.provider_key,
                 _apply_entity_artist(session, external_library, item, counters, config),
             )
+            await _checkpoint()
+        await _flush_catalog()
 
     if capabilities.list_albums:
         async for item in adapter.iter_albums(config, since=since, scope=scope):
+            await _queue_catalog("album", item.provider_key, item.raw_metadata)
             await _guard(
                 "album",
                 item.provider_key,
-                _apply_entity_album(session, external_library, item, counters, config),
+                _apply_entity_album(session, external_library, item, counters, config, lazy="album" in lazy_kinds),
             )
+            await _checkpoint()
+        await _flush_catalog()
 
     if capabilities.list_playlists:
         async for item in adapter.iter_playlists(config, since=since, scope=scope):
+            await _queue_catalog("playlist", item.provider_key, item.raw_metadata)
             await _guard(
                 "playlist",
                 item.provider_key,
-                _apply_entity_playlist(session, external_library, item, counters),
+                _apply_entity_playlist(session, external_library, item, counters, lazy=lazy_playlists),
             )
+            await _checkpoint()
+        await _flush_catalog()
 
     if since is None:
         await _reconcile_missing_entities(session, external_library, capabilities, run, counters)
@@ -1282,7 +1612,12 @@ async def sync_external_library(
         assert run  # for mypy
         external_library.last_sync_started_at = run.started_at
         external_library.last_sync_status = "running"
-        await session.flush()
+        # Commit the "running" state immediately so the run is visible to
+        # other sessions — progress is then checkpointed periodically inside
+        # the sync passes rather than staying invisible until the final
+        # commit (previously the whole sync ran in one giant transaction, so
+        # a long sync showed the run as "queued" with no sign of life).
+        await session.commit()
 
         if (capabilities.limits or {}).get("entity_import"):
             # Entity-backed provider: tracks/albums/artists/playlists are

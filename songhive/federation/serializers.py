@@ -26,6 +26,7 @@ from ._common import (
     get_tag_url,
     get_track_download_path,
     get_track_url,
+    provider_browse_link,
 )
 
 # Namespaced keys stamped on attachment docs produced by
@@ -549,6 +550,11 @@ def track_to_audio_object(
 
     track_url = get_track_url(track=track, domain=domain)
     stream_url = stream_url or get_stream_url(track=track, domain=domain)
+    # Metadata-only providers (e.g. TIDAL) never federate audio bytes;
+    # remote servers get a provider browse link instead.
+    browse_link = provider_browse_link(track)
+    if browse_link is not None:
+        stream_url = None
     object_id = ap_object_id or track_url
     unloaded = _unloaded_attrs(track)
     media_type = _track_media_type(track, unloaded)
@@ -596,6 +602,15 @@ def track_to_audio_object(
                 "mimeType": media_type,
             },
         )
+    if browse_link is not None:
+        urls.append(
+            {
+                "type": "Link",
+                "href": browse_link,
+                "mediaType": "text/html",
+                "mimeType": "text/html",
+            }
+        )
 
     obj = {
         "type": "Audio",
@@ -635,6 +650,15 @@ def track_to_audio_object(
         }
         _enrich_track_attachment(audio_attachment, track, artist, domain)
         obj["attachment"] = [audio_attachment]
+    elif browse_link is not None:
+        obj["attachment"] = [
+            {
+                "type": "Document",
+                "mediaType": "text/html",
+                "url": browse_link,
+                "name": track.title,
+            }
+        ]
 
     return allow_public_quotes(obj)
 
@@ -689,6 +713,11 @@ def track_to_note_object(
 
     track_url = get_track_url(track=track, domain=domain)
     stream_url = stream_url or get_stream_url(track=track, domain=domain)
+    # Metadata-only providers (e.g. TIDAL) never federate audio bytes;
+    # remote servers get a provider browse link instead.
+    browse_link = provider_browse_link(track)
+    if browse_link is not None:
+        stream_url = None
     object_id = ap_object_id or track_url
     unloaded = _unloaded_attrs(track)
     media_type = _track_media_type(track, unloaded)
@@ -726,6 +755,15 @@ def track_to_note_object(
             attachment["duration"] = format_duration(track.duration)
         _enrich_track_attachment(attachment, track, artist, domain)
         obj["attachment"] = [attachment]
+    elif browse_link is not None:
+        obj["attachment"] = [
+            {
+                "type": "Document",
+                "mediaType": "text/html",
+                "url": browse_link,
+                "name": track.title,
+            }
+        ]
 
     return allow_public_quotes(obj)
 

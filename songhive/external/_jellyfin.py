@@ -550,9 +550,120 @@ class JellyfinExternalAdapter(ExternalLibraryAdapter):
             list_albums=bool(config.get("include_albums", True)),
             list_artists=bool(config.get("include_artists", True)),
             list_playlists=bool(config.get("include_playlists", True)),
-            limits={"checksum_algorithm": None, "entity_import": True},
+            limits={"checksum_algorithm": None, "entity_import": True, "search": True},
         )
         return self._capabilities
+
+    def _track_ref(self, item: dict, base: str) -> Optional[ExternalItemRef]:
+        """Map a raw Jellyfin Audio item onto an ``ExternalItemRef``."""
+        item_id = item.get("Id")
+        if not item_id:
+            return None
+        size = item.get("Size")
+        if size is None:
+            sources = item.get("MediaSources")
+            if isinstance(sources, list):
+                for source in sources:
+                    if isinstance(source, dict) and source.get("Size"):
+                        size = source["Size"]
+                        break
+        return ExternalItemRef(
+            provider_key=str(item_id),
+            display_path=self._display_path(item),
+            etag=item.get("Etag") if isinstance(item.get("Etag"), str) else None,
+            mtime=self._parse_datetime(item.get("DateModified")),
+            size=int(size) if size is not None else None,
+            mime_type=self._mime_for_item(item),
+            metadata=self._track_metadata(item, base),
+        )
+
+    def _album_meta(self, item: dict, base: str) -> Optional[ExternalAlbumMetadata]:
+        """Map a raw Jellyfin MusicAlbum item onto ``ExternalAlbumMetadata``."""
+        item_id = item.get("Id")
+        if not item_id:
+            return None
+        artist_items = item.get("ArtistItems") or item.get("AlbumArtists") or []
+        artist_names: list[str] = []
+        artist_keys: list[str] = []
+        if isinstance(artist_items, list):
+            for entry in artist_items:
+                if isinstance(entry, dict):
+                    if entry.get("Name"):
+                        artist_names.append(str(entry["Name"]))
+                    if entry.get("Id"):
+                        artist_keys.append(str(entry["Id"]))
+        if not artist_names and item.get("AlbumArtist"):
+            artist_names.append(str(item["AlbumArtist"]))
+
+        genres = item.get("Genres")
+        provider_ids = item.get("ProviderIds")
+        image_tags = item.get("ImageTags")
+        cover_url = None
+        if isinstance(image_tags, dict) and image_tags.get("Primary"):
+            cover_url = f"{base}/Items/{item_id}/Images/Primary"
+
+        year = item.get("ProductionYear")
+        return ExternalAlbumMetadata(
+            provider_key=str(item_id),
+            title=str(item.get("Name") or "Unknown"),
+            artist_names=tuple(artist_names),
+            artist_provider_keys=tuple(artist_keys),
+            release_year=int(year) if isinstance(year, (int, float)) else None,
+            genres=tuple(str(g) for g in genres) if isinstance(genres, list) else (),
+            cover_url=cover_url,
+            description=item.get("Overview") if isinstance(item.get("Overview"), str) else None,
+            provider_ids=({str(k): str(v) for k, v in provider_ids.items()} if isinstance(provider_ids, dict) else {}),
+            etag=item.get("Etag") if isinstance(item.get("Etag"), str) else None,
+            mtime=self._parse_datetime(item.get("DateModified")),
+            raw_metadata=dict(item),
+        )
+
+    def _artist_meta(self, item: dict, base: str) -> Optional[ExternalArtistMetadata]:
+        """Map a raw Jellyfin MusicArtist item onto ``ExternalArtistMetadata``."""
+        item_id = item.get("Id")
+        if not item_id:
+            return None
+        provider_ids = item.get("ProviderIds")
+        image_tags = item.get("ImageTags")
+        image_url = None
+        if isinstance(image_tags, dict) and image_tags.get("Primary"):
+            image_url = f"{base}/Items/{item_id}/Images/Primary"
+        return ExternalArtistMetadata(
+            provider_key=str(item_id),
+            name=str(item.get("Name") or "Unknown"),
+            image_url=image_url,
+            bio=item.get("Overview") if isinstance(item.get("Overview"), str) else None,
+            provider_ids=({str(k): str(v) for k, v in provider_ids.items()} if isinstance(provider_ids, dict) else {}),
+            etag=item.get("Etag") if isinstance(item.get("Etag"), str) else None,
+            mtime=self._parse_datetime(item.get("DateModified")),
+            raw_metadata=dict(item),
+        )
+
+    def _playlist_meta(
+        self,
+        item: dict,
+        base: str,
+        entries: list[ExternalPlaylistEntry],
+    ) -> Optional[ExternalPlaylistMetadata]:
+        """Map a raw Jellyfin Playlist item onto ``ExternalPlaylistMetadata``."""
+        item_id = item.get("Id")
+        if not item_id:
+            return None
+        image_tags = item.get("ImageTags")
+        cover_url = None
+        if isinstance(image_tags, dict) and image_tags.get("Primary"):
+            cover_url = f"{base}/Items/{item_id}/Images/Primary"
+        return ExternalPlaylistMetadata(
+            provider_key=str(item_id),
+            title=str(item.get("Name") or "Untitled playlist"),
+            description=item.get("Overview") if isinstance(item.get("Overview"), str) else None,
+            cover_url=cover_url,
+            owner_name=item["OwnerName"] if isinstance(item.get("OwnerName"), str) else None,
+            entries=tuple(entries),
+            etag=item.get("Etag") if isinstance(item.get("Etag"), str) else None,
+            mtime=self._parse_datetime(item.get("DateModified")),
+            raw_metadata=dict(item),
+        )
 
     async def iter_items(
         self,
@@ -564,26 +675,9 @@ class JellyfinExternalAdapter(ExternalLibraryAdapter):
         async with self._authed_client(config) as (client, token):
             base = await self._server_url(config)
             async for item in self._iter_entity_items(client, token, config, "Audio", since):
-                item_id = item.get("Id")
-                if not item_id:
-                    continue
-                size = item.get("Size")
-                if size is None:
-                    sources = item.get("MediaSources")
-                    if isinstance(sources, list):
-                        for source in sources:
-                            if isinstance(source, dict) and source.get("Size"):
-                                size = source["Size"]
-                                break
-                yield ExternalItemRef(
-                    provider_key=str(item_id),
-                    display_path=self._display_path(item),
-                    etag=item.get("Etag") if isinstance(item.get("Etag"), str) else None,
-                    mtime=self._parse_datetime(item.get("DateModified")),
-                    size=int(size) if size is not None else None,
-                    mime_type=self._mime_for_item(item),
-                    metadata=self._track_metadata(item, base),
-                )
+                ref = self._track_ref(item, base)
+                if ref is not None:
+                    yield ref
 
     async def iter_albums(
         self,
@@ -594,47 +688,9 @@ class JellyfinExternalAdapter(ExternalLibraryAdapter):
         async with self._authed_client(config) as (client, token):
             base = await self._server_url(config)
             async for item in self._iter_entity_items(client, token, config, "MusicAlbum", since):
-                item_id = item.get("Id")
-                if not item_id:
-                    continue
-
-                artist_items = item.get("ArtistItems") or item.get("AlbumArtists") or []
-                artist_names: list[str] = []
-                artist_keys: list[str] = []
-                if isinstance(artist_items, list):
-                    for entry in artist_items:
-                        if isinstance(entry, dict):
-                            if entry.get("Name"):
-                                artist_names.append(str(entry["Name"]))
-                            if entry.get("Id"):
-                                artist_keys.append(str(entry["Id"]))
-                if not artist_names and item.get("AlbumArtist"):
-                    artist_names.append(str(item["AlbumArtist"]))
-
-                genres = item.get("Genres")
-                provider_ids = item.get("ProviderIds")
-                image_tags = item.get("ImageTags")
-                cover_url = None
-                if isinstance(image_tags, dict) and image_tags.get("Primary"):
-                    cover_url = f"{base}/Items/{item_id}/Images/Primary"
-
-                year = item.get("ProductionYear")
-                yield ExternalAlbumMetadata(
-                    provider_key=str(item_id),
-                    title=str(item.get("Name") or "Unknown"),
-                    artist_names=tuple(artist_names),
-                    artist_provider_keys=tuple(artist_keys),
-                    release_year=int(year) if isinstance(year, (int, float)) else None,
-                    genres=tuple(str(g) for g in genres) if isinstance(genres, list) else (),
-                    cover_url=cover_url,
-                    description=item.get("Overview") if isinstance(item.get("Overview"), str) else None,
-                    provider_ids=(
-                        {str(k): str(v) for k, v in provider_ids.items()} if isinstance(provider_ids, dict) else {}
-                    ),
-                    etag=item.get("Etag") if isinstance(item.get("Etag"), str) else None,
-                    mtime=self._parse_datetime(item.get("DateModified")),
-                    raw_metadata=dict(item),
-                )
+                album = self._album_meta(item, base)
+                if album is not None:
+                    yield album
 
     async def iter_artists(
         self,
@@ -645,26 +701,9 @@ class JellyfinExternalAdapter(ExternalLibraryAdapter):
         async with self._authed_client(config) as (client, token):
             base = await self._server_url(config)
             async for item in self._iter_entity_items(client, token, config, "MusicArtist", since):
-                item_id = item.get("Id")
-                if not item_id:
-                    continue
-                provider_ids = item.get("ProviderIds")
-                image_tags = item.get("ImageTags")
-                image_url = None
-                if isinstance(image_tags, dict) and image_tags.get("Primary"):
-                    image_url = f"{base}/Items/{item_id}/Images/Primary"
-                yield ExternalArtistMetadata(
-                    provider_key=str(item_id),
-                    name=str(item.get("Name") or "Unknown"),
-                    image_url=image_url,
-                    bio=item.get("Overview") if isinstance(item.get("Overview"), str) else None,
-                    provider_ids=(
-                        {str(k): str(v) for k, v in provider_ids.items()} if isinstance(provider_ids, dict) else {}
-                    ),
-                    etag=item.get("Etag") if isinstance(item.get("Etag"), str) else None,
-                    mtime=self._parse_datetime(item.get("DateModified")),
-                    raw_metadata=dict(item),
-                )
+                artist = self._artist_meta(item, base)
+                if artist is not None:
+                    yield artist
 
     async def iter_playlists(
         self,
@@ -703,28 +742,9 @@ class JellyfinExternalAdapter(ExternalLibraryAdapter):
                         break
                     start += len(items)
 
-                image_tags = item.get("ImageTags")
-                cover_url = None
-                if isinstance(image_tags, dict) and image_tags.get("Primary"):
-                    cover_url = f"{base}/Items/{item_id}/Images/Primary"
-
-                owner_name = None
-                # Jellyfin playlists don't always carry the owner on the item;
-                # keep the field for providers that do.
-                if isinstance(item.get("OwnerName"), str):
-                    owner_name = item["OwnerName"]
-
-                yield ExternalPlaylistMetadata(
-                    provider_key=str(item_id),
-                    title=str(item.get("Name") or "Untitled playlist"),
-                    description=item.get("Overview") if isinstance(item.get("Overview"), str) else None,
-                    cover_url=cover_url,
-                    owner_name=owner_name,
-                    entries=tuple(entries),
-                    etag=item.get("Etag") if isinstance(item.get("Etag"), str) else None,
-                    mtime=self._parse_datetime(item.get("DateModified")),
-                    raw_metadata=dict(item),
-                )
+                playlist = self._playlist_meta(item, base, entries)
+                if playlist is not None:
+                    yield playlist
 
     async def open_stream(
         self,
@@ -766,6 +786,96 @@ class JellyfinExternalAdapter(ExternalLibraryAdapter):
             "Jellyfin metadata is provided inline by iter_items",
             operation="read_metadata",
         )
+
+    async def search(
+        self,
+        config: dict,
+        query: str,
+        *,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Search the Jellyfin library; results are transient metadata dicts."""
+        kinds = {"Audio": "track", "MusicAlbum": "album", "MusicArtist": "artist", "Playlist": "playlist"}
+        results: list[dict] = []
+        async with self._authed_client(config) as (client, token):
+            collection_ids = await self._collection_ids(client, token, config)
+            parent_ids: list[Optional[str]] = list(collection_ids) or [None]
+            for parent_id in parent_ids:
+                params: dict[str, Any] = {
+                    "searchTerm": query,
+                    "IncludeItemTypes": ",".join(kinds),
+                    "Recursive": "true",
+                    "Limit": limit,
+                    "Fields": _ITEM_FIELDS,
+                }
+                if parent_id is not None:
+                    params["ParentId"] = parent_id
+                page = await self._get_json(client, token, "/Items", params=params)
+                items = page.get("Items") if isinstance(page, dict) else None
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    kind = kinds.get(str(item.get("Type") or ""))
+                    if kind is None or item.get("Id") is None:
+                        continue
+                    names = item.get("Artists") or item.get("AlbumArtists") or []
+                    subtitle = ", ".join(str(n) for n in names if n) or None
+                    results.append(
+                        {
+                            "kind": kind,
+                            "provider_key": str(item["Id"]),
+                            "title": str(item.get("Name") or item["Id"]),
+                            "subtitle": subtitle,
+                            # Authenticated image endpoints can't be handed to
+                            # the browser without leaking the token.
+                            "image_url": None,
+                            "external_url": None,
+                        }
+                    )
+                if len(results) >= limit:
+                    return results[:limit]
+        return results
+
+    def entity_from_payload(
+        self,
+        config: dict,
+        kind: str,
+        payload: dict,
+    ) -> Optional[Any]:
+        """Re-map a cached Jellyfin item payload without touching the server."""
+        if not isinstance(payload, dict):
+            return None
+        base = str(config.get("server_url") or "").strip().rstrip("/")
+        mapper = {
+            "track": lambda item: self._track_ref(item, base),
+            "album": lambda item: self._album_meta(item, base),
+            "artist": lambda item: self._artist_meta(item, base),
+            "playlist": lambda item: self._playlist_meta(item, base, []),
+        }.get(kind)
+        if mapper is None:
+            return None
+        try:
+            return mapper(payload)
+        except Exception:
+            return None
+
+    async def fetch_entity_metadata(
+        self,
+        config: dict,
+        kind: str,
+        provider_key: str,
+    ) -> Optional[Any]:
+        """Fetch one entity by ``/Items/{id}`` for the materialization path."""
+        async with self._authed_client(config) as (client, token):
+            try:
+                item = await self._get_json(client, token, f"/Items/{provider_key}", params={"Fields": _ITEM_FIELDS})
+            except ExternalLibraryError:
+                return None
+        if not isinstance(item, dict):
+            return None
+        return self.entity_from_payload(config, kind, item)
 
     async def compute_sha256(self, config: dict, item: ExternalItemRef) -> str:
         raise UnsupportedExternalOperation(

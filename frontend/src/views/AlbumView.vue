@@ -21,6 +21,10 @@ import { usePlayerStore } from "@/stores/player";
 import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
 import { useCanManage } from "@/composables/useCanManage";
+import { useProviderSync } from "@/composables/useProviderSync";
+import { providerSyncAlbum } from "@/api/providerSync";
+import { providerDisplayName } from "@/utils/providerName";
+import { formatDateTime } from "@/i18n";
 import { useCollectionItem } from "@/composables/useCollectionItem";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
@@ -98,6 +102,52 @@ const { canManage } = useCanManage(
 );
 
 const isPublic = computed(() => album.value?.visibility === "public");
+
+const {
+  syncStatus: providerSync,
+  isRefreshing: providerRefreshing,
+  isNeverFetched: providerNeverFetched,
+  canSync: canSyncProvider,
+  syncing: providerSyncing,
+  syncNow: syncProviderNow,
+} = useProviderSync({
+  kind: "album",
+  entityId: albumId,
+  status: computed(() => album.value?.provider_sync),
+  canSync: isOwner,
+  sync: providerSyncAlbum,
+  onRefreshed: () =>
+    Promise.all([refreshTracks(), loadStats(), loadAlbum()]).then(
+      () => undefined,
+    ),
+  onError: (message) => toastStore.push({ type: "error", message }),
+});
+
+const providerLabel = computed(() =>
+  providerDisplayName(providerSync.value?.provider_type),
+);
+
+const providerSyncText = computed(() => {
+  const sync = providerSync.value;
+  if (!sync) return "";
+  if (sync.state === "refreshing") {
+    return t("browse.providerSync.refreshing", {
+      provider: providerLabel.value,
+    });
+  }
+  if (sync.state === "never_fetched") {
+    return t("browse.providerSync.loading", { provider: providerLabel.value });
+  }
+  if (sync.state === "error") {
+    return t("browse.providerSync.error", { provider: providerLabel.value });
+  }
+  return sync.fetched_at
+    ? t("browse.providerSync.updated", {
+        provider: providerLabel.value,
+        time: formatDateTime(sync.fetched_at),
+      })
+    : t("browse.providerSync.from", { provider: providerLabel.value });
+});
 
 const { collectionAction, toggleCollection } = useCollectionItem(
   "album",
@@ -430,6 +480,28 @@ watch(
               :track-count="stats.track_count"
               :total-duration="stats.total_duration"
             />
+            <span
+              v-if="providerSync"
+              class="album-view__provider-sync"
+              :class="{
+                'album-view__provider-sync--error':
+                  providerSync.state === 'error',
+              }"
+            >
+              <i class="fa-solid fa-cloud" aria-hidden="true" />
+              {{ providerSyncText }}
+            </span>
+            <AppButton
+              v-if="providerSync && canSyncProvider"
+              size="sm"
+              variant="secondary"
+              icon="rotate"
+              :loading="providerSyncing || providerRefreshing"
+              class="album-view__provider-sync-now"
+              @click="syncProviderNow"
+            >
+              {{ t("browse.providerSync.syncNow") }}
+            </AppButton>
           </div>
 
           <div v-if="album.tags?.length" class="album-view__tags">
@@ -475,9 +547,18 @@ watch(
           }}</AppButton>
         </div>
 
+        <p
+          v-if="providerRefreshing"
+          class="album-view__provider-refreshing"
+          role="status"
+        >
+          <i class="fa-solid fa-rotate fa-spin" aria-hidden="true" />
+          {{ t("browse.providerSync.refreshing", { provider: providerLabel }) }}
+        </p>
+
         <TrackList
           :tracks="tracks"
-          :loading="tracksLoading"
+          :loading="tracksLoading || providerNeverFetched"
           :loading-more="tracksLoadingMore"
           :context="artistName"
           :show-artwork="true"
@@ -650,6 +731,29 @@ watch(
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.album-view__provider-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.album-view__provider-sync--error {
+  color: var(--color-danger);
+}
+
+.album-view__provider-sync-now {
+  align-self: flex-start;
+}
+
+.album-view__provider-refreshing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
 }
 
 .album-view__section {
