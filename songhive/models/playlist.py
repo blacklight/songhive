@@ -46,7 +46,12 @@ class Playlist(Base):
     owner = relationship("User", backref="playlists", lazy="selectin")
     image_file = relationship("StoredFile", foreign_keys=[image_file_id], lazy="selectin")
     cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")
-    tracks: Mapped[List["PlaylistTrack"]] = relationship("PlaylistTrack", back_populates="playlist", lazy="selectin")
+    tracks: Mapped[List["PlaylistTrack"]] = relationship(
+        "PlaylistTrack",
+        back_populates="playlist",
+        lazy="raise",
+        passive_deletes=True,
+    )
     tags: Mapped[List["Tag"]] = relationship(
         "Tag",
         secondary="tag_playlists",

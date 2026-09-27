@@ -1188,10 +1188,12 @@ async def update_external_library(
         external_library.sync_interval_seconds = body.sync_interval_seconds
         changes["sync_interval_seconds"] = body.sync_interval_seconds
 
-    if body.visibility is not None and external_library.library is not None:
-        external_library.library.visibility = body.visibility.value
-        changes["visibility"] = body.visibility.value
-        await music.propagate_external_library_visibility(db, external_library, current_user)
+    if body.visibility is not None:
+        library = await db.get(Library, external_library.library_id)
+        if library is not None:
+            library.visibility = body.visibility.value
+            changes["visibility"] = body.visibility.value
+            await music.propagate_external_library_visibility(db, external_library, current_user)
 
     if body.config is not None:
         merged_config = _merge_config_preserving_redacted(

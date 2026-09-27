@@ -365,16 +365,9 @@ async def test_watch_external_libraries_restarts_when_libraries_change(tmp_path,
 async def test_resolve_libraries_skips_undecryptable_config(monkeypatch):
     """A library whose config cannot be decrypted is skipped with a warning, not crashed."""
 
-    class _FakeLibrary:
-        id = "lib-1"
-        config = "invalid-encrypted-token"
-
     class _FakeResult:
-        def scalars(self):
-            return self
-
         def all(self):
-            return [_FakeLibrary()]
+            return [("lib-1", "invalid-encrypted-token")]
 
     class _FakeSession:
         async def execute(self, *args, **kwargs) -> _FakeResult:

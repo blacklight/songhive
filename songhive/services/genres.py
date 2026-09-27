@@ -510,6 +510,9 @@ async def delete_genre_globally(session: AsyncSession, genre_name: str) -> Optio
     if genre is None:
         return None
 
+    # Explicitly remove association rows for databases without FK cascade.
+    await session.execute(delete(GenreTrack).where(GenreTrack.genre_id == genre.id))
+    await session.execute(delete(GenreAlbum).where(GenreAlbum.genre_id == genre.id))
     await session.delete(genre)
     await session.flush()
     return genre

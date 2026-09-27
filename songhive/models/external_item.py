@@ -109,7 +109,7 @@ class ExternalItem(Base):
         "ExternalLibrary",
         backref=backref(
             "external_items",
-            lazy="selectin",
+            lazy="raise",
             passive_deletes="all",
         ),
         lazy="selectin",

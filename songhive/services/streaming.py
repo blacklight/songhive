@@ -310,7 +310,9 @@ async def _enforce_stream_policy(
     if policy is None:
         return config
 
-    library = external_library.library
+    from ..models.library import Library
+
+    library = await session.get(Library, external_library.library_id)
     owner_id = library.owner_id if library is not None else external_library.created_by_id
     is_admin = user is not None and getattr(user, "role", None) == "admin"
 

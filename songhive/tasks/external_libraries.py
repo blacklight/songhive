@@ -341,13 +341,16 @@ def write_back_metadata_task(external_track_id: str) -> bool:
 
 
 async def _publish_contents_event(
+    session,
     external_library: ExternalLibrary,
     kind: str,
     entity_id: Optional[str],
     state: str,
 ) -> None:
     """Notify the library owner so clients can reload the container's tracks."""
-    library = external_library.library
+    from ..models.library import Library
+
+    library = await session.get(Library, external_library.library_id)
     owner_id = getattr(library, "owner_id", None) if library is not None else None
     if owner_id is None:
         return
@@ -433,7 +436,7 @@ async def _refresh_external_contents(
                     item.contents_error = None
                 item.sync_error = None
                 await session.commit()
-                await _publish_contents_event(external_library, kind, entity_id, "fresh")
+                await _publish_contents_event(session, external_library, kind, entity_id, "fresh")
                 return {"status": "not_modified"}
             except ExternalRateLimited:
                 raise
@@ -441,7 +444,7 @@ async def _refresh_external_contents(
                 item.contents_error = _sanitize_error(exc)
                 item.sync_error = item.contents_error
                 await session.commit()
-                await _publish_contents_event(external_library, kind, entity_id, "error")
+                await _publish_contents_event(session, external_library, kind, entity_id, "error")
                 logger.exception(
                     "Contents refresh failed: library=%s %s/%s",
                     external_library_id,
@@ -543,7 +546,7 @@ async def _refresh_external_contents(
             item.sync_error = None
             await session.commit()
 
-            await _publish_contents_event(external_library, kind, entity_id, "fresh")
+            await _publish_contents_event(session, external_library, kind, entity_id, "fresh")
             return {
                 "status": "ok",
                 "entries": len(contents.entries),

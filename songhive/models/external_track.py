@@ -74,7 +74,7 @@ class ExternalTrack(Base):
         "ExternalLibrary",
         backref=backref(
             "external_tracks",
-            lazy="selectin",
+            lazy="raise",
             passive_deletes="all",
         ),
         lazy="selectin",

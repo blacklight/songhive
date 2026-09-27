@@ -25,13 +25,15 @@ class Genre(Base):
         "GenreTrack",
         back_populates="genre",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="raise",
+        passive_deletes=True,
     )
     albums: Mapped[List["GenreAlbum"]] = relationship(
         "GenreAlbum",
         back_populates="genre",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="raise",
+        passive_deletes=True,
     )
 
 

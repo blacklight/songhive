@@ -44,7 +44,7 @@ class Album(Base):
     artist: Mapped["Artist"] = relationship("Artist", back_populates="albums", lazy="selectin")
     cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")
     owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
-    tracks: Mapped[List["Track"]] = relationship("Track", back_populates="album", lazy="selectin")
+    tracks: Mapped[List["Track"]] = relationship("Track", back_populates="album", lazy="raise", passive_deletes=True)
     tags: Mapped[List["Tag"]] = relationship(
         "Tag",
         secondary="tag_albums",

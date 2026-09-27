@@ -27,7 +27,7 @@ from ...external.registry import (
     list_external_provider_types,
 )
 from ...external.sync import _find_or_create_library_track
-from ...models import ExternalLibrary, ExternalSyncRun, ExternalTrack
+from ...models import ExternalLibrary, ExternalSyncRun, ExternalTrack, Library
 from ...models.audit_log import AuditTargetType
 from ...models.user import User
 from ...services import audit, deletion, music
@@ -209,10 +209,12 @@ async def update_admin_external_library(
         external_library.include_in_library_index = body.include_in_library_index or False
         changes["include_in_library_index"] = external_library.include_in_library_index
 
-    if body.visibility is not None and external_library.library is not None:
-        external_library.library.visibility = body.visibility.value
-        changes["visibility"] = body.visibility.value
-        await music.propagate_external_library_visibility(db, external_library, admin)
+    if body.visibility is not None:
+        library = await db.get(Library, external_library.library_id)
+        if library is not None:
+            library.visibility = body.visibility.value
+            changes["visibility"] = body.visibility.value
+            await music.propagate_external_library_visibility(db, external_library, admin)
 
     if body.config is not None:
         merged_config = _merge_config_preserving_redacted(

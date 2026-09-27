@@ -50,7 +50,7 @@ class Library(Base):
         "Track",
         secondary="library_tracks",
         backref="libraries",
-        lazy="selectin",
+        lazy="raise",
         viewonly=True,
     )
     tags: Mapped[List["Tag"]] = relationship(

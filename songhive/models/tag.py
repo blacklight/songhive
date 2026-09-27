@@ -30,37 +30,43 @@ class Tag(Base):
         "TagTrack",
         back_populates="tag",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="raise",
+        passive_deletes=True,
     )
     albums: Mapped[List["TagAlbum"]] = relationship(
         "TagAlbum",
         back_populates="tag",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="raise",
+        passive_deletes=True,
     )
     artists: Mapped[List["TagArtist"]] = relationship(
         "TagArtist",
         back_populates="tag",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="raise",
+        passive_deletes=True,
     )
     playlists: Mapped[List["TagPlaylist"]] = relationship(
         "TagPlaylist",
         back_populates="tag",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="raise",
+        passive_deletes=True,
     )
     libraries: Mapped[List["TagLibrary"]] = relationship(
         "TagLibrary",
         back_populates="tag",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="raise",
+        passive_deletes=True,
     )
     activities: Mapped[List["ActivityTag"]] = relationship(
         "ActivityTag",
         back_populates="tag",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="raise",
+        passive_deletes=True,
     )
 
 

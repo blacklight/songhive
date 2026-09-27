@@ -44,13 +44,15 @@ class Podcast(Base):
         "PodcastEpisode",
         back_populates="podcast",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="raise",
+        passive_deletes=True,
     )
     subscriptions: Mapped[List["PodcastSubscription"]] = relationship(
         "PodcastSubscription",
         back_populates="podcast",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="raise",
+        passive_deletes=True,
     )
 
 

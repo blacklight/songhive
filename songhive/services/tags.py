@@ -12,6 +12,7 @@ from typing import Any, List, Optional, Tuple, Type
 from sqlalchemy import (
     and_,
     asc,
+    delete,
     desc,
     func,
     literal,
@@ -613,6 +614,9 @@ async def delete_tag_globally(session: AsyncSession, tag_name: str) -> Optional[
     if tag is None:
         return None
 
+    # Explicitly remove association rows for databases without FK cascade.
+    for assoc_class in (TagTrack, TagAlbum, TagArtist, TagPlaylist, TagLibrary, ActivityTag):
+        await session.execute(delete(assoc_class).where(assoc_class.tag_id == tag.id))  # type: ignore[attr-defined]
     await session.delete(tag)
     await session.flush()
     return tag

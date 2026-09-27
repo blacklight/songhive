@@ -254,24 +254,26 @@ async def _resolve_libraries() -> list[tuple[str, Path]]:
 
     try:
         async with get_session() as session:
+            # Select columns rather than entities: loading ExternalLibrary
+            # objects would pull in the `library` selectin relationship, which
+            # cascades into every track in the library and their own eager
+            # relationships on each poll.
             result = await session.execute(
-                select(ExternalLibrary).where(
+                select(ExternalLibrary.id, ExternalLibrary.config).where(
                     ExternalLibrary.provider_type == "local",
                     ExternalLibrary.enabled.is_(True),
                     ExternalLibrary.sync_enabled.is_(True),
                 )
             )
-            rows = result.scalars().all()
 
-            for library in rows:
-                raw_config = library.config
+            for library_id, raw_config in result.all():
                 try:
                     decrypted = decrypt_json(raw_config) if isinstance(raw_config, str) else dict(raw_config or {})
                 except Exception as exc:
                     logger.warning(
                         "Skipping local library %s: config decryption failed (%s). "
                         "Check that auth.secret_key matches the key used to encrypt the library config.",
-                        library.id,
+                        library_id,
                         exc,
                     )
                     continue
@@ -282,14 +284,14 @@ async def _resolve_libraries() -> list[tuple[str, Path]]:
                 except Exception:
                     logger.exception(
                         "Skipping local library %s: config validation failed",
-                        library.id,
+                        library_id,
                     )
                     continue
 
                 if adapter.resolved_root is None:
                     continue
 
-                libraries.append((str(library.id), adapter.resolved_root))
+                libraries.append((str(library_id), adapter.resolved_root))
     finally:
         await dispose_and_reset()
 

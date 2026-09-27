@@ -25,6 +25,7 @@ from ..models.external_item import ExternalItem
 from ..models.external_library import ExternalLibrary
 from ..models.external_sync_run import ExternalSyncRun
 from ..models.external_track import ExternalTrack
+from ..models.library import Library
 from ..models.library_track import LibraryTrack
 from ..models.playlist import Playlist, PlaylistTrack
 from ..models.stored_file import StoredFile
@@ -258,7 +259,7 @@ async def _apply_metadata(
     stored_fingerprint = external_track.metadata_fingerprint
     fingerprint_changed = stored_fingerprint is None or current_fingerprint != stored_fingerprint
 
-    library = external_library.library
+    library = await session.get(Library, external_library.library_id)
     owner_id = library.owner_id if library is not None else None
     visibility = library.visibility if library is not None else "private"
 
@@ -807,7 +808,7 @@ async def _apply_entity_track(
     if metadata is None:
         return None
 
-    library = external_library.library
+    library = await session.get(Library, external_library.library_id)
     owner_id = library.owner_id if library is not None else None
     visibility = library.visibility if library is not None else "private"
     match_musicbrainz = bool(config.get("dedup_musicbrainz"))
@@ -1113,7 +1114,7 @@ async def _apply_entity_album(
     ``lazy`` providers never enumerate album contents during sync; a newer
     provider mtime marks the cached contents stale for the lazy refresh path.
     """
-    library = external_library.library
+    library = await session.get(Library, external_library.library_id)
     owner_id = library.owner_id if library is not None else None
     visibility = library.visibility if library is not None else "private"
     match_musicbrainz = bool(config.get("dedup_musicbrainz"))
@@ -1202,7 +1203,7 @@ async def _apply_entity_playlist(
     without entries: only metadata is updated here and ``PlaylistTrack`` rows
     are never touched — contents arrive through the lazy refresh path.
     """
-    library = external_library.library
+    library = await session.get(Library, external_library.library_id)
     owner_id = library.owner_id if library is not None else None
     visibility = library.visibility if library is not None else "private"
 

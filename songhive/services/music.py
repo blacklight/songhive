@@ -1160,7 +1160,7 @@ async def propagate_external_library_visibility(
     ``propagate_album_visibility``.  Returns ``(track, previous_visibility)``
     pairs for the tracks whose visibility actually changed.
     """
-    library = external_library.library
+    library = await session.get(Library, external_library.library_id)
     if library is None:
         return []
 

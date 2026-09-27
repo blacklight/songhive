@@ -829,6 +829,9 @@ async def subscribe(
         # the podcast row so a later subscribe retries cleanly. An existing
         # podcast keeps its last-good catalog and merely records the error.
         if is_new:
+            # Explicitly remove child rows for databases without FK cascade.
+            await db.execute(delete(PodcastEpisode).where(PodcastEpisode.podcast_id == podcast.id))
+            await db.execute(delete(PodcastSubscription).where(PodcastSubscription.podcast_id == podcast.id))
             await db.delete(podcast)
             await db.flush()
         raise

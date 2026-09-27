@@ -91,6 +91,6 @@ class ExternalLibrary(Base):
             lazy="selectin",
             passive_deletes=True,
         ),
-        lazy="selectin",
+        lazy="raise",
         passive_deletes=True,
     )

@@ -435,6 +435,32 @@ docs/              # Architecture & feature documentation
 When notable sections are added, changed or removed, remember to update
 `docs/ARCHITECTURE.md` accordingly.
 
+## ORM Lazy Loading
+
+- Unbounded collection relationships use ``lazy="raise"``:
+  ``Library.tracks``, ``Playlist.tracks``, ``Album.tracks``,
+  ``Artist.albums``/``Artist.tracks``, ``ExternalLibrary.library`` /
+  ``external_items`` / ``external_tracks``, ``Tag.*`` and ``Genre.*``
+  association collections, ``Podcast.episodes``/``subscriptions``.
+  A plain ``select()`` of these entities must never pull a whole subtree —
+  that cascade is what made the external-library watchdog burn CPU
+  re-materialising ~100k ORM objects every 5 seconds.
+- Code that needs the data opts in explicitly: ``selectinload`` in the
+  ``_X_selectin_options`` helpers in ``services/music.py`` (the
+  ``include=tracks`` API path), ``session.refresh(obj, ["rel"])``, or a
+  direct ``session.get(Parent, obj.parent_id)`` for parent rows.
+- Bounded per-entity relationships stay ``lazy="selectin"``
+  (``Track.artist``/``album``/files, tag/genre association rows,
+  ``Activity.mentions``/``targets``/``tags``, ``User.links``/``invites``,
+  ``PlaybackSession.outputs``) — serializers read them unconditionally.
+- ``passive_deletes=True`` on the ``raise`` rels lets ``session.delete``
+  skip loading the collection; Postgres cleans children via
+  ``ON DELETE CASCADE``. SQLite does not enforce FKs, so ORM-delete paths
+  for ``Tag``/``Genre``/``Podcast`` bulk-delete children explicitly — keep
+  that convention for any new ``session.delete`` of these parents.
+- Do not add new ``lazy="selectin"`` relationships pointing at unbounded
+  collections; ``tests/test_lazy_loading.py`` pins this contract.
+
 ## Database Migrations
 
 - Migrations are managed with [Alembic](https://alembic.sqlalchemy.org/).
