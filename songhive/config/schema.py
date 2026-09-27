@@ -862,6 +862,15 @@ class StreamsConfig(BaseSettings):
         ge=0,
         description="Maximum concurrent listeners per native HTTP mount; 0 disables the cap.",
     )
+    http_stream_metaint_bytes: int = Field(
+        default=16384,
+        ge=1024,
+        description=(
+            "ICY metadata interval in bytes for native HTTP mounts. Listeners "
+            "that send Icy-MetaData: 1 receive a StreamTitle block every "
+            "metaint bytes of audio."
+        ),
+    )
 
     @field_validator(
         "allowed_user_providers",

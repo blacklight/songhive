@@ -629,6 +629,17 @@ async def update_library(
   across all `http` outputs (enforced in `services/outputs.py`), may carry an
   optional `listen_token` (`?token=`/`Bearer`), and are unreachable in the
   uvicorn fallback like the other native Tornado routes.
+- Now-playing metadata follows playback: `SessionDriver` calls
+  `driver.update_metadata(...)` after every `set_source` (play, track change,
+  startup sync, paused sync). The `http` driver appends `{"m": ...}` entries
+  to the mount's Redis stream and stores the song in the meta blob; the mount
+  handler seeds the title from the blob and interleaves ICY `StreamTitle`
+  blocks every `streams.http_stream_metaint_bytes` bytes for clients that
+  send `Icy-MetaData: 1`. The `icecast` driver pushes the title out-of-band
+  to `/admin/metadata?mode=updinfo` with the source credentials (the ffmpeg
+  muxer can't update ICY in flight) and republishes after an encoder
+  reconnect. `snapcast` stays a no-op: snapserver's control API has no
+  metadata setter — only a `controlscript` stream plugin can supply it.
 - The `snapcast` provider (`songhive/streams/snapcast.py`) casts to a
   snapserver via an ffmpeg *passthrough* encoder that copies raw s16le PCM to
   a `pipe://` source FIFO (`mode=fifo`, auto-created with `mkfifo`; existing

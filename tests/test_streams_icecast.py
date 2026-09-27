@@ -31,7 +31,7 @@ async def test_icecast_validate_config_returns_capabilities():
     caps = await provider.validate_config(_valid_config())
     assert caps.pause_supported is True
     assert caps.seek_supported is True
-    assert caps.metadata_updates is False
+    assert caps.metadata_updates is True
 
 
 @pytest.mark.asyncio
@@ -244,3 +244,108 @@ async def test_icecast_set_volume_while_paused_only_records(monkeypatch):
     # The next resume builds its argv with the new gain.
     argv = driver._decoder_argv(driver._current_source, position=0.0)
     assert argv[argv.index("-af") + 1] == "volume=0.5"
+
+
+class _FakeHttpResponse:
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _FakeHttpClient:
+    """Minimal httpx.AsyncClient stand-in that records GET calls."""
+
+    calls: list[dict] = []
+    fail: bool = False
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    async def get(self, url, params=None, auth=None):
+        if _FakeHttpClient.fail:
+            import httpx
+
+            raise httpx.ConnectError("unreachable")
+        _FakeHttpClient.calls.append({"url": url, "params": params, "auth": auth})
+        return _FakeHttpResponse()
+
+
+@pytest.mark.asyncio
+async def test_icecast_update_metadata_pushes_updinfo(monkeypatch):
+    """update_metadata hits Icecast's admin updinfo endpoint with the song."""
+    provider = IcecastOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    driver = IcecastDriver(config)
+
+    _FakeHttpClient.calls = []
+    _FakeHttpClient.fail = False
+    monkeypatch.setattr("songhive.streams.icecast.httpx.AsyncClient", _FakeHttpClient)
+
+    await driver.update_metadata(TrackMeta(track_id="t1", title="Song", artist="Artist"))
+
+    assert len(_FakeHttpClient.calls) == 1
+    call = _FakeHttpClient.calls[0]
+    assert call["url"] == "http://example.com:8000/admin/metadata"
+    assert call["params"] == {
+        "mount": "/stream",
+        "mode": "updinfo",
+        "charset": "UTF-8",
+        "song": "Artist - Song",
+    }
+    assert call["auth"] == ("source", "secret")
+
+    # Identical metadata is deduplicated.
+    await driver.update_metadata(TrackMeta(track_id="t1", title="Song", artist="Artist"))
+    assert len(_FakeHttpClient.calls) == 1
+
+    # A track change pushes again.
+    await driver.update_metadata(TrackMeta(track_id="t2", title="Other", artist="Artist"))
+    assert len(_FakeHttpClient.calls) == 2
+    assert _FakeHttpClient.calls[1]["params"]["song"] == "Artist - Other"
+
+
+@pytest.mark.asyncio
+async def test_icecast_update_metadata_failure_is_swallowed(monkeypatch):
+    """A failed updinfo push logs a warning but never raises."""
+    provider = IcecastOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    driver = IcecastDriver(config)
+
+    _FakeHttpClient.calls = []
+    _FakeHttpClient.fail = True
+    monkeypatch.setattr("songhive.streams.icecast.httpx.AsyncClient", _FakeHttpClient)
+
+    meta = TrackMeta(track_id="t1", title="Song", artist="Artist")
+    await driver.update_metadata(meta)
+    # Not marked pushed, so a later identical update retries.
+    assert driver._pushed_song is None
+    assert driver._current_metadata == meta
+
+
+@pytest.mark.asyncio
+async def test_icecast_update_metadata_repushed_after_encoder_restart(monkeypatch):
+    """An encoder restart forgets the dedupe marker and republishes the title."""
+    provider = IcecastOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    driver = IcecastDriver(config)
+
+    _FakeHttpClient.calls = []
+    _FakeHttpClient.fail = False
+    monkeypatch.setattr("songhive.streams.icecast.httpx.AsyncClient", _FakeHttpClient)
+
+    meta = TrackMeta(track_id="t1", title="Song", artist="Artist")
+    await driver.update_metadata(meta)
+    assert len(_FakeHttpClient.calls) == 1
+
+    # Simulate the encoder reconnect path clearing the dedupe marker.
+    driver._pushed_song = None
+    await driver.update_metadata(meta)
+    assert len(_FakeHttpClient.calls) == 2

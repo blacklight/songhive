@@ -222,6 +222,11 @@ rate_limit_window_seconds = 60
 # Maximum concurrent listeners per mount; 0 disables the cap.
 # http_stream_max_listeners = 64
 
+# ICY metadata interval in bytes. Listeners that send "Icy-MetaData: 1"
+# receive a StreamTitle block every metaint bytes of audio so track changes
+# update their now-playing display.
+# http_stream_metaint_bytes = 16384
+
 [streaming]
 # Path to the ffmpeg binary. When omitted, Songhive searches PATH.
 # ffmpeg_path = "/usr/bin/ffmpeg"

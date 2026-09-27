@@ -712,3 +712,65 @@ async def test_update_output_config_reloads_driver(
     assert _find_command(first, "stop") is not None
     assert _find_command(second, "start") is not None
     assert second.config.get("items") == {"reloaded": True}
+
+
+def _update_metadata_commands(driver: OutputDriver) -> list[tuple]:
+    """Return every ``update_metadata`` command the driver received."""
+    return [cmd for cmd in driver.commands if isinstance(cmd, tuple) and cmd[0] == "update_metadata"]
+
+
+@pytest.mark.asyncio
+async def test_play_pushes_now_playing_metadata(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """Playback start pushes the current track's metadata to the driver."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="idle")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+
+    await _send_command(worker, session.id, "play")
+    assert await _wait_until(lambda: _update_metadata_commands(fake))
+
+    await _stop_driver_task(driver, task)
+
+    update = _update_metadata_commands(fake)[0]
+    assert update[1].track_id == "t1"
+    assert update[1].song == "Artist - Track One"
+    # The title is pushed right after the decoder swap.
+    commands = [c[0] if isinstance(c, tuple) else c for c in fake.commands]
+    assert commands.index("update_metadata") > commands.index("set_source")
+
+
+@pytest.mark.asyncio
+async def test_track_change_pushes_now_playing_metadata(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """Advancing to the next track pushes its metadata to the driver."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+
+    # Startup sync puts the driver on the first track and publishes its title.
+    assert await _wait_until(lambda: _update_metadata_commands(fake))
+
+    fake.trigger_source_ended()
+    assert await _wait_until(lambda: len(_update_metadata_commands(fake)) >= 2)
+
+    await _stop_driver_task(driver, task)
+
+    updates = _update_metadata_commands(fake)
+    assert updates[0][1].track_id == "t1"
+    assert updates[-1][1].track_id == "t2"
+    assert updates[-1][1].song == "Artist - Track Two"

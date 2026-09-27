@@ -37,6 +37,11 @@ class TrackMeta:
     album: Optional[str] = None
     duration: Optional[float] = None
 
+    @property
+    def song(self) -> str:
+        """ICY-style ``Artist - Title`` stream title."""
+        return " - ".join(part for part in (self.artist, self.title) if part)
+
 
 @dataclass(frozen=True)
 class AudioSource:

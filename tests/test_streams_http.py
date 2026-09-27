@@ -36,7 +36,7 @@ async def test_http_validate_config_returns_capabilities():
     assert caps.pause_supported is True
     assert caps.seek_supported is True
     assert caps.multi_listener is True
-    assert caps.metadata_updates is False
+    assert caps.metadata_updates is True
 
 
 @pytest.mark.asyncio
@@ -256,3 +256,35 @@ async def test_http_driver_pause_resume_via_silence(monkeypatch, fake_redis):
         assert driver.is_paused is True
     finally:
         await driver.stop()
+
+
+@pytest.mark.asyncio
+async def test_http_driver_publishes_now_playing(fake_redis):
+    """update_metadata appends an ``m`` entry and refreshes the meta blob."""
+    provider = HttpStreamOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    config["_redis"] = fake_redis
+    driver = HttpStreamDriver(config)
+
+    await driver.update_metadata(TrackMeta(track_id="t1", title="Song", artist="Artist", album="LP"))
+
+    entries = await fake_redis.xrange(stream_data_key("radio"))
+    meta_entries = [fields for _id, fields in entries if fields.get("m")]
+    assert len(meta_entries) == 1
+    payload = json.loads(meta_entries[0]["m"])
+    assert payload["song"] == "Artist - Song"
+    assert payload["album"] == "LP"
+
+    meta = json.loads(await fake_redis.get(stream_meta_key("radio")))
+    assert meta["song"] == "Artist - Song"
+    assert meta["title"] == "Song"
+    assert meta["artist"] == "Artist"
+    assert meta["album"] == "LP"
+
+    # Identical metadata is deduplicated; a track change publishes again.
+    await driver.update_metadata(TrackMeta(track_id="t1", title="Song", artist="Artist", album="LP"))
+    await driver.update_metadata(TrackMeta(track_id="t2", title="Next", artist="Artist"))
+    entries = await fake_redis.xrange(stream_data_key("radio"))
+    meta_entries = [json.loads(fields["m"]) for _id, fields in entries if fields.get("m")]
+    assert [m["song"] for m in meta_entries] == ["Artist - Song", "Artist - Next"]

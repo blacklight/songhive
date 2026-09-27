@@ -98,7 +98,7 @@ class IcecastOutput(AudioOutput):
             config["username"] = "source"
 
         self._capabilities = OutputCapabilities(
-            metadata_updates=False,
+            metadata_updates=True,
             pause_supported=True,
             seek_supported=True,
             multi_listener=True,
@@ -140,6 +140,7 @@ class IcecastDriver(OutputDriver):
         self._listener_count_cache: Optional[int] = None
         self._listener_count_at = 0.0
         self._listener_count_ttl = 5.0
+        self._pushed_song: Optional[str] = None
 
     @property
     def _format_spec(self) -> dict[str, str]:
@@ -345,6 +346,9 @@ class IcecastDriver(OutputDriver):
 
     async def _start_encoder(self) -> None:
         """Start a fresh ffmpeg encoder process and a watcher for it."""
+        # A (re)connect drops the mount's now-playing metadata server-side;
+        # forget the dedupe marker so it is republished.
+        self._pushed_song = None
         argv = self._encoder_argv()
         redacted = list(argv)
         redacted[-1] = re.sub(r"^(icecast://)[^@]+@", r"\1source:***@", redacted[-1])
@@ -401,6 +405,8 @@ class IcecastDriver(OutputDriver):
             self._emit({"type": "error", "message": f"encoder exited (rc={rc})"})
             return
         await self._restart_decoder()
+        # The reconnect cleared the mount's stream title; push it again.
+        await self.update_metadata(self._current_metadata)
 
     async def _restart_decoder(self) -> None:
         """Restart the decoder against the current source after an encoder restart."""
@@ -546,8 +552,37 @@ class IcecastDriver(OutputDriver):
         return self._task_count
 
     async def update_metadata(self, metadata: TrackMeta) -> None:
-        """v1: no-op because the ffmpeg icecast muxer cannot update ICY in flight."""
-        logger.debug("update_metadata no-op for icecast v1: %s", metadata)
+        """Push now-playing metadata via Icecast's admin metadata endpoint.
+
+        The ffmpeg icecast muxer cannot update ICY metadata in flight, so the
+        song title is published out-of-band to ``/admin/metadata``
+        (``mode=updinfo``) with the source credentials — the same mechanism
+        standalone source clients use. Failures are logged and swallowed:
+        metadata must never interrupt the audio pipeline.
+        """
+        self._current_metadata = metadata
+        song = metadata.song
+        if song == self._pushed_song:
+            return
+        cfg = self.config
+        url = f"{cfg.get('protocol') or 'http'}://{cfg['host']}:{cfg['port']}/admin/metadata"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    url,
+                    params={
+                        "mount": cfg["mount"],
+                        "mode": "updinfo",
+                        "charset": "UTF-8",
+                        "song": song,
+                    },
+                    auth=(str(cfg.get("username") or "source"), str(cfg.get("password") or "")),
+                )
+                resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("Icecast metadata update failed for mount %s: %s", cfg.get("mount"), exc)
+            return
+        self._pushed_song = song
 
     async def health(self) -> OutputHealth:
         """Return whether the encoder appears alive."""

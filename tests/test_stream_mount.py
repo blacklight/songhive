@@ -209,3 +209,91 @@ async def test_mount_requires_listen_token(mount_server, fake_redis, db_session)
     resp = await asyncio.wait_for(fetch, timeout=15)
     client.close()
     assert resp.code == 200
+
+
+@pytest.mark.asyncio
+async def test_mount_interleaves_icy_metadata(mount_server, fake_redis, db_session, config):
+    """ICY clients get icy-metaint plus StreamTitle blocks on track changes."""
+    config.streams.http_stream_metaint_bytes = 1024
+    base, user = mount_server
+    await _make_http_output(db_session, user)
+    await fake_redis.set(
+        stream_meta_key("radio"),
+        json.dumps({"content_type": "audio/mpeg", "song": "Artist - First"}),
+        ex=30,
+    )
+    audio = b"A" * 1024 + b"B" * 1024
+    await fake_redis.xadd(stream_data_key("radio"), {"d": _b64(audio)})
+
+    client = tornado.httpclient.AsyncHTTPClient()
+    chunks: list[bytes] = []
+    request = tornado.httpclient.HTTPRequest(
+        f"{base}/streams/radio",
+        headers={"Icy-MetaData": "1"},
+        streaming_callback=chunks.append,
+        request_timeout=30,
+    )
+    fetch = asyncio.ensure_future(client.fetch(request))
+    try:
+        await asyncio.sleep(0.2)
+        await fake_redis.xadd(stream_data_key("radio"), {"m": json.dumps({"song": "Artist - Next"})})
+        await fake_redis.xadd(stream_data_key("radio"), {"d": _b64(b"C" * 1024)})
+        await fake_redis.xadd(stream_data_key("radio"), {"end": "1"})
+        resp = await asyncio.wait_for(fetch, timeout=15)
+    finally:
+        client.close()
+
+    assert resp.code == 200
+    assert resp.headers.get("icy-metaint") == "1024"
+
+    # Parse the interleaved body: every 1024 audio bytes are followed by a
+    # metadata block (one length byte counting 16-byte units + payload).
+    body = b"".join(chunks)
+    titles: list[str] = []
+    audio_out = bytearray()
+    i = 0
+    while i < len(body):
+        segment = body[i : i + 1024]
+        audio_out += segment
+        i += len(segment)
+        if i < len(body):
+            block_len = body[i] * 16
+            block = body[i + 1 : i + 1 + block_len]
+            i += 1 + block_len
+            titles.append(block.rstrip(b"\x00").decode("utf-8"))
+
+    assert bytes(audio_out) == audio + b"C" * 1024
+    assert any("StreamTitle='Artist - First';" in t for t in titles)
+    assert any("StreamTitle='Artist - Next';" in t for t in titles)
+
+
+@pytest.mark.asyncio
+async def test_mount_plain_client_gets_pure_audio(mount_server, fake_redis, db_session, config):
+    """Without Icy-MetaData: 1 the body carries no metadata blocks."""
+    config.streams.http_stream_metaint_bytes = 1024
+    base, user = mount_server
+    await _make_http_output(db_session, user)
+    await fake_redis.set(stream_meta_key("radio"), json.dumps({"content_type": "audio/mpeg"}), ex=30)
+    await fake_redis.xadd(stream_data_key("radio"), {"d": _b64(b"X" * 3000)})
+
+    client = tornado.httpclient.AsyncHTTPClient()
+    chunks: list[bytes] = []
+    request = tornado.httpclient.HTTPRequest(
+        f"{base}/streams/radio",
+        streaming_callback=chunks.append,
+        request_timeout=30,
+    )
+    fetch = asyncio.ensure_future(client.fetch(request))
+    try:
+        await asyncio.sleep(0.2)
+        await fake_redis.xadd(stream_data_key("radio"), {"m": json.dumps({"song": "A - B"})})
+        await fake_redis.xadd(stream_data_key("radio"), {"end": "1"})
+        resp = await asyncio.wait_for(fetch, timeout=15)
+    finally:
+        client.close()
+
+    assert resp.code == 200
+    assert resp.headers.get("icy-metaint") is None
+    body = b"".join(chunks)
+    assert b"StreamTitle" not in body
+    assert body == b"X" * 3000

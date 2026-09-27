@@ -340,16 +340,23 @@ class SessionDriver:
                 if session.state == "playing":
                     source, metadata = await self._resolve_source(db, session)
                     if source is not None:
+                        metadata = metadata or TrackMeta(track_id="", title="", artist="")
                         await self.driver.set_source(
                             source,
                             position=session.position_seconds,
-                            metadata=metadata or TrackMeta(track_id="", title="", artist=""),
+                            metadata=metadata,
                         )
+                        await self.driver.update_metadata(metadata)
                         self._active_track_id = _current_track_id(session)
                         session.position_anchor_at = _now_utc()
                         session.last_active_at = _now_utc()
                 elif session.state == "paused":
                     await self.driver.pause()
+                    # Keep the now-playing title visible on mounts joined
+                    # while the session was already paused.
+                    metadata = await self._resolve_metadata(db, session)
+                    if metadata is not None:
+                        await self.driver.update_metadata(metadata)
         except Exception:
             logger.exception("Failed to sync session %s on startup", self.session_id)
 
@@ -402,11 +409,13 @@ class SessionDriver:
             if needs_source:
                 try:
                     duration = metadata.duration if metadata else None
+                    metadata = metadata or TrackMeta(track_id="", title="", artist="")
                     await self.driver.set_source(
                         source,
                         position=_clamp_position(session.position_seconds, duration),
-                        metadata=metadata or TrackMeta(track_id="", title="", artist=""),
+                        metadata=metadata,
                     )
+                    await self.driver.update_metadata(metadata)
                     self._active_track_id = track_id
                 except Exception:
                     logger.exception("Failed to set driver source for %s", self.session_id)
@@ -624,11 +633,13 @@ class SessionDriver:
         track_id = _current_track_id(session)
         if source is not None and session.state == "playing":
             try:
+                metadata = metadata or TrackMeta(track_id="", title="", artist="")
                 await self.driver.set_source(
                     source,
                     position=session.position_seconds,
-                    metadata=metadata or TrackMeta(track_id="", title="", artist=""),
+                    metadata=metadata,
                 )
+                await self.driver.update_metadata(metadata)
                 self._active_track_id = track_id
             except Exception:
                 logger.exception("Failed to set next driver source for %s", self.session_id)
@@ -638,6 +649,31 @@ class SessionDriver:
             except Exception:
                 logger.exception("Failed to pause driver for %s", self.session_id)
 
+    async def _resolve_metadata(self, db, session: PlaybackSession) -> Optional[TrackMeta]:
+        """Resolve the current queue track to a TrackMeta without touching audio."""
+        track_dict = _current_track(session)
+        if track_dict is None:
+            return None
+
+        track_id = track_dict.get("id")
+        if not track_id:
+            return None
+
+        track = await db.execute(
+            select(Track).where(Track.id == track_id).options(selectinload(Track.artist), selectinload(Track.album))
+        )
+        track = track.scalar_one_or_none()
+        if track is None:
+            return None
+
+        return TrackMeta(
+            track_id=str(track.id),
+            title=track.title,
+            artist=track.artist.name if track.artist is not None else "",
+            album=track.album.title if track.album is not None else None,
+            duration=track.duration,
+        )
+
     async def _resolve_source(
         self,
         db,
@@ -645,27 +681,10 @@ class SessionDriver:
     ) -> tuple[Optional[AudioSource], Optional[TrackMeta]]:
         """Resolve the current queue track to an AudioSource and TrackMeta."""
         track_dict = _current_track(session)
-        if track_dict is None:
+        track_id = track_dict.get("id") if track_dict else None
+        metadata = await self._resolve_metadata(db, session)
+        if metadata is None or track_id is None:
             return None, None
-
-        track_id = track_dict.get("id")
-        if not track_id:
-            return None, None
-
-        track = await db.execute(
-            select(Track).where(Track.id == track_id).options(selectinload(Track.artist), selectinload(Track.album))
-        )
-        track = track.scalar_one_or_none()
-        if track is None:
-            return None, None
-
-        metadata = TrackMeta(
-            track_id=str(track.id),
-            title=track.title,
-            artist=track.artist.name if track.artist is not None else "",
-            album=track.album.title if track.album is not None else None,
-            duration=track.duration,
-        )
 
         stored_file = await resolve_track_file(db, track_id)
         if stored_file is not None:

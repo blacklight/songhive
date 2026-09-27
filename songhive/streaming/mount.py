@@ -18,6 +18,13 @@ buffering proxies from hiding that lag inside their own buffers.
 The mount is considered live only while the driver keeps the short-TTL
 ``songhive:stream:meta:{mount}`` key refreshed; once it expires (or an
 ``{"end": "1"}`` sentinel arrives) listeners are disconnected.
+
+Clients that send ``Icy-MetaData: 1`` get an ``icy-metaint`` response header
+and ICY ``StreamTitle`` metadata blocks interleaved into the audio every
+``streams.http_stream_metaint_bytes`` bytes. The current title comes from
+the meta blob at connect time and from ``{"m": ...}`` entries the driver
+appends to the stream on track changes, so updates reach listeners in audio
+order. Plain clients receive untouched audio.
 """
 
 import base64
@@ -44,12 +51,43 @@ from ..streams.http import (
 logger = logging.getLogger(__name__)
 
 
+def _icy_metadata_block(song: str) -> bytes:
+    """Build one ICY ``StreamTitle`` block (length byte + padded payload)."""
+    # Apostrophes and semicolons would break naive StreamTitle parsers; a
+    # typographic apostrophe keeps the displayed title readable.
+    safe = song.replace("'", "’").replace(";", ",")[:384]
+    payload = f"StreamTitle='{safe}';StreamUrl='';".encode("utf-8")
+    payload += b"\x00" * (-len(payload) % 16)
+    return bytes([len(payload) // 16]) + payload
+
+
+def _song_from_meta_entry(raw: object) -> str:
+    """Extract the stream title from a ``{"m": ...}`` stream entry value."""
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", "replace")
+    try:
+        data = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    song = data.get("song")
+    if song:
+        return str(song)
+    return " - ".join(str(part) for part in (data.get("artist"), data.get("title")) if part)
+
+
 class StreamMountHandler(tornado.web.RequestHandler):
     """Serve a native HTTP audio mountpoint to listeners."""
 
     _LISTENER_TTL_SECONDS = 25
     _XREAD_BLOCK_MS = 5000
     _XREAD_COUNT = 64
+
+    # Per-request ICY interleave state, initialised in _handle.
+    _icy_metaint: int = 0
+    _icy_audio_bytes: int = 0
+    _icy_song: str = ""
 
     @property
     def _config(self) -> SonghiveConfig:
@@ -113,6 +151,8 @@ class StreamMountHandler(tornado.web.RequestHandler):
         digits = "".join(c for c in bitrate if c.isdigit())
         if digits:
             self.set_header("icy-br", digits)
+        if self._icy_metaint:
+            self.set_header("icy-metaint", str(self._icy_metaint))
 
     async def _now_ms(self, redis) -> int:
         """Current time in ms, preferring the Redis clock that stamps entry IDs."""
@@ -138,6 +178,21 @@ class StreamMountHandler(tornado.web.RequestHandler):
         async for _ in redis.scan_iter(match=stream_listener_pattern(mount), count=100):
             count += 1
         return count
+
+    def _write_audio(self, data: bytes) -> None:
+        """Write audio bytes, inserting an ICY metadata block at each boundary."""
+        if not self._icy_metaint:
+            self.write(data)
+            return
+        offset = 0
+        while offset < len(data):
+            take = min(self._icy_metaint - self._icy_audio_bytes, len(data) - offset)
+            self.write(data[offset : offset + take])
+            self._icy_audio_bytes += take
+            offset += take
+            if self._icy_audio_bytes >= self._icy_metaint:
+                self._icy_audio_bytes = 0
+                self.write(_icy_metadata_block(self._icy_song))
 
     async def _handle(self, mount: str, *, send_body: bool) -> None:
         redis = self._redis
@@ -175,6 +230,13 @@ class StreamMountHandler(tornado.web.RequestHandler):
         except (TypeError, ValueError):
             meta = {}
 
+        # ICY metadata is opt-in: only interleave StreamTitle blocks for
+        # clients that asked for them — anything else must get pure audio.
+        icy_requested = self.request.headers.get("Icy-MetaData", "").strip() == "1"
+        self._icy_metaint = int(self._config.streams.http_stream_metaint_bytes) if icy_requested else 0
+        self._icy_audio_bytes = 0
+        self._icy_song = str(meta.get("song") or "")
+
         max_listeners = self._config.streams.http_stream_max_listeners
         if send_body and max_listeners and await self._listener_count(slug) >= max_listeners:
             self.set_status(429)
@@ -204,10 +266,19 @@ class StreamMountHandler(tornado.web.RequestHandler):
             now_ms = await self._now_ms(redis) if max_lag_ms else 0
             live_tail: list[tuple[str, str]] = []
             ended = False
+            meta_seen = False
             for entry_id, fields in tail:
                 if fields.get("end"):
                     ended = True
                     break
+                meta_update = fields.get("m")
+                if meta_update:
+                    # Newest metadata entry in the burst seeds the title;
+                    # older ones are superseded.
+                    if not meta_seen:
+                        self._icy_song = _song_from_meta_entry(meta_update)
+                        meta_seen = True
+                    continue
                 data = fields.get("d")
                 if data and (not max_lag_ms or self._entry_age_ms(entry_id, now_ms) <= max_lag_ms):
                     live_tail.append((entry_id, data))
@@ -216,7 +287,7 @@ class StreamMountHandler(tornado.web.RequestHandler):
                 # is over even though the meta key has not expired yet.
                 return
             for _, data in reversed(live_tail):
-                self.write(base64.b64decode(data))
+                self._write_audio(base64.b64decode(data))
             await self.flush()
 
             while not self._finished:
@@ -246,6 +317,10 @@ class StreamMountHandler(tornado.web.RequestHandler):
                     last_id = entry_id
                     if fields.get("end"):
                         return
+                    meta_update = fields.get("m")
+                    if meta_update:
+                        self._icy_song = _song_from_meta_entry(meta_update)
+                        continue
                     data = fields.get("d")
                     if not data:
                         continue
@@ -254,7 +329,7 @@ class StreamMountHandler(tornado.web.RequestHandler):
                         # jumps forward instead of accumulating latency.
                         dropped += 1
                         continue
-                    self.write(base64.b64decode(data))
+                    self._write_audio(base64.b64decode(data))
                     await self.flush()
                 if dropped:
                     logger.info(

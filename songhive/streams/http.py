@@ -12,11 +12,12 @@ stream and fans out to any number of listeners.
 Redis keys per mount:
 
 - ``songhive:stream:data:{mount}`` — capped stream of base64-encoded audio
-  chunks (``{"d": ...}`` entries) plus an ``{"end": "1"}`` sentinel appended
-  on a graceful stop so listeners disconnect promptly.
+  chunks (``{"d": ...}`` entries), ``{"m": ...}`` now-playing metadata
+  entries appended on track changes, and an ``{"end": "1"}`` sentinel
+  appended on a graceful stop so listeners disconnect promptly.
 - ``songhive:stream:meta:{mount}`` — JSON blob (content type, bitrate, ICY
-  fields) with a short TTL, refreshed while the encoder is alive; its absence
-  means the mount is offline and listeners get a 404.
+  fields, current track) with a short TTL, refreshed while the encoder is
+  alive; its absence means the mount is offline and listeners get a 404.
 - ``songhive:stream:listener:{mount}:{id}`` — per-listener TTL keys written
   by the web process so the driver can report ``listener_count`` for idle
   shutdown.
@@ -132,7 +133,7 @@ class HttpStreamOutput(IcecastOutput):
             raise ValueError("sample_rate must be a positive integer")
 
         self._capabilities = OutputCapabilities(
-            metadata_updates=False,
+            metadata_updates=True,
             pause_supported=True,
             seek_supported=True,
             multi_listener=True,
@@ -216,6 +217,7 @@ class HttpStreamDriver(IcecastDriver):
         if self._redis is None:
             return
         cfg = self.config
+        track = self._current_metadata
         meta = {
             "mount": self._mount,
             "content_type": self._format_spec["content_type"],
@@ -223,6 +225,10 @@ class HttpStreamDriver(IcecastDriver):
             "name": cfg.get("name") or "",
             "description": cfg.get("description") or "",
             "genre": cfg.get("genre") or "",
+            "song": track.song,
+            "title": track.title,
+            "artist": track.artist,
+            "album": track.album,
         }
         try:
             await self._redis.set(stream_meta_key(self._mount), json.dumps(meta), ex=int(_META_TTL_SECONDS))
@@ -285,8 +291,41 @@ class HttpStreamDriver(IcecastDriver):
         await super().stop()
 
     async def update_metadata(self, metadata: TrackMeta) -> None:
-        """v1: no-op; the Redis transport carries no in-band ICY metadata."""
-        logger.debug("update_metadata no-op for http stream v1: %s", metadata)
+        """Publish now-playing metadata into the mount's stream and meta blob.
+
+        An ``{"m": ...}`` entry appended to the Redis stream reaches every
+        listener in audio order; ``streaming/mount.py`` turns it into an ICY
+        ``StreamTitle`` block at the next metaint boundary for clients that
+        sent ``Icy-MetaData: 1``. The meta blob carries the same fields so a
+        newly-connected listener seeds its title before the first ``m``
+        entry arrives.
+        """
+        self._current_metadata = metadata
+        song = metadata.song
+        if song == self._pushed_song:
+            return
+        if self._redis is not None:
+            try:
+                await self._redis.xadd(
+                    stream_data_key(self._mount),
+                    {
+                        "m": json.dumps(
+                            {
+                                "song": song,
+                                "title": metadata.title,
+                                "artist": metadata.artist,
+                                "album": metadata.album,
+                            }
+                        )
+                    },
+                    maxlen=self._max_entries,
+                    approximate=True,
+                )
+            except Exception:
+                logger.warning("Failed to publish metadata entry for mount %s", self._mount)
+                return
+            await self._publish_meta()
+        self._pushed_song = song
 
     async def listener_count(self) -> int:
         """Count active listeners via their TTL presence keys."""

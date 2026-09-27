@@ -1889,8 +1889,13 @@ the controlling tab closes.
   track. Pausing swaps the decoder for a **realtime** (`-re`) `anullsrc`
   silence generator so the mount stays alive without flooding listeners.
   `source_ended` decoder events carry a generation tag so events from a
-  killed decoder can't pause the new source. ffmpeg's Icecast muxer does not
-  support mid-stream ICY metadata, so `update_metadata` is a no-op.
+  killed decoder can't pause the new source. ffmpeg's Icecast muxer cannot
+  update ICY metadata in flight, so `update_metadata` publishes the
+  now-playing title out-of-band to the server's
+  `/admin/metadata?mount=...&mode=updinfo&song=...` endpoint using the
+  source credentials (best-effort: failures are logged, never raised), and
+  the push is repeated after an encoder reconnect because a source
+  reconnect clears the mount's metadata.
 - **Native HTTP provider** (`streams/http.py`) — same driver machinery, but
   the encoder writes to `pipe:1` and a publish task XADDs each ~16 KiB chunk
   (base64) into the Redis stream `songhive:stream:data:{mount}`
@@ -1909,9 +1914,13 @@ the controlling tab closes.
   entries disconnect listeners on graceful stop; per-listener TTL keys under
   `songhive:stream:listener:{mount}:*` feed `listener_count` for idle
   shutdown and enforce `streams.http_stream_max_listeners` (0 = uncapped).
-  Mount slugs must be unique across `http` outputs; an optional
-  `listen_token` field gates listeners via `?token=`/`Bearer`. No external
-  server or extra port is needed.
+  Now-playing metadata rides the same stream as `{"m": ...}` entries and is
+  mirrored into the meta blob; listeners that send `Icy-MetaData: 1` get an
+  `icy-metaint` header and `StreamTitle` blocks interleaved into the audio
+  every `streams.http_stream_metaint_bytes` bytes, so track changes update
+  the title in audio order. Mount slugs must be unique across `http`
+  outputs; an optional `listen_token` field gates listeners via
+  `?token=`/`Bearer`. No external server or extra port is needed.
 - **Snapcast provider** (`streams/snapcast.py`) — same driver machinery, but
   the "encoder" is an ffmpeg *passthrough*: raw s16le stereo PCM from stdin is
   copied unchanged to a snapserver sink — either the named pipe of a
@@ -1928,7 +1937,9 @@ the controlling tab closes.
   newline-delimited protocol; `control_host`/`control_port` fields) and
   counts connected, unmuted clients — optionally only those in groups playing
   `stream_name` — so idle shutdown tracks real listeners like the Icecast
-  status endpoint does.
+  status endpoint does. `update_metadata` is a no-op: snapserver's control
+  API offers no metadata setter — stream metadata can only originate from a
+  `controlscript` plugin attached to the source in `snapserver.conf`.
 - **Driver interface** (`streams/driver.py`) — `start`, `stop`,
   `set_source`, `pause`, `resume`, `seek`, `set_volume`, `update_metadata`,
   `health`, `is_paused`, `listener_count`, and an `events` queue. The worker

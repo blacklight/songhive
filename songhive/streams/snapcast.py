@@ -281,8 +281,14 @@ class SnapcastDriver(IcecastDriver):
         await super()._start_encoder()
 
     async def update_metadata(self, metadata: TrackMeta) -> None:
-        """v1: no-op; the raw PCM sink carries no in-band metadata."""
-        logger.debug("update_metadata no-op for snapcast v1: %s", metadata)
+        """No-op: snapserver exposes no metadata setter on its control API.
+
+        The raw PCM sink carries no in-band metadata, and the JSON-RPC
+        control interface (``Stream.SetProperty``/``Stream.Control``) only
+        covers playback properties — stream metadata can only originate from
+        a ``controlscript`` stream plugin declared in snapserver.conf.
+        """
+        logger.debug("update_metadata no-op for snapcast: %s", metadata)
 
     async def listener_count(self) -> int:
         """Count connected, unmuted Snapclients via snapserver's JSON-RPC API."""
