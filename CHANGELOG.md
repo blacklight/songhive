@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Albums and playlists can now be exported as M3U playlists, with
+  access tokens either embedded or non-public tracks excluded, via new
+  `/m3u` endpoints and a download action in the UI.
+  ([`534d1e1`](https://git.platypush.tech/blacklight/songhive/commit/534d1e18bff4d2a5ec83d493f5941c5f1be6423c)).
+- `streams`: Now-playing metadata is pushed to audio outputs on track
+  change — HTTP mounts interleave ICY `StreamTitle` blocks for clients
+  sending `Icy-MetaData: 1`, and Icecast outputs publish the title via
+  the admin metadata API (Snapcast is unsupported).
+  ([`27407b3`](https://git.platypush.tech/blacklight/songhive/commit/27407b35deaa05d16bdd0b25c7ca1e725ed6db6e)).
+- `i18n`: Add an Italian locale, and a "Browser default" language
+  option in the profile Interface tab that picks the locale from the
+  browser's preferred languages.
+  ([`e83ac48`](https://git.platypush.tech/blacklight/songhive/commit/e83ac48b249fcf6c5bcd7c58a6781748a4a3a063)).
+- `i18n`: Add an Arabic locale with right-to-left layout support.
+  ([`b5744cf`](https://git.platypush.tech/blacklight/songhive/commit/b5744cf7eefab8cdb7794558ac68e7da4e16e747)).
+- `i18n`: Add a Spanish locale.
+  ([`427f701`](https://git.platypush.tech/blacklight/songhive/commit/427f7019cde30dc54dcff9dcf0f748f7d077acab)).
+- `search`: Pasting a local, share or remote URL into search now
+  resolves it directly to the matching result.
+  ([`24a9b5b`](https://git.platypush.tech/blacklight/songhive/commit/24a9b5b9ad501b414336b17764654e49289ad235)).
+
+### Fixed
+
+- `external`: Containers removed by the provider (e.g. a delisted TIDAL
+  album) are now marked as missing instead of triggering a refetch on
+  every view.
+  ([`e31ee30`](https://git.platypush.tech/blacklight/songhive/commit/e31ee30ed9755bbbfb232d1f2084914393cd12a1)).
+- `redis`: Fix intermittent "Future attached to a different loop" 500
+  errors on unrelated endpoints by keeping one shared async Redis
+  client per event loop.
+  ([`7c88e09`](https://git.platypush.tech/blacklight/songhive/commit/7c88e093eea590f813838acbc4c4cb920f7d6bda)).
+
 ## 0.3.8
 
 ### Changed
