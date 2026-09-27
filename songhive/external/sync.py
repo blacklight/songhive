@@ -71,6 +71,10 @@ class RunCounters:
         # Entity-import counters (entity-backed providers only); persisted in
         # ``ExternalSyncRun.details["entities"]`` rather than new columns.
         self.entity_counts: dict[str, int] = {}
+        # Local artist ids whose provider key is known — drained once per
+        # pass into ``_backfill_artist_images`` so track-derived artists can
+        # pick up provider images without N+1 API calls during enumeration.
+        self.artist_image_backlog: dict[str, str] = {}
 
 
 def _utcnow() -> datetime:
@@ -649,6 +653,93 @@ async def _fill_album_cover(session: AsyncSession, album_id: Optional[str], cove
     )
 
 
+def _queue_artist_image(counters: RunCounters, artist_id: Optional[str], provider_key: Optional[str]) -> None:
+    """Record a materialized artist for the deferred provider-image fetch."""
+    if artist_id and provider_key:
+        counters.artist_image_backlog[str(artist_id)] = provider_key
+
+
+async def _backfill_artist_images(
+    session: AsyncSession,
+    adapter: Any,
+    config: dict,
+    counters: RunCounters,
+    provider_type: str,
+    *,
+    catalog_ttl: Optional[int] = None,
+) -> None:
+    """Fetch provider images for artists that materialized without one.
+
+    Track payloads carry artist ids but not pictures (e.g. TIDAL ``artists``
+    entries have ``picture: null``), so artists materialized as a side-effect
+    of track/album contents stay imageless. The provider catalog gates
+    refetches at ``catalog_ttl`` so artists that genuinely have no image are
+    not re-requested every sync.
+    """
+    from ..services.provider_catalog import get_catalog_entries, upsert_catalog_entries
+
+    backlog = counters.artist_image_backlog
+    counters.artist_image_backlog = {}
+    if not backlog:
+        return
+
+    imageless = (
+        (
+            await session.execute(
+                _lean(select(Artist.id)).where(
+                    Artist.id.in_(backlog), or_(Artist.image_url.is_(None), Artist.image_url == "")
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pending = {str(aid): backlog[str(aid)] for aid in imageless if str(aid) in backlog}
+    if not pending:
+        return
+
+    cached = await get_catalog_entries(session, provider_type, "artist", sorted(set(pending.values())))
+    images: dict[str, str] = {}
+    to_fetch: dict[str, str] = {}
+    for artist_id, provider_key in pending.items():
+        entry = cached.get(provider_key)
+        meta = None
+        if entry is not None and isinstance(entry.payload, dict):
+            meta = adapter.entity_from_payload(config, "artist", entry.payload)
+        if meta is not None and getattr(meta, "image_url", None):
+            images[artist_id] = meta.image_url
+        elif entry is None:
+            to_fetch[artist_id] = provider_key
+
+    fetched: list[dict] = []
+    for artist_id, provider_key in to_fetch.items():
+        try:
+            payload = await adapter.fetch_entity_payload(config, "artist", provider_key)
+        except Exception:
+            logger.debug("Artist payload fetch failed: %s/%s", provider_type, provider_key, exc_info=True)
+            continue
+        if not isinstance(payload, dict):
+            continue
+        fetched.append(payload)
+        meta = adapter.entity_from_payload(config, "artist", payload)
+        if meta is not None and getattr(meta, "image_url", None):
+            images[artist_id] = meta.image_url
+
+    if fetched:
+        try:
+            async with session.begin_nested():
+                await upsert_catalog_entries(session, provider_type, "artist", fetched, ttl_seconds=catalog_ttl)
+        except Exception:
+            logger.debug("Artist catalog upsert failed during image backfill", exc_info=True)
+
+    for artist_id, image_url in images.items():
+        await session.execute(
+            update(Artist)
+            .where(Artist.id == artist_id, or_(Artist.image_url.is_(None), Artist.image_url == ""))
+            .values(image_url=image_url)
+        )
+
+
 async def _find_entity_artist(
     session: AsyncSession,
     name: str,
@@ -735,6 +826,7 @@ async def _apply_entity_track(
         # Heal albums that were created coverless before track-derived covers
         # were applied (immutable/unchanged tracks never re-resolve the album).
         await _fill_album_cover(session, track.album_id, metadata.cover_url)
+        _queue_artist_image(counters, track.artist_id, metadata.artist_provider_key)
 
     if external_item is not None and track is not None:
         if immutable:
@@ -802,6 +894,7 @@ async def _apply_entity_track(
             musicbrainz_id=(metadata.provider_ids or {}).get("MusicBrainzArtist"),
             match_musicbrainz=match_musicbrainz,
         )
+        _queue_artist_image(counters, str(artist.id), metadata.artist_provider_key)
         album: Optional[Album] = None
         if metadata.album:
             album_artist = await _find_entity_artist(
@@ -810,6 +903,7 @@ async def _apply_entity_track(
                 musicbrainz_id=None,
                 match_musicbrainz=False,
             )
+            _queue_artist_image(counters, str(album_artist.id), metadata.album_artist_provider_key)
             album = await _find_entity_album(
                 session,
                 title=metadata.album,
@@ -851,6 +945,7 @@ async def _apply_entity_track(
         # ISRC-dedup link on an immutable provider: attach the provider
         # reference without rewriting the existing local metadata.
         await _fill_album_cover(session, track.album_id, metadata.cover_url)
+        _queue_artist_image(counters, track.artist_id, metadata.artist_provider_key)
     else:
         local_edited = track.metadata_updated_at is not None and (
             track.external_metadata_synced_at is None or track.metadata_updated_at > track.external_metadata_synced_at
@@ -878,6 +973,7 @@ async def _apply_entity_track(
             musicbrainz_id=(metadata.provider_ids or {}).get("MusicBrainzArtist"),
             match_musicbrainz=match_musicbrainz,
         )
+        _queue_artist_image(counters, str(artist.id), metadata.artist_provider_key)
         album = None
         if metadata.album:
             album_artist = await _find_entity_artist(
@@ -886,6 +982,7 @@ async def _apply_entity_track(
                 musicbrainz_id=None,
                 match_musicbrainz=False,
             )
+            _queue_artist_image(counters, str(album_artist.id), metadata.album_artist_provider_key)
             album = await _find_entity_album(
                 session,
                 title=metadata.album,
@@ -1042,6 +1139,11 @@ async def _apply_entity_album(
 
     artist_name = item.artist_names[0] if item.artist_names else "Unknown Artist"
     artist = await _find_entity_artist(session, artist_name, match_musicbrainz=match_musicbrainz)
+    # Album payloads carry artist pictures (unlike track payloads) — propagate
+    # the primary artist's image for free while the album is being applied.
+    if item.artist_image_url and not artist.image_url:
+        artist.image_url = item.artist_image_url
+    _queue_artist_image(counters, str(artist.id), item.artist_provider_keys[0] if item.artist_provider_keys else None)
     album = await _find_entity_album(
         session,
         title=item.title or "Unknown Album",
@@ -1526,6 +1628,8 @@ async def _sync_entity_library(
 
     if since is None:
         await _reconcile_missing_entities(session, external_library, capabilities, run, counters)
+
+    await _backfill_artist_images(session, adapter, config, counters, provider_type, catalog_ttl=catalog_ttl)
 
 
 def _maybe_enqueue_musicbrainz(config: Any, track_ids: set[str]) -> None:

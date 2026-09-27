@@ -376,7 +376,13 @@ async def _refresh_external_contents(
 
     from ..external.errors import ExternalRateLimited
     from ..external.lazy import contents_lock_key
-    from ..external.sync import RunCounters, _apply_entity_track, _find_external_item
+    from ..external.sync import (
+        RunCounters,
+        _apply_entity_track,
+        _backfill_artist_images,
+        _catalog_ttl_seconds,
+        _find_external_item,
+    )
     from ..external.types import ContentsNotModified
     from ..models.playlist import PlaylistTrack
     from ..services.provider_catalog import (
@@ -505,6 +511,17 @@ async def _refresh_external_contents(
                         entry.provider_key,
                         exc_info=True,
                     )
+
+            # 3b. Artist images aren't in track payloads — fetch them lazily
+            # for artists materialized without one.
+            await _backfill_artist_images(
+                session,
+                adapter,
+                decrypted,
+                counters,
+                external_library.provider_type,
+                catalog_ttl=_catalog_ttl_seconds(external_library.provider_type, decrypted),
+            )
 
             # 4. Replace the container's local rows in provider order.
             if kind == "playlist" and item.playlist_id is not None:

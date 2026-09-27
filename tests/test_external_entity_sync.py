@@ -114,6 +114,24 @@ class FakeEntityAdapter(ExternalLibraryAdapter):
             )
             yield ExternalPlaylistMetadata(entries=entries, **entry)
 
+    def entity_from_payload(self, config: dict, kind: str, payload: dict):
+        if kind == "artist" and isinstance(payload, dict):
+            return ExternalArtistMetadata(
+                provider_key=str(payload["id"]),
+                name=str(payload.get("name") or "Unknown"),
+                image_url=payload.get("image_url"),
+                raw_metadata=dict(payload),
+            )
+        return None
+
+    async def fetch_entity_payload(self, config: dict, kind: str, provider_key: str):
+        if kind != "artist":
+            return None
+        for entry in config.get("entities", {}).get("artist_payloads", []):
+            if str(entry.get("id")) == str(provider_key):
+                return entry
+        return None
+
 
 @pytest.fixture(autouse=True)
 def _register_fake_entity_adapter():
@@ -502,3 +520,91 @@ async def test_entity_track_cover_does_not_overwrite(db_session, fake_redis, _ma
     await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
     await db_session.refresh(album)
     assert album.cover_url == "https://img.example/local.jpg"
+
+
+@pytest.mark.asyncio
+async def test_entity_track_artist_image_backfill(db_session, fake_redis, _make_entity_library):
+    """Track-derived artists pick up their provider image after the pass.
+
+    Track payloads carry artist ids but no pictures, so the artist row is
+    created imageless and healed by a deferred ``fetch_entity_payload`` drain.
+    """
+    external_library, _, _ = await _make_entity_library(
+        {
+            "tracks": [_track("jf-1", artist_provider_key="fake-artist-1")],
+            "artist_payloads": [
+                {"id": "fake-artist-1", "name": "Artist A", "image_url": "https://img.example/artist.jpg"}
+            ],
+        }
+    )
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+
+    artist = (await db_session.execute(select(Artist))).scalar_one()
+    assert artist.image_url == "https://img.example/artist.jpg"
+
+
+@pytest.mark.asyncio
+async def test_entity_artist_image_backfill_unchanged_track(db_session, fake_redis, _make_entity_library):
+    """An unchanged immutable re-sync still backfills a missing artist image."""
+    external_library, _, _ = await _make_entity_library(
+        {"tracks": [_track("jf-1", artist_provider_key="fake-artist-1")]},
+        {"immutable_tracks": True},
+    )
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    artist = (await db_session.execute(select(Artist))).scalar_one()
+    assert not artist.image_url
+
+    config = secrets.decrypt_json(external_library.config)
+    config["entities"]["artist_payloads"] = [
+        {"id": "fake-artist-1", "name": "Artist A", "image_url": "https://img.example/artist.jpg"}
+    ]
+    external_library.config = secrets.encrypt_json(config)
+    await db_session.flush()
+
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    await db_session.refresh(artist)
+    assert artist.image_url == "https://img.example/artist.jpg"
+
+
+@pytest.mark.asyncio
+async def test_entity_album_pass_propagates_artist_image(db_session, fake_redis, _make_entity_library):
+    """Album payloads carry artist pictures; the album pass fills the artist image."""
+    external_library, _, _ = await _make_entity_library(
+        {
+            "albums": [
+                {
+                    "provider_key": "jf-album-1",
+                    "title": "Album A",
+                    "artist_names": ("Artist A",),
+                    "artist_provider_keys": ("fake-artist-1",),
+                    "artist_image_url": "https://img.example/artist.jpg",
+                    "etag": "e2",
+                }
+            ],
+        }
+    )
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+
+    artist = (await db_session.execute(select(Artist))).scalar_one()
+    assert artist.image_url == "https://img.example/artist.jpg"
+
+
+@pytest.mark.asyncio
+async def test_entity_artist_image_never_overwritten(db_session, fake_redis, _make_entity_library):
+    """A locally-set artist image is never replaced by the provider's."""
+    external_library, _, _ = await _make_entity_library(
+        {
+            "tracks": [_track("jf-1", artist_provider_key="fake-artist-1")],
+            "artist_payloads": [
+                {"id": "fake-artist-1", "name": "Artist A", "image_url": "https://img.example/provider.jpg"}
+            ],
+        }
+    )
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    artist = (await db_session.execute(select(Artist))).scalar_one()
+    artist.image_url = "https://img.example/local.jpg"
+    await db_session.flush()
+
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    await db_session.refresh(artist)
+    assert artist.image_url == "https://img.example/local.jpg"

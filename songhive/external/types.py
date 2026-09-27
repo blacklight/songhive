@@ -35,6 +35,8 @@ class ExternalTrackMetadata:
     composer: Optional[str] = None
     disc_count: Optional[int] = None
     provider_ids: dict[str, str] = field(default_factory=dict)
+    artist_provider_key: Optional[str] = None
+    album_artist_provider_key: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ class ExternalAlbumMetadata:
     release_year: Optional[int] = None
     genres: tuple[str, ...] = ()
     cover_url: Optional[str] = None
+    artist_image_url: Optional[str] = None
     description: Optional[str] = None
     provider_ids: dict[str, str] = field(default_factory=dict)
     etag: Optional[str] = None

@@ -72,18 +72,50 @@ def _artist_names(item: dict) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _primary_artist(item: dict) -> str:
-    """Return the primary (first ``MAIN``) artist name for a track/album."""
+def _first_artist_entry(item: dict) -> Optional[dict]:
+    """First ``artists`` entry with a name (positionally pairs with ``artist_names[0]``)."""
+    for entry in item.get("artists") or []:
+        if isinstance(entry, dict) and entry.get("name"):
+            return entry
+    single = item.get("artist")
+    if isinstance(single, dict) and single.get("name"):
+        return single
+    return None
+
+
+def _primary_artist_entry(item: dict) -> Optional[dict]:
+    """Return the primary (first ``MAIN``) artist entry for a track/album."""
     artists = item.get("artists")
     if isinstance(artists, list):
         for entry in artists:
             if isinstance(entry, dict) and entry.get("type") == "MAIN" and entry.get("name"):
-                return str(entry["name"])
+                return entry
     single = item.get("artist")
     if isinstance(single, dict) and single.get("name"):
-        return str(single["name"])
-    names = _artist_names(item)
-    return names[0] if names else ""
+        return single
+    return _first_artist_entry(item) if isinstance(artists, list) else None
+
+
+def _primary_artist(item: dict) -> str:
+    """Return the primary (first ``MAIN``) artist name for a track/album."""
+    entry = _primary_artist_entry(item)
+    return str(entry["name"]) if entry else ""
+
+
+def _primary_artist_key(item: dict) -> Optional[str]:
+    """Provider id of the primary artist — used to fetch artist images lazily."""
+    entry = _primary_artist_entry(item)
+    if entry is not None and entry.get("id") is not None:
+        return str(entry["id"])
+    return None
+
+
+def _first_artist_key(item: dict) -> Optional[str]:
+    """Provider id of the positional first artist (pairs with ``artist_names[0]``)."""
+    entry = _first_artist_entry(item)
+    if entry is not None and entry.get("id") is not None:
+        return str(entry["id"])
+    return None
 
 
 def _title(item: dict) -> str:
@@ -155,6 +187,8 @@ def map_track(item: dict) -> ExternalTrackMetadata:
         artist=_primary_artist(item) or "Unknown Artist",
         album=album_title,
         album_artist=album_artists[0] if album_artists else "",
+        artist_provider_key=_primary_artist_key(item),
+        album_artist_provider_key=_first_artist_key(album) or _first_artist_key(item),
         track_number=_num(item.get("trackNumber")),
         disc_number=_num(item.get("volumeNumber")),
         duration=_float(item.get("duration")),
@@ -201,6 +235,9 @@ def map_album(item: dict) -> Optional[ExternalAlbumMetadata]:
     if isinstance(upc, str) and upc:
         provider_ids["upc"] = upc
 
+    first_artist = _first_artist_entry(item)
+    artist_picture = first_artist.get("picture") if first_artist else None
+
     return ExternalAlbumMetadata(
         provider_key=str(item["id"]),
         title=_title(item),
@@ -208,6 +245,7 @@ def map_album(item: dict) -> Optional[ExternalAlbumMetadata]:
         artist_provider_keys=tuple(artist_keys),
         release_year=_year(item),
         cover_url=image_url(item.get("cover")),
+        artist_image_url=image_url(artist_picture, width=750, height=750) if isinstance(artist_picture, str) else None,
         provider_ids=provider_ids,
         raw_metadata=dict(item),
     )
