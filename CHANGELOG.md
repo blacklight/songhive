@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `frontend`: The mobile navigation sidebar opens again — the RTL CSS
+  transform had raised the off-canvas rule's specificity above the
+  open-state selector, so the sidebar never slid back in.
+  ([`3af52ba`](https://git.platypush.tech/blacklight/songhive/commit/3af52ba80b285a03cac5743c7dde1e595e3d0971)).
+
 ## 0.3.9
 
 ### Added
