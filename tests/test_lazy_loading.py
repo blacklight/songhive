@@ -16,8 +16,8 @@ from sqlalchemy import inspect, select
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm import selectinload
 
-from songhive.models.artist import Artist
 from songhive.models.album import Album
+from songhive.models.artist import Artist
 from songhive.models.external_item import ExternalItem
 from songhive.models.external_library import ExternalLibrary
 from songhive.models.external_track import ExternalTrack

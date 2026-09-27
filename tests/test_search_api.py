@@ -1,6 +1,7 @@
 """Tests for the aggregate /api/v1/search/ endpoint."""
 
 from datetime import datetime, timezone
+from typing import Optional
 
 import pytest
 from fastapi.testclient import TestClient
@@ -583,3 +584,377 @@ async def test_search_users_remote_excludes_local_and_blocked(fed_client, fed_co
     items = [i for s in response.json()["sections"] for i in s["items"]]
     # Only the local account matches — not its cached actor document.
     assert all(i["id"] != "https://music.example.com/users/regular" for i in items)
+
+
+# ---------------------------------------------------------------------------
+# Direct URL lookups
+# ---------------------------------------------------------------------------
+
+LOCAL_ORIGIN = "http://testserver"
+REMOTE_DOMAIN = "remote.invalid"  # .invalid never resolves — fetch is stubbed
+REMOTE_ACTOR_URL = f"https://{REMOTE_DOMAIN}/users/alice"
+REMOTE_TRACK_URL = f"https://{REMOTE_DOMAIN}/tracks/track1"
+
+REMOTE_ACTOR_DOC = {
+    "id": REMOTE_ACTOR_URL,
+    "type": "Person",
+    "preferredUsername": "alice",
+    "name": "Alice Remote",
+    "inbox": f"{REMOTE_ACTOR_URL}/inbox",
+}
+
+REMOTE_TRACK_DOC = {
+    "id": f"https://{REMOTE_DOMAIN}/users/alice/objects/track1",
+    "type": "Audio",
+    "attributedTo": REMOTE_ACTOR_URL,
+    "name": "Remote Song",
+    "url": {
+        "type": "Link",
+        "href": f"https://{REMOTE_DOMAIN}/media/song.ogg",
+        "mediaType": "audio/ogg",
+    },
+    "to": ["https://www.w3.org/ns/activitystreams#Public"],
+}
+
+
+@pytest.fixture
+def remote_fetcher(monkeypatch):
+    """Stub ``remote_content.guarded_fetch`` with a canned-document router."""
+    from songhive.federation.fetch import FetchResult
+    from songhive.services import remote_content as rc
+
+    class _Fetcher:
+        def __init__(self, routes: dict):
+            self.routes = routes
+            self.calls: list[str] = []
+
+        def __call__(self, url, *, check_url=None, **kwargs):
+            self.calls.append(url)
+            if check_url is not None:
+                check_url(url)
+            response = self.routes[url]
+            if isinstance(response, Exception):
+                raise response
+            import json as jsonlib
+
+            return FetchResult(
+                url=url,
+                status_code=200,
+                content_type="application/activity+json",
+                body=jsonlib.dumps(response).encode(),
+                headers={},
+            )
+
+    def _install(routes: dict) -> _Fetcher:
+        fake = _Fetcher(routes)
+        monkeypatch.setattr(rc, "guarded_fetch", fake)
+        return fake
+
+    return _install
+
+
+def _search(client, url: str, headers: Optional[dict] = None):
+    return client.get("/api/v1/search", params={"q": url}, headers=headers or {})
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_local_track(client, regular_user, db_session):
+    """A local track URL resolves to exactly one track result."""
+    artist = await _make_artist(db_session, name="URL Artist")
+    track = await _make_track(db_session, artist, title="Linked Track", owner=regular_user)
+    await db_session.commit()
+
+    response = _search(client, f"{LOCAL_ORIGIN}/tracks/{track.id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert [s["entity"] for s in data["sections"]] == ["tracks"]
+    section = data["sections"][0]
+    assert section["total"] == 1
+    assert [i["id"] for i in section["items"]] == [str(track.id)]
+    assert section["items"][0]["title"] == "Linked Track"
+    assert section["items"][0]["url"] == f"/tracks/{track.id}"
+    assert "URL Artist" in section["items"][0]["subtitle"]
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_local_entities(client, regular_user, db_session):
+    """Album, artist, playlist and library URLs each resolve to one result."""
+    artist = await _make_artist(db_session, name="URL Artist")
+    album = await _make_album(db_session, artist, title="URL Album", owner=regular_user)
+    playlist = await _make_playlist(db_session, regular_user, name="URL Playlist")
+    library = await _make_library(db_session, regular_user, name="URL Library")
+    await db_session.commit()
+
+    cases = [
+        (f"{LOCAL_ORIGIN}/albums/{album.id}", "albums", str(album.id)),
+        (f"{LOCAL_ORIGIN}/artists/{artist.id}", "artists", str(artist.id)),
+        (f"{LOCAL_ORIGIN}/playlists/{playlist.id}", "playlists", str(playlist.id)),
+        (f"{LOCAL_ORIGIN}/libraries/{library.id}", "libraries", str(library.id)),
+    ]
+    for url, entity, expected_id in cases:
+        response = _search(client, url)
+        assert response.status_code == 200
+        data = response.json()
+        assert [s["entity"] for s in data["sections"]] == [entity]
+        assert _section_ids(data, entity) == [expected_id]
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_api_prefix_and_trailing_slash(client, regular_user, db_session):
+    """``/api/v1/``-prefixed and trailing-slash resource URLs resolve too."""
+    artist = await _make_artist(db_session, name="URL Artist")
+    track = await _make_track(db_session, artist, title="Linked Track", owner=regular_user)
+    await db_session.commit()
+
+    for url in (
+        f"{LOCAL_ORIGIN}/api/v1/tracks/{track.id}",
+        f"{LOCAL_ORIGIN}/tracks/{track.id}/",
+    ):
+        data = _search(client, url).json()
+        assert _section_ids(data, "tracks") == [str(track.id)]
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_private_track_hidden_from_anonymous(
+    client, regular_user, other_user, db_session, auth_headers
+):
+    """A private track URL yields no result for anonymous or foreign users."""
+    artist = await _make_artist(db_session, name="URL Artist")
+    track = await _make_track(
+        db_session,
+        artist,
+        title="Secret Track",
+        owner=regular_user,
+        visibility=Visibility.PRIVATE.value,
+    )
+    await db_session.commit()
+    url = f"{LOCAL_ORIGIN}/tracks/{track.id}"
+
+    for headers in ({}, auth_headers(other_user)):
+        data = _search(client, url, headers=headers).json()
+        assert [s["entity"] for s in data["sections"]] == ["tracks"]
+        assert _section_ids(data, "tracks") == []
+
+    data = _search(client, url, headers=auth_headers(regular_user)).json()
+    assert _section_ids(data, "tracks") == [str(track.id)]
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_local_visibility_url(client, regular_user, other_user, db_session, auth_headers):
+    """A LOCAL-visibility track URL is hidden anonymously, shown to users."""
+    artist = await _make_artist(db_session, name="URL Artist")
+    track = await _make_track(
+        db_session,
+        artist,
+        title="Local Track",
+        owner=regular_user,
+        visibility=Visibility.LOCAL.value,
+    )
+    await db_session.commit()
+    url = f"{LOCAL_ORIGIN}/tracks/{track.id}"
+
+    assert _section_ids(_search(client, url).json(), "tracks") == []
+    data = _search(client, url, headers=auth_headers(other_user)).json()
+    assert _section_ids(data, "tracks") == [str(track.id)]
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_share_link_grants_access(client, regular_user, db_session, auth_headers):
+    """A share short link yields the shared item even for anonymous callers."""
+    artist = await _make_artist(db_session, name="URL Artist")
+    track = await _make_track(
+        db_session,
+        artist,
+        title="Shared Track",
+        owner=regular_user,
+        visibility=Visibility.PRIVATE.value,
+    )
+    await db_session.commit()
+
+    response = client.post(
+        "/api/v1/share-urls",
+        json={"item_type": "track", "item_id": str(track.id)},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 201
+    share = response.json()
+    token = share["token"]
+
+    for url in (share["url"], f"{LOCAL_ORIGIN}/share/{token}"):
+        data = _search(client, url).json()
+        assert [s["entity"] for s in data["sections"]] == ["tracks"]
+        items = data["sections"][0]["items"]
+        assert [i["id"] for i in items] == [str(track.id)]
+        # The token is the only grant — the result links back to the share
+        # page, which sets the share_token cookie the entity API checks.
+        assert items[0]["url"] == f"/share/{token}"
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_token_query_param_grants_access(client, regular_user, db_session, auth_headers):
+    """A ``?token=`` resource URL grants access to a private item."""
+    artist = await _make_artist(db_session, name="URL Artist")
+    track = await _make_track(
+        db_session,
+        artist,
+        title="Shared Track",
+        owner=regular_user,
+        visibility=Visibility.PRIVATE.value,
+    )
+    await db_session.commit()
+
+    share = client.post(
+        "/api/v1/share-urls",
+        json={"item_type": "track", "item_id": str(track.id)},
+        headers=auth_headers(regular_user),
+    ).json()
+
+    data = _search(client, f"{LOCAL_ORIGIN}/tracks/{track.id}?token={share['token']}").json()
+    items = data["sections"][0]["items"]
+    assert [i["id"] for i in items] == [str(track.id)]
+    assert items[0]["url"] == f"/share/{share['token']}"
+
+    # The ambient grant (header / cookie) applies to a bare resource URL too.
+    data = _search(
+        client,
+        f"{LOCAL_ORIGIN}/tracks/{track.id}",
+        headers={"X-Share-Token": share["token"]},
+    ).json()
+    assert [i["id"] for i in data["sections"][0]["items"]] == [str(track.id)]
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_invalid_and_revoked_tokens(client, regular_user, db_session, auth_headers):
+    """Unknown, revoked, or wrong-item tokens produce no result."""
+    artist = await _make_artist(db_session, name="URL Artist")
+    track = await _make_track(
+        db_session,
+        artist,
+        title="Shared Track",
+        owner=regular_user,
+        visibility=Visibility.PRIVATE.value,
+    )
+    await db_session.commit()
+
+    share = client.post(
+        "/api/v1/share-urls",
+        json={"item_type": "track", "item_id": str(track.id)},
+        headers=auth_headers(regular_user),
+    ).json()
+    token = share["token"]
+
+    assert _search(client, f"{LOCAL_ORIGIN}/api/v1/share/not-a-token").json()["sections"] == []
+
+    # A revoked token stops resolving.
+    revoke = client.delete(f"/api/v1/share-urls/{share['id']}", headers=auth_headers(regular_user))
+    assert revoke.status_code == 204
+    assert _search(client, f"{LOCAL_ORIGIN}/api/v1/share/{token}").json()["sections"] == []
+    data = _search(client, f"{LOCAL_ORIGIN}/tracks/{track.id}?token={token}").json()
+    assert _section_ids(data, "tracks") == []
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_missing_and_unsupported(client):
+    """Missing resources and unrecognized local paths return empty results."""
+    # A nonexistent id looks exactly like an unauthorized one.
+    data = _search(client, f"{LOCAL_ORIGIN}/tracks/does-not-exist").json()
+    assert [s["entity"] for s in data["sections"]] == ["tracks"]
+    assert _section_ids(data, "tracks") == []
+
+    # Unrecognized local paths yield no sections at all.
+    data = _search(client, f"{LOCAL_ORIGIN}/some/random/page").json()
+    assert data["sections"] == []
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_local_profile(client, regular_user, db_session):
+    """A ``/@user`` local URL resolves to the users section."""
+    await db_session.commit()
+    data = _search(client, f"{LOCAL_ORIGIN}/@{regular_user.username}").json()
+    assert [s["entity"] for s in data["sections"]] == ["users"]
+    items = data["sections"][0]["items"]
+    assert [i["id"] for i in items] == [regular_user.username]
+    assert items[0]["url"] == f"/@{regular_user.username}"
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_suppresses_text_results(client, regular_user, db_session):
+    """A direct URL never returns unrelated text matches."""
+    artist = await _make_artist(db_session, name="testserver Artist")
+    track = await _make_track(db_session, artist, title="testserver song", owner=regular_user)
+    other = await _make_track(db_session, artist, title="testserver other", owner=regular_user)
+    await db_session.commit()
+
+    data = _search(client, f"{LOCAL_ORIGIN}/tracks/{track.id}").json()
+    assert len(data["sections"]) == 1
+    assert _section_ids(data, "tracks") == [str(track.id)]
+    assert str(other.id) not in _section_ids(data, "tracks")
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_remote_track_not_yet_cached(client, regular_user, auth_headers, db_session, remote_fetcher):
+    """A remote track URL is dereferenced even when never federated."""
+    await db_session.commit()
+    remote_fetcher({REMOTE_TRACK_URL: REMOTE_TRACK_DOC, REMOTE_ACTOR_URL: REMOTE_ACTOR_DOC})
+
+    response = _search(client, REMOTE_TRACK_URL, headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    data = response.json()
+    assert [s["entity"] for s in data["sections"]] == ["remote"]
+    section = data["sections"][0]
+    assert section["total"] == 1
+    item = section["items"][0]
+    assert item["type"] == "track"
+    assert item["title"] == "Remote Song"
+    assert item["url"].startswith("/remote/track/")
+    assert REMOTE_DOMAIN in item["subtitle"]
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_remote_requires_lookup_permission(client, db_session, remote_fetcher):
+    """Anonymous callers get no remote result under the default policy."""
+    await db_session.commit()
+    fake = remote_fetcher({REMOTE_TRACK_URL: REMOTE_TRACK_DOC})
+
+    data = _search(client, REMOTE_TRACK_URL).json()
+    assert [s["entity"] for s in data["sections"]] == ["remote"]
+    assert _section_ids(data, "remote") == []
+    assert fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_remote_fetch_failure_is_empty(client, regular_user, auth_headers, db_session, remote_fetcher):
+    """A failed remote dereference yields an empty section, not an error."""
+    from songhive.federation.fetch import FetchError
+
+    await db_session.commit()
+    remote_fetcher({REMOTE_TRACK_URL: FetchError("boom", status_code=502)})
+
+    response = _search(client, REMOTE_TRACK_URL, headers=auth_headers(regular_user))
+    assert response.status_code == 200
+    data = response.json()
+    assert [s["entity"] for s in data["sections"]] == ["remote"]
+    assert _section_ids(data, "remote") == []
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_local_spa_remote_page(client, regular_user, auth_headers, db_session, remote_fetcher):
+    """A local ``/remote/…`` SPA URL resolves to the cached remote object."""
+    await db_session.commit()
+    remote_fetcher({REMOTE_TRACK_URL: REMOTE_TRACK_DOC, REMOTE_ACTOR_URL: REMOTE_ACTOR_DOC})
+    first = _search(client, REMOTE_TRACK_URL, headers=auth_headers(regular_user)).json()
+    remote_url = first["sections"][0]["items"][0]["url"]
+
+    data = _search(client, f"{LOCAL_ORIGIN}{remote_url}", headers=auth_headers(regular_user)).json()
+    assert [s["entity"] for s in data["sections"]] == ["remote"]
+    assert [i["url"] for i in data["sections"][0]["items"]] == [remote_url]
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_local_instance_domain(fed_client, fed_config, regular_user, db_session):
+    """URLs on the configured instance domain resolve locally."""
+    track = await _make_track(db_session, await _make_artist(db_session), owner=regular_user)
+    await db_session.commit()
+
+    data = _search(fed_client, f"https://music.example.com/tracks/{track.id}").json()
+    assert _section_ids(data, "tracks") == [str(track.id)]

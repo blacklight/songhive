@@ -361,4 +361,95 @@ describe("SearchView", () => {
 
     expect(section.find(".search-view__provider-error").exists()).toBe(true);
   });
+
+  describe("direct URL lookup", () => {
+    function makeUrlFetch(sections: unknown[] = []) {
+      return vi.fn().mockImplementation((url: string) => {
+        if (url.includes("/search/")) {
+          return Promise.resolve(
+            makeResponse({
+              query: "q",
+              remote_available: false,
+              sections,
+            }),
+          );
+        }
+        return Promise.resolve(makeResponse([], { "X-Total-Count": "0" }));
+      });
+    }
+
+    const trackSection = {
+      entity: "tracks",
+      total: 1,
+      items: [
+        {
+          type: "track",
+          id: "t-1",
+          title: "Linked Track",
+          subtitle: "URL Artist",
+          image_url: null,
+          url: "/tracks/t-1",
+        },
+      ],
+    };
+
+    it("resolves a pasted URL to a single direct result", async () => {
+      vi.stubGlobal("fetch", makeUrlFetch([trackSection]));
+      const wrapper = await mountView({
+        q: "https://manganiello.music/tracks/t-1",
+      });
+      await flushPromises();
+
+      const section = wrapper.find(".search-view__section");
+      expect(section.find(".search-view__section-title").text()).toContain(
+        "Tracks",
+      );
+      const link = wrapper.find(".search-view__link");
+      expect(link.text()).toBe("Linked Track");
+      expect(link.attributes("href")).toBe("/tracks/t-1");
+      expect(section.find(".search-view__meta").text()).toBe("URL Artist");
+    });
+
+    it("hits only the aggregate endpoint — no lists or provider search", async () => {
+      vi.stubGlobal("fetch", makeUrlFetch([trackSection]));
+      await mountView({ q: "https://manganiello.music/tracks/t-1" });
+      await flushPromises();
+
+      const calledUrls = vi
+        .mocked(fetch)
+        .mock.calls.map(([url]) => String(url));
+      expect(calledUrls.filter((u) => u.includes("/search/"))).toHaveLength(1);
+      expect(
+        calledUrls.filter((u) => u.includes("/search/providers")),
+      ).toHaveLength(0);
+      expect(calledUrls.filter((u) => !u.includes("/search/"))).toHaveLength(0);
+    });
+
+    it("shows a no-results state when the URL resolves to nothing", async () => {
+      vi.stubGlobal("fetch", makeUrlFetch([]));
+      const wrapper = await mountView({
+        q: "https://manganiello.music/tracks/missing",
+      });
+      await flushPromises();
+
+      expect(wrapper.find(".search-view__section-empty").text()).toBe(
+        "No results found.",
+      );
+      expect(wrapper.find(".search-view__link").exists()).toBe(false);
+    });
+
+    it("does not render unrelated entity sections for a URL query", async () => {
+      vi.stubGlobal("fetch", makeUrlFetch([trackSection]));
+      const wrapper = await mountView({
+        q: "https://manganiello.music/tracks/t-1",
+      });
+      await flushPromises();
+
+      const sections = wrapper.findAll(".search-view__section");
+      expect(sections).toHaveLength(1);
+      expect(sections[0].find(".search-view__section-title").text()).toContain(
+        "Tracks",
+      );
+    });
+  });
 });

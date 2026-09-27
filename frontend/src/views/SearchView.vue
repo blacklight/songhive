@@ -40,6 +40,7 @@ const {
   activeEntities,
   sections,
   entityConfig,
+  resetSection,
   searchAll,
   searchSection,
   setPage,
@@ -48,6 +49,20 @@ const {
 } = useSearchSections();
 
 const hasSearched = ref(false);
+
+// A pasted URL is a direct entity lookup, not a text query: ``/search``
+// resolves it to the single referenced entity's section. The view renders
+// only that result — per-entity lists, provider groups and the cached
+// remote section stay off.
+const isUrlQuery = computed(() => /^https?:\/\/\S+$/i.test(query.value.trim()));
+const directSections = ref<SearchResultSection[]>([]);
+const directBusy = ref(false);
+const directItems = computed(() =>
+  directSections.value.flatMap((section) => section.items),
+);
+const populatedDirectSections = computed(() =>
+  directSections.value.filter((section) => section.items.length),
+);
 
 // Remote discovery: the aggregate endpoint's ``remote`` section only ever
 // returns cached objects (no network fetch); the explicit lookup action —
@@ -144,6 +159,24 @@ async function performSearch() {
   providerAdded.value = {};
   providerImportError.value = {};
   const term = query.value.trim();
+  directSections.value = [];
+  if (isUrlQuery.value) {
+    providerLoading.value = false;
+    for (const entity of SEARCH_ENTITIES) {
+      resetSection(entity);
+    }
+    directBusy.value = true;
+    try {
+      const response = await searchPreview(term);
+      remoteAvailable.value = response.remote_available ?? false;
+      directSections.value = response.sections;
+    } catch {
+      directSections.value = [];
+    } finally {
+      directBusy.value = false;
+    }
+    return;
+  }
   const hashtag = term.startsWith("#");
   if (term && !hashtag) {
     providerLoading.value = true;
@@ -242,8 +275,14 @@ watch(query, () => performSearch());
 
 const showStart = computed(() => !hasSearched.value || !query.value.trim());
 // ``#term`` is a hashtag lookup: only the tags section is searched/rendered.
+// URL queries bypass the per-entity sections entirely — the direct result
+// block below renders the referenced entity on its own.
 const visibleEntities = computed<SearchSectionEntity[]>(() =>
-  query.value.trim().startsWith("#") ? ["tags"] : activeEntities.value,
+  isUrlQuery.value
+    ? []
+    : query.value.trim().startsWith("#")
+      ? ["tags"]
+      : activeEntities.value,
 );
 </script>
 
@@ -291,6 +330,58 @@ const visibleEntities = computed<SearchSectionEntity[]>(() =>
     </p>
 
     <div v-else class="search-view__sections">
+      <template v-if="isUrlQuery">
+        <section
+          v-for="section in populatedDirectSections"
+          :key="section.entity"
+          class="search-view__section"
+        >
+          <header class="search-view__section-header">
+            <h2 class="search-view__section-title">
+              {{ t(`search.entities.${section.entity}`) }}
+              <span class="search-view__section-count">
+                ({{ section.total }})
+              </span>
+            </h2>
+          </header>
+
+          <ul class="search-view__grid search-view__grid--users">
+            <li
+              v-for="item in section.items"
+              :key="item.id ?? item.url"
+              class="search-view__item search-view__item--remote"
+            >
+              <img
+                v-if="item.image_url"
+                :src="item.image_url"
+                :alt="item.title"
+                class="search-view__thumb"
+              />
+              <span
+                v-else
+                class="search-view__thumb search-view__thumb--empty"
+              />
+              <RouterLink :to="item.url" class="search-view__link">
+                {{ item.title }}
+              </RouterLink>
+              <span v-if="item.subtitle" class="search-view__meta">
+                {{ item.subtitle }}
+              </span>
+            </li>
+          </ul>
+        </section>
+
+        <div
+          v-if="directBusy"
+          class="search-view__section search-view__section-loading"
+        >
+          {{ t("common.loading") }}
+        </div>
+        <p v-else-if="!directItems.length" class="search-view__section-empty">
+          {{ t("search.noResults") }}
+        </p>
+      </template>
+
       <section
         v-for="entity in visibleEntities"
         :key="entity"
