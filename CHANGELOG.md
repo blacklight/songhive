@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `tidal`: First-class TIDAL external-library provider — connect an
+  account via device authorization or PKCE, sync saved tracks, albums,
+  artists and playlists, lazy-load playlist and album contents with
+  configurable TTLs and a manual refresh, and stream or download via
+  codec-aware remuxed DASH segments (FLAC or M4A). Track metadata is
+  immutable and cached in a shared provider catalog; editing is
+  limited to local genres and tags, and federation publishes
+  metadata-only browse links rather than proxied audio.
+  ([`c22cefe`](https://git.platypush.tech/blacklight/songhive/commit/c22cefef03199ffd21998b7dcfbe3133cbb23ab6)).
+- Making a track public no longer auto-federates it — the track PATCH
+  endpoint takes an explicit `publish` flag, and the track and bulk
+  edit UIs show a "Publish on the Fediverse" checkbox before a
+  `Create(Audio)` activity is sent to followers.
+  ([`5e6e0ea`](https://git.platypush.tech/blacklight/songhive/commit/5e6e0ea503b50cfaf6e03bf61f3b188cb35e7aa2)).
+- `artist-view`: Albums on artist pages are now sorted by release
+  year (newest first) by default.
+  ([`c935ec3`](https://git.platypush.tech/blacklight/songhive/commit/c935ec32bb65d24fb3109db94156f1f848235a7b)).
+
+### Fixed
+
+- `musicbrainz`: Cover-art enrichment no longer picks the first
+  title-matching release, which often resolved to bootlegs, promos or
+  limited editions — releases are now ranked by title match, status,
+  disambiguation, release-group type, Cover Art Archive availability,
+  release date and country, and the album is re-linked to the release
+  that actually provided artwork.
+  ([`bfbe8a4`](https://git.platypush.tech/blacklight/songhive/commit/bfbe8a4a6de0e0be3829fdf39bac77e5e604ca16)).
+
 ## 0.3.6
 
 ### Added
