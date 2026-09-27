@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- `orm`: Large collection relationships (library/playlist/album/artist
+  tracks, external-library items, tag/genre associations, podcast
+  episodes) are no longer eagerly loaded, so plain entity queries stop
+  materialising the whole reachable object graph — this fixes the
+  external-library watchdog re-loading ~100k ORM objects every 5
+  seconds and speeds up library and playlist API endpoints.
+  ([`291ba5c`](https://git.platypush.tech/blacklight/songhive/commit/291ba5c590fa79fcc14f01ead1fec32daf5c42c0)).
+
+### Fixed
+
+- `frontend`: The `publish` flag is now sent on the request body only
+  when the content is actually editable.
+  ([`dad091b`](https://git.platypush.tech/blacklight/songhive/commit/dad091b5467651cd10e8fdc81443b9d73bbba6fd)).
+- `tidal`: Albums and artists materialised as a side-effect of track
+  imports now receive artwork — track-derived artists no longer stay
+  imageless, album covers are filled on every track resolution, and
+  artist images are backfilled once per sync pass (existing local
+  artwork is never overwritten).
+  ([`b93a893`](https://git.platypush.tech/blacklight/songhive/commit/b93a893a4982066e66cc7cecd03371518a6467fc)).
+
 ## 0.3.7
 
 ### Added
