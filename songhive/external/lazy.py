@@ -227,6 +227,12 @@ async def ensure_contents(
     expired = fetched_at is not None and ttl is not None and (_utcnow() - fetched_at).total_seconds() >= ttl
     marked_stale = item.contents_error == _STALE_MARKER
     needs_refresh = force or never_fetched or expired or marked_stale or bool(error)
+    if item.state != "active" and not force:
+        # The provider reported the object gone (contents refresh marked it
+        # missing) or it dropped out of the collection listing — retrying on
+        # every view just fails again. A listing sync re-activates the item;
+        # an explicit force refresh still retries.
+        needs_refresh = False
 
     if needs_refresh:
         await _try_enqueue(item, entity_kind, force=force, redis=redis)

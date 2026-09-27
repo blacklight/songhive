@@ -192,6 +192,9 @@ async def upsert_catalog_contents(
     entry.contents = contents
     entry.contents_etag = etag
     entry.contents_fetched_at = now
+    # A successful contents fetch is a fresh sighting — clear a prior
+    # unavailable pin (e.g. the provider had delisted the container).
+    entry.unavailable_at = None
     await session.flush()
     return entry
 

@@ -377,7 +377,7 @@ async def _refresh_external_contents(
     from sqlalchemy import delete
     from sqlalchemy.orm import selectinload
 
-    from ..external.errors import ExternalRateLimited
+    from ..external.errors import ExternalItemNotFound, ExternalRateLimited
     from ..external.lazy import contents_lock_key
     from ..external.sync import (
         RunCounters,
@@ -390,6 +390,7 @@ async def _refresh_external_contents(
     from ..models.playlist import PlaylistTrack
     from ..services.provider_catalog import (
         get_catalog_entry,
+        mark_unavailable,
         upsert_catalog_contents,
         upsert_catalog_entries,
     )
@@ -397,8 +398,6 @@ async def _refresh_external_contents(
     config = load_config([])
     redis = get_redis_client(config)
     lock_key = contents_lock_key(external_library_id, kind, provider_key)
-    entity_id: Optional[str] = None
-    external_library: Optional[ExternalLibrary] = None
 
     try:
         async with get_session() as session:
@@ -432,6 +431,7 @@ async def _refresh_external_contents(
                 contents = await adapter.iter_contents(decrypted, kind, provider_key, etag=etag)
             except ContentsNotModified:
                 item.contents_fetched_at = _utcnow()
+                item.state = "active"
                 if item.contents_error == "stale":
                     item.contents_error = None
                 item.sync_error = None
@@ -440,6 +440,25 @@ async def _refresh_external_contents(
                 return {"status": "not_modified"}
             except ExternalRateLimited:
                 raise
+            except ExternalItemNotFound as exc:
+                # The provider object is gone (e.g. TIDAL delisted the
+                # album): mark the item missing so views stop re-enqueueing
+                # a fetch that can only fail again. A fresh listing sighting
+                # re-activates it via _upsert_external_item.
+                item.state = "missing"
+                item.contents_error = _sanitize_error(exc)
+                item.contents_fetched_at = _utcnow()
+                item.sync_error = None
+                await mark_unavailable(session, external_library.provider_type, kind, provider_key)
+                await session.commit()
+                await _publish_contents_event(session, external_library, kind, entity_id, "error")
+                logger.warning(
+                    "Contents refresh: provider object is gone: library=%s %s/%s",
+                    external_library_id,
+                    kind,
+                    provider_key,
+                )
+                return {"status": "missing", "error": item.contents_error}
             except Exception as exc:
                 item.contents_error = _sanitize_error(exc)
                 item.sync_error = item.contents_error
@@ -544,6 +563,7 @@ async def _refresh_external_contents(
             item.contents_fetched_at = _utcnow()
             item.contents_error = None
             item.sync_error = None
+            item.state = "active"
             await session.commit()
 
             await _publish_contents_event(session, external_library, kind, entity_id, "fresh")

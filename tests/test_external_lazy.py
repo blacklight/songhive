@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import func, select
 
 from songhive.external.base import ExternalLibraryAdapter
+from songhive.external.errors import ExternalItemNotFound
 from songhive.external.lazy import ensure_contents, wait_for_contents
 from songhive.external.registry import register_external_adapter
 from songhive.external.sync import sync_external_library
@@ -106,6 +107,8 @@ class FakeContentsAdapter(ExternalLibraryAdapter):
         current_etag = config.get("etags", {}).get(provider_key)
         if etag is not None and etag == current_etag:
             raise ContentsNotModified()
+        if config.get("raise_contents_not_found"):
+            raise ExternalItemNotFound("provider object gone")
         if config.get("raise_contents_error"):
             raise RuntimeError("provider exploded")
         entries = []
@@ -596,6 +599,62 @@ async def test_refresh_error_recorded_and_published(
     envelope = next(e for e in published if e["type"] == "external_contents_refreshed")
     assert envelope["data"]["state"] == "error"
     assert envelope["user_id"] == str(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_refresh_not_found_marks_missing(
+    db_session, engine, fake_redis, fake_redis_server, make_contents_library, monkeypatch
+):
+    """A provider 404 marks the container missing so views stop re-enqueueing
+    a fetch that can only fail again; force refresh still retries."""
+    from songhive.ws import events as ws_events
+
+    published: list[dict] = []
+    monkeypatch.setattr(ws_events, "_publish_envelope", published.append)
+    delay = _spy_delay(monkeypatch)
+
+    external_library, _, owner = await make_contents_library(
+        {
+            "entities": {"playlists": [_playlist("pl-1")]},
+            "raise_contents_not_found": True,
+        }
+    )
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    playlist = (await db_session.execute(select(Playlist))).scalar_one()
+
+    result = await _run_refresh(db_session, engine, fake_redis, external_library, "playlist", "pl-1")
+    assert result["status"] == "missing"
+
+    item = await _external_item(db_session, external_library, "playlist", "pl-1")
+    assert item.state == "missing"
+    assert item.contents_error
+    assert item.contents_fetched_at is not None
+    assert item.sync_error is None
+
+    # The shared catalog row is pinned unavailable like the stream path does.
+    container = (
+        await db_session.execute(
+            select(ProviderCatalogEntry).where(
+                ProviderCatalogEntry.kind == "playlist",
+                ProviderCatalogEntry.provider_key == "pl-1",
+            )
+        )
+    ).scalar_one()
+    assert container.unavailable_at is not None
+
+    envelope = next(e for e in published if e["type"] == "external_contents_refreshed")
+    assert envelope["data"]["state"] == "error"
+    assert envelope["user_id"] == str(owner.id)
+
+    # Views still report the error state but no longer enqueue a refresh.
+    status = await ensure_contents(db_session, "playlist", str(playlist.id), redis=fake_redis)
+    assert status.state == "error"
+    assert delay.call_count == 0
+
+    # An explicit owner refresh still retries the provider.
+    status = await ensure_contents(db_session, "playlist", str(playlist.id), force=True, redis=fake_redis)
+    assert status.state == "error"
+    assert delay.call_count == 1
 
 
 # ---------------------------------------------------------------------------

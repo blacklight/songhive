@@ -1463,7 +1463,10 @@ the ordered track refs (etag-conditional when supported), rewrites
 `membership="referenced"` (full syncs reconcile by membership so referenced
 tracks untouched by the collection are demoted rather than deleted), and
 publishes an `external_contents_refreshed` WebSocket event so the frontend
-reloads. `POST /playlists/{id}/provider-sync` (and the album equivalent)
+reloads. A provider 404 is terminal, not retried: the item is marked
+`state="missing"`, its catalog row pinned `unavailable_at`, and
+`ensure_contents` stops auto-enqueueing until a listing sync re-activates
+the item. `POST /playlists/{id}/provider-sync` (and the album equivalent)
 forces a refresh for owners/managers.
 
 **Streaming and downloads.** `external/_tidal/stream.py` resolves playback at
