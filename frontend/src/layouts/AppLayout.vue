@@ -751,7 +751,10 @@ const publicProfileLink = computed(() =>
     z-index: var(--z-sidebar);
   }
 
-  .app-layout__sidebar--open {
+  /* postcss-rtlcss wraps the off-canvas rule above in [dir=ltr]/[dir=rtl]
+     prefixes, raising its specificity — the open state needs an extra class
+     to keep outranking it. */
+  .app-layout__sidebar.app-layout__sidebar--open {
     transform: translateX(0);
   }
 

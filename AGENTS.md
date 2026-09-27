@@ -150,9 +150,16 @@
   properties by hand. Icons whose glyph implies direction are mirrored via
   `frontend/src/styles/rtl.css` — add new directional FontAwesome icons
   (arrows, chevrons, reply/share) there, but never media-transport icons
-  (play, step-forward/backward). Arabic plural strings use all six CLDR
-  forms in pipe order `zero | one | two | few | many | other` (see
-  `arabicPluralRule`); other locales keep the English pipe count.
+  (play, step-forward/backward). `postcss-rtlcss` boosts the specificity of
+  every rule containing a directional declaration by wrapping it in
+  `[dir="ltr"]`/`[dir="rtl"]`, while direction-invariant overrides
+  (e.g. `transform: translateX(0)` re-showing an off-canvas element) stay
+  unprefixed and lose the cascade — give such state-override rules an extra
+  class (e.g. `.sidebar.sidebar--open`) so they still win (the nav sidebars
+  in `AppLayout.vue`/`AdminLayout.vue` were broken by this). Arabic plural
+  strings use all six CLDR forms in pipe order
+  `zero | one | two | few | many | other` (see `arabicPluralRule`); other
+  locales keep the English pipe count.
 - The frontend toolchain (vite 8, vitest 5, jsdom 30 via undici 8) requires
   Node 24+; undici 8 calls `worker_threads.markAsUncloneable`, which does not
   exist on Node 20. CI and the Dockerfile `NODE_VERSION` both pin Node 24.
