@@ -11,27 +11,27 @@
 
 <!-- toc -->
 
-- [🌟 Overview](#%F0%9F%8C%9F-overview)
-- [⚡ Features](#%E2%9A%A1-features)
-  * [🎵 Music streaming](#%F0%9F%8E%B5-music-streaming)
-  * [📢 Social & federated](#%F0%9F%93%A2-social--federated)
-  * [🔁 Sharing & privacy](#%F0%9F%94%81-sharing--privacy)
-  * [🛠️ Platform](#%F0%9F%9B%A0%EF%B8%8F-platform)
-- [📐 Architecture](#%F0%9F%93%90-architecture)
-- [📦 Installation](#%F0%9F%93%A6-installation)
-  * [🏗️ Docker](#%F0%9F%8F%97%EF%B8%8F-docker)
+- [🌟 Overview](#overview)
+- [⚡ Features](#features)
+  * [🎵 Music streaming](#music-streaming)
+  * [📢 Social & federated](#social-federated)
+  * [🔁 Sharing & privacy](#sharing-privacy)
+  * [🛠️ Platform](#platform)
+- [📐 Architecture](#architecture)
+- [📦 Installation](#installation)
+  * [🏗️ Docker](#docker)
     + [Latest image](#latest-image)
     + [From a local checkout](#from-a-local-checkout)
-  * [🐍 pip](#%F0%9F%90%8D-pip)
+  * [🐍 pip](#pip)
     + [Latest stable package](#latest-stable-package)
     + [From a local checkout](#from-a-local-checkout-1)
-  * [🌐 nginx setup](#%F0%9F%8C%90-nginx-setup)
-- [⚙️ Configuration](#%E2%9A%99%EF%B8%8F-configuration)
+  * [🌐 nginx setup](#nginx-setup)
+- [⚙️ Configuration](#configuration)
   * [Getting the default configuration](#getting-the-default-configuration)
   * [Base configuration](#base-configuration)
   * [From environment variables](#from-environment-variables)
   * [User-facing features and toggles](#user-facing-features-and-toggles)
-- [⚡ Running the service](#%E2%9A%A1-running-the-service)
+- [⚡ Running the service](#running-the-service)
   * [Docker installation](#docker-installation)
   * [pip installation](#pip-installation)
     + [Celery](#celery)
@@ -41,22 +41,22 @@
   * [Creating the admin user](#creating-the-admin-user)
     + [Docker installation](#docker-installation-1)
     + [pip installation](#pip-installation-1)
-- [▶️ Testing the installation](#%E2%96%B6%EF%B8%8F-testing-the-installation)
-- [🔔 Notifications](#%F0%9F%94%94-notifications)
-- [🧩 Integrations](#%F0%9F%A7%A9-integrations)
+- [▶️ Testing the installation](#testing-the-installation)
+- [🔔 Notifications](#notifications)
+- [🧩 Integrations](#integrations)
   * [Subsonic-compatible clients](#subsonic-compatible-clients)
   * [Mopidy](#mopidy)
-- [🛠️ Development](#%F0%9F%9B%A0%EF%B8%8F-development)
+- [🛠️ Development](#development)
   * [Frontend](#frontend)
-- [API](#-api)
-- [📜 License](#%F0%9F%93%9C-license)
+- [API](#api)
+- [📜 License](#license)
 
 <!-- tocstop -->
 
 A federated and self-hosted music sharing service, built with ActivityPub
 federation support.
 
-## 🌟 Overview
+## <a name="overview"></a>🌟 Overview
 
 Songhive is a self-hosted music streaming and sharing platform — think
 [Funkwhale](https://funkwhale.audio) meets Mastodon — where your music library
@@ -75,9 +75,9 @@ desktop](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-full.pn
 ![Screenshot of an instance's home page on
 mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federated.png)
 
-## ⚡ Features
+## <a name="features"></a>⚡ Features
 
-### 🎵 Music streaming
+### <a name="music-streaming"></a>🎵 Music streaming
 
 - 💿 **Music Library**: Upload and organize artists, albums, and tracks, with
   automatic tag extraction, duplicate detection, and metadata enrichment from
@@ -100,7 +100,7 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
 - 🐍 **Mopidy**: browse and play your instance's library from a Mopidy server via
   the [`mopidy-songhive` extension](https://github.com/blacklight/mopidy-songhive)
 
-### 📢 Social & federated
+### <a name="social-federated"></a>📢 Social & federated
 
 - 🌐 **Federation**: Full ActivityPub support via
   [pubby](https://github.com/blacklight/pubby) — federate with Mastodon and
@@ -129,7 +129,7 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
   exposes RSS 2.0 and Atom feeds, with `<link rel="alternate">` discovery tags
   served to feed readers
 
-### 🔁 Sharing & privacy
+### <a name="sharing-privacy"></a>🔁 Sharing & privacy
 
 - 🔒 **Fine-grained visibility**: keep tracks, albums, playlists and libraries
   `private`, `local` (instance-only) or `public`
@@ -144,7 +144,7 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
   will send you a notification. Every content you share, link or comment on on a
   source that supports Webmentions will send a Webmention back to the source
 
-### 🛠️ Platform
+### <a name="platform"></a>🛠️ Platform
 
 - 👥 **Multi-user**: User registration (open, invite-only or closed), profiles
   with per-user profile visibility, and admin management
@@ -167,7 +167,7 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
 ![Screenshot of a profile
 view](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/profile-view.png)
 
-## 📐 Architecture
+## <a name="architecture"></a>📐 Architecture
 
 - **Backend**: FastAPI (REST API) + Tornado (WebSocket, streaming, process server)
 - **Models**: Pydantic (validation) + SQLAlchemy (async ORM)
@@ -176,12 +176,12 @@ view](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/profile-view.pn
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
 
-## 📦 Installation
+## <a name="installation"></a>📦 Installation
 
 Songhive can be run either as a complete Docker stack or installed locally with
 `pip`.
 
-### 🏗️ Docker
+### <a name="docker"></a>🏗️ Docker
 
 The Docker Compose setup pulls the published image, starts PostgreSQL and
 Redis, and wires everything together behind an Nginx reverse proxy. The
@@ -233,7 +233,7 @@ published image — `docker compose build` is a no-op unless you first
 uncomment the `build:` blocks in `docker-compose.yml`, which is what you want
 if you intend to build the image from the local checkout instead.
 
-### 🐍 pip
+### <a name="pip"></a>🐍 pip
 
 This path is useful for local development or running on an existing Python host.
 A published package is also available on PyPI and ships the built web UI, so the
@@ -277,12 +277,12 @@ npm run build
 cd ..
 ```
 
-### 🌐 nginx setup
+### <a name="nginx-setup"></a>🌐 nginx setup
 
 If you are planning to serve Songhive behind a reverse proxy, you can reuse the
 [`nginx.conf`](./docker/nginx.conf) used by the Docker setup.
 
-## ⚙️ Configuration
+## <a name="configuration"></a>⚙️ Configuration
 
 ### Getting the default configuration
 
@@ -380,7 +380,7 @@ profile visibility (`public`/`local`/`private`), notification preferences
 (in-app, email, daily digest), API tokens, active sessions, mutes and blocks,
 and scrobbling thresholds.
 
-## ⚡ Running the service
+## <a name="running-the-service"></a>⚡ Running the service
 
 ### Docker installation
 
@@ -523,7 +523,7 @@ songhive -c "$SONGHIVE_CONFIG" admin create-user \
     --admin
 ```
 
-## ▶️ Testing the installation
+## <a name="testing-the-installation"></a>▶️ Testing the installation
 
 Open:
 
@@ -531,7 +531,7 @@ Open:
 - **Swagger UI**: http://localhost:8000/swagger-ui/
 - **OpenAPI spec**: http://localhost:8000/openapi.json
 
-## 🔔 Notifications
+## <a name="notifications"></a>🔔 Notifications
 
 For OS-native notifications, generate your VAPID keys with:
 
@@ -542,7 +542,7 @@ songhive admin generate-vapid-keys
 Then add them to [your configuration](./config.toml.example) and restart the
 service.
 
-## 🧩 Integrations
+## <a name="integrations"></a>🧩 Integrations
 
 ### Subsonic-compatible clients
 
@@ -595,7 +595,7 @@ pip install mopidy-songhive
 It allows you to browse and play your libraries, playlists, albums etc. directly
 from your Mopidy instance.
 
-## 🛠️ Development
+## <a name="development"></a>🛠️ Development
 
 ```bash
 # Run tests
@@ -620,7 +620,7 @@ npm run dev     # Development server
 npm run build   # Production build (outputs to songhive/static/)
 ```
 
-## </> API
+## <a name="api"></a></> API
 
 REST API available at `/api/v1/`:
 
@@ -646,6 +646,6 @@ WebSocket: `/ws/events` (real-time notifications)
 
 Federation: `/.well-known/webfinger`, `/ap/actor`, `/ap/inbox`, `/ap/outbox`
 
-## 📜 License
+## <a name="license"></a>📜 License
 
 [AGPL-3.0](./LICENSE)

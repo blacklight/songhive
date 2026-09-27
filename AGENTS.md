@@ -95,6 +95,14 @@
   dispatches `sys.argv[2:]` to the matching `*_main` entry point — a
   subcommand must be the first argument, since server options are not
   forwarded to it.
+- The README table of contents (between `<!-- toc -->`/`<!-- tocstop -->`) is
+  maintained by the `markdown-toc` pre-commit hook, a local hook running
+  `scripts/update_toc.py` (stdlib only). It emits Forgejo-style slugs
+  (emoji/punctuation dropped, separators collapsed), which match the canonical
+  host's heading anchors. GitHub slugifies differently (e.g. `## 🌟 Overview` →
+  `#-overview`), so headings whose title isn't plain `[A-Za-z0-9 -]` carry an
+  explicit `<a name="slug"></a>` anchor inside the heading line — keep it in
+  sync when renaming a heading (`tests/test_readme_toc.py` enforces this).
 - The `pubby` library provides ActivityPub federation (FastAPI adapter).
 - Every remote HTTP fetch on the Webmention path (incoming source parsing,
   outgoing endpoint discovery, outgoing delivery, outgoing source reads)

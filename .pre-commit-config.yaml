@@ -11,10 +11,13 @@ repos:
     - id: check-added-large-files
       args: ['--maxkb=3000']
 
--   repo: https://github.com/Lucas-C/pre-commit-hooks-nodejs
-    rev: v1.1.2
+-   repo: local
     hooks:
     -   id: markdown-toc
+        name: Regenerate Markdown table of contents
+        language: python
+        entry: python scripts/update_toc.py
+        files: .*\.md$
 
 - repo: https://github.com/PyCQA/flake8
   rev: 7.1.0
