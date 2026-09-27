@@ -5,18 +5,51 @@ const STORAGE_LOCALE_KEY = "songhive.locale";
 
 const localeLoaders: Record<string, () => Promise<Record<string, unknown>>> = {
   en: () => Promise.resolve(en),
+  it: () => import("./locales/it.json").then((m) => m.default),
 };
 
 export function getSupportedLocales(): string[] {
   return Object.keys(localeLoaders);
 }
 
-export function getStoredLocale(): string {
-  return localStorage.getItem(STORAGE_LOCALE_KEY) || "en";
+export function getStoredLocale(): string | null {
+  return localStorage.getItem(STORAGE_LOCALE_KEY) || null;
 }
 
 export function setStoredLocale(locale: string) {
   localStorage.setItem(STORAGE_LOCALE_KEY, locale);
+}
+
+export function clearStoredLocale() {
+  localStorage.removeItem(STORAGE_LOCALE_KEY);
+}
+
+export function resolveLocale(
+  candidate: string | null | undefined,
+): string | null {
+  if (!candidate) return null;
+  const supported = getSupportedLocales();
+  const normalized = candidate.toLowerCase();
+  if (supported.includes(normalized)) return normalized;
+  const base = normalized.split("-")[0];
+  return (
+    supported.find((locale) => locale.toLowerCase().split("-")[0] === base) ??
+    null
+  );
+}
+
+export function detectBrowserLocale(): string {
+  const candidates =
+    typeof navigator === "undefined"
+      ? []
+      : navigator.languages?.length
+        ? navigator.languages
+        : [navigator.language];
+  for (const candidate of candidates) {
+    const resolved = resolveLocale(candidate);
+    if (resolved) return resolved;
+  }
+  return "en";
 }
 
 export const i18n = createI18n({
@@ -42,13 +75,17 @@ export async function loadLocale(locale: string): Promise<boolean> {
   }
 }
 
-export async function initializeI18n(): Promise<void> {
-  const stored = getStoredLocale();
-  const initial = getSupportedLocales().includes(stored) ? stored : "en";
-  if (initial !== "en") {
-    await loadLocale(initial);
+export function applyLocale(locale: string) {
+  i18n.global.locale.value = locale as "en";
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = locale;
   }
-  i18n.global.locale.value = initial as "en";
+}
+
+export async function initializeI18n(): Promise<void> {
+  const initial = resolveLocale(getStoredLocale()) ?? detectBrowserLocale();
+  const loaded = initial === "en" || (await loadLocale(initial));
+  applyLocale(loaded ? initial : "en");
 }
 
 export function formatDateTime(

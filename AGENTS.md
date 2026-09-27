@@ -127,6 +127,13 @@
   `songhive/static/swagger-ui/` (rewriting `swagger-initializer.js` to point
   at the app's `/openapi.json`); FastAPI mounts it at `/swagger-ui/` so no
   separate swagger-ui container is needed.
+- UI strings live in `frontend/src/i18n/locales/*.json` (`en.json` is the
+  fallback and is bundled eagerly; other locales are loaded on demand via the
+  `localeLoaders` map in `frontend/src/i18n/index.ts`). The active locale is
+  resolved from `localStorage["songhive.locale"]` (set from the profile
+  Interface tab) or, when unset, from `navigator.languages` with `en` as
+  fallback. When adding or changing an i18n key, update EVERY locale file —
+  not just `en.json` — so translations never fall back to the key name.
 - The frontend toolchain (vite 8, vitest 5, jsdom 30 via undici 8) requires
   Node 24+; undici 8 calls `worker_threads.markAsUncloneable`, which does not
   exist on Node 20. CI and the Dockerfile `NODE_VERSION` both pin Node 24.
@@ -561,8 +568,8 @@ record an audit log entry with `songhive.services.audit.log_action`.
   `log_action` rejects unknown values, and
   `GET /api/v1/admin/audit/target-types` exposes the enum so the admin
   audit page's target-type dropdown stays in sync automatically. Add a
-  member there (plus an `pages.admin.audit.targetTypes.*` label in
-  `frontend/src/i18n/locales/en.json`) when a new target type is needed.
+  member there (plus an `pages.admin.audit.targetTypes.*` label in every
+  `frontend/src/i18n/locales/*.json` file) when a new target type is needed.
 
 Example:
 

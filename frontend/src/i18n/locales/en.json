@@ -1670,7 +1670,10 @@
       "hint": "Customize how Songhive looks on this device.",
       "themeLabel": "Theme",
       "themeHint": "\"System\" follows your device's appearance setting.",
-      "accentHint": "Used for highlights, buttons and active states."
+      "accentHint": "Used for highlights, buttons and active states.",
+      "languageLabel": "Language",
+      "languageHint": "\"Browser default\" follows your browser's language setting.",
+      "languageAuto": "Browser default"
     },
     "security": {
       "passwordLabel": "Current password",

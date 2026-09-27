@@ -2,11 +2,13 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { ACCENT_PRESETS, useThemeStore, type ThemeMode } from "@/stores/theme";
+import { useLocale } from "@/composables/useLocale";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 
 const { t } = useI18n();
 const themeStore = useThemeStore();
+const { available: availableLocales, stored, setLocale } = useLocale();
 
 const mode = computed({
   get: () => themeStore.mode,
@@ -17,6 +19,27 @@ const themeOptions = computed(() => [
   { value: "system", label: t("theme.system") },
   { value: "light", label: t("theme.light") },
   { value: "dark", label: t("theme.dark") },
+]);
+
+const language = computed({
+  get: () => stored.value ?? "",
+  set: (value: string) => void setLocale(value || null),
+});
+
+function languageName(code: string): string {
+  try {
+    return new Intl.DisplayNames([code], { type: "language" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
+const languageOptions = computed(() => [
+  { value: "", label: t("profile.interface.languageAuto") },
+  ...availableLocales.map((code) => ({
+    value: code,
+    label: languageName(code),
+  })),
 ]);
 
 function accentLabel(name: string): string {
@@ -35,6 +58,14 @@ function accentLabel(name: string): string {
       :options="themeOptions"
       :label="t('profile.interface.themeLabel')"
       :hint="t('profile.interface.themeHint')"
+    />
+
+    <AppSelect
+      v-model="language"
+      class="interface-tab__language"
+      :options="languageOptions"
+      :label="t('profile.interface.languageLabel')"
+      :hint="t('profile.interface.languageHint')"
     />
 
     <div class="interface-tab__accent">
@@ -92,7 +123,8 @@ function accentLabel(name: string): string {
   color: var(--color-text-muted);
 }
 
-.interface-tab__theme {
+.interface-tab__theme,
+.interface-tab__language {
   max-width: 20rem;
 }
 

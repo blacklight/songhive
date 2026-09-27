@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
-import { i18n } from "@/i18n";
+import { getSupportedLocales, i18n } from "@/i18n";
 import { ACCENT_PRESETS, useThemeStore } from "@/stores/theme";
 import InterfaceTab from "./InterfaceTab.vue";
 
@@ -15,15 +15,43 @@ describe("InterfaceTab", () => {
 
   it("renders the theme selector with the current mode", () => {
     const wrapper = mount(InterfaceTab);
-    const select = wrapper.find("select");
+    const select = wrapper.find(".interface-tab__theme select");
 
     expect(select.exists()).toBe(true);
     expect((select.element as HTMLSelectElement).value).toBe("system");
-    expect(wrapper.findAll("option").map((o) => o.text())).toEqual([
+    expect(
+      wrapper.findAll(".interface-tab__theme option").map((o) => o.text()),
+    ).toEqual([
       i18n.global.t("theme.system"),
       i18n.global.t("theme.light"),
       i18n.global.t("theme.dark"),
     ]);
+  });
+
+  it("renders the language selector and persists the choice", async () => {
+    const wrapper = mount(InterfaceTab);
+    const select = wrapper.find(".interface-tab__language select");
+
+    expect(select.exists()).toBe(true);
+    expect((select.element as HTMLSelectElement).value).toBe("");
+    const options = wrapper
+      .findAll(".interface-tab__language option")
+      .map((o) => o.text());
+    expect(options[0]).toBe(i18n.global.t("profile.interface.languageAuto"));
+    expect(options.length).toBe(1 + getSupportedLocales().length);
+
+    await select.setValue("it");
+    await vi.waitFor(() => {
+      expect(localStorage.getItem("songhive.locale")).toBe("it");
+    });
+    expect(i18n.global.locale.value).toBe("it");
+
+    await select.setValue("");
+    await vi.waitFor(() => {
+      expect(localStorage.getItem("songhive.locale")).toBeNull();
+    });
+
+    i18n.global.locale.value = "en";
   });
 
   it("persists the selected theme through the theme store", async () => {
