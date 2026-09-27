@@ -1,0 +1,27 @@
+/*
+ * RTL adjustments that postcss-rtlcss cannot infer automatically.
+ *
+ * postcss-rtlcss already mirrors directional CSS declarations (margins,
+ * paddings, borders, positions, text-align) under [dir="rtl"]. What remains
+ * is semantic mirroring: icons whose glyph implies reading direction must be
+ * flipped horizontally. Media transport icons (play, step-forward, …) are
+ * intentionally NOT mirrored — playback direction is universal.
+ */
+[dir="rtl"] .fa-arrow-left,
+[dir="rtl"] .fa-arrow-right,
+[dir="rtl"] .fa-arrow-up-right-from-square,
+[dir="rtl"] .fa-chevron-left,
+[dir="rtl"] .fa-chevron-right,
+[dir="rtl"] .fa-angle-left,
+[dir="rtl"] .fa-angle-right,
+[dir="rtl"] .fa-caret-left,
+[dir="rtl"] .fa-caret-right,
+[dir="rtl"] .fa-reply,
+[dir="rtl"] .fa-reply-all,
+[dir="rtl"] .fa-share,
+[dir="rtl"] .fa-arrow-right-from-bracket,
+[dir="rtl"] .fa-arrow-right-to-bracket,
+[dir="rtl"] .fa-arrow-left-long,
+[dir="rtl"] .fa-arrow-right-long {
+  transform: scaleX(-1);
+}

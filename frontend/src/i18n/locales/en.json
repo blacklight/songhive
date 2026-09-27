@@ -1627,7 +1627,7 @@
     "deleteAccountWarning": "This action is irreversible. Your tracks and collection will have no owner unless you also choose to delete all content you created.",
     "deleteAccountRecursiveLabel": "Also delete all content I created (tracks, albums, playlists, libraries and radios)",
     "deleteAccountConfirmationLabel": "Confirm account deletion",
-    "deleteAccountConfirmationHint": "Type \"Yes, I really want to delete my account\" to confirm.",
+    "deleteAccountConfirmationHint": "Type \"{phrase}\" to confirm.",
     "deleteAccountConfirmationError": "Confirmation text does not match. Please type the exact phrase shown above.",
     "deleteAccountCancel": "Cancel",
     "deleteAccountConfirm": "Delete account",

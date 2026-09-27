@@ -1627,7 +1627,7 @@
     "deleteAccountWarning": "Questa azione è irreversibile. I tuoi brani e la tua collezione resteranno senza proprietario a meno che tu non scelga anche di eliminare tutti i contenuti che hai creato.",
     "deleteAccountRecursiveLabel": "Elimina anche tutti i contenuti che ho creato (brani, album, playlist, librerie e radio)",
     "deleteAccountConfirmationLabel": "Conferma eliminazione account",
-    "deleteAccountConfirmationHint": "Digita \"Sì, voglio davvero eliminare il mio account\" per confermare.",
+    "deleteAccountConfirmationHint": "Digita \"{phrase}\" per confermare.",
     "deleteAccountConfirmationError": "Il testo di conferma non corrisponde. Digita esattamente la frase mostrata sopra.",
     "deleteAccountCancel": "Annulla",
     "deleteAccountConfirm": "Elimina account",

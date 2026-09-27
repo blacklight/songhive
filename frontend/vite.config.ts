@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import rtlcss from 'postcss-rtlcss'
 import { cpSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -50,6 +51,13 @@ function swaggerUi(): Plugin {
 
 export default defineConfig({
   plugins: [vue(), swaggerUi()],
+  // Mirrors physical directional CSS (left/right, text-align, floats, ...)
+  // into [dir=ltr]/[dir=rtl] variants so RTL locales get a flipped layout.
+  css: {
+    postcss: {
+      plugins: [rtlcss()],
+    },
+  },
   resolve: {
     alias: {
       '@': resolve(import.meta.dirname, 'src'),

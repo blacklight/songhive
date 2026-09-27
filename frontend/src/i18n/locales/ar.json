@@ -1,0 +1,2440 @@
+{
+  "tags": {
+    "title": "الوسوم",
+    "label": "الوسوم",
+    "placeholder": "أضف وسوما…",
+    "ariaLabel": "الوسوم",
+    "hint": "أحرف صغيرة وأرقام وشرطات سفلية؛ حرف واحد على الأقل. افصل بينها بفواصل أو مسافات.",
+    "emptyTag": "أدخل وسما.",
+    "tooLong": "يجب ألا يتجاوز الوسم 64 حرفا.",
+    "invalidCharacters": "قد تحتوي الوسوم فقط على أحرف صغيرة وأرقام وشرطات سفلية.",
+    "noLetter": "يجب أن تحتوي الوسوم على حرف واحد على الأقل.",
+    "removeTag": "إزالة {tag}",
+    "itemCount": "{count} عناصر",
+    "searchPlaceholder": "ابحث في الوسوم…",
+    "allTags": "كل الوسوم",
+    "taggedItems": "عناصر موسومة",
+    "empty": "لا توجد وسوم.",
+    "emptyItems": "لا توجد عناصر موسومة بهذا الوسم.",
+    "deleteConfirm": "حذف الوسم \"{name}\" وإزالته من كل العناصر؟",
+    "deleteSuccess": "تم حذف الوسم.",
+    "deleteError": "تعذر حذف الوسم: {message}",
+    "saveError": "تعذر حفظ الوسوم: {message}"
+  },
+  "genres": {
+    "title": "الأنواع",
+    "label": "الأنواع",
+    "placeholder": "أضف أنواعا…",
+    "ariaLabel": "الأنواع",
+    "hint": "أحرف صغيرة، أرقام، مسافات، شرطات سفلية، &، - و/؛ حرف واحد على الأقل. افصل بينها بفواصل أو فواصل منقوطة.",
+    "emptyTag": "أدخل نوعا.",
+    "tooLong": "يجب ألا يتجاوز النوع 128 حرفا.",
+    "invalidCharacters": "قد تحتوي الأنواع فقط على أحرف صغيرة، أرقام، مسافات، شرطات سفلية، &، - و/.",
+    "noLetter": "يجب أن تحتوي الأنواع على حرف واحد على الأقل.",
+    "removeTag": "إزالة {tag}",
+    "itemCount": "{count} عناصر",
+    "searchPlaceholder": "ابحث في الأنواع…",
+    "allGenres": "كل الأنواع",
+    "taggedItems": "عناصر موسومة",
+    "empty": "لا توجد أنواع.",
+    "emptyItems": "لا توجد عناصر في هذا النوع.",
+    "deleteConfirm": "حذف النوع \"{name}\" وإزالته من كل العناصر؟",
+    "deleteSuccess": "تم حذف النوع.",
+    "deleteError": "تعذر حذف النوع: {message}",
+    "saveError": "تعذر حفظ الأنواع: {message}"
+  },
+  "feeds": {
+    "subscribe": "الخلاصة",
+    "rss": "خلاصة RSS",
+    "atom": "خلاصة Atom"
+  },
+  "common": {
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "delete": "حذف",
+    "confirm": "تأكيد",
+    "close": "إغلاق",
+    "openMenu": "فتح القائمة",
+    "closeMenu": "إغلاق القائمة",
+    "clear": "مسح",
+    "loading": "جار التحميل",
+    "error": "خطأ",
+    "retry": "إعادة المحاولة",
+    "search": "بحث",
+    "copy": "نسخ",
+    "loadMore": "تحميل المزيد",
+    "asc": "تصاعدي",
+    "desc": "تنازلي",
+    "notFound": "غير موجود",
+    "forbidden": "ممنوع",
+    "edit": "تعديل",
+    "remove": "إزالة",
+    "play": "تشغيل",
+    "pause": "إيقاف مؤقت",
+    "favorite": "تفضيل",
+    "unfavorite": "إلغاء التفضيل",
+    "favoriteAdded": "تمت الإضافة إلى المفضلة.",
+    "favoriteRemoved": "تمت الإزالة من المفضلة.",
+    "favoriteAddError": "تعذرت الإضافة إلى المفضلة: {message}",
+    "favoriteRemoveError": "تعذرت الإزالة من المفضلة: {message}",
+    "share": "مشاركة",
+    "download": "تنزيل",
+    "downloadM3u": "تنزيل M3U",
+    "yes": "نعم",
+    "no": "لا",
+    "all": "الكل",
+    "required": "مطلوب",
+    "playAll": "تشغيل الكل"
+  },
+  "sort": {
+    "label": "ترتيب حسب",
+    "ascending": "تصاعدي",
+    "descending": "تنازلي",
+    "fields": {
+      "name": "الاسم",
+      "title": "العنوان",
+      "username": "اسم المستخدم",
+      "artist_name": "الفنان",
+      "album_title": "الألبوم",
+      "created_at": "تاريخ الإضافة",
+      "updated_at": "تاريخ التحديث",
+      "release_year": "سنة الإصدار",
+      "position": "ترتيب قائمة التشغيل",
+      "item_count": "عدد العناصر",
+      "first_used": "أول استخدام",
+      "last_used": "آخر استخدام",
+      "type": "النوع"
+    }
+  },
+  "search": {
+    "title": "البحث",
+    "placeholder": "ابحث في المقاطع والألبومات والفنانين وقوائم التشغيل والمكتبات والمستخدمين والوسوم والأنواع",
+    "start": "أدخل مصطلح بحث أعلاه للعثور على محتوى في Songhive.",
+    "filters": "البحث في",
+    "loading": "جار تحميل الاقتراحات",
+    "error": "تعذر تحميل الاقتراحات.",
+    "noResults": "لا توجد نتائج.",
+    "entities": {
+      "tracks": "المقاطع",
+      "albums": "الألبومات",
+      "artists": "الفنانون",
+      "playlists": "قوائم التشغيل",
+      "libraries": "المكتبات",
+      "users": "المستخدمون",
+      "tags": "الوسوم",
+      "genres": "الأنواع",
+      "remote": "بعيد"
+    },
+    "providerResults": "الخدمات المتصلة",
+    "providerGroup": "{provider} — {name}",
+    "providerAdd": "إضافة إلى المكتبة",
+    "providerAdded": "تمت الإضافة",
+    "providerAddFailed": "تعذرت الإضافة إلى المكتبة."
+  },
+  "statusComposer": {
+    "title": "منشور جديد",
+    "placeholder": "بم تفكر؟",
+    "publish": "نشر",
+    "published": "نُشر المنشور.",
+    "contentType": "الصيغة",
+    "contentTypes": {
+      "text/markdown": "Markdown",
+      "text/plain": "نص عادي"
+    },
+    "visibility": "الظهور",
+    "language": "اللغة",
+    "attachFile": "إرفاق ملف",
+    "attachTrack": "إرفاق مقطع",
+    "trackSearchPlaceholder": "ابحث عن مقاطع لإرفاقها…",
+    "uploadError": "تعذر رفع المرفق: {message}",
+    "audioImport": {
+      "uploadToLibrary": "إضافة المرفقات الصوتية إلى مكتبتك أيضا",
+      "fetchMetadata": "جلب بيانات المقطع الوصفية (MusicBrainz)",
+      "fetchMetadataHint": "يبحث عن الفنان والألبوم والعنوان عبر الإنترنت بعد الاستيراد.",
+      "targetLibrary": "المكتبة",
+      "defaultLibrary": "الرفوعات (افتراضي)"
+    }
+  },
+  "theme": {
+    "light": "فاتح",
+    "dark": "داكن",
+    "system": "النظام",
+    "accent": "لون التمييز",
+    "accents": {
+      "yellow": "أصفر",
+      "orange": "برتقالي",
+      "red": "أحمر",
+      "green": "أخضر",
+      "blue": "أزرق",
+      "cyan": "سماوي",
+      "purple": "بنفسجي",
+      "gray": "رمادي",
+      "olive": "زيتوني",
+      "turquoise": "فيروزي"
+    }
+  },
+  "auth": {
+    "login": "تسجيل الدخول",
+    "logout": "تسجيل الخروج",
+    "register": "التسجيل",
+    "email": "البريد الإلكتروني",
+    "password": "كلمة المرور",
+    "username": "اسم المستخدم",
+    "loginPage": {
+      "title": "تسجيل الدخول",
+      "usernameOrEmail": "اسم المستخدم أو البريد الإلكتروني",
+      "password": "كلمة المرور",
+      "submit": "تسجيل الدخول",
+      "failed": "اسم المستخدم أو كلمة المرور غير صحيحة.",
+      "emailNotVerified": "لم يتم التحقق من عنوان بريدك الإلكتروني.",
+      "forgotPassword": "نسيت كلمة المرور؟",
+      "noAccount": "ليس لديك حساب؟ سجل",
+      "mfa": {
+        "title": "المصادقة الثنائية",
+        "hint": "أدخل الرمز من تطبيق المصادقة، أو أحد رموز الاسترداد لديك.",
+        "code": "رمز المصادقة أو الاسترداد",
+        "submit": "تحقق",
+        "useSecurityKey": "استخدام مفتاح أمان",
+        "back": "عودة لتسجيل الدخول",
+        "failed": "فشل التحقق. سجل الدخول مجددا."
+      }
+    },
+    "registerPage": {
+      "title": "التسجيل",
+      "username": "اسم المستخدم",
+      "email": "البريد الإلكتروني",
+      "password": "كلمة المرور",
+      "confirmPassword": "تأكيد كلمة المرور",
+      "displayName": "الاسم المعروض",
+      "displayNameHint": "اسم اختياري يظهر على ملفك الشخصي العام",
+      "inviteCode": "رمز الدعوة",
+      "inviteCodeHint": "مطلوب إن كان هذا الخادم يتطلب دعوات",
+      "submit": "تسجيل",
+      "success": "تم التسجيل بنجاح. سجل الدخول.",
+      "emailVerificationNotice": "تحقق من بريدك الوارد للتحقق من عنوان بريدك الإلكتروني.",
+      "passwordMismatch": "كلمتا المرور غير متطابقتين.",
+      "haveAccount": "لديك حساب مسبقا؟ سجل الدخول"
+    },
+    "passwordReset": {
+      "requestTitle": "إعادة تعيين كلمة المرور",
+      "requestHint": "أدخل اسم المستخدم أو البريد الإلكتروني وسنرسل لك رابط إعادة تعيين إن وُجد حساب.",
+      "usernameOrEmail": "اسم المستخدم أو البريد الإلكتروني",
+      "requestSubmit": "إرسال رابط إعادة التعيين",
+      "requestSuccess": "إن وُجد حساب، فقد أُرسل رابط إعادة تعيين إلى عنوان بريده الإلكتروني.",
+      "backToLogin": "عودة لتسجيل الدخول",
+      "confirmTitle": "تعيين كلمة مرور جديدة",
+      "newPassword": "كلمة المرور الجديدة",
+      "confirmPassword": "تأكيد كلمة المرور الجديدة",
+      "confirmSubmit": "إعادة تعيين كلمة المرور",
+      "confirmSuccess": "تم تحديث كلمة مرورك. سجل الدخول.",
+      "invalidToken": "رابط إعادة التعيين هذا غير صالح أو منتهي الصلاحية.",
+      "passwordMismatch": "كلمتا المرور غير متطابقتين."
+    },
+    "verifyEmail": {
+      "title": "التحقق من البريد",
+      "verifying": "جار التحقق من عنوان بريدك الإلكتروني…",
+      "success": "تم التحقق من عنوان بريدك الإلكتروني. يمكنك الآن تسجيل الدخول.",
+      "invalidToken": "رابط التحقق هذا غير صالح أو منتهي الصلاحية.",
+      "backToLogin": "عودة لتسجيل الدخول"
+    }
+  },
+  "nav": {
+    "home": "الرئيسية",
+    "library": "المكتبة",
+    "libraries": "المكتبات",
+    "playlists": "قوائم التشغيل",
+    "artists": "الفنانون",
+    "albums": "الألبومات",
+    "tracks": "المقاطع",
+    "history": "السجل",
+    "stats": "الإحصائيات",
+    "favorites": "المفضلة",
+    "files": "الملفات",
+    "shares": "المشاركات",
+    "tags": "الوسوم",
+    "genres": "الأنواع",
+    "radio": "الراديو",
+    "about": "حول",
+    "api": "API",
+    "admin": "الإدارة",
+    "profile": "الملف الشخصي",
+    "settings": "الإعدادات",
+    "users": "المستخدمون",
+    "search": "البحث",
+    "externalLibraries": "المكتبات الخارجية",
+    "login": "تسجيل الدخول",
+    "notifications": "الإشعارات",
+    "mentions": "الإشارات",
+    "unreadNotifications": "{count} إشعارات غير مقروءة",
+    "podcasts": "البودكاست",
+    "downloads": "التنزيلات"
+  },
+  "errors": {
+    "unknown": "حدث خطأ ما. حاول مجددا.",
+    "uploadFailed": "فشل الرفع. حاول مجددا.",
+    "uploadAborted": "أُلغي الرفع."
+  },
+  "pages": {
+    "notFound": "الصفحة غير موجودة.",
+    "forbidden": "ليس لديك إذن لعرض هذه الصفحة.",
+    "placeholder": "صفحة {name} — قادمة في المرحلة {phase}",
+    "goHome": "الذهاب للرئيسية",
+    "goLogin": "تسجيل الدخول",
+    "home": {
+      "seeAll": "عرض الكل",
+      "playError": "تعذر تشغيل هذا المقطع: {message}",
+      "greeting": {
+        "morning": "صباح الخير، {name}",
+        "afternoon": "طاب يومك، {name}",
+        "evening": "مساء الخير، {name}",
+        "fallback": "مرحبا بعودتك، {name}",
+        "cta": "انشر شيئا"
+      },
+      "hero": {
+        "defaultTagline": "خدمة لمشاركة الموسيقى على الفيديفرس",
+        "stats": {
+          "tracks": "{count} مقطع",
+          "albums": "{count} ألبوم",
+          "artists": "{count} فنان",
+          "libraries": "{count} مكتبة",
+          "users": "{count} شخص"
+        }
+      },
+      "tabs": {
+        "music": "الموسيقى",
+        "activity": "النشاط"
+      },
+      "shelves": {
+        "jumpBackIn": "تابع من حيث توقفت",
+        "favorites": "مفضلاتك",
+        "uploads": "رفوعاتك",
+        "newOnInstance": "جديد على هذا الخادم",
+        "recentAlbums": "ألبومات مضافة حديثا",
+        "recentTracks": "مقاطع مضافة حديثا",
+        "publicLibraries": "مكتبات عامة",
+        "people": "أشخاص",
+        "exploreGenres": "استكشف الأنواع"
+      },
+      "feed": {
+        "title": "أحدث الأنشطة",
+        "latestOnInstance": "الأحدث على هذا الخادم",
+        "scopes": {
+          "mine": "أنشطتي",
+          "instance": "هذا الخادم",
+          "federated": "الفيديفرس"
+        },
+        "modes": {
+          "posts": "المنشورات",
+          "all": "كل الأنشطة"
+        },
+        "empty": "لا يوجد نشاط بعد.",
+        "signInCta": "سجل الدخول لرؤية نشاطك الخاص"
+      }
+    },
+    "history": {
+      "title": "السجل",
+      "searchPlaceholder": "ابحث في السجل…",
+      "playedAt": "وقت التشغيل",
+      "playAgain": "تشغيل مجددا",
+      "empty": "لا يوجد سجل استماع بعد.",
+      "emptySearch": "لا توجد مدخلات سجل مطابقة.",
+      "previous": "السابق",
+      "next": "التالي",
+      "untitled": "مقطع بلا عنوان",
+      "playError": "تعذر تشغيل هذا المقطع: {message}",
+      "playAllPartial": "تعذر تشغيل سوى {count} من {total} مقطع."
+    },
+    "stats": {
+      "title": "إحصائيات الاستماع",
+      "from": "من",
+      "to": "إلى",
+      "name": "الاسم",
+      "playsCount": "مرات التشغيل",
+      "topArtists": "أكثر الفنانين استماعا",
+      "topAlbums": "أكثر الألبومات استماعا",
+      "topTracks": "أكثر المقاطع تشغيلا",
+      "topGenres": "أكثر الأنواع استماعا",
+      "plays": "مرات التشغيل عبر الزمن",
+      "genresTimeline": "الخط الزمني للأنواع",
+      "releases": "سنوات الإصدار",
+      "clock": "ساعة الاستماع",
+      "empty": "لا توجد مرات استماع مسجلة في هذه الفترة.",
+      "emptySection": "لا توجد بيانات لهذه الفترة",
+      "groupBy": {
+        "day": "يوم",
+        "week": "أسبوع",
+        "month": "شهر",
+        "year": "سنة",
+        "decade": "عقد"
+      }
+    },
+    "favorites": {
+      "title": "المفضلة",
+      "tracks": "المقاطع",
+      "albums": "الألبومات",
+      "artists": "الفنانون",
+      "playlists": "قوائم التشغيل",
+      "entityTypesGated": "تفضيل الألبومات والفنانين وقوائم التشغيل غير متاح بعد.",
+      "empty": "لا تملك مقاطع مفضلة بعد.",
+      "emptyWithFavorites": "تعذر تحميل مقاطعك المفضلة."
+    },
+    "shares": {
+      "title": "المشاركات",
+      "empty": "لم تشارك أي شيء بعد.",
+      "includeRevoked": "تضمين الملغاة",
+      "unknownItem": "عنصر بلا عنوان",
+      "anyoneWithLink": "أي شخص لديه الرابط",
+      "expiresAt": "تنتهي الصلاحية {date}",
+      "columns": {
+        "type": "النوع",
+        "resource": "المورد",
+        "sharedWith": "مُشارَك مع",
+        "status": "الحالة"
+      },
+      "types": {
+        "grant": "مشاركة مع مستخدم",
+        "url": "رابط عام"
+      },
+      "status": {
+        "active": "نشط",
+        "expired": "منتهي الصلاحية",
+        "revoked": "ملغى"
+      }
+    },
+    "files": {
+      "title": "الملفات",
+      "uploadTitle": "رفع ملف",
+      "visibility": "الظهور",
+      "library": "المكتبة",
+      "defaultLibrary": "المكتبة الافتراضية (الرفوعات)",
+      "selectFile": "اختر ملفا",
+      "selectedFiles": "{count} ملفات محددة",
+      "upload": "رفع",
+      "uploading": "جار الرفع…",
+      "uploadingFile": "جار رفع الملف {current} من {total}: {name} ({percent}%)",
+      "uploadProgress": "تم رفع {percent}%",
+      "uploadSuccess": "تم رفع الملف.",
+      "uploadSuccessPlural": "تم رفع {count} ملفات.",
+      "uploadPartial": "تم رفع {success} من {total} ملفات.",
+      "uploadAllFailed": "تعذر رفع أي من الملفات.",
+      "uploadCancelled": "تم إلغاء الرفع.",
+      "publishFediverse": "النشر على الفيديفرس",
+      "publishFediverseHint": "شارك المقطع مع متابعيك على الفيديفرس كمنشور صوتي اتحادي.",
+      "uploadError": "تعذر رفع الملف: {message}",
+      "fileUploadError": "تعذر رفع \"{name}\": {message}",
+      "detailTitle": "تفاصيل الملف",
+      "originalFilename": "اسم الملف الأصلي",
+      "contentType": "نوع المحتوى",
+      "size": "الحجم",
+      "sha256": "SHA-256",
+      "owner": "المالك",
+      "download": "تنزيل",
+      "untitledFile": "ملف بلا عنوان",
+      "copySha256": "نسخ SHA-256",
+      "sha256Copied": "تم نسخ SHA-256 إلى الحافظة.",
+      "copyFailed": "تعذر نسخ SHA-256.",
+      "empty": "الملف غير موجود.",
+      "associatedTracks": "المقاطع المرتبطة",
+      "preview": "معاينة"
+    },
+    "radio": {
+      "title": "الراديو",
+      "createTitle": "إنشاء محطة",
+      "name": "الاسم",
+      "description": "الوصف",
+      "config": "الإعدادات",
+      "configHint": "إعدادات راديو خام اختيارية للمستخدمين المتقدمين.",
+      "visibility": "الظهور",
+      "create": "إنشاء محطة",
+      "createSuccess": "تم إنشاء محطة الراديو.",
+      "createError": "تعذر إنشاء المحطة: {message}",
+      "playError": "تعذر بدء المحطة: {message}",
+      "loadError": "تعذر تحميل المحطات: {message}",
+      "emptyTracks": "لم يتم إنشاء مقاطع لهذه المحطة.",
+      "empty": "لا توجد محطات راديو بعد.",
+      "loginHint": "سجل الدخول لإنشاء محطتك الخاصة."
+    },
+    "podcasts": {
+      "title": "البودكاست",
+      "feedUrl": "رابط خلاصة RSS",
+      "feedUrlPlaceholder": "https://example.com/feed.xml",
+      "follow": "متابعة البودكاست",
+      "followSuccess": "تمت متابعة {title}.",
+      "followError": "تعذرت متابعة البودكاست: {message}",
+      "importOpml": "استيراد OPML",
+      "exportOpml": "تصدير OPML",
+      "importResult": "اكتمل الاستيراد: {subscribed} اشتراك جديد، {skipped} مشترك مسبقا، {failed} فشل.",
+      "importError": "تعذر استيراد OPML: {message}",
+      "loadError": "تعذر تحميل البودكاست: {message}",
+      "episodeCount": "لا حلقات | حلقة واحدة | حلقتان | {count} حلقات | {count} حلقة | {count} حلقة",
+      "feedError": "فشل تحديث الخلاصة",
+      "empty": "لا يوجد بودكاست بعد. تابع واحدا عبر رابط خلاصة RSS أعلاه، أو استورد ملف OPML.",
+      "searchPlaceholder": "ابحث في البودكاست",
+      "noResults": "لا يوجد بودكاست يطابق \"{query}\".",
+      "unplayedCount": "لا حلقات غير مشغّلة | حلقة واحدة غير مشغّلة | حلقتان غير مشغّلتين | {count} حلقات غير مشغّلة | {count} حلقة غير مشغّلة | {count} حلقة غير مشغّلة",
+      "latestEpisodeAt": "أحدث حلقة: {date}",
+      "sort": {
+        "latest": "أحدث حلقة",
+        "unplayed": "غير المشغّلة",
+        "episodes": "الحلقات"
+      },
+      "sync": {
+        "title": "مزامنة GPodder",
+        "hint": "زامن اشتراكاتك في البودكاست مع خادم متوافق مع GPodder (gpodder.net، opodsync، Nextcloud…).",
+        "serverType": "نوع الخادم",
+        "serverTypeGpodder": "متوافق مع gpodder.net",
+        "serverTypeNextcloud": "Nextcloud (تطبيق gpoddersync)",
+        "serverUrl": "رابط الخادم",
+        "serverUrlHint": "الرابط الأساسي لخادم المزامنة، مثل https://gpodder.net",
+        "serverUrlHintNextcloud": "رابط Nextcloud الخاص بك، مثل https://cloud.example.com — يجب تثبيت تطبيق gpoddersync.",
+        "username": "اسم المستخدم",
+        "password": "كلمة المرور",
+        "passwordHint": "كلمة مرور خادم المزامنة، تُخزن على هذا الخادم.",
+        "passwordHintNextcloud": "كلمة مرور تطبيق Nextcloud (الإعدادات ← الأمان ← الأجهزة والجلسات)، تُخزن على هذا الخادم.",
+        "passwordKeepHint": "اتركه فارغا للاحتفاظ بكلمة المرور المخزنة.",
+        "deviceId": "معرف الجهاز",
+        "deviceIdHint": "اسم الجهاز الذي يزامن به هذا الخادم.",
+        "mode": "وضع المزامنة",
+        "modeHint": "وضع السحب فقط يطبق التغييرات الواردة من الخادم؛ أما ثنائي الاتجاه فيرفع أيضا التغييرات المحلية (عند التعارض يغلب أحدث تغيير).",
+        "modePull": "سحب فقط",
+        "modeBidirectional": "ثنائي الاتجاه",
+        "enabled": "المزامنة مفعلة",
+        "enabledHint": "عند التعطيل، لا تُنفذ أي مزامنات تلقائية لهذا الحساب.",
+        "syncNow": "زامن الآن",
+        "delete": "إزالة المزامنة",
+        "saved": "تم حفظ إعدادات المزامنة.",
+        "saveError": "تعذر حفظ إعدادات المزامنة: {message}",
+        "deleted": "تمت إزالة إعدادات المزامنة.",
+        "deleteError": "تعذرت إزالة إعدادات المزامنة: {message}",
+        "loadError": "تعذر تحميل إعدادات المزامنة: {message}",
+        "syncError": "فشلت المزامنة: {message}",
+        "lastSynced": "آخر مزامنة: {date}",
+        "neverSynced": "أبدا",
+        "lastError": "آخر خطأ في المزامنة: {message}",
+        "syncResult": "اكتملت المزامنة: {subscribed} اشتراك، {unsubscribed} إلغاء اشتراك، {pushed} دفع، {errors} خطأ."
+      }
+    },
+    "podcast": {
+      "loadError": "تعذر تحميل البودكاست: {message}",
+      "episodesError": "تعذر تحميل الحلقات: {message}",
+      "episodes": "الحلقات",
+      "emptyEpisodes": "لا توجد حلقات بعد.",
+      "refresh": "تحديث الخلاصة",
+      "refreshSuccess": "تم تحديث الخلاصة.",
+      "refreshError": "تعذر تحديث الخلاصة: {message}",
+      "unfollow": "إلغاء المتابعة",
+      "unfollowSuccess": "تم إلغاء متابعة البودكاست.",
+      "unfollowError": "تعذر إلغاء متابعة البودكاست: {message}",
+      "explicit": "صريح",
+      "season": "م{n}",
+      "trailer": "إعلان",
+      "feedErrorDetail": "فشل آخر تحديث للخلاصة: {message}",
+      "copyFeedUrl": "نسخ رابط الخلاصة",
+      "feedUrlCopied": "تم نسخ رابط الخلاصة إلى الحافظة.",
+      "feedUrlCopyFailed": "تعذر نسخ رابط الخلاصة.",
+      "markPlayed": "تعليم كمشغّل",
+      "markUnplayed": "تعليم كغير مشغّل",
+      "playedError": "تعذر تحديث حالة التشغيل: {message}",
+      "addToPlaylist": "إضافة إلى قائمة تشغيل"
+    },
+    "about": {
+      "title": "حول",
+      "instanceName": "اسم الخادم",
+      "version": "الإصدار",
+      "description": "الوصف",
+      "documentation": "التوثيق",
+      "support": "الدعم",
+      "defaultName": "Songhive",
+      "defaultDescription": "خدمة لمشاركة الموسيقى على الفيديفرس.",
+      "projectUrl": "رابط المشروع",
+      "githubUrl": "مرآة GitHub",
+      "issueTracker": "متتبع المشكلات",
+      "administrators": "المديرون",
+      "contact": "اتصال",
+      "contactPerson": "جهة الاتصال",
+      "contactName": "الاسم",
+      "contactEmail": "البريد الإلكتروني",
+      "contactUrl": "الموقع",
+      "revealEmail": "انقر لإظهار عنوان البريد الإلكتروني"
+    },
+    "admin": {
+      "dashboard": {
+        "title": "لوحة المعلومات",
+        "storage": "التخزين",
+        "users": "المستخدمون",
+        "content": "المحتوى",
+        "federation": "الفيدرالية",
+        "totalUsers": "إجمالي المستخدمين",
+        "activeUsers": "المستخدمون النشطون",
+        "recentRegistrations": "التسجيلات الأخيرة",
+        "libraries": "المكتبات",
+        "federationEnabled": "مفعلة",
+        "federationDisabled": "معطلة",
+        "instanceDomain": "نطاق الخادم",
+        "instanceName": "اسم الخادم",
+        "totalFiles": "إجمالي الملفات",
+        "totalSize": "الحجم الإجمالي",
+        "refresh": "تحديث",
+        "loadError": "تعذر تحميل إحصائيات لوحة المعلومات: {message}"
+      },
+      "users": {
+        "title": "المستخدمون",
+        "searchPlaceholder": "ابحث في المستخدمين…",
+        "username": "اسم المستخدم",
+        "email": "البريد الإلكتروني",
+        "role": "الدور",
+        "status": "الحالة",
+        "actions": "الإجراءات",
+        "active": "نشط",
+        "inactive": "غير نشط",
+        "promote": "ترقية",
+        "demote": "تخفيض",
+        "activate": "تفعيل",
+        "deactivate": "تعطيل",
+        "approve": "موافقة",
+        "delete": "حذف",
+        "deleteConfirm": "حذف المستخدم \"{username}\"؟",
+        "selected": "{count} محدد",
+        "bulkDeactivate": "تعطيل المحدد",
+        "bulkActivate": "تفعيل المحدد",
+        "bulkDelete": "حذف المحدد",
+        "bulkActionConfirm": "هل أنت متأكد أنك تريد {action} {count} مستخدمين محددين؟",
+        "bulkDeleteConfirm": "حذف {count} مستخدمين محددين؟",
+        "loadMore": "تحميل المزيد",
+        "empty": "لا يوجد مستخدمون.",
+        "emptySearch": "لا يوجد مستخدمون مطابقون.",
+        "promoteSuccess": "تمت ترقية المستخدم.",
+        "demoteSuccess": "تم تخفيض المستخدم.",
+        "activateSuccess": "تم تفعيل المستخدم.",
+        "deactivateSuccess": "تم تعطيل المستخدم.",
+        "deleteSuccess": "تم حذف المستخدم.",
+        "bulkSuccess": "{action} {count} مستخدمين.",
+        "actionError": "تعذر تحديث المستخدم: {message}"
+      },
+      "settings": {
+        "title": "الإعدادات",
+        "save": "حفظ",
+        "saved": "تم حفظ الإعدادات.",
+        "saveError": "تعذر حفظ الإعدادات: {message}",
+        "instanceName": "اسم الخادم",
+        "instanceDescription": "وصف الخادم",
+        "instanceContactName": "اسم جهة الاتصال",
+        "instanceContactEmail": "بريد جهة الاتصال",
+        "instanceContactUrl": "رابط جهة الاتصال",
+        "registrationMode": "وضع التسجيل",
+        "federationEnabled": "الفيدرالية مفعلة",
+        "remoteSearchAccess": "صلاحية البحث البعيد",
+        "fetchTimeoutSeconds": "مهلة الجلب البعيد (ثوان)",
+        "remoteSearchAccessHint": "من يحق له البحث عن الجهات والأنشطة والموارد البعيدة: \"معطل\" يوقف البحث البعيد، \"المستخدمون الموثقون\" يقتصر على المستخدمين المسجلين، و\"عام\" يسمح أيضا بالبحث للزوار.",
+        "previewCardsEnabled": "بطاقات المعاينة مفعلة",
+        "typeString": "نص",
+        "typeBoolean": "تشغيل/إيقاف",
+        "typeNumber": "رقم",
+        "typeJson": "JSON",
+        "registrationOptions": {
+          "open": "مفتوح",
+          "invite-only": "بالدعوات فقط",
+          "approval-required": "يتطلب الموافقة",
+          "closed": "مغلق"
+        },
+        "remoteSearchOptions": {
+          "disabled": "معطل",
+          "authenticated": "المستخدمون الموثقون",
+          "public": "عام"
+        },
+        "singleUserUsername": "تفعيل وضع المستخدم الوحيد لهذا الخادم: عرض الخط الزمني لهذا المستخدم افتراضيا في الصفحة الرئيسية",
+        "publicStatsEnabled": "تفعيل الإحصائيات العامة لهذا الخادم"
+      },
+      "reports": {
+        "title": "البلاغات",
+        "targetType": "نوع الهدف",
+        "targetId": "معرف الهدف",
+        "reason": "السبب",
+        "status": "الحالة",
+        "reporter": "المُبلِغ",
+        "actorUrl": "رابط الجهة",
+        "forwarded": "مُحال إلى خادم بعيد",
+        "forwardedYes": "نعم",
+        "createdAt": "تاريخ الإنشاء",
+        "filterStatus": "تصفية حسب الحالة",
+        "statuses": {
+          "pending": "قيد الانتظار",
+          "reviewed": "تمت المراجعة",
+          "resolved": "تم الحل",
+          "dismissed": "مرفوض"
+        },
+        "allStatuses": "كل الحالات",
+        "resolutionNotes": "ملاحظات الحل",
+        "resolve": "حل",
+        "dismiss": "رفض",
+        "details": "التفاصيل",
+        "loadMore": "تحميل المزيد",
+        "empty": "لا توجد بلاغات.",
+        "resolveSuccess": "تم حل البلاغ.",
+        "dismissSuccess": "تم رفض البلاغ.",
+        "actionError": "تعذر تحديث البلاغ: {message}"
+      },
+      "invites": {
+        "title": "الدعوات",
+        "url": "رابط الدعوة",
+        "token": "الرمز",
+        "detailsTitle": "تفاصيل الدعوة",
+        "code": "الرمز",
+        "maxUses": "أقصى عدد استخدامات",
+        "uses": "الاستخدامات",
+        "expiresAt": "تنتهي في",
+        "createdAt": "تاريخ الإنشاء",
+        "create": "إنشاء دعوة",
+        "createTitle": "إنشاء رمز دعوة",
+        "revoke": "إلغاء",
+        "revokeConfirm": "إلغاء الدعوة \"{code}\"؟",
+        "unlimited": "غير محدود",
+        "loadMore": "تحميل المزيد",
+        "empty": "لا توجد رموز دعوة.",
+        "createSuccess": "تم إنشاء الدعوة.",
+        "revokeSuccess": "تم إلغاء الدعوة.",
+        "actionError": "تعذر تحديث الدعوة: {message}",
+        "maxUsesHint": "اتركه فارغا لاستخدامات غير محدودة.",
+        "expiresAtHint": "اتركه فارغا لرمز لا تنتهي صلاحيته أبدا.",
+        "urlCopied": "تم نسخ رابط الدعوة إلى الحافظة.",
+        "tokenCopied": "تم نسخ الرمز إلى الحافظة.",
+        "copyFailed": "تعذر نسخ رابط الدعوة."
+      },
+      "audit": {
+        "title": "سجل التدقيق",
+        "timestamp": "الطابع الزمني",
+        "actor": "الجهة",
+        "action": "الإجراء",
+        "targetType": "نوع الهدف",
+        "target": "الهدف",
+        "targetId": "معرف الهدف",
+        "details": "التفاصيل",
+        "filterAction": "تصفية حسب الإجراء",
+        "filterTargetType": "تصفية حسب نوع الهدف",
+        "loadMore": "تحميل المزيد",
+        "empty": "لا توجد مدخلات في سجل التدقيق.",
+        "targetTypes": {
+          "user": "مستخدم",
+          "track": "مقطع",
+          "playlist": "قائمة تشغيل",
+          "album": "ألبوم",
+          "artist": "فنان",
+          "library": "مكتبة",
+          "tag": "وسم",
+          "file": "ملف",
+          "report": "بلاغ",
+          "invite": "دعوة",
+          "oauth_client": "عميل OAuth",
+          "activity": "نشاط",
+          "actor": "جهة",
+          "api_token": "رمز API",
+          "celery": "مهمة Celery",
+          "external_library": "مكتبة خارجية",
+          "external_track": "مقطع خارجي",
+          "federation": "فيدرالية",
+          "genre": "نوع",
+          "images": "صور",
+          "instance": "خادم",
+          "setting": "إعداد",
+          "storage": "تخزين",
+          "user_session": "جلسة مستخدم"
+        },
+        "allTargetTypes": "كل أنواع الأهداف",
+        "targetTypesLoadError": "تعذر تحميل أنواع الأهداف: {message}"
+      },
+      "tasks": {
+        "title": "المهام",
+        "storageCleanup": {
+          "title": "تنظيف التخزين",
+          "description": "شغّل مهمة تنظيف الملفات اليتيمة. قد يستغرق هذا وقتا ولا يمكن التراجع عنه.",
+          "trigger": "تشغيل التنظيف",
+          "triggered": "بدأ تنظيف التخزين.",
+          "triggerError": "تعذر تشغيل تنظيف التخزين: {message}"
+        },
+        "syncTags": {
+          "title": "مزامنة الوسوم",
+          "description": "إعادة كتابة الوسوم المضمنة في مقطع واحد أو أكثر لتطابق بيانات قاعدة البيانات.",
+          "allWarning": "سيؤدي هذا إلى إدراج إعادة كتابة الوسوم لكل المقاطع وقد يستغرق وقتا.",
+          "scopeLabel": "النطاق",
+          "scopeAll": "كل المقاطع",
+          "scopeTrack": "مقطع",
+          "scopeAlbum": "ألبوم",
+          "scopeArtist": "فنان",
+          "scopeLibrary": "مكتبة",
+          "targetIdLabel": "معرف الهدف",
+          "targetIdHint": "مطلوب عند اختيار مقطع أو ألبوم أو فنان أو مكتبة واحدة.",
+          "targetIdRequired": "معرف الهدف مطلوب للنطاق المحدد.",
+          "dryRun": "تشغيل تجريبي",
+          "trigger": "مزامنة الوسوم",
+          "triggered": "تم إدراج مزامنة الوسوم لـ {count} مقطع.",
+          "dryRunTriggered": "اكتمل التشغيل التجريبي: سيتم إدراج {count} مقطع.",
+          "triggerError": "تعذر تشغيل مزامنة الوسوم: {message}"
+        },
+        "rehashAudio": {
+          "title": "إعادة حساب بصمات الصوت",
+          "description": "ترحيل ملفات الصوت إلى بصمات SHA-256 للصوت فقط. هذه مهمة طويلة الأمد.",
+          "dryRun": "تشغيل تجريبي",
+          "trigger": "إعادة حساب البصمات",
+          "triggered": "تم إدراج مهمة إعادة حساب بصمات الصوت.",
+          "triggerError": "تعذر تشغيل إعادة حساب البصمات: {message}"
+        },
+        "provisionFederationKeys": {
+          "title": "توفير مفاتيح الفيدرالية",
+          "description": "إنشاء روابط جهات ActivityPub وأزواج مفاتيح للمستخدمين الذين ينقصهم ذلك.",
+          "dryRun": "تشغيل تجريبي",
+          "trigger": "توفير المفاتيح",
+          "triggered": "تم إدراج مهمة توفير مفاتيح الفيدرالية.",
+          "triggerError": "تعذر تشغيل توفير مفاتيح الفيدرالية: {message}"
+        },
+        "enrichImages": {
+          "title": "إثراء الصور",
+          "description": "جلب صور الفنانين وأغلفة الألبومات من MusicBrainz لفنان أو ألبوم واحد أو أكثر.",
+          "allWarning": "سيؤدي هذا إلى إدراج إثراء الصور لكل الفنانين والألبومات غير المثراة ذات معرفات MusicBrainz وقد يستغرق وقتا.",
+          "scopeLabel": "النطاق",
+          "scopeAll": "كل الفنانين والألبومات",
+          "scopeArtist": "فنان",
+          "scopeAlbum": "ألبوم",
+          "targetIdLabel": "معرف الهدف",
+          "targetIdHint": "مطلوب عند اختيار فنان أو ألبوم واحد.",
+          "targetIdRequired": "معرف الهدف مطلوب للنطاق المحدد.",
+          "force": "فرض إعادة الإثراء",
+          "dryRun": "تشغيل تجريبي",
+          "trigger": "إثراء الصور",
+          "triggered": "تم إدراج إثراء الصور لـ {artists} فنان و {albums} ألبوم.",
+          "dryRunTriggered": "اكتمل التشغيل التجريبي: سيتم إثراء {artists} فنان و {albums} ألبوم.",
+          "triggerError": "تعذر تشغيل إثراء الصور: {message}"
+        },
+        "notificationPurge": {
+          "title": "تطهير الإشعارات",
+          "description": "حذف الإشعارات المقروءة الأقدم من فترة الاحتفاظ المعدة. لا يمكن التراجع عن هذا.",
+          "trigger": "تطهير الإشعارات",
+          "triggered": "تم تطهير {count} إشعار.",
+          "triggerError": "تعذر تطهير الإشعارات: {message}"
+        },
+        "remoteActivityPurge": {
+          "title": "تقليم الأنشطة البعيدة",
+          "description": "حذف الأنشطة والكائنات البعيدة المخزنة مؤقتا الأقدم من فترة الاحتفاظ المعدة والتي لم يتفاعل معها أي مستخدم محلي. يمكن جلب الكائنات المقلمة مجددا عبر البحث برابطها البعيد.",
+          "daysLabel": "أقدم من (أيام)",
+          "daysHint": "اختياري. اتركه فارغا لاستخدام فترة الاحتفاظ المعدة.",
+          "dryRun": "تشغيل تجريبي",
+          "trigger": "تقليم الأنشطة البعيدة",
+          "triggered": "تم إدراج تقليم الأنشطة البعيدة.",
+          "dryRunTriggered": "تم إدراج التشغيل التجريبي لتقليم الأنشطة البعيدة.",
+          "triggerError": "تعذر إدراج تقليم الأنشطة البعيدة: {message}"
+        }
+      },
+      "celery": {
+        "title": "عمال Celery",
+        "refresh": "تحديث",
+        "taskId": "معرف المهمة",
+        "task": "المهمة",
+        "worker": "العامل",
+        "runtime": "مدة التشغيل",
+        "runtimeSeconds": "{runtime} ث",
+        "details": "التفاصيل",
+        "args": "وسائط",
+        "kwargs": "وسائط مسماة",
+        "actions": "إجراءات",
+        "terminate": "إنهاء",
+        "empty": "لا توجد مهام Celery قيد التشغيل.",
+        "selectAll": "تحديد كل المهام",
+        "selectTask": "تحديد المهمة {task_id}",
+        "terminateSelected": "إنهاء المحدد ({count})",
+        "terminateConfirm": "هل أنت متأكد أنك تريد إنهاء {count} مهمة قيد التشغيل؟",
+        "terminateTaskConfirm": "هل أنت متأكد أنك تريد إنهاء المهمة {task_id}؟",
+        "terminated": "تم إنهاء {count} مهمة.",
+        "loadError": "تعذر تحميل مهام Celery: {message}",
+        "terminateError": "تعذر إنهاء المهام: {message}",
+        "queueStats": {
+          "title": "نظرة عامة على الطوابير",
+          "total": "الإجمالي",
+          "processing": "قيد المعالجة",
+          "queued": "في الانتظار",
+          "failed": "فاشلة",
+          "completed": "مكتملة"
+        },
+        "byTaskTitle": "المهام حسب الاسم",
+        "taskName": "اسم المهمة",
+        "count": "العدد",
+        "queueEmpty": "لا توجد مهام في الانتظار أو قيد التشغيل."
+      }
+    },
+    "externalLibraries": {
+      "title": "المكتبات الخارجية",
+      "listTitle": "المكتبات الخارجية",
+      "newTitle": "مكتبة خارجية جديدة",
+      "editTitle": "تعديل مكتبة خارجية",
+      "adminTitle": "المكتبات الخارجية",
+      "provider": "المزود",
+      "providerHint": "اختر مزود تخزين خارجيا.",
+      "name": "الاسم",
+      "providerConfig": "إعدادات المزود",
+      "config": "الإعدادات (JSON)",
+      "configHint": "إعدادات خاصة بالمزود ككائن JSON.",
+      "configError": "يجب أن تكون الإعدادات JSON صالحا.",
+      "visibility": "الظهور",
+      "enabled": "مفعلة",
+      "syncEnabled": "المزامنة مفعلة",
+      "syncInterval": "فترة المزامنة (ثوان)",
+      "includeInLibraryIndex": "تضمين في فهرس المكتبة",
+      "create": "إنشاء",
+      "save": "حفظ",
+      "sync": "زامن الآن",
+      "syncing": "جار المزامنة…",
+      "syncSuccess": "اكتملت المزامنة.",
+      "syncPartial": "اكتملت المزامنة مع تحذيرات.",
+      "syncFailed": "فشلت المزامنة.",
+      "syncTimeout": "تعذر تأكيد حالة المزامنة.",
+      "syncError": "تعذر بدء المزامنة: {message}",
+      "oauthConnect": "ربط حساب {provider}",
+      "oauthConnected": "تم ربط الحساب. راجع الإعدادات واحفظ للإنهاء.",
+      "oauthFailed": "فشل الربط: {message}",
+      "tracks": "المقاطع",
+      "syncRuns": "مرات المزامنة",
+      "syncRunStatus": "الحالة",
+      "trackState": "الحالة",
+      "trackProviderKey": "مفتاح المزود",
+      "trackDisplayPath": "المسار",
+      "lastSeen": "آخر ظهور",
+      "lastSynced": "آخر مزامنة",
+      "restore": "استعادة",
+      "deleteTrack": "إزالة المقطع",
+      "deleteTrackSource": "حذف ملف المصدر أيضا",
+      "removeSonghiveTrack": "إزالة المقطع المحلي أيضا",
+      "bulkDelete": "حذف المحدد",
+      "selectAll": "تحديد الكل",
+      "noProviders": "لا تتوفر مزودات خارجية.",
+      "noLibraries": "لا توجد مكتبات خارجية معدة.",
+      "createSuccess": "تم إنشاء المكتبة الخارجية.",
+      "saveSuccess": "تم حفظ المكتبة الخارجية.",
+      "deleteConfirm": "حذف المكتبة الخارجية \"{name}\"؟",
+      "deleteSuccess": "تم حذف المكتبة الخارجية.",
+      "deleteError": "تعذر الحذف: {message}",
+      "saveError": "تعذر الحفظ: {message}",
+      "loadError": "تعذر التحميل: {message}",
+      "duplicateModalTitle": "الملف المرفوع يطابق مقطعا خارجيا",
+      "duplicateModalMessage": "ملف رفعته يطابق مقطعا تديره مكتبة خارجية ({provider}) مسبقا.",
+      "keepLocal": "الاحتفاظ بالمقطع المحلي",
+      "discardUpload": "تجاهل الملف المرفوع",
+      "resolveError": "تعذر حل التكرار: {message}",
+      "external": "خارجي",
+      "trackExternalBadge": "خارجي: {provider}",
+      "trackExternalState": "{state}",
+      "deviceAuth": {
+        "connect": "ربط {provider}",
+        "reconnect": "إعادة ربط {provider}",
+        "reconnectHint": "بيانات اعتماد {provider} المحفوظة مفقودة أو تعذر تحديثها — أعد ربط الحساب.",
+        "connected": "تم الربط مع {provider}.",
+        "failed": "تعذر الربط: {message}",
+        "instructions": "افتح {verificationUrl} وأدخل الرمز {userCode} لتخويل خادم Songhive هذا.",
+        "waiting": "بانتظار التخويل… (تبقى {seconds} ث)",
+        "slowDown": "ما زال الانتظار — طلبت TIDAL إبطاء الاستعلام. (تبقى {seconds} ث)",
+        "expired": "انتهت صلاحية رمز التخويل. حاول مجددا.",
+        "denied": "رُفض التخويل.",
+        "error": "فشل التخويل.",
+        "pkceMode": {
+          "label": "استخدام إعادة توجيه المتصفح (PKCE) بدلا من رمز الجهاز",
+          "hint": "يفتح صفحة تسجيل دخول TIDAL تعيد التوجيه برمز — مفيد على الأجهزة التي يصعب فيها إدخال رمز."
+        },
+        "pkce": {
+          "instructions": "افتح {authorizeUrl}، سجل الدخول إلى TIDAL، ثم الصق رابط إعادة التوجيه الكامل أدناه.",
+          "redirectLabel": "رابط إعادة التوجيه",
+          "redirectHint": "الصق الرابط الكامل الذي أعيد توجيه متصفحك إليه بعد التخويل.",
+          "complete": "إكمال الربط"
+        }
+      },
+      "providers": {
+        "gdrive": {
+          "help": "يُنصح: اربط حساب Google عبر OAuth. في وحدة تحكم Google Cloud على {appConsole}: اختر مشروعا أو أنشئ واحدا، فعّل Google Drive API (APIs & Services ← Library)، ثم أنشئ عميل OAuth من نوع \"Web application\" (APIs & Services ← Credentials ← Create credentials ← OAuth client ID) وأضف رابط إعادة التوجيه المخول هذا: {callbackUrl}\nفي APIs & Services ← OAuth consent screen ← Data access، أضف النطاق {permissions} — أو {writePermissions} إن فعّلت الكتابة أو إعادة التسمية أو الحذف أدناه (مسار الربط يطلب النطاق الصحيح تلقائيا). وما دامت شاشة الموافقة في وضع الاختبار، أضف حساب Google الذي تربطه كمستخدم تجريبي.\nأدخل معرف العميل والسر أدناه واستخدم زر الربط — يُملأ رمزا الوصول والتحديث تلقائيا.\nبديل خادم-إلى-خادم: أنشئ حساب خدمة في IAM & Admin ← Service Accounts على {appConsole}، حمّل مفتاح JSON من تبويب Keys (Add key ← Create new key ← JSON) والصق محتوى الملف في حقل حساب الخدمة — ثم شارك مجلد Drive مع بريد حساب الخدمة. حقول عميل OAuth غير مستخدمة مع حساب الخدمة، لذا يكفي أي عنصر نائب (مثل \"-\").",
+          "fields": {
+            "access_token": {
+              "label": "رمز الوصول",
+              "description": "يُملأ تلقائيا بزر الربط. أدخله يدويا فقط لاختبار سريع — رموز وصول Google تنتهي بعد نحو ساعة ولا يمكن تحديثها. يُخزن مشفرا."
+            },
+            "refresh_token": {
+              "label": "رمز التحديث",
+              "description": "يُملأ تلقائيا بزر الربط. الاعتماد الدائم — يولّد رموز وصول قصيرة الأجل تلقائيا. يتطلب معرف وسر عميل OAuth أدناه. يُخزن مشفرا."
+            },
+            "client_id": {
+              "label": "معرف عميل OAuth",
+              "description": "معرف عميل OAuth 2.0 لتطبيق الويب في Google Cloud (APIs & Services ← Credentials ← Create credentials ← OAuth client ID). مطلوب لمسار الربط — وعند استخدام مفتاح حساب خدمة بدلا منه، يكفي أي عنصر نائب (مثل \"-\")."
+            },
+            "client_secret": {
+              "label": "سر عميل OAuth",
+              "description": "سر عميل OAuth 2.0 الظاهر مع المعرف في وحدة تحكم Google Cloud. تنطبق قاعدة العنصر النائب نفسها كمعرف العميل لإعدادات حساب الخدمة. يُخزن مشفرا."
+            },
+            "service_account_key": {
+              "label": "مفتاح حساب الخدمة (JSON)",
+              "description": "البديل الخادم-إلى-خادم لـ OAuth: أنشئ حساب خدمة في IAM & Admin ← Service Accounts في وحدة تحكم Google Cloud، حمّل مفتاح JSON من تبويب Keys (Add key ← Create new key ← JSON) والصق محتواه الكامل هنا. شارك مجلد Drive مع بريد حساب الخدمة. له أولوية على حقول OAuth. يُخزن مشفرا."
+            },
+            "root_folder_id": {
+              "label": "معرف المجلد الجذري",
+              "description": "معرف مجلد Drive المطلوب فهرسته — الجزء الأخير من رابط المجلد (drive.google.com/drive/folders/<id>). اتركه فارغا لجذر My Drive — أو لجذر القرص المشترك عند تعيين معرف قرص."
+            },
+            "drive_id": {
+              "label": "معرف القرص المشترك",
+              "description": "معرف قرص مشترك (فريق) اختياري — الجزء الأخير من رابط القرص المشترك عند فتحه في Drive. يفعّل دعم الأقراص المشتركة في القوائم ويحصر البحث في ذلك القرص."
+            },
+            "token_uri": {
+              "label": "رابط نقطة نهاية الرموز",
+              "description": "نقطة نهاية OAuth المستخدمة لمقايضة رموز التحديث وتأكيدات حساب الخدمة. افتراضيا نقطة Google؛ غيّرها فقط للاختبار أو الواجهات المتوافقة."
+            },
+            "verify_ssl": {
+              "label": "التحقق من شهادة TLS",
+              "description": "التحقق من شهادة TLS لخادم الواجهة البرمجية. عطّله فقط للاختبار أو الشبكات الخاصة الموثوقة — التعطيل يترك الاتصال مكشوفا لانتحال MITM وسرقة الاعتماد."
+            },
+            "ca_bundle": {
+              "label": "مسار حزمة CA",
+              "description": "مسار اختياري على خادم Songhive لحزمة CA بصيغة PEM تُستخدم للتحقق من شهادة TLS لخادم الواجهة البرمجية. لها أولوية على مفتاح التحقق عند تعيينها."
+            },
+            "timeout": {
+              "label": "مهلة الطلب (ثوان)",
+              "description": "مدة انتظار كل طلب HTTP إلى Google Drive API."
+            },
+            "extensions": {
+              "label": "امتدادات الملفات",
+              "description": "قائمة مفصولة بفواصل لامتدادات ملفات الصوت المراد فهرستها (مثل .mp3، .flac)."
+            },
+            "exclude": {
+              "label": "أنماط الاستبعاد",
+              "description": "أنماط glob مفصولة بفواصل لمسارات بعيدة يُتخطاها أثناء الفحص."
+            },
+            "recursive": {
+              "label": "فحص متكرر",
+              "description": "فهرسة ملفات الصوت في المجلدات الفرعية البعيدة بشكل متكرر."
+            },
+            "allow_hashing": {
+              "label": "السماح بحساب بصمة الصوت",
+              "description": "حساب بصمة صوتية ثابتة للمقاطع لكشف التكرارات ودعم إعادة الترميز. يتطلب تنزيل الملفات الجديدة أو المتغيرة مرة واحدة."
+            },
+            "fast_hash": {
+              "label": "استخدام بصمة خام سريعة",
+              "description": "استخدام SHA-256 خام بدلا من بصمة ffmpeg للصوت فقط. أرخص لكنها تتغير عند تغير الوسوم أو الغلاف."
+            },
+            "trash_on_delete": {
+              "label": "سلة المهملات بدلا من الحذف النهائي",
+              "description": "نقل الملفات المحذوفة إلى سلة مهملات Drive (قابلة للاستعادة) بدلا من حذفها نهائيا."
+            },
+            "allow_write_tags": {
+              "label": "السماح بكتابة البيانات الوصفية",
+              "description": "السماح لـ Songhive بإعادة كتابة الوسوم المضمنة وإعادة رفع الملفات عند تعديل المقاطع. يتطلب نطاق Drive الكامل — لإعدادات OAuth فعّله قبل النقر على ربط حتى يغطيه الرمز الممنوح."
+            },
+            "allow_rename_source": {
+              "label": "السماح بإعادة تسمية المصدر",
+              "description": "السماح لـ Songhive بإعادة تسمية ملفات بعيدة عبر تعديلات المقاطع. يتطلب نطاق Drive الكامل — لإعدادات OAuth فعّله قبل النقر على ربط."
+            },
+            "allow_delete_source": {
+              "label": "السماح بحذف المصدر",
+              "description": "السماح بحذف الملفات في Drive. يتطلب نطاق Drive الكامل — لإعدادات OAuth فعّله قبل النقر على ربط."
+            }
+          }
+        },
+        "jellyfin": {
+          "help": "اربط خادم Jellyfin بعيدا لاستيراد مقاطعه وألبوماته وفنانيه وقوائم تشغيله كعناصر مكتبة أصلية. البيانات الوصفية للقراءة فقط والصوت يُمرَّر من الخادم — لا يُنسخ شيء إلى تخزين Songhive.\nيُنصح: أنشئ مفتاح API في Jellyfin تحت Dashboard ← API Keys. بديلا عن ذلك أدخل اسم مستخدم Jellyfin وكلمة المرور؛ تُقايض برمز جلسة مرة واحدة ولا تُخزن خارج إعدادات المكتبة المشفرة.",
+          "fields": {
+            "server_url": {
+              "label": "رابط الخادم",
+              "description": "الرابط الأساسي لخادم Jellyfin (مثل https://jellyfin.example.com). العناوين الخاصة أو المحلية مرفوضة."
+            },
+            "api_key": {
+              "label": "مفتاح API",
+              "description": "مفتاح Jellyfin API (Dashboard ← API Keys). مفضل على اسم المستخدم/كلمة المرور. يُخزن مشفرا."
+            },
+            "username": {
+              "label": "اسم المستخدم",
+              "description": "اسم مستخدم Jellyfin — يُستخدم مع كلمة المرور أدناه فقط عند عدم تعيين مفتاح API."
+            },
+            "password": {
+              "label": "كلمة المرور",
+              "description": "كلمة مرور Jellyfin، تُقايض برمز جلسة عند عدم تعيين مفتاح API. تُخزن مشفرة."
+            },
+            "verify_ssl": {
+              "label": "التحقق من شهادة TLS",
+              "description": "التحقق من شهادة TLS لخادم Jellyfin. عطّله فقط للاختبار أو الشبكات الخاصة الموثوقة — التعطيل يترك الاتصال مكشوفا لانتحال MITM وسرقة الاعتماد."
+            },
+            "timeout": {
+              "label": "مهلة الطلب (ثوان)",
+              "description": "مدة انتظار كل طلب HTTP إلى خادم Jellyfin."
+            },
+            "collections": {
+              "label": "المكتبات",
+              "description": "قائمة مفصولة بفواصل لأسماء أو معرفات مكتبات Jellyfin المراد استيرادها. اتركها فارغة لاستيراد كل مكتبات الموسيقى."
+            },
+            "include_tracks": {
+              "label": "استيراد المقاطع",
+              "description": "استيراد عناصر الصوت في Jellyfin كمقاطع."
+            },
+            "include_artists": {
+              "label": "استيراد الفنانين",
+              "description": "استيراد فناني Jellyfin كفنانين أصليين."
+            },
+            "include_albums": {
+              "label": "استيراد الألبومات",
+              "description": "استيراد ألبومات Jellyfin كألبومات أصلية."
+            },
+            "include_playlists": {
+              "label": "استيراد قوائم التشغيل",
+              "description": "استيراد قوائم تشغيل Jellyfin كقوائم مملوكة للمزود."
+            },
+            "sync_metadata": {
+              "label": "إثراء البيانات الوصفية",
+              "description": "تشغيل إثراء MusicBrainz الخاص بـ Songhive على المقاطع المستوردة أيضا. معطل افتراضيا — بيانات المزود هي المرجع."
+            },
+            "sync_cover_art": {
+              "label": "استيراد صور الأغلفة",
+              "description": "استيراد روابط صور Jellyfin كأغلفة للمقاطع/الألبومات/الفنانين (مرجعية لا منزلة)."
+            },
+            "dedup_musicbrainz": {
+              "label": "إزالة التكرار بمعرف MusicBrainz",
+              "description": "مطابقة الفنانين/الألبومات المستوردة مع الموجود بمعرف MusicBrainz قبل اللجوء لمطابقة الاسم. معطل افتراضيا — المطابقة بالاسم فقط ولا تستدعي MusicBrainz API أبدا."
+            }
+          }
+        },
+        "tidal": {
+          "help": "اربط حساب TIDAL لاستيراد مقاطعك وألبوماتك وفنانيك وقوائم تشغيلك المحفوظة كعناصر مكتبة أصلية. استخدم زر الربط أدناه — يستخدم Songhive تخويل أجهزة TIDAL، فتصادق على الوصول في صفحة TIDAL وتُملأ بيانات الاعتماد تلقائيا.\nتُجلب محتويات قوائم التشغيل والألبومات عند فتحها وتُخزن مؤقتا لمدة TTL المعدة — استخدم \"زامن الآن\" على قائمة تشغيل أو ألبوم لفرض التحديث. تُعامل بيانات المقاطع الوصفية كثابتة بعد الاستيراد؛ تبقى الوسوم والظهور فقط قابلة للتعديل محليا.",
+          "fields": {
+            "quality": {
+              "label": "جودة البث",
+              "description": "جودة بث TIDAL المفضلة. تتطلب Hi-Res اشتراك TIDAL يشملها.",
+              "options": {
+                "low": "منخفضة (96 kbps AAC)",
+                "high": "عالية (320 kbps AAC)",
+                "lossless": "بلا فقدان (FLAC)",
+                "hi_res_lossless": "Hi-Res بلا فقدان (FLAC)"
+              }
+            },
+            "include_tracks": {
+              "label": "استيراد المقاطع المحفوظة",
+              "description": "استيراد المقاطع المحفوظة في مجموعة TIDAL كمقاطع أصلية."
+            },
+            "include_artists": {
+              "label": "استيراد الفنانين",
+              "description": "استيراد الفنانين المحفوظين في مجموعة TIDAL كفنانين أصليين."
+            },
+            "include_albums": {
+              "label": "استيراد الألبومات",
+              "description": "استيراد الألبومات المحفوظة في مجموعة TIDAL كألبومات أصلية. تُجلب محتويات الألبوم عند فتحه."
+            },
+            "include_playlists": {
+              "label": "استيراد قوائم التشغيل",
+              "description": "استيراد قوائم التشغيل التي أنشأتها على TIDAL. تُجلب المحتويات عند فتح القائمة."
+            },
+            "include_followed_playlists": {
+              "label": "استيراد قوائم التشغيل المتابَعة",
+              "description": "استيراد قوائم تشغيل TIDAL التي تتابعها ولم تنشئها أيضا."
+            },
+            "sync_metadata": {
+              "label": "إثراء البيانات الوصفية",
+              "description": "تشغيل إثراء MusicBrainz الخاص بـ Songhive على المقاطع المستوردة أيضا. معطل افتراضيا — بيانات المزود هي المرجع."
+            },
+            "dedup_isrc": {
+              "label": "إزالة التكرار بـ ISRC",
+              "description": "مطابقة المقاطع المستوردة مع الموجود بـ ISRC قبل إنشاء جديدة. تحتفظ المقاطع المطابقة ببياناتها المحلية."
+            },
+            "playlist_ttl_seconds": {
+              "label": "مدة تخزين قوائم التشغيل/الألبومات (ثوان)",
+              "description": "مدة بقاء محتويات القوائم والألبومات المخزنة مؤقتا قبل إعادة جلبها. الحد الأدنى 300."
+            },
+            "mpd_mode": {
+              "label": "وضع تسليم Hi-Res",
+              "description": "طريقة تقديم بثوث MPEG-DASH (Hi-Res). يتطلب \"remux\" وجود ffmpeg.",
+              "options": {
+                "segments": "مقاطع MPEG-DASH خام",
+                "remux": "إعادة مزج إلى FLAC عبر ffmpeg"
+              }
+            },
+            "redirect_streams": {
+              "label": "إعادة توجيه البثوث",
+              "description": "إعادة توجيه العملاء إلى روابط TIDAL CDN بدلا من تمرير بيانات الصوت عبر هذا الخادم."
+            },
+            "download_format": {
+              "label": "صيغة التنزيل",
+              "description": "حاوية مقاطع TIDAL المنزلة. يجب تفعيل التنزيلات في إعدادات الخادم.",
+              "options": {
+                "flac": "FLAC",
+                "aac": "AAC (M4A)"
+              }
+            }
+          }
+        },
+        "local": {
+          "fields": {
+            "root": {
+              "label": "المسار الجذري",
+              "description": "مسار مطلق أو نسبي للمجلد المراد فهرسته. يجب أن يقع ضمن قائمة local_roots المسموحة."
+            },
+            "follow_symlinks": {
+              "label": "اتباع الروابط الرمزية",
+              "description": "ما إذا كانت تُتبع الروابط الرمزية أثناء فحص المكتبة."
+            },
+            "recursive": {
+              "label": "فحص متكرر",
+              "description": "فهرسة ملفات الصوت في المجلدات الفرعية بشكل متكرر."
+            },
+            "extensions": {
+              "label": "امتدادات الملفات",
+              "description": "قائمة مفصولة بفواصل لامتدادات ملفات الصوت المراد فهرستها (مثل .mp3، .flac)."
+            },
+            "exclude": {
+              "label": "أنماط الاستبعاد",
+              "description": "أنماط glob مفصولة بفواصل لمسارات يُتخطاها أثناء الفحص."
+            },
+            "allow_write_tags": {
+              "label": "السماح بكتابة البيانات الوصفية",
+              "description": "السماح لـ Songhive بكتابة وسوم البيانات الوصفية إلى ملفات المصدر. يتطلب إذن الكتابة على المجلد الجذري."
+            },
+            "allow_rename_source": {
+              "label": "السماح بإعادة تسمية المصدر",
+              "description": "السماح لـ Songhive بإعادة تسمية ملفات المصدر عبر تعديلات المقاطع. يتطلب إذن الكتابة على المجلد الجذري."
+            },
+            "allow_delete_source": {
+              "label": "السماح بحذف المصدر",
+              "description": "السماح بحذف ملفات المصدر من نظام الملفات. يتطلب إذن الكتابة على المجلد الجذري."
+            },
+            "allow_hashing": {
+              "label": "السماح بحساب بصمة الصوت",
+              "description": "حساب بصمة صوتية ثابتة للمقاطع لكشف التكرارات ودعم إعادة الترميز."
+            },
+            "fast_hash": {
+              "label": "استخدام بصمة خام سريعة",
+              "description": "استخدام SHA-256 خام بدلا من بصمة ffmpeg للصوت فقط. أسرع لكنها تتغير عند تغير الوسوم أو الغلاف."
+            }
+          }
+        },
+        "s3": {
+          "fields": {
+            "bucket": {
+              "label": "الحاوية",
+              "description": "اسم حاوية S3 المحتوية على ملفات الصوت."
+            },
+            "prefix": {
+              "label": "بادئة المفاتيح",
+              "description": "فهرسة الكائنات تحت هذه البادئة فقط (مثل music/). اتركها فارغة لفحص الحاوية كاملة."
+            },
+            "endpoint_url": {
+              "label": "رابط نقطة النهاية",
+              "description": "نقطة نهاية مخصصة للخدمات المتوافقة مع S3 (مثل MinIO). اتركها فارغة لـ AWS."
+            },
+            "region": {
+              "label": "المنطقة",
+              "description": "منطقة AWS للحاوية. اختيارية لمعظم الخدمات المتوافقة مع S3."
+            },
+            "access_key": {
+              "label": "مفتاح الوصول",
+              "description": "معرف مفتاح الوصول. اتركه فارغا لاستخدام اعتمادات الخادم المحيطة."
+            },
+            "secret_key": {
+              "label": "المفتاح السري",
+              "description": "مفتاح الوصول السري المقترن بمفتاح الوصول. يُخزن مشفرا."
+            },
+            "path_style": {
+              "label": "عنونة بأسلوب المسار",
+              "description": "استخدام روابط بأسلوب المسار (bucket/key) بدلا من الأسلوب الافتراضي المستضاف. تتطلبه بعض الخدمات المتوافقة مع S3 مثل MinIO."
+            },
+            "presigned_urls": {
+              "label": "البث عبر روابط موقعة مسبقا",
+              "description": "إعادة توجيه العملاء إلى روابط قصيرة الأجل موقعة مسبقا للتشغيل بدلا من تمرير الصوت عبر Songhive."
+            },
+            "presigned_expiry_seconds": {
+              "label": "انتهاء صلاحية الرابط الموقع (ثوان)",
+              "description": "مدة صلاحية روابط البث المولدة (60–604800)."
+            },
+            "extensions": {
+              "label": "امتدادات الملفات",
+              "description": "قائمة مفصولة بفواصل لامتدادات ملفات الصوت المراد فهرستها (مثل .mp3، .flac)."
+            },
+            "exclude": {
+              "label": "أنماط الاستبعاد",
+              "description": "أنماط glob مفصولة بفواصل لمفاتيح كائنات يُتخطاها أثناء الفحص."
+            },
+            "recursive": {
+              "label": "فحص متكرر",
+              "description": "فهرسة الكائنات في بادئات مفاتيح متداخلة. عطّله لفهرسة المفاتيح الموجودة مباشرة تحت البادئة فقط."
+            },
+            "allow_hashing": {
+              "label": "السماح بحساب بصمة الصوت",
+              "description": "حساب بصمة صوتية ثابتة للمقاطع لكشف التكرارات ودعم إعادة الترميز. يتطلب تنزيل الكائنات الجديدة أو المتغيرة مرة واحدة."
+            },
+            "fast_hash": {
+              "label": "استخدام بصمة خام سريعة",
+              "description": "استخدام SHA-256 خام بدلا من بصمة ffmpeg للصوت فقط. أرخص لكنها تتغير عند تغير الوسوم أو الغلاف."
+            },
+            "allow_write_tags": {
+              "label": "السماح بكتابة البيانات الوصفية",
+              "description": "السماح لـ Songhive بإعادة كتابة الوسوم المضمنة وإعادة رفع الكائنات عند تعديل المقاطع."
+            },
+            "allow_rename_source": {
+              "label": "السماح بإعادة تسمية المصدر",
+              "description": "السماح لـ Songhive بإعادة تسمية الكائنات عبر تعديلات المقاطع. يتطلب إذن الكتابة على الحاوية."
+            },
+            "allow_delete_source": {
+              "label": "السماح بحذف المصدر",
+              "description": "السماح بحذف الكائنات من الحاوية. يتطلب إذن الكتابة على الحاوية."
+            }
+          }
+        },
+        "sftp": {
+          "fields": {
+            "host": {
+              "label": "المضيف",
+              "description": "اسم المضيف أو عنوان IP لخادم SFTP/SSH. يجب أن يكون المضيف البعيد قابلا للوصول من خادم Songhive — كل الوصول للملفات يتم من الخادم."
+            },
+            "port": {
+              "label": "المنفذ",
+              "description": "منفذ SSH للخادم البعيد (عادة 22)."
+            },
+            "username": {
+              "label": "اسم المستخدم",
+              "description": "اسم مستخدم SSH المستخدم لتسجيل الدخول إلى الخادم البعيد."
+            },
+            "password": {
+              "label": "كلمة المرور",
+              "description": "كلمة مرور SSH. يمكن دمجها مع مفتاح خاص؛ يختار الخادم الطريقة التي يقبلها. تُخزن مشفرة."
+            },
+            "private_key": {
+              "label": "المفتاح الخاص",
+              "description": "مفتاح خاص بصيغة PEM أو OpenSSH للمصادقة بالمفتاح العام. الصق المفتاح كاملا بما فيه سطرا BEGIN/END. يُخزن مشفرا."
+            },
+            "private_key_passphrase": {
+              "label": "عبارة مرور المفتاح الخاص",
+              "description": "عبارة المرور التي تحمي المفتاح الخاص إن كان مشفرا. تُخزن مشفرة."
+            },
+            "verify_host_key": {
+              "label": "التحقق من مفتاح المضيف",
+              "description": "التحقق من مفتاح مضيف SSH للخادم. عند التفعيل يجب أن يكون المضيف مدرجا في بيانات المضيفين المعروفين أدناه أو في ملف ~/.ssh/known_hosts على الخادم."
+            },
+            "known_hosts": {
+              "label": "المضيفون المعروفون",
+              "description": "سطور known_hosts بصيغة OpenSSH المستخدمة للتحقق من مفتاح مضيف الخادم، مثل \"host.example ssh-ed25519 AAAA...\". تُستخدم فقط عند تفعيل التحقق من مفتاح المضيف."
+            },
+            "root": {
+              "label": "الجذر البعيد",
+              "description": "المجلد على الخادم البعيد المراد فهرسته. المسارات النسبية تُحل مقابل مجلد مستخدم SSH الرئيسي؛ اتركه فارغا لفهرسة المجلد الرئيسي نفسه."
+            },
+            "connect_timeout": {
+              "label": "مهلة الاتصال (ثوان)",
+              "description": "مدة انتظار اكتمال اتصال SSH وتسجيل الدخول."
+            },
+            "follow_symlinks": {
+              "label": "اتباع الروابط الرمزية",
+              "description": "ما إذا كانت تُتبع الروابط الرمزية أثناء فحص المكتبة البعيدة."
+            },
+            "recursive": {
+              "label": "فحص متكرر",
+              "description": "فهرسة ملفات الصوت في المجلدات الفرعية البعيدة بشكل متكرر."
+            },
+            "extensions": {
+              "label": "امتدادات الملفات",
+              "description": "قائمة مفصولة بفواصل لامتدادات ملفات الصوت المراد فهرستها (مثل .mp3، .flac)."
+            },
+            "exclude": {
+              "label": "أنماط الاستبعاد",
+              "description": "أنماط glob مفصولة بفواصل لمسارات بعيدة يُتخطاها أثناء الفحص."
+            },
+            "allow_hashing": {
+              "label": "السماح بحساب بصمة الصوت",
+              "description": "حساب بصمة صوتية ثابتة للمقاطع لكشف التكرارات ودعم إعادة الترميز. يتطلب تنزيل الملفات الجديدة أو المتغيرة مرة واحدة."
+            },
+            "fast_hash": {
+              "label": "استخدام بصمة خام سريعة",
+              "description": "استخدام SHA-256 خام بدلا من بصمة ffmpeg للصوت فقط. أرخص لكنها تتغير عند تغير الوسوم أو الغلاف."
+            },
+            "allow_write_tags": {
+              "label": "السماح بكتابة البيانات الوصفية",
+              "description": "السماح لـ Songhive بإعادة كتابة الوسوم المضمنة وإعادة رفع الملفات عند تعديل المقاطع. يتطلب إذن الكتابة على الخادم البعيد."
+            },
+            "allow_rename_source": {
+              "label": "السماح بإعادة تسمية المصدر",
+              "description": "السماح لـ Songhive بإعادة تسمية ملفات بعيدة عبر تعديلات المقاطع. يتطلب إذن الكتابة على الخادم البعيد."
+            },
+            "allow_delete_source": {
+              "label": "السماح بحذف المصدر",
+              "description": "السماح بحذف الملفات على الخادم البعيد. يتطلب إذن الكتابة على الخادم البعيد."
+            }
+          }
+        },
+        "webdav": {
+          "fields": {
+            "url": {
+              "label": "رابط WebDAV",
+              "description": "الرابط الأساسي لخادم WebDAV، مثل https://nextcloud.example.com/remote.php/dav/files/alice. يجب أن يكون الخادم قابلا للوصول من خادم Songhive — كل الوصول للملفات يتم من الخادم."
+            },
+            "root": {
+              "label": "الجذر البعيد",
+              "description": "المجلد تحت الرابط الأساسي المراد فهرسته (مثل Music). اتركه فارغا لفهرسة الرابط الأساسي نفسه."
+            },
+            "username": {
+              "label": "اسم المستخدم",
+              "description": "اسم مستخدم مصادقة HTTP Basic."
+            },
+            "password": {
+              "label": "كلمة المرور",
+              "description": "كلمة مرور مصادقة HTTP Basic. تُخزن مشفرة."
+            },
+            "token": {
+              "label": "رمز Bearer",
+              "description": "رمز Bearer يُرسل في ترويسة Authorization. يُستخدم فقط عند عدم تعيين اسم مستخدم. يُخزن مشفرا."
+            },
+            "verify_ssl": {
+              "label": "التحقق من شهادة TLS",
+              "description": "التحقق من شهادة TLS للخادم. عطّله فقط للاختبار أو الشبكات الخاصة الموثوقة — التعطيل يترك الاتصال مكشوفا لانتحال MITM وسرقة الاعتماد."
+            },
+            "ca_bundle": {
+              "label": "مسار حزمة CA",
+              "description": "مسار اختياري على خادم Songhive لحزمة CA بصيغة PEM تُستخدم للتحقق من شهادة TLS للخادم. لها أولوية على مفتاح التحقق عند تعيينها."
+            },
+            "timeout": {
+              "label": "مهلة الطلب (ثوان)",
+              "description": "مدة انتظار كل طلب HTTP إلى خادم WebDAV."
+            },
+            "extensions": {
+              "label": "امتدادات الملفات",
+              "description": "قائمة مفصولة بفواصل لامتدادات ملفات الصوت المراد فهرستها (مثل .mp3، .flac)."
+            },
+            "exclude": {
+              "label": "أنماط الاستبعاد",
+              "description": "أنماط glob مفصولة بفواصل لمسارات بعيدة يُتخطاها أثناء الفحص."
+            },
+            "recursive": {
+              "label": "فحص متكرر",
+              "description": "فهرسة ملفات الصوت في المجلدات الفرعية البعيدة بشكل متكرر."
+            },
+            "allow_hashing": {
+              "label": "السماح بحساب بصمة الصوت",
+              "description": "حساب بصمة صوتية ثابتة للمقاطع لكشف التكرارات ودعم إعادة الترميز. يتطلب تنزيل الملفات الجديدة أو المتغيرة مرة واحدة."
+            },
+            "fast_hash": {
+              "label": "استخدام بصمة خام سريعة",
+              "description": "استخدام SHA-256 خام بدلا من بصمة ffmpeg للصوت فقط. أرخص لكنها تتغير عند تغير الوسوم أو الغلاف."
+            },
+            "allow_write_tags": {
+              "label": "السماح بكتابة البيانات الوصفية",
+              "description": "السماح لـ Songhive بإعادة كتابة الوسوم المضمنة وإعادة رفع الملفات عند تعديل المقاطع. يتطلب إذن الكتابة على الخادم البعيد."
+            },
+            "allow_rename_source": {
+              "label": "السماح بإعادة تسمية المصدر",
+              "description": "السماح لـ Songhive بإعادة تسمية ملفات بعيدة عبر تعديلات المقاطع. يتطلب إذن الكتابة على الخادم البعيد."
+            },
+            "allow_delete_source": {
+              "label": "السماح بحذف المصدر",
+              "description": "السماح بحذف الملفات على الخادم البعيد. يتطلب إذن الكتابة على الخادم البعيد."
+            }
+          }
+        },
+        "dropbox": {
+          "help": "أنشئ تطبيق Dropbox خاصا بك على {appConsole} (اختر \"Scoped access\"). الأذونات المطلوبة: {permissions} — إضافة إلى {writePermissions} إن أردت كتابة البيانات الوصفية أو إعادة التسمية/الحذف.\nفي إعدادات OAuth 2 للتطبيق، أضف رابط إعادة التوجيه هذا: {callbackUrl}\nثم أدخل مفتاح التطبيق (وسر التطبيق إن ظهر) أدناه واستخدم زر الربط لتخويل حساب Dropbox — تُملأ رموز الوصول والتحديث تلقائيا.\nإن غيّرت أذونات التطبيق لاحقا، اربط مجددا: الرموز الحالية تحتفظ فقط بالنطاقات الممنوحة عند إصدارها.",
+          "fields": {
+            "access_token": {
+              "label": "رمز الوصول",
+              "description": "يُملأ تلقائيا بزر الربط. أدخله يدويا فقط لاختبار سريع — رموز وصول Dropbox تنتهي بعد ساعات قليلة. يُخزن مشفرا."
+            },
+            "refresh_token": {
+              "label": "رمز التحديث",
+              "description": "يُملأ تلقائيا بزر الربط. الاعتماد الدائم — يولّد رموز وصول قصيرة الأجل تلقائيا. يتطلب مفتاح التطبيق أدناه. يُخزن مشفرا."
+            },
+            "app_key": {
+              "label": "مفتاح التطبيق",
+              "description": "مفتاح تطبيق Dropbox الخاص بك، من صفحته في Dropbox App Console. مطلوب."
+            },
+            "app_secret": {
+              "label": "سر التطبيق",
+              "description": "سر تطبيق Dropbox، الظاهر بجانب مفتاح التطبيق في App Console. اختياري. يُخزن مشفرا."
+            },
+            "root": {
+              "label": "المجلد الجذري",
+              "description": "مجلد Dropbox المراد فهرسته (مثل /Music). اتركه فارغا لفهرسة الحساب كاملا."
+            },
+            "timeout": {
+              "label": "مهلة الطلب (ثوان)",
+              "description": "مدة انتظار كل طلب إلى Dropbox API."
+            },
+            "temporary_links": {
+              "label": "البث عبر روابط مؤقتة",
+              "description": "إعادة توجيه العملاء إلى روابط تنزيل Dropbox قصيرة الأجل للتشغيل — تُخفف الحمل عن الخادم، لكن Firefox يرفض تشغيلها (تقدمها Dropbox بسياسة CSP مقيدة). اتركها معطلة لتمرير الصوت عبر Songhive الذي يعمل في كل متصفح."
+            },
+            "extensions": {
+              "label": "امتدادات الملفات",
+              "description": "قائمة مفصولة بفواصل لامتدادات ملفات الصوت المراد فهرستها (مثل .mp3، .flac)."
+            },
+            "exclude": {
+              "label": "أنماط الاستبعاد",
+              "description": "أنماط glob مفصولة بفواصل لمسارات Dropbox يُتخطاها أثناء الفحص."
+            },
+            "recursive": {
+              "label": "فحص متكرر",
+              "description": "فهرسة ملفات الصوت في مجلدات المجلد الجذري الفرعية بشكل متكرر."
+            },
+            "allow_hashing": {
+              "label": "السماح بحساب بصمة الصوت",
+              "description": "حساب بصمة صوتية ثابتة للمقاطع لكشف التكرارات ودعم إعادة الترميز. يتطلب تنزيل الملفات الجديدة أو المتغيرة مرة واحدة."
+            },
+            "fast_hash": {
+              "label": "استخدام بصمة خام سريعة",
+              "description": "استخدام SHA-256 خام بدلا من بصمة ffmpeg للصوت فقط. أرخص لكنها تتغير عند تغير الوسوم أو الغلاف."
+            },
+            "allow_write_tags": {
+              "label": "السماح بكتابة البيانات الوصفية",
+              "description": "السماح لـ Songhive بإعادة كتابة الوسوم المضمنة وإعادة رفع الملفات عند تعديل المقاطع. يتطلب إذن الكتابة على الحساب."
+            },
+            "allow_rename_source": {
+              "label": "السماح بإعادة تسمية المصدر",
+              "description": "السماح لـ Songhive بإعادة تسمية ملفات Dropbox عبر تعديلات المقاطع. يتطلب إذن الكتابة على الحساب."
+            },
+            "allow_delete_source": {
+              "label": "السماح بحذف المصدر",
+              "description": "السماح بحذف الملفات من Dropbox. يتطلب إذن الكتابة على الحساب."
+            }
+          }
+        }
+      }
+    },
+    "scrobbling": {
+      "title": "سكروبل",
+      "hint": "أرسل المقاطع التي تشغلها إلى حساب Last.fm أو Libre.fm. يُرسل تحديث \"يُشغل الآن\" عند بدء التشغيل ويُسكروبل المقطع بعد تجاوز العتبات أدناه.",
+      "disabled": "السكروبل معطل على هذا الخادم.",
+      "service": "الخدمة",
+      "serviceUnavailable": "{name} (غير معدة على هذا الخادم)",
+      "username": "اسم المستخدم",
+      "password": "كلمة المرور",
+      "passwordHint": "كلمة مرور حسابك على خدمة السكروبل. تُستخدم فقط لإنشاء جلسة ولا تُخزن أبدا.",
+      "connect": "ربط الحساب",
+      "connected": "تم ربط حساب السكروبل.",
+      "connectedAs": "تم الربط مع {service} باسم {name}.",
+      "connectError": "تعذر الربط: {message}",
+      "enabled": "السكروبل مفعل",
+      "enabledHint": "عند التعطيل تُسجل مرات التشغيل محليا لكنها لا تُرسل.",
+      "minSeconds": "سكروبل بعد (ثوان)",
+      "minSecondsHint": "تُحتسب مرة التشغيل بعد انقضاء هذا القدر من وقت التشغيل.",
+      "minPercent": "سكروبل بعد (نسبة مئوية)",
+      "minPercentHint": "تُحتسب مرة التشغيل بعد تشغيل هذه النسبة من مدة المقطع — أيهما تحقق أولا.",
+      "disconnect": "قطع الاتصال",
+      "saved": "تم حفظ إعدادات السكروبل.",
+      "saveError": "تعذر حفظ إعدادات السكروبل: {message}",
+      "deleted": "تم قطع اتصال حساب السكروبل.",
+      "deleteError": "تعذر قطع الاتصال: {message}",
+      "loadError": "تعذر تحميل إعدادات السكروبل: {message}",
+      "lastScrobbled": "آخر سكروبل: {date}",
+      "neverScrobbled": "أبدا",
+      "lastError": "آخر خطأ سكروبل: {message}"
+    }
+  },
+  "profile": {
+    "title": "الملف الشخصي",
+    "tabs": {
+      "profile": "الملف الشخصي",
+      "password": "كلمة المرور",
+      "apiTokens": "رموز API",
+      "sessions": "الجلسات",
+      "externalLibraries": "المكتبات الخارجية",
+      "posts": "المنشورات",
+      "activity": "النشاط",
+      "tracks": "المقاطع",
+      "albums": "الألبومات",
+      "libraries": "المكتبات",
+      "playlists": "قوائم التشغيل",
+      "notifications": "الإشعارات",
+      "interface": "الواجهة",
+      "moderation": "الإشراف",
+      "security": "الأمان",
+      "podcastSync": "مزامنة البودكاست",
+      "scrobbling": "سكروبل",
+      "outputs": "المخرجات"
+    },
+    "copyHandle": "نسخ معرف الفيديفرس",
+    "compose": "إنشاء منشور",
+    "statusContentType": "صيغة المنشور الافتراضية",
+    "statusContentTypeHint": "الصيغة المستخدمة افتراضيا عند كتابة المنشورات.",
+    "previewCards": "بطاقات معاينة الروابط",
+    "previewCardsHint": "جلب بطاقات معاينة للروابط في منشوراتك.",
+    "profileVisibility": "الظهور في الدليل",
+    "profileVisibilityHint": "ما إذا كان ملفك الشخصي يظهر في دليل المستخدمين.",
+    "visibility": {
+      "public": "عام — مدرج للجميع",
+      "local": "محلي — مدرج للمستخدمين المسجلين فقط",
+      "private": "خاص — غير مدرج"
+    },
+    "followersApproval": "الموافقة على المتابعين",
+    "followersApprovalHint": "كيفية التعامل مع طلبات المتابعة الجديدة.",
+    "followersApprovalOptions": {
+      "accept": "قبول — الموافقة على المتابعين الجدد تلقائيا",
+      "manual": "يدوي — مراجعة كل طلب متابعة",
+      "reject": "رفض — رفض المتابعين الجدد تلقائيا"
+    },
+    "followers": "لا متابعين | متابع واحد | متابعان | {count} متابعين | {count} متابع | {count} متابع",
+    "following": "لا متابعات | متابعة واحدة | متابعتان | {count} متابعات | {count} متابعة | {count} متابعة",
+    "follow": "متابعة",
+    "unfollow": "إلغاء المتابعة",
+    "followRequested": "تم الطلب",
+    "activityNotifications": {
+      "subscribe": "إشعاري بالنشاط",
+      "unsubscribe": "إيقاف إشعارات النشاط",
+      "error": "تعذر تحديث إشعارات النشاط: {message}"
+    },
+    "followsPage": {
+      "title": "حسابات أتابعها",
+      "empty": "لا تتابع أحدا بعد.",
+      "pending": "مطلوب",
+      "pendingHint": "طلب المتابعة بانتظار الموافقة."
+    },
+    "followersPage": {
+      "title": "المتابعون",
+      "empty": "لا يوجد متابعون بعد.",
+      "since": "يتابع منذ",
+      "tabs": {
+        "followers": "المتابعون",
+        "requests": "الطلبات"
+      },
+      "requestsEmpty": "لا توجد طلبات متابعة معلقة.",
+      "requestsHint": "طلبات متابعة بانتظار موافقتك.",
+      "accept": "قبول",
+      "reject": "رفض",
+      "requestAccepted": "تم قبول طلب المتابعة.",
+      "requestRejected": "تم رفض طلب المتابعة.",
+      "requestError": "تعذر حل طلب المتابعة: {message}"
+    },
+    "displayName": "الاسم المعروض",
+    "bio": "نبذة",
+    "avatar": "الصورة الرمزية",
+    "avatarUrl": "رابط الصورة الرمزية",
+    "avatarUpload": "رفع صورة رمزية",
+    "avatarRemove": "إزالة الصورة الرمزية",
+    "avatarRemoveSuccess": "تمت إزالة الصورة الرمزية.",
+    "avatarRemoveError": "تعذرت إزالة الصورة الرمزية: {message}",
+    "links": "الروابط",
+    "linksHint": "روابط rel=\"me\" (مثل موقعك أو ملفك الاجتماعي)",
+    "addLink": "إضافة رابط",
+    "linkName": "الاسم",
+    "linkUrl": "الرابط",
+    "removeLink": "إزالة",
+    "save": "حفظ",
+    "saveSuccess": "تم حفظ الملف الشخصي.",
+    "saveError": "تعذر حفظ الملف الشخصي: {message}",
+    "currentPassword": "كلمة المرور الحالية",
+    "newPassword": "كلمة المرور الجديدة",
+    "confirmPassword": "تأكيد كلمة المرور الجديدة",
+    "changePassword": "تغيير كلمة المرور",
+    "passwordRequired": "كل حقول كلمة المرور مطلوبة.",
+    "passwordMismatch": "كلمتا المرور الجديدتان غير متطابقتين.",
+    "passwordTooLong": "كلمة المرور طويلة جدا (الحد الأقصى 72 بايت).",
+    "passwordChangeSuccess": "تم تغيير كلمة المرور. سجل الدخول مجددا.",
+    "passwordChangeError": "تعذر تغيير كلمة المرور: {message}",
+    "resendVerification": "إعادة إرسال بريد التحقق",
+    "resendVerificationSuccess": "تم إرسال بريد تحقق جديد. تحقق من بريدك الوارد.",
+    "resendVerificationError": "تعذرت إعادة إرسال بريد التحقق: {message}",
+    "deleteAccount": "حذف الحساب",
+    "deleteAccountHint": "سيزيل هذا ملفك الشخصي وإعداداتك نهائيا. يمكن الاحتفاظ بمحتواك أو حذفه أدناه.",
+    "deleteAccountDialogTitle": "احذف حسابك",
+    "deleteAccountWarning": "هذا الإجراء لا رجعة فيه. ستبقى مقاطعك ومجموعتك بلا مالك ما لم تختر أيضا حذف كل المحتوى الذي أنشأته.",
+    "deleteAccountRecursiveLabel": "احذف أيضا كل المحتوى الذي أنشأته (المقاطع والألبومات وقوائم التشغيل والمكتبات ومحطات الراديو)",
+    "deleteAccountConfirmationLabel": "تأكيد حذف الحساب",
+    "deleteAccountConfirmationHint": "اكتب \"{phrase}\" للتأكيد.",
+    "deleteAccountConfirmationError": "نص التأكيد غير مطابق. اكتب العبارة الظاهرة أعلاه تماما.",
+    "deleteAccountCancel": "إلغاء",
+    "deleteAccountConfirm": "حذف الحساب",
+    "deleteAccountSuccess": "تم حذف حسابك.",
+    "deleteAccountError": "تعذر حذف الحساب: {message}",
+    "apiTokens": {
+      "create": "إنشاء رمز",
+      "name": "الاسم",
+      "nameHint": "اسم وصفي لهذا الرمز",
+      "expiresAt": "تنتهي في",
+      "expiresAtHint": "اختياري. اتركه فارغا لرمز لا تنتهي صلاحيته أبدا.",
+      "tokenCopied": "تم نسخ الرمز إلى الحافظة.",
+      "copyFailed": "تعذر نسخ الرمز. انسخه يدويا.",
+      "rawTokenLabel": "رمزك الجديد",
+      "rawTokenHint": "انسخ هذا الرمز الآن — لا يمكن عرضه مجددا.",
+      "revoke": "إلغاء",
+      "revokeConfirm": "هل أنت متأكد أنك تريد إلغاء \"{name}\"؟",
+      "expiresAtInvalid": "يجب أن يكون الانتهاء في المستقبل.",
+      "empty": "لا تملك رموز API.",
+      "createdAt": "تاريخ الإنشاء",
+      "lastUsedAt": "آخر استخدام",
+      "never": "أبدا"
+    },
+    "sessions": {
+      "device": "الجهاز",
+      "ipAddress": "عنوان IP",
+      "createdAt": "تاريخ الإنشاء",
+      "expiresAt": "تنتهي",
+      "current": "الجلسة الحالية",
+      "unknown": "غير معروف",
+      "empty": "لا توجد جلسات نشطة.",
+      "revoke": "إلغاء",
+      "revokeConfirm": "هل أنت متأكد أنك تريد إلغاء الجلسة على \"{device}\"؟",
+      "revokeCurrentConfirm": "هل أنت متأكد أنك تريد إلغاء جلستك الحالية؟ سيتم تسجيل خروجك.",
+      "revokeSuccess": "تم إلغاء الجلسة.",
+      "revokeCurrentSuccess": "تم إلغاء الجلسة. جار تسجيل الخروج..."
+    },
+    "interface": {
+      "title": "الواجهة",
+      "hint": "خصص مظهر Songhive على هذا الجهاز.",
+      "themeLabel": "السمة",
+      "themeHint": "\"النظام\" يتبع إعداد مظهر جهازك.",
+      "accentHint": "يُستخدم للإبرازات والأزرار والحالات النشطة.",
+      "languageLabel": "اللغة",
+      "languageHint": "\"الافتراضي للمتصفح\" يتبع إعداد لغة متصفحك.",
+      "languageAuto": "الافتراضي للمتصفح"
+    },
+    "security": {
+      "passwordLabel": "كلمة المرور الحالية",
+      "totp": {
+        "heading": "تطبيق المصادقة",
+        "disabledHint": "استخدم تطبيق مصادقة لتوليد رموز مؤقتة عند تسجيل الدخول.",
+        "enabledHint": "تطبيق المصادقة لديك نشط. أدخل كلمة المرور لتعطيله.",
+        "setup": "إعداد تطبيق المصادقة",
+        "scanHint": "امسح رمز QR هذا بتطبيق المصادقة، ثم أدخل الرمز الظاهر لتأكيد الإعداد.",
+        "qrAlt": "رمز QR لإعداد تطبيق المصادقة",
+        "manualEntry": "تعذر المسح؟ أدخل هذا المفتاح يدويا:",
+        "codeLabel": "رمز المصادقة",
+        "codeHint": "أدخل الرمز المكون من 6 أرقام الظاهر في تطبيقك.",
+        "confirm": "تأكيد وتفعيل",
+        "enabled": "تم تفعيل المصادقة الثنائية.",
+        "disabled": "تم تعطيل تطبيق المصادقة.",
+        "disable": "تعطيل",
+        "disableConfirm": "سيوقف هذا عامل تطبيق المصادقة الثاني. متابعة؟"
+      },
+      "keys": {
+        "heading": "مفاتيح الأمان",
+        "unsupported": "متصفحك لا يدعم مفاتيح الأمان (WebAuthn).",
+        "name": "الاسم",
+        "createdAt": "أُضيف",
+        "actions": "",
+        "empty": "لا توجد مفاتيح أمان مسجلة.",
+        "nameLabel": "اسم المفتاح",
+        "nameHint": "تسمية للتعرف على هذا المفتاح، مثل 'YubiKey'.",
+        "add": "إضافة مفتاح أمان",
+        "added": "تم تسجيل مفتاح الأمان.",
+        "cancelled": "أُلغي تسجيل مفتاح الأمان.",
+        "remove": "إزالة",
+        "removeConfirm": "إزالة مفتاح الأمان '{name}'؟",
+        "unnamed": "مفتاح بلا اسم"
+      },
+      "recovery": {
+        "heading": "رموز الاسترداد",
+        "remaining": "تبقى {count} رموز استرداد غير مستخدمة.",
+        "regenerate": "إعادة توليد الرموز",
+        "regenerateConfirm": "سيبطل هذا كل رموز الاسترداد الحالية. متابعة؟",
+        "newCodes": "رموز الاسترداد الجديدة",
+        "newCodesHint": "خزن هذه الرموز في مكان آمن. يمكن استخدام كل منها مرة واحدة لتسجيل الدخول إن فقدت عوامل الأمان الأخرى.",
+        "copied": "تم نسخ رموز الاسترداد."
+      }
+    }
+  },
+  "users": {
+    "title": "المستخدمون",
+    "search": "ابحث في المستخدمين…",
+    "sort": {
+      "label": "ترتيب حسب",
+      "username": "اسم المستخدم",
+      "createdAt": "تاريخ الانضمام"
+    },
+    "joined": "انضم",
+    "empty": "لا يوجد مستخدمون."
+  },
+  "browse": {
+    "entities": {
+      "artists": "الفنانون",
+      "albums": "الألبومات",
+      "tracks": "المقاطع",
+      "playlists": "قوائم التشغيل",
+      "libraries": "المكتبات",
+      "activities": "الأنشطة",
+      "files": "الملفات",
+      "artist": "الفنان",
+      "album": "الألبوم",
+      "track": "المقطع",
+      "playlist": "قائمة التشغيل",
+      "library": "المكتبة",
+      "file": "الملف",
+      "radio": "الراديو",
+      "item": "العنصر",
+      "episode": "الحلقة",
+      "share": "المشاركة",
+      "shares": "المشاركات"
+    },
+    "list": {
+      "searchPlaceholder": "ابحث في {entity}…",
+      "empty": "لا نتائج في {entity}.",
+      "loadMore": "تحميل المزيد",
+      "loadPrevious": "تحميل السابق",
+      "myCollection": "مجموعتي",
+      "createPlaylist": "إنشاء قائمة تشغيل",
+      "createLibrary": "إنشاء مكتبة",
+      "newPlaylist": "قائمة تشغيل جديدة",
+      "newLibrary": "مكتبة جديدة"
+    },
+    "detail": {
+      "tracks": "المقاطع",
+      "albums": "الألبومات",
+      "discography": "الأعمال",
+      "released": "تاريخ الإصدار",
+      "year": "السنة",
+      "genre": "النوع",
+      "duration": "المدة",
+      "trackNumber": "الرقم",
+      "discNumber": "القرص",
+      "owner": "المالك",
+      "visibility": "الظهور",
+      "actions": "الإجراءات",
+      "tags": "الوسوم",
+      "playAll": "تشغيل الكل",
+      "trackCount": "لا مقاطع | مقطع واحد | مقطعان | {count} مقاطع | {count} مقطع | {count} مقطع",
+      "albumCount": "لا ألبومات | ألبوم واحد | ألبومان | {count} ألبومات | {count} ألبوم | {count} ألبوم",
+      "episodeCount": "لا حلقات | حلقة واحدة | حلقتان | {count} حلقات | {count} حلقة | {count} حلقة"
+    },
+    "visibility": {
+      "private": "خاص",
+      "local": "محلي",
+      "public": "عام"
+    },
+    "edit": {
+      "editAlbum": "تعديل الألبوم",
+      "editTrack": "تعديل المقطع",
+      "editLibrary": "تعديل المكتبة",
+      "editArtist": "تعديل الفنان",
+      "title": "العنوان",
+      "artist": "الفنان",
+      "album": "الألبوم",
+      "description": "الوصف",
+      "extraArtists": "فنانون إضافيون",
+      "extraArtistsHint": "قائمة مفصولة بفواصل لفنانين مشاركين إضافيين (مثل الفنانين الضيوف)",
+      "releaseYear": "سنة الإصدار",
+      "filename": "اسم الملف",
+      "name": "الاسم",
+      "tags": "الوسوم",
+      "publishFediverse": "النشر على الفيديفرس",
+      "publishFediverseHint": "إرسال منشور صوتي ActivityPub إلى متابعيك على الفيديفرس. إن لم يُفعّل يصبح المقطع عاما فقط — يصبح رابطه متاحا للجميع دون منشور فيديفرس.",
+      "saveSuccess": "تم الحفظ.",
+      "saveError": "تعذر الحفظ: {message}",
+      "deleteConfirm": "هل أنت متأكد أنك تريد حذف \"{name}\"؟",
+      "deleted": "تم الحذف.",
+      "providerManaged": "تدير {provider} البيانات الوصفية — لا يمكن تعديل الحقول المقفلة هنا. تبقى الحقول المحلية كالوسوم والظهور قابلة للتعديل."
+    },
+    "providerSync": {
+      "from": "المزود: {provider}",
+      "updated": "حُدث في {time}",
+      "refreshing": "جار تحديث محتويات {provider}…",
+      "loading": "جار تحميل محتويات {provider}…",
+      "error": "تعذر تحديث محتويات {provider}.",
+      "syncNow": "زامن الآن"
+    },
+    "delete": {
+      "title": "حذف {entity}؟",
+      "confirm": "هل أنت متأكد أنك تريد حذف \"{name}\"؟",
+      "bulkTitle": "حذف {count} {entity}؟",
+      "bulkConfirm": "هل أنت متأكد أنك تريد حذف {count} {entity}؟",
+      "recursive": "حذف {contents} المرتبطة",
+      "deleteSource": "حذف ملف الصوت المصدر أيضا",
+      "deleteSourceWarning": "هذا الإجراء مدمر ولا رجعة فيه. سيُحذف ملف الصوت المصدر من مكتبة {provider} الخارجية ولا يمكن استعادته.",
+      "success": "تم حذف \"{name}\".",
+      "bulkSuccess": "تم حذف {count} {entity}.",
+      "error": "تعذر حذف {entity}: {message}"
+    },
+    "download": {
+      "error": "تعذر تنزيل المقطع: {message}"
+    },
+    "libraryManagement": {
+      "addTracks": "إضافة مقاطع",
+      "upload": "رفع",
+      "uploadMore": "رفع المزيد",
+      "bulkUpload": "رفع جماعي",
+      "scan": "فحص",
+      "scanPath": "فحص مسار",
+      "scanHint": "مسار نظام الملفات لفحصه بحثا عن مقاطع جديدة",
+      "scanning": "جار الفحص…",
+      "scanSuccess": "بدأ الفحص.",
+      "scanError": "تعذر الفحص: {message}",
+      "uploadSuccess": "اكتمل الرفع.",
+      "uploadError": "تعذر الرفع: {message}",
+      "force": "الكتابة فوق الملفات الموجودة",
+      "enrich": "جلب البيانات الوصفية",
+      "publish": "النشر على الفيديفرس",
+      "publishHint": "مشاركة الرفوعات العامة مع متابعيك على الفيديفرس كمنشورات صوتية اتحادية.",
+      "libraryTracks": "مقاطع المكتبة"
+    },
+    "share": {
+      "shareTitle": "مشاركة \"{name}\"",
+      "shareGrants": "مُشارَك مع مستخدمين",
+      "shareUrls": "روابط عامة",
+      "unknownItem": "عنصر بلا عنوان",
+      "user": "المستخدم",
+      "createGrant": "منح وصول",
+      "revoke": "إلغاء",
+      "createShareUrl": "إنشاء رابط عام",
+      "expiresAt": "تنتهي في",
+      "expiresAtHint": "اختياري. اتركه فارغا لرابط لا تنتهي صلاحيته أبدا.",
+      "copyUrl": "نسخ الرابط",
+      "urlCopied": "تم نسخ الرابط إلى الحافظة.",
+      "copyFailed": "تعذر نسخ الرابط.",
+      "revokeConfirm": "هل أنت متأكد أنك تريد إلغاء وصول \"{user}\"؟",
+      "shareUrlCreated": "تم إنشاء الرابط العام.",
+      "sharedItem": "{type} مشارَك",
+      "shareExpired": "انتهت صلاحية هذا الرابط.",
+      "shareRevoked": "تم إلغاء هذا الرابط.",
+      "shareNotFound": "هذا العنصر المشارَك غير موجود.",
+      "createdAt": "تاريخ الإنشاء",
+      "expiresAtInvalid": "يجب أن يكون الانتهاء في المستقبل.",
+      "grantCreated": "تم منح الوصول.",
+      "grantCreateError": "تعذر منح الوصول: {message}",
+      "urlCreateError": "تعذر إنشاء الرابط: {message}",
+      "revokeError": "تعذر الإلغاء: {message}",
+      "rawToken": "الرمز",
+      "rawTokenHint": "انسخ هذا الرمز الآن — لا يمكن عرضه مجددا.",
+      "revokeUrlConfirm": "هل أنت متأكد أنك تريد إلغاء هذا الرابط العام؟",
+      "emptyGrants": "غير مشارَك مع أي مستخدمين.",
+      "emptyUrls": "لا توجد روابط عامة.",
+      "openInApp": "سجل الدخول لفتحه في التطبيق",
+      "publicUrl": "رابط عام",
+      "publicUrlHint": "يمكن لأي شخص عرض هذه الصفحة العامة.",
+      "webUrl": "الويب",
+      "downloadUrl": "تنزيل مباشر",
+      "preview": "معاينة",
+      "fediverse": "فيديفرس",
+      "fediverseHint": "نشر هذا المقطع كمنشور ActivityPub.",
+      "fediverseType": "نوع المنشور",
+      "fediverseTypeNote": "منشور (Note)",
+      "fediverseTypeAudio": "مقطع (Audio)",
+      "fediverseTypeNoteHint": "يشارك منشورا عاديا مع المقطع مرفقا — يظهر النص على كل خوادم الفيديفرس.",
+      "fediverseTypeAudioHint": "ينشر المقطع ككائن صوتي اتحادي. بعض الخوادم (مثل Mastodon) تعرض عنوان المقطع ورابطه فقط — لا يظهر نص المنشور.",
+      "fediversePublish": "نشر",
+      "fediversePublished": "نُشر المقطع على الفيديفرس.",
+      "fediverseNotPublic": "يمكن نشر المقاطع العامة فقط على الفيديفرس. غيّر ظهور المقطع إلى عام أولا.",
+      "embed": "تضمين",
+      "embedHint": "الصق هذا المقتطف في صفحة ويب لتضمين هذا العنصر.",
+      "embedFormat": "صيغة التضمين",
+      "embedFormatAudio": "عنصر HTML audio",
+      "embedFormatHtmlList": "قائمة مقاطع HTML",
+      "embedFormatMarkdown": "رابط Markdown",
+      "embedFormatScript": "أداة JavaScript",
+      "embedFormatIframe": "إطار HTML iframe",
+      "embedLoading": "جار تحميل تفاصيل التضمين…",
+      "embedNotPublic": "يمكن تضمين العناصر العامة فقط. غيّر الظهور إلى عام أولا."
+    },
+    "contextMenu": {
+      "playNext": "تشغيل تاليا",
+      "enqueue": "إضافة إلى قائمة الانتظار",
+      "goToAlbum": "الذهاب إلى الألبوم",
+      "goToArtist": "الذهاب إلى الفنان",
+      "goToTrack": "الذهاب إلى المقطع",
+      "addToLibrary": "إضافة إلى المكتبة",
+      "addToPlaylist": "إضافة إلى قائمة تشغيل",
+      "removeFromLibrary": "إزالة من المكتبة",
+      "removeFromPlaylist": "إزالة من قائمة التشغيل",
+      "deleteTrack": "حذف المقطع",
+      "editTrack": "تعديل المقطع",
+      "enrich": "جلب البيانات الوصفية",
+      "goToPodcast": "الذهاب إلى البودكاست",
+      "openOnProvider": "فتح على {provider}"
+    },
+    "enrich": {
+      "title": "جلب البيانات الوصفية",
+      "metadata": "جلب البيانات الوصفية",
+      "success": "تم إدراج إثراء البيانات الوصفية.",
+      "albumSuccess": "تم إدراج إثراء البيانات الوصفية لـ {count} مقطع.",
+      "error": "تعذر جلب البيانات الوصفية: {message}"
+    },
+    "removeFromCollection": {
+      "singleTitle": "إزالة \"{track}\" من \"{collection}\"؟",
+      "bulkTitle": "إزالة {count} مقاطع من \"{collection}\"؟",
+      "confirm": "إزالة",
+      "cancel": "إلغاء",
+      "singleSuccess": "تمت إزالة \"{track}\" من \"{collection}\".",
+      "bulkSuccess": "تمت إزالة {count} مقاطع من \"{collection}\".",
+      "error": "تعذرت إزالة المقاطع: {message}"
+    },
+    "reorder": {
+      "start": "إعادة ترتيب",
+      "done": "تم",
+      "moveUp": "نقل لأعلى",
+      "moveDown": "نقل لأسفل",
+      "moveToPosition": "نقل إلى موضع",
+      "top": "الأعلى",
+      "bottom": "الأسفل",
+      "drag": "اسحب لإعادة الترتيب",
+      "invalidPosition": "أدخل رقما موجبا، -1 للنهاية، أو 0 للإلغاء.",
+      "loadMoreToMove": "حمّل مقاطع إضافية لنقل التحديد لأسفل أكثر.",
+      "error": "تعذرت إعادة ترتيب المقاطع: {message}"
+    },
+    "bulkEdit": {
+      "start": "تعديل جماعي",
+      "done": "تم",
+      "selectAll": "تحديد الكل",
+      "deselectAll": "إلغاء تحديد الكل",
+      "removeSelected": "إزالة المحدد",
+      "removeSelectedFromLibrary": "إزالة من المكتبة",
+      "removeSelectedFromPlaylist": "إزالة من قائمة التشغيل",
+      "deleteSelected": "حذف المحدد",
+      "addToLibrary": "إضافة إلى المكتبة",
+      "addToPlaylist": "إضافة إلى قائمة تشغيل",
+      "editMetadata": "تعديل البيانات الوصفية",
+      "editMetadataTitle": "تعديل البيانات الوصفية لـ {count} مقاطع",
+      "editHint": "تُطبق فقط الحقول التي تغيرها على كل مقطع محدد. تحتفظ الحقول غير الممسوحة بقيمها الحالية.",
+      "keepUnchanged": "إبقاء دون تغيير",
+      "publishFediverseHint": "إرسال منشور صوتي ActivityPub إلى متابعيك على الفيديفرس لكل مقطع يصبح عاما. إن لم يُفعّل تصبح المقاطع عامة فقط — تصبح روابطها متاحة للجميع دون منشورات فيديفرس.",
+      "nothingToUpdate": "لا توجد تغييرات للتطبيق.",
+      "saveSuccess": "تم تحديث البيانات الوصفية لـ {count} مقاطع.",
+      "savePartial": "تم تحديث {updated} من {total} مقطع.",
+      "saveError": "تعذر تحديث {count} مقاطع: {message}",
+      "empty": "لا توجد مقاطع محددة.",
+      "download": "تنزيل"
+    },
+    "addToCollection": {
+      "addToLibrary": "إضافة إلى المكتبة",
+      "addToPlaylist": "إضافة إلى قائمة تشغيل",
+      "trackCount": "{count} مقاطع",
+      "episodeCount": "{count} حلقات",
+      "libraryTitle": "إضافة {name} إلى مكتبة",
+      "playlistTitle": "إضافة {name} إلى قائمة تشغيل",
+      "selectLibrary": "المكتبة",
+      "selectPlaylist": "قائمة التشغيل",
+      "newLibrary": "إنشاء مكتبة جديدة",
+      "newPlaylist": "إنشاء قائمة تشغيل جديدة",
+      "nameLabel": "الاسم",
+      "nameRequired": "أدخل اسما.",
+      "empty": "لا توجد مجموعات متاحة.",
+      "noneAdded": "لم تُضف أي مقاطع (قد تكون موجودة مسبقا).",
+      "librarySuccess": "تمت إضافة {count} مقاطع إلى المكتبة.",
+      "playlistSuccess": "تمت إضافة {count} مقاطع إلى قائمة التشغيل.",
+      "duplicateWarning": "مقطع واحد أو أكثر موجود مسبقا في قائمة التشغيل هذه. إضافتها مرة أخرى على أي حال؟",
+      "addAnyway": "إضافة على أي حال"
+    },
+    "createPlaylist": "تم إنشاء قائمة التشغيل.",
+    "createLibrary": "تم إنشاء المكتبة.",
+    "collection": {
+      "save": "حفظ في مجموعتي",
+      "remove": "إزالة من مجموعتي",
+      "saveSuccess": "تم الحفظ في مجموعتك.",
+      "removeSuccess": "تمت الإزالة من مجموعتك.",
+      "saveError": "تعذر الحفظ: {message}",
+      "removeError": "تعذرت الإزالة: {message}"
+    },
+    "playlist": {
+      "empty": "لا توجد مقاطع في قائمة التشغيل هذه بعد."
+    }
+  },
+  "player": {
+    "player": "المشغل",
+    "playbackControls": "أزرار التشغيل",
+    "shuffle": "تشغيل عشوائي",
+    "previousTrack": "المقطع السابق",
+    "nextTrack": "المقطع التالي",
+    "repeatOff": "التكرار متوقف",
+    "repeatAll": "تكرار الكل",
+    "repeatOne": "تكرار مقطع واحد",
+    "volumeControls": "أزرار مستوى الصوت",
+    "mute": "كتم الصوت",
+    "unmute": "إلغاء كتم الصوت",
+    "volume": "مستوى الصوت",
+    "volumeValue": "مستوى الصوت {value}%",
+    "progress": "التقدم",
+    "seek": "تقديم",
+    "progressValue": "{current} من {duration}",
+    "expandPlayer": "توسيع المشغل",
+    "collapsePlayer": "طي المشغل",
+    "openQueue": "فتح قائمة الانتظار",
+    "closeQueue": "إغلاق قائمة الانتظار",
+    "clearQueue": "مسح قائمة الانتظار",
+    "queue": "قائمة الانتظار",
+    "queueTracks": "مقاطع قائمة الانتظار",
+    "emptyQueue": "قائمة الانتظار فارغة.",
+    "removeFromQueue": "إزالة {title} من قائمة الانتظار",
+    "nowPlaying": "يُشغل الآن",
+    "goToAlbum": "الذهاب إلى الألبوم {title}",
+    "goToArtist": "الذهاب إلى الفنان {name}",
+    "goToTrack": "الذهاب إلى المقطع {title}",
+    "albumArtwork": "غلاف الألبوم"
+  },
+  "activities": {
+    "title": "الأنشطة",
+    "detailTitle": "نشاط",
+    "view": "الأنشطة",
+    "backTo": "رجوع إلى {entity}",
+    "empty": "لا توجد أنشطة بعد.",
+    "loadMore": "تحميل المزيد",
+    "like": "إعجاب",
+    "liked": "معجَب به",
+    "likeError": "تعذر الإعجاب بهذا النشاط.",
+    "boost": "تعزيز",
+    "boosted": "معزَّز",
+    "boostError": "تعذر تعزيز هذا النشاط.",
+    "unboost": "إلغاء التعزيز",
+    "unboostError": "تعذرت إزالة التعزيز.",
+    "unlike": "إلغاء الإعجاب",
+    "unlikeError": "تعذرت إزالة الإعجاب.",
+    "unlikeConfirm": "إزالة إعجابك؟",
+    "unboostConfirm": "إزالة تعزيزك؟",
+    "objectUnavailable": "هذا المحتوى غير متاح.",
+    "reply": "رد",
+    "replies": "الردود",
+    "quote": "اقتباس",
+    "quotes": "الاقتباسات",
+    "noReplies": "لا توجد ردود بعد.",
+    "noQuotes": "لا توجد اقتباسات بعد.",
+    "replyPlaceholder": "اكتب ردك…",
+    "replySubmit": "رد",
+    "quotePlaceholder": "اكتب اقتباسك…",
+    "quoteSubmit": "اقتباس",
+    "repliesError": "تعذر تحميل الردود.",
+    "quotesError": "تعذر تحميل الاقتباسات.",
+    "loginToInteract": "سجل الدخول للتفاعل",
+    "previewCard": "معاينة الرابط",
+    "actors": {
+      "likes": "أُعجب به من",
+      "boosts": "عُزّز من",
+      "empty": "لا توجد تفاعلات معروفة بعد."
+    },
+    "filters": {
+      "all": "الكل",
+      "local": "محلي",
+      "remote": "بعيد",
+      "replies": "ردود",
+      "boosts": "تعزيزات",
+      "likes": "إعجابات"
+    },
+    "types": {
+      "announce": "عزّز",
+      "like": "أعجب بهذا",
+      "reply": "ردّ",
+      "quote": "اقتبس",
+      "mention": "ذكر",
+      "update": "حدّث",
+      "delete": "حذف",
+      "webmention": "Webmention"
+    },
+    "visibility": {
+      "public": "عام",
+      "followers": "المتابعون",
+      "mentioned": "المذكورون",
+      "local": "محلي",
+      "private": "خاص"
+    },
+    "edit": {
+      "title": "تعديل النشاط",
+      "content": "المحتوى",
+      "visibility": "الظهور",
+      "error": "تعذر تحديث هذا النشاط."
+    },
+    "copyUrl": {
+      "done": "تم نسخ رابط النشاط إلى الحافظة.",
+      "error": "تعذر نسخ رابط النشاط."
+    },
+    "delete": {
+      "title": "حذف النشاط",
+      "confirm": "حذف هذا النشاط؟ سيُرسل إشعار سحب إلى الفيديفرس إن كان منشورا هناك.",
+      "done": "تم حذف النشاط.",
+      "error": "تعذر حذف هذا النشاط."
+    },
+    "audio": {
+      "player": "مشغل الصوت",
+      "playInPlayer": "تشغيل في المشغل",
+      "addToQueue": "إضافة إلى قائمة الانتظار",
+      "addedToQueue": "أُضيف إلى قائمة الانتظار.",
+      "playError": "تعذر تشغيل هذا الصوت.",
+      "downloadError": "تعذر تنزيل هذا الصوت: {message}"
+    },
+    "webmentionTypes": {
+      "mention": "Webmention",
+      "reply": "ردّ عبر Webmention",
+      "like": "أعجب عبر Webmention",
+      "repost": "أعاد نشره عبر Webmention",
+      "bookmark": "أضافه للإشارات عبر Webmention",
+      "rsvp": "أجاب RSVP عبر Webmention",
+      "follow": "تابع عبر Webmention"
+    }
+  },
+  "mentions": {
+    "title": "الإشارات",
+    "empty": "لا توجد إشارات بعد.",
+    "emptyFiltered": "لا توجد إشارات مطابقة للمرشحات المحددة.",
+    "loadMore": "تحميل المزيد",
+    "private": "خاص",
+    "filters": {
+      "all": "الكل",
+      "private": "الخاصة فقط",
+      "sources": "تصفية حسب المصدر",
+      "visibility": "تصفية حسب الظهور"
+    },
+    "sources": {
+      "local": "محلي",
+      "activitypub": "ActivityPub",
+      "webmention": "Webmentions"
+    },
+    "errors": {
+      "loadFailed": "تعذر تحميل الإشارات: {message}"
+    }
+  },
+  "notifications": {
+    "title": "الإشعارات",
+    "empty": "لا توجد إشعارات بعد.",
+    "emptyUnread": "لا توجد إشعارات غير مقروءة.",
+    "emptyFiltered": "لا توجد إشعارات مطابقة للأنواع المحددة.",
+    "filters": {
+      "all": "الكل",
+      "unread": "غير مقروءة",
+      "types": "تصفية حسب النوع"
+    },
+    "markAllRead": "تعليم الكل كمقروء",
+    "unreadCount": "لا إشعارات غير مقروءة | إشعار غير مقروء واحد | إشعاران غير مقروءان | {count} إشعارات غير مقروءة | {count} إشعار غير مقروء | {count} إشعار غير مقروء",
+    "toast": "{actor} {action}",
+    "markRead": "تعليم كمقروء",
+    "markUnread": "تعليم كغير مقروء",
+    "select": "تحديد",
+    "done": "تم",
+    "selectAll": "تحديد الكل",
+    "selectRow": "تحديد الإشعار",
+    "dismiss": "تجاهل",
+    "deleteSelected": "حذف المحدد",
+    "clearAll": "مسح الكل",
+    "clearAllTitle": "مسح كل الإشعارات؟",
+    "clearAllConfirm": "يحذف هذا كل إشعار نهائيا. لا يمكن التراجع عنه.",
+    "loadMore": "تحميل المزيد",
+    "types": {
+      "follow": "بدأ بمتابعتك",
+      "followObject": "تابع {object} خاصتك",
+      "followRequest": "طلب متابعتك",
+      "like": "أعجب بـ{object} خاصتك",
+      "boost": "عزّز {object} خاصتك",
+      "quote": "اقتبس {object} خاصتك",
+      "reply": "ردّ على {object} خاصتك",
+      "mention": "ذكرك",
+      "share": "شارك {object} معك",
+      "unknown": "أرسل لك إشعارا",
+      "webmention": "ذكر {object} خاصتك",
+      "activity": "شارك {object}",
+      "activityCreate": "شارك {object}",
+      "activityLike": "أعجب بـ{object}",
+      "activityAnnounce": "عزّز {object}",
+      "activityReply": "ردّ على {object}",
+      "activityQuote": "اقتبس {object}",
+      "report": "قدّم بلاغا",
+      "download": "تنزيلك جاهز"
+    },
+    "objects": {
+      "post": "منشور",
+      "track": "مقطع",
+      "album": "ألبوم",
+      "artist": "فنان",
+      "playlist": "قائمة تشغيل",
+      "library": "مكتبة",
+      "radio": "راديو",
+      "file": "ملف"
+    },
+    "objectsWithArticle": {
+      "post": "منشور",
+      "track": "مقطع",
+      "album": "ألبوم",
+      "artist": "فنان",
+      "playlist": "قائمة تشغيل",
+      "library": "مكتبة",
+      "radio": "راديو",
+      "file": "ملف"
+    },
+    "someone": "شخص ما",
+    "errors": {
+      "updateFailed": "تعذر تحديث الإشعارات: {message}",
+      "deleteFailed": "تعذر حذف الإشعارات: {message}"
+    },
+    "settings": {
+      "title": "إعدادات الإشعارات",
+      "hint": "اختر كيف تريد أن يتم إشعارك لكل نوع نشاط.",
+      "type": "النوع",
+      "inApp": "داخل التطبيق",
+      "email": "البريد الإلكتروني",
+      "emailDigest": "الملخص اليومي",
+      "save": "حفظ التفضيلات",
+      "saved": "تم حفظ تفضيلات الإشعارات.",
+      "saveFailed": "تعذر حفظ تفضيلات الإشعارات: {message}",
+      "loadFailed": "تعذر تحميل تفضيلات الإشعارات: {message}",
+      "emailUnverified": "يتطلب التسليم بالبريد عنوان بريد موثقا. وثّق بريدك لتفعيل إشعارات البريد.",
+      "push": {
+        "title": "إشعارات نظام التشغيل",
+        "hint": "استقبل إشعارات دفع من المتصفح على الأجهزة المدعومة حتى عند إغلاق Songhive. سيطلب متصفحك الإذن عند تفعيلها.",
+        "enable": "تفعيل",
+        "disable": "تعطيل",
+        "unsupported": "هذا المتصفح لا يدعم إشعارات الدفع.",
+        "status": {
+          "unsupported": "غير مدعومة في هذا المتصفح.",
+          "unavailable": "إشعارات الدفع غير معدة على هذا الخادم.",
+          "denied": "رُفض الإذن. فعّل الإشعارات في إعدادات متصفحك لاستخدام هذه الميزة.",
+          "prompt": "إشعارات الدفع متوقفة.",
+          "subscribed": "إشعارات الدفع مفعلة.",
+          "loading": "جار التحميل…"
+        }
+      },
+      "typeNames": {
+        "follow": "المتابعات",
+        "like": "الإعجابات",
+        "boost": "التعزيزات",
+        "quote": "الاقتباسات",
+        "reply": "الردود",
+        "mention": "الإشارات",
+        "share": "المشاركات",
+        "webmention": "Webmentions",
+        "activity": "نشاط المستخدم",
+        "report": "البلاغات",
+        "download": "التنزيلات"
+      }
+    },
+    "onItem": "على {title}",
+    "followRequest": {
+      "accept": "قبول",
+      "reject": "رفض",
+      "accepted": "مقبول",
+      "rejected": "مرفوض",
+      "error": "تعذر حل طلب المتابعة: {message}"
+    }
+  },
+  "remote": {
+    "badge": "بعيد",
+    "activityTitle": "نشاط بعيد",
+    "resourceTitle": "محتوى {kind} بعيد",
+    "viewOriginal": "عرض الأصل على {domain}",
+    "actorUnavailable": "هذا الملف البعيد لم يعد متاحا.",
+    "objectUnavailable": "هذا المحتوى البعيد لم يعد متاحا.",
+    "cachedActivities": "الأنشطة",
+    "noCachedActivities": "لا توجد أنشطة مخزنة مؤقتا لهذا الملف البعيد.",
+    "lookupBusy": "جار البحث على الفيديفرس…",
+    "lookupFailed": "فشل البحث البعيد.",
+    "seeOnFediverse": "عرض {resource} على الفيديفرس",
+    "kinds": {
+      "track": "مقطع",
+      "album": "ألبوم",
+      "artist": "فنان",
+      "playlist": "قائمة تشغيل",
+      "library": "مكتبة"
+    },
+    "follow": "متابعة {kind}",
+    "unfollow": "إلغاء المتابعة",
+    "followRequested": "تم طلب المتابعة",
+    "followSuccess": "تم إرسال طلب المتابعة.",
+    "unfollowSuccess": "تم إلغاء المتابعة.",
+    "followError": "تعذر تحديث المتابعة: {message}",
+    "partOf": "جزء من",
+    "items": "المحتويات",
+    "interactions": "التفاعلات",
+    "viewResource": "عرض المورد البعيد",
+    "libraryItems": "عناصر اتحادية",
+    "favoritesTitle": "مفضلات اتحادية",
+    "collectedTitle": "عناصر {kind} بعيدة في مجموعتك",
+    "hostedOn": "مستضاف على {domain}"
+  },
+  "embed": {
+    "unavailable": "هذا المحتوى غير متاح.",
+    "openIn": "فتح في {name}"
+  },
+  "moderation": {
+    "mute": "كتم",
+    "unmute": "إلغاء الكتم",
+    "block": "حظر",
+    "unblock": "إلغاء الحظر",
+    "limit": "تقييد",
+    "suspend": "تعليق",
+    "clear": "مسح الإشراف",
+    "defederate": "قطع الفيدرالية",
+    "followersOnly": "للمتابعين فقط",
+    "apply": "تطبيق",
+    "actionApplied": "تم تطبيق إجراء الإشراف.",
+    "mutedBadge": "مكتوم",
+    "blockedBadge": "محظور",
+    "limitedBadge": "مقيد",
+    "suspendedBadge": "معلق",
+    "limitedNotice": "قام مشرفو هذا الخادم بتقييد هذا الحساب.",
+    "showAnyway": "عرض على أي حال",
+    "reason": "السبب (اختياري)",
+    "reasonPlaceholder": "لماذا يُتخذ هذا الإجراء؟",
+    "muteConfirmTitle": "كتم مستخدم",
+    "muteConfirmMessage": "كتم {name}؟ سيُخفى نشاطه عنك لكنه سيظل يرى نشاطك.",
+    "blockConfirmTitle": "حظر مستخدم",
+    "blockConfirmMessage": "حظر {name}؟ لن يتمكن من رؤية نشاطك أو التفاعل معك، وستُزال المتابعات القائمة.",
+    "mutedUsers": "المستخدمون المكتومون",
+    "mutesHint": "يُخفى عنك نشاط المستخدمين المكتومين؛ يظل نشاطك يصلهم.",
+    "noMutes": "لا يوجد مستخدمون مكتومون.",
+    "blockedUsers": "المستخدمون المحظورون",
+    "blocksHint": "لا يستطيع المستخدمون المحظورون رؤية نشاطك أو التفاعل معك.",
+    "noBlocks": "لا يوجد مستخدمون محظورون.",
+    "adminTitle": "الإشراف",
+    "usersSection": "إشراف المستخدمين",
+    "instancesSection": "إشراف الخوادم",
+    "actorUrlLabel": "الجهة",
+    "actorUrlHint": "اسم مستخدم محلي، أو معرف {'@'}user{'@'}domain، أو رابط الجهة.",
+    "actionLabel": "الإجراء",
+    "domainLabel": "النطاق",
+    "domainHint": "نطاق خادم بعيد، مثل mastodon.social.",
+    "limitedUsers": "المستخدمون المقيدون",
+    "limitHint": "تتطلب المتابعات الموافقة؛ تصل الأنشطة لمتابعيهم فقط.",
+    "noLimited": "لا يوجد مستخدمون مقيدون.",
+    "suspendedUsers": "المستخدمون المعلقون",
+    "suspendHint": "لا يمكنهم التفاعل أو استقبال النشاط؛ قطعت كل علاقات المتابعة المحلية.",
+    "noSuspended": "لا يوجد مستخدمون معلقون.",
+    "defederatedInstances": "خوادم مقطوعة الفيدرالية",
+    "defederateHint": "قُطعت كل الفيدرالية من وإلى الخادم؛ تُخفى جهاته.",
+    "noDefederated": "لا توجد خوادم مقطوعة الفيدرالية.",
+    "followersOnlyInstances": "خوادم للمتابعين فقط",
+    "followersOnlyHint": "تُسلم الأنشطة فقط للمستخدمين المحليين الذين يتابعون الكاتب.",
+    "noFollowersOnly": "لا توجد خوادم للمتابعين فقط.",
+    "report": "إبلاغ",
+    "reportTitle": "الإبلاغ عن مستخدم",
+    "reportReason": "لماذا تبلغ عن هذا الحساب؟",
+    "reportReasons": {
+      "spam": "بريد مزعج",
+      "harassment": "تحرش",
+      "copyright": "انتهاك حقوق نشر",
+      "illegal": "محتوى غير قانوني",
+      "other": "أخرى"
+    },
+    "reportComment": "تعليقات إضافية (اختياري)",
+    "reportCommentPlaceholder": "هل يوجد شيء آخر يجب أن يعرفه المشرفون؟",
+    "forwardToRemote": "إحالة أيضا إلى {domain}",
+    "reportSubmit": "إرسال البلاغ",
+    "reportSubmitted": "تم إرسال البلاغ. شكرا لك."
+  },
+  "outputs": {
+    "title": "المخرجات",
+    "thisDevice": "هذا الجهاز",
+    "select": "مخرج التشغيل",
+    "output": "المخرج",
+    "new": "مخرج جديد",
+    "newTitle": "مخرج جديد",
+    "editTitle": "تعديل المخرج",
+    "name": "الاسم",
+    "provider": "المزود",
+    "enabled": "مفعل",
+    "status": "الحالة",
+    "streamUrl": "رابط البث",
+    "ok": "حسنا",
+    "test": "اختبار",
+    "testSuccess": "إعدادات المخرج صالحة.",
+    "testFailed": "فشل اختبار المخرج.",
+    "noProviders": "لا تتوفر مزودات مخرجات.",
+    "noOutputs": "لا توجد مخرجات خادم معدة بعد.",
+    "fieldRequired": "{field} مطلوب.",
+    "createSuccess": "تم إنشاء المخرج.",
+    "saveSuccess": "تم حفظ المخرج.",
+    "saveError": "تعذر حفظ المخرج: {message}",
+    "deleteSuccess": "تم حذف المخرج.",
+    "deleteError": "تعذر حذف المخرج: {message}",
+    "deleteConfirm": "حذف المخرج \"{name}\"؟",
+    "loadError": "تعذر تحميل المخرجات: {message}"
+  },
+  "downloads": {
+    "title": "التنزيلات",
+    "empty": "لا توجد تنزيلات بعد. حدد مقاطع أو افتح ألبوما أو فنانا أو قائمة تشغيل واختر تنزيل.",
+    "queued": "تم إدراج تنزيل \"{label}\" — سيُشعرك عند جاهزيته.",
+    "requestFailed": "تعذر إدراج التنزيل: {message}",
+    "m3uFailed": "تعذر تصدير ملف قائمة التشغيل: {message}",
+    "downloadFailed": "تعذر تنزيل الأرشيف: {message}",
+    "deleteFailed": "تعذر حذف الأرشيف: {message}",
+    "clearCompleted": "مسح المكتملة",
+    "clearCompletedConfirm": "حذف كل التنزيلات المنتهية؟ ستُزال ملفات الأرشيف.",
+    "cleared": "تم مسح {count} تنزيل.",
+    "itemCount": "لا عناصر | عنصر واحد | عنصران | {count} عناصر | {count} عنصر | {count} عنصر",
+    "itemErrors": "تعذر تضمين {count} عناصر | تعذر تضمين عنصر واحد | تعذر تضمين عنصرين | تعذر تضمين {count} عناصر | تعذر تضمين {count} عنصر | تعذر تضمين {count} عنصر",
+    "refresh": "تحديث",
+    "status": {
+      "pending": "في الانتظار",
+      "processing": "قيد الإنشاء…",
+      "ready": "جاهز",
+      "failed": "فشل"
+    }
+  }
+}

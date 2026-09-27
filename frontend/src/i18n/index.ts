@@ -6,7 +6,39 @@ const STORAGE_LOCALE_KEY = "songhive.locale";
 const localeLoaders: Record<string, () => Promise<Record<string, unknown>>> = {
   en: () => Promise.resolve(en),
   it: () => import("./locales/it.json").then((m) => m.default),
+  ar: () => import("./locales/ar.json").then((m) => m.default),
 };
+
+const RTL_LOCALES = new Set([
+  "ar",
+  "ckb",
+  "dv",
+  "fa",
+  "he",
+  "ps",
+  "sd",
+  "ug",
+  "ur",
+  "yi",
+]);
+
+export function isRtlLocale(locale: string): boolean {
+  return RTL_LOCALES.has(locale.toLowerCase().split("-")[0]);
+}
+
+// CLDR plural categories for Arabic, in pipe order:
+// zero | one | two | few (n%100 in 3-10) | many (n%100 in 11-99) | other.
+function arabicPluralRule(choice: number, choicesLength: number): number {
+  let index: number;
+  if (choice === 0) index = 0;
+  else if (choice === 1) index = 1;
+  else if (choice === 2) index = 2;
+  else {
+    const mod100 = choice % 100;
+    index = mod100 >= 3 && mod100 <= 10 ? 3 : mod100 >= 11 ? 4 : 5;
+  }
+  return Math.min(index, choicesLength - 1);
+}
 
 export function getSupportedLocales(): string[] {
   return Object.keys(localeLoaders);
@@ -57,6 +89,7 @@ export const i18n = createI18n({
   locale: "en",
   fallbackLocale: "en",
   messages: { en },
+  pluralRules: { ar: arabicPluralRule },
 });
 
 const loadedLocales = new Set<string>(["en"]);
@@ -79,6 +112,7 @@ export function applyLocale(locale: string) {
   i18n.global.locale.value = locale as "en";
   if (typeof document !== "undefined") {
     document.documentElement.lang = locale;
+    document.documentElement.dir = isRtlLocale(locale) ? "rtl" : "ltr";
   }
 }
 

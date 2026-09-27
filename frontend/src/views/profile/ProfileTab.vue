@@ -462,7 +462,11 @@ async function onSubmit() {
           v-model="deleteConfirmation"
           type="text"
           :label="t('profile.deleteAccountConfirmationLabel')"
-          :hint="t('profile.deleteAccountConfirmationHint')"
+          :hint="
+            t('profile.deleteAccountConfirmationHint', {
+              phrase: DELETE_CONFIRMATION,
+            })
+          "
         />
 
         <p

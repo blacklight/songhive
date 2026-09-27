@@ -134,6 +134,17 @@
   Interface tab) or, when unset, from `navigator.languages` with `en` as
   fallback. When adding or changing an i18n key, update EVERY locale file —
   not just `en.json` — so translations never fall back to the key name.
+  `applyLocale` also sets `<html lang>` and flips `dir` to `rtl` for locales
+  listed in `RTL_LOCALES` (e.g. `ar`). RTL layout is handled by
+  `postcss-rtlcss` in `vite.config.ts`, which auto-mirrors directional CSS
+  under `[dir="rtl"]` — keep writing physical LTR properties
+  (`margin-left`, `padding-right`, `left:`); do NOT convert them to logical
+  properties by hand. Icons whose glyph implies direction are mirrored via
+  `frontend/src/styles/rtl.css` — add new directional FontAwesome icons
+  (arrows, chevrons, reply/share) there, but never media-transport icons
+  (play, step-forward/backward). Arabic plural strings use all six CLDR
+  forms in pipe order `zero | one | two | few | many | other` (see
+  `arabicPluralRule`); other locales keep the English pipe count.
 - The frontend toolchain (vite 8, vitest 5, jsdom 30 via undici 8) requires
   Node 24+; undici 8 calls `worker_threads.markAsUncloneable`, which does not
   exist on Node 20. CI and the Dockerfile `NODE_VERSION` both pin Node 24.

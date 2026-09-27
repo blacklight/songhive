@@ -3,6 +3,7 @@ import {
   i18n,
   initializeI18n,
   loadLocale,
+  applyLocale,
   detectBrowserLocale,
   resolveLocale,
   formatDateTime,
@@ -26,6 +27,8 @@ afterEach(() => {
   delete (navigator as { language?: string }).language;
   localStorage.clear();
   i18n.global.locale.value = "en";
+  document.documentElement.removeAttribute("lang");
+  document.documentElement.removeAttribute("dir");
 });
 
 describe("i18n", () => {
@@ -91,6 +94,43 @@ describe("i18n", () => {
     expect(i18n.global.t("common.save")).toBe("Salva");
     expect(i18n.global.t("browse.entities.artists")).toBe("Artisti");
     expect(i18n.global.t("player.shuffle")).toBe("Casuale");
+  });
+
+  it("loadLocale loads Arabic messages", async () => {
+    expect(await loadLocale("ar")).toBe(true);
+    i18n.global.locale.value = "ar" as "en";
+    expect(i18n.global.t("common.save")).toBe("حفظ");
+    expect(i18n.global.t("browse.entities.artists")).toBe("الفنانون");
+    expect(i18n.global.t("player.shuffle")).toBe("تشغيل عشوائي");
+  });
+
+  it("applyLocale sets the document lang and dir", () => {
+    applyLocale("it");
+    expect(document.documentElement.lang).toBe("it");
+    expect(document.documentElement.dir).toBe("ltr");
+    applyLocale("ar");
+    expect(document.documentElement.lang).toBe("ar");
+    expect(document.documentElement.dir).toBe("rtl");
+    applyLocale("en");
+    expect(document.documentElement.dir).toBe("ltr");
+  });
+
+  it("detects an RTL browser locale", async () => {
+    stubBrowserLanguages(["ar-EG", "en"]);
+    await initializeI18n();
+    expect(i18n.global.locale.value).toBe("ar");
+    expect(document.documentElement.dir).toBe("rtl");
+  });
+
+  it("applies Arabic plural categories", async () => {
+    await loadLocale("ar");
+    i18n.global.locale.value = "ar" as "en";
+    const key = "browse.detail.trackCount";
+    expect(i18n.global.t(key, 0)).toBe("لا مقاطع");
+    expect(i18n.global.t(key, 1)).toBe("مقطع واحد");
+    expect(i18n.global.t(key, 2)).toBe("مقطعان");
+    expect(i18n.global.t(key, 5)).toBe("5 مقاطع");
+    expect(i18n.global.t(key, 15)).toBe("15 مقطع");
   });
 
   it("loadLocale returns false for unknown locales", async () => {
