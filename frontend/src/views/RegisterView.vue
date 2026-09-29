@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { register } from "@/api/auth";
 import { getApiErrorMessage } from "@/api/client";
+import { useInstanceStore } from "@/stores/instance";
 import { useToastStore } from "@/stores/toast";
+import { formatPrice } from "@/utils/money";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
@@ -13,6 +15,23 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const toast = useToastStore();
+const instanceStore = useInstanceStore();
+
+const membershipPrice = computed(() => {
+  const payments = instanceStore.payments;
+  if (!payments?.membership_price_minor || !payments.membership_currency) {
+    return null;
+  }
+  return t("auth.registerPage.membershipNotice", {
+    price: formatPrice(
+      payments.membership_price_minor,
+      payments.membership_currency,
+    ),
+    interval: t(
+      `payments.membership.interval.${payments.membership_interval ?? "month"}`,
+    ),
+  });
+});
 
 function getQueryCode(raw: unknown): string {
   if (Array.isArray(raw)) return raw[0] ?? "";
@@ -69,6 +88,15 @@ async function onSubmit() {
         message: t("auth.registerPage.emailVerificationNotice"),
       });
     }
+    if (response.billing_required) {
+      // Paid registration: the account stays inactive until checkout
+      // completes — the scoped billing token authorizes that flow.
+      await router.replace({
+        name: "billing",
+        query: response.billing_token ? { bcap: response.billing_token } : {},
+      });
+      return;
+    }
     await router.replace("/login");
   } catch (err) {
     error.value = getApiErrorMessage(err, t("errors.unknown"));
@@ -83,6 +111,10 @@ async function onSubmit() {
     <AppPageTitle :level="2" class="register-view__title" icon="user-plus">
       {{ t("auth.registerPage.title") }}
     </AppPageTitle>
+
+    <p v-if="membershipPrice" class="register-view__membership">
+      {{ membershipPrice }}
+    </p>
 
     <AppInput
       v-model="username"

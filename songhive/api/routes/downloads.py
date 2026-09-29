@@ -254,6 +254,15 @@ async def download_archive_file(
     archive = await _get_own_archive(db, user, archive_id)
     if archive.status != "ready" or archive.archive_file is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    # Re-check download rights at serve time: a refund/dispute landing
+    # between archive creation and download must not leak paid bytes.
+    from ...services.payments import access as payment_access
+
+    track_refs = [str(item.get("ref")) for item in (archive.items or []) if item.get("kind") == "track"]
+    if track_refs:
+        allowed = await payment_access.downloadable_track_ids(db, track_refs, user)
+        if any(ref not in allowed for ref in track_refs):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return await _download_stored_file_response(archive.archive_file, "attachment", storage)
 
 

@@ -28,8 +28,20 @@ ALLOWED_SETTINGS: dict[str, dict[str, Any]] = {
     "instance_contact_url": {"type": "str", "default": ""},
     "registration_mode": {
         "type": "enum",
-        "choices": ["open", "invite-only", "approval-required", "closed"],
+        "choices": ["open", "invite-only", "approval-required", "paid", "closed"],
         "default": "open",
+    },
+    "membership_price_minor": {
+        "type": "number",
+        "default": 500,
+        "min": 0,
+        "max": 10_000_000,
+    },
+    "membership_currency": {"type": "str", "default": "USD"},
+    "membership_interval": {
+        "type": "enum",
+        "choices": ["week", "month", "year"],
+        "default": "month",
     },
     "federation_enabled": {"type": "bool", "default": True},
     "remote_search_access": {
@@ -234,12 +246,37 @@ async def apply_settings_overrides(
         except ValueError:
             logger.warning("Ignoring invalid registration_mode setting: %r", raw)
 
-    if not fed_overrides and not auth_overrides:
+    payments_overrides: dict[str, Any] = {}
+    if "membership_price_minor" in settings:
+        raw_amount = settings["membership_price_minor"]
+        if isinstance(raw_amount, (int, float)) and not isinstance(raw_amount, bool) and 0 <= raw_amount <= 10_000_000:
+            payments_overrides["default_membership_amount_minor"] = int(raw_amount)
+        else:
+            logger.warning("Ignoring invalid membership_price_minor setting: %r", raw_amount)
+    if "membership_currency" in settings:
+        raw_currency = settings["membership_currency"]
+        if isinstance(raw_currency, str) and len(raw_currency.strip()) == 3:
+            payments_overrides["membership_currency"] = raw_currency.strip().upper()
+        else:
+            logger.warning("Ignoring invalid membership_currency setting: %r", raw_currency)
+    if "membership_interval" in settings:
+        raw_interval = settings["membership_interval"]
+        if raw_interval in ("week", "month", "year"):
+            payments_overrides["membership_interval"] = raw_interval
+        else:
+            logger.warning("Ignoring invalid membership_interval setting: %r", raw_interval)
+
+    if not fed_overrides and not auth_overrides and not payments_overrides:
         return config
 
     new_federation = config.federation.model_copy(update=fed_overrides)
     new_auth = config.auth.model_copy(update=auth_overrides)
+    new_payments = config.payments.model_copy(update=payments_overrides)
     return config.model_copy(
-        update={"federation": new_federation, "auth": new_auth},
+        update={
+            "federation": new_federation,
+            "auth": new_auth,
+            "payments": new_payments,
+        },
         deep=True,
     )

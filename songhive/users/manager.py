@@ -180,8 +180,14 @@ async def register_user(
     if invite is not None:
         invite.uses += 1
 
-    # Approval-required users start inactive; every other mode is active.
-    is_active = config.auth.registration_mode != RegistrationMode.APPROVAL_REQUIRED
+    # Approval-required and paid-registration users start inactive; every
+    # other mode is active. Paid users also carry ``payments_required`` so the
+    # membership sync keeps them inactive until the provider confirms payment.
+    paid_mode = config.auth.registration_mode == RegistrationMode.PAID
+    is_active = config.auth.registration_mode not in (
+        RegistrationMode.APPROVAL_REQUIRED,
+        RegistrationMode.PAID,
+    )
     email_verified = not config.auth.require_email_verification
     email_verification_token: Optional[str] = None
     email_verification_token_raw: Optional[str] = None
@@ -200,6 +206,7 @@ async def register_user(
         is_active=is_active,
         email_verified=email_verified,
         email_verification_token=email_verification_token,
+        payments_required=paid_mode,
     )
     ensure_user_actor(user, config)
     session.add(user)
@@ -368,20 +375,33 @@ async def demote_user(session: AsyncSession, user_id: str) -> User:
     return user
 
 
-async def approve_user(session: AsyncSession, user_id: str) -> User:
-    """Approve a user by activating their account."""
+async def approve_user(
+    session: AsyncSession,
+    user_id: str,
+    config: Optional[SonghiveConfig] = None,
+) -> User:
+    """
+    Approve a user by activating their account.
+
+    The effective flag goes through ``sync_user_active_flag`` so approving a
+    ``payments_required`` account without a live subscription leaves it
+    inactive — payment must come from the provider, not the approval.
+    """
+    from ..services.payments import membership
+
     user = await _get_user_or_raise(session, user_id)
-    user.is_active = True
-    await session.flush()
+    user.admin_suspended = False
+    await membership.sync_user_active_flag(session, user, config=config)
     return user
 
 
-async def activate_user(session: AsyncSession, user_id: str) -> User:
-    """Activate (re-enable) a user account."""
-    user = await _get_user_or_raise(session, user_id)
-    user.is_active = True
-    await session.flush()
-    return user
+async def activate_user(
+    session: AsyncSession,
+    user_id: str,
+    config: Optional[SonghiveConfig] = None,
+) -> User:
+    """Activate (re-enable) a user account, honoring unpaid memberships."""
+    return await approve_user(session, user_id, config=config)
 
 
 async def deactivate_user_by_id(
@@ -389,11 +409,19 @@ async def deactivate_user_by_id(
     user_id: str,
     redis: Optional[Redis] = None,
     access_token_ttl: int = 0,
+    config: Optional[SonghiveConfig] = None,
 ) -> User:
     """Deactivate a user account, guarding the last active admin."""
+    from ..services.payments import membership
+
     user = await _get_user_or_raise(session, user_id)
     if user.role == UserRole.ADMIN and user.is_active and await _active_admin_count(session) <= 1:
         raise UserManagementError("Cannot deactivate the last active admin", 400)
+    # An explicit deactivation must also stop billing: durable cancel intent is
+    # recorded first so a failure leaves a retryable task, not a paid ghost.
+    if config is not None:
+        await membership.cancel_for_deactivated_user(session, user, config)
+    user.admin_suspended = True
     user.is_active = False
     await session.flush()
     if redis is not None:
@@ -469,6 +497,25 @@ async def _remove_user_references(session: AsyncSession, user: User) -> None:
     await session.execute(delete(WebAuthnCredential).where(WebAuthnCredential.user_id == user.id))
     await session.execute(delete(RecoveryCode).where(RecoveryCode.user_id == user.id))
 
+    # Payment rows owned by the user. Sales, the seller connect account, and
+    # the instance subscription go with the account; orders and entitlements
+    # keep their rows (with the buyer nulled) as the sellers' revenue ledger.
+    from ..models.payments import (
+        ConnectedAccount,
+        InstanceSubscription,
+        PaymentOrder,
+        PurchaseEntitlement,
+        Sale,
+    )
+
+    await session.execute(delete(Sale).where(Sale.owner_id == user.id))
+    await session.execute(delete(ConnectedAccount).where(ConnectedAccount.user_id == user.id))
+    await session.execute(delete(InstanceSubscription).where(InstanceSubscription.user_id == user.id))
+    await session.execute(update(PaymentOrder).where(PaymentOrder.buyer_user_id == user.id).values(buyer_user_id=None))
+    await session.execute(
+        update(PurchaseEntitlement).where(PurchaseEntitlement.user_id == user.id).values(user_id=None)
+    )
+
     # Nullify optional owner/reviewer fields on user-created content.
     await session.execute(update(Album).where(Album.owner_id == user.id).values(owner_id=None))
     await session.execute(update(AuditLog).where(AuditLog.actor_id == user.id).values(actor_id=None))
@@ -489,11 +536,23 @@ async def delete_user(
     *,
     recursive: bool = False,
     storage: Optional[StorageService] = None,
+    config: Optional[SonghiveConfig] = None,
 ) -> List[deletion.UnpublishInfo]:
     """Delete a user account and, optionally, all content created by the user."""
+    from ..services.payments import membership
+
     user = await _get_user_or_raise(session, user_id)
     if user.role == UserRole.ADMIN and user.is_active and await _active_admin_count(session) <= 1:
         raise UserManagementError("Cannot delete the last active admin", 400)
+
+    # Billing must stop before the row goes away. When the provider call
+    # cannot be confirmed the intent stays durable (a retry task owns it) and
+    # the delete is refused — a repeat call once it lands proceeds normally.
+    if config is not None and not await membership.cancel_for_deactivated_user(session, user, config):
+        raise UserManagementError(
+            "Provider subscription cancellation is pending; retry once it confirms",
+            409,
+        )
 
     unpublish: List[deletion.UnpublishInfo] = []
 
@@ -563,9 +622,9 @@ async def verify_email(session: AsyncSession, token: str) -> User | None:
     Verify a user's email address using the raw verification token.
 
     On success the user's ``email_verified`` is set to ``True`` and the
-    ``email_verification_token`` is cleared. The account ``is_active`` status
-    is not modified, so approval-required accounts still require an admin
-    approval step.
+    ``email_verification_token`` is cleared. Approval-required accounts stay
+    inactive; ``payments_required`` accounts re-sync ``is_active`` so a
+    verified + paid user activates immediately.
     """
     user = await get_user_by_email_verification_token(session, token)
     if user is None:
@@ -574,6 +633,13 @@ async def verify_email(session: AsyncSession, token: str) -> User | None:
     user.email_verified = True
     user.email_verification_token = None
     await session.flush()
+
+    # A payments_required account may activate right here: verification is the
+    # last gate once the provider has confirmed payment.
+    if user.payments_required:
+        from ..services.payments import membership
+
+        await membership.sync_user_active_flag(session, user)
     return user
 
 
@@ -591,7 +657,11 @@ async def generate_verification_email_token(
     return a generic success response without leaking account status.
     """
     user = await get_user_by_username_or_email(session, username_or_email)
-    if user is None or not user.is_active or user.email_verified:
+    if user is None or user.email_verified:
+        return None, None
+    # Inactive unpaid members still need the verification email — it is the
+    # first step toward paying; suspended users get nothing.
+    if not user.is_active and (user.admin_suspended or not user.payments_required):
         return None, None
 
     raw_token = secrets.token_urlsafe(32)

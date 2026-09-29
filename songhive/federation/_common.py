@@ -99,6 +99,21 @@ def get_stream_url(track: Track, domain: str) -> Optional[str]:
     return f"https://{domain}{path}" if path is not None else None
 
 
+def gated_stream_url(track: Track, domain: str, sale) -> Optional[str]:
+    """
+    Return the policy-respecting stream URL for a sale-gated track.
+
+    ``full_stream``/``sample`` policies advertise the gated stream endpoint —
+    remote players hit it anonymously and receive exactly what the unpaid
+    policy allows (full bytes or the configured sample). ``none`` returns
+    ``None`` so no media URL is advertised at all.
+    """
+    if sale.unpaid_policy == "none":
+        return None
+    path = f"/api/v1/stream/{track.id}"
+    return f"https://{domain}{path}" if domain else path
+
+
 def _item_external_library(item: ExternalItem):
     """Return the item's library when loaded, without implicit IO."""
     if "external_library" in getattr(sa_inspect(item), "unloaded", frozenset()):

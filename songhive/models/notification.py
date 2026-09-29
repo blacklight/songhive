@@ -49,6 +49,8 @@ class NotificationType(str, Enum):
     ACTIVITY = "activity"
     REPORT = "report"
     DOWNLOAD = "download"
+    PURCHASE = "purchase"
+    MEMBERSHIP = "membership"
 
 
 NOTIFICATION_TYPES = tuple(t.value for t in NotificationType)

@@ -58,6 +58,8 @@ const TYPE_ICONS: Record<string, string> = {
   activity: "bell",
   report: "flag",
   download: "download",
+  purchase: "bag-shopping",
+  membership: "id-card",
 };
 
 const filters = [
@@ -363,7 +365,11 @@ function actorName(item: NotificationResponse): string {
     str(payload.actor_display_name) ??
     str(payload.actor_name) ??
     // Download notifications have no actor; the archive label leads instead.
-    (item.type === "download" ? str(payload.label) : null);
+    (item.type === "download" ? str(payload.label) : null) ??
+    // Purchase/membership notifications are actor-less system events.
+    (item.type === "purchase" || item.type === "membership"
+      ? t("notifications.paymentsActor")
+      : null);
   return name ?? t("notifications.someone");
 }
 

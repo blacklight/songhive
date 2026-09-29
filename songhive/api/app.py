@@ -48,6 +48,7 @@ from .routes import (
     mentions,
     notifications,
     outputs,
+    payments,
     playback,
     playlists,
     podcasts,
@@ -316,6 +317,8 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     )
     app.include_router(files.router, prefix=api_prefix, tags=["files"])
     app.include_router(downloads.router, prefix=api_prefix, tags=["downloads"])
+    app.include_router(payments.router, prefix=api_prefix, tags=["payments"])
+    app.include_router(payments.admin_router, prefix=api_prefix, tags=["payments"])
     app.include_router(shares.router, prefix=api_prefix, tags=["shares"])
     app.include_router(share_urls.router, prefix=api_prefix, tags=["share-urls"])
     app.include_router(share.router, prefix=api_prefix, tags=["share"])

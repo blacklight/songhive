@@ -819,6 +819,7 @@ async def delete_current_user(
             str(current_user.id),
             recursive=body.recursive,
             storage=storage,
+            config=get_config(request),
         )
     except user_manager.UserManagementError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

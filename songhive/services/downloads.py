@@ -225,7 +225,28 @@ async def resolve_archive_items(
             elif entry.remote_object is not None:
                 items.append(_remote_item(entry.remote_object))
 
+    # Payment layer: ACL visibility never upgrades download rights. Tracks
+    # gated by an active sale stay out of the ZIP unless the requester has
+    # ``full`` access (owner/seller/admin or an active entitlement).
+    items, paywalled = await _drop_paywalled_tracks(session, items, user)
+    skipped += paywalled
     return items[:max_items], skipped
+
+
+async def _drop_paywalled_tracks(
+    session: AsyncSession,
+    items: list[ArchiveItem],
+    user: User,
+) -> Tuple[list[ArchiveItem], int]:
+    """Remove sale-gated track items the requester cannot download."""
+    track_refs = [item.ref for item in items if item.kind == ITEM_KIND_TRACK]
+    if not track_refs:
+        return items, 0
+    from .payments import access as payment_access
+
+    allowed = await payment_access.downloadable_track_ids(session, track_refs, user)
+    kept = [item for item in items if item.kind != ITEM_KIND_TRACK or str(item.ref) in allowed]
+    return kept, len(items) - len(kept)
 
 
 async def derive_label(
@@ -320,19 +341,30 @@ async def _materialize_track(
     config: SonghiveConfig,
     *,
     user_id: Optional[str] = None,
+    allowed_track_ids: Optional[frozenset] = None,
 ) -> tuple[Path, str, bool]:
     """
     Materialize a local/external track.
 
     Returns ``(path, extension, temporary)`` — ``temporary`` marks paths
     outside ``workdir`` that must be deleted after the archive is written.
-    ``user_id`` is the archive requester, used for provider stream policies.
+    ``user_id`` is the archive requester, used for provider stream policies
+    and the payment gate; ``allowed_track_ids`` bypasses that gate for
+    already-authorized sets (a paid order's snapshot).
     """
     from ..models.base import get_session
     from ..storage.local import LocalStorage
+    from .payments import access as payment_access
 
     async with get_session() as session:
         stored = await resolve_track_file(session, item.ref)
+        if allowed_track_ids is None or str(item.ref) not in allowed_track_ids:
+            track = await session.get(Track, item.ref)
+            if track is not None:
+                user = await session.get(User, user_id) if user_id else None
+                track_access = await payment_access.resolve_track_access(session, track, user)
+                if not track_access.can_download:
+                    raise ArchiveRequestError("Payment required for this track", status_code=403)
     if stored is not None:
         path = await storage.backend.retrieve(stored.storage_path)
         if path is None:
@@ -473,6 +505,7 @@ async def materialize_archive(
     workdir: Path,
     *,
     user_id: Optional[str] = None,
+    allowed_track_ids: Optional[frozenset] = None,
 ) -> tuple[Path, list[dict]]:
     """
     Materialize every item under ``workdir`` and return ``(zip_path, item_errors)``.
@@ -491,7 +524,14 @@ async def materialize_archive(
         item = ArchiveItem.from_dict(raw)
         try:
             if item.kind == ITEM_KIND_TRACK:
-                path, ext, temporary = await _materialize_track(item, workdir, storage, config, user_id=user_id)
+                path, ext, temporary = await _materialize_track(
+                    item,
+                    workdir,
+                    storage,
+                    config,
+                    user_id=user_id,
+                    allowed_track_ids=allowed_track_ids,
+                )
                 if temporary:
                     temporary_paths.append(path)
             elif item.kind == ITEM_KIND_REMOTE:

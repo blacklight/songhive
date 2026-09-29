@@ -311,6 +311,43 @@ const routes: RouteRecordRaw[] = [
         name: "share",
         component: () => import("@/views/ShareView.vue"),
       },
+      // Provider checkout return targets — the redirect itself is not proof
+      // of payment; the view polls order/membership status.
+      {
+        path: "checkout/success",
+        name: "checkoutSuccess",
+        component: () => import("@/views/CheckoutView.vue"),
+      },
+      {
+        path: "checkout/cancel",
+        name: "checkoutCancel",
+        component: () => import("@/views/CheckoutView.vue"),
+      },
+      // Guest redemption links from purchase emails carry the token as a
+      // path segment (/redeem/<token>); ?token= is also accepted.
+      {
+        path: "redeem/:token?",
+        name: "redeem",
+        component: () => import("@/views/RedeemView.vue"),
+      },
+      // Membership billing — reachable with a scoped billing capability
+      // (?bcap=) by accounts that are inactive pending payment. The
+      // success/cancel sub-paths are the provider redirect targets.
+      {
+        path: "billing",
+        name: "billing",
+        component: () => import("@/views/BillingView.vue"),
+      },
+      {
+        path: "billing/success",
+        name: "billingSuccess",
+        component: () => import("@/views/BillingView.vue"),
+      },
+      {
+        path: "billing/cancel",
+        name: "billingCancel",
+        component: () => import("@/views/BillingView.vue"),
+      },
       {
         path: "settings",
         name: "settings",
@@ -334,6 +371,15 @@ const routes: RouteRecordRaw[] = [
         name: "settingsExternalLibraryEdit",
         component: () => import("@/views/ExternalLibraryEditView.vue"),
         meta: { requiresAuth: true },
+      },
+      // Path-style tab links (e.g. /settings/billing in notifications)
+      // redirect onto the ?tab= query the settings view actually reads.
+      {
+        path: "settings/:tab",
+        redirect: (to) => ({
+          path: "/settings",
+          query: { tab: to.params.tab },
+        }),
       },
       {
         path: "users",

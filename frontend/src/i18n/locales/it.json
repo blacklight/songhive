@@ -213,7 +213,8 @@
       "success": "Registrazione completata. Ora puoi accedere.",
       "emailVerificationNotice": "Controlla la tua casella di posta per verificare il tuo indirizzo email.",
       "passwordMismatch": "Le password non coincidono.",
-      "haveAccount": "Hai già un account? Accedi"
+      "haveAccount": "Hai già un account? Accedi",
+      "membershipNotice": "Questa istanza richiede un abbonamento a pagamento di {price} per {interval}."
     },
     "passwordReset": {
       "requestTitle": "Reimposta password",
@@ -609,7 +610,13 @@
         "deactivateSuccess": "Utente disattivato.",
         "deleteSuccess": "Utente eliminato.",
         "bulkSuccess": "{action} {count} utenti.",
-        "actionError": "Impossibile aggiornare l'utente: {message}"
+        "actionError": "Impossibile aggiornare l'utente: {message}",
+        "requirePayment": "Richiedere un abbonamento a pagamento per {username}? L'account si disattiva fino al completamento del pagamento; eventuali abbonamenti attivi restano validi.",
+        "waivePayment": "Esonerare {username} dall'abbonamento a pagamento? L'abbonamento attivo verrà annullato.",
+        "paymentsRequiredSuccess": "Requisito di pagamento aggiornato.",
+        "requirePaymentShort": "Richiedi pagamento",
+        "waivePaymentShort": "Esonera dal pagamento",
+        "paymentRequiredBadge": "Abbonamento a pagamento richiesto"
       },
       "settings": {
         "title": "Impostazioni",
@@ -1538,7 +1545,9 @@
       "security": "Sicurezza",
       "podcastSync": "Sincronizzazione podcast",
       "scrobbling": "Scrobbling",
-      "outputs": "Uscite"
+      "outputs": "Uscite",
+      "purchases": "Acquisti",
+      "billing": "Fatturazione"
     },
     "copyHandle": "Copia l'handle del fediverso",
     "compose": "Componi",
@@ -2207,7 +2216,13 @@
       "activityReply": "ha risposto a {object}",
       "activityQuote": "ha citato {object}",
       "report": "ha inviato una segnalazione",
-      "download": "il tuo download è pronto"
+      "download": "il tuo download è pronto",
+      "purchase": "ha confermato il tuo acquisto",
+      "membership": "ha aggiornato il tuo abbonamento",
+      "membershipPaid": "ha confermato il pagamento del tuo abbonamento",
+      "membershipPaymentFailed": "non è riuscito ad addebitare il tuo abbonamento",
+      "membershipCancelScheduled": "ha programmato la cancellazione del tuo abbonamento",
+      "membershipCanceled": "ha terminato il tuo abbonamento"
     },
     "objects": {
       "post": "post",
@@ -2272,7 +2287,9 @@
         "webmention": "Webmention",
         "activity": "Attività degli utenti",
         "report": "Segnalazioni",
-        "download": "Download"
+        "download": "Download",
+        "purchase": "Acquisti",
+        "membership": "Abbonamento"
       }
     },
     "onItem": "su {title}",
@@ -2282,7 +2299,8 @@
       "accepted": "Accettata",
       "rejected": "Rifiutata",
       "error": "Impossibile risolvere la richiesta di follow: {message}"
-    }
+    },
+    "paymentsActor": "Pagamenti"
   },
   "remote": {
     "badge": "Remoto",
@@ -2435,6 +2453,150 @@
       "processing": "In preparazione…",
       "ready": "Pronto",
       "failed": "Non riuscito"
+    }
+  },
+  "payments": {
+    "purchase": {
+      "buy": "Acquista ora",
+      "owned": "È già tuo: i download sono sbloccati.",
+      "email": "Indirizzo email",
+      "emailHint": "Ti invieremo un link per il download dopo il pagamento.",
+      "emailRequired": "Inserisci un indirizzo email per ricevere il link di download.",
+      "checkoutError": "Impossibile avviare il pagamento.",
+      "policy": {
+        "full_stream": "Lo streaming è gratuito: l'acquisto sblocca i download.",
+        "sample": "È disponibile un'anteprima: l'acquisto sblocca la traccia completa.",
+        "none": "Acquisto necessario per streaming e download."
+      }
+    },
+    "sale": {
+      "title": "Vendi questo elemento",
+      "connectRequired": "Collega un account di pagamento prima di pubblicare una vendita.",
+      "connect": "Configura i pagamenti",
+      "onboardError": "Impossibile avviare la configurazione dei pagamenti.",
+      "price": "Prezzo",
+      "priceInvalid": "Inserisci un prezzo valido nell'intervallo consentito.",
+      "currency": "Valuta",
+      "unpaidPolicy": "I visitatori che non acquistano possono",
+      "policy": {
+        "fullStream": "Ascoltare la traccia completa",
+        "sample": "Ascoltare un'anteprima",
+        "none": "Nessun accesso all'audio"
+      },
+      "sampleStart": "Inizio anteprima (secondi)",
+      "sampleLength": "Durata anteprima (secondi)",
+      "sampleBoundsError": "L'anteprima deve rientrare nella durata della traccia.",
+      "statusLabel": "Stato",
+      "status": {
+        "draft": "bozza",
+        "active": "attiva",
+        "inactive": "inattiva"
+      },
+      "publish": "Pubblica vendita",
+      "saveDraft": "Salva bozza",
+      "updatePublished": "Aggiorna vendita",
+      "deactivate": "Disattiva vendita",
+      "deactivateTitle": "Disattivare questa vendita?",
+      "deactivateMessage": "I nuovi acquisti si interrompono subito; chi ha già acquistato mantiene l'accesso.",
+      "saved": "Vendita salvata.",
+      "published": "Vendita pubblicata",
+      "saveError": "Impossibile salvare la vendita.",
+      "deactivated": "Vendita disattivata.",
+      "loadError": "Impossibile caricare la vendita."
+    },
+    "checkout": {
+      "title": "Pagamento",
+      "successTitle": "Pagamento ricevuto",
+      "successBody": "Il pagamento è andato a buon fine. L'accesso si sblocca appena il provider conferma: di solito bastano pochi secondi.",
+      "confirmed": "Acquisto confermato. Buon ascolto!",
+      "cancelTitle": "Pagamento annullato",
+      "cancelBody": "Nessun addebito effettuato. Puoi tornare all'elemento e riprovare quando vuoi.",
+      "unknownBody": "Stiamo ancora attendendo la conferma del provider di pagamento. Controlla i tuoi acquisti tra poco.",
+      "viewPurchases": "Vedi i miei acquisti",
+      "viewBilling": "Vedi fatturazione"
+    },
+    "redeem": {
+      "title": "Riscatta acquisto",
+      "hint": "Incolla il token ricevuto via email.",
+      "tokenLabel": "Token di riscatto",
+      "submit": "Riscatta",
+      "success": "Il tuo acquisto è pronto: i link per il download sono qui sotto.",
+      "failed": "Token non valido, scaduto o già utilizzato.",
+      "expiry": "Questi link restano validi per {days} giorni.",
+      "downloadAll": "Scarica tutto ({count})"
+    },
+    "purchases": {
+      "empty": "Nessun acquisto per ora.",
+      "loadError": "Impossibile caricare i tuoi acquisti.",
+      "downloadArchive": "Scarica tutti i file",
+      "status": {
+        "pending": "in attesa",
+        "paid": "pagato",
+        "failed": "fallito",
+        "expired": "scaduto",
+        "refunded": "rimborsato",
+        "partially_refunded": "parzialmente rimborsato",
+        "disputed": "contestato",
+        "canceled": "annullato"
+      }
+    },
+    "membership": {
+      "title": "Abbonamento",
+      "pricePer": "{price} per {interval}",
+      "interval": {
+        "week": "settimana",
+        "month": "mese",
+        "year": "anno"
+      },
+      "statusLabel": "Stato",
+      "status": {
+        "none": "nessuno",
+        "incomplete": "incompleto",
+        "active": "attivo",
+        "trialing": "prova",
+        "past_due": "scaduto",
+        "canceled": "annullato",
+        "unpaid": "non pagato",
+        "incomplete_expired": "scaduto"
+      },
+      "paidThrough": "Pagato fino al",
+      "cancelScheduled": "Annullamento programmato: l'accesso continua fino alla data di scadenza pagata.",
+      "checkoutSuccess": "Pagamento completato — conferma del pagamento in corso…",
+      "checkoutConfirmed": {
+        "signed_in": "Pagamento confermato — accesso effettuato.",
+        "verify": "Pagamento confermato — controlla la tua email per verificare l'account.",
+        "login": "Pagamento confermato — accedi per continuare."
+      },
+      "checkoutCancel": "Pagamento annullato — non è stato addebitato nulla.",
+      "continueLogin": "Accedi per continuare",
+      "subscribe": "Abbonati",
+      "managePortal": "Gestisci abbonamento",
+      "cancel": "Annulla abbonamento",
+      "loadError": "Impossibile caricare i dati dell'abbonamento.",
+      "checkoutError": "Impossibile avviare il pagamento.",
+      "portalError": "Impossibile aprire il portale di fatturazione.",
+      "cancelError": "Impossibile annullare l'abbonamento.",
+      "cancelConfirm": "Sei sicuro/a di voler annullare l'abbonamento?",
+      "unsubscribe": "Annulla abbonamento"
+    },
+    "connect": {
+      "title": "Pagamenti",
+      "hint": "Collega un account di pagamento per vendere tracce e album.",
+      "statusLabel": "Account di pagamento",
+      "state": {
+        "none": "non collegato",
+        "pending": "registrazione incompleta",
+        "ready": "pronto a vendere"
+      },
+      "start": "Collega pagamenti",
+      "resume": "Riprendi la registrazione",
+      "disconnect": "Scollega",
+      "disconnectTitle": "Scollegare i pagamenti?",
+      "disconnectMessage": "Le vendite attive vengono disattivate e non potrai più vendere.",
+      "onboardError": "Impossibile avviare la configurazione dei pagamenti.",
+      "disconnectError": "Impossibile scollegare l'account di pagamento.",
+      "countryLabel": "Paese di attività",
+      "countryPlaceholder": "Seleziona il tuo paese"
     }
   }
 }

@@ -22,6 +22,7 @@ from ..services.genres import extract_genres_from_track, genres_to_tags
 from ._common import (
     active_external_item,
     active_external_track,
+    gated_stream_url,
     get_stream_url,
     get_tag_url,
     get_track_download_path,
@@ -522,6 +523,7 @@ def track_to_audio_object(
     actor_url: Optional[str] = None,
     ap_object_id: Optional[str] = None,
     library_url: Optional[str] = None,
+    sale=None,
 ) -> Optional[dict]:
     """
     Serialize a Track to an ActivityPub Audio object.
@@ -555,6 +557,10 @@ def track_to_audio_object(
     browse_link = provider_browse_link(track)
     if browse_link is not None:
         stream_url = None
+    if sale is not None:
+        # A sale-gated track advertises the policy-enforcing stream URL —
+        # never the raw file path, which anonymous remote fetches cannot pay.
+        stream_url = gated_stream_url(track, domain, sale)
     object_id = ap_object_id or track_url
     unloaded = _unloaded_attrs(track)
     media_type = _track_media_type(track, unloaded)
@@ -672,6 +678,7 @@ def track_to_note_object(
     ap_object_id: Optional[str] = None,
     audio_object_id: Optional[str] = None,
     published: Optional[datetime] = None,
+    sale=None,
 ) -> Optional[dict]:
     """
     Serialize a Track to an ActivityPub ``Note`` carrying the audio.
@@ -718,6 +725,10 @@ def track_to_note_object(
     browse_link = provider_browse_link(track)
     if browse_link is not None:
         stream_url = None
+    if sale is not None:
+        # A sale-gated track advertises the policy-enforcing stream URL —
+        # never the raw file path, which anonymous remote fetches cannot pay.
+        stream_url = gated_stream_url(track, domain, sale)
     object_id = ap_object_id or track_url
     unloaded = _unloaded_attrs(track)
     media_type = _track_media_type(track, unloaded)
@@ -884,6 +895,7 @@ def track_to_attachment(
     artist: Optional[Artist],
     domain: str = "",
     audio_object_id: Optional[str] = None,
+    sale=None,
 ) -> dict:
     """
     Serialize a hosted track as a status attachment.
@@ -899,9 +911,13 @@ def track_to_attachment(
     chose to reference it.
     """
     name = f"{artist.name} - {track.title}" if artist is not None else track.title
-    stream_path = get_track_download_path(track)
-    if stream_path is not None:
-        stream_url = f"https://{domain}{stream_path}" if domain else stream_path
+    if sale is not None:
+        # Sale-gated tracks advertise only the policy-enforcing stream URL.
+        stream_url = gated_stream_url(track, domain, sale)
+    else:
+        stream_path = get_track_download_path(track)
+        stream_url = (f"https://{domain}{stream_path}" if domain else stream_path) if stream_path else None
+    if stream_url is not None:
         attachment: dict = {
             "type": "Audio",
             "mediaType": _track_media_type(track, _unloaded_attrs(track)),

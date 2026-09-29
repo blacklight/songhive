@@ -187,6 +187,14 @@ async def _track_entry(
     """Build a stream entry, embedding a share token when needed/possible."""
     if not await _track_playable(session, track, policy_cache):
         return None
+    # Sale-gated tracks keep the stream URL — the endpoint enforces the
+    # sale's unpaid policy itself — except ``none``, which would only 403.
+    from .payments import access as payment_access
+
+    gate_cache = policy_cache.setdefault("sale_gates", {})
+    track_access = await payment_access.gated_access(session, track, None, gate_cache=gate_cache)
+    if track_access is not None and track_access.level == payment_access.ACCESS_NONE:
+        return None
     url = f"{base_url}/api/v1/stream/{track.id}"
     # Member tracks of a public container are anonymously playable through
     # the ACL's derived-access rules (track → album/playlist), so they keep
@@ -249,9 +257,12 @@ async def _track_entries(
     embed: Optional[Embedder],
 ) -> Tuple[List[M3uEntry], int]:
     """Build entries for local tracks, counting dropped ones."""
+    from .payments import access as payment_access
+
     entries: List[M3uEntry] = []
     skipped = 0
-    policy_cache: dict = {}
+    policy_cache: dict = {"sale_gates": {}}
+    await payment_access.prewarm_gate_cache(session, tracks, policy_cache["sale_gates"])
     for track in tracks:
         entry = await _track_entry(
             session, track, base_url, container_public=container_public, embed=embed, policy_cache=policy_cache
@@ -338,7 +349,14 @@ async def playlist_document(
 
     entries: List[M3uEntry] = []
     skipped = 0
-    policy_cache: dict = {}
+    policy_cache: dict = {"sale_gates": {}}
+    from .payments import access as payment_access
+
+    await payment_access.prewarm_gate_cache(
+        session,
+        [row.track for row in rows if row.track is not None],
+        policy_cache["sale_gates"],
+    )
     for row in rows:
         entry: Optional[M3uEntry]
         if row.track is not None:

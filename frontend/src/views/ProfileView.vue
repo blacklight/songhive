@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
+import { useInstanceStore } from "@/stores/instance";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ProfileTab from "./profile/ProfileTab.vue";
@@ -16,9 +17,12 @@ import PodcastSyncTab from "./profile/PodcastSyncTab.vue";
 import ScrobblingTab from "./profile/ScrobblingTab.vue";
 import ExternalLibrariesView from "@/views/ExternalLibrariesView.vue";
 import OutputsView from "@/views/OutputsView.vue";
+import PurchasesTab from "./profile/PurchasesTab.vue";
+import BillingTab from "./profile/BillingTab.vue";
 
 const { t } = useI18n();
 const route = useRoute();
+const instanceStore = useInstanceStore();
 
 const tab = computed(() => {
   const raw = route.query.tab;
@@ -36,11 +40,24 @@ const tab = computed(() => {
       "scrobbling",
       "externalLibraries",
       "outputs",
+      "purchases",
+      "billing",
       "moderation",
     ].includes(value)
     ? value
     : "profile";
 });
+
+const paymentTabs = instanceStore.paymentsEnabled
+  ? [
+      {
+        key: "purchases",
+        label: t("profile.tabs.purchases"),
+        icon: "bag-shopping",
+      },
+      { key: "billing", label: t("profile.tabs.billing"), icon: "credit-card" },
+    ]
+  : [];
 
 const tabs = [
   { key: "profile", label: t("profile.tabs.profile"), icon: "user" },
@@ -78,6 +95,7 @@ const tabs = [
     label: t("profile.tabs.outputs"),
     icon: "radio",
   },
+  ...paymentTabs,
   {
     key: "moderation",
     label: t("profile.tabs.moderation"),
@@ -107,6 +125,10 @@ const currentComponent = computed(() => {
       return ExternalLibrariesView;
     case "outputs":
       return OutputsView;
+    case "purchases":
+      return PurchasesTab;
+    case "billing":
+      return BillingTab;
     case "moderation":
       return ModerationTab;
     default:

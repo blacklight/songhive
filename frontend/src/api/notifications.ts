@@ -1,10 +1,6 @@
 import type { components } from "./types";
 import { apiRequest, apiRequestWithHeaders } from "./client";
 
-export type NotificationResponse =
-  components["schemas"]["NotificationResponse"];
-export type NotificationPreferenceItem =
-  components["schemas"]["NotificationPreferenceItem"];
 export type NotificationPreferencesResponse =
   components["schemas"]["NotificationPreferencesResponse"];
 
@@ -19,7 +15,9 @@ export type NotificationType =
   | "webmention"
   | "activity"
   | "report"
-  | "download";
+  | "download"
+  | "purchase"
+  | "membership";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "follow",
@@ -33,7 +31,21 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "activity",
   "report",
   "download",
+  "purchase",
+  "membership",
 ];
+
+// The generated schema's ``type`` enum predates the payment notifications;
+// widen it with the full client-side union.
+export type NotificationResponse = Omit<
+  components["schemas"]["NotificationResponse"],
+  "type"
+> & { type: NotificationType };
+
+export type NotificationPreferenceItem = Omit<
+  components["schemas"]["NotificationPreferenceItem"],
+  "type"
+> & { type: NotificationType };
 
 export interface NotificationListPage {
   items: NotificationResponse[];

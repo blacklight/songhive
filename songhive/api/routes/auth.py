@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple, Union
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,6 +75,10 @@ class RegisterResponse(BaseModel):
     is_active: bool
     email_verified: bool
     role: str
+    # Paid-registration instances hand the new account a scoped capability so
+    # it can reach the membership billing endpoints while still inactive.
+    billing_required: bool = False
+    billing_token: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -214,6 +218,7 @@ async def register(
     request: Request,
     db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
+    redis: Redis = Depends(get_redis),
 ):
     """Register a new user account."""
     try:
@@ -229,18 +234,30 @@ async def register(
     except RegistrationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
+    billing_token: Optional[str] = None
+    if user.payments_required:
+        from ...services.payments import membership
+
+        billing_token = await membership.create_billing_capability(redis, user, config)
+
     if config.auth.require_email_verification and user.email_verification_token_raw:
-        verification_url = (
-            f"{str(request.base_url).rstrip('/')}/verify-email?"
-            f"{urlencode({'token': user.email_verification_token_raw})}"
-        )
+        params = {"token": user.email_verification_token_raw}
+        if billing_token:
+            # The verification link carries the billing capability forward so
+            # the SPA can route straight into membership checkout afterwards.
+            params["bcap"] = billing_token
+        verification_url = f"{str(request.base_url).rstrip('/')}/verify-email?{urlencode(params)}"
         send_verification_email.delay(  # type: ignore
             user.email,
             user.username,
             verification_url=verification_url,
         )
 
-    return RegisterResponse.model_validate(user)
+    response = RegisterResponse.model_validate(user)
+    if billing_token:
+        response.billing_required = True
+        response.billing_token = billing_token
+    return response
 
 
 @router.post("/login", response_model=Union[TokenPairResponse, MfaRequiredResponse])
@@ -270,6 +287,25 @@ async def login(
         )
 
     if not user.is_active:
+        # A payments_required account that is merely unpaid (not suspended)
+        # gets a 402 with a scoped billing capability so the client can route
+        # straight to membership checkout instead of a dead-end 401. The
+        # structured body must survive — the problem-details handler would
+        # stringify a dict ``detail`` — so a JSONResponse is returned directly.
+        if user.payments_required and not user.admin_suspended:
+            from ...services.payments import membership
+
+            await membership.sync_user_active_flag(db, user, config=config)
+            if not user.is_active:
+                billing_token = await membership.create_billing_capability(redis, user, config)
+                return JSONResponse(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    content={
+                        "billing_required": True,
+                        "billing_token": billing_token,
+                        "reason": "membership_payment_required",
+                    },
+                )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Account is inactive",

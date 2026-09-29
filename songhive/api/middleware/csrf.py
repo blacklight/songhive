@@ -51,8 +51,10 @@ _EXEMPT_PATHS = frozenset(
 # exclusively through u/p/apiKey request parameters — never through the
 # browser session cookies — so cookie-based forgery cannot produce an
 # authenticated request; rejecting them would only break POST-capable
-# clients running in cookie-bearing environments.
-_EXEMPT_PREFIXES = ("/rest/",)
+# clients running in cookie-bearing environments. Payment webhooks are
+# server-to-server calls authorized by the provider signature — no cookie
+# session is ever consulted, so the CSRF token has nothing to protect.
+_EXEMPT_PREFIXES = ("/rest/", "/api/v1/payments/webhooks/")
 
 
 class CsrfMiddleware:

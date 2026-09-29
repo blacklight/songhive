@@ -103,6 +103,10 @@ class SubsonicStreamHandler(StreamHandler):
 class SubsonicDownloadHandler(SubsonicStreamHandler):
     """Serve ``/rest/download.view`` with an attachment disposition."""
 
+    # ``download.view`` requests the original bytes: sale-gated tracks need
+    # ``full`` access (buyer/owner), not just playback rights.
+    _requires_download_access = True
+
     async def _prepare_response(self, track: Track) -> None:
         await super()._prepare_response(track)
         title = track.title.replace('"', "").replace("\\", "") or "track"

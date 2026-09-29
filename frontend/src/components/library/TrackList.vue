@@ -210,8 +210,26 @@ function isExternalUnplayable(track: QueueTrack): boolean {
   return !track.audio_url && !track.stream_url && !!track.external_url;
 }
 
+/**
+ * Sale-gated local tracks with a ``none`` unpaid policy advertise no media
+ * URL — the row links to the track page, where the purchase panel lives.
+ */
+function isPaidLocked(track: QueueTrack): boolean {
+  return (
+    !track.remote &&
+    !!track.paid &&
+    !track.audio_url &&
+    !track.stream_url &&
+    !track.external_url
+  );
+}
+
 function isUnplayable(track: QueueTrack): boolean {
-  return isRemoteUnplayable(track) || isExternalUnplayable(track);
+  return (
+    isRemoteUnplayable(track) ||
+    isExternalUnplayable(track) ||
+    isPaidLocked(track)
+  );
 }
 
 function openAddDialog(mode: "library" | "playlist") {
@@ -406,6 +424,10 @@ function play(index: number) {
   }
   if (isExternalUnplayable(track)) {
     openExternalUrl(track);
+    return;
+  }
+  if (isPaidLocked(track)) {
+    void router.push({ name: "track", params: { id: track.id } });
     return;
   }
   const wasCurrent = isCurrentTrack(track);

@@ -31,6 +31,19 @@ from songhive.models.notification import (  # noqa: F401
 )
 from songhive.models.oauth_client import OAuth2Client  # noqa: F401
 from songhive.models.output_stream import OutputStream  # noqa: F401
+from songhive.models.payments import (  # noqa: F401
+    ConnectedAccount,
+    FulfillmentOutbox,
+    InstanceSubscription,
+    PaymentEvent,
+    PaymentOrder,
+    PaymentOrderItem,
+    PurchaseArtifact,
+    PurchaseEntitlement,
+    RedeemCapability,
+    Sale,
+    SampleDerivative,
+)
 from songhive.models.playback_session import PlaybackSession, PlaybackSessionOutput  # noqa: F401
 from songhive.models.playlist import Playlist  # noqa: F401
 from songhive.models.podcast import (  # noqa: F401

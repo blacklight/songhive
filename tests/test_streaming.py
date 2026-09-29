@@ -30,6 +30,7 @@ from songhive.models.artist import Artist
 from songhive.models.base import Base, get_session, init_db, reset_db
 from songhive.models.history import ListeningHistory
 from songhive.models.library import Library
+from songhive.models.payments import PaymentOrder, PurchaseEntitlement, Sale
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
 from songhive.models.upload import Upload
@@ -161,10 +162,80 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
                 visibility=Visibility.PUBLIC.value,
                 duration=1.0,
             )
+            # A sale-gated track: ``none`` policy denies unpaid bytes entirely,
+            # ``full_stream`` policy still streams (but not downloads).
+            self.paid_track = Track(
+                title="Paid Track",
+                artist_id=artist.id,
+                audio_file_id=short_file.id,
+                owner_id=str(self.user.id),
+                visibility=Visibility.PUBLIC.value,
+                duration=1.0,
+            )
+            self.paid_stream_track = Track(
+                title="Paid Stream Track",
+                artist_id=artist.id,
+                audio_file_id=short_file.id,
+                owner_id=str(self.user.id),
+                visibility=Visibility.PUBLIC.value,
+                duration=1.0,
+            )
             session.add_all(
-                [self.public_track, self.public_long_track, self.private_track, self.local_track, self.mpeg_track]
+                [
+                    self.public_track,
+                    self.public_long_track,
+                    self.private_track,
+                    self.local_track,
+                    self.mpeg_track,
+                    self.paid_track,
+                    self.paid_stream_track,
+                ]
             )
             await session.flush()
+
+            paid_sale = Sale(
+                owner_id=str(self.user.id),
+                entity_type="track",
+                track_id=self.paid_track.id,
+                status="active",
+                price_minor=500,
+                currency="USD",
+                unpaid_policy="none",
+            )
+            stream_sale = Sale(
+                owner_id=str(self.user.id),
+                entity_type="track",
+                track_id=self.paid_stream_track.id,
+                status="active",
+                price_minor=500,
+                currency="USD",
+                unpaid_policy="full_stream",
+            )
+            session.add_all([paid_sale, stream_sale])
+            await session.flush()
+
+            # ``other`` holds a paid entitlement for the none-policy track.
+            order = PaymentOrder(
+                kind="purchase",
+                sale_id=paid_sale.id,
+                buyer_user_id=str(self.other.id),
+                status="paid",
+                currency="usd",
+                total_minor=500,
+                checkout_token="tok",
+                provider_name="fake",
+            )
+            session.add(order)
+            await session.flush()
+            session.add(
+                PurchaseEntitlement(
+                    order_id=order.id,
+                    sale_id=paid_sale.id,
+                    track_id=self.paid_track.id,
+                    user_id=str(self.other.id),
+                    status="active",
+                )
+            )
 
             # Pre-cache opus transcodes for cache-hit coverage.
             self.cached_opus = await cache_transcode(
@@ -283,6 +354,32 @@ class TestStreamHandler(tornado.testing.AsyncHTTPTestCase):
         """Requesting a missing track returns 404."""
         response = self.fetch("/api/v1/stream/00000000-0000-0000-0000-000000000000")
         assert response.code == 404
+
+    def test_paid_track_denied_anonymous(self):
+        """A ``none``-policy sale denies all bytes to unpaid listeners."""
+        response = self.fetch(f"/api/v1/stream/{self.paid_track.id}")
+        assert response.code == 403
+
+    def test_paid_track_buyer_streams(self):
+        """The entitled buyer streams a ``none``-policy track."""
+        response = self.fetch(
+            f"/api/v1/stream/{self.paid_track.id}",
+            headers=self._auth_header(self.other_token),
+        )
+        assert response.code == 200
+
+    def test_paid_track_owner_streams(self):
+        """The seller streams their own gated track."""
+        response = self.fetch(
+            f"/api/v1/stream/{self.paid_track.id}",
+            headers=self._auth_header(self.token),
+        )
+        assert response.code == 200
+
+    def test_full_stream_policy_allows_anonymous(self):
+        """``full_stream`` policy serves bytes to unpaid listeners."""
+        response = self.fetch(f"/api/v1/stream/{self.paid_stream_track.id}")
+        assert response.code == 200
 
     def test_range_request_returns_206(self):
         """A Range header on a passthrough request returns 206."""

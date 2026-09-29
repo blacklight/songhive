@@ -29,6 +29,8 @@ import AppSelect from "@/components/ui/AppSelect.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ImageUploadField from "@/components/ui/ImageUploadField.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import SaleEditor from "@/components/payments/SaleEditor.vue";
+import { useInstanceStore } from "@/stores/instance";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -36,7 +38,9 @@ const router = useRouter();
 const confirm = useConfirmStore();
 const toast = useToastStore();
 
+const instanceStore = useInstanceStore();
 const albumId = computed(() => String(route.params.id));
+const paymentsEnabled = computed(() => instanceStore.paymentsEnabled);
 const album = ref<AlbumResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -309,6 +313,12 @@ watch(
           </AppButton>
         </div>
       </form>
+
+      <SaleEditor
+        v-if="paymentsEnabled"
+        entity-type="album"
+        :entity-id="albumId"
+      />
 
       <section
         class="album-edit-view__section"

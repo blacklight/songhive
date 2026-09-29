@@ -151,7 +151,9 @@ enabled = true
 # max_item_bytes = 2147483648
 
 [auth]
-# Supported: "open", "invite-only", "approval-required", "closed"
+# Supported: "open", "invite-only", "approval-required", "paid", "closed"
+# "paid" requires [payments] to be enabled and configured; new accounts stay
+# inactive until their membership subscription is confirmed by the provider.
 registration_mode = "open"
 require_email_verification = false
 # Number of trusted reverse-proxy hops. A value greater than 0 enables
@@ -168,6 +170,118 @@ password_reset_token_expiry_minutes = 30
 rate_limit_enabled = true
 rate_limit_requests = 10
 rate_limit_window_seconds = 60
+
+[payments]
+# Enable payments: artists can sell tracks/albums through their own Stripe
+# Connect accounts, and registration_mode = "paid" can gate the instance
+# behind a paid membership. Requires the `stripe` package.
+enabled = false
+
+# Stripe secret API key (sk_live_.../sk_test_...). Required when enabled.
+# Prefer SONGHIVE_PAYMENTS__STRIPE_SECRET_KEY for secrets.
+#
+# Artist payouts use Stripe Connect: before sellers can onboard, your Stripe
+# account must have Connect enabled — open the Dashboard, go to Connect ->
+# Get started (https://dashboard.stripe.com/connect/overview) and complete
+# the platform profile (platform name, industry, support details). Seller
+# accounts are created through the Accounts v2 API with an Express dashboard,
+# merchant card_payments + recipient stripe_transfers capabilities, and
+# application-collected fees and losses (the only responsibility model new
+# platforms support) — the seller's country of operation is collected in the
+# UI at onboarding time.
+# stripe_secret_key = ""
+
+# Webhook signing secrets (whsec_...). These are NOT the same as payment
+# links or API keys — each secret is generated when you register a webhook
+# endpoint in the Stripe Dashboard. Steps (turn on "Test mode" first when
+# testing; dashboard.stripe.com/test/webhooks):
+#
+#   1. Open Workbench -> Webhooks tab (older dashboards: Developers ->
+#      Webhooks) and click "Create an event destination" ("Add endpoint").
+#   2. Platform endpoint — choose "Events on your account", select events
+#        checkout.session.completed, invoice.paid, invoice.payment_failed,
+#        customer.subscription.updated, customer.subscription.deleted
+#      then "Webhook endpoint", URL:
+#        https://<your-domain>/api/v1/payments/webhooks/stripe
+#   3. Connect endpoint — repeat, but choose "Events on connected
+#      accounts" (requires Stripe Connect; older dashboards: check "Listen
+#      to events on Connected accounts"), select events
+#        checkout.session.completed, charge.refunded,
+#        charge.dispute.created, charge.dispute.closed, account.updated
+#      URL: https://<your-domain>/api/v1/payments/webhooks/stripe-connect
+#      IMPORTANT: this choice is made at destination creation and cannot be
+#      changed later. A destination listening on "your account" never
+#      receives purchase events — artist sales are direct charges on the
+#      seller's connected account, so checkout.session.completed for a
+#      purchase is emitted there, not on the platform account. If the flag
+#      is wrong, delete the destination and recreate it.
+#   4. Open each destination's settings page — under "Signing secret",
+#      click "Reveal secret" and copy the whsec_... value into the
+#      matching option below (platform secret for the platform endpoint,
+#      connect secret for the connected-accounts endpoint).
+#
+# Payload type: all events above are v1 "snapshot" events (the full object
+# is embedded in data.object), which is what Songhive verifies. Do not
+# enable v2/thin API categories — e.g. "Accounts v2" sends v2 thin events
+# carrying only an event ID. The v1 account.updated event lives under the
+# plain "Accounts" category on the Connect destination. Extra v1 event
+# types are harmless — unhandled ones are recorded as "ignored".
+#
+# For local development, `stripe listen` prints a shared whsec_... secret
+# usable for both:
+#   stripe listen \
+#     --forward-to localhost:8000/api/v1/payments/webhooks/stripe \
+#     --forward-connect-to localhost:8000/api/v1/payments/webhooks/stripe-connect
+#
+# stripe_platform_webhook_secret = ""
+# stripe_connect_webhook_secret = ""
+
+# Canonical https:// public base URL used to build checkout, redemption, and
+# email links. Falls back to federation.instance_domain when unset; payments
+# fail closed when neither resolves to an absolute URL.
+# public_base_url = "https://music.example.com"
+
+# ISO-4217 currencies accepted for artist sales (lowercase).
+# supported_currencies = ["usd"]
+
+# Sale price bounds in minor units (cents) of the sale currency.
+# min_price_minor = 50
+# max_price_minor = 1000000
+
+# Instance membership pricing. Also editable at runtime from the admin
+# settings page (membership_price_minor, membership_currency,
+# membership_interval).
+# default_membership_amount_minor = 500   # $5.00
+# membership_currency = "USD"
+# membership_interval = "month"           # "week", "month", or "year"
+
+# Stripe product/price provisioning for memberships. The lookup key is used
+# to find or create the recurring Price; change it only if you rotate prices.
+# membership_product_name = "Songhive membership"
+# membership_price_lookup_key = "songhive-membership-v1"
+
+# Audio samples offered to unpaid listeners on "sample"-policy sales.
+# default_sample_seconds = 30
+# sample_max_seconds = 120
+
+# Guest purchases: opaque redemption links emailed to the buyer.
+# redeem_capability_ttl_days = 30         # link validity
+# guest_redemption_limit = 10             # max redemptions per link
+# artifact_ttl_hours = 24                 # cached paid-archive (ZIP) lifetime
+
+# Paid memberships: hours of access preserved after the provider-confirmed
+# paid_through timestamp when a renewal payment fails, before the account
+# deactivates.
+# membership_grace_hours = 72
+
+# Lifetime (seconds) of the scoped billing capability issued to unpaid users
+# at login/registration so they can reach membership checkout while inactive.
+# billing_capability_ttl_seconds = 1800
+
+# Internal tuning: TTL (hours) of pending checkout orders before they expire,
+# and TTL (seconds) of the Redis locks around fulfillment/sample rendering.
+# checkout_session_ttl_hours = 23
+# fulfillment_lock_ttl_seconds = 300
 
 [streams]
 # Path to the ffmpeg binary used by the stream worker. If unset, it falls back

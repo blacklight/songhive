@@ -68,6 +68,17 @@ async function onSubmit() {
     }
     await finishLogin();
   } catch (err) {
+    if (err instanceof ApiError && err.status === 402) {
+      // Unpaid membership account — the scoped billing token routes the user
+      // to the membership page, where checkout can resume.
+      const body = err.body as { billing_token?: string } | undefined;
+      const bcap = body?.billing_token;
+      await router.push({
+        name: "billing",
+        query: bcap ? { bcap } : {},
+      });
+      return;
+    }
     if (err instanceof ApiError && err.status === 403) {
       error.value = t("auth.loginPage.emailNotVerified");
     } else {

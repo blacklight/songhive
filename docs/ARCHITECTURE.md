@@ -2025,6 +2025,86 @@ regenerated `types.ts` carry the typed client.
 
 ---
 
+## Payments
+
+Optional payments support (`payments.enabled`, `[payments]` config) covers
+two flows: **artist sales** (fans buy tracks or albums; sellers are paid
+through their own Stripe Connect accounts) and **paid instance
+memberships** (`registration_mode = "paid"` gates accounts behind an
+instance subscription, default $5/month configurable via admin settings).
+
+**Provider abstraction** (`services/payments/providers/`) — a small
+`PaymentProvider` protocol with a Stripe implementation (Checkout Sessions
+with direct charges on connected accounts for sales, Billing for
+memberships, Connect for seller onboarding) and a deterministic `fake`
+provider used by the test suite. Seller accounts are created through the
+Accounts v2 API (`POST /v2/core/accounts`) — Stripe disables Accounts v1
+creation for new Connect integrations — as `dashboard="express"` accounts
+with `merchant.card_payments` (direct charges) and
+`recipient.stripe_transfers` capabilities, `identity.country` taken from
+the seller's onboarding request (required before a `merchant`
+configuration can be applied) and `defaults.responsibilities` fixed to
+`application`/`application` (platform-collected fees, platform loss
+liability — the only combination new platforms support). Onboarding uses
+v2 Account Links and `connected_account_state` normalizes both v1
+(`account.updated` webhook) and v2 (live retrieve) payload shapes into the
+stored `ConnectedAccount` flags. Provider events are the only authority that moves
+money state: checkout redirects are never trusted.
+
+**Data model** (`models/payments.py`) — `Sale` (per track or album, with
+`unpaid_policy` of `full_stream`/`sample`/`none`), `PaymentOrder` +
+`PaymentOrderItem` (both `purchase` and `membership` kinds; guest emails
+are Fernet-encrypted), `PurchaseEntitlement` (permanent per-track rights
+keyed on `user_id` or a guest `email_hash`), `RedeemCapability` (opaque,
+expiring, rate-limited guest download tokens), `ConnectedAccount`,
+`InstanceSubscription`, `PurchaseArtifact`/`SampleDerivative` (paid
+snapshot ZIPs and trimmed samples as private `StoredFile`s), plus
+`PaymentEvent` inbox and `FulfillmentOutbox` rows for idempotent webhook
+processing and durable guest delivery.
+
+**Access policy** (`services/payments/access.py`) is the single source of
+truth for byte-level access: owners/sellers/admins and active entitlements
+get `full`; unpaid listeners get the sale's policy level (`stream`,
+`sample`, or `none`). Refunded or disputed orders revoke entitlements.
+Every media path consults it — serialized track responses rewrite
+`audio_url`/`can_download`, the Tornado stream handler serves original
+bytes, the configured sample, or 403 by level (`SubsonicDownloadHandler`
+flips `_requires_download_access` so `download.view` needs `full`), and
+`files/{id}/download`, `tracks/{id}/download`, download-archive
+materialization, share pages, feeds, M3U and federation serializers all
+suppress or substitute URLs the requester isn't entitled to.
+
+**Membership lifecycle** (`services/payments/membership.py`) —
+`sync_user_active_flag` is the only writer of `User.is_active` for payment
+reasons, combining `payments_required`, `admin_suspended`, subscription
+`paid_through` + `membership_grace_hours`, and email verification. Paid
+registrations start inactive; `invoice.paid` activates only when email is
+verified (verification itself re-syncs). Unpaid-but-verified users get a
+402 with a scoped Redis billing capability (`billing_capability_ttl_seconds`)
+that authorizes only the membership endpoints. `POST
+/payments/membership/session` exchanges a billing capability or a fresh
+`order` checkout token for a real session once the webhook-confirmed state
+shows the account active — each scoped credential mints exactly one session
+(Redis single-use marker) and the order token only within the capability TTL
+of the order's last update, the same freshness window membership portal and
+cancellation enforce for order-token callers. Admin deactivation/deletion
+cancels provider subscriptions first, with durable retry intent when the
+provider call can't be confirmed.
+
+**Webhooks** (`POST /api/v1/payments/webhooks/stripe{,-connect}`, CSRF-exempt
+server-to-server calls) verify the provider signature, persist a normalized
+`PaymentEvent` inbox row, and process idempotently through
+`tasks/payments.py`'s `process_payment_event`. Beat-scheduled sweeps bound
+lost deliveries: membership expirations, pending-order expiry, outbox
+retries, and artifact cleanup.
+
+**Frontend** — `PurchasePanel`/`SaleEditor`/`MembershipPanel` components,
+`/checkout/*`, `/redeem`, `/billing` routes, profile Purchases/Billing tabs
+(shown only when payments are enabled), login 402 → `/billing?bcap=…`
+routing, and admin `payments_required` toggles on the Users page.
+
+---
+
 ## Federation
 
 Federation is powered by [pubby](https://github.com/blacklight/pubby) mounted

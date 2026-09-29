@@ -23,6 +23,7 @@ import { useShareDialog } from "@/composables/useShareDialog";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useFeedLinks } from "@/composables/useFeedLinks";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
+import PurchasePanel from "@/components/payments/PurchasePanel.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import TagList from "@/components/tags/TagList.vue";
@@ -133,7 +134,7 @@ const actions = computed(() => [
     key: "download",
     label: t("common.download"),
     icon: "download",
-    visible: !!track.value?.audio_url,
+    visible: !!track.value?.audio_url && track.value?.can_download !== false,
   },
   {
     key: "favorite",
@@ -501,6 +502,13 @@ watch(
           <p v-if="track.description" class="track-view__description">
             {{ track.description }}
           </p>
+
+          <PurchasePanel
+            v-if="track.paid && !canManage"
+            entity-type="track"
+            :entity-id="track.id"
+            class="track-view__purchase"
+          />
         </div>
 
         <div class="track-view__header-actions">

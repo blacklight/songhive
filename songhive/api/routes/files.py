@@ -123,7 +123,9 @@ class StoredFileResponse(BaseModel):
     owner_id: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
     original_filename: Optional[str] = None
-    url: str
+    # ``None`` when the requester may see the row but not its bytes — e.g. a
+    # file claimed only by sale-gated tracks.
+    url: Optional[str] = None
     tracks: Optional[List[TrackSummary]] = None
 
 
@@ -674,8 +676,11 @@ async def list_uploaded_files(
     storage: StorageService = Depends(get_storage_service),
 ):
     """List stored files visible to the requester."""
+    from ...services.payments import access as payment_access
+
     total = await count_files(db, q=q, user=user)
     rows = await list_files(db, q=q, user=user, limit=pagination.limit, offset=pagination.offset)
+    downloadable = await payment_access.downloadable_file_ids(db, [str(f.id) for f in rows], user)
     pagination.set_total(response, total)
     return [
         StoredFileResponse(
@@ -686,7 +691,7 @@ async def list_uploaded_files(
             owner_id=redact_owner(cast(HasOwnerId, f), user),
             visibility=f.visibility,
             original_filename=f.original_filename,
-            url=await storage.get_url(f),
+            url=await storage.get_url(f) if str(f.id) in downloadable else None,
         )
         for f in rows
     ]
@@ -721,7 +726,9 @@ async def get_file_metadata(
     ]
     tracks = [t for t in track_summaries if t is not None]
 
-    url = await storage.get_url(stored_file)
+    from ...services.payments import access as payment_access
+
+    url = await storage.get_url(stored_file) if await payment_access.file_download_access(db, file_id, user) else None
     return StoredFileResponse(
         id=stored_file.id,
         content_type=stored_file.content_type,
@@ -838,6 +845,7 @@ async def _download_stored_file_response(
 async def download_file(
     file_id: str,
     disposition: Literal["inline", "attachment"] = Query("inline"),
+    user: Optional[User] = Depends(get_current_user_optional),
     storage: StorageService = Depends(get_storage_service),
     db: AsyncSession = Depends(get_db),
 ):
@@ -845,6 +853,12 @@ async def download_file(
     stored_file = await db.get(StoredFile, file_id)
     # ``require_access`` already loads the row and raises 404 when missing.
     assert stored_file is not None
+    # ACL/share access never upgrades payment rights: raw bytes of a
+    # sale-gated track require ``full`` access (buyer/owner/admin).
+    from ...services.payments import access as payment_access
+
+    if not await payment_access.file_download_access(db, file_id, user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return await _download_stored_file_response(stored_file, disposition, storage)
 
 

@@ -338,6 +338,7 @@ class RegistrationMode(str, Enum):
     OPEN = "open"
     INVITE_ONLY = "invite-only"
     APPROVAL_REQUIRED = "approval-required"
+    PAID = "paid"
     CLOSED = "closed"
 
 
@@ -891,6 +892,141 @@ class StreamsConfig(BaseSettings):
         return value
 
 
+class PaymentsConfig(BaseSettings):
+    """Payments configuration (Stripe purchases and paid memberships)."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable payments: artist sales and paid registrations",
+    )
+    stripe_secret_key: Optional[str] = Field(
+        default=None,
+        description="Stripe secret API key (sk_...); required when payments are enabled",
+        repr=False,
+        exclude=True,
+    )
+    stripe_platform_webhook_secret: Optional[str] = Field(
+        default=None,
+        description="Signing secret (whsec_...) for the platform-account webhook endpoint",
+        repr=False,
+        exclude=True,
+    )
+    stripe_connect_webhook_secret: Optional[str] = Field(
+        default=None,
+        description="Signing secret (whsec_...) for the Connect (seller account) webhook endpoint",
+        repr=False,
+        exclude=True,
+    )
+    public_base_url: Optional[str] = Field(
+        default=None,
+        description=(
+            "Canonical https:// public base URL used to build checkout, redeem, and email "
+            "links. Falls back to federation.instance_domain when unset; payments requiring "
+            "absolute URLs fail closed when neither resolves to a canonical https URL."
+        ),
+    )
+    supported_currencies: list[str] = Field(
+        default_factory=lambda: ["usd"],
+        description="ISO-4217 currencies accepted for sales (lowercase)",
+    )
+    min_price_minor: int = Field(
+        default=50,
+        ge=0,
+        description="Minimum sale price in minor units of the sale currency",
+    )
+    max_price_minor: int = Field(
+        default=1_000_000,
+        ge=0,
+        description="Maximum sale price in minor units of the sale currency",
+    )
+    default_membership_amount_minor: int = Field(
+        default=500,
+        ge=0,
+        description="Default membership price in minor units (500 = $5.00)",
+    )
+    membership_currency: str = Field(
+        default="USD",
+        description="ISO-4217 currency for instance memberships",
+    )
+    membership_interval: Literal["week", "month", "year"] = Field(
+        default="month",
+        description="Membership billing interval",
+    )
+    membership_product_name: str = Field(
+        default="Songhive membership",
+        description="Stripe product name provisioned for membership billing",
+    )
+    membership_price_lookup_key: str = Field(
+        default="songhive-membership-v1",
+        description="Stable lookup key used to find or provision the membership Stripe Price",
+    )
+    sample_max_seconds: int = Field(
+        default=120,
+        ge=1,
+        description="Maximum length of a sale sample in seconds",
+    )
+    default_sample_seconds: int = Field(
+        default=30,
+        ge=1,
+        description="Sample length used when a sale does not configure one",
+    )
+    redeem_capability_ttl_days: int = Field(
+        default=30,
+        ge=1,
+        description="Days a guest purchase redemption link stays valid",
+    )
+    billing_capability_ttl_seconds: int = Field(
+        default=1800,
+        ge=60,
+        description="Lifetime of the billing capability issued to unpaid users at login",
+    )
+    guest_redemption_limit: int = Field(
+        default=10,
+        ge=1,
+        description="Maximum number of times a guest capability may be redeemed",
+    )
+    membership_grace_hours: int = Field(
+        default=72,
+        ge=0,
+        description="Hours of access preserved after paid_through when renewal payment fails",
+    )
+    artifact_ttl_hours: int = Field(
+        default=24,
+        ge=1,
+        description="Hours a cached paid-download artifact (e.g. album ZIP) is retained",
+    )
+    fulfillment_lock_ttl_seconds: int = Field(
+        default=300,
+        ge=30,
+        description="Redis TTL for the fulfillment/sample-generation locks",
+    )
+    checkout_session_ttl_hours: int = Field(
+        default=23,
+        ge=1,
+        description="Hours a pending checkout order stays open before expiring",
+    )
+
+    @field_validator("supported_currencies", mode="before")
+    @classmethod
+    def _parse_currencies(cls, value):
+        if isinstance(value, str):
+            return ServerConfig._split_cors_origins(value)
+        return value
+
+    @field_validator("supported_currencies", mode="after")
+    @classmethod
+    def _normalize_currencies(cls, value: list[str]) -> list[str]:
+        return [currency.strip().lower() for currency in value if currency and currency.strip()]
+
+    @field_validator("public_base_url", mode="after")
+    @classmethod
+    def _normalize_public_base_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip().rstrip("/")
+        return value or None
+
+
 class SubsonicConfig(BaseSettings):
     """Subsonic API adapter configuration."""
 
@@ -991,6 +1127,7 @@ class SonghiveConfig(BaseSettings):
     musicbrainz: MusicBrainzConfig = Field(default_factory=MusicBrainzConfig)
     imports: ImportConfig = Field(default_factory=ImportConfig)
     downloads: DownloadsConfig = Field(default_factory=DownloadsConfig)
+    payments: PaymentsConfig = Field(default_factory=PaymentsConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     external_libraries: ExternalLibrariesConfig = Field(default_factory=ExternalLibrariesConfig)
     streams: StreamsConfig = Field(default_factory=StreamsConfig)

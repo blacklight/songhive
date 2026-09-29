@@ -5,7 +5,12 @@ import type { LoginResponse } from "./twoFactor";
 export type RegisterRequest =
   paths["/api/v1/auth/register"]["post"]["requestBody"]["content"]["application/json"];
 export type RegisterResponse =
-  paths["/api/v1/auth/register"]["post"]["responses"]["201"]["content"]["application/json"];
+  paths["/api/v1/auth/register"]["post"]["responses"]["201"]["content"]["application/json"] & {
+    /** Paid-registration accounts start unpaid — a scoped billing
+     * capability that authorizes only the membership endpoints. */
+    billing_required?: boolean;
+    billing_token?: string | null;
+  };
 export type LoginRequest =
   paths["/api/v1/auth/login"]["post"]["requestBody"]["content"]["application/json"];
 export type TokenPairResponse =

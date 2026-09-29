@@ -237,7 +237,10 @@ async def test_get_and_set_preferences(db_session, regular_user):
     """Preferences merge stored rows with defaults for the remaining types."""
     prefs = await notifications.get_preferences(db_session, regular_user.id)
     assert len(prefs) == len(NotificationType)
-    assert all(p["in_app"] is True and p["email"] is False and p["email_digest"] is False for p in prefs)
+    email_default = {"purchase", "membership"}
+    assert all(
+        p["in_app"] is True and p["email"] is (p["type"] in email_default) and p["email_digest"] is False for p in prefs
+    )
 
     await notifications.set_preference(db_session, regular_user.id, "like", in_app=False, email=True, email_digest=True)
     prefs = await notifications.get_preferences(db_session, regular_user.id)

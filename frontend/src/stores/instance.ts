@@ -28,6 +28,22 @@ export const useInstanceStore = defineStore("instance", () => {
   const loading = computed(() => status.value === "loading");
   const name = computed(() => instance.value?.title || "Songhive");
 
+  // The payments block is a Songhive extension (not in generated types yet).
+  const payments = computed(() => {
+    const raw = instance.value as Record<string, unknown> | null;
+    return (raw?.payments ?? null) as {
+      enabled: boolean;
+      paid_registration: boolean;
+      membership_price_minor: number | null;
+      membership_currency: string | null;
+      membership_interval: string | null;
+    } | null;
+  });
+  const paymentsEnabled = computed(() => payments.value?.enabled ?? false);
+  const paidRegistration = computed(
+    () => payments.value?.paid_registration ?? false,
+  );
+
   async function load(): Promise<void> {
     if (bootstrapped && status.value !== "idle") return bootstrapped;
 
@@ -57,6 +73,9 @@ export const useInstanceStore = defineStore("instance", () => {
     singleUser,
     loading,
     name,
+    payments,
+    paymentsEnabled,
+    paidRegistration,
     load,
   };
 });

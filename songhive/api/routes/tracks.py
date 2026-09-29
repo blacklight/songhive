@@ -549,6 +549,28 @@ async def _build_track_response(
             filename = track.audio_file.original_filename
         can_rename_source = track.audio_file_id is not None
 
+    # Payment overlay: an active sale rewrites the advertised media URL and
+    # exposes the offer — the raw file URL must never leak to a requester
+    # whose access level doesn't include original bytes.
+    paid = False
+    unpaid_policy: Optional[str] = None
+    price_minor: Optional[int] = None
+    currency: Optional[str] = None
+    if db is not None:
+        from ...services.payments import access as payment_access
+
+        gate_cache = policy_cache.setdefault("sale_gates", {}) if policy_cache is not None else None
+        track_access = await payment_access.gated_access(db, track, user, gate_cache=gate_cache)
+        if track_access is not None and track_access.sale is not None:
+            sale = track_access.sale
+            paid = True
+            unpaid_policy = sale.unpaid_policy
+            price_minor = sale.price_minor
+            currency = sale.currency
+            audio_url = payment_access.audio_url_for(track, track_access)
+            can_stream = track_access.can_stream
+            can_download = track_access.can_download
+
     return TrackResponse(
         id=str(track.id),
         title=track.title,
@@ -584,6 +606,10 @@ async def _build_track_response(
         can_write_tags=can_write_tags,
         can_rename_source=can_rename_source,
         can_delete_source=can_delete_source,
+        paid=paid,
+        unpaid_policy=unpaid_policy,
+        price_minor=price_minor,
+        currency=currency,
         editable_fields=editable_fields,
         created_at=track.created_at,
         updated_at=track.updated_at,
@@ -616,6 +642,14 @@ async def download_track(
     track = await music.get_track(db, track_id, include={"artist"})
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    # Payment layer: a sale-gated track's original bytes require ``full``
+    # access — ``full_stream`` playback rights do not include downloads.
+    from ...services.payments import access as payment_access
+
+    track_access = await payment_access.resolve_track_access(db, track, user)
+    if not track_access.can_download:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     stored_file = await resolve_track_file(db, track_id)
     if stored_file is not None:

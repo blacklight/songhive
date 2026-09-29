@@ -26,6 +26,7 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ImageUploadField from "@/components/ui/ImageUploadField.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackMetadataForm from "@/components/library/TrackMetadataForm.vue";
+import SaleEditor from "@/components/payments/SaleEditor.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -35,6 +36,7 @@ const instanceStore = useInstanceStore();
 const toast = useToastStore();
 
 const trackId = computed(() => String(route.params.id));
+const paymentsEnabled = computed(() => instanceStore.paymentsEnabled);
 const track = ref<TrackResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -350,6 +352,13 @@ watch(
           {{ t("common.delete") }}
         </AppButton>
       </TrackMetadataForm>
+
+      <SaleEditor
+        v-if="paymentsEnabled"
+        entity-type="track"
+        :entity-id="trackId"
+        :duration-seconds="track.duration ?? null"
+      />
 
       <section
         class="track-edit-view__section"

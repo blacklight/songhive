@@ -213,7 +213,8 @@
       "success": "Registro completado. Inicia sesión.",
       "emailVerificationNotice": "Revisa tu bandeja de entrada para verificar tu dirección de correo electrónico.",
       "passwordMismatch": "Las contraseñas no coinciden.",
-      "haveAccount": "¿Ya tienes cuenta? Inicia sesión"
+      "haveAccount": "¿Ya tienes cuenta? Inicia sesión",
+      "membershipNotice": "Esta instancia requiere una membresía de pago de {price} por {interval}."
     },
     "passwordReset": {
       "requestTitle": "Restablecer contraseña",
@@ -609,7 +610,13 @@
         "deactivateSuccess": "Usuario desactivado.",
         "deleteSuccess": "Usuario eliminado.",
         "bulkSuccess": "{action} a {count} usuarios.",
-        "actionError": "No se pudo actualizar el usuario: {message}"
+        "actionError": "No se pudo actualizar el usuario: {message}",
+        "requirePayment": "¿Exigir una membresía de pago a {username}? La cuenta se desactiva hasta que se complete el pago y cualquier suscripción activa se mantiene.",
+        "waivePayment": "¿Eximir a {username} de la membresía de pago? Se cancelará su suscripción activa.",
+        "paymentsRequiredSuccess": "Requisito de pago actualizado.",
+        "requirePaymentShort": "Exigir pago",
+        "waivePaymentShort": "Eximir del pago",
+        "paymentRequiredBadge": "Requiere membresía de pago"
       },
       "settings": {
         "title": "Configuración",
@@ -1538,7 +1545,9 @@
       "security": "Seguridad",
       "podcastSync": "Sincronización de podcasts",
       "scrobbling": "Scrobbling",
-      "outputs": "Salidas"
+      "outputs": "Salidas",
+      "purchases": "Compras",
+      "billing": "Facturación"
     },
     "copyHandle": "Copiar identificador del Fediverso",
     "compose": "Redactar",
@@ -2207,7 +2216,13 @@
       "activityReply": "respondió a {object}",
       "activityQuote": "citó {object}",
       "report": "envió un informe",
-      "download": "tu descarga está lista"
+      "download": "tu descarga está lista",
+      "purchase": "confirmó tu compra",
+      "membership": "actualizó tu membresía",
+      "membershipPaid": "confirmó el pago de tu membresía",
+      "membershipPaymentFailed": "no pudo cobrar tu membresía",
+      "membershipCancelScheduled": "programó la cancelación de tu membresía",
+      "membershipCanceled": "dio por terminada tu membresía"
     },
     "objects": {
       "post": "publicación",
@@ -2272,7 +2287,9 @@
         "webmention": "Webmentions",
         "activity": "Actividad de usuarios",
         "report": "Informes",
-        "download": "Descargas"
+        "download": "Descargas",
+        "purchase": "Compras",
+        "membership": "Membresía"
       }
     },
     "onItem": "en {title}",
@@ -2282,7 +2299,8 @@
       "accepted": "Aceptada",
       "rejected": "Rechazada",
       "error": "No se pudo resolver la solicitud de seguimiento: {message}"
-    }
+    },
+    "paymentsActor": "Pagos"
   },
   "remote": {
     "badge": "Remoto",
@@ -2435,6 +2453,150 @@
       "processing": "Generando…",
       "ready": "Lista",
       "failed": "Fallida"
+    }
+  },
+  "payments": {
+    "purchase": {
+      "buy": "Comprar ahora",
+      "owned": "Ya es tuyo: las descargas están desbloqueadas.",
+      "email": "Correo electrónico",
+      "emailHint": "Te enviaremos un enlace de descarga tras el pago.",
+      "emailRequired": "Introduce un correo electrónico para recibir el enlace de descarga.",
+      "checkoutError": "No se pudo iniciar el pago.",
+      "policy": {
+        "full_stream": "La escucha es gratuita; la compra desbloquea las descargas.",
+        "sample": "Hay una muestra disponible; la compra desbloquea la pista completa.",
+        "none": "Se requiere compra para escuchar y descargar."
+      }
+    },
+    "sale": {
+      "title": "Vender este elemento",
+      "connectRequired": "Conecta una cuenta de cobros antes de publicar una venta.",
+      "connect": "Configurar cobros",
+      "onboardError": "No se pudo iniciar la conexión de cobros.",
+      "price": "Precio",
+      "priceInvalid": "Introduce un precio válido dentro del rango permitido.",
+      "currency": "Moneda",
+      "unpaidPolicy": "Los visitantes sin compra pueden",
+      "policy": {
+        "fullStream": "Escuchar la pista completa",
+        "sample": "Escuchar una muestra",
+        "none": "No acceder al audio"
+      },
+      "sampleStart": "Inicio de la muestra (segundos)",
+      "sampleLength": "Duración de la muestra (segundos)",
+      "sampleBoundsError": "La muestra debe estar dentro de la duración de la pista.",
+      "statusLabel": "Estado",
+      "status": {
+        "draft": "borrador",
+        "active": "activa",
+        "inactive": "inactiva"
+      },
+      "publish": "Publicar venta",
+      "saveDraft": "Guardar borrador",
+      "updatePublished": "Actualizar venta",
+      "deactivate": "Desactivar venta",
+      "deactivateTitle": "¿Desactivar esta venta?",
+      "deactivateMessage": "Las nuevas compras se detienen de inmediato; los compradores actuales conservan su acceso.",
+      "saved": "Venta guardada.",
+      "published": "Venta publicada",
+      "saveError": "No se pudo guardar la venta.",
+      "deactivated": "Venta desactivada.",
+      "loadError": "No se pudo cargar la venta."
+    },
+    "checkout": {
+      "title": "Pago",
+      "successTitle": "Pago recibido",
+      "successBody": "Tu pago se ha procesado. El acceso se desbloquea en cuanto el proveedor de pagos lo confirme; suele tardar unos segundos.",
+      "confirmed": "Compra confirmada. ¡Disfrútala!",
+      "cancelTitle": "Pago cancelado",
+      "cancelBody": "No se ha realizado ningún cargo. Puedes volver al elemento e intentarlo cuando quieras.",
+      "unknownBody": "Todavía estamos esperando la confirmación del proveedor de pagos. Revisa tus compras en unos instantes.",
+      "viewPurchases": "Ver mis compras",
+      "viewBilling": "Ver facturación"
+    },
+    "redeem": {
+      "title": "Canjear compra",
+      "hint": "Pega el token del correo de compra.",
+      "tokenLabel": "Token de canje",
+      "submit": "Canjear",
+      "success": "Tu compra está lista; abajo tienes los enlaces de descarga.",
+      "failed": "Este token no es válido, ha caducado o ya se ha canjeado.",
+      "expiry": "Estos enlaces son válidos durante {days} días.",
+      "downloadAll": "Descargar todo ({count})"
+    },
+    "purchases": {
+      "empty": "Aún no tienes compras.",
+      "loadError": "No se pudieron cargar tus compras.",
+      "downloadArchive": "Descargar todos los archivos",
+      "status": {
+        "pending": "pendiente",
+        "paid": "pagada",
+        "failed": "fallida",
+        "expired": "caducada",
+        "refunded": "reembolsada",
+        "partially_refunded": "reembolsada parcialmente",
+        "disputed": "en disputa",
+        "canceled": "cancelada"
+      }
+    },
+    "membership": {
+      "title": "Membresía",
+      "pricePer": "{price} por {interval}",
+      "interval": {
+        "week": "semana",
+        "month": "mes",
+        "year": "año"
+      },
+      "statusLabel": "Estado",
+      "status": {
+        "none": "ninguna",
+        "incomplete": "incompleta",
+        "active": "activa",
+        "trialing": "de prueba",
+        "past_due": "vencida",
+        "canceled": "cancelada",
+        "unpaid": "impagada",
+        "incomplete_expired": "caducada"
+      },
+      "paidThrough": "Pagada hasta",
+      "cancelScheduled": "Cancelación programada: el acceso continúa hasta la fecha pagada.",
+      "checkoutSuccess": "Pago completado — confirmando tu pago…",
+      "checkoutConfirmed": {
+        "signed_in": "Pago confirmado — has iniciado sesión.",
+        "verify": "Pago confirmado — revisa tu correo para verificar tu cuenta.",
+        "login": "Pago confirmado — inicia sesión para continuar."
+      },
+      "checkoutCancel": "El pago fue cancelado — no se realizó ningún cargo.",
+      "continueLogin": "Inicia sesión para continuar",
+      "subscribe": "Suscribirse",
+      "managePortal": "Gestionar suscripción",
+      "cancel": "Cancelar membresía",
+      "loadError": "No se pudieron cargar los datos de la membresía.",
+      "checkoutError": "No se pudo iniciar el pago.",
+      "portalError": "No se pudo abrir el portal de facturación.",
+      "cancelError": "No se pudo cancelar la membresía.",
+      "cancelConfirm": "Estas seguro/a de querer cancelar la membresía?",
+      "unsubscribe": "Desuscribirse"
+    },
+    "connect": {
+      "title": "Cobros",
+      "hint": "Conecta una cuenta de cobros para vender pistas y álbumes.",
+      "statusLabel": "Cuenta de cobros",
+      "state": {
+        "none": "sin conectar",
+        "pending": "alta incompleta",
+        "ready": "lista para vender"
+      },
+      "start": "Conectar cobros",
+      "resume": "Reanudar el alta",
+      "disconnect": "Desconectar",
+      "disconnectTitle": "¿Desconectar los cobros?",
+      "disconnectMessage": "Las ventas activas se desactivan y ya no podrás vender.",
+      "onboardError": "No se pudo iniciar la conexión de cobros.",
+      "disconnectError": "No se pudo desconectar la cuenta de cobros.",
+      "countryLabel": "País de operación",
+      "countryPlaceholder": "Selecciona tu país"
     }
   }
 }

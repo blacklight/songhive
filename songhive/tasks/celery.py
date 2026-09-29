@@ -104,6 +104,9 @@ def make_celery(
             "songhive.tasks.external_libraries.write_back_metadata": {"queue": "bulk"},
             "songhive.tasks.podcasts.refresh_podcast": {"queue": "bulk"},
             "songhive.tasks.storage.rehash_audio_files": {"queue": "bulk"},
+            # ffmpeg sample renders are heavyweight; keep them off the default
+            # queue with the rest of the bulk media work.
+            "songhive.tasks.payments.materialize_track_sample": {"queue": "bulk"},
         },
         beat_schedule={
             "cleanup-orphaned-files": {
@@ -139,6 +142,33 @@ def make_celery(
             "cleanup-completed-downloads": {
                 "task": "songhive.tasks.downloads.cleanup_completed_downloads",
                 "schedule": crontab(minute=35),
+            },
+            # Payments safety nets. Webhooks drive the authoritative state,
+            # but these sweeps bound the damage of a lost delivery: lapsed
+            # memberships deactivate, stale checkouts close, queued guest
+            # deliveries retry, and expired artifacts/samples free storage.
+            "payments-sweep-membership-expirations": {
+                "task": "songhive.tasks.payments.sweep_membership_expirations",
+                "schedule": crontab(minute=7),
+            },
+            "payments-expire-pending-orders": {
+                "task": "songhive.tasks.payments.expire_pending_orders",
+                "schedule": crontab(minute="*/30"),
+            },
+            # Provider-confirmed fulfillment: a missed checkout.session.completed
+            # webhook (e.g. a connect endpoint not subscribed to connected
+            # accounts) leaves paid orders pending; this polls the provider.
+            "payments-reconcile-pending-orders": {
+                "task": "songhive.tasks.payments.reconcile_pending_orders",
+                "schedule": crontab(minute="*/5"),
+            },
+            "payments-process-fulfillment-outbox": {
+                "task": "songhive.tasks.payments.process_fulfillment_outbox",
+                "schedule": crontab(minute="*/5"),
+            },
+            "payments-cleanup": {
+                "task": "songhive.tasks.payments.cleanup_payments",
+                "schedule": crontab(minute=41),
             },
         },
     )

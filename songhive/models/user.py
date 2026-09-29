@@ -115,6 +115,22 @@ class User(Base):
     # and recovery codes live in their own tables keyed by user id.
     totp_secret: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Payments / paid registration. ``payments_required`` marks an account
+    # that must hold an active instance subscription to be usable;
+    # ``admin_suspended`` records a deliberate admin deactivation. Both feed
+    # ``services.payments.membership.sync_user_active_flag``, the single
+    # writer that derives ``is_active`` from payment state.
+    payments_required: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="0",
+    )
+    admin_suspended: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="0",
+    )
+
     # Federation fields
     actor_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, unique=True)
     private_key_pem: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

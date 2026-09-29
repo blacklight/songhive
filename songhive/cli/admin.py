@@ -93,6 +93,13 @@ def _add_disable_user_command(subparsers: argparse._SubParsersAction) -> None:
     disable_parser.add_argument("--username", required=True)
 
 
+def _add_cancel_subscription_command(subparsers: argparse._SubParsersAction) -> None:
+    cancel_parser = subparsers.add_parser(
+        "cancel-subscription", help="Immediately cancel a user's paid membership subscription"
+    )
+    cancel_parser.add_argument("--username", required=True)
+
+
 def _add_reset_password_command(subparsers: argparse._SubParsersAction) -> None:
     reset_parser = subparsers.add_parser("reset-password", help="Reset a user's password")
     reset_parser.add_argument("--username", required=True)
@@ -251,6 +258,7 @@ def _add_admin_commands(parser: argparse.ArgumentParser) -> None:
     _add_demote_user_command(subparsers)
     _add_approve_user_command(subparsers)
     _add_disable_user_command(subparsers)
+    _add_cancel_subscription_command(subparsers)
     _add_reset_password_command(subparsers)
     _add_clear_2fa_command(subparsers)
     _add_import_dir_command(subparsers)
@@ -349,31 +357,57 @@ async def _handle_demote_user(args):
 
 
 async def _handle_approve_user(args):
+    config = load_config([])
     async with get_session() as session:
         user = await get_user_by_username(session, args.username)
         if not user:
             print(f"Error: user '{args.username}' not found", file=sys.stderr)
             sys.exit(1)
         try:
-            await user_manager.approve_user(session, user.id)
+            await user_manager.approve_user(session, user.id, config=config)
         except user_manager.UserManagementError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
-        print(f"User '{args.username}' approved and activated")
+        if user.is_active:
+            print(f"User '{args.username}' approved and activated")
+        else:
+            print(f"User '{args.username}' approved (still inactive — membership payment required)")
 
 
 async def _handle_disable_user(args):
+    config = load_config([])
     async with get_session() as session:
         user = await get_user_by_username(session, args.username)
         if not user:
             print(f"Error: user '{args.username}' not found", file=sys.stderr)
             sys.exit(1)
         try:
-            await user_manager.deactivate_user_by_id(session, user.id)
+            await user_manager.deactivate_user_by_id(session, user.id, config=config)
         except user_manager.UserManagementError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
         print(f"User '{args.username}' deactivated")
+
+
+async def _handle_cancel_subscription(args):
+    config = load_config([])
+    async with get_session() as session:
+        user = await get_user_by_username(session, args.username)
+        if not user:
+            print(f"Error: user '{args.username}' not found", file=sys.stderr)
+            sys.exit(1)
+        from ..services.payments import membership
+
+        try:
+            subscription = await membership.request_cancel(session, user, config, immediate=True)
+        except LookupError:
+            print(f"User '{args.username}' has no active provider subscription")
+            return
+        except Exception as exc:  # noqa: BLE001 — provider outage defers to the retry task
+            print(f"Error contacting payment provider: {exc}", file=sys.stderr)
+            print("Cancel intent recorded; the payments worker will retry", file=sys.stderr)
+            sys.exit(1)
+        print(f"User '{args.username}' subscription canceled (status={subscription.status})")
 
 
 async def _handle_reset_password(args):
@@ -800,6 +834,7 @@ def admin_main(argv=None):
         "demote-user": _handle_demote_user,
         "approve-user": _handle_approve_user,
         "disable-user": _handle_disable_user,
+        "cancel-subscription": _handle_cancel_subscription,
         "reset-password": _handle_reset_password,
         "clear-2fa": _handle_clear_2fa,
         "import-dir": _handle_import_dir,

@@ -6,6 +6,8 @@ import { useMediaQuery } from "@/composables/useMediaQuery";
 import { useConfirm } from "@/composables/useConfirm";
 import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
+import { useInstanceStore } from "@/stores/instance";
+import { adminSetPaymentsRequired } from "@/api/payments";
 import {
   listUsers,
   promoteUser,
@@ -19,6 +21,7 @@ import {
 } from "@/api/admin";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import AppTable from "@/components/ui/AppTable.vue";
@@ -27,6 +30,7 @@ import SearchBar from "@/components/ui/SearchBar.vue";
 const { t } = useI18n();
 const isWide = useMediaQuery("(min-width: 1280px)", true);
 const toastStore = useToastStore();
+const instanceStore = useInstanceStore();
 const { confirm } = useConfirm();
 
 const {
@@ -221,6 +225,31 @@ async function onDeactivate(user: AdminUserResponse) {
   }
 }
 
+async function onTogglePaymentsRequired(user: AdminUserResponse) {
+  const required = !user.payments_required;
+  const ok = await confirm({
+    title: t("common.confirm"),
+    message: required
+      ? t("pages.admin.users.requirePayment", { username: user.username })
+      : t("pages.admin.users.waivePayment", { username: user.username }),
+    danger: required,
+  });
+  if (!ok) return;
+
+  try {
+    // Waiving the requirement cancels the subscription so billing stops;
+    // imposing it keeps any existing subscription (the user may have paid).
+    await adminSetPaymentsRequired(user.id, required, !required);
+    toastStore.push({
+      type: "success",
+      message: t("pages.admin.users.paymentsRequiredSuccess"),
+    });
+    await refresh();
+  } catch (err) {
+    showError("pages.admin.users.actionError", err);
+  }
+}
+
 async function onDelete(user: AdminUserResponse) {
   const ok = await confirm({
     title: t("common.confirm"),
@@ -400,6 +429,13 @@ onMounted(() => load());
             :class="statusClasses(userFromRow(row)!)"
           >
             {{ userStatusLabel(userFromRow(row)!) }}
+            <span
+              v-if="userFromRow(row)!.payments_required"
+              class="users-view__badge"
+              :title="t('pages.admin.users.paymentRequiredBadge')"
+            >
+              <AppIcon name="money-bill" spacing="left" />
+            </span>
           </span>
         </template>
 
@@ -440,6 +476,23 @@ onMounted(() => load());
             </AppButton>
 
             <AppButton
+              v-if="instanceStore.paymentsEnabled"
+              size="sm"
+              variant="secondary"
+              :icon="
+                userFromRow(row)!.payments_required
+                  ? 'money-bill-wave'
+                  : 'money-bill'
+              "
+              :title="
+                userFromRow(row)!.payments_required
+                  ? t('pages.admin.users.waivePaymentShort')
+                  : t('pages.admin.users.requirePaymentShort')
+              "
+              @click="onTogglePaymentsRequired(userFromRow(row)!)"
+            />
+
+            <AppButton
               size="sm"
               variant="danger"
               icon="trash"
@@ -462,6 +515,13 @@ onMounted(() => load());
             </span>
             <span :class="statusClasses(user)">
               {{ userStatusLabel(user) }}
+              <span
+                v-if="user.payments_required"
+                class="users-view__badge"
+                :title="t('pages.admin.users.paymentRequiredBadge')"
+              >
+                <AppIcon name="money-bill" spacing="left" />
+              </span>
             </span>
           </div>
 
@@ -510,6 +570,19 @@ onMounted(() => load());
             >
               {{ t("pages.admin.users.activate") }}
             </AppButton>
+
+            <AppButton
+              v-if="instanceStore.paymentsEnabled"
+              size="sm"
+              variant="secondary"
+              :icon="user.payments_required ? 'money-bill-wave' : 'money-bill'"
+              :title="
+                user.payments_required
+                  ? t('pages.admin.users.waivePaymentShort')
+                  : t('pages.admin.users.requirePaymentShort')
+              "
+              @click="onTogglePaymentsRequired(user)"
+            />
 
             <AppButton
               size="sm"

@@ -5,6 +5,11 @@ export type TrackResponse = components["schemas"]["TrackResponse"] & {
   external_url?: string | null;
   /** Fields the provider allows editing locally (e.g. ["genres", "tags"]). */
   editable_fields?: string[] | null;
+  /** An active sale gates this track. */
+  paid?: boolean;
+  unpaid_policy?: "full_stream" | "sample" | "none" | null;
+  price_minor?: number | null;
+  currency?: string | null;
 };
 
 export type QueueTrack = TrackResponse & {

@@ -213,7 +213,8 @@
       "success": "تم التسجيل بنجاح. سجل الدخول.",
       "emailVerificationNotice": "تحقق من بريدك الوارد للتحقق من عنوان بريدك الإلكتروني.",
       "passwordMismatch": "كلمتا المرور غير متطابقتين.",
-      "haveAccount": "لديك حساب مسبقا؟ سجل الدخول"
+      "haveAccount": "لديك حساب مسبقا؟ سجل الدخول",
+      "membershipNotice": "تتطلب هذه النسخة عضوية مدفوعة بقيمة {price} كل {interval}."
     },
     "passwordReset": {
       "requestTitle": "إعادة تعيين كلمة المرور",
@@ -609,7 +610,13 @@
         "deactivateSuccess": "تم تعطيل المستخدم.",
         "deleteSuccess": "تم حذف المستخدم.",
         "bulkSuccess": "{action} {count} مستخدمين.",
-        "actionError": "تعذر تحديث المستخدم: {message}"
+        "actionError": "تعذر تحديث المستخدم: {message}",
+        "requirePayment": "هل تريد اشتراط عضوية مدفوعة لـ {username}؟ يتم إيقاف الحساب حتى اكتمال الدفع، ويبقى أي اشتراك نشط سارياً.",
+        "waivePayment": "إعفاء {username} من شرط العضوية المدفوعة؟ سيتم إلغاء اشتراكه النشط.",
+        "paymentsRequiredSuccess": "تم تحديث شرط الدفع.",
+        "requirePaymentShort": "اشتراط الدفع",
+        "waivePaymentShort": "إعفاء من الدفع",
+        "paymentRequiredBadge": "عضوية مدفوعة مطلوبة"
       },
       "settings": {
         "title": "الإعدادات",
@@ -1538,7 +1545,9 @@
       "security": "الأمان",
       "podcastSync": "مزامنة البودكاست",
       "scrobbling": "سكروبل",
-      "outputs": "المخرجات"
+      "outputs": "المخرجات",
+      "purchases": "المشتريات",
+      "billing": "الفوترة"
     },
     "copyHandle": "نسخ معرف الفيديفرس",
     "compose": "إنشاء منشور",
@@ -2207,7 +2216,13 @@
       "activityReply": "ردّ على {object}",
       "activityQuote": "اقتبس {object}",
       "report": "قدّم بلاغا",
-      "download": "تنزيلك جاهز"
+      "download": "تنزيلك جاهز",
+      "purchase": "أكّدت عملية الشراء الخاصة بك",
+      "membership": "حدّثت عضويتك",
+      "membershipPaid": "أكّدت دفعة عضويتك",
+      "membershipPaymentFailed": "تعذّر عليها تحصيل دفعة عضويتك",
+      "membershipCancelScheduled": "جدولت إلغاء عضويتك",
+      "membershipCanceled": "أنهت عضويتك"
     },
     "objects": {
       "post": "منشور",
@@ -2272,7 +2287,9 @@
         "webmention": "Webmentions",
         "activity": "نشاط المستخدم",
         "report": "البلاغات",
-        "download": "التنزيلات"
+        "download": "التنزيلات",
+        "purchase": "المشتريات",
+        "membership": "العضوية"
       }
     },
     "onItem": "على {title}",
@@ -2282,7 +2299,8 @@
       "accepted": "مقبول",
       "rejected": "مرفوض",
       "error": "تعذر حل طلب المتابعة: {message}"
-    }
+    },
+    "paymentsActor": "المدفوعات"
   },
   "remote": {
     "badge": "بعيد",
@@ -2435,6 +2453,150 @@
       "processing": "قيد الإنشاء…",
       "ready": "جاهز",
       "failed": "فشل"
+    }
+  },
+  "payments": {
+    "purchase": {
+      "buy": "اشترِ الآن",
+      "owned": "هذا المحتوى ملكك — التنزيلات مفتوحة.",
+      "email": "عنوان البريد الإلكتروني",
+      "emailHint": "سنرسل لك رابط التنزيل بعد إتمام الدفع.",
+      "emailRequired": "أدخل عنوان بريد إلكتروني لتلقّي رابط التنزيل.",
+      "checkoutError": "تعذّر بدء عملية الدفع.",
+      "policy": {
+        "full_stream": "الاستماع مجاني — الشراء يفتح التنزيلات.",
+        "sample": "تتوفر عينة استماع — الشراء يفتح المقطع كاملاً.",
+        "none": "الشراء مطلوب للاستماع والتنزيل."
+      }
+    },
+    "sale": {
+      "title": "بيع هذا العنصر",
+      "connectRequired": "اربط حساب مدفوعات قبل نشر أي عملية بيع.",
+      "connect": "إعداد المدفوعات",
+      "onboardError": "تعذّر بدء ربط حساب المدفوعات.",
+      "price": "السعر",
+      "priceInvalid": "أدخل سعراً صالحاً ضمن النطاق المسموح.",
+      "currency": "العملة",
+      "unpaidPolicy": "الزوار غير المشترين يستطيعون",
+      "policy": {
+        "fullStream": "الاستماع إلى المقطع كاملاً",
+        "sample": "الاستماع إلى عينة",
+        "none": "لا وصول إلى الصوت"
+      },
+      "sampleStart": "بداية العينة (بالثواني)",
+      "sampleLength": "مدة العينة (بالثواني)",
+      "sampleBoundsError": "يجب أن تكون العينة ضمن مدة المقطع.",
+      "statusLabel": "الحالة",
+      "status": {
+        "draft": "مسودة",
+        "active": "نشط",
+        "inactive": "موقوف"
+      },
+      "publish": "نشر البيع",
+      "saveDraft": "حفظ كمسودة",
+      "updatePublished": "تحديث البيع",
+      "deactivate": "إيقاف البيع",
+      "deactivateTitle": "إيقاف هذا البيع؟",
+      "deactivateMessage": "تتوقف المشتريات الجديدة فوراً؛ ويحتفظ المشترون الحاليون بوصولهم.",
+      "saved": "تم حفظ البيع.",
+      "published": "تم نشر العرض",
+      "saveError": "تعذّر حفظ البيع.",
+      "deactivated": "تم إيقاف البيع.",
+      "loadError": "تعذّر تحميل البيع."
+    },
+    "checkout": {
+      "title": "الدفع",
+      "successTitle": "تم استلام الدفعة",
+      "successBody": "تمت معالجة دفعتك. يُفتح الوصول فور تأكيد مزوّد الدفع — عادةً خلال ثوانٍ.",
+      "confirmed": "تم تأكيد الشراء — استمتع!",
+      "cancelTitle": "تم إلغاء الدفع",
+      "cancelBody": "لم يُخصم أي مبلغ. يمكنك العودة إلى العنصر والمحاولة مجدداً متى شئت.",
+      "unknownBody": "ما زلنا بانتظار تأكيد مزوّد الدفع. راجع مشترياتك بعد لحظات.",
+      "viewPurchases": "عرض مشترياتي",
+      "viewBilling": "عرض الفوترة"
+    },
+    "redeem": {
+      "title": "استرداد عملية شراء",
+      "hint": "الصق الرمز الموجود في بريد الشراء.",
+      "tokenLabel": "رمز الاسترداد",
+      "submit": "استرداد",
+      "success": "عملية الشراء جاهزة — روابط التنزيل أدناه.",
+      "failed": "هذا الرمز غير صالح أو منتهي الصلاحية أو مُستردّ مسبقاً.",
+      "expiry": "تبقى هذه الروابط صالحة لمدة {days} يوم.",
+      "downloadAll": "تنزيل الكل ({count})"
+    },
+    "purchases": {
+      "empty": "لا توجد مشتريات بعد.",
+      "loadError": "تعذّر تحميل مشترياتك.",
+      "downloadArchive": "تنزيل جميع الملفات",
+      "status": {
+        "pending": "قيد الانتظار",
+        "paid": "مدفوعة",
+        "failed": "فاشلة",
+        "expired": "منتهية",
+        "refunded": "مستردة",
+        "partially_refunded": "مستردة جزئياً",
+        "disputed": "متنازَع عليها",
+        "canceled": "ملغاة"
+      }
+    },
+    "membership": {
+      "title": "العضوية",
+      "pricePer": "{price} كل {interval}",
+      "interval": {
+        "week": "أسبوع",
+        "month": "شهر",
+        "year": "سنة"
+      },
+      "statusLabel": "الحالة",
+      "status": {
+        "none": "لا يوجد",
+        "incomplete": "غير مكتملة",
+        "active": "نشطة",
+        "trialing": "تجريبية",
+        "past_due": "متأخرة",
+        "canceled": "ملغاة",
+        "unpaid": "غير مدفوعة",
+        "incomplete_expired": "منتهية"
+      },
+      "paidThrough": "مدفوعة حتى",
+      "cancelScheduled": "تمت جدولة الإلغاء — يستمر الوصول حتى تاريخ انتهاء المدة المدفوعة.",
+      "checkoutSuccess": "اكتمل الدفع — جارٍ تأكيد عملية الدفع…",
+      "checkoutConfirmed": {
+        "signed_in": "تم تأكيد الدفع — تم تسجيل دخولك.",
+        "verify": "تم تأكيد الدفع — تحقق من بريدك الإلكتروني لتفعيل حسابك.",
+        "login": "تم تأكيد الدفع — سجّل الدخول للمتابعة."
+      },
+      "checkoutCancel": "تم إلغاء الدفع — لم يتم تحصيل أي مبلغ.",
+      "continueLogin": "سجّل الدخول للمتابعة",
+      "subscribe": "اشترك",
+      "managePortal": "إدارة الاشتراك",
+      "cancel": "إلغاء العضوية",
+      "loadError": "تعذّر تحميل تفاصيل العضوية.",
+      "checkoutError": "تعذّر بدء عملية الدفع.",
+      "portalError": "تعذّر فتح بوابة الفوترة.",
+      "cancelError": "تعذّر إلغاء العضوية.",
+      "cancelConfirm": "هل تريد حقاً انتهاء العضوية؟",
+      "unsusbscribe": "الغاء الاشتراك"
+    },
+    "connect": {
+      "title": "المدفوعات",
+      "hint": "اربط حساب مدفوعات لبيع المقاطع والألبومات.",
+      "statusLabel": "حساب المدفوعات",
+      "state": {
+        "none": "غير مرتبط",
+        "pending": "التسجيل غير مكتمل",
+        "ready": "جاهز للبيع"
+      },
+      "start": "ربط المدفوعات",
+      "resume": "استئناف التسجيل",
+      "disconnect": "فصل الحساب",
+      "disconnectTitle": "فصل حساب المدفوعات؟",
+      "disconnectMessage": "سيتم إيقاف المبيعات النشطة ولن تتمكن من البيع بعد الآن.",
+      "onboardError": "تعذّر بدء ربط حساب المدفوعات.",
+      "disconnectError": "تعذّر فصل حساب المدفوعات.",
+      "countryLabel": "بلد النشاط",
+      "countryPlaceholder": "اختر بلدك"
     }
   }
 }

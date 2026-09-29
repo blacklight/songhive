@@ -10,6 +10,7 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 from email.utils import formatdate
+from typing import Optional
 
 from ..config.schema import SonghiveConfig
 
@@ -97,6 +98,71 @@ def send_password_reset_email(config: SonghiveConfig, to_address: str, username:
     return send_email(config, to_address, subject, body)
 
 
+def send_purchase_redeem_email(
+    config: SonghiveConfig,
+    to_address: str,
+    redeem_url: str,
+    title: str,
+    expires_days: int,
+) -> bool:
+    """Send a guest buyer their download link for a completed purchase."""
+    subject = "Your Songhive purchase is ready"
+    body = (
+        "Hi,\n\n"
+        f"Thank you for your purchase of {title}. "
+        "Your download link is ready:\n\n"
+        f"{redeem_url}\n\n"
+        f"This link stays valid for {expires_days} days and can be used a "
+        "limited number of times. If you did not make this purchase, you can "
+        "ignore this email."
+    )
+    return send_email(config, to_address, subject, body)
+
+
+def _absolute_url(config: SonghiveConfig, url: str) -> str:
+    """Resolve a relative SPA path (e.g. ``/settings/billing``) to a public URL."""
+    if not url or url.startswith(("http://", "https://")):
+        return url
+    from .payments import public_base_url
+
+    base = public_base_url(config)
+    return f"{base}{url}" if base else url
+
+
+_MEMBERSHIP_EVENT_TEXT = {
+    "membership_paid": ("Membership payment confirmed", "Your membership payment was confirmed — thank you."),
+    "membership_payment_failed": (
+        "Membership payment failed",
+        "A payment for your membership failed. Please update your payment " "method to keep your account active.",
+    ),
+    "membership_cancel_scheduled": (
+        "Membership cancellation scheduled",
+        "Your membership cancellation is scheduled — you keep access until " "the end of the paid period.",
+    ),
+    "membership_canceled": ("Membership ended", "Your membership has ended."),
+}
+
+
+def _system_notification_text(notification: dict) -> Optional[tuple[str, str]]:
+    """
+    Subject suffix and body line for actor-less system notifications
+    (``purchase``, ``membership``), or ``None`` for regular actor notifications.
+    """
+    notification_type = notification.get("type")
+    payload = notification.get("payload") or {}
+    if notification_type == "purchase":
+        count = payload.get("track_count")
+        noun = "track" if count == 1 else "tracks"
+        detail = f" — {count} {noun} added" if count else ""
+        return "Purchase confirmed", f"Thank you for your purchase{detail}; it's now in your library."
+    if notification_type == "membership":
+        return _MEMBERSHIP_EVENT_TEXT.get(
+            str(payload.get("event") or ""),
+            ("Membership update", "Your membership status changed."),
+        )
+    return None
+
+
 def send_notification_email(
     config: SonghiveConfig,
     to_address: str,
@@ -104,17 +170,22 @@ def send_notification_email(
     notification: dict,
 ) -> bool:
     """Send a plain-text email for a single notification."""
-    payload = notification.get("payload") or {}
-    actor_name = payload.get("actor_name") or notification.get("actor_url") or "someone"
-    notification_type = notification.get("type") or "notification"
-    source_url = notification.get("source_url")
-
-    subject = f"[Songhive] New {notification_type} from {actor_name}"
-    lines = [
-        f"Hi {username},",
-        "",
-        f"You have a new {notification_type} notification from {actor_name}.",
-    ]
+    source_url = _absolute_url(config, notification.get("source_url") or "")
+    system = _system_notification_text(notification)
+    if system is not None:
+        subject_suffix, body_line = system
+        subject = f"[Songhive] {subject_suffix}"
+        lines = [f"Hi {username},", "", body_line]
+    else:
+        payload = notification.get("payload") or {}
+        actor_name = payload.get("actor_name") or notification.get("actor_url") or "someone"
+        notification_type = notification.get("type") or "notification"
+        subject = f"[Songhive] New {notification_type} from {actor_name}"
+        lines = [
+            f"Hi {username},",
+            "",
+            f"You have a new {notification_type} notification from {actor_name}.",
+        ]
     if source_url:
         lines += ["", f"View it here: {source_url}"]
     lines += ["", "You can manage your notification preferences in your profile settings."]
@@ -143,10 +214,15 @@ def send_notification_digest_email(
     for notification_type in sorted(grouped):
         lines.append(f"{notification_type}:")
         for notification in grouped[notification_type]:
-            payload = notification.get("payload") or {}
-            actor_name = payload.get("actor_name") or notification.get("actor_url") or "someone"
-            source_url = notification.get("source_url")
-            line = f"  - {actor_name}"
+            system = _system_notification_text(notification)
+            if system is not None:
+                entry = system[1]
+            else:
+                payload = notification.get("payload") or {}
+                actor_name = payload.get("actor_name") or notification.get("actor_url") or "someone"
+                entry = actor_name
+            source_url = _absolute_url(config, notification.get("source_url") or "")
+            line = f"  - {entry}"
             if source_url:
                 line += f" — {source_url}"
             lines.append(line)

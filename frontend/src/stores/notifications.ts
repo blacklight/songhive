@@ -324,7 +324,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
     const actor =
       typeof name === "string" && name
         ? name
-        : i18n.global.t("notifications.someone");
+        : // Purchase/membership notifications are actor-less system events.
+          notification.type === "purchase" || notification.type === "membership"
+          ? i18n.global.t("notifications.paymentsActor")
+          : i18n.global.t("notifications.someone");
     return i18n.global.t("notifications.toast", {
       actor,
       action: notificationActionText(notification),

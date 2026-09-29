@@ -39,6 +39,7 @@ class AuditTargetType(str, Enum):
     INVITE = "invite"
     LIBRARY = "library"
     OAUTH_CLIENT = "oauth_client"
+    PAYMENT = "payment"
     PLAYLIST = "playlist"
     REPORT = "report"
     SETTING = "setting"

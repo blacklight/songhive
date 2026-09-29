@@ -113,6 +113,8 @@ async def create_user(
         password_hash=hash_password(password),
         role=role,
         is_active=is_active,
+        # Admin/provisioning-created accounts bypass paid registration.
+        payments_required=False,
     )
     if config is not None:
         ensure_user_actor(user, config)

@@ -88,6 +88,11 @@ class StreamHandler(tornado.web.RequestHandler):
     SUPPORTED_FORMATS = {"mp3", "ogg", "flac", "aac", "opus"}
     _FORMAT_BY_MIMETYPE = {fmt["mimetype"]: key for key, fmt in Transcoder.FORMAT_MAP.items()}
 
+    # Subclasses serving a download endpoint (Subsonic ``download.view``)
+    # flip this so sale-gated tracks require ``full`` access, not just
+    # streaming rights.
+    _requires_download_access = False
+
     @property
     def _config(self) -> SonghiveConfig:
         """Return the application configuration from Tornado settings."""
@@ -681,6 +686,20 @@ class StreamHandler(tornado.web.RequestHandler):
             if not await self._check_access(session, track_id, user):
                 return
 
+            # Payment layer: ACL decides visibility, this decides bytes.
+            from ..services.payments import access as payment_access
+
+            track_access = await payment_access.resolve_track_access(session, track, user)
+            if track_access.level == payment_access.ACCESS_NONE or (
+                self._requires_download_access and not track_access.can_download
+            ):
+                self._forbidden()
+                return
+
+            if track_access.level == payment_access.ACCESS_SAMPLE:
+                await self._serve_payment_sample(session, track, track_access.sale, storage_backend)
+                return
+
             external_stream: Optional[ExternalStream] = None
             if stored_file is None:
                 try:
@@ -797,6 +816,36 @@ class StreamHandler(tornado.web.RequestHandler):
                     state,
                     range_header,
                 )
+
+    async def _serve_payment_sample(
+        self,
+        session,
+        track: Track,
+        sale,
+        storage_backend: StorageBackend,
+    ) -> None:
+        """Serve the configured sample for a ``sample``-gated track — never original bytes."""
+        from ..services.payments import samples as samples_service
+
+        storage = StorageService(storage_backend, self._config.storage)
+        stored = await samples_service.sample_stored_file(
+            session,
+            track,
+            sale,
+            self._config,
+            storage=storage,
+            redis=self._redis,
+        )
+        if stored is None:
+            self._not_found("sample not ready")
+            return
+        local_path = await self._require_local_path(storage_backend, stored)
+        if local_path is None:
+            return
+        try:
+            await self._serve_file(str(local_path), stored.content_type or "audio/mpeg")
+        except tornado.iostream.StreamClosedError:
+            return
 
     async def _serve_file(
         self,

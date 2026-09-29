@@ -39,6 +39,7 @@ import AppButton from "@/components/ui/AppButton.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import EntityActions from "@/components/ui/EntityActions.vue";
+import PurchasePanel from "@/components/payments/PurchasePanel.vue";
 import { activityFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import CollectionStats from "@/components/library/CollectionStats.vue";
@@ -526,6 +527,13 @@ watch(
           <p v-if="album.description" class="album-view__description">
             {{ album.description }}
           </p>
+
+          <PurchasePanel
+            v-if="!canManage"
+            entity-type="album"
+            :entity-id="album.id"
+            class="album-view__purchase"
+          />
 
           <div class="album-view__header-actions">
             <EntityActions

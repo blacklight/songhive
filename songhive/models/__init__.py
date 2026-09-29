@@ -23,6 +23,19 @@ from .moderation import AdminUserModeration, InstanceModeration, UserModeration
 from .notification import ActivitySubscription, Notification, NotificationPreference, PushSubscription
 from .oauth_client import OAuth2Client
 from .output_stream import OutputStream
+from .payments import (
+    ConnectedAccount,
+    FulfillmentOutbox,
+    InstanceSubscription,
+    PaymentEvent,
+    PaymentOrder,
+    PaymentOrderItem,
+    PurchaseArtifact,
+    PurchaseEntitlement,
+    RedeemCapability,
+    Sale,
+    SampleDerivative,
+)
 from .playback_session import PlaybackSession, PlaybackSessionOutput
 from .playlist import Playlist, PlaylistTrack
 from .podcast import (
@@ -65,6 +78,7 @@ __all__ = [
     "AuditTargetType",
     "Base",
     "CollectionItem",
+    "ConnectedAccount",
     "DownloadArchive",
     "ExternalItem",
     "ExternalLibrary",
@@ -72,6 +86,7 @@ __all__ = [
     "ExternalTrack",
     "Favorite",
     "Follow",
+    "FulfillmentOutbox",
     "Genre",
     "GenreAlbum",
     "GenreTrack",
@@ -85,6 +100,7 @@ __all__ = [
     "init_db",
     "reset_db",
     "InstanceModeration",
+    "InstanceSubscription",
     "Invite",
     "Library",
     "LibraryTrack",
@@ -94,6 +110,9 @@ __all__ = [
     "NotificationPreference",
     "OAuth2Client",
     "OutputStream",
+    "PaymentEvent",
+    "PaymentOrder",
+    "PaymentOrderItem",
     "PlaybackSession",
     "PlaybackSessionOutput",
     "Playlist",
@@ -106,11 +125,16 @@ __all__ = [
     "PodcastSyncEvent",
     "PreviewCard",
     "ProviderCatalogEntry",
+    "PurchaseArtifact",
+    "PurchaseEntitlement",
     "PushSubscription",
     "Radio",
     "RecoveryCode",
+    "RedeemCapability",
     "RemoteObject",
     "Report",
+    "Sale",
+    "SampleDerivative",
     "ScrobbleConfig",
     "ShareGrant",
     "Setting",

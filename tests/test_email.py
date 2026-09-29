@@ -252,3 +252,72 @@ def test_password_reset_task_noops_when_not_configured(caplog, monkeypatch):
     result = send_password_reset_email_task.run("user@example.com", "bob", "token")
     assert result is False
     assert "Email not queued" in caplog.text
+
+
+def test_notification_email_actor_notification(fake_smtp, email_config):
+    """Actor-driven notifications keep the \"from {actor}\" phrasing."""
+    from songhive.services.email import send_notification_email
+
+    result = send_notification_email(
+        email_config,
+        "user@example.com",
+        "alice",
+        {"type": "like", "payload": {"actor_name": "bob"}},
+    )
+    assert result is True
+    msg = fake_smtp.instances[0].sent[0]
+    assert msg["Subject"] == "[Songhive] New like from bob"
+    assert "new like notification from bob" in msg.get_content()
+
+
+def test_notification_email_membership_no_actor(fake_smtp):
+    """Membership events are actor-less: no 'from someone' phrasing, and
+    relative SPA links resolve against the configured public base URL."""
+    from songhive.services.email import send_notification_email
+
+    config = SonghiveConfig(
+        auth={"secret_key": "a" * 32},
+        federation={"enabled": False},
+        email={
+            "smtp_host": "smtp.example.com",
+            "smtp_port": 587,
+            "smtp_tls": True,
+            "from_address": "songhive@example.com",
+        },
+        payments={"public_base_url": "https://songhive.example.com"},
+    )
+    result = send_notification_email(
+        config,
+        "user@example.com",
+        "alice",
+        {
+            "type": "membership",
+            "payload": {"event": "membership_paid"},
+            "source_url": "/settings?tab=billing",
+        },
+    )
+    assert result is True
+    msg = fake_smtp.instances[0].sent[0]
+    assert msg["Subject"] == "[Songhive] Membership payment confirmed"
+    body = msg.get_content()
+    assert "membership payment was confirmed" in body
+    assert "someone" not in body
+    assert "https://songhive.example.com/settings?tab=billing" in body
+
+
+def test_notification_email_purchase_no_actor(fake_smtp, email_config):
+    """Purchase receipts are actor-less and name the track count."""
+    from songhive.services.email import send_notification_email
+
+    result = send_notification_email(
+        email_config,
+        "user@example.com",
+        "alice",
+        {"type": "purchase", "payload": {"order_id": "o1", "track_count": 3}},
+    )
+    assert result is True
+    msg = fake_smtp.instances[0].sent[0]
+    assert msg["Subject"] == "[Songhive] Purchase confirmed"
+    body = msg.get_content()
+    assert "3 tracks" in body
+    assert "someone" not in body

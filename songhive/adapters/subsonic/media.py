@@ -103,6 +103,39 @@ async def _stream(ctx: _Ctx, *, download: bool = False) -> Response:
     backend = get_storage(config.storage)
     range_header = ctx.request.headers.get("Range")
 
+    # Payment layer: ACL decides visibility, this decides bytes.
+    from ...services.payments import access as payment_access
+
+    track_access = await payment_access.resolve_track_access(ctx.db, track, ctx.user)
+    if track_access.level == payment_access.ACCESS_NONE or (download and not track_access.can_download):
+        raise SubsonicError(NOT_AUTHORIZED, "Access denied")
+
+    if track_access.level == payment_access.ACCESS_SAMPLE:
+        # Serve the configured sample — never original bytes.
+        from ...services.payments import samples as samples_service
+
+        assert track_access.sale is not None
+        sample_file = await samples_service.sample_stored_file(
+            ctx.db,
+            track,
+            track_access.sale,
+            config,
+            storage=ctx.storage,
+            redis=ctx.redis,
+        )
+        if sample_file is None:
+            raise SubsonicError(NOT_FOUND, "Sample not ready")
+        try:
+            sample_path = await backend.retrieve(sample_file.storage_path)
+        except ValueError:
+            sample_path = None
+        if sample_path is None:
+            raise SubsonicError(NOT_FOUND, "Media file not found")
+        return FileResponse(
+            sample_path,
+            media_type=sample_file.content_type or "audio/mpeg",
+        )
+
     stored_file = await resolve_track_file(ctx.db, str(track.id))
     if stored_file is not None:
         # Prefer a cached transcode when format/bitrate was requested.

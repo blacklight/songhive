@@ -90,6 +90,17 @@ async def _load_shared_item(db: AsyncSession, item_type: str, item_id: str) -> O
     return None
 
 
+def _item_tracks(item: Any, item_type: str) -> list:
+    """Return the tracks a shared item renders players for."""
+    if item_type == "track":
+        return [item]
+    if item_type in ("album", "artist", "library"):
+        return [t for t in (getattr(item, "tracks", None) or []) if t]
+    if item_type == "playlist":
+        return [pt.track for pt in (getattr(item, "tracks", None) or []) if pt and pt.track]
+    return []
+
+
 def _html_not_found(request: Request, token: str) -> HTMLResponse:
     """Return an HTML 404 page for an invalid or expired share link."""
     return HTMLResponse(
@@ -151,5 +162,11 @@ async def resolve_share_url(
         if audio_target is not None:
             return RedirectResponse(audio_target, status_code=status.HTTP_302_FOUND)
 
-    html = render_share_page(item, row.item_type, token, request)
+    # Sale-gated tracks render their player against the payment stream
+    # endpoint instead of the raw file URL — a share token widens ACL
+    # visibility but never upgrades payment rights.
+    from ...services.payments import access as payment_access
+
+    gates = await payment_access.effective_gates(db, _item_tracks(item, row.item_type))
+    html = render_share_page(item, row.item_type, token, request, gated_ids=set(gates))
     return HTMLResponse(content=html, status_code=status.HTTP_200_OK)

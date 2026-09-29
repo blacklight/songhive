@@ -186,6 +186,19 @@
   -Q celery,scrobbles,bulk` (compose and `config/systemd/songhive-celery.service`
   already do). Routing happens at publish time, so a worker that predates the
   split still drains messages already queued on `celery`.
+- Payments (`[payments]` config, `services/payments/`,
+  `api/routes/payments.py`): all byte-access decisions go through
+  `services/payments/access.py` — never gate on raw `is_active` or ACL
+  alone for gated tracks. `services/payments/membership.py`
+  `sync_user_active_flag` is the single writer of `User.is_active` for
+  payment reasons; `admin_suspended` is the sticky flag that keeps manual
+  deactivations from being undone by webhooks. Stripe webhooks
+  (`/api/v1/payments/webhooks/*`, CSRF-exempt) are the only authority that
+  moves order/subscription state — checkout redirects prove nothing.
+  `SubsonicDownloadHandler._requires_download_access = True` exists so
+  `download.view` demands `full` access while `stream.view` accepts
+  playback-level rights. Generated OpenAPI types do not include payments
+  paths — `frontend/src/api/payments.ts` defines its client types locally.
 - Scrobbling (`services/scrobbler.py`, `tasks/scrobbling.py`,
   `api/routes/scrobbling.py`) targets Audioscrobbler-compatible services
   (Last.fm `https://ws.audioscrobbler.com/2.0/`, Libre.fm

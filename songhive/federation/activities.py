@@ -75,6 +75,7 @@ def create_audio_activity(
     duration: Optional[float] = None,
     ap_object_id: Optional[str] = None,
     library_url: Optional[str] = None,
+    sale=None,
     visibility: "Visibility | str" = Visibility.PUBLIC,
     mention_actor_urls: Iterable[str] = (),
 ) -> Optional[dict]:
@@ -109,6 +110,7 @@ def create_audio_activity(
         actor_url=actor_url,
         ap_object_id=ap_object_id,
         library_url=library_url,
+        sale=sale,
     )
     if audio_object is None:
         return None
@@ -133,6 +135,7 @@ def create_note_activity(
     ap_object_id: Optional[str] = None,
     audio_object_id: Optional[str] = None,
     published: Optional[datetime] = None,
+    sale=None,
     visibility: "Visibility | str" = Visibility.PUBLIC,
     mention_actor_urls: Iterable[str] = (),
 ) -> Optional[dict]:
@@ -163,6 +166,7 @@ def create_note_activity(
         ap_object_id=ap_object_id,
         audio_object_id=audio_object_id,
         published=published,
+        sale=sale,
     )
     if note_object is None:
         return None

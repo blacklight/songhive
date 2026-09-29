@@ -214,8 +214,23 @@ def _entity_title(entity: object) -> str:
     )
 
 
-def track_item(track: Track, base_url: str) -> FeedItem:
-    """Build a feed item for a track, with a stream enclosure when playable."""
+async def _muted_track_ids(session: AsyncSession, tracks: list) -> set:
+    """Return ids of sale-gated tracks whose unpaid policy serves no media."""
+    if not tracks:
+        return set()
+    from .payments import access as payment_access
+
+    gates = await payment_access.effective_gates(session, tracks)
+    return {tid for tid, sale in gates.items() if sale.unpaid_policy == "none"}
+
+
+def track_item(track: Track, base_url: str, *, playable: bool = True) -> FeedItem:
+    """
+    Build a feed item for a track, with a stream enclosure when playable.
+
+    ``playable=False`` suppresses the enclosure — used for sale-gated tracks
+    whose ``unpaid_policy`` is ``none`` (the stream endpoint would only 403).
+    """
     artist_name = track.artist.name if track.artist else None
     title = f"{artist_name} - {track.title}" if artist_name else track.title
     link = f"{base_url}/tracks/{track.id}"
@@ -228,6 +243,8 @@ def track_item(track: Track, base_url: str) -> FeedItem:
         author=artist_name,
         updated=track.updated_at,
     )
+    if not playable:
+        return item
     if track.audio_file is not None:
         item.enclosure_url = f"{base_url}/api/v1/stream/{track.id}"
         item.enclosure_type = track.audio_mime_type or track.audio_file.content_type
@@ -437,7 +454,11 @@ async def artist_feed(
     tracks = list((await session.execute(stmt)).scalars().all())
 
     releases = sorted([*albums, *tracks], key=lambda e: e.created_at, reverse=True)[:limit]
-    items = [album_item(e, base_url) if isinstance(e, Album) else track_item(e, base_url) for e in releases]
+    muted = await _muted_track_ids(session, [e for e in releases if isinstance(e, Track)])
+    items = [
+        album_item(e, base_url) if isinstance(e, Album) else track_item(e, base_url, playable=str(e.id) not in muted)
+        for e in releases
+    ]
     link = f"{base_url}/artists/{artist.id}"
     return Feed(
         id=link,
@@ -480,10 +501,11 @@ async def collection_feed(
                 or_(Track.id.is_(None), _list_access_predicate(Track, requester, "track"))
             )
         rows = list((await session.execute(entries_stmt.limit(limit))).scalars().all())
+        muted = await _muted_track_ids(session, [row.track for row in rows if row.track is not None])
         items = []
         for row in rows:
             if row.track is not None:
-                items.append(track_item(row.track, base_url))
+                items.append(track_item(row.track, base_url, playable=str(row.track.id) not in muted))
             elif row.episode is not None:
                 items.append(episode_item(row.episode, base_url))
     else:
@@ -496,7 +518,8 @@ async def collection_feed(
         stmt = stmt.options(*music_service._track_selectin_options({"artist", "album"}))
         stmt = apply_access_filter(stmt, Track, requester, "track").limit(limit)
         tracks = list((await session.execute(stmt)).scalars().all())
-        items = [track_item(t, base_url) for t in tracks]
+        muted = await _muted_track_ids(session, tracks)
+        items = [track_item(t, base_url, playable=str(t.id) not in muted) for t in tracks]
     plural = get_item_plural(kind) or f"{kind}s"
     link = f"{base_url}/{plural}/{entity.id}"  # type: ignore[attr-defined]
     return Feed(
@@ -595,12 +618,13 @@ async def genre_feed(
     )
 
     merged = sorted([*tracks, *albums], key=lambda e: e.created_at, reverse=True)[:limit]
+    muted = await _muted_track_ids(session, [e for e in merged if isinstance(e, Track)])
     items = []
     for entity in merged:
         if isinstance(entity, Album):
             items.append(album_item(entity, base_url))
         elif isinstance(entity, Track):
-            items.append(track_item(entity, base_url))
+            items.append(track_item(entity, base_url, playable=str(entity.id) not in muted))
     link = f"{base_url}/genres/{quote(genre_name)}"
     return Feed(
         id=link,

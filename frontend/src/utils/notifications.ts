@@ -114,6 +114,14 @@ export function notificationActionText(
       );
     }
     keys.push("notifications.types.activity");
+  } else if (notification.type === "membership") {
+    // ``membership_paid`` → ``notifications.types.membershipPaid``, …
+    const event = str(payload.event);
+    if (event) {
+      const camel = event.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+      keys.push(`notifications.types.${camel}`);
+    }
+    keys.push("notifications.types.membership");
   } else {
     keys.push(
       notification.type === "follow" &&

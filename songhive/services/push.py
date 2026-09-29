@@ -135,6 +135,11 @@ async def list_subscriptions(session: AsyncSession, user_id: str) -> List[PushSu
 
 def _notification_body(notification: Dict[str, Any], config: SonghiveConfig) -> str:
     """Build a short body text for the push message."""
+    from .email import _system_notification_text
+
+    system = _system_notification_text(notification)
+    if system is not None:
+        return system[1]
     payload = notification.get("payload") or {}
     actor = payload.get("actor_display_name") or payload.get("actor_name") or notification.get("actor_url") or "Someone"
     ntype = notification.get("type") or "notification"

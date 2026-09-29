@@ -96,6 +96,16 @@ class InstanceContact(BaseModel):
     url: str = ""
 
 
+class InstancePayments(BaseModel):
+    """Public payments metadata for the instance."""
+
+    enabled: bool = False
+    paid_registration: bool = False
+    membership_price_minor: Optional[int] = None
+    membership_currency: Optional[str] = None
+    membership_interval: Optional[str] = None
+
+
 class InstanceV1(BaseModel):
     """Mastodon-compatible ``/api/v1/instance`` response."""
 
@@ -122,6 +132,7 @@ class InstanceV1(BaseModel):
     # Username configured for single-user mode; ``/`` redirects anonymous
     # visitors to ``/@{single_user}`` when set.
     single_user: Optional[str] = None
+    payments: InstancePayments = Field(default_factory=InstancePayments)
 
 
 class _V2Thumbnail(BaseModel):
@@ -231,7 +242,22 @@ def _registration_flags(mode: RegistrationMode) -> tuple[bool, bool, bool]:
         return True, False, True
     if mode == RegistrationMode.APPROVAL_REQUIRED:
         return True, True, False
+    if mode == RegistrationMode.PAID:
+        return True, False, False
     return False, False, False
+
+
+def _instance_payments(config: SonghiveConfig) -> InstancePayments:
+    """Summarize the payments configuration for public instance metadata."""
+    payments = config.payments
+    paid = config.auth.registration_mode == RegistrationMode.PAID
+    return InstancePayments(
+        enabled=bool(payments.enabled),
+        paid_registration=paid,
+        membership_price_minor=payments.default_membership_amount_minor if paid else None,
+        membership_currency=payments.membership_currency.upper() if paid else None,
+        membership_interval=payments.membership_interval if paid else None,
+    )
 
 
 async def _user_count(db: AsyncSession) -> int:
@@ -373,6 +399,7 @@ async def get_instance_v1(
         contact=_instance_contact(config),
         staff_accounts=[_user_to_staff_account(admin, request, config) for admin in admins],
         single_user=single_user,
+        payments=_instance_payments(config),
     )
 
 

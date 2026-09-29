@@ -34,6 +34,7 @@ from ...services import activities as activities_service
 from ...services import moderation as moderation_service
 from ...services.auth import get_user_by_id, get_user_by_username
 from ...services.federation import ensure_user_actor, extract_domain, is_domain_allowed
+from ...services.payments import access as payment_access
 from ...services.storage import StorageService
 from ...tasks.federation import process_incoming
 from ..deps import get_config, get_current_user_optional, get_db, get_storage_service
@@ -163,6 +164,7 @@ async def _track_object_document(db: AsyncSession, track: Track, owner: Any, con
         actor_url=owner.actor_url,
         ap_object_id=object_url,
         library_url=await activities_service._track_library_url(db, track, owner.actor_url, domain),
+        sale=await payment_access.effective_gate(db, track),
     )
     if audio_object is None:
         return None
@@ -730,12 +732,15 @@ def _owner_actor_url(owner: Optional[User], config: SonghiveConfig) -> str:
     return _instance_actor_url(config)
 
 
-def _audio_items(
+async def _audio_items(
+    db: AsyncSession,
     tracks: Iterable[Track],
     domain: str,
     actor_url: str,
     library_url: str,
 ) -> list[dict]:
+    tracks = list(tracks)
+    gates = await payment_access.effective_gates(db, tracks)
     return [
         doc
         for track in tracks
@@ -746,6 +751,7 @@ def _audio_items(
                 domain,
                 actor_url=actor_url,
                 library_url=library_url,
+                sale=gates.get(str(track.id)),
             )
         )
         is not None
@@ -918,7 +924,7 @@ async def get_library_document(
             library_url,
             page_num,
             total,
-            _audio_items(tracks, domain, actor_url, library_url),
+            await _audio_items(db, tracks, domain, actor_url, library_url),
             actor_url,
             page_size=_LIBRARY_PAGE_SIZE,
         ),
@@ -1018,7 +1024,7 @@ async def get_user_library_document(
             library_url,
             page_num,
             total,
-            _audio_items(tracks, domain, actor_url, library_url),
+            await _audio_items(db, tracks, domain, actor_url, library_url),
             actor_url,
             page_size=_LIBRARY_PAGE_SIZE,
         ),

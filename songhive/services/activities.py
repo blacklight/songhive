@@ -45,6 +45,7 @@ from ..models.library import Library
 from ..models.library_track import LibraryTrack
 from ..models.mention_record import MentionSource
 from ..models.notification import NotificationType
+from ..models.payments import Sale
 from ..models.playlist import Playlist
 from ..models.radio import Radio
 from ..models.remote_object import RemoteObject
@@ -1723,7 +1724,11 @@ async def update_activity(
             audio_object_id = (
                 f"{activity.source_actor}/objects/{track.federation_object_id}" if track.federation_object_id else None
             )
-            rebuilt.append(track_to_attachment(track, artist, domain, audio_object_id=audio_object_id))
+            rebuilt.append(
+                track_to_attachment(
+                    track, artist, domain, audio_object_id=audio_object_id, sale=await _track_sale_gate(session, track)
+                )
+            )
         obj["attachment"] = [a for a in obj.get("attachment") or [] if not _is_user_attachment(a)] + rebuilt
 
     if obj is not None and (processed is not None or attachments_requested or language is not _UNSET):
@@ -2244,7 +2249,11 @@ async def reply_to_activity(
     for track in tracks:
         artist = await session.get(Artist, track.artist_id) if track.artist_id else None
         audio_object_id = f"{actor_url}/objects/{track.federation_object_id}" if track.federation_object_id else None
-        attachments.append(track_to_attachment(track, artist, domain, audio_object_id=audio_object_id))
+        attachments.append(
+            track_to_attachment(
+                track, artist, domain, audio_object_id=audio_object_id, sale=await _track_sale_gate(session, track)
+            )
+        )
 
     # The replied-to author is always addressed — locally through a mention
     # row (which keeps ``mentioned``-visibility replies viewable to them) and
@@ -2507,7 +2516,11 @@ async def quote_activity(
     for track in tracks:
         artist = await session.get(Artist, track.artist_id) if track.artist_id else None
         audio_object_id = f"{actor_url}/objects/{track.federation_object_id}" if track.federation_object_id else None
-        attachments.append(track_to_attachment(track, artist, domain, audio_object_id=audio_object_id))
+        attachments.append(
+            track_to_attachment(
+                track, artist, domain, audio_object_id=audio_object_id, sale=await _track_sale_gate(session, track)
+            )
+        )
 
     # The quoted author is always addressed — locally through a mention
     # row (which keeps ``mentioned``-visibility quotes viewable to them)
@@ -3646,7 +3659,11 @@ async def create_status(
     for track in tracks:
         artist = await session.get(Artist, track.artist_id) if track.artist_id else None
         audio_object_id = f"{actor_url}/objects/{track.federation_object_id}" if track.federation_object_id else None
-        attachments.append(track_to_attachment(track, artist, domain, audio_object_id=audio_object_id))
+        attachments.append(
+            track_to_attachment(
+                track, artist, domain, audio_object_id=audio_object_id, sale=await _track_sale_gate(session, track)
+            )
+        )
 
     object_uuid = str(uuid.uuid4())
     object_id = f"{actor_url}/objects/{object_uuid}"
@@ -3821,6 +3838,13 @@ async def _notify_status_mentions(
             logger.warning("Failed to create mention notification for activity %s: %s", activity.id, exc)
 
 
+async def _track_sale_gate(session: AsyncSession, track: Track) -> Optional[Sale]:
+    """Return the active sale gating a track being serialized for federation."""
+    from .payments import access as payment_access
+
+    return await payment_access.effective_gate(session, track)
+
+
 class _TrackPublicationKwargs(TypedDict):
     """Keyword arguments shared by ``create_note_activity``/``create_audio_activity``."""
 
@@ -3830,6 +3854,7 @@ class _TrackPublicationKwargs(TypedDict):
     domain: str
     description: Optional[str]
     ap_object_id: Optional[str]
+    sale: Optional[Sale]
     visibility: "Visibility | str"
     mention_actor_urls: Iterable[str]
 
@@ -3985,6 +4010,9 @@ async def record_track_publication(
             )
             audio_object_id = f"{audio_actor_url}/objects/{track.federation_object_id}"
     object_id = f"{owner.actor_url}/objects/{object_uuid}"
+    # A sale-gated track advertises only the policy-enforcing stream URL —
+    # federated copies must never carry the raw file URL.
+    sale = await _track_sale_gate(session, track)
     args: _TrackPublicationKwargs = {
         "actor_url": owner.actor_url,
         "track": track,
@@ -3992,6 +4020,7 @@ async def record_track_publication(
         "domain": config.federation.instance_domain,
         "description": status,
         "ap_object_id": object_id,
+        "sale": sale,
         "visibility": activity_visibility,
         "mention_actor_urls": mention_actor_urls,
     }
@@ -4180,6 +4209,7 @@ async def sync_track_publications(
 
     domain = config.federation.instance_domain
     now = datetime.now(timezone.utc).isoformat()
+    sale = await _track_sale_gate(session, track)
     synced: List[Activity] = []
     for activity in rows:
         payload = activity.payload
@@ -4213,6 +4243,7 @@ async def sync_track_publications(
                     else None
                 ),
                 published=published,
+                sale=sale,
             )
         else:
             rebuilt = track_to_audio_object(
@@ -4222,6 +4253,7 @@ async def sync_track_publications(
                 actor_url=activity.source_actor,
                 ap_object_id=object_doc.get("id") or activity.source_id,
                 library_url=await _track_library_url(session, track, activity.source_actor, domain),
+                sale=sale,
             )
         if rebuilt is None:
             continue

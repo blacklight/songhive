@@ -2,6 +2,7 @@
 Admin routes.
 """
 
+import logging
 from datetime import datetime
 from typing import Any, List, Optional
 
@@ -52,6 +53,8 @@ from .._common import Pagination, client_ip, get_pagination
 from ..deps import get_config, get_db, get_redis, get_storage_service, require_admin
 from ..middleware.rate_limit import rate_limit_account
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/admin")
 
 
@@ -65,6 +68,8 @@ class AdminUserResponse(BaseModel):
     email: str
     is_active: bool
     role: UserRole
+    payments_required: bool = False
+    admin_suspended: bool = False
 
 
 class AuditLogResponse(BaseModel):
@@ -184,7 +189,7 @@ async def approve_user(
 ):
     """Approve a user by activating their account."""
     try:
-        user = await user_manager.approve_user(db, user_id)
+        user = await user_manager.approve_user(db, user_id, config=get_config(request))
     except user_manager.UserManagementError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -213,7 +218,7 @@ async def activate_user(
 ):
     """Activate (re-enable) a user account."""
     try:
-        user = await user_manager.activate_user(db, user_id)
+        user = await user_manager.activate_user(db, user_id, config=get_config(request))
     except user_manager.UserManagementError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -245,7 +250,9 @@ async def deactivate_user(
     try:
         config = get_config(request)
         access_token_ttl = (config.auth.access_token_expiry_minutes or 0) * 60
-        user = await user_manager.deactivate_user_by_id(db, user_id, redis=redis, access_token_ttl=access_token_ttl)
+        user = await user_manager.deactivate_user_by_id(
+            db, user_id, redis=redis, access_token_ttl=access_token_ttl, config=config
+        )
     except user_manager.UserManagementError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -258,6 +265,75 @@ async def deactivate_user(
         details={"is_active": user.is_active, "tokens_revoked": True},
         ip_address=client_ip(request),
     )
+    return AdminUserResponse.model_validate(user)
+
+
+class PaymentsRequiredRequest(BaseModel):
+    """Set or clear a user's paid-membership requirement."""
+
+    required: bool
+    cancel_subscription: bool = True
+
+
+@router.post(
+    "/users/{user_id}/payments-required",
+    response_model=AdminUserResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def set_payments_required(
+    body: PaymentsRequiredRequest,
+    user_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """
+    Override whether a user must hold a paid membership.
+
+    Setting the flag deactivates the account until a subscription pays;
+    clearing it re-syncs ``is_active`` (which may re-activate). With
+    ``cancel_subscription`` an existing provider subscription is canceled
+    immediately so billing stops.
+    """
+    from ...services.payments import membership
+
+    config = get_config(request)
+    try:
+        user = await user_manager._get_user_or_raise(db, user_id)
+    except user_manager.UserManagementError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    user.payments_required = body.required
+    canceled = False
+    if body.cancel_subscription:
+        subscription = await membership.get_subscription(db, user.id)
+        if subscription is not None and subscription.provider_subscription_id:
+            try:
+                await membership.request_cancel(db, user, config, immediate=True)
+                canceled = True
+            except Exception as exc:  # noqa: BLE001 — provider errors defer to the retry task
+                from ...tasks.payments import cancel_provider_subscription
+
+                cancel_provider_subscription.delay(subscription.provider_subscription_id)  # type: ignore[attr-defined]
+                logger.warning("Deferred subscription cancel for user %s: %s", user.id, exc)
+
+    await membership.sync_user_active_flag(db, user, config=config)
+
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="user.payments_required",
+        target_type=AuditTargetType.USER,
+        target_id=user_id,
+        details={
+            "payments_required": body.required,
+            "cancel_subscription": body.cancel_subscription,
+            "canceled": canceled,
+            "is_active": user.is_active,
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
     return AdminUserResponse.model_validate(user)
 
 
@@ -297,7 +373,7 @@ async def delete_user(
     )
 
     try:
-        unpublish = await user_manager.delete_user(db, user_id, recursive=recursive, storage=storage)
+        unpublish = await user_manager.delete_user(db, user_id, recursive=recursive, storage=storage, config=config)
     except user_manager.UserManagementError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -833,14 +909,14 @@ async def bulk_user_action(
             async with db.begin_nested():
                 if body.action == "deactivate":
                     await user_manager.deactivate_user_by_id(
-                        db, user_id, redis=redis, access_token_ttl=access_token_ttl
+                        db, user_id, redis=redis, access_token_ttl=access_token_ttl, config=config
                     )
                 elif body.action == "activate":
-                    await user_manager.activate_user(db, user_id)
+                    await user_manager.activate_user(db, user_id, config=config)
                 elif body.action == "delete":
                     await revoke_all_user_refresh_tokens(redis, user_id, access_token_ttl)
                     user_unpublish = await user_manager.delete_user(
-                        db, user_id, recursive=body.recursive, storage=storage
+                        db, user_id, recursive=body.recursive, storage=storage, config=config
                     )
                     unpublish.extend(user_unpublish)
         except (user_manager.UserManagementError, SQLAlchemyError, RedisConnectionError) as exc:

@@ -213,7 +213,8 @@
       "success": "Registration successful. Please log in.",
       "emailVerificationNotice": "Please check your inbox to verify your email address.",
       "passwordMismatch": "Passwords do not match.",
-      "haveAccount": "Already have an account? Log in"
+      "haveAccount": "Already have an account? Log in",
+      "membershipNotice": "This instance requires a paid membership of {price} per {interval}."
     },
     "passwordReset": {
       "requestTitle": "Reset password",
@@ -609,7 +610,13 @@
         "deactivateSuccess": "User deactivated.",
         "deleteSuccess": "User deleted.",
         "bulkSuccess": "{action} {count} users.",
-        "actionError": "Could not update user: {message}"
+        "actionError": "Could not update user: {message}",
+        "requirePayment": "Require a paid membership for {username}? Their account deactivates until checkout completes and any active subscription is kept.",
+        "waivePayment": "Waive the paid-membership requirement for {username}? Their active subscription is canceled.",
+        "paymentsRequiredSuccess": "Payment requirement updated.",
+        "requirePaymentShort": "Require payment",
+        "waivePaymentShort": "Waive payment requirement",
+        "paymentRequiredBadge": "Paid membership required"
       },
       "settings": {
         "title": "Settings",
@@ -1538,7 +1545,9 @@
       "security": "Security",
       "podcastSync": "Podcast sync",
       "scrobbling": "Scrobbling",
-      "outputs": "Outputs"
+      "outputs": "Outputs",
+      "purchases": "Purchases",
+      "billing": "Billing"
     },
     "copyHandle": "Copy fediverse handle",
     "compose": "Compose",
@@ -2207,7 +2216,13 @@
       "activityReply": "replied to {object}",
       "activityQuote": "quoted {object}",
       "report": "filed a report",
-      "download": "your download is ready"
+      "download": "your download is ready",
+      "purchase": "confirmed your purchase",
+      "membership": "updated your membership",
+      "membershipPaid": "confirmed your membership payment",
+      "membershipPaymentFailed": "couldn't collect your membership payment",
+      "membershipCancelScheduled": "scheduled your membership cancellation",
+      "membershipCanceled": "ended your membership"
     },
     "objects": {
       "post": "post",
@@ -2272,7 +2287,9 @@
         "webmention": "Webmentions",
         "activity": "User activity",
         "report": "Reports",
-        "download": "Downloads"
+        "download": "Downloads",
+        "purchase": "Purchases",
+        "membership": "Membership"
       }
     },
     "onItem": "on {title}",
@@ -2282,7 +2299,8 @@
       "accepted": "Accepted",
       "rejected": "Rejected",
       "error": "Could not resolve the follow request: {message}"
-    }
+    },
+    "paymentsActor": "Payments"
   },
   "remote": {
     "badge": "Remote",
@@ -2435,6 +2453,150 @@
       "processing": "Building…",
       "ready": "Ready",
       "failed": "Failed"
+    }
+  },
+  "payments": {
+    "purchase": {
+      "buy": "Buy now",
+      "owned": "You own this — downloads are unlocked.",
+      "email": "Email address",
+      "emailHint": "We'll email you a download link after checkout.",
+      "emailRequired": "Enter an email address to receive your download link.",
+      "checkoutError": "Checkout could not be started.",
+      "policy": {
+        "full_stream": "Streaming is free — buying unlocks downloads.",
+        "sample": "A preview sample is available — buying unlocks the full track.",
+        "none": "Purchase required for streaming and downloads."
+      }
+    },
+    "sale": {
+      "title": "Sell this item",
+      "connectRequired": "Connect a payout account before publishing a sale.",
+      "connect": "Set up payouts",
+      "onboardError": "Payout onboarding could not be started.",
+      "price": "Price",
+      "priceInvalid": "Enter a valid price within the allowed range.",
+      "currency": "Currency",
+      "unpaidPolicy": "Unpaid visitors can",
+      "policy": {
+        "fullStream": "Stream the full track",
+        "sample": "Hear a sample",
+        "none": "Get no media access"
+      },
+      "sampleStart": "Sample start (seconds)",
+      "sampleLength": "Sample length (seconds)",
+      "sampleBoundsError": "The sample must fit within the track duration.",
+      "statusLabel": "Status",
+      "status": {
+        "draft": "draft",
+        "active": "active",
+        "inactive": "inactive"
+      },
+      "publish": "Publish sale",
+      "saveDraft": "Save draft",
+      "updatePublished": "Update sale",
+      "deactivate": "Deactivate sale",
+      "deactivateTitle": "Deactivate this sale?",
+      "deactivateMessage": "New purchases stop immediately; existing buyers keep their access.",
+      "saved": "Sale saved.",
+      "published": "Sale published",
+      "saveError": "The sale could not be saved.",
+      "deactivated": "Sale deactivated.",
+      "loadError": "The sale could not be loaded."
+    },
+    "checkout": {
+      "title": "Checkout",
+      "successTitle": "Payment received",
+      "successBody": "Your payment went through. Access unlocks as soon as the payment provider confirms it — this usually takes a few seconds.",
+      "confirmed": "Purchase confirmed — enjoy!",
+      "cancelTitle": "Checkout canceled",
+      "cancelBody": "No payment was taken. You can return to the item and try again whenever you're ready.",
+      "unknownBody": "We're still waiting for the payment provider to confirm. Check your purchases in a moment.",
+      "viewPurchases": "View my purchases",
+      "viewBilling": "View billing"
+    },
+    "redeem": {
+      "title": "Redeem purchase",
+      "hint": "Paste the token from your purchase email.",
+      "tokenLabel": "Redemption token",
+      "submit": "Redeem",
+      "success": "Your purchase is ready — download links are below.",
+      "failed": "This token is invalid, expired, or already redeemed.",
+      "expiry": "These links stay valid for {days} days.",
+      "downloadAll": "Download all ({count})"
+    },
+    "purchases": {
+      "empty": "No purchases yet.",
+      "loadError": "Your purchases could not be loaded.",
+      "downloadArchive": "Download all files",
+      "status": {
+        "pending": "pending",
+        "paid": "paid",
+        "failed": "failed",
+        "expired": "expired",
+        "refunded": "refunded",
+        "partially_refunded": "partially refunded",
+        "disputed": "disputed",
+        "canceled": "canceled"
+      }
+    },
+    "membership": {
+      "title": "Membership",
+      "pricePer": "{price} per {interval}",
+      "interval": {
+        "week": "week",
+        "month": "month",
+        "year": "year"
+      },
+      "statusLabel": "Status",
+      "status": {
+        "none": "none",
+        "incomplete": "incomplete",
+        "active": "active",
+        "trialing": "trial",
+        "past_due": "past due",
+        "canceled": "canceled",
+        "unpaid": "unpaid",
+        "incomplete_expired": "expired"
+      },
+      "paidThrough": "Paid through",
+      "cancelScheduled": "Cancellation scheduled — access continues until the paid-through date.",
+      "checkoutSuccess": "Checkout complete — confirming your payment…",
+      "checkoutConfirmed": {
+        "signed_in": "Payment confirmed — you're signed in.",
+        "verify": "Payment confirmed — check your email to verify your account.",
+        "login": "Payment confirmed — log in to continue."
+      },
+      "checkoutCancel": "Checkout was canceled — you have not been charged.",
+      "continueLogin": "Log in to continue",
+      "subscribe": "Subscribe",
+      "managePortal": "Manage subscription",
+      "cancel": "Cancel membership",
+      "loadError": "Membership details could not be loaded.",
+      "checkoutError": "Checkout could not be started.",
+      "portalError": "The billing portal could not be opened.",
+      "cancelError": "The membership could not be canceled.",
+      "cancelConfirm": "Are you sure you want to cancel your membership?",
+      "unsubscribe": "Unsubscribe"
+    },
+    "connect": {
+      "title": "Payouts",
+      "hint": "Connect a payout account to sell tracks and albums.",
+      "statusLabel": "Payout account",
+      "state": {
+        "none": "not connected",
+        "pending": "onboarding incomplete",
+        "ready": "ready to sell"
+      },
+      "start": "Connect payouts",
+      "resume": "Resume onboarding",
+      "disconnect": "Disconnect",
+      "disconnectTitle": "Disconnect payouts?",
+      "disconnectMessage": "Active sales are deactivated and you will no longer be able to sell.",
+      "onboardError": "Payout onboarding could not be started.",
+      "disconnectError": "The payout account could not be disconnected.",
+      "countryLabel": "Country of operation",
+      "countryPlaceholder": "Select your country"
     }
   }
 }

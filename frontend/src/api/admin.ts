@@ -1,7 +1,11 @@
 import type { components } from "./types";
 import { apiRequest } from "./client";
 
-export type AdminUserResponse = components["schemas"]["AdminUserResponse"];
+export type AdminUserResponse = components["schemas"]["AdminUserResponse"] & {
+  /** Membership billing gate — not in generated types yet. */
+  payments_required?: boolean;
+  admin_suspended?: boolean;
+};
 export type AdminInviteCreateRequest =
   components["schemas"]["AdminInviteCreateRequest"];
 export type AdminInviteResponse = components["schemas"]["AdminInviteResponse"];

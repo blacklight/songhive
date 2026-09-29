@@ -84,6 +84,11 @@ class TrackSummary(BaseModel):
     release_year: Optional[int] = None
     owner_id: Optional[str] = None
     visibility: str = Visibility.PRIVATE.value
+    # Payment overlay — set only when an active sale gates the track.
+    paid: bool = False
+    unpaid_policy: Optional[str] = None
+    price_minor: Optional[int] = None
+    currency: Optional[str] = None
 
 
 class TrackResponse(BaseModel):
@@ -125,6 +130,11 @@ class TrackResponse(BaseModel):
     can_write_tags: Optional[bool] = None
     can_rename_source: Optional[bool] = None
     can_delete_source: Optional[bool] = None
+    # Payment overlay — set only when an active sale gates the track.
+    paid: bool = False
+    unpaid_policy: Optional[str] = None
+    price_minor: Optional[int] = None
+    currency: Optional[str] = None
     # Provider-declared list of locally-editable fields (e.g. TIDAL allows
     # only genres/tags); ``None`` for local or unrestricted tracks.
     editable_fields: Optional[List[str]] = None
@@ -245,6 +255,10 @@ async def build_track_summary(
 
     audio_url = None
     external_url = None
+    paid = False
+    unpaid_policy = None
+    price_minor = None
+    currency = None
     if track.audio_file_id and _is_loaded(track, "audio_file") and track.audio_file:
         audio_url = await storage.get_url(track.audio_file)
     else:
@@ -262,6 +276,19 @@ async def build_track_summary(
                 if not await external_stream_allowed(session, external_library, user, cache=policy_cache):
                     audio_url = None
                     external_url = _provider_external_url(external_library, external_ref)
+
+    if session is not None:
+        from ..services.payments import access as payment_access
+
+        gate_cache = policy_cache.setdefault("sale_gates", {}) if policy_cache is not None else None
+        track_access = await payment_access.gated_access(session, track, user, gate_cache=gate_cache)
+        if track_access is not None and track_access.sale is not None:
+            sale = track_access.sale
+            paid = True
+            unpaid_policy = sale.unpaid_policy
+            price_minor = sale.price_minor
+            currency = sale.currency
+            audio_url = payment_access.audio_url_for(track, track_access)
 
     artist = None
     if _is_loaded(track, "artist") and track.artist is not None:
@@ -287,6 +314,10 @@ async def build_track_summary(
         release_year=_track_release_year(track),
         owner_id=track.owner_id,
         visibility=track.visibility,
+        paid=paid,
+        unpaid_policy=unpaid_policy,
+        price_minor=price_minor,
+        currency=currency,
     )
 
 

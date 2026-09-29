@@ -48,6 +48,11 @@ DEFAULT_IN_APP = True
 DEFAULT_EMAIL = False
 DEFAULT_EMAIL_DIGEST = False
 
+# Types that default to email delivery: purchase receipts and membership
+# lifecycle events must reach users who can no longer log in to see in-app
+# notifications (an expired member's only renewal path is the emailed link).
+DEFAULT_EMAIL_TYPES = frozenset({NotificationType.PURCHASE.value, NotificationType.MEMBERSHIP.value})
+
 NOTIFICATION_WS_EVENT = "notification"
 NOTIFICATION_DELETED_WS_EVENT = "notification_deleted"
 NOTIFICATION_UPDATED_WS_EVENT = "notification_updated"
@@ -97,7 +102,8 @@ async def get_targets(
     )
     pref = result.scalar_one_or_none()
     if pref is None:
-        return DEFAULT_IN_APP, DEFAULT_EMAIL, DEFAULT_EMAIL_DIGEST
+        type_value = type.value if isinstance(type, NotificationType) else type
+        return DEFAULT_IN_APP, type_value in DEFAULT_EMAIL_TYPES, DEFAULT_EMAIL_DIGEST
     return bool(pref.in_app), bool(pref.email), bool(pref.email_digest)
 
 
@@ -244,7 +250,7 @@ async def get_preferences(session: AsyncSession, user_id: str) -> List[Dict[str,
         {
             "type": type,
             "in_app": bool(stored[type].in_app) if type in stored else DEFAULT_IN_APP,
-            "email": bool(stored[type].email) if type in stored else DEFAULT_EMAIL,
+            "email": bool(stored[type].email) if type in stored else type.value in DEFAULT_EMAIL_TYPES,
             "email_digest": bool(stored[type].email_digest) if type in stored else DEFAULT_EMAIL_DIGEST,
         }
         for type in NotificationType
