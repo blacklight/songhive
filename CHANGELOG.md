@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `api`: Media download requests are now rate-limited via a new
+  `auth.rate_limit_media_requests` setting (image downloads are
+  exempt), and download responses are served with
+  `Cache-Control: immutable` headers.
+  ([`345fee4`](https://git.platypush.tech/blacklight/songhive/commit/345fee4157254095ad7b0b680f66c14e0ee116e3)).
+- Collection-wide shuffle play: track lists gained a "Shuffle play"
+  action that queues a randomized slice of the collection and refills
+  the queue with more random tracks as it nears the end, including in
+  shared playback sessions.
+  ([`bff6b07`](https://git.platypush.tech/blacklight/songhive/commit/bff6b07d71a1d2c1148e688d8e3d1c76d90802b0)).
+
+### Changed
+
+- `streaming`: Tracks start playing much sooner — stream requests no
+  longer pay the ORM relationship-loading cascade on the database
+  before the first byte, TIDAL DASH segments are fetched concurrently
+  before the ffmpeg remux, and remuxed MP4 files are written with
+  faststart so browsers can demux them without a tail-range probe.
+  Repeat-one is now visually distinct from repeat-all and manual
+  next/previous still navigates the queue in repeat-one mode,
+  shuffle-fetched tracks outside the rendered list show artist, album
+  and cover, and external playlist/album contents no longer stall
+  behind database lock waits during lazy refreshes.
+  ([`3027a7a`](https://git.platypush.tech/blacklight/songhive/commit/3027a7a66893a3b1b115545b9b4e2d7983bdb4b7)).
+
 ## 0.4.0
 
 ### Added
