@@ -5,6 +5,12 @@ export type AdminUserResponse = components["schemas"]["AdminUserResponse"] & {
   /** Membership billing gate — not in generated types yet. */
   payments_required?: boolean;
   admin_suspended?: boolean;
+  /**
+   * Per-user upload quota override in bytes — not in generated types yet.
+   * `null`/absent inherits the instance default, `-1` means unlimited,
+   * any other non-negative value is the user's byte cap.
+   */
+  upload_quota?: number | null;
 };
 export type AdminInviteCreateRequest =
   components["schemas"]["AdminInviteCreateRequest"];
@@ -139,6 +145,21 @@ export function deleteUser(userId: string, recursive = false): Promise<void> {
   return apiRequest<void>(`/admin/users/${userId}`, {
     method: "DELETE",
     query: { recursive },
+  });
+}
+
+/**
+ * Set a user's upload quota override. `null` clears the override so the
+ * instance default applies; `-1` grants unlimited uploads; any other
+ * non-negative value is the cap in bytes.
+ */
+export function setUserQuota(
+  userId: string,
+  quota: number | null,
+): Promise<AdminUserResponse> {
+  return apiRequest<AdminUserResponse>(`/admin/users/${userId}/quota`, {
+    method: "POST",
+    body: { quota },
   });
 }
 

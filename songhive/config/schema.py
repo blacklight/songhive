@@ -117,6 +117,15 @@ class StorageConfig(BaseSettings):
         default=5 * 1024 * 1024 * 1024,
         description="Maximum total size in bytes for a single bulk upload request; defaults to 5 GiB",
     )
+    upload_quota: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Default per-user upload quota in bytes, applied to media uploads by "
+            "non-admin users. None (the default) means unlimited. Admins can "
+            "override it per user — higher, lower, or no quota at all."
+        ),
+    )
 
 
 class FederationConfig(BaseSettings):

@@ -2,7 +2,15 @@ import type { components, paths } from "./types";
 import { apiRequest, apiRequestWithHeaders } from "./client";
 
 export type UserResponse =
-  paths["/api/v1/users/me"]["get"]["responses"]["200"]["content"]["application/json"];
+  paths["/api/v1/users/me"]["get"]["responses"]["200"]["content"]["application/json"] & {
+    /**
+     * Upload quota status — not in generated types yet.
+     * ``upload_quota`` is the effective cap in bytes (``null`` = unlimited);
+     * ``upload_quota_used`` is the number of bytes currently charged to it.
+     */
+    upload_quota?: number | null;
+    upload_quota_used?: number | null;
+  };
 export type UserProfileUpdate =
   paths["/api/v1/users/me"]["patch"]["requestBody"]["content"]["application/json"];
 export type PublicUserResponse =

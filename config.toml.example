@@ -45,6 +45,10 @@ local_path = "/var/lib/songhive/media"
 # max_bulk_upload_files = 50
 # Maximum total size in bytes for a single bulk upload request; defaults to 5 GiB.
 # max_bulk_upload_total_size = 5368709120
+# Default per-user upload quota in bytes for media uploads by non-admin
+# users; unset means unlimited. Admins can override it per user (higher,
+# lower, or no quota at all).
+# upload_quota = 1073741824
 
 [federation]
 enabled = true

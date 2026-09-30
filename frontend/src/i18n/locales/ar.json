@@ -616,7 +616,17 @@
         "paymentsRequiredSuccess": "تم تحديث شرط الدفع.",
         "requirePaymentShort": "اشتراط الدفع",
         "waivePaymentShort": "إعفاء من الدفع",
-        "paymentRequiredBadge": "عضوية مدفوعة مطلوبة"
+        "paymentRequiredBadge": "عضوية مدفوعة مطلوبة",
+        "quotaTitle": "حصة الرفع لـ {username}",
+        "quotaCurrent": "الإعداد الحالي: {value}",
+        "quotaMode": "الحصة",
+        "quotaModeDefault": "الوضع الافتراضي للخادم",
+        "quotaModeUnlimited": "غير محدودة",
+        "quotaModeCustom": "مخصصة",
+        "quotaMb": "الحصة (MiB)",
+        "quotaMbHint": "الحجم الإجمالي الأقصى للوسائط المرفوعة من المستخدم بالميبيبايت. 0 يمنع الرفع الجديد.",
+        "quotaInvalid": "أدخل عددًا غير سالب من الميبيبايت.",
+        "quotaSuccess": "تم تحديث حصة الرفع."
       },
       "settings": {
         "title": "الإعدادات",

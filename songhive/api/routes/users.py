@@ -29,7 +29,7 @@ from ...services import notifications as notifications_service
 from ...services import remote_content
 from ...services.auth import get_user_by_username, list_public_users
 from ...services.federation import unpublish_track_activity
-from ...services.storage import StorageService
+from ...services.storage import StorageService, get_upload_usage, resolve_upload_quota
 from ...services.tags import get_items_for_tag, list_tags, validate_tag_name
 from ...users import manager as user_manager
 from ...users.manager import DELETE_ACCOUNT_CONFIRMATION, PasswordChangeError, change_user_password, update_profile
@@ -94,6 +94,10 @@ class UserResponse(BaseModel):
     profile_visibility: ProfileVisibility = ProfileVisibility.PUBLIC
     followers_approval: FollowersApproval = FollowersApproval.ACCEPT
     links: List[UserLinkOutput] = Field(default_factory=list)
+    # Effective upload quota in bytes (``null`` = unlimited) and the number
+    # of uploaded bytes currently charged to it.
+    upload_quota: Optional[int] = None
+    upload_quota_used: Optional[int] = None
 
 
 class PublicUserResponse(BaseModel):
@@ -399,10 +403,22 @@ class DeleteAccountRequest(BaseModel):
     recursive: bool = False
 
 
+async def _user_response(db: AsyncSession, user: User, config: SonghiveConfig) -> UserResponse:
+    """Build a ``UserResponse`` including the caller's upload quota status."""
+    response = UserResponse.model_validate(user)
+    response.upload_quota = resolve_upload_quota(user, config.storage)
+    response.upload_quota_used = await get_upload_usage(db, str(user.id))
+    return response
+
+
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_profile(current_user: User = Depends(get_current_user)):
+async def get_current_user_profile(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    config: SonghiveConfig = Depends(get_config),
+):
     """Get the current authenticated user's profile."""
-    return UserResponse.model_validate(current_user)
+    return await _user_response(db, current_user, config)
 
 
 @router.patch(
@@ -427,7 +443,7 @@ async def update_current_user_profile(
     if config.federation.enabled:
         await sync_user_actor(current_user, config)
 
-    return UserResponse.model_validate(current_user)
+    return await _user_response(db, current_user, config)
 
 
 async def _load_follow_requests(user: User, config: SonghiveConfig) -> list:

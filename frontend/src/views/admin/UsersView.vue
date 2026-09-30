@@ -15,14 +15,19 @@ import {
   activateUser,
   deactivateUser,
   deleteUser,
+  setUserQuota,
   bulkUserAction,
   type AdminUserResponse,
   type BulkUserActionRequest,
 } from "@/api/admin";
+import { formatBytes } from "@/utils/entity";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
+import AppInput from "@/components/ui/AppInput.vue";
+import AppModal from "@/components/feedback/AppModal.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
+import AppSelect from "@/components/ui/AppSelect.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import AppTable from "@/components/ui/AppTable.vue";
 import SearchBar from "@/components/ui/SearchBar.vue";
@@ -222,6 +227,73 @@ async function onDeactivate(user: AdminUserResponse) {
     await refresh();
   } catch (err) {
     showError("pages.admin.users.actionError", err);
+  }
+}
+
+const quotaUser = ref<AdminUserResponse | null>(null);
+const quotaMode = ref<"default" | "unlimited" | "custom">("default");
+const quotaMb = ref("");
+const quotaError = ref("");
+const quotaSaving = ref(false);
+
+const quotaModeOptions = computed(() => [
+  { value: "default", label: t("pages.admin.users.quotaModeDefault") },
+  { value: "unlimited", label: t("pages.admin.users.quotaModeUnlimited") },
+  { value: "custom", label: t("pages.admin.users.quotaModeCustom") },
+]);
+
+function quotaLabel(user: AdminUserResponse | null): string {
+  if (!user) return "";
+  if (user.upload_quota === null || user.upload_quota === undefined)
+    return t("pages.admin.users.quotaModeDefault");
+  if (user.upload_quota < 0) return t("pages.admin.users.quotaModeUnlimited");
+  return formatBytes(user.upload_quota);
+}
+
+function onEditQuota(user: AdminUserResponse) {
+  quotaUser.value = user;
+  if (user.upload_quota === null || user.upload_quota === undefined) {
+    quotaMode.value = "default";
+    quotaMb.value = "";
+  } else if (user.upload_quota < 0) {
+    quotaMode.value = "unlimited";
+    quotaMb.value = "";
+  } else {
+    quotaMode.value = "custom";
+    quotaMb.value = String(Math.round(user.upload_quota / (1024 * 1024)));
+  }
+  quotaError.value = "";
+}
+
+async function onSaveQuota() {
+  const user = quotaUser.value;
+  if (!user) return;
+
+  let quota: number | null = null;
+  if (quotaMode.value === "unlimited") {
+    quota = -1;
+  } else if (quotaMode.value === "custom") {
+    const mb = Number(quotaMb.value);
+    if (quotaMb.value.trim() === "" || !Number.isFinite(mb) || mb < 0) {
+      quotaError.value = t("pages.admin.users.quotaInvalid");
+      return;
+    }
+    quota = Math.round(mb * 1024 * 1024);
+  }
+
+  quotaSaving.value = true;
+  try {
+    await setUserQuota(user.id, quota);
+    toastStore.push({
+      type: "success",
+      message: t("pages.admin.users.quotaSuccess"),
+    });
+    quotaUser.value = null;
+    await refresh();
+  } catch (err) {
+    showError("pages.admin.users.actionError", err);
+  } finally {
+    quotaSaving.value = false;
   }
 }
 
@@ -476,6 +548,18 @@ onMounted(() => load());
             </AppButton>
 
             <AppButton
+              size="sm"
+              variant="secondary"
+              icon="gauge"
+              :title="
+                t('pages.admin.users.quotaTitle', {
+                  username: userFromRow(row)!.username,
+                })
+              "
+              @click="onEditQuota(userFromRow(row)!)"
+            />
+
+            <AppButton
               v-if="instanceStore.paymentsEnabled"
               size="sm"
               variant="secondary"
@@ -572,6 +656,16 @@ onMounted(() => load());
             </AppButton>
 
             <AppButton
+              size="sm"
+              variant="secondary"
+              icon="gauge"
+              :title="
+                t('pages.admin.users.quotaTitle', { username: user.username })
+              "
+              @click="onEditQuota(user)"
+            />
+
+            <AppButton
               v-if="instanceStore.paymentsEnabled"
               size="sm"
               variant="secondary"
@@ -609,6 +703,45 @@ onMounted(() => load());
         {{ t("pages.admin.users.loadMore") }}
       </AppButton>
     </div>
+
+    <AppModal
+      :open="quotaUser !== null"
+      :title="
+        t('pages.admin.users.quotaTitle', { username: quotaUser?.username })
+      "
+      @close="quotaUser = null"
+    >
+      <div v-if="quotaUser" class="users-view__quota-form">
+        <p class="users-view__quota-current">
+          {{
+            t("pages.admin.users.quotaCurrent", {
+              value: quotaLabel(quotaUser),
+            })
+          }}
+        </p>
+        <AppSelect
+          v-model="quotaMode"
+          :options="quotaModeOptions"
+          :label="t('pages.admin.users.quotaMode')"
+        />
+        <AppInput
+          v-if="quotaMode === 'custom'"
+          v-model="quotaMb"
+          type="number"
+          :label="t('pages.admin.users.quotaMb')"
+          :hint="t('pages.admin.users.quotaMbHint')"
+          :error="quotaError"
+        />
+      </div>
+      <template #actions>
+        <AppButton variant="secondary" @click="quotaUser = null">
+          {{ t("common.cancel") }}
+        </AppButton>
+        <AppButton :loading="quotaSaving" @click="onSaveQuota">
+          {{ t("common.save") }}
+        </AppButton>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -744,6 +877,18 @@ onMounted(() => load());
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-md);
   text-align: center;
+}
+
+.users-view__quota-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.users-view__quota-current {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
 }
 
 .users-view__status {

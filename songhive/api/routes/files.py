@@ -49,7 +49,7 @@ from ...services.import_ import (
     resolve_external_duplicate,
 )
 from ...services.storage import StorageService, count_files, list_files
-from ...storage import FileSizeLimitExceededError
+from ...storage import FileSizeLimitExceededError, QuotaExceededError
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery
 from ..deps import (
@@ -223,6 +223,7 @@ async def _process_single_upload(
                 redis=redis,
                 description=description,
                 publish=publish,
+                enforce_quota=True,
             )
             stored_file = result.stored_file
             is_duplicate = result.was_duplicate
@@ -250,6 +251,8 @@ async def _process_single_upload(
             is_duplicate = exc.was_duplicate
         except FileSizeLimitExceededError:
             return _UploadOutcome(error="File too large")
+        except QuotaExceededError:
+            return _UploadOutcome(error="Upload quota exceeded")
         except Exception as exc:
             logger.warning("Could not import audio file as track: %s", exc)
 
@@ -267,9 +270,12 @@ async def _process_single_upload(
                 file.filename or "file",
                 str(current_user.id),
                 visibility,
+                enforce_quota=True,
             )
         except FileSizeLimitExceededError:
             return _UploadOutcome(error="File too large")
+        except QuotaExceededError:
+            return _UploadOutcome(error="Upload quota exceeded")
 
     return _UploadOutcome(
         stored_file=stored_file,
@@ -428,6 +434,9 @@ async def upload_file(
     if outcome.error == "File too large":
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
 
+    if outcome.error == "Upload quota exceeded":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Upload quota exceeded")
+
     if outcome.external_duplicate is not None:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
@@ -550,6 +559,11 @@ async def bulk_upload_files(
                 result = BulkFileUploadResult(
                     filename=upload_file.filename,
                     error="File too large",
+                )
+            elif outcome.error == "Upload quota exceeded":
+                result = BulkFileUploadResult(
+                    filename=upload_file.filename,
+                    error="Upload quota exceeded",
                 )
             elif outcome.stored_file is None and outcome.track_id is not None:
                 result = BulkFileUploadResult(

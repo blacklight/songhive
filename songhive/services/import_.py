@@ -259,6 +259,7 @@ async def _store_uploaded_audio_file(
     filename: str,
     owner_id: Optional[str],
     visibility: str,
+    enforce_quota: bool = False,
 ) -> Tuple[StoredFile, bool]:
     fd, tmp_name = tempfile.mkstemp()
     os.close(fd)
@@ -295,6 +296,7 @@ async def _store_uploaded_audio_file(
                     visibility=visibility,
                     content_hash=hash_hex,
                     return_duplicate=True,
+                    enforce_quota=enforce_quota,
                 ),
             )
     finally:
@@ -310,6 +312,7 @@ async def _store_uploaded_file(
     filename: str,
     owner_id: Optional[str],
     visibility: str,
+    enforce_quota: bool = False,
 ) -> Tuple[StoredFile, bool]:
     """Store the uploaded audio file and return it with a duplicate flag."""
     if _is_audio_content_type(content_type):
@@ -321,6 +324,7 @@ async def _store_uploaded_file(
             filename=filename,
             owner_id=owner_id,
             visibility=visibility,
+            enforce_quota=enforce_quota,
         )
 
     return cast(
@@ -333,6 +337,7 @@ async def _store_uploaded_file(
             owner_id=owner_id,
             visibility=visibility,
             return_duplicate=True,
+            enforce_quota=enforce_quota,
         ),
     )
 
@@ -662,6 +667,7 @@ async def import_audio_file(
     redis: Optional[Redis] = None,
     description: Optional[str] = None,
     publish: bool = False,
+    enforce_quota: bool = False,
 ) -> ImportResult:
     """
     Import an audio file: store it, extract metadata, create artist/album/track
@@ -686,6 +692,8 @@ async def import_audio_file(
     :param publish: Whether the caller asked to federate the track. Stored on
         the external-duplicate resolution token so the ``publish`` choice
         survives the pending-upload round-trip.
+    :param enforce_quota: Enforce the owner's upload quota when storing new
+        bytes — pass ``True`` for user-initiated uploads.
     :returns: Import result with the created records.
     :raises DuplicateTrackError: When a duplicate is detected and ``force`` is
         ``False``.
@@ -703,6 +711,7 @@ async def import_audio_file(
             filename,
             owner_id,
             visibility,
+            enforce_quota=enforce_quota,
         )
     else:
         if content_type is None:

@@ -616,7 +616,17 @@
         "paymentsRequiredSuccess": "Requisito di pagamento aggiornato.",
         "requirePaymentShort": "Richiedi pagamento",
         "waivePaymentShort": "Esonera dal pagamento",
-        "paymentRequiredBadge": "Abbonamento a pagamento richiesto"
+        "paymentRequiredBadge": "Abbonamento a pagamento richiesto",
+        "quotaTitle": "Quota di upload per {username}",
+        "quotaCurrent": "Impostazione attuale: {value}",
+        "quotaMode": "Quota",
+        "quotaModeDefault": "Predefinita dell'istanza",
+        "quotaModeUnlimited": "Illimitata",
+        "quotaModeCustom": "Personalizzata",
+        "quotaMb": "Quota (MiB)",
+        "quotaMbHint": "Dimensione totale massima dei file caricati dall'utente, in MiB. 0 blocca i nuovi caricamenti.",
+        "quotaInvalid": "Inserisci un numero di MiB non negativo.",
+        "quotaSuccess": "Quota di upload aggiornata."
       },
       "settings": {
         "title": "Impostazioni",

@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 from .base import StorageBackend
-from .exc import FileSizeLimitExceededError, is_unique_constraint_error
+from .exc import FileSizeLimitExceededError, QuotaExceededError, is_unique_constraint_error
 from .local import LocalStorage
 from .s3 import S3Storage
 
@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FileSizeLimitExceededError",
+    "QuotaExceededError",
     "StorageBackend",
     "LocalStorage",
     "S3Storage",

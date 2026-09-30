@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from sqlalchemy import Boolean, CheckConstraint, String, Text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from .base import Base, TZDateTime
@@ -41,9 +41,13 @@ class FollowersApproval(str, Enum):
 VALID_ROLES = {r.value for r in UserRole}
 VALID_PROFILE_VISIBILITIES = {v.value for v in ProfileVisibility}
 VALID_FOLLOWERS_APPROVALS = {v.value for v in FollowersApproval}
+# ``users.upload_quota`` sentinel: the user has no upload quota even when the
+# instance configures a default (``storage.upload_quota``).
+UPLOAD_QUOTA_UNLIMITED = -1
 _ROLE_CHECK = f"role IN ({', '.join(repr(r) for r in VALID_ROLES)})"
 _PROFILE_VISIBILITY_CHECK = f"profile_visibility IN ({', '.join(repr(v) for v in VALID_PROFILE_VISIBILITIES)})"
 _FOLLOWERS_APPROVAL_CHECK = f"followers_approval IN ({', '.join(repr(v) for v in VALID_FOLLOWERS_APPROVALS)})"
+_UPLOAD_QUOTA_CHECK = f"upload_quota IS NULL OR upload_quota >= {UPLOAD_QUOTA_UNLIMITED}"
 
 
 class User(Base):
@@ -60,6 +64,10 @@ class User(Base):
         CheckConstraint(
             _FOLLOWERS_APPROVAL_CHECK,
             name="ck_users_followers_approval",
+        ),
+        CheckConstraint(
+            _UPLOAD_QUOTA_CHECK,
+            name="ck_users_upload_quota",
         ),
     )
     __allow_unmapped__ = True
@@ -130,6 +138,12 @@ class User(Base):
         default=False,
         server_default="0",
     )
+
+    # Per-user upload quota override, in bytes. ``NULL`` means "follow the
+    # instance default" (``storage.upload_quota``, itself nullable);
+    # ``UPLOAD_QUOTA_UNLIMITED`` means "no quota even when a default is
+    # configured"; any other non-negative value is the user's byte cap.
+    upload_quota: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
     # Federation fields
     actor_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, unique=True)

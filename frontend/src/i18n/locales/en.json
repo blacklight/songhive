@@ -616,7 +616,17 @@
         "paymentsRequiredSuccess": "Payment requirement updated.",
         "requirePaymentShort": "Require payment",
         "waivePaymentShort": "Waive payment requirement",
-        "paymentRequiredBadge": "Paid membership required"
+        "paymentRequiredBadge": "Paid membership required",
+        "quotaTitle": "Upload quota for {username}",
+        "quotaCurrent": "Current setting: {value}",
+        "quotaMode": "Quota",
+        "quotaModeDefault": "Instance default",
+        "quotaModeUnlimited": "Unlimited",
+        "quotaModeCustom": "Custom",
+        "quotaMb": "Quota (MiB)",
+        "quotaMbHint": "Maximum total size of the user's uploaded media, in MiB. 0 blocks new uploads.",
+        "quotaInvalid": "Enter a non-negative number of MiB.",
+        "quotaSuccess": "Upload quota updated."
       },
       "settings": {
         "title": "Settings",

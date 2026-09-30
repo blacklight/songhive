@@ -22,7 +22,7 @@ from ...models.moderation import (
     VALID_ADMIN_USER_ACTIONS,
     VALID_INSTANCE_ACTIONS,
 )
-from ...models.user import User, UserRole
+from ...models.user import UPLOAD_QUOTA_UNLIMITED, User, UserRole
 from ...services import audit, auth, deletion
 from ...services import federation as federation_service
 from ...services import moderation as moderation_service
@@ -70,6 +70,9 @@ class AdminUserResponse(BaseModel):
     role: UserRole
     payments_required: bool = False
     admin_suspended: bool = False
+    # Per-user upload quota override in bytes: ``null`` inherits the instance
+    # default, ``-1`` means unlimited, any other non-negative value is a cap.
+    upload_quota: Optional[int] = None
 
 
 class AuditLogResponse(BaseModel):
@@ -263,6 +266,60 @@ async def deactivate_user(
         target_type=AuditTargetType.USER,
         target_id=user_id,
         details={"is_active": user.is_active, "tokens_revoked": True},
+        ip_address=client_ip(request),
+    )
+    return AdminUserResponse.model_validate(user)
+
+
+class UserQuotaRequest(BaseModel):
+    """Set or clear a user's upload quota override."""
+
+    quota: Optional[int] = None
+
+    @field_validator("quota")
+    @classmethod
+    def _validate_quota(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and value < UPLOAD_QUOTA_UNLIMITED:
+            raise ValueError(
+                f"quota must be {UPLOAD_QUOTA_UNLIMITED} (unlimited), "
+                "null (instance default), or a non-negative byte count"
+            )
+        return value
+
+
+@router.post(
+    "/users/{user_id}/quota",
+    response_model=AdminUserResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def set_user_quota(
+    body: UserQuotaRequest,
+    user_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Set a per-user upload quota override (admin only).
+
+    ``quota`` semantics: ``null`` clears the override so the instance default
+    (``storage.upload_quota``) applies; ``-1`` grants the user unlimited
+    uploads even when a default is configured; any other non-negative value
+    is the user's upload cap in bytes. Admin users are never quota-limited.
+    """
+    try:
+        user = await user_manager._get_user_or_raise(db, user_id)
+    except user_manager.UserManagementError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    old_quota = user.upload_quota
+    user.upload_quota = body.quota
+    await audit.log_action(
+        db,
+        actor_id=admin.id,
+        action="user.quota",
+        target_type=AuditTargetType.USER,
+        target_id=user_id,
+        details={"old_quota": old_quota, "new_quota": user.upload_quota},
         ip_address=client_ip(request),
     )
     return AdminUserResponse.model_validate(user)

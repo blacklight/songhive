@@ -616,7 +616,17 @@
         "paymentsRequiredSuccess": "Requisito de pago actualizado.",
         "requirePaymentShort": "Exigir pago",
         "waivePaymentShort": "Eximir del pago",
-        "paymentRequiredBadge": "Requiere membresía de pago"
+        "paymentRequiredBadge": "Requiere membresía de pago",
+        "quotaTitle": "Cuota de subida de {username}",
+        "quotaCurrent": "Configuración actual: {value}",
+        "quotaMode": "Cuota",
+        "quotaModeDefault": "Predeterminada de la instancia",
+        "quotaModeUnlimited": "Ilimitada",
+        "quotaModeCustom": "Personalizada",
+        "quotaMb": "Cuota (MiB)",
+        "quotaMbHint": "Tamaño total máximo de los archivos subidos por el usuario, en MiB. 0 bloquea las nuevas subidas.",
+        "quotaInvalid": "Introduce un número de MiB no negativo.",
+        "quotaSuccess": "Cuota de subida actualizada."
       },
       "settings": {
         "title": "Configuración",

@@ -41,6 +41,7 @@ from ...services.tags import (
     remove_tag_from_entity,
     validate_tag_name,
 )
+from ...storage import QuotaExceededError
 from ...tasks.import_ import process_upload, scan_directory
 from .._common import Pagination, client_ip, get_pagination
 from .._include import IncludeQuery, get_include
@@ -395,6 +396,7 @@ async def upload_track(
             content_type=file.content_type,
             description=description,
             publish=publish,
+            enforce_quota=True,
         )
         await db.commit()
         if publish and result.track.visibility == Visibility.PUBLIC.value and user is not None:
@@ -410,6 +412,8 @@ async def upload_track(
                     config=request.app.state.config,
                 )
             await db.commit()
+    except QuotaExceededError:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Upload quota exceeded") from None
     except DuplicateTrackError as exc:
         existing = await music.get_track(db, exc.existing_track_id)
         return JSONResponse(
@@ -460,6 +464,7 @@ async def _import_single_sync_file(
             enrich=enrich,
             content_type=upload_file.content_type,
             publish=publish,
+            enforce_quota=True,
         )
         await db.commit()
         if (
@@ -492,6 +497,12 @@ async def _import_single_sync_file(
             filename=filename,
             status="duplicate",
             existing_track_id=exc.existing_track_id,
+        )
+    except QuotaExceededError:
+        return BulkUploadResult(
+            filename=filename,
+            status="error",
+            error="Upload quota exceeded",
         )
     except Exception as exc:
         return BulkUploadResult(
@@ -548,17 +559,25 @@ async def _upload_async_batch(
 ) -> JSONResponse:
     """Store a large batch of files and enqueue background processing."""
     stored_files = []
+    quota_exceeded = False
     for upload_file in files:
         content_type = upload_file.content_type or "application/octet-stream"
-        stored, _ = await storage.store_file(
-            db,
-            upload_file.file,
-            content_type,
-            original_filename=upload_file.filename or "audio.mp3",
-            owner_id=str(user.id) if user else None,
-            visibility=visibility.value,
-            return_duplicate=True,
-        )
+        try:
+            stored, _ = await storage.store_file(
+                db,
+                upload_file.file,
+                content_type,
+                original_filename=upload_file.filename or "audio.mp3",
+                owner_id=str(user.id) if user else None,
+                visibility=visibility.value,
+                return_duplicate=True,
+                enforce_quota=True,
+            )
+        except QuotaExceededError:
+            # Files already stored are still queued; remaining files in the
+            # batch are rejected since the user's quota is now exhausted.
+            quota_exceeded = True
+            break
         stored_files.append((stored, upload_file.filename))
     await db.commit()
 
@@ -580,7 +599,7 @@ async def _upload_async_batch(
 
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
-        content={"job_id": job_id, "enqueued": _enqueued + 1},
+        content={"job_id": job_id, "enqueued": _enqueued + 1, "quota_exceeded": quota_exceeded},
     )
 
 

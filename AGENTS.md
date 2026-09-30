@@ -290,6 +290,16 @@
   so that tags and cover art can be rewritten without changing the stored path
   or invalidating the content hash. Run `songhive admin rehash-audio` once to
   migrate legacy audio `StoredFile` rows to audio-only hashes.
+- Upload quotas: `storage.upload_quota` (bytes, unset = unlimited) is the
+  instance default enforced on all user-initiated media uploads by non-admins;
+  `users.upload_quota` overrides it per user (`NULL` = inherit,
+  `UPLOAD_QUOTA_UNLIMITED`/`-1` = unlimited, else the byte cap). Enforcement
+  is opt-in per call via `enforce_quota=True` on `StorageService.store_file`
+  (only new bytes are charged — content dedup skips the check), and usage
+  counts only `StoredFile` rows under the `files/` prefix owned by the user
+  (`services/storage.get_upload_usage`). Admins set overrides via
+  `POST /api/v1/admin/users/{id}/quota`; callers see the effective quota and
+  usage on `GET /api/v1/users/me`.
 - Track metadata is rewritten into embedded tags by the `sync_track_tags`
   Celery task (`tasks/tags.py`). It resolves cover art in the order
   track image → album cover → none, acquires a Redis lock per track, and

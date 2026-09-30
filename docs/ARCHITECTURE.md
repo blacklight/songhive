@@ -325,7 +325,7 @@ these subsections:
 | `database`     | url (asyncpg), pool_size, max_overflow                        |
 | `redis`        | url                                                           |
 | `celery`       | broker_url, result_backend, cleanup_orphaned_files_schedule   |
-| `storage`      | backend (local/s3), local_path, s3_*, cdn_prefix, max_upload_size |
+| `storage`      | backend (local/s3), local_path, s3_*, cdn_prefix, max_upload_size, upload_quota |
 | `federation`   | enabled, instance_domain, instance_name, contact_name/contact_email/contact_url, private_key_path, allow/block lists, remote_search_access, fetch_timeout_seconds, remote_activity_retention_days, remote_activity_prune_schedule |
 | `auth`         | registration_mode, secret_key, token TTLs, rate_limit, trusted_proxy_hops, cookie_secure, cookie_samesite, cookie_domain |
 | `email`        | smtp_host, smtp_port, smtp_user, from_address, tls settings   |

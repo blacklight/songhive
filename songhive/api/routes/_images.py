@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models.stored_file import StoredFile
 from ...models.user import User
 from ...services.storage import StorageService
+from ...storage import QuotaExceededError
 
 IMAGE_SIZE_LIMIT = 10 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = {
@@ -51,14 +52,23 @@ async def upload_entity_image(
         )
 
     buffer = io.BytesIO(data)
-    stored = await storage.store_file(
-        db,
-        buffer,
-        content_type=content_type,
-        original_filename=file.filename,
-        owner_id=owner_id or user.id,
-        visibility=getattr(entity, "visibility", "private"),
-    )
+    try:
+        stored = await storage.store_file(
+            db,
+            buffer,
+            content_type=content_type,
+            original_filename=file.filename,
+            owner_id=owner_id or user.id,
+            visibility=getattr(entity, "visibility", "private"),
+            # The quota is charged to ``owner_id`` but only applies to
+            # uploads by non-admin users.
+            enforce_quota=not user.is_admin,
+        )
+    except QuotaExceededError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Upload quota exceeded",
+        ) from None
 
     setattr(entity, field_name, stored.id)
     relationship = field_name.replace("_file_id", "_file")

@@ -14,6 +14,7 @@ vi.mock("@/api/admin", () => ({
   activateUser: vi.fn(),
   deactivateUser: vi.fn(),
   deleteUser: vi.fn(),
+  setUserQuota: vi.fn(),
   bulkUserAction: vi.fn(),
 }));
 
@@ -58,6 +59,7 @@ describe("UsersView", () => {
   afterEach(() => {
     vi.useRealTimers();
     wrapper?.unmount();
+    document.body.innerHTML = "";
   });
 
   it("lists users on mount", async () => {
@@ -203,5 +205,110 @@ describe("UsersView", () => {
     const toastStore = useToastStore();
     expect(toastStore.toasts).toHaveLength(1);
     expect(toastStore.toasts[0].type).toBe("success");
+  });
+
+  async function openQuotaModal(user: AdminUserResponse) {
+    wrapper?.unmount();
+    document.body.innerHTML = "";
+    vi.mocked(adminApi.listUsers).mockResolvedValue([user]);
+    wrapper = mount(UsersView, {
+      attachTo: document.body,
+      global: { plugins: [i18n] },
+    });
+    await flushPromises();
+
+    const quotaButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) =>
+        b.getAttribute("aria-label") ===
+        i18n.global.t("pages.admin.users.quotaTitle", {
+          username: user.username,
+        }),
+    );
+    expect(quotaButton).toBeDefined();
+    quotaButton?.click();
+    await flushPromises();
+
+    const modal = document.body.querySelector(".app-modal");
+    expect(modal).not.toBeNull();
+    return modal as HTMLElement;
+  }
+
+  function modalSelect(modal: HTMLElement): HTMLSelectElement {
+    return modal.querySelector("select") as HTMLSelectElement;
+  }
+
+  function modalSaveButton(): HTMLButtonElement {
+    const button = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === i18n.global.t("common.save"),
+    );
+    expect(button).toBeDefined();
+    return button as HTMLButtonElement;
+  }
+
+  it("saves a custom quota converted from MiB to bytes", async () => {
+    const user = createUser("u1", "alice");
+    const modal = await openQuotaModal(user);
+    vi.mocked(adminApi.setUserQuota).mockResolvedValue({
+      ...user,
+      upload_quota: 10 * 1024 * 1024,
+    });
+
+    modalSelect(modal).value = "custom";
+    modalSelect(modal).dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    const mbInput = modal.querySelector(
+      'input[type="number"]',
+    ) as HTMLInputElement;
+    mbInput.value = "10";
+    mbInput.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    modalSaveButton().click();
+    await flushPromises();
+
+    expect(adminApi.setUserQuota).toHaveBeenCalledWith("u1", 10 * 1024 * 1024);
+    expect(document.body.querySelector(".app-modal")).toBeNull();
+  });
+
+  it("saves the unlimited mode as -1 and the default mode as null", async () => {
+    const user = createUser("u1", "alice");
+    user.upload_quota = 512;
+    vi.mocked(adminApi.setUserQuota).mockResolvedValue(user);
+
+    let modal = await openQuotaModal(user);
+    modalSelect(modal).value = "unlimited";
+    modalSelect(modal).dispatchEvent(new Event("change"));
+    await flushPromises();
+    modalSaveButton().click();
+    await flushPromises();
+    expect(adminApi.setUserQuota).toHaveBeenLastCalledWith("u1", -1);
+
+    modal = await openQuotaModal(user);
+    modalSelect(modal).value = "default";
+    modalSelect(modal).dispatchEvent(new Event("change"));
+    await flushPromises();
+    modalSaveButton().click();
+    await flushPromises();
+    expect(adminApi.setUserQuota).toHaveBeenLastCalledWith("u1", null);
+  });
+
+  it("rejects a blank custom quota without calling the API", async () => {
+    const user = createUser("u1", "alice");
+    const modal = await openQuotaModal(user);
+
+    modalSelect(modal).value = "custom";
+    modalSelect(modal).dispatchEvent(new Event("change"));
+    await flushPromises();
+
+    modalSaveButton().click();
+    await flushPromises();
+
+    expect(adminApi.setUserQuota).not.toHaveBeenCalled();
+    expect(modal.textContent).toContain(
+      i18n.global.t("pages.admin.users.quotaInvalid"),
+    );
   });
 });

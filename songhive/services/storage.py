@@ -22,8 +22,39 @@ from ..models._enums import Visibility
 from ..models.stored_file import StoredFile
 from ..models.user import User
 from ..storage.base import StorageBackend
-from ..storage.exc import is_unique_constraint_error
+from ..storage.exc import QuotaExceededError, is_unique_constraint_error
 from .acl import apply_access_filter
+
+# Storage prefix under which user-uploaded files are stored. Only rows under
+# this prefix count against a user's upload quota: derived rows (``covers``,
+# ``images``, ``transcoded``, ``purchases``, ``samples``, ``downloads``) also
+# carry an ``owner_id`` but are not uploads.
+UPLOAD_PREFIX = "files"
+
+
+def resolve_upload_quota(user: Optional[User], config: StorageConfig) -> Optional[int]:
+    """Return ``user``'s effective upload quota in bytes; ``None`` = unlimited.
+
+    Admin users are never quota-limited. A ``NULL`` ``user.upload_quota``
+    inherits the instance default (``storage.upload_quota``);
+    ``UPLOAD_QUOTA_UNLIMITED`` (-1) opts the user out of any quota.
+    """
+    if user is None or user.is_admin:
+        return None
+    if user.upload_quota is not None:
+        return None if user.upload_quota < 0 else user.upload_quota
+    return config.upload_quota
+
+
+async def get_upload_usage(session: AsyncSession, owner_id: str) -> int:
+    """Return the stored bytes currently charged to ``owner_id``'s upload quota."""
+    result = await session.scalar(
+        select(func.coalesce(func.sum(StoredFile.size), 0)).where(
+            StoredFile.owner_id == owner_id,
+            StoredFile.storage_path.like(f"{UPLOAD_PREFIX}/%"),
+        )
+    )
+    return int(result or 0)
 
 
 class StorageService:
@@ -74,6 +105,21 @@ class StorageService:
 
         return hasher.hexdigest(), total
 
+    async def _check_upload_quota(
+        self,
+        session: AsyncSession,
+        owner_id: str,
+        incoming_size: int,
+    ) -> None:
+        """Raise ``QuotaExceededError`` if ``owner_id``'s quota can't fit the file."""
+        owner = await session.get(User, owner_id)
+        quota = resolve_upload_quota(owner, self.config)
+        if quota is None:
+            return
+        used = await get_upload_usage(session, owner_id)
+        if used + incoming_size > quota:
+            raise QuotaExceededError(quota=quota, used=used, incoming=incoming_size)
+
     @overload
     async def store_file(
         self,
@@ -82,11 +128,12 @@ class StorageService:
         content_type: str,
         *,
         original_filename: Optional[str] = None,
-        prefix: str = "files",
+        prefix: str = UPLOAD_PREFIX,
         owner_id: Optional[str] = None,
         visibility: str = Visibility.PRIVATE.value,
         content_hash: Optional[str] = None,
         return_duplicate: Literal[False] = False,
+        enforce_quota: bool = False,
     ) -> StoredFile: ...
 
     @overload
@@ -97,11 +144,12 @@ class StorageService:
         content_type: str,
         *,
         original_filename: Optional[str] = None,
-        prefix: str = "files",
+        prefix: str = UPLOAD_PREFIX,
         owner_id: Optional[str] = None,
         visibility: str = Visibility.PRIVATE.value,
         content_hash: Optional[str] = None,
         return_duplicate: Literal[True] = True,
+        enforce_quota: bool = False,
     ) -> tuple[StoredFile, bool]: ...
 
     async def store_file(
@@ -111,11 +159,12 @@ class StorageService:
         content_type: str,
         *,
         original_filename: Optional[str] = None,
-        prefix: str = "files",
+        prefix: str = UPLOAD_PREFIX,
         owner_id: Optional[str] = None,
         visibility: str = Visibility.PRIVATE.value,
         content_hash: Optional[str] = None,
         return_duplicate: bool = False,
+        enforce_quota: bool = False,
     ) -> Union[StoredFile, tuple[StoredFile, bool]]:
         """
         Store a file in a content-addressable layout and return a ``StoredFile``.
@@ -127,6 +176,11 @@ class StorageService:
 
         Set ``return_duplicate=True`` to also receive a boolean that is ``True``
         when the existing row was returned.
+
+        Set ``enforce_quota=True`` for user-initiated uploads: when the bytes
+        are new (not a content duplicate), the owner's effective upload quota
+        is checked before anything is persisted and ``QuotaExceededError`` is
+        raised if the file does not fit. Duplicate content is never charged.
         """
         self._rewind(file)
 
@@ -145,6 +199,9 @@ class StorageService:
                 if return_duplicate:
                     return existing, True
                 return existing
+
+            if enforce_quota and owner_id is not None:
+                await self._check_upload_quota(session, owner_id, size)
 
             if not await self.backend.exists(path):
                 with open(tmp_path, "rb") as f:
