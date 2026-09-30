@@ -382,9 +382,11 @@ async def _refresh_external_contents(
     from ..external.sync import (
         RunCounters,
         _apply_entity_track,
-        _backfill_artist_images,
         _catalog_ttl_seconds,
+        _fetch_artist_image_payloads,
         _find_external_item,
+        _plan_artist_image_backfill,
+        _store_artist_images,
     )
     from ..external.types import ContentsNotModified
     from ..models.playlist import PlaylistTrack
@@ -426,6 +428,13 @@ async def _refresh_external_contents(
                 session, external_library.provider_type, kind, provider_key, allow_expired=True
             )
             etag = prior.contents_etag if prior is not None else None
+
+            # Release the read transaction before any provider call. Holding
+            # it across remote fetches — and the materialization transaction
+            # across the artist-image backfill — pins write locks for the
+            # whole fetch duration, which serialized concurrent refreshes
+            # behind the slowest provider call.
+            await session.commit()
 
             try:
                 contents = await adapter.iter_contents(decrypted, kind, provider_key, etag=etag)
@@ -472,101 +481,157 @@ async def _refresh_external_contents(
                 )
                 return {"status": "failed", "error": item.contents_error}
 
-            # 1. Catalog the inline track payloads — write-once, no expiry.
-            payloads = [
-                dict(e.metadata.raw_metadata)
-                for e in contents.entries
-                if e.metadata is not None
-                and isinstance(e.metadata.raw_metadata, dict)
-                and e.metadata.raw_metadata.get("id") is not None
-            ]
-            try:
-                async with session.begin_nested():
-                    await upsert_catalog_entries(
-                        session,
-                        external_library.provider_type,
-                        "track",
-                        payloads,
-                        write_once=True,
-                    )
-            except Exception:
-                logger.debug("Catalog upsert conflict during contents refresh", exc_info=True)
-
-            # 2. Persist the ordered child refs + etag on the shared catalog row.
-            await upsert_catalog_contents(
-                session,
-                external_library.provider_type,
-                kind,
-                provider_key,
-                [{"id": e.provider_key, "position": e.position} for e in contents.entries],
-                etag=contents.etag,
-            )
-
-            # 3. Materialize local tracks as referenced members.
+            # The write phase below is pure database work, keeping the
+            # transaction — and the unique-key locks its catalog inserts
+            # take — short enough not to stall other refreshes or syncs.
             immutable = bool((external_library.capabilities or {}).get("limits", {}).get("immutable_tracks"))
             run = cast(ExternalSyncRun, SimpleNamespace(triggered_by_user_id=None))
             counters = RunCounters()
-            for entry in contents.entries:
-                if entry.metadata is None:
-                    continue
-                ref = ExternalItemRef(
-                    provider_key=entry.provider_key,
-                    display_path=entry.provider_key,
-                    metadata=entry.metadata,
-                )
+            try:
+                # 1. Catalog the inline track payloads — write-once, no expiry.
+                payloads = [
+                    dict(e.metadata.raw_metadata)
+                    for e in contents.entries
+                    if e.metadata is not None
+                    and isinstance(e.metadata.raw_metadata, dict)
+                    and e.metadata.raw_metadata.get("id") is not None
+                ]
                 try:
                     async with session.begin_nested():
-                        await _apply_entity_track(
+                        await upsert_catalog_entries(
                             session,
-                            external_library,
-                            ref,
-                            run,
-                            counters,
-                            decrypted,
-                            membership="referenced",
-                            add_to_library=False,
-                            immutable=immutable,
+                            external_library.provider_type,
+                            "track",
+                            payloads,
+                            write_once=True,
                         )
                 except Exception:
-                    logger.debug(
-                        "Could not materialize referenced track %s",
-                        entry.provider_key,
-                        exc_info=True,
-                    )
+                    logger.debug("Catalog upsert conflict during contents refresh", exc_info=True)
 
-            # 3b. Artist images aren't in track payloads — fetch them lazily
-            # for artists materialized without one.
-            await _backfill_artist_images(
-                session,
-                adapter,
-                decrypted,
-                counters,
-                external_library.provider_type,
-                catalog_ttl=_catalog_ttl_seconds(external_library.provider_type, decrypted),
-            )
+                # 2. Persist the ordered child refs + etag on the shared catalog row.
+                await upsert_catalog_contents(
+                    session,
+                    external_library.provider_type,
+                    kind,
+                    provider_key,
+                    [{"id": e.provider_key, "position": e.position} for e in contents.entries],
+                    etag=contents.etag,
+                )
 
-            # 4. Replace the container's local rows in provider order.
-            if kind == "playlist" and item.playlist_id is not None:
-                await session.execute(delete(PlaylistTrack).where(PlaylistTrack.playlist_id == item.playlist_id))
+                # 3. Materialize local tracks as referenced members.
                 for entry in contents.entries:
-                    child = await _find_external_item(session, external_library_id, "track", entry.provider_key)
-                    if child is None or child.track_id is None:
+                    if entry.metadata is None:
                         continue
-                    session.add(
-                        PlaylistTrack(
-                            playlist_id=item.playlist_id,
-                            track_id=child.track_id,
-                            position=entry.position,
+                    ref = ExternalItemRef(
+                        provider_key=entry.provider_key,
+                        display_path=entry.provider_key,
+                        metadata=entry.metadata,
+                    )
+                    try:
+                        async with session.begin_nested():
+                            await _apply_entity_track(
+                                session,
+                                external_library,
+                                ref,
+                                run,
+                                counters,
+                                decrypted,
+                                membership="referenced",
+                                add_to_library=False,
+                                immutable=immutable,
+                            )
+                    except Exception:
+                        logger.debug(
+                            "Could not materialize referenced track %s",
+                            entry.provider_key,
+                            exc_info=True,
                         )
+
+                # 3b. Artist images aren't in track payloads — plan the lazy
+                # image fetches now (reads only); the remote calls run after
+                # this transaction commits.
+                image_backlog = counters.artist_image_backlog
+                counters.artist_image_backlog = {}
+                cached_images: dict[str, str] = {}
+                artists_to_fetch: dict[str, str] = {}
+                if image_backlog:
+                    cached_images, artists_to_fetch = await _plan_artist_image_backfill(
+                        session, adapter, decrypted, image_backlog, external_library.provider_type
                     )
 
-            item.contents_fetched_at = _utcnow()
-            item.contents_error = None
-            item.sync_error = None
-            item.state = "active"
-            await session.commit()
+                # 4. Replace the container's local rows in provider order.
+                if kind == "playlist" and item.playlist_id is not None:
+                    await session.execute(delete(PlaylistTrack).where(PlaylistTrack.playlist_id == item.playlist_id))
+                    for entry in contents.entries:
+                        child = await _find_external_item(session, external_library_id, "track", entry.provider_key)
+                        if child is None or child.track_id is None:
+                            continue
+                        session.add(
+                            PlaylistTrack(
+                                playlist_id=item.playlist_id,
+                                track_id=child.track_id,
+                                position=entry.position,
+                            )
+                        )
+
+                item.contents_fetched_at = _utcnow()
+                item.contents_error = None
+                item.sync_error = None
+                item.state = "active"
+                await session.commit()
+            except Exception as exc:
+                # A write-phase failure must not leave the container stuck in
+                # never_fetched: record the error so the UI surfaces it and
+                # the next view re-enqueues.
+                logger.exception(
+                    "Contents refresh write failed: library=%s %s/%s",
+                    external_library_id,
+                    kind,
+                    provider_key,
+                )
+                try:
+                    await session.rollback()
+                    item.contents_error = _sanitize_error(exc)
+                    item.sync_error = item.contents_error
+                    await session.commit()
+                except Exception:
+                    logger.debug("Could not record contents refresh error", exc_info=True)
+                await _publish_contents_event(session, external_library, kind, entity_id, "error")
+                return {"status": "failed", "error": _sanitize_error(exc)}
 
             await _publish_contents_event(session, external_library, kind, entity_id, "fresh")
+
+            # 5. Artist image backfill: provider fetches run with no
+            # transaction open; results land in a short follow-up write.
+            provider_type = external_library.provider_type
+            catalog_ttl = _catalog_ttl_seconds(provider_type, decrypted)
+            # Roll back the read transaction opened by the event's owner
+            # lookup so the fetches below hold no transaction at all.
+            await session.rollback()
+            try:
+                fetched_images, fetched_payloads = await _fetch_artist_image_payloads(
+                    adapter, decrypted, artists_to_fetch, provider_type
+                )
+                cached_images.update(fetched_images)
+                if fetched_payloads or cached_images:
+                    await _store_artist_images(
+                        session,
+                        provider_type,
+                        cached_images,
+                        fetched_payloads,
+                        catalog_ttl,
+                    )
+                    await session.commit()
+            except Exception:
+                # Contents are already live; artist images are best-effort.
+                logger.warning(
+                    "Artist image backfill failed after contents refresh: library=%s %s/%s",
+                    external_library_id,
+                    kind,
+                    provider_key,
+                    exc_info=True,
+                )
+
             return {
                 "status": "ok",
                 "entries": len(contents.entries),
@@ -594,7 +659,6 @@ def refresh_external_contents_task(
     external_library_id: str,
     kind: str,
     provider_key: str,
-    force: bool = False,
 ) -> dict:
     """Celery task entry point for refreshing a lazy container's contents."""
     from ..external.errors import ExternalRateLimited

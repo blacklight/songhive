@@ -473,22 +473,19 @@ export const usePlayerStore = defineStore("player", () => {
     engine?.pause();
   }
 
+  // Manual skip: always moves through the queue — repeat-one only affects
+  // the automatic advance in ``handleEnded``, otherwise the next/prev
+  // buttons could never leave the looping track.
   function next() {
     if (!currentTrack.value) return;
     if (sessionMode.value && sessionController) {
       sessionController.next();
       return;
     }
-    if (repeat.value === "one") {
-      currentTime.value = 0;
-      engine?.seek(0);
-      play();
-      return;
-    }
     const nextIndex = index.value + 1;
     if (nextIndex < queue.value.length) {
       index.value = nextIndex;
-    } else if (repeat.value === "all" && queue.value.length > 0) {
+    } else if (repeat.value !== "off" && queue.value.length > 0) {
       index.value = 0;
     } else {
       return;
@@ -516,7 +513,7 @@ export const usePlayerStore = defineStore("player", () => {
     }
     let prevIndex = index.value - 1;
     if (prevIndex < 0) {
-      if (repeat.value === "all") {
+      if (repeat.value !== "off") {
         prevIndex = queue.value.length - 1;
       } else {
         return;
@@ -531,6 +528,31 @@ export const usePlayerStore = defineStore("player", () => {
     if (track) engine?.load(track);
     engine?.play();
     persistNow();
+  }
+
+  /**
+   * Advance after the current track finishes on its own. Repeat-one
+   * replays the track in place; the other modes behave like ``next``.
+   * At the end of the queue with repeat off, settle into a paused state —
+   * the engine does not emit a state change on "ended", so without this
+   * the UI would keep showing a finished track as playing.
+   */
+  function handleEnded() {
+    // Remote outputs run their own queue; a stale local end-of-track must
+    // not double-advance the session.
+    if (sessionMode.value || !currentTrack.value) return;
+    if (repeat.value === "one") {
+      currentTime.value = 0;
+      engine?.seek(0);
+      play();
+      return;
+    }
+    if (index.value < queue.value.length - 1 || repeat.value === "all") {
+      next();
+      return;
+    }
+    playbackState.value = "paused";
+    isPlaying.value = false;
   }
 
   function seek(seconds: number) {
@@ -734,6 +756,7 @@ export const usePlayerStore = defineStore("player", () => {
     pause,
     next,
     prev,
+    handleEnded,
     seek,
     setVolume,
     setSessionVolume,

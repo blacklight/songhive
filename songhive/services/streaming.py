@@ -37,8 +37,19 @@ logger = logging.getLogger(__name__)
 
 
 async def get_upload_for_track(session: AsyncSession, track_id: str) -> Optional[Upload]:
-    """Get the best available upload for a track."""
-    result = await session.execute(select(Upload).where(Upload.track_id == track_id).limit(1))
+    """
+    Get the best available upload for a track.
+
+    Lean on purpose: ``Upload`` relationships are ``lazy="selectin"``, and on
+    the stream path only ``stored_file`` is ever needed — a plain select would
+    issue an extra SELECT per relationship before the first byte is sent.
+    """
+    result = await session.execute(
+        select(Upload)
+        .where(Upload.track_id == track_id)
+        .options(raiseload("*"), selectinload(Upload.stored_file))
+        .limit(1)
+    )
     return cast(Optional[Upload], result.scalar_one_or_none())
 
 
@@ -312,7 +323,9 @@ async def _enforce_stream_policy(
 
     from ..models.library import Library
 
-    library = await session.get(Library, external_library.library_id)
+    library = (
+        await session.execute(select(Library).where(Library.id == external_library.library_id).options(raiseload("*")))
+    ).scalar_one_or_none()
     owner_id = library.owner_id if library is not None else external_library.created_by_id
     is_admin = user is not None and getattr(user, "role", None) == "admin"
 

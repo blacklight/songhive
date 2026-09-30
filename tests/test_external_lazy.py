@@ -21,6 +21,7 @@ from songhive.external.registry import register_external_adapter
 from songhive.external.sync import sync_external_library
 from songhive.external.types import (
     ContentsNotModified,
+    ExternalArtistMetadata,
     ExternalContentEntry,
     ExternalContents,
     ExternalItemRef,
@@ -44,8 +45,15 @@ class FakeContentsAdapter(ExternalLibraryAdapter):
     provider_type = "fake-contents"
     user_configurable = True
 
-    # Test instrumentation: number of provider calls per adapter instance.
+    # Test instrumentation: number of provider calls per adapter instance,
+    # plus an optional hook invoked on every provider-bound call.
     iter_contents_calls: int = 0
+    provider_call_probe = None
+
+    def _probe_call(self, name: str) -> None:
+        probe = type(self).provider_call_probe
+        if probe is not None:
+            probe(name)
 
     async def validate_config(self, config: dict) -> ExternalLibraryCapabilities:
         self._capabilities = ExternalLibraryCapabilities(
@@ -103,6 +111,7 @@ class FakeContentsAdapter(ExternalLibraryAdapter):
         *,
         etag: Optional[str] = None,
     ) -> ExternalContents:
+        self._probe_call("iter_contents")
         FakeContentsAdapter.iter_contents_calls += 1
         current_etag = config.get("etags", {}).get(provider_key)
         if etag is not None and etag == current_etag:
@@ -122,11 +131,29 @@ class FakeContentsAdapter(ExternalLibraryAdapter):
             )
         return ExternalContents(entries=tuple(entries), etag=current_etag)
 
+    def entity_from_payload(self, config: dict, kind: str, payload: dict):
+        if kind == "artist" and isinstance(payload, dict):
+            return ExternalArtistMetadata(
+                provider_key=str(payload.get("id")),
+                name=str(payload.get("name") or "Unknown"),
+                image_url=payload.get("image_url"),
+                raw_metadata=dict(payload),
+            )
+        return None
+
+    async def fetch_entity_payload(self, config: dict, kind: str, provider_key: str):
+        self._probe_call("fetch_entity_payload")
+        if kind != "artist":
+            return None
+        payload = config.get("artist_payloads", {}).get(provider_key)
+        return payload if isinstance(payload, dict) else None
+
 
 @pytest.fixture(autouse=True)
 def _register_fake_contents_adapter():
     register_external_adapter("fake-contents", FakeContentsAdapter)
     FakeContentsAdapter.iter_contents_calls = 0
+    FakeContentsAdapter.provider_call_probe = None
     yield
     from songhive.external.registry import unregister_external_adapter
 
@@ -291,7 +318,6 @@ async def test_force_refresh_enqueues(db_session, fake_redis, make_contents_libr
     status = await ensure_contents(db_session, "playlist", str(playlist.id), force=True, redis=fake_redis)
     assert status.state == "refreshing"
     assert delay.call_count == 1
-    assert delay.call_args.args[3] is True
 
 
 @pytest.mark.asyncio
@@ -655,6 +681,103 @@ async def test_refresh_not_found_marks_missing(
     status = await ensure_contents(db_session, "playlist", str(playlist.id), force=True, redis=fake_redis)
     assert status.state == "error"
     assert delay.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_runs_provider_io_without_transaction(
+    db_session, engine, fake_redis, make_contents_library, monkeypatch
+):
+    """Provider calls must never run inside an open DB transaction.
+
+    Previously the refresh held one transaction across ``iter_contents``,
+    the catalog inserts, materialization and the per-artist image fetches —
+    its uncommitted ``provider_catalog_entries`` inserts then blocked every
+    concurrent refresh/sync writing the same keys (TIDAL playlists stuck in
+    never_fetched for tens of minutes).
+    """
+    from contextlib import asynccontextmanager
+
+    from songhive.models.artist import Artist
+    from songhive.tasks import external_libraries as ext_tasks
+
+    external_library, _, _ = await make_contents_library(
+        {
+            "entities": {"playlists": [_playlist("pl-1")]},
+            "contents": {
+                "playlist": {"pl-1": [_track("t-1", artist_provider_key="art-1")]},
+            },
+            "artist_payloads": {"art-1": {"id": "art-1", "name": "Artist A", "image_url": "https://img/art-1"}},
+        }
+    )
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+
+    # Spy on the session the task body runs in to observe its transaction
+    # state at the moment each provider call fires.
+    task_sessions: list = []
+    real_get_session = ext_tasks.get_session
+
+    @asynccontextmanager
+    async def spy_get_session():
+        async with real_get_session() as session:
+            task_sessions.append(session)
+            yield session
+
+    monkeypatch.setattr(ext_tasks, "get_session", spy_get_session)
+
+    call_txn: list[tuple[str, bool]] = []
+    FakeContentsAdapter.provider_call_probe = lambda name: call_txn.append(
+        (name, task_sessions[0].in_transaction() if task_sessions else True)
+    )
+
+    result = await _run_refresh(db_session, engine, fake_redis, external_library, "playlist", "pl-1")
+    assert result["status"] == "ok"
+
+    assert ("iter_contents", False) in call_txn
+    assert ("fetch_entity_payload", False) in call_txn
+    assert all(in_txn is False for _, in_txn in call_txn)
+
+    # The split backfill still applied the fetched artist image.
+    artist = (await db_session.execute(select(Artist))).scalar_one()
+    assert artist.image_url == "https://img/art-1"
+
+
+@pytest.mark.asyncio
+async def test_refresh_write_failure_records_error(
+    db_session, engine, fake_redis, fake_redis_server, make_contents_library, monkeypatch
+):
+    """A mid-write failure must record contents_error — otherwise the
+    container stays never_fetched and the UI spins on it forever."""
+    from songhive.services import provider_catalog
+    from songhive.ws import events as ws_events
+
+    published: list[dict] = []
+    monkeypatch.setattr(ws_events, "_publish_envelope", published.append)
+
+    external_library, _, owner = await make_contents_library(
+        {
+            "entities": {"playlists": [_playlist("pl-1")]},
+            "contents": {"playlist": {"pl-1": [_track("t-1")]}},
+        }
+    )
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    playlist = (await db_session.execute(select(Playlist))).scalar_one()
+
+    async def _explode(*args, **kwargs):
+        raise RuntimeError("catalog write exploded")
+
+    monkeypatch.setattr(provider_catalog, "upsert_catalog_contents", _explode)
+
+    result = await _run_refresh(db_session, engine, fake_redis, external_library, "playlist", "pl-1")
+    assert result["status"] == "failed"
+
+    item = await _external_item(db_session, external_library, "playlist", "pl-1")
+    assert item.contents_error == "catalog write exploded"
+    assert item.contents_fetched_at is None
+
+    envelope = next(e for e in published if e["type"] == "external_contents_refreshed")
+    assert envelope["data"]["state"] == "error"
+    assert envelope["user_id"] == str(owner.id)
+    assert envelope["data"]["entity_id"] == str(playlist.id)
 
 
 # ---------------------------------------------------------------------------

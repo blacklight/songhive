@@ -146,13 +146,7 @@ async def find_external_item(
     return result.scalars().first()
 
 
-async def _try_enqueue(
-    item: ExternalItem,
-    kind: str,
-    *,
-    force: bool,
-    redis,
-) -> bool:
+async def _try_enqueue(item: ExternalItem, kind: str, *, redis) -> bool:
     """Acquire the dedupe lock and enqueue the refresh task."""
     if redis is None:
         from ..config.loader import load_config
@@ -177,7 +171,6 @@ async def _try_enqueue(
         str(item.external_library_id),
         kind,
         item.provider_key,
-        force,
     )
     return True
 
@@ -235,7 +228,7 @@ async def ensure_contents(
         needs_refresh = False
 
     if needs_refresh:
-        await _try_enqueue(item, entity_kind, force=force, redis=redis)
+        await _try_enqueue(item, entity_kind, redis=redis)
 
     if never_fetched:
         state = "never_fetched"

@@ -83,10 +83,10 @@ def _track_album(track: Track) -> Optional[Album]:
 
 def _track_external_ref(track: Track):
     """Return the active external reference (file- or entity-backed)."""
-    external = getattr(track, "external_track", None)
+    external = getattr(track, "external_track", None) if _is_loaded(track, "external_track") else None
     if external is not None and external.state == "active":
         return external
-    entity = getattr(track, "external_item", None)
+    entity = getattr(track, "external_item", None) if _is_loaded(track, "external_item") else None
     if entity is not None and entity.state == "active":
         return entity
     return None

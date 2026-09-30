@@ -394,7 +394,16 @@
   `sync._resolve_sha256` never treats it as an audio hash. Changing an
   external library's visibility must go through
   `services.music.propagate_external_library_visibility` so synced `Track`
-  rows stay consistent with the backing `Library`.
+  rows stay consistent with the backing `Library`. Provider HTTP calls must
+  never run while a write transaction is open: `provider_catalog_entries`
+  has a unique key per `(provider_type, kind, provider_key)` and plain
+  `INSERT`s, so an uncommitted batch blocks every concurrent writer for the
+  whole remote fetch (lazy playlist refreshes serialized ~30 min behind one
+  slow TIDAL backfill). `sync._plan_artist_image_backfill` /
+  `_fetch_artist_image_payloads` / `_store_artist_images` split the artist
+  image backfill into DB-read/provider-fetch/DB-write phases, and
+  `tasks.external_libraries._refresh_external_contents` commits between
+  phases — keep that shape when adding provider calls.
   OAuth-capable providers register an `OAuthProviderSpec` in
   `external/oauth.py` (Dropbox and Google Drive do today;
   Spotify/Tidal/YouTube are planned): the generic begin/callback/claim routes

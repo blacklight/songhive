@@ -29,9 +29,9 @@ from .sync import (
     _apply_entity_artist,
     _apply_entity_playlist,
     _apply_entity_track,
-    _backfill_artist_images,
     _catalog_ttl_seconds,
     _utcnow,
+    backfill_artist_images,
 )
 from .types import (
     ExternalAlbumMetadata,
@@ -138,7 +138,7 @@ async def materialize_provider_entity(
         elif isinstance(item, ExternalPlaylistMetadata):
             entity = await _apply_entity_playlist(session, external_library, item, counters, lazy=lazy)
 
-    await _backfill_artist_images(
+    await backfill_artist_images(
         session,
         adapter,
         config,

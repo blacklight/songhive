@@ -30,7 +30,7 @@ const playerStore = usePlayerStore();
 playerEngine.init({
   onTimeUpdate: (t) => playerStore.updateTime(t),
   onDuration: (d) => playerStore.updateDuration(d),
-  onEnded: () => playerStore.next(),
+  onEnded: () => playerStore.handleEnded(),
   onStateChange: (s) => playerStore.setPlaybackState(s),
   onError: (err) => {
     playerStore.setPlaybackState("error");

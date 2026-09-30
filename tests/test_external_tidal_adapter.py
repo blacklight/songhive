@@ -464,12 +464,24 @@ def _patch_remux_pipeline(monkeypatch, captured: dict, *, cover: bool = False):
         path.write_bytes(b"JPEG")
         return path
 
+    async def _prefetch(urls, workdir, *, timeout):
+        captured["prefetched"] = list(urls)
+        workdir = Path(workdir)
+        workdir.mkdir(parents=True, exist_ok=True)
+        parts = []
+        for i, _url in enumerate(urls):
+            part = workdir / f"seg{i:06d}"
+            part.write_bytes(b"SEG")
+            parts.append(part.as_posix())
+        return parts
+
     async def _ffmpeg(args, *, timeout):
         captured.setdefault("ffmpeg", []).append(args)
         Path(args[-1]).write_bytes(b"TAGGED")
 
     monkeypatch.setattr(tidal_stream, "_resolve_manifest", _manifest)
     monkeypatch.setattr(tidal_remux, "_fetch_url_to_file", _fetch)
+    monkeypatch.setattr(tidal_remux, "_prefetch_segments", _prefetch)
     monkeypatch.setattr(tidal_remux, "_fetch_cover", _cover)
     monkeypatch.setattr(tidal_remux, "_run_ffmpeg", _ffmpeg)
     monkeypatch.setattr(tidal_remux, "downloads_allowed", lambda: True)
@@ -598,6 +610,10 @@ async def test_download_mpd_remuxes_via_playlist(monkeypatch):
     assert "-protocol_whitelist" in args
     assert "file,http,https,tcp,tls,crypto" in joined
     assert any(a.endswith(".m3u8") for a in args)
+    # Segments were prefetched locally rather than fetched serially by ffmpeg.
+    assert captured["prefetched"] == captured["manifest"]["urls"]
+    # mp4 output is written moov-first so browsers need no tail probe.
+    assert "-movflags" in args and "+faststart" in args
     # Cover attached as a second input.
     assert "attached_pic" in joined
     stream.path.unlink(missing_ok=True)
@@ -635,10 +651,20 @@ async def test_remux_mode_returns_seekable_cached_file(monkeypatch, tmp_path):
 
     from songhive.external._tidal import remux as tidal_remux
 
+    async def _prefetch(urls, workdir, *, timeout):
+        workdir.mkdir(parents=True, exist_ok=True)
+        parts = []
+        for i, _url in enumerate(urls):
+            part = workdir / f"seg{i:06d}"
+            part.write_bytes(b"X")
+            parts.append(part.as_posix())
+        return parts
+
     async def _remux(m3u8, output, *, timeout, metadata=None, cover_path=None, container="flac"):
         builds.append(m3u8)
         output.write_bytes(b"REMUXED")
 
+    monkeypatch.setattr(tidal_remux, "_prefetch_segments", _prefetch)
     monkeypatch.setattr(tidal_remux, "remux_playlist_to_file", _remux)
 
     first = await tidal_stream.open_stream(_config(mpd_mode="remux"), _item())
@@ -675,3 +701,66 @@ async def test_segments_mode_writes_no_cache_files(monkeypatch, tmp_path):
     assert stream.kind == "iterator"
     await stream.iterator.aclose()
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_prefetch_segments_runs_concurrently_and_in_order(monkeypatch, tmp_path):
+    """Segment prefetch must be parallel and preserve manifest order."""
+    import asyncio
+    from pathlib import Path
+
+    import httpx
+
+    from songhive.external._tidal import remux as tidal_remux
+
+    inflight = 0
+    max_inflight = 0
+    payloads = {f"/seg-{i}.m4s": f"data-{i}".encode() for i in range(20)}
+
+    async def _handler(request):
+        nonlocal inflight, max_inflight
+        inflight += 1
+        max_inflight = max(max_inflight, inflight)
+        await asyncio.sleep(0.02)
+        inflight -= 1
+        return httpx.Response(200, content=payloads[request.url.path])
+
+    transport = httpx.MockTransport(_handler)
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        tidal_remux.httpx,
+        "AsyncClient",
+        lambda *a, **kw: real_client(*a, transport=transport, **kw),
+    )
+
+    urls = [f"https://sp-pr-fa.audio.tidal.com/seg-{i}.m4s" for i in range(20)]
+    parts = await tidal_remux._prefetch_segments(urls, tmp_path / "parts", timeout=30.0)
+
+    assert max_inflight > 1  # parallel — a serial run never exceeds 1
+    assert len(parts) == len(urls)
+    for i, part in enumerate(parts):
+        assert Path(part).read_bytes() == f"data-{i}".encode()
+
+
+@pytest.mark.asyncio
+async def test_prefetch_segments_propagates_http_errors(monkeypatch, tmp_path):
+    import httpx
+
+    from songhive.external._tidal import remux as tidal_remux
+    from songhive.external.errors import ExternalItemNotFound
+
+    async def _handler(request):
+        status = 404 if request.url.path.endswith("seg-1.m4s") else 200
+        return httpx.Response(status, content=b"x")
+
+    transport = httpx.MockTransport(_handler)
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        tidal_remux.httpx,
+        "AsyncClient",
+        lambda *a, **kw: real_client(*a, transport=transport, **kw),
+    )
+
+    urls = [f"https://sp-pr-fa.audio.tidal.com/seg-{i}.m4s" for i in range(3)]
+    with pytest.raises(ExternalItemNotFound):
+        await tidal_remux._prefetch_segments(urls, tmp_path / "parts", timeout=30.0)

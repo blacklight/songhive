@@ -10,6 +10,8 @@ import {
   deletePlaylistImage,
   uploadPlaylistCover,
   deletePlaylistCover,
+  playlistItemToQueueTrack,
+  type PlaylistItemResponse,
   type PlaylistResponse,
   type PlaylistCreate,
   type PlaylistUpdate,
@@ -144,5 +146,57 @@ describe("playlists api", () => {
     expect(apiRequest).toHaveBeenCalledWith("/playlists/p1/cover", {
       method: "DELETE",
     });
+  });
+});
+
+describe("playlistItemToQueueTrack", () => {
+  it("derives the player display fields from the nested track response", () => {
+    // QueueTrack's artist_name/album_title/artwork_url don't exist on a raw
+    // TrackResponse — shuffle-play chunks fetched outside the visible list
+    // must still map them from artist/album/image_url.
+    const item: PlaylistItemResponse = {
+      item_id: "item-1",
+      position: 0,
+      type: "track",
+      track: {
+        id: "t1",
+        title: "Song One",
+        artist_id: "a1",
+        album_id: "al1",
+        extra_artists: [],
+        visibility: "public",
+        tags: [],
+        genres: [],
+        in_collection: false,
+        is_external: false,
+        image_url: "https://example.com/art.jpg",
+        artist: { id: "a1", name: "The Larks" },
+        album: {
+          id: "al1",
+          title: "Meadowland",
+          artist_id: "a1",
+          visibility: "public",
+        },
+      },
+      episode: null,
+    };
+
+    const track = playlistItemToQueueTrack(item);
+
+    expect(track?.id).toBe("t1");
+    expect(track?.artist_name).toBe("The Larks");
+    expect(track?.album_title).toBe("Meadowland");
+    expect(track?.artwork_url).toBe("https://example.com/art.jpg");
+  });
+
+  it("returns null for items without a playable payload", () => {
+    const item: PlaylistItemResponse = {
+      item_id: "item-1",
+      position: 0,
+      type: "track",
+      track: null,
+      episode: null,
+    };
+    expect(playlistItemToQueueTrack(item)).toBeNull();
   });
 });

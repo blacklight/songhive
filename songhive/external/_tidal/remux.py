@@ -126,7 +126,13 @@ async def remux_playlist_to_file(
         if cover_path is not None:
             args += ["-map", "1", "-c:v", "copy", "-disposition:v:0", "attached_pic"]
         args += _metadata_args(metadata or {})
-        args += ["-f", "mp4" if container == "aac" else "flac", "-c", "copy", str(output)]
+        args += ["-f", "mp4" if container == "aac" else "flac", "-c", "copy"]
+        if container == "aac":
+            # moov at the front: without it the atom lands at EOF and a browser
+            # must fetch the file tail (an extra full round trip) before it can
+            # demux anything.
+            args += ["-movflags", "+faststart"]
+        args += [str(output)]
         await _run_ffmpeg(args, timeout=timeout)
     finally:
         playlist_path.unlink(missing_ok=True)
@@ -146,7 +152,6 @@ async def remux_stream(
     config = load_config([])
     cache = get_remote_audio_cache(config)
     cache_key = f"tidal:{track_id}:{quality}"
-    m3u8 = segments_m3u8(urls)
     timeout = max(300.0, _proxy_timeout())
 
     # The FLAC muxer only accepts a FLAC stream; AAC (and any other codec
@@ -155,7 +160,21 @@ async def remux_stream(
     ext = ".flac" if codec == "flac" else ".m4a"
 
     async def build(tmp: Path) -> None:
-        await remux_playlist_to_file(m3u8, tmp, timeout=timeout, container=container)
+        # ffmpeg's HLS demuxer fetches the manifest's segments one HTTP
+        # request at a time; prefetching them concurrently turns cold-play
+        # latency from one round-trip per segment into roughly one per
+        # parallelism window.
+        parts_dir = tmp.parent / f"{tmp.name}.parts"
+        try:
+            parts = await _prefetch_segments(urls, parts_dir, timeout=timeout)
+            await remux_playlist_to_file(
+                segments_m3u8(parts),
+                tmp,
+                timeout=timeout,
+                container=container,
+            )
+        finally:
+            shutil.rmtree(parts_dir, ignore_errors=True)
 
     path = await cache.get_or_build(cache_key, build, ext=ext)
     return ExternalStream(
@@ -171,19 +190,50 @@ async def remux_stream(
 async def _fetch_url_to_file(url: str, output: Path, *, timeout: float, max_bytes: int) -> int:
     """Download ``url`` to ``output``, enforcing the proxy byte cap."""
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        async with client.stream("GET", url) as response:
-            if response.status_code >= 400:
-                raise ExternalItemNotFound(f"TIDAL media fetch failed ({response.status_code})")
-            total = 0
-            with open(output, "wb") as fh:
-                async for chunk in response.aiter_bytes(_FETCH_CHUNK_BYTES):
-                    if not chunk:
-                        continue
-                    total += len(chunk)
-                    if max_bytes and total > max_bytes:
-                        raise ExternalLibraryError("TIDAL download exceeds the size cap")
-                    fh.write(chunk)
+        return await _stream_url_to_file(client, url, output, max_bytes)
+
+
+async def _stream_url_to_file(client: httpx.AsyncClient, url: str, output: Path, max_bytes: int) -> int:
+    """Stream ``url`` to ``output`` using an existing client."""
+    async with client.stream("GET", url) as response:
+        if response.status_code >= 400:
+            raise ExternalItemNotFound(f"TIDAL media fetch failed ({response.status_code})")
+        total = 0
+        with open(output, "wb") as fh:
+            async for chunk in response.aiter_bytes(_FETCH_CHUNK_BYTES):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if max_bytes and total > max_bytes:
+                    raise ExternalLibraryError("TIDAL download exceeds the size cap")
+                fh.write(chunk)
     return total
+
+
+_SEGMENT_PARALLELISM = 8
+
+
+async def _prefetch_segments(urls: list[str], workdir: Path, *, timeout: float) -> list[str]:
+    """Download every segment URL concurrently into ``workdir``.
+
+    Returns the local file paths in manifest order (``urls[0]`` is the init
+    segment). One shared client plus a bounded semaphore keeps the burst
+    parallel without opening a connection per segment.
+    """
+    workdir.mkdir(parents=True, exist_ok=True)
+    sem = asyncio.Semaphore(_SEGMENT_PARALLELISM)
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout), follow_redirects=True) as client:
+
+        async def _one(index: int, url: str) -> str:
+            # The .m4s suffix matters: ffmpeg's HLS demuxer rejects segment
+            # files whose extension is not in its allowed list.
+            part = workdir / f"seg{index:06d}.m4s"
+            async with sem:
+                await _stream_url_to_file(client, url, part, 0)
+            return part.as_posix()
+
+        return list(await asyncio.gather(*(_one(i, url) for i, url in enumerate(urls))))
 
 
 async def _fetch_cover(url: Optional[str], workdir: Path, *, timeout: float) -> Optional[Path]:
@@ -290,9 +340,11 @@ async def download_track(config: dict, item, *, fmt: Optional[str] = None) -> Ex
 
     output = workdir / f"track{os.getpid()}.{ext}"
     if manifest.get("mode") == "mpd":
-        m3u8 = segments_m3u8(urls)
+        # Same parallel prefetch as the streaming path — sequential
+        # segment fetches are the dominant cost otherwise.
+        parts = await _prefetch_segments(urls, workdir / "segments", timeout=timeout)
         await remux_playlist_to_file(
-            m3u8,
+            segments_m3u8(parts),
             output,
             timeout=timeout,
             metadata=tags,

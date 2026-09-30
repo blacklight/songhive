@@ -3,6 +3,7 @@ import { apiRequest, apiRequestWithHeaders } from "./client";
 import type { ProviderSyncStatus } from "./providerSync";
 import type { RemoteObject } from "./remote";
 import type { QueueTrack } from "@/player/types";
+import { toQueueTrack } from "@/player/enrich";
 import { remoteObjectToQueueTrack } from "@/utils/remoteObject";
 
 export type PlaylistResponse = components["schemas"]["PlaylistResponse"] & {
@@ -336,7 +337,9 @@ export function playlistItemToQueueTrack(
   item: PlaylistItemResponse,
 ): QueueTrack | null {
   if (item.type === "track" && item.track) {
-    return item.track as QueueTrack;
+    // QueueTrack needs the denormalized artist_name/album_title/artwork_url
+    // fields — derive them from the nested artist/album/image_url data.
+    return toQueueTrack(item.track);
   }
   if (item.type === "remote" && item.remote) {
     // Keep unplayable remote items in the list so they can be removed.

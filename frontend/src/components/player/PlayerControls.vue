@@ -116,8 +116,7 @@ const nextDisabled = computed(() => !store.hasNext && store.repeat === "off");
   position: relative;
 }
 
-.player-controls__repeat--all::after,
-.player-controls__repeat--one::after {
+.player-controls__repeat--all::after {
   content: "";
   position: absolute;
   bottom: 0.1rem;
@@ -127,5 +126,23 @@ const nextDisabled = computed(() => !store.hasNext && store.repeat === "off");
   height: 0.25rem;
   border-radius: var(--radius-full);
   background-color: currentColor;
+}
+
+.player-controls__repeat--one::after {
+  content: "1";
+  position: absolute;
+  top: 0.05rem;
+  right: 0.05rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-size: 0.55rem;
+  font-weight: 700;
+  line-height: 1;
 }
 </style>

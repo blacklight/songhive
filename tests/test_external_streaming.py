@@ -280,3 +280,24 @@ class TestExternalStreamHandler(tornado.testing.AsyncHTTPTestCase):
 
         self.assertEqual(response.code, 200)
         self.assertEqual(response.body, data)
+
+    def test_resolve_track_loads_no_relationships(self):
+        """_resolve_track must not pay the Track selectin cascade per request.
+
+        Every ``lazy="selectin"`` relationship on ``Track`` is an extra SELECT
+        round-trip before the first streamed byte; the handler only needs
+        column attributes plus ``audio_file``.
+        """
+        from sqlalchemy import inspect as sa_inspect
+
+        async def _run():
+            async with get_session() as session:
+                handler = MagicMock()
+                track, stored = await StreamHandler._resolve_track(handler, session, str(self.track.id))
+                return sa_inspect(track).unloaded, stored
+
+        unloaded, stored = self.io_loop.run_sync(_run)
+        self.assertIsNone(stored)  # external track: no stored file
+        self.assertIn("artist", unloaded)
+        self.assertIn("external_track", unloaded)
+        self.assertIn("external_item", unloaded)

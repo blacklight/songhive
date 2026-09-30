@@ -190,6 +190,31 @@ describe("PlayerBar", () => {
     expect(store.currentTrack?.id).toBe("b");
   });
 
+  it("marks the repeat button distinctly for repeat-all and repeat-one", async () => {
+    const { wrapper, store } = await mountPlayerBar();
+    store.playAll([makeTrack("a"), makeTrack("b")], 0);
+    await flushPromises();
+
+    const repeatButton = wrapper.find(
+      ".player-bar__full .player-controls__repeat",
+    );
+    expect(repeatButton.exists()).toBe(true);
+    expect(repeatButton.classes()).toContain("player-controls__repeat--off");
+    expect(repeatButton.attributes("aria-pressed")).toBe("false");
+
+    store.cycleRepeat();
+    await flushPromises();
+    expect(repeatButton.classes()).toContain("player-controls__repeat--all");
+    expect(repeatButton.attributes("aria-pressed")).toBe("true");
+
+    store.cycleRepeat();
+    await flushPromises();
+    expect(repeatButton.classes()).toContain("player-controls__repeat--one");
+    expect(repeatButton.classes()).not.toContain(
+      "player-controls__repeat--all",
+    );
+  });
+
   it("toggles the QueuePanel", async () => {
     const { wrapper, store } = await mountPlayerBar();
     store.playAll([makeTrack("a"), makeTrack("b")], 0);

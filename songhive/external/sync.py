@@ -181,7 +181,8 @@ def _item_matches_existing(item: ExternalItemRef, external_track: ExternalTrack)
 
 
 def _lean(stmt):
-    """Suppress relationship eager-loads on a per-item entity select.
+    """
+    Suppress relationship eager-loads on a per-item entity select.
 
     Model relationships are almost all ``lazy="selectin"`` and selectin
     loading cascades: a single ``select(Track)`` otherwise detonates into
@@ -252,7 +253,6 @@ async def _apply_metadata(
     external_track: ExternalTrack,
     external_library: ExternalLibrary,
     capabilities: ExternalLibraryCapabilities,
-    sha256: str,
 ) -> MetadataDecision:
     """Create, update, or leave a Songhive track untouched based on metadata rules."""
     current_fingerprint = _metadata_fingerprint(metadata)
@@ -485,7 +485,6 @@ async def _process_item(
         external_track,
         external_library,
         capabilities,
-        sha256,
     )
 
     track = await _load_existing_track(session, external_track)
@@ -660,7 +659,106 @@ def _queue_artist_image(counters: RunCounters, artist_id: Optional[str], provide
         counters.artist_image_backlog[str(artist_id)] = provider_key
 
 
-async def _backfill_artist_images(
+async def _plan_artist_image_backfill(
+    session: AsyncSession,
+    adapter: Any,
+    config: dict,
+    backlog: dict[str, str],
+    provider_type: str,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """
+    Split ``backlog`` (artist_id → provider_key) into images resolvable
+    from the provider catalog and provider keys that still need a fetch.
+
+    Pure database reads — no provider calls — so it may run inside the
+    caller's open transaction.
+    """
+    from ..services.provider_catalog import get_catalog_entries
+
+    imageless = (
+        (
+            await session.execute(
+                _lean(select(Artist.id)).where(
+                    Artist.id.in_(backlog), or_(Artist.image_url.is_(None), Artist.image_url == "")
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pending = {str(aid): backlog[str(aid)] for aid in imageless if str(aid) in backlog}
+    if not pending:
+        return {}, {}
+
+    cached = await get_catalog_entries(session, provider_type, "artist", sorted(set(pending.values())))
+    images: dict[str, str] = {}
+    to_fetch: dict[str, str] = {}
+    for artist_id, provider_key in pending.items():
+        entry = cached.get(provider_key)
+        meta = None
+        if entry is not None and isinstance(entry.payload, dict):
+            meta = adapter.entity_from_payload(config, "artist", entry.payload)
+        if meta is not None and getattr(meta, "image_url", None):
+            images[artist_id] = meta.image_url
+        elif entry is None:
+            to_fetch[artist_id] = provider_key
+    return images, to_fetch
+
+
+async def _fetch_artist_image_payloads(
+    adapter: Any,
+    config: dict,
+    to_fetch: dict[str, str],
+    provider_type: str,
+) -> tuple[dict[str, str], list[dict]]:
+    """Fetch the provider payload for each ``to_fetch`` artist sequentially.
+
+    Pure provider I/O: callers run this with no transaction open so slow or
+    rate-limited provider calls never pin database locks.
+    """
+    images: dict[str, str] = {}
+    fetched: list[dict] = []
+    for artist_id, provider_key in to_fetch.items():
+        try:
+            payload = await adapter.fetch_entity_payload(config, "artist", provider_key)
+        except Exception:
+            logger.debug("Artist payload fetch failed: %s/%s", provider_type, provider_key, exc_info=True)
+            continue
+        if not isinstance(payload, dict):
+            continue
+        fetched.append(payload)
+        meta = adapter.entity_from_payload(config, "artist", payload)
+        if meta is not None and getattr(meta, "image_url", None):
+            images[artist_id] = meta.image_url
+    return images, fetched
+
+
+async def _store_artist_images(
+    session: AsyncSession,
+    provider_type: str,
+    images: dict[str, str],
+    fetched: list[dict],
+    catalog_ttl: Optional[int],
+) -> None:
+    """Persist fetched artist payloads and apply image URLs (short write)."""
+    from ..services.provider_catalog import upsert_catalog_entries
+
+    if fetched:
+        try:
+            async with session.begin_nested():
+                await upsert_catalog_entries(session, provider_type, "artist", fetched, ttl_seconds=catalog_ttl)
+        except Exception:
+            logger.debug("Artist catalog upsert failed during image backfill", exc_info=True)
+
+    for artist_id, image_url in images.items():
+        await session.execute(
+            update(Artist)
+            .where(Artist.id == artist_id, or_(Artist.image_url.is_(None), Artist.image_url == ""))
+            .values(image_url=image_url)
+        )
+
+
+async def backfill_artist_images(
     session: AsyncSession,
     adapter: Any,
     config: dict,
@@ -677,68 +775,15 @@ async def _backfill_artist_images(
     refetches at ``catalog_ttl`` so artists that genuinely have no image are
     not re-requested every sync.
     """
-    from ..services.provider_catalog import get_catalog_entries, upsert_catalog_entries
-
     backlog = counters.artist_image_backlog
     counters.artist_image_backlog = {}
     if not backlog:
         return
 
-    imageless = (
-        (
-            await session.execute(
-                _lean(select(Artist.id)).where(
-                    Artist.id.in_(backlog), or_(Artist.image_url.is_(None), Artist.image_url == "")
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    pending = {str(aid): backlog[str(aid)] for aid in imageless if str(aid) in backlog}
-    if not pending:
-        return
-
-    cached = await get_catalog_entries(session, provider_type, "artist", sorted(set(pending.values())))
-    images: dict[str, str] = {}
-    to_fetch: dict[str, str] = {}
-    for artist_id, provider_key in pending.items():
-        entry = cached.get(provider_key)
-        meta = None
-        if entry is not None and isinstance(entry.payload, dict):
-            meta = adapter.entity_from_payload(config, "artist", entry.payload)
-        if meta is not None and getattr(meta, "image_url", None):
-            images[artist_id] = meta.image_url
-        elif entry is None:
-            to_fetch[artist_id] = provider_key
-
-    fetched: list[dict] = []
-    for artist_id, provider_key in to_fetch.items():
-        try:
-            payload = await adapter.fetch_entity_payload(config, "artist", provider_key)
-        except Exception:
-            logger.debug("Artist payload fetch failed: %s/%s", provider_type, provider_key, exc_info=True)
-            continue
-        if not isinstance(payload, dict):
-            continue
-        fetched.append(payload)
-        meta = adapter.entity_from_payload(config, "artist", payload)
-        if meta is not None and getattr(meta, "image_url", None):
-            images[artist_id] = meta.image_url
-
-    if fetched:
-        try:
-            async with session.begin_nested():
-                await upsert_catalog_entries(session, provider_type, "artist", fetched, ttl_seconds=catalog_ttl)
-        except Exception:
-            logger.debug("Artist catalog upsert failed during image backfill", exc_info=True)
-
-    for artist_id, image_url in images.items():
-        await session.execute(
-            update(Artist)
-            .where(Artist.id == artist_id, or_(Artist.image_url.is_(None), Artist.image_url == ""))
-            .values(image_url=image_url)
-        )
+    images, to_fetch = await _plan_artist_image_backfill(session, adapter, config, backlog, provider_type)
+    fetched_images, fetched = await _fetch_artist_image_payloads(adapter, config, to_fetch, provider_type)
+    images.update(fetched_images)
+    await _store_artist_images(session, provider_type, images, fetched, catalog_ttl)
 
 
 async def _find_entity_artist(
@@ -1630,7 +1675,18 @@ async def _sync_entity_library(
     if since is None:
         await _reconcile_missing_entities(session, external_library, capabilities, run, counters)
 
-    await _backfill_artist_images(session, adapter, config, counters, provider_type, catalog_ttl=catalog_ttl)
+    if counters.artist_image_backlog:
+        # Commit the entity passes before the provider fetches so the sync's
+        # pending writes — and their catalog/entity locks — are released
+        # while remote image lookups run.
+        backlog = counters.artist_image_backlog
+        counters.artist_image_backlog = {}
+        images, to_fetch = await _plan_artist_image_backfill(session, adapter, config, backlog, provider_type)
+        await session.commit()
+        fetched_images, fetched = await _fetch_artist_image_payloads(adapter, config, to_fetch, provider_type)
+        images.update(fetched_images)
+        await _store_artist_images(session, provider_type, images, fetched, catalog_ttl)
+        await session.commit()
 
 
 def _maybe_enqueue_musicbrainz(config: Any, track_ids: set[str]) -> None:

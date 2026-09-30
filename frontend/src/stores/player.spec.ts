@@ -173,7 +173,7 @@ describe("usePlayerStore", () => {
     expect(engine.play).toHaveBeenCalled();
   });
 
-  it("next with repeat one restarts the same track", () => {
+  it("handleEnded restarts the same track when repeat is one", () => {
     const store = usePlayerStore();
     const engine = createMockEngine();
     store.registerEngine(engine);
@@ -186,12 +186,139 @@ describe("usePlayerStore", () => {
     engine.load.mockClear();
     engine.seek.mockClear();
     engine.play.mockClear();
-    store.next();
+    store.handleEnded();
 
     expect(store.index).toBe(0);
     expect(engine.seek).toHaveBeenCalledWith(0);
     expect(engine.load).not.toHaveBeenCalled();
     expect(engine.play).toHaveBeenCalled();
+  });
+
+  it("next still advances to the next track when repeat is one", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [makeTrack("a"), makeTrack("b"), makeTrack("c")];
+    store.playAll(tracks, 0);
+    store.cycleRepeat();
+    store.cycleRepeat();
+    expect(store.repeat).toBe("one");
+
+    engine.load.mockClear();
+    engine.seek.mockClear();
+    store.next();
+
+    expect(store.index).toBe(1);
+    expect(engine.load).toHaveBeenCalledWith(tracks[1]);
+    expect(engine.seek).not.toHaveBeenCalled();
+  });
+
+  it("next wraps to the start when repeat is one", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [makeTrack("a"), makeTrack("b")];
+    store.playAll(tracks, 1);
+    store.cycleRepeat();
+    store.cycleRepeat();
+    expect(store.repeat).toBe("one");
+
+    engine.load.mockClear();
+    store.next();
+
+    expect(store.index).toBe(0);
+    expect(engine.load).toHaveBeenCalledWith(tracks[0]);
+  });
+
+  it("prev wraps to the last track when repeat is one", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [makeTrack("a"), makeTrack("b"), makeTrack("c")];
+    store.playAll(tracks, 0);
+    store.cycleRepeat();
+    store.cycleRepeat();
+    expect(store.repeat).toBe("one");
+
+    engine.load.mockClear();
+    store.prev();
+
+    expect(store.index).toBe(2);
+    expect(engine.load).toHaveBeenCalledWith(tracks[2]);
+  });
+
+  it("handleEnded advances to the next track when repeat is off", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [makeTrack("a"), makeTrack("b")];
+    store.playAll(tracks, 0);
+
+    engine.load.mockClear();
+    store.handleEnded();
+
+    expect(store.index).toBe(1);
+    expect(engine.load).toHaveBeenCalledWith(tracks[1]);
+  });
+
+  it("handleEnded pauses at the last track when repeat is off", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [makeTrack("a"), makeTrack("b")];
+    store.playAll(tracks, 1);
+    expect(store.isPlaying).toBe(true);
+
+    engine.load.mockClear();
+    engine.play.mockClear();
+    store.handleEnded();
+
+    expect(store.index).toBe(1);
+    expect(store.isPlaying).toBe(false);
+    expect(store.playbackState).toBe("paused");
+    expect(engine.load).not.toHaveBeenCalled();
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it("handleEnded is ignored while a session output drives playback", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const controller = {
+      playTrack: vi.fn(),
+      playAll: vi.fn(),
+      playAt: vi.fn(),
+      play: vi.fn(),
+      pause: vi.fn(),
+      next: vi.fn(),
+      prev: vi.fn(),
+      seek: vi.fn(),
+      toggleShuffle: vi.fn(),
+      setRepeat: vi.fn(),
+      setVolume: vi.fn(),
+      enqueue: vi.fn(),
+      enqueueNext: vi.fn(),
+      removeAt: vi.fn(),
+      clear: vi.fn(),
+    };
+    store.registerSessionController(controller);
+    store.setSessionMode(true);
+    store.setSessionState(
+      [makeTrack("a"), makeTrack("b")],
+      0,
+      "off",
+      false,
+      0,
+      true,
+      "playing",
+      180,
+    );
+
+    store.handleEnded();
+
+    expect(controller.next).not.toHaveBeenCalled();
+    expect(engine.load).not.toHaveBeenCalled();
+    expect(store.index).toBe(0);
   });
 
   it("next does nothing at the last track when repeat is off", () => {

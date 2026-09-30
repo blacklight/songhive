@@ -15,6 +15,8 @@ import aiofiles
 import httpx
 import tornado.iostream
 import tornado.web
+from sqlalchemy import select
+from sqlalchemy.orm import raiseload, selectinload
 
 from ..api.middleware.auth import decode_access_token, get_access_token_jti
 from ..config.schema import SonghiveConfig, effective_bitrate
@@ -35,9 +37,9 @@ from ..services.storage import StorageService
 from ..services.streaming import (
     cache_transcode,
     get_cached_transcode,
+    get_upload_for_track,
     record_listen,
     resolve_external_stream,
-    resolve_track_file,
 )
 from ..storage import get_storage
 from ..storage.base import StorageBackend
@@ -221,13 +223,28 @@ class StreamHandler(tornado.web.RequestHandler):
         return user
 
     async def _resolve_track(self, session, track_id: str) -> Optional[tuple[Track, Optional[StoredFile]]]:
-        """Resolve a track and its backing stored file, returning 404 when the track is missing."""
-        track = await session.get(Track, track_id)
+        """
+        Resolve a track and its backing stored file, returning 404 when the track is missing.
+
+        The select is deliberately lean: ``Track`` relationships are almost all
+        ``lazy="selectin"``, so a plain ``session.get`` detonates into ~10 extra
+        SELECTs before the first byte is served — on a remote database that is
+        over a second of pure round-trips per stream request. Callers only need
+        column attributes and ``audio_file``.
+        """
+        result = await session.execute(
+            select(Track).where(Track.id == track_id).options(raiseload("*"), selectinload(Track.audio_file))
+        )
+        track = result.scalar_one_or_none()
         if track is None:
             self._not_found()
             return None
 
-        stored_file = await resolve_track_file(session, track_id)
+        stored_file = track.audio_file
+        if stored_file is None:
+            upload = await get_upload_for_track(session, track_id)
+            if upload is not None:
+                stored_file = upload.stored_file
         return track, stored_file
 
     async def _check_access(self, session, track_id: str, user: Optional[User]) -> bool:
