@@ -614,6 +614,88 @@ def _fake_metadata():
     )
 
 
+def _upload_public_file(client, auth_headers, user, filename, content, content_type):
+    """Upload a non-audio public file and return its file id."""
+    response = client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": (filename, io.BytesIO(content), content_type)},
+        headers=auth_headers(user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    return response.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_check_rate_limit_limit_override(fake_redis):
+    """An explicit limit override is honored instead of the configured default."""
+    config = SonghiveConfig(
+        auth={
+            "rate_limit_enabled": True,
+            "rate_limit_requests": 10,
+            "rate_limit_window_seconds": 60,
+        }
+    )
+    request = _request()
+
+    await _check_rate_limit(request, config, fake_redis, scope="media", limit=1)
+    with pytest.raises(HTTPException) as exc_info:
+        await _check_rate_limit(request, config, fake_redis, scope="media", limit=1)
+    assert exc_info.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_check_rate_limit_zero_limit_disables(fake_redis):
+    """A limit of 0 disables the check entirely."""
+    config = SonghiveConfig(
+        auth={
+            "rate_limit_enabled": True,
+            "rate_limit_requests": 10,
+            "rate_limit_window_seconds": 60,
+        }
+    )
+    request = _request()
+
+    for _ in range(5):
+        await _check_rate_limit(request, config, fake_redis, scope="unlimited", limit=0)
+
+
+@pytest.mark.asyncio
+async def test_file_download_image_exempt_from_rate_limit(client, regular_user, auth_headers):
+    """image/* downloads never hit the media rate limit."""
+    client.app.state.config.auth.rate_limit_media_requests = 1
+    file_id = _upload_public_file(client, auth_headers, regular_user, "pic.png", b"\x89PNG-fake-bytes", "image/png")
+
+    for _ in range(5):
+        response = client.get(f"/api/v1/files/{file_id}/download")
+        assert response.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.asyncio
+async def test_file_download_uses_media_rate_limit(client, regular_user, auth_headers):
+    """Non-image downloads use rate_limit_media_requests, not rate_limit_requests."""
+    client.app.state.config.auth.rate_limit_requests = 1
+    client.app.state.config.auth.rate_limit_media_requests = 2
+    file_id = _upload_public_file(client, auth_headers, regular_user, "doc.txt", b"hello", "text/plain")
+
+    for _ in range(2):
+        response = client.get(f"/api/v1/files/{file_id}/download")
+        assert response.status_code == status.HTTP_200_OK
+
+    response = client.get(f"/api/v1/files/{file_id}/download")
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_file_download_media_limit_disabled(client, regular_user, auth_headers):
+    """rate_limit_media_requests = 0 disables media download limiting."""
+    client.app.state.config.auth.rate_limit_media_requests = 0
+    file_id = _upload_public_file(client, auth_headers, regular_user, "doc.txt", b"hello", "text/plain")
+
+    for _ in range(5):
+        response = client.get(f"/api/v1/files/{file_id}/download")
+        assert response.status_code == status.HTTP_200_OK
+
+
 def _upload_audio(client, auth_headers, user, content):
     """Upload an audio file and return (file_id, track_id)."""
     response = client.post(

@@ -1765,7 +1765,16 @@ alembic revision --autogenerate -m "add example column"
 - **Rate limiting** — Redis sliding-window; `rate_limit` (IP), `rate_limit_user_or_ip`
   (authenticated users keyed by id), and `rate_limit_account` (always per-user)
   FastAPI dependencies. Media `DELETE` endpoints use `rate_limit_account` for
-  per-user rate limiting on destructive operations. Fails open when Redis is unavailable.
+  per-user rate limiting on destructive operations. Byte-serving endpoints
+  (`GET /api/v1/files/{id}/download`, `GET /api/v1/tracks/{id}/download`) use
+  `rate_limit_file_download`/`rate_limit_media`, which draw from the looser
+  `auth.rate_limit_media_requests` budget (0 disables it) instead of
+  `rate_limit_requests`; `image/*` stored files are exempt entirely so
+  avatars, covers and image attachments survive federation-driven fetch
+  bursts from a single remote egress IP. Fails open when Redis is
+  unavailable. Downloaded files are content-addressed, so their responses
+  carry `Cache-Control: …, max-age=31536000, immutable` — `public` for
+  publicly visible files, `private` otherwise.
 - **CORS** — the API uses the credentialed `CORSMiddleware` allowlist from
   `server.cors_origins`. Read-only media endpoints
   (`GET /api/v1/files/{id}/download`, `GET /api/v1/tracks/{id}/download`, and

@@ -386,6 +386,15 @@ class AuthConfig(BaseSettings):
         default=60,
         description="Rate limit window in seconds",
     )
+    rate_limit_media_requests: int = Field(
+        default=60,
+        ge=0,
+        description=(
+            "Max file/track download requests allowed in a rate limit window "
+            "(per user or IP, per file); 0 disables download limiting. "
+            "image/* file downloads are always exempt."
+        ),
+    )
     trusted_proxy_hops: int = Field(
         default=0,
         description=(

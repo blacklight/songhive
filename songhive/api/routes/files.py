@@ -61,7 +61,7 @@ from ..deps import (
     get_storage_service,
     require_access,
 )
-from ..middleware.rate_limit import rate_limit, rate_limit_account
+from ..middleware.rate_limit import rate_limit, rate_limit_account, rate_limit_file_download
 from ..responses import TrackResponse, TrackSummary, build_track_summary
 from ._common import AudioImportOptions, HasOwnerId, redact_owner
 from .external_libraries import (
@@ -841,7 +841,14 @@ async def _download_stored_file_response(
 
     disposition = _sanitize_content_disposition(disposition, stored_file.content_type)
     filename = _sanitize_filename(stored_file.original_filename)
-    headers = {"X-Content-Type-Options": "nosniff"}
+    # Stored files are content-addressed by SHA-256, so the bytes behind a URL
+    # never change: they can be cached immutably. ``public`` is only sent for
+    # publicly visible files so shared caches never store ACL-gated content.
+    cache_scope = "public" if stored_file.visibility == Visibility.PUBLIC.value else "private"
+    headers = {
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": f"{cache_scope}, max-age=31536000, immutable",
+    }
 
     return FileResponse(
         path,
@@ -854,7 +861,7 @@ async def _download_stored_file_response(
 
 @router.get(
     "/{file_id}/download",
-    dependencies=[Depends(require_access("file")), Depends(rate_limit)],
+    dependencies=[Depends(require_access("file")), Depends(rate_limit_file_download)],
 )
 async def download_file(
     file_id: str,

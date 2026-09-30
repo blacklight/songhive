@@ -77,7 +77,7 @@ from ..deps import (
     get_storage_service,
     require_access,
 )
-from ..middleware.rate_limit import rate_limit_account, rate_limit_user_or_ip
+from ..middleware.rate_limit import rate_limit_account, rate_limit_media
 from ..responses import (
     TrackResponse,
     _is_loaded,
@@ -626,11 +626,10 @@ def _cleanup_temp_file(path: Union[str, Path]) -> None:
 
 @router.get(
     "/{track_id}/download",
-    dependencies=[Depends(require_access("track")), Depends(rate_limit_user_or_ip)],
+    dependencies=[Depends(require_access("track")), Depends(rate_limit_media)],
 )
 async def download_track(
     track_id: str,
-    request: Request,
     background_tasks: BackgroundTasks,
     disposition: Literal["inline", "attachment"] = Query("inline"),
     user: Optional[User] = Depends(get_current_user_optional),

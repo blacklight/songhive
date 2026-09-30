@@ -109,6 +109,7 @@ def test_auth_config_defaults():
     assert config.auth.rate_limit_enabled is True
     assert config.auth.rate_limit_requests == 10
     assert config.auth.rate_limit_window_seconds == 60
+    assert config.auth.rate_limit_media_requests == 60
     assert config.auth.secret_key
     assert config.auth.secret_key != "change-me-in-production"
     assert len(config.auth.secret_key.encode("utf-8")) >= 32

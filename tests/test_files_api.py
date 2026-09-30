@@ -120,6 +120,36 @@ def test_download_file(files_client, regular_user, auth_headers, upload_txt):
     assert 'filename="test.txt"' in response.headers["Content-Disposition"]
 
 
+def test_download_file_cache_headers_private(files_client, regular_user, auth_headers, upload_txt):
+    """Non-public files are served with a private immutable Cache-Control header."""
+    data, _ = upload_txt
+
+    response = files_client.get(
+        f"/api/v1/files/{data['id']}/download",
+        headers=auth_headers(regular_user),
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, max-age=31536000, immutable"
+
+
+def test_download_file_cache_headers_public(files_client, regular_user, auth_headers):
+    """Public files are served with a public immutable Cache-Control header."""
+    headers = auth_headers(regular_user)
+    response = files_client.post(
+        "/api/v1/files/upload?visibility=public",
+        files={"file": ("test.txt", io.BytesIO(b"hello"), "text/plain")},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    file_id = response.json()["id"]
+
+    response = files_client.get(f"/api/v1/files/{file_id}/download")
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+
+
 def test_download_file_range(files_client, regular_user, auth_headers, upload_txt):
     """Range requests are honored with a 206 Partial Content response."""
     data, content = upload_txt
