@@ -1797,6 +1797,8 @@
       "actions": "Azioni",
       "tags": "Tag",
       "playAll": "Riproduci tutto",
+      "shufflePlay": "Riproduzione casuale",
+      "shuffleEmpty": "Nessun brano riproducibile.",
       "trackCount": "Nessun brano | {count} brano | {count} brani",
       "albumCount": "Nessun album | {count} album | {count} album",
       "episodeCount": "Nessun episodio | {count} episodio | {count} episodi"

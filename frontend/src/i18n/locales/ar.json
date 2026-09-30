@@ -1797,6 +1797,8 @@
       "actions": "الإجراءات",
       "tags": "الوسوم",
       "playAll": "تشغيل الكل",
+      "shufflePlay": "تشغيل عشوائي",
+      "shuffleEmpty": "لا توجد مقاطع قابلة للتشغيل.",
       "trackCount": "لا مقاطع | مقطع واحد | مقطعان | {count} مقاطع | {count} مقطع | {count} مقطع",
       "albumCount": "لا ألبومات | ألبوم واحد | ألبومان | {count} ألبومات | {count} ألبوم | {count} ألبوم",
       "episodeCount": "لا حلقات | حلقة واحدة | حلقتان | {count} حلقات | {count} حلقة | {count} حلقة"

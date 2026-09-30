@@ -847,6 +847,7 @@ async def list_playlist_tracks_route(
                 "album_title",
                 "updated_at",
                 "release_year",
+                "random",
             },
             "position",
         )
@@ -929,6 +930,7 @@ async def list_playlist_items_route(
                 "album_title",
                 "updated_at",
                 "release_year",
+                "random",
             },
             "position",
         )

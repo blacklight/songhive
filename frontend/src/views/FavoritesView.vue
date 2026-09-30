@@ -8,6 +8,8 @@ import { listRemoteObjects, type RemoteObject } from "@/api/remote";
 import { listTracksWithMeta, type TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
 import { useToastStore } from "@/stores/toast";
+import { toQueueTrack } from "@/player/enrich";
+import { SHUFFLE_CHUNK_SIZE } from "@/composables/useShufflePlay";
 import type { QueueTrack } from "@/player/types";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
@@ -53,6 +55,20 @@ const {
     syncQuery: true,
   },
 );
+
+// A random chunk of all favorites so shuffle play isn't limited to the
+// loaded page. The active search filter applies, matching the list.
+const shuffleFetch = async (): Promise<QueueTrack[]> => {
+  const result = await listTracksWithMeta({
+    q: query.value || undefined,
+    favorited: true,
+    limit: SHUFFLE_CHUNK_SIZE,
+    offset: 0,
+    sort_by: "random",
+    include: "artist,album",
+  });
+  return result.tracks.map((track) => toQueueTrack(track));
+};
 
 const activeTab = ref<"tracks" | "albums" | "artists" | "playlists">("tracks");
 
@@ -219,6 +235,7 @@ onMounted(() => {
         :favorite-label="t('common.unfavorite')"
         :favorite-managed="true"
         :deletable="true"
+        :shuffle-fetch="shuffleFetch"
         @toggle-favorite="onToggleFavorite"
         @share="onTrackShare"
         @removed="onTracksRemoved"

@@ -5,6 +5,9 @@ import { useRoute, useRouter } from "vue-router";
 import { getApiErrorMessage } from "@/api/client";
 import { listTracksWithMeta } from "@/api/tracks";
 import type { TrackResponse } from "@/api/tracks";
+import { toQueueTrack } from "@/player/enrich";
+import { SHUFFLE_CHUNK_SIZE } from "@/composables/useShufflePlay";
+import type { QueueTrack } from "@/player/types";
 import type { ActivityListResponse, ActivityResponse } from "@/api/activities";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirmStore } from "@/stores/confirm";
@@ -95,6 +98,19 @@ const activityLoadingMore = ref(false);
 const page = computed(() => Math.floor(offset.value / LIMIT) + 1);
 const isTrackActive = computed(() => activeType.value === "track");
 const isActivityActive = computed(() => activeType.value === "activity");
+
+// A random chunk of the whole tagged/genre track set so shuffle play
+// isn't limited to the loaded page.
+const shuffleFetch = async (): Promise<QueueTrack[]> => {
+  const result = await listTracksWithMeta({
+    limit: SHUFFLE_CHUNK_SIZE,
+    offset: 0,
+    sort_by: "random",
+    include: "artist,album",
+    ...(props.kind === "genre" ? { genre: props.name } : { tag: props.name }),
+  });
+  return result.tracks.map((track) => toQueueTrack(track));
+};
 
 const icon = "tag";
 
@@ -457,6 +473,7 @@ onMounted(() => loadVisibleTypes());
       :show-artwork="true"
       :deletable="authStore.isAdmin"
       :auto-scroll="true"
+      :shuffle-fetch="shuffleFetch"
       @removed="load"
       @updated="load"
     />

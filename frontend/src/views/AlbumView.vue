@@ -31,6 +31,10 @@ import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useDownloadArchive } from "@/composables/useDownloadArchive";
 import { useM3uExport } from "@/composables/useM3uExport";
+import {
+  useShufflePlay,
+  SHUFFLE_CHUNK_SIZE,
+} from "@/composables/useShufflePlay";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useFeedLinks } from "@/composables/useFeedLinks";
 import type { QueueTrack } from "@/player/types";
@@ -209,6 +213,26 @@ const queueTracks = computed<QueueTrack[]>(() =>
     .filter((track) => !track.remote || track.stream_url || track.audio_url),
 );
 
+// A random chunk of the whole album so shuffle play isn't limited to the
+// loaded page.
+const shuffleFetch = async (): Promise<QueueTrack[]> => {
+  const tracks = await listTracks({
+    album_id: albumId.value,
+    limit: SHUFFLE_CHUNK_SIZE,
+    offset: 0,
+    sort_by: "random",
+    include: "artist,album",
+  });
+  return tracks.map((track) =>
+    toQueueTrack(track, {
+      artist_name: artistName.value,
+      album_title: album.value?.title,
+      artwork_url: album.value?.cover_url ?? undefined,
+    }),
+  );
+};
+const { shufflePlay } = useShufflePlay(shuffleFetch);
+
 const canShare = computed(() => isOwner.value || isPublic.value);
 
 const actions = computed(() => [
@@ -225,6 +249,14 @@ const actions = computed(() => [
     icon: "share-nodes",
     variant: "secondary" as const,
     visible: canShare.value,
+  },
+  {
+    key: "shuffle",
+    label: t("browse.detail.shufflePlay"),
+    icon: "shuffle",
+    variant: "secondary" as const,
+    visible: true,
+    disabled: queueTracks.value.length === 0,
   },
   {
     key: "enqueue",
@@ -301,6 +333,9 @@ async function onAction(key: string) {
   switch (key) {
     case "play":
       player.playAll(queueTracks.value);
+      break;
+    case "shuffle":
+      await shufflePlay();
       break;
     case "enqueue":
       for (const track of queueTracks.value) player.enqueue(track);
@@ -582,6 +617,7 @@ watch(
           :context="artistName"
           :show-artwork="true"
           :deletable="true"
+          :shuffle-fetch="shuffleFetch"
           @share="onTrackShare"
           @removed="onTracksRemoved"
           @updated="onTracksRemoved"

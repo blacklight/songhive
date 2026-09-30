@@ -573,6 +573,8 @@ def _apply_collection_tracks_query(stmt: Select[Any], query: str) -> Select[Any]
 
 def _track_sort_clause(sort_by: str, sort_dir: str) -> Tuple[Any, ...]:
     """Return ORDER BY clauses for a track list based on the requested field."""
+    if sort_by == "random":
+        return (func.random(),)
     artist_name = select(Artist.name).where(Artist.id == Track.artist_id).scalar_subquery()
     album_title = select(Album.title).where(Album.id == Track.album_id).scalar_subquery()
     album_release_year = select(Album.release_year).where(Album.id == Track.album_id).scalar_subquery()
@@ -751,8 +753,9 @@ async def list_tracks(
     )
     base_stmt = apply_access_filter(base_stmt, Track, user, "track")
 
-    # Album tracks are always ordered by disc and track number.
-    if album_id:
+    # Album tracks are always ordered by disc and track number — unless the
+    # caller asked for a random order (shuffle play across the album).
+    if album_id and sort_by != "random":
         base_stmt = base_stmt.order_by(
             _order_clause(Track.disc_number, "asc", nulls_last=True),
             _order_clause(Track.track_number, "asc", nulls_last=True),
@@ -1747,6 +1750,8 @@ def _playlist_item_sort_clause(sort_by: str, sort_dir: str) -> Tuple[Any, ...]:
     mixed list stays meaningfully ordered (episode title, podcast author as
     artist name, podcast title as album title, publish year as release year).
     """
+    if sort_by == "random":
+        return (func.random(),)
     if sort_by == "position":
         primary = _order_clause(PlaylistTrack.position, sort_dir)
         secondary = _order_clause(PlaylistTrack.id, sort_dir)

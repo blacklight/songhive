@@ -18,6 +18,8 @@ import {
 import { listRemoteObjects, type RemoteObject } from "@/api/remote";
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
+import { toQueueTrack } from "@/player/enrich";
+import { SHUFFLE_CHUNK_SIZE } from "@/composables/useShufflePlay";
 import { useCanManage } from "@/composables/useCanManage";
 import { useCollectionItem } from "@/composables/useCollectionItem";
 import { useEntityMeta } from "@/composables/useEntityMeta";
@@ -88,6 +90,19 @@ const {
     queryKey: "tracks",
   },
 );
+
+// A random chunk of the whole library so shuffle play isn't limited to
+// the loaded page. The active search filter applies, matching the list.
+const shuffleFetch = async (): Promise<QueueTrack[]> => {
+  const tracks = await listLibraryTracks(libraryId.value, {
+    q: tracksQuery.value || undefined,
+    limit: SHUFFLE_CHUNK_SIZE,
+    offset: 0,
+    sort_by: "random",
+    include: "artist,album",
+  });
+  return tracks.map((track) => toQueueTrack(track));
+};
 
 const { owner, visibilityText, visibilityIcon } = useEntityMeta(library);
 
@@ -416,6 +431,7 @@ watch(
           :context="library.name"
           :removable-from="removableFrom"
           :deletable="true"
+          :shuffle-fetch="shuffleFetch"
           @share="onTrackShare"
           @removed="onTracksRemoved"
           @updated="onTracksRemoved"

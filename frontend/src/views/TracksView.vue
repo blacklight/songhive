@@ -5,6 +5,8 @@ import { useChunkList } from "@/composables/useChunkList";
 import { useRemoteEntities } from "@/composables/useRemoteEntities";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { listTracksWithMeta, type TrackResponse } from "@/api/tracks";
+import { toQueueTrack } from "@/player/enrich";
+import { SHUFFLE_CHUNK_SIZE } from "@/composables/useShufflePlay";
 import type { QueueTrack } from "@/player/types";
 import {
   mergeEntityItems,
@@ -63,6 +65,21 @@ const {
   },
 );
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
+
+// A random chunk of the local catalog (search and collection filters
+// apply) so shuffle play isn't limited to the loaded page. Remote
+// entities are merged client-side and can't join the random ordering.
+const shuffleFetch = async (): Promise<QueueTrack[]> => {
+  const result = await listTracksWithMeta({
+    q: query.value || undefined,
+    collection: myCollection.value || undefined,
+    limit: SHUFFLE_CHUNK_SIZE,
+    offset: 0,
+    sort_by: "random",
+    include: "artist,album",
+  });
+  return result.tracks.map((track) => toQueueTrack(track));
+};
 
 // Federated tracks render in the same list, marked by TrackList's globe +
 // domain badge. The remote fetch follows the same search/collection/sort
@@ -251,6 +268,7 @@ watch(
         :loading-more="loadingMore"
         :loading-previous="loadingPrevious"
         :deletable="authStore.isAuthenticated"
+        :shuffle-fetch="shuffleFetch"
         @share="onTrackShare"
         @removed="onRemoved"
         @updated="onRemoved"

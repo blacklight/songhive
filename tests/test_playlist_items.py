@@ -192,6 +192,40 @@ async def test_items_lists_mixed_rows_in_position_order(client, db_session, regu
 
 
 @pytest.mark.asyncio
+async def test_items_random_sort_returns_mixed_chunk(client, db_session, regular_user, auth_headers, podcast):
+    """``sort_by=random`` draws a random page across mixed item types."""
+    playlist = _create_playlist(client, regular_user, auth_headers)
+    track = await _make_track(db_session, regular_user)
+    episodes = await _episodes(db_session, podcast)
+    headers = auth_headers(regular_user)
+
+    response = client.post(
+        f"/api/v1/playlists/{playlist['id']}/tracks",
+        json={
+            "track_ids": [str(track.id)],
+            "episode_ids": [str(episodes[0].id), str(episodes[1].id)],
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201
+
+    items = client.get(
+        f"/api/v1/playlists/{playlist['id']}/items",
+        params={"sort_by": "random", "limit": 100},
+        headers=headers,
+    ).json()
+    assert len(items) == 3
+    assert sorted(_item_types(items)) == ["episode", "episode", "track"]
+
+    page = client.get(
+        f"/api/v1/playlists/{playlist['id']}/items",
+        params={"sort_by": "random", "limit": 1},
+        headers=headers,
+    ).json()
+    assert len(page) == 1
+
+
+@pytest.mark.asyncio
 async def test_add_duplicate_episode_conflicts_then_allows(client, db_session, regular_user, auth_headers, podcast):
     """Duplicate episode ids produce a 409 unless ``allow_duplicates`` is set."""
     playlist = _create_playlist(client, regular_user, auth_headers)

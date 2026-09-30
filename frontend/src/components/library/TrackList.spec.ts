@@ -1471,4 +1471,60 @@ describe("TrackList", () => {
     expect(tracksApi.deleteTrack).not.toHaveBeenCalled();
     expect(wrapper.emitted("removed")?.[0]).toEqual([["track-1"]]);
   });
+
+  it("hides the shuffle button without a shuffle fetcher", async () => {
+    ({ wrapper } = mountTrackList({ tracks: [makeTrack()] }));
+    await flushPromises();
+
+    const labels = wrapper.findAll("button").map((b) => b.text());
+    expect(labels).not.toContain(i18n.global.t("browse.detail.shufflePlay"));
+  });
+
+  it("shuffle plays a fetched chunk when the shuffle button is clicked", async () => {
+    const chunk = [
+      makeTrack({ id: "s-1", title: "Shuffle One" }),
+      makeTrack({ id: "s-2", title: "Shuffle Two" }),
+    ];
+    const shuffleFetch = vi.fn(async () => chunk.map((t) => toQueueTrack(t)));
+    ({ wrapper } = mountTrackList({
+      tracks: [makeTrack()],
+      shuffleFetch,
+    }));
+    await flushPromises();
+
+    const button = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.detail.shufflePlay"));
+    expect(button).toBeDefined();
+    await button?.trigger("click");
+    await flushPromises();
+
+    expect(shuffleFetch).toHaveBeenCalledTimes(1);
+    const player = usePlayerStore();
+    expect(player.shuffle).toBe(true);
+    expect(new Set(player.queue.map((t) => t.id))).toEqual(
+      new Set(["s-1", "s-2"]),
+    );
+  });
+
+  it("filters unplayable rows out of the shuffled chunk", async () => {
+    const shuffleFetch = vi.fn(async () => [
+      toQueueTrack(makeTrack({ id: "s-1" })),
+      makeRemoteTrack({ id: "remote-x" }),
+    ]);
+    ({ wrapper } = mountTrackList({
+      tracks: [makeTrack()],
+      shuffleFetch,
+    }));
+    await flushPromises();
+
+    const button = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.detail.shufflePlay"));
+    await button?.trigger("click");
+    await flushPromises();
+
+    const player = usePlayerStore();
+    expect(player.queue.map((t) => t.id)).toEqual(["s-1"]);
+  });
 });

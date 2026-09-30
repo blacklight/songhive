@@ -79,6 +79,8 @@ export interface SessionController {
   setVolume(volume: number): void;
   enqueue(track: QueueTrack): void;
   enqueueNext(track: QueueTrack): void;
+  /** Append tracks to the end of the queue in one command. */
+  extendQueue?(tracks: QueueTrack[]): void;
   removeAt(index: number): void;
   clear(): void;
 }

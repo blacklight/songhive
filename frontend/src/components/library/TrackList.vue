@@ -7,6 +7,12 @@ import { useAuthStore } from "@/stores/auth";
 import { useToastStore } from "@/stores/toast";
 import type { TrackResponse, QueueTrack } from "@/player/types";
 import { toQueueTrack, type TrackEnrich } from "@/player/enrich";
+import {
+  isExternalUnplayable,
+  isPaidLocked,
+  isRemoteUnplayable,
+  isUnplayable,
+} from "@/player/playable";
 import AppTable, { type Column } from "@/components/ui/AppTable.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
@@ -41,6 +47,7 @@ import {
 } from "@/api/externalLibraries";
 import { canManageItem } from "@/composables/useCanManage";
 import { useDownloadArchive } from "@/composables/useDownloadArchive";
+import { useShufflePlay } from "@/composables/useShufflePlay";
 import ExternalTrackBadge from "@/components/external-libraries/ExternalTrackBadge.vue";
 
 export interface RemovableFrom {
@@ -69,6 +76,13 @@ export interface Props {
   offset?: number;
   total?: number;
   hasMore?: boolean;
+  /**
+   * When provided, the header shows a "Shuffle play" button. The fetcher
+   * must return a fresh random chunk of queue tracks from the whole
+   * collection (e.g. a ``sort_by=random`` listing call) — it is invoked
+   * once to start playback and again whenever the queue nears its end.
+   */
+  shuffleFetch?: () => Promise<QueueTrack[]>;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -103,6 +117,13 @@ const player = usePlayerStore();
 const authStore = useAuthStore();
 const toastStore = useToastStore();
 const { requestArchive } = useDownloadArchive();
+const { shufflePlay, loading: shuffleLoading } = useShufflePlay(
+  () => props.shuffleFetch?.() ?? Promise.resolve([]),
+);
+
+const shuffleDisabled = computed(
+  () => props.total === 0 && playableQueue.value.length === 0 && !props.hasMore,
+);
 
 const menuOpen = ref(false);
 const menuX = ref(0);
@@ -191,45 +212,6 @@ function isPodcastEpisode(track: QueueTrack): boolean {
 
 function isRemoteTrack(track: QueueTrack): boolean {
   return !!track.remote && !!track.remote_object_id;
-}
-
-/**
- * Remote rows cached without playable media can't be queued — clicking
- * their title opens the remote resource page instead.
- */
-function isRemoteUnplayable(track: QueueTrack): boolean {
-  return !!track.remote && !track.stream_url && !track.audio_url;
-}
-
-/**
- * Provider-backed tracks whose media isn't playable for this viewer (e.g.
- * stream policy denies the proxy URL) still offer the public provider page
- * — ``external_url`` — as the click target instead of a play action.
- */
-function isExternalUnplayable(track: QueueTrack): boolean {
-  return !track.audio_url && !track.stream_url && !!track.external_url;
-}
-
-/**
- * Sale-gated local tracks with a ``none`` unpaid policy advertise no media
- * URL — the row links to the track page, where the purchase panel lives.
- */
-function isPaidLocked(track: QueueTrack): boolean {
-  return (
-    !track.remote &&
-    !!track.paid &&
-    !track.audio_url &&
-    !track.stream_url &&
-    !track.external_url
-  );
-}
-
-function isUnplayable(track: QueueTrack): boolean {
-  return (
-    isRemoteUnplayable(track) ||
-    isExternalUnplayable(track) ||
-    isPaidLocked(track)
-  );
 }
 
 function openAddDialog(mode: "library" | "playlist") {
@@ -1522,6 +1504,17 @@ async function onMenuSelect(key: string) {
         @click="playAll"
       >
         {{ t("browse.detail.playAll") }}
+      </AppButton>
+      <AppButton
+        v-if="props.shuffleFetch"
+        variant="secondary"
+        size="sm"
+        icon="shuffle"
+        :loading="shuffleLoading"
+        :disabled="shuffleDisabled"
+        @click="shufflePlay"
+      >
+        {{ t("browse.detail.shufflePlay") }}
       </AppButton>
 
       <div v-if="canEdit" class="track-list__bulk">

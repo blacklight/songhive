@@ -23,6 +23,9 @@ import {
   type PlaylistResponse,
 } from "@/api/playlists";
 import { getApiErrorMessage } from "@/api/client";
+import { toQueueTrack } from "@/player/enrich";
+import { SHUFFLE_CHUNK_SIZE } from "@/composables/useShufflePlay";
+import type { QueueTrack } from "@/player/types";
 import ActivityCard from "@/components/activities/ActivityCard.vue";
 import AlbumCard from "@/components/library/AlbumCard.vue";
 import LibraryCard from "@/components/library/LibraryCard.vue";
@@ -85,6 +88,19 @@ const emptyEntity = computed(() => {
 const emptyMessage = computed(() =>
   t("browse.list.empty", { entity: emptyEntity.value }),
 );
+
+// A random chunk of the profile's tracks so shuffle play isn't limited
+// to the loaded page.
+const shuffleFetch = async (): Promise<QueueTrack[]> => {
+  const result = await listTracksWithMeta({
+    owner_username: username.value,
+    include: "artist,album",
+    limit: SHUFFLE_CHUNK_SIZE,
+    offset: 0,
+    sort_by: "random",
+  });
+  return result.tracks.map((track) => toQueueTrack(track));
+};
 
 function reset() {
   activities.value = null;
@@ -290,6 +306,7 @@ watch([includeBoosts, includeReplies], () => {
         :loading-more="loadingMore"
         :total="tracksResult.total"
         :offset="tracksResult.offset"
+        :shuffle-fetch="shuffleFetch"
       />
       <p v-else class="user-profile-tab__empty">{{ emptyMessage }}</p>
       <div

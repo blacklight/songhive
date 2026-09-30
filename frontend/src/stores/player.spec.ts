@@ -625,4 +625,118 @@ describe("usePlayerStore", () => {
     vi.advanceTimersByTime(2000);
     expect(store.currentTime).toBe(11);
   });
+
+  it("shuffleAll shuffles the queue and preserves the original order", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [
+      makeTrack("a"),
+      makeTrack("b"),
+      makeTrack("c"),
+      makeTrack("d"),
+    ];
+
+    store.shuffleAll(tracks);
+
+    expect(store.shuffle).toBe(true);
+    expect(store.index).toBe(0);
+    expect(store.originalQueue).toEqual(tracks);
+    expect(new Set(store.queue.map((t) => t.id))).toEqual(
+      new Set(tracks.map((t) => t.id)),
+    );
+    expect(engine.load).toHaveBeenCalledWith(store.queue[0], 0);
+    expect(engine.play).toHaveBeenCalled();
+  });
+
+  it("refills the queue near its end with deduped tracks", async () => {
+    const store = usePlayerStore();
+    store.registerEngine(createMockEngine());
+    const tracks = ["a", "b", "c", "d", "e", "f", "g", "h"].map((id) =>
+      makeTrack(id),
+    );
+    const refill = vi.fn(async () => [
+      makeTrack("e"),
+      makeTrack("i"),
+      makeTrack("j"),
+      makeTrack("k"),
+    ]);
+
+    store.shuffleAll(tracks, refill);
+    store.playAt(4);
+    await flushPromises();
+
+    expect(refill).toHaveBeenCalledTimes(1);
+    const ids = store.queue.map((t) => t.id);
+    expect(ids.length).toBe(11);
+    expect(ids.slice(-3)).toEqual(["i", "j", "k"]);
+    // The unshuffled mirror grows too, so toggling shuffle off keeps them.
+    expect(new Set(store.originalQueue.map((t) => t.id))).toEqual(new Set(ids));
+  });
+
+  it("stops refilling once a chunk yields no new tracks", async () => {
+    const store = usePlayerStore();
+    store.registerEngine(createMockEngine());
+    const tracks = ["a", "b", "c", "d", "e", "f"].map((id) => makeTrack(id));
+    const refill = vi.fn(async () => [makeTrack("a"), makeTrack("b")]);
+
+    store.shuffleAll(tracks, refill);
+    store.playAt(4);
+    await flushPromises();
+
+    expect(refill).toHaveBeenCalledTimes(1);
+    expect(store.queue.length).toBe(6);
+
+    store.playAt(5);
+    await flushPromises();
+    expect(refill).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes refills through the session controller in session mode", async () => {
+    const store = usePlayerStore();
+    store.registerEngine(createMockEngine());
+    const controller = {
+      playTrack: vi.fn(),
+      playAll: vi.fn(),
+      playAt: vi.fn(),
+      play: vi.fn(),
+      pause: vi.fn(),
+      next: vi.fn(),
+      prev: vi.fn(),
+      seek: vi.fn(),
+      toggleShuffle: vi.fn(),
+      setRepeat: vi.fn(),
+      setVolume: vi.fn(),
+      enqueue: vi.fn(),
+      enqueueNext: vi.fn(),
+      extendQueue: vi.fn(),
+      removeAt: vi.fn(),
+      clear: vi.fn(),
+    };
+    store.registerSessionController(controller);
+    store.setSessionMode(true);
+    const tracks = ["a", "b", "c", "d", "e", "f", "g", "h"].map((id) =>
+      makeTrack(id),
+    );
+    const refill = vi.fn(async () => [
+      makeTrack("e"),
+      makeTrack("i"),
+      makeTrack("j"),
+    ]);
+
+    store.shuffleAll(tracks, refill);
+    expect(controller.playAll).toHaveBeenCalledTimes(1);
+    expect(controller.toggleShuffle).toHaveBeenCalledWith(true);
+
+    // The server echoes an index near the queue's end — the store asks the
+    // controller to extend the queue rather than mutating it locally.
+    store.setSessionState(tracks, 4, "off", true, 0, true, "playing", 180);
+    await flushPromises();
+
+    expect(refill).toHaveBeenCalledTimes(1);
+    expect(controller.extendQueue).toHaveBeenCalledWith([
+      makeTrack("i"),
+      makeTrack("j"),
+    ]);
+  });
 });

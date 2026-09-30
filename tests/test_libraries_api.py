@@ -670,6 +670,37 @@ def test_list_library_tracks(client, sample_libraries, regular_user, auth_header
     assert response.headers["x-total-count"] == "1"
 
 
+@pytest.mark.asyncio
+async def test_list_library_tracks_random_sort(client, db_session, sample_libraries, regular_user, auth_headers):
+    """``sort_by=random`` returns a random page of the library's tracks."""
+    library_data = next(lib for lib in sample_libraries if lib["visibility"] == "public")
+    library = await db_session.get(Library, library_data["id"])
+    tracks = await _add_library_tracks(
+        db_session, library, regular_user, Visibility.PUBLIC, Visibility.PUBLIC, Visibility.PUBLIC
+    )
+    headers = auth_headers(regular_user)
+    track_ids = {str(track.id) for track in tracks}
+
+    response = client.get(
+        f"/api/v1/libraries/{library.id}/tracks",
+        params={"sort_by": "random", "limit": 100},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert {track["id"] for track in response.json()} == track_ids
+    assert response.headers["X-Total-Count"] == "3"
+
+    response = client.get(
+        f"/api/v1/libraries/{library.id}/tracks",
+        params={"sort_by": "random", "limit": 1},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] in track_ids
+
+
 def test_list_library_tracks_missing(client, regular_user, auth_headers):
     """Listing tracks for a missing library returns 404."""
     response = client.get(

@@ -68,6 +68,18 @@ function shuffleArray<T>(items: T[]): T[] {
   return copy;
 }
 
+/**
+ * Fetches another chunk of tracks to keep a shuffled queue going — e.g. a
+ * ``sort_by=random`` listing call against the collection being shuffled.
+ * The store dedupes by track id, so refetches may overlap earlier chunks.
+ */
+export type QueueRefill = () => Promise<QueueTrack[]>;
+
+// How close to the end of the queue playback may get before a refill chunk
+// is requested, and the maximum queue size a shuffle session grows to.
+const QUEUE_REFILL_THRESHOLD = 5;
+const QUEUE_REFILL_MAX = 500;
+
 export const usePlayerStore = defineStore("player", () => {
   const queue: Ref<QueueTrack[]> = ref([]);
   const originalQueue: Ref<QueueTrack[]> = ref([]);
@@ -136,6 +148,11 @@ export const usePlayerStore = defineStore("player", () => {
   let sessionController: SessionController | null = null;
   const sessionMode: Ref<boolean> = ref(false);
 
+  // Shuffle-play fetcher that extends the queue when playback nears its
+  // end; set by ``shuffleAll`` and cleared when a new queue context starts.
+  const queueRefill: Ref<QueueRefill | null> = ref(null);
+  let refillInFlight = false;
+
   function registerEngine(api: EngineApi) {
     engine = api;
     engine.setVolume(volume.value, muted.value);
@@ -185,6 +202,7 @@ export const usePlayerStore = defineStore("player", () => {
   );
 
   function playTrack(track: QueueTrack, queueContext?: QueueTrack[]) {
+    queueRefill.value = null;
     if (sessionMode.value && sessionController) {
       sessionController.playTrack(track, queueContext);
       return;
@@ -214,6 +232,7 @@ export const usePlayerStore = defineStore("player", () => {
 
   function playAll(tracks: QueueTrack[], startIndex = 0) {
     if (tracks.length === 0) return;
+    queueRefill.value = null;
     if (sessionMode.value && sessionController) {
       sessionController.playAll(tracks, startIndex);
       return;
@@ -238,6 +257,90 @@ export const usePlayerStore = defineStore("player", () => {
     engine?.play();
     persistNow();
   }
+
+  /**
+   * Start playback with a shuffled copy of ``tracks``. The unshuffled input
+   * is kept as ``originalQueue`` so toggling shuffle off restores the
+   * collection order. ``refill`` — typically a ``sort_by=random`` listing
+   * call against the collection — tops the queue up when playback nears its
+   * end, so shuffling covers tracks beyond the initially fetched chunk.
+   */
+  function shuffleAll(tracks: QueueTrack[], refill?: QueueRefill) {
+    if (tracks.length === 0) return;
+    queueRefill.value = refill ?? null;
+    const shuffled = shuffleArray(tracks);
+    if (sessionMode.value && sessionController) {
+      sessionController.playAll(shuffled, 0);
+      sessionController.toggleShuffle(true);
+      return;
+    }
+    const previousTrackId = currentTrack.value?.id;
+    queue.value = shuffled;
+    originalQueue.value = [...tracks];
+    index.value = 0;
+    shuffle.value = true;
+
+    const track = queue.value[0]!;
+    const startAt =
+      restoredPosition.value !== null && previousTrackId === track.id
+        ? restoredPosition.value
+        : 0;
+    restoredPosition.value = null;
+
+    currentTime.value = 0;
+    duration.value = 0;
+    playbackState.value = "loading";
+    isPlaying.value = true;
+    engine?.load(track, startAt);
+    engine?.play();
+    persistNow();
+  }
+
+  /**
+   * Top the queue up when playback approaches its end. Fetches another
+   * chunk through the stored refill, dedupes against the queued ids, and
+   * appends. A fetch returning only duplicates (or throwing) ends the
+   * refill — the queue then drains and stops normally.
+   */
+  async function maybeRefillQueue() {
+    const refill = queueRefill.value;
+    // The shuffle flag gates refills: in session mode an echoed queue with
+    // shuffle=false (e.g. another controller's play-all) means this refill
+    // no longer belongs to the live queue.
+    if (!refill || !shuffle.value || refillInFlight) return;
+    if (index.value < queue.value.length - QUEUE_REFILL_THRESHOLD) return;
+    if (queue.value.length >= QUEUE_REFILL_MAX) {
+      queueRefill.value = null;
+      return;
+    }
+    refillInFlight = true;
+    try {
+      const fresh = await refill();
+      const seen = new Set(queue.value.map((track) => track.id));
+      const additions = fresh.filter((track) => !seen.has(track.id));
+      if (additions.length === 0) {
+        queueRefill.value = null;
+        return;
+      }
+      if (sessionMode.value) {
+        sessionController?.extendQueue?.(additions);
+      } else {
+        queue.value.push(...additions);
+        if (originalQueue.value.length > 0) {
+          originalQueue.value.push(...additions);
+        }
+      }
+      persist();
+    } catch {
+      queueRefill.value = null;
+    } finally {
+      refillInFlight = false;
+    }
+  }
+
+  watch([index, () => queue.value.length], () => {
+    void maybeRefillQueue();
+  });
 
   function playAt(i: number) {
     if (i < 0 || i >= queue.value.length) return;
@@ -327,6 +430,7 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   function clear() {
+    queueRefill.value = null;
     if (sessionMode.value && sessionController) {
       sessionController.clear();
       return;
@@ -467,11 +571,13 @@ export const usePlayerStore = defineStore("player", () => {
 
   function toggleShuffle() {
     if (sessionMode.value && sessionController) {
+      if (shuffle.value) queueRefill.value = null;
       sessionController.toggleShuffle(!shuffle.value);
       return;
     }
     if (shuffle.value) {
-      // Disable: restore original order.
+      // Disable: restore original order and stop queue refills.
+      queueRefill.value = null;
       if (originalQueue.value.length > 0) {
         const current = currentTrack.value;
         queue.value = [...originalQueue.value];
@@ -618,6 +724,7 @@ export const usePlayerStore = defineStore("player", () => {
     registerSessionController,
     playTrack,
     playAll,
+    shuffleAll,
     playAt,
     enqueue,
     enqueueNext,

@@ -434,6 +434,39 @@ async def test_list_playlist_tracks_sorted_by_position_and_title(
 
 
 @pytest.mark.asyncio
+async def test_list_playlist_tracks_random_sort(
+    client,
+    regular_user,
+    auth_headers,
+    sortable_playlist_tracks,
+):
+    """``sort_by=random`` returns a random page drawn from the whole playlist."""
+    playlist, tracks = sortable_playlist_tracks
+    headers = auth_headers(regular_user)
+    track_ids = {str(track.id) for track in tracks}
+
+    response = client.get(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        params={"sort_by": "random", "limit": 100},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert {track["id"] for track in response.json()} == track_ids
+    assert response.headers["X-Total-Count"] == "3"
+
+    # A bounded page returns a random chunk of the collection.
+    response = client.get(
+        f"/api/v1/playlists/{playlist.id}/tracks",
+        params={"sort_by": "random", "limit": 1},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] in track_ids
+
+
+@pytest.mark.asyncio
 async def test_list_playlist_tracks_filters_by_query(
     client,
     regular_user,

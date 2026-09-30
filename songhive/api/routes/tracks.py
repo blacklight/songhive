@@ -715,7 +715,7 @@ async def list_tracks(
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(
         get_sort(
-            {"created_at", "title", "artist_name", "album_title", "updated_at", "release_year"},
+            {"created_at", "title", "artist_name", "album_title", "updated_at", "release_year", "random"},
             "created_at",
             "desc",
         )

@@ -31,6 +31,7 @@ import { useOwnership } from "@/composables/useOwnership";
 import { useShareDialog } from "@/composables/useShareDialog";
 import { useDownloadArchive } from "@/composables/useDownloadArchive";
 import { useM3uExport } from "@/composables/useM3uExport";
+import { SHUFFLE_CHUNK_SIZE } from "@/composables/useShufflePlay";
 import { useEntityDelete } from "@/composables/useEntityDelete";
 import { useFeedLinks } from "@/composables/useFeedLinks";
 import type { QueueTrack } from "@/player/types";
@@ -107,6 +108,22 @@ const tracks = computed<QueueTrack[]>(() =>
     .map(playlistItemToQueueTrack)
     .filter((item): item is QueueTrack => item !== null),
 );
+
+// A random chunk of the whole playlist — tracks, episodes and remote
+// objects alike — so shuffle play isn't limited to the loaded page. The
+// active search filter applies, matching what the list currently shows.
+const shuffleFetch = async (): Promise<QueueTrack[]> => {
+  const { items } = await listPlaylistItemsWithMeta(playlistId.value, {
+    q: tracksQuery.value || undefined,
+    limit: SHUFFLE_CHUNK_SIZE,
+    offset: 0,
+    sort_by: "random",
+    include: "artist,album",
+  });
+  return items
+    .map(playlistItemToQueueTrack)
+    .filter((item): item is QueueTrack => item !== null);
+};
 
 const { owner, visibilityText, visibilityIcon } = useEntityMeta(playlist);
 
@@ -538,6 +555,7 @@ watch(
           :offset="trackOffset"
           :total="trackTotal"
           :has-more="tracksHasMore"
+          :shuffle-fetch="shuffleFetch"
           @share="onTrackShare"
           @removed="onTracksRemoved"
           @updated="onTracksRemoved"

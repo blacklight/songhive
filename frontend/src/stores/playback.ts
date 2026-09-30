@@ -269,6 +269,12 @@ export const usePlaybackStore = defineStore("playback", () => {
       const next = [...current, queueTrackToTrackData(track)];
       void sendCommand("set_queue", { queue: next });
     },
+    extendQueue: (tracks: QueueTrack[]) => {
+      if (tracks.length === 0) return;
+      const current = session.value?.queue || [];
+      const next = [...current, ...tracks.map(queueTrackToTrackData)];
+      void sendCommand("set_queue", { queue: next });
+    },
     enqueueNext: (track: QueueTrack) => {
       const current = (session.value?.queue || []).map(trackDataToQueueTrack);
       const insertAt = Math.min(
