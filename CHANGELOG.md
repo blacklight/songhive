@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `payments`: Add Stripe-powered sales and memberships — tracks can
+  be gated behind a purchase or a membership. Adds checkout, billing
+  and redeem views, webhook-driven order/subscription fulfillment,
+  purchase and membership notifications, and admin controls.
+  ([`98b13fb`](https://git.platypush.tech/blacklight/songhive/commit/98b13fb86da945b5adc99d169002c54582ad16db)).
+- `uploads`: Enforce per-user upload quotas on media uploads — a new
+  `storage.upload_quota` default with per-user overrides caps file,
+  library and image uploads (returning 403 on exceed). The effective
+  quota and usage are exposed on `/users/me`, with an admin quota API
+  and UI.
+  ([`1b2fbd1`](https://git.platypush.tech/blacklight/songhive/commit/1b2fbd194640104d3ceb161fa9871b7906905d38)).
+
 ## 0.3.10
 
 ### Fixed
