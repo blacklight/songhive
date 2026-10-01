@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `streams`: A new `/streams` page (backed by `/api/v1/streams`)
+  lists the instance's native HTTP mounts — tokenless streams are
+  visible to everyone, token-protected and disabled ones only to
+  their owner — with owner info, online status, now-playing
+  metadata, a listener estimate, an embedded live player and
+  player-bar handoff. Also fixes flaky embed playback: the worker
+  now batches control-command bursts into a single decoder sync
+  instead of restarting the source per command, and live embeds no
+  longer react to the global player's shared `isPlaying` flag.
+  ([`c3ada51`](https://git.platypush.tech/blacklight/songhive/commit/c3ada518812574818ee37ccc662ad3b53c2d8865)).
+
+### Fixed
+
+- `federation`: Inbound notes that mention or address a local user —
+  or reply to or quote a locally owned activity — are now materialized
+  even when the author is not followed, so they render as interactive
+  cards instead of read-only snapshots, and non-public notes confined
+  to local addressees mirror with `mentioned` visibility.
+  ([`7d13b93`](https://git.platypush.tech/blacklight/songhive/commit/7d13b933ebe550c83404577e64fcba28e7777bbe)).
+- `users`: Local followers and follow requests now display the bare
+  username — the responses carry a `local_username` field used to
+  override the handle and display fields.
+  ([`8e18f13`](https://git.platypush.tech/blacklight/songhive/commit/8e18f13a8da9120273be626a1bc52d1cb625cf60)).
+
 ## 0.4.1
 
 ### Added
