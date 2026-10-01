@@ -5,7 +5,7 @@ User profile routes.
 import asyncio
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Iterable, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -139,6 +139,8 @@ class FollowerResponse(BaseModel):
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     followed_at: Optional[datetime] = None
+    # Set when the follower is a user on this instance.
+    local_username: Optional[str] = None
 
 
 class FollowRequestResponse(BaseModel):
@@ -149,6 +151,8 @@ class FollowRequestResponse(BaseModel):
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     requested_at: Optional[datetime] = None
+    # Set when the requesting actor is a user on this instance.
+    local_username: Optional[str] = None
 
 
 class FollowingResponse(BaseModel):
@@ -194,28 +198,57 @@ class ActivitySubscriptionState(BaseModel):
     follow_state: Optional[str] = None
 
 
-def _follower_response(follower) -> FollowerResponse:
+def _follower_response(follower, local_users: dict) -> FollowerResponse:
     """Map a stored pubby ``Follower`` to its public representation."""
     actor_data = follower.actor_data or {}
+    local = local_users.get(follower.actor_id)
     return FollowerResponse(
         actor_url=follower.actor_id,
-        handle=federation_service.actor_doc_handle(actor_data, follower.actor_id),
-        display_name=activity_service._actor_doc_display_name(actor_data),
-        avatar_url=activity_service._actor_doc_avatar_url(actor_data),
+        # Local followers keep their bare username — ``user@local-domain``
+        # would route to the remote-actor view, which rejects local handles.
+        handle=(local.username if local else None)
+        or federation_service.actor_doc_handle(actor_data, follower.actor_id),
+        display_name=(local.display_name if local else None) or activity_service._actor_doc_display_name(actor_data),
+        avatar_url=(local.avatar_url if local else None) or activity_service._actor_doc_avatar_url(actor_data),
         followed_at=follower.followed_at,
+        local_username=local.username if local else None,
     )
 
 
-def _follow_request_response(request) -> FollowRequestResponse:
+def _follow_request_response(request, local_users: dict) -> FollowRequestResponse:
     """Map a stored pubby ``FollowRequest`` to its representation."""
     actor_data = request.actor_data or {}
+    local = local_users.get(request.actor_id)
     return FollowRequestResponse(
         actor_url=request.actor_id,
-        handle=federation_service.actor_doc_handle(actor_data, request.actor_id),
-        display_name=activity_service._actor_doc_display_name(actor_data),
-        avatar_url=activity_service._actor_doc_avatar_url(actor_data),
+        # Local requesters keep their bare username — see _follower_response.
+        handle=(local.username if local else None) or federation_service.actor_doc_handle(actor_data, request.actor_id),
+        display_name=(local.display_name if local else None) or activity_service._actor_doc_display_name(actor_data),
+        avatar_url=(local.avatar_url if local else None) or activity_service._actor_doc_avatar_url(actor_data),
         requested_at=request.requested_at,
+        local_username=local.username if local else None,
     )
+
+
+async def _local_users_by_actor_url(db: AsyncSession, actor_urls: Iterable[str]) -> dict:
+    """Map actor URLs to this instance's user accounts."""
+    urls = [url for url in dict.fromkeys(actor_urls) if url]
+    if not urls:
+        return {}
+    result = await db.execute(select(User).where(User.actor_url.in_(urls)))
+    return {user.actor_url: user for user in result.scalars()}
+
+
+async def _follower_responses(db: AsyncSession, followers: list) -> List[FollowerResponse]:
+    """Serialize follower rows, bulk-loading followers that are local users."""
+    local_users = await _local_users_by_actor_url(db, (f.actor_id for f in followers))
+    return [_follower_response(f, local_users) for f in followers]
+
+
+async def _follow_request_responses(db: AsyncSession, requests: list) -> List[FollowRequestResponse]:
+    """Serialize follow-request rows, bulk-loading local requesters."""
+    local_users = await _local_users_by_actor_url(db, (r.actor_id for r in requests))
+    return [_follow_request_response(r, local_users) for r in requests]
 
 
 def _following_response(row: Follow, local_users: dict) -> FollowingResponse:
@@ -472,13 +505,14 @@ async def list_my_follow_requests(
     response: Response,
     pagination: Pagination = Depends(get_pagination),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     config: SonghiveConfig = Depends(get_config),
 ):
     """List the current user's pending follow requests, newest first."""
     requests = await _load_follow_requests(current_user, config)
     pagination.set_total(response, len(requests))
     page = requests[pagination.offset : pagination.offset + pagination.limit]
-    return [_follow_request_response(r) for r in page]
+    return await _follow_request_responses(db, page)
 
 
 async def _decide_follow_request(
@@ -1028,7 +1062,7 @@ async def list_user_followers(
     followers = await _load_followers(user, config)
     pagination.set_total(response, len(followers))
     page = followers[pagination.offset : pagination.offset + pagination.limit]
-    return [_follower_response(f) for f in page]
+    return await _follower_responses(db, page)
 
 
 @router.get("/{username}/follows", response_model=List[FollowingResponse])

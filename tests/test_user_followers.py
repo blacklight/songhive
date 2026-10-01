@@ -169,6 +169,45 @@ async def test_list_followers_sorted_by_followed_at_desc(fed_client, fed_config,
     assert data[1]["followed_at"]
 
 
+async def test_list_followers_local_user_reports_bare_username(
+    fed_client, fed_config, fed_user, other_user, db_session
+):
+    """A local follower is reported by bare username, not ``user@domain``.
+
+    The ``/@user`` followers tab links entries through their handle, and a
+    ``user@local-domain`` handle routes to the remote-actor view, which
+    rejects local actors — local followers must keep their bare username,
+    matching ``/{username}/follows``.
+    """
+    other_user.actor_url = f"https://{fed_config.federation.instance_domain}/users/other"
+    other_user.display_name = "Other Local"
+    await db_session.commit()
+    now = datetime.now(timezone.utc)
+    _store(
+        fed_config,
+        _follower(
+            other_user.actor_url,
+            now - timedelta(days=1),
+            {"id": other_user.actor_url, "preferredUsername": "other", "name": "Stale Name"},
+        ),
+        _follower(BOB_ACTOR, now, BOB_DOC),
+    )
+
+    response = fed_client.get("/api/v1/users/regular/followers")
+    assert response.status_code == 200
+    by_url = {f["actor_url"]: f for f in response.json()}
+
+    local = by_url[other_user.actor_url]
+    assert local["handle"] == "other"
+    assert local["local_username"] == "other"
+    # The live profile wins over the actor document snapshot.
+    assert local["display_name"] == "Other Local"
+
+    remote = by_url[BOB_ACTOR]
+    assert remote["handle"] == "bob@remote.example"
+    assert remote["local_username"] is None
+
+
 async def test_list_followers_pagination(fed_client, fed_config, fed_user):
     """limit/offset paginate the followers list."""
     now = datetime.now(timezone.utc)
@@ -780,6 +819,38 @@ async def test_list_follow_requests_owner(fed_client, fed_config, fed_user):
     assert data[1]["display_name"] == "Bob Remote"
     assert data[1]["avatar_url"] == "https://remote.example/bob.png"
     assert data[1]["requested_at"]
+
+
+async def test_list_follow_requests_local_user_reports_bare_username(
+    fed_client, fed_config, fed_user, other_user, db_session
+):
+    """A local requester is reported by bare username, not ``user@domain``.
+
+    Same routing constraint as the followers list: ``user@local-domain``
+    handles route to the remote-actor view, which rejects local actors.
+    """
+    other_user.actor_url = f"https://{fed_config.federation.instance_domain}/users/other"
+    await db_session.commit()
+    _store_request(
+        fed_config,
+        _follow_request(
+            other_user.actor_url,
+            actor_data={"id": other_user.actor_url, "preferredUsername": "other"},
+        ),
+        _follow_request(BOB_ACTOR, actor_data=BOB_DOC),
+    )
+
+    response = fed_client.get("/api/v1/users/me/follow-requests", headers=_auth(fed_config, fed_user))
+    assert response.status_code == 200
+    by_url = {r["actor_url"]: r for r in response.json()}
+
+    local = by_url[other_user.actor_url]
+    assert local["handle"] == "other"
+    assert local["local_username"] == "other"
+
+    remote = by_url[BOB_ACTOR]
+    assert remote["handle"] == "bob@remote.example"
+    assert remote["local_username"] is None
 
 
 async def test_list_follow_requests_pagination(fed_client, fed_config, fed_user):
