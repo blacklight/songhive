@@ -416,8 +416,13 @@
   `federation_followers`/`federation_follow_requests` tables only track the
   inbound side. `services/follows.py` resolves targets, delivers
   `Follow`/`Undo(Follow)`, and folds inbound `Accept`/`Reject` back into the
-  row. Inbound `Create` and `Announce` activities are only materialized when
-  the actor is followed by a local user (`actor_is_followed`); explicit
+  row. Inbound `Announce` activities are only materialized when the actor
+  is followed by a local user (`actor_is_followed`); inbound `Create` (and
+  `Update` replays of a missed `Create`) are also admitted when the object
+  addresses a local user (addressees or `Mention` tags) or replies
+  to/quotes a locally owned activity — `_object_has_local_audience` in
+  `federation/incoming.py` — because those objects generate notifications
+  whose cards must be backed by an interactable `Activity` row. Explicit
   remote-URL lookups are the other admission path. An `Announce` of an
   object unknown locally is dereferenced through
   `remote_content.dereference_remote_object` (guarded fetch →

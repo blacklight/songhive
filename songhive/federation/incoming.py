@@ -23,6 +23,12 @@ with ``mentioned`` visibility when they address at least one local user —
 through ``to``/``cc``/``bto``/``bcc`` addressees or ``Mention`` tags — so
 only the addressed audience can see them. Non-public posts addressing no
 local user are not materialized.
+
+Inbound objects are admitted when their author is followed by a local
+user, when they belong to a followed remote resource, or when they
+address a local user or answer a locally owned activity — the objects
+notifications are generated for, which recipients must be able to
+interact with.
 """
 
 import asyncio
@@ -712,6 +718,7 @@ async def update_remote_object(
             )
         return
 
+    mentions = await _remote_mentions(session, obj, config)
     if row.entity_type == "remote":
         # Standalone posts mirror a ``remote_objects`` row — refresh it
         # from the update and recompute visibility the same way the
@@ -723,7 +730,7 @@ async def update_remote_object(
             obj=obj,
             actor_url=actor,
         )
-        row.visibility = "public" if remote_object.visibility == "public" else "local"
+        row.visibility = remote_content_service.mirror_activity_visibility(remote_object.visibility, mentions)
     else:
         entity = await resolve_entity(session, row.entity_type, row.entity_id)
         if entity is not None:
@@ -738,7 +745,7 @@ async def update_remote_object(
         row.published_at = published
 
     await session.execute(delete(ActivityMention).where(ActivityMention.activity_id == row.id))
-    for mention in await _remote_mentions(session, obj, config):
+    for mention in mentions:
         session.add(ActivityMention(activity_id=row.id, **mention))
     await session.flush()
     await _sync_activity_tags(session, row, _remote_hashtags(obj))
@@ -931,6 +938,27 @@ def _activity_object_candidates(activity: dict) -> List[str]:
     return candidates
 
 
+async def _object_has_local_audience(session: AsyncSession, obj: dict) -> bool:
+    """
+    Return whether an inbound object directly concerns a local user.
+
+    Covers ``to``/``cc``/``bto``/``bcc`` addressees and ``Mention`` tag
+    ``href``s matching a local ``User.actor_url``, plus ``inReplyTo``/quote
+    targets resolving to a locally owned activity — exactly the objects
+    ``create_inbox_notifications`` produces a mention/reply/quote
+    notification for. They must materialize even from unfollowed actors so
+    the notification card is backed by an interactable activity row.
+    """
+    if await _local_addressee_users(session, obj):
+        return True
+    for ref in (obj.get("inReplyTo"), extract_quote_target(obj)):
+        if isinstance(ref, str) and ref:
+            target = await _resolve_object_activity(session, ref)
+            if target is not None and target.owner_user_id is not None:
+                return True
+    return False
+
+
 async def _remote_activity_admitted(session: AsyncSession, activity: dict) -> bool:
     """
     Return whether an inbound remote activity is admitted for storage.
@@ -938,12 +966,22 @@ async def _remote_activity_admitted(session: AsyncSession, activity: dict) -> bo
     Two admission paths: the publishing actor is followed by a local user
     (actor follow), or the activity's object is — or belongs to — a
     followed remote resource (object follow, e.g. a followed federated
-    library delivering ``Create(Audio)`` items).
+    library delivering ``Create(Audio)`` items). ``Create``/``Update``
+    objects addressing a local user or answering a locally owned activity
+    are also admitted — they generate notifications regardless of follows,
+    and an unmaterialized note leaves the recipient with a read-only
+    snapshot they cannot answer.
     """
     actor = activity.get("actor")
     if isinstance(actor, str) and await follows_service.actor_is_followed(session, actor):
         return True
-    return await follows_service.object_is_followed(session, _activity_object_candidates(activity))
+    if await follows_service.object_is_followed(session, _activity_object_candidates(activity)):
+        return True
+    if activity.get("type") in ("Create", "Update"):
+        obj = activity.get("object")
+        if isinstance(obj, dict):
+            return await _object_has_local_audience(session, obj)
+    return False
 
 
 async def sync_remote_activity(
@@ -956,8 +994,9 @@ async def sync_remote_activity(
     Reflect an inbound remote activity onto materialized ``Activity`` rows.
 
     ``Create`` materializes replies to — and quotes of — known activities,
-    and standalone posts from followed actors as ``remote_objects``
-    mirrors; ``Update`` revises and ``Delete`` retracts materialized rows; an
+    and standalone posts from followed actors or posts addressing a local
+    user as ``remote_objects`` mirrors; ``Update`` revises and ``Delete``
+    retracts materialized rows; an
     ``Accept`` answering a ``QuoteRequest`` we sent stamps the issued
     ``QuoteAuthorization`` onto the quoting post. Newly materialized
     public replies and quotes are relayed to remote actors following an
@@ -984,11 +1023,12 @@ async def sync_remote_activity(
     if activity_type == "Create":
         obj = activity.get("object")
         actor = activity.get("actor")
-        # Inbound objects are only stored for actors some local user
-        # follows, or objects belonging to a followed remote resource
-        # (e.g. ``Create(Audio)`` into a followed library); objects
-        # fetched explicitly through URL lookup arrive through the
-        # dereference path instead.
+        # Inbound objects are stored for actors some local user follows,
+        # objects belonging to a followed remote resource (e.g.
+        # ``Create(Audio)`` into a followed library), and objects that
+        # address a local user or answer a locally owned activity — the
+        # ones notifications are generated for; objects fetched explicitly
+        # through URL lookup arrive through the dereference path instead.
         if not isinstance(actor, str) or not await _remote_activity_admitted(session, activity):
             return
         # Quote fields take precedence over ``inReplyTo`` — mirroring

@@ -2133,3 +2133,171 @@ async def test_non_public_standalone_post_is_stored_limited(db_session, regular_
     )
     assert remote_object is not None
     assert remote_object.visibility == "private"
+
+
+# ---------------------------------------------------------------------------
+# local-audience admission — unfollowed actors addressing local users
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_mention_from_unfollowed_actor_materializes(db_session, regular_user, config):
+    """A public note mentioning a local user is stored without a follow."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    await db_session.flush()
+
+    activity = _create_post()
+    activity["object"]["tag"] = [
+        {
+            "type": "Mention",
+            "href": regular_user.actor_url,
+            "name": "@regular@local.example",
+        }
+    ]
+    await sync_remote_activity(db_session, activity=activity, config=config)
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/notes/p1",
+        )
+    )
+    assert row is not None
+    assert row.entity_type == "remote"
+    assert row.activity_type == "create"
+    assert row.visibility == Visibility.PUBLIC.value
+
+    mentions = (
+        (await db_session.execute(select(ActivityMention).where(ActivityMention.activity_id == row.id))).scalars().all()
+    )
+    assert [(m.actor_url, m.user_id) for m in mentions] == [(regular_user.actor_url, regular_user.id)]
+    assert await activity_service.can_view_activity(db_session, regular_user, row) is True
+
+
+@pytest.mark.asyncio
+async def test_addressee_from_unfollowed_actor_materializes(db_session, regular_user, config):
+    """A non-public note addressing a local user via ``to`` is stored too."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    await db_session.flush()
+
+    activity = _create_post(public=False)
+    activity["object"]["to"] = [regular_user.actor_url]
+    await sync_remote_activity(db_session, activity=activity, config=config)
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/notes/p1",
+        )
+    )
+    assert row is not None
+    assert row.entity_type == "remote"
+    assert row.visibility == Visibility.MENTIONED.value
+
+
+@pytest.mark.asyncio
+async def test_non_public_mention_confined_to_addressee(db_session, regular_user, other_user, admin_user, config):
+    """A non-public note mentioning a local user is only visible to them."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    await db_session.flush()
+
+    activity = _create_post(public=False)
+    activity["object"]["tag"] = [
+        {
+            "type": "Mention",
+            "href": regular_user.actor_url,
+            "name": "@regular@local.example",
+        }
+    ]
+    await sync_remote_activity(db_session, activity=activity, config=config)
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/notes/p1",
+        )
+    )
+    assert row is not None
+    assert row.visibility == Visibility.MENTIONED.value
+    assert await activity_service.can_view_activity(db_session, regular_user, row) is True
+    for viewer in (other_user, admin_user, None):
+        assert await activity_service.can_view_activity(db_session, viewer, row) is False
+
+
+@pytest.mark.asyncio
+async def test_reply_from_unfollowed_actor_to_local_activity_materializes(db_session, regular_user, config):
+    """A reply to a locally owned activity is admitted without a follow."""
+    config = _fed_config(config)
+    track = await _make_track(db_session, regular_user)
+    parent = _make_activity("track", track.id, owner_user_id=regular_user.id)
+    db_session.add(parent)
+    await db_session.flush()
+
+    await sync_remote_activity(db_session, activity=_create_activity(parent), config=config)
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/notes/r1",
+        )
+    )
+    assert row is not None
+    assert row.activity_type == "reply"
+    assert row.entity_type == "track"
+    assert row.entity_id == str(track.id)
+    assert row.in_reply_to_activity_id == str(parent.id)
+
+
+@pytest.mark.asyncio
+async def test_unfollowed_post_without_local_audience_still_skipped(db_session, regular_user, config):
+    """A post from an unfollowed actor addressing no local user is not stored."""
+    config = _fed_config(config)
+    # regular_user exists with an actor_url but is neither addressee nor mention.
+    regular_user.actor_url = "https://local.example/users/regular"
+    await db_session.flush()
+
+    await sync_remote_activity(
+        db_session,
+        activity=_create_post(in_reply_to="https://elsewhere.example/notes/x1"),
+        config=config,
+    )
+    await db_session.flush()
+
+    assert await db_session.scalar(select(func.count(Activity.id)).where(Activity.source_type == "remote")) == 0
+    assert await db_session.scalar(select(func.count(remote_content_service.RemoteObject.id))) == 0
+
+
+@pytest.mark.asyncio
+async def test_update_from_unfollowed_actor_replays_missed_create(db_session, regular_user, config):
+    """An Update for a note mentioning a local user materializes it too."""
+    config = _fed_config(config)
+    regular_user.actor_url = "https://local.example/users/regular"
+    await db_session.flush()
+
+    update = _create_post(content="<p>edited mention</p>")
+    update["type"] = "Update"
+    update["object"]["tag"] = [
+        {
+            "type": "Mention",
+            "href": regular_user.actor_url,
+            "name": "@regular@local.example",
+        }
+    ]
+    await sync_remote_activity(db_session, activity=update, config=config)
+    await db_session.flush()
+
+    row = await db_session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == "https://remote.example/notes/p1",
+        )
+    )
+    assert row is not None
+    assert row.content == "<p>edited mention</p>"

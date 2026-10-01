@@ -973,6 +973,23 @@ async def _resolve_parent_activity(session: AsyncSession, obj: dict) -> Optional
     return None
 
 
+def mirror_activity_visibility(remote_object_visibility: str, mentions: List[Dict[str, Any]]) -> str:
+    """
+    Map a cached remote object's visibility onto its mirror ``Activity``.
+
+    Public objects stay public. Non-public objects addressed to specific
+    local users (mention tags or addressees — the ``ActivityMention``
+    fields carry their ``user_id``) get ``mentioned`` so only the
+    addressed audience can view the row; anything else degrades to
+    ``local``.
+    """
+    if remote_object_visibility == "public":
+        return "public"
+    if any(mention.get("user_id") for mention in mentions):
+        return "mentioned"
+    return "local"
+
+
 async def _materialize_remote_activity(
     session: AsyncSession,
     *,
@@ -1014,11 +1031,12 @@ async def _materialize_remote_activity(
         )
     )
 
+    mentions = await _remote_mentions(session, obj, config)
     content = strip_quote_fallback(obj.get("content"), extract_quote_target(obj))
     fields = {
         "activity_type": activity_type if activity_type != "update" or existing is None else existing.activity_type,
         "source_actor": actor_url,
-        "visibility": "public" if remote_object.visibility == "public" else "local",
+        "visibility": mirror_activity_visibility(remote_object.visibility, mentions),
         "in_reply_to_activity_id": str(parent.id) if parent is not None else None,
         "content": content if isinstance(content, str) and content else None,
         "content_type": "text/html" if isinstance(content, str) and content else "text/plain",
@@ -1053,7 +1071,6 @@ async def _materialize_remote_activity(
         session.add(row)
     await session.flush()
 
-    mentions = await _remote_mentions(session, obj, config)
     await session.refresh(row, ["mentions"])
     existing_mentions = {m.handle for m in row.mentions}
     for mention in mentions:
