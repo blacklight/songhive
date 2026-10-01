@@ -255,6 +255,7 @@
     "tags": "Tags",
     "genres": "Genres",
     "radio": "Radio",
+    "streams": "Streams",
     "about": "About",
     "api": "API",
     "admin": "Admin",
@@ -454,6 +455,18 @@
       "emptyTracks": "No tracks were generated for this station.",
       "empty": "No radio stations yet.",
       "loginHint": "Log in to create your own station."
+    },
+    "streams": {
+      "title": "Streams",
+      "empty": "No streams are available on this instance.",
+      "loadError": "Could not load streams: {message}",
+      "live": "Live",
+      "offline": "Offline",
+      "disabled": "Disabled",
+      "private": "Private",
+      "listeners": "No listeners | {count} listener | {count} listeners",
+      "nowPlaying": "Now playing",
+      "openStream": "Open stream URL"
     },
     "podcasts": {
       "title": "Podcasts",
@@ -2151,7 +2164,8 @@
       "addToQueue": "Add to queue",
       "addedToQueue": "Added to the queue.",
       "playError": "Could not play this audio.",
-      "downloadError": "Could not download this audio: {message}"
+      "downloadError": "Could not download this audio: {message}",
+      "live": "Live"
     },
     "webmentionTypes": {
       "mention": "Webmention",

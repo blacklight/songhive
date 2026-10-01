@@ -184,6 +184,12 @@ const navItems = computed<NavItem[]>(() => [
     icon: "tower-broadcast",
   },
   {
+    name: t("nav.streams"),
+    to: "/streams",
+    requiresAuth: false,
+    icon: "satellite-dish",
+  },
+  {
     name: t("nav.podcasts"),
     to: "/podcasts",
     requiresAuth: true,

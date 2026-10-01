@@ -255,6 +255,7 @@
     "tags": "الوسوم",
     "genres": "الأنواع",
     "radio": "الراديو",
+    "streams": "البثوث",
     "about": "حول",
     "api": "API",
     "admin": "الإدارة",
@@ -454,6 +455,18 @@
       "emptyTracks": "لم يتم إنشاء مقاطع لهذه المحطة.",
       "empty": "لا توجد محطات راديو بعد.",
       "loginHint": "سجل الدخول لإنشاء محطتك الخاصة."
+    },
+    "streams": {
+      "title": "البثوث",
+      "empty": "لا توجد بثوث متاحة على هذا الخادم.",
+      "loadError": "تعذّر تحميل البثوث: {message}",
+      "live": "مباشر",
+      "offline": "غير متصل",
+      "disabled": "معطّل",
+      "private": "خاص",
+      "listeners": "لا مستمعين | مستمع واحد | مستمعان | {count} مستمعين | {count} مستمعًا | {count} مستمع",
+      "nowPlaying": "يُشغَّل الآن",
+      "openStream": "فتح رابط البث"
     },
     "podcasts": {
       "title": "البودكاست",
@@ -2151,7 +2164,8 @@
       "addToQueue": "إضافة إلى قائمة الانتظار",
       "addedToQueue": "أُضيف إلى قائمة الانتظار.",
       "playError": "تعذر تشغيل هذا الصوت.",
-      "downloadError": "تعذر تنزيل هذا الصوت: {message}"
+      "downloadError": "تعذر تنزيل هذا الصوت: {message}",
+      "live": "مباشر"
     },
     "webmentionTypes": {
       "mention": "Webmention",

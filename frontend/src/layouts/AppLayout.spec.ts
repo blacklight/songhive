@@ -206,6 +206,7 @@ describe("AppLayout", () => {
       "Playlists",
       "Tags",
       "Genres",
+      "Streams",
       "About",
       "API",
     ]);
@@ -251,6 +252,7 @@ describe("AppLayout", () => {
       "Downloads",
       "Shares",
       "Radio",
+      "Streams",
       "Podcasts",
       "About",
       "API",

@@ -289,6 +289,13 @@ const routes: RouteRecordRaw[] = [
         name: "radio",
         component: () => import("@/views/RadioView.vue"),
       },
+      // The native-mount endpoints live under /streams/{mount} on Tornado;
+      // the bare /streams path falls through to the SPA.
+      {
+        path: "streams",
+        name: "streams",
+        component: () => import("@/views/StreamsView.vue"),
+      },
       {
         path: "podcasts",
         name: "podcasts",

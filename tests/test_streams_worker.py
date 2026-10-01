@@ -774,3 +774,91 @@ async def test_track_change_pushes_now_playing_metadata(
     assert updates[0][1].track_id == "t1"
     assert updates[-1][1].track_id == "t2"
     assert updates[-1][1].song == "Artist - Track Two"
+
+
+@pytest.mark.asyncio
+async def test_command_burst_syncs_driver_once(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """A burst of commands must restart the decoder once, not once per envelope.
+
+    Actions like setQueueAndPlay publish set_queue + play_at + play as
+    separate envelopes a few hundred milliseconds apart; syncing the driver
+    per envelope restarted the source repeatedly, so listeners heard the
+    track start over.
+    """
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+
+    # Startup sync puts the driver on the first track.
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    async def _persist_and_notify(command: str, args: dict | None = None) -> None:
+        async with get_session() as db:
+            persisted = await db.get(PlaybackSession, session.id)
+            assert persisted is not None
+            await handle_command(db, persisted, command, args or {}, "conn-1")
+        await _send_command(worker, session.id, command, args or {})
+
+    # Emulate a setQueueAndPlay-style burst serialized over several loop
+    # ticks: every envelope repositions playback, so syncing per envelope
+    # would restart the decoder once per command.
+    await _persist_and_notify("seek", {"seconds": 5})
+    await asyncio.sleep(0.15)
+    await _persist_and_notify("play_at", {"index": 1})
+    await asyncio.sleep(0.15)
+    await _persist_and_notify("seek", {"seconds": 10})
+
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
+    # Let the settle window elapse so any stray per-envelope sync lands before
+    # the count is asserted.
+    await asyncio.sleep(SessionDriver._CONTROL_SETTLE_S + 0.3)
+
+    await _stop_driver_task(driver, task)
+
+    set_source_commands = _set_source_commands(fake)
+    assert len(set_source_commands) == 2
+    # The batch resolves to the final position of the last command.
+    assert set_source_commands[1][3].track_id == "t2"
+    assert set_source_commands[1][2] == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
+async def test_separate_seeks_still_reposition(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """Commands arriving after the burst settles each get their own sync."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+
+    # Startup sync puts the driver on the first track.
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    await _send_command(worker, session.id, "seek", {"seconds": 5})
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
+
+    # Wait out the settle window so the next command lands in its own batch.
+    await asyncio.sleep(SessionDriver._CONTROL_SETTLE_S + 0.3)
+    await _send_command(worker, session.id, "seek", {"seconds": 10})
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 3)
+
+    await _stop_driver_task(driver, task)
+
+    set_source_commands = _set_source_commands(fake)
+    assert len(set_source_commands) == 3
+    assert set_source_commands[1][2] == pytest.approx(5.0)
+    assert set_source_commands[2][2] == pytest.approx(10.0)

@@ -347,4 +347,7 @@ class StreamMountHandler(tornado.web.RequestHandler):
             except Exception:
                 pass
             if not self._finished:
-                await self.finish()
+                try:
+                    await self.finish()
+                except tornado.iostream.StreamClosedError:
+                    pass

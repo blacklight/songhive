@@ -36,9 +36,10 @@ const mountedWrappers: VueWrapper[] = [];
 function mountPlayer(
   attachment: ActivityAttachment,
   remote = false,
+  live = false,
 ): VueWrapper {
   const wrapper = mount(ActivityAudioPlayer, {
-    props: { attachment, remote },
+    props: { attachment, remote, live },
     global: { plugins: [createTestRouter()] },
     attachTo: document.body,
   });
@@ -208,6 +209,40 @@ describe("ActivityAudioPlayer", () => {
     expect(el.pause).toHaveBeenCalled();
   });
 
+  it("live mode leaves the global player state untouched", async () => {
+    const store = usePlayerStore();
+    const wrapper = mountPlayer(makeAttachment(), false, true);
+    const el = audioEl(wrapper);
+    el.pause = vi.fn();
+
+    // A live monitor starting does not pause the global player — in session
+    // mode that pause would silence the very stream it is listening to.
+    store.playAll([
+      {
+        id: "q1",
+        title: "Queued",
+        artist_id: "a1",
+        artist_name: "A",
+        visibility: "public",
+        tags: [],
+        genres: [],
+        is_external: false,
+      },
+    ]);
+    expect(store.isPlaying).toBe(true);
+    await fireMediaEvent(wrapper, "play");
+    expect(store.isPlaying).toBe(true);
+
+    // Session state events may flip isPlaying while the remote session plays;
+    // they must not pause the live monitor.
+    el.paused = false;
+    store.isPlaying = false;
+    await flushPromises();
+    store.isPlaying = true;
+    await flushPromises();
+    expect(el.pause).not.toHaveBeenCalled();
+  });
+
   it("sends a local track to the player resolved through the API", async () => {
     getTrackMock.mockResolvedValue({
       id: "track-9",
@@ -316,6 +351,25 @@ describe("ActivityAudioPlayer", () => {
     expect(downloadTrackMock).toHaveBeenCalledWith(
       "https://audio.example/song.mp3",
       "Tiger Girl",
+    );
+  });
+
+  it("live mode lazy-connects and hides seek and download", () => {
+    const wrapper = mountPlayer(
+      makeAttachment({ name: "Test Radio" }),
+      false,
+      true,
+    );
+
+    expect(audioEl(wrapper).attributes.getNamedItem("preload")?.value).toBe(
+      "none",
+    );
+    expect(wrapper.find(".audio-player__seek").exists()).toBe(false);
+    expect(wrapper.find('button[aria-label="Download"]').exists()).toBe(false);
+    expect(wrapper.find(".audio-player__live").exists()).toBe(true);
+    // Play-in-player and queue handoff remain available for live streams.
+    expect(wrapper.find('button[aria-label="Play in player"]').exists()).toBe(
+      true,
     );
   });
 

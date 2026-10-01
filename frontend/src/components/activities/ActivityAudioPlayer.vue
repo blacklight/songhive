@@ -40,13 +40,21 @@ const props = withDefaults(
      */
     remote?: boolean;
     /**
+     * ``true`` for continuous live audio (e.g. native HTTP stream mounts):
+     * the element lazy-connects (``preload="none"``) so merely viewing the
+     * page never occupies a listener slot, and the seek bar and download
+     * action — meaningless for an endless stream — are replaced by a LIVE
+     * badge plus the elapsed listening time.
+     */
+    live?: boolean;
+    /**
      * Author/uploader avatar — the last-resort artwork when the attachment
      * carries no ``image`` (track, album or artist art already resolved
      * server-side).
      */
     avatarUrl?: string;
   }>(),
-  { remote: false, avatarUrl: undefined },
+  { remote: false, live: false, avatarUrl: undefined },
 );
 
 const { t } = useI18n();
@@ -119,7 +127,10 @@ function onPlay() {
   const el = audioEl.value;
   if (el) pauseOtherInlineAudio(el);
   // One soundtrack at a time: an inline preview stops the player bar.
-  if (playerStore.isPlaying) playerStore.pause();
+  // Live players opt out: ``isPlaying`` may reflect a remote playback
+  // session (possibly the one feeding this stream), and pausing it through
+  // the session controller would silence the very mount being monitored.
+  if (!props.live && playerStore.isPlaying) playerStore.pause();
 }
 
 function onTimeUpdate() {
@@ -159,12 +170,14 @@ watch([volume, muted], ([v, m]) => {
   }
 });
 
-// The global player taking over stops the inline preview.
+// The global player taking over stops the inline preview. Live players are
+// exempt: ``isPlaying`` also tracks remote session state, and pausing a live
+// monitor whenever its session reports "playing" would keep cutting it off.
 watch(
   () => playerStore.isPlaying,
   (isPlaying) => {
     const el = audioEl.value;
-    if (isPlaying && el && !el.paused) el.pause();
+    if (!props.live && isPlaying && el && !el.paused) el.pause();
   },
 );
 
@@ -249,7 +262,7 @@ onBeforeUnmount(() => {
     <audio
       ref="audioEl"
       :src="info.url"
-      preload="metadata"
+      :preload="live ? 'none' : 'metadata'"
       class="audio-player__el"
       @play="onPlay"
       @pause="playing = false"
@@ -306,7 +319,19 @@ onBeforeUnmount(() => {
           :title="playing ? t('common.pause') : t('common.play')"
           @click="toggle"
         />
-        <div class="audio-player__progress">
+        <div v-if="live" class="audio-player__progress">
+          <span
+            class="audio-player__live"
+            :aria-label="t('activities.audio.live')"
+          >
+            <AppIcon name="circle" class="audio-player__live-dot" />
+            {{ t("activities.audio.live") }}
+          </span>
+          <time class="audio-player__time" aria-hidden="true">{{
+            formatTime(displayTime)
+          }}</time>
+        </div>
+        <div v-else class="audio-player__progress">
           <time class="audio-player__time" aria-hidden="true">{{
             formatTime(displayTime)
           }}</time>
@@ -364,6 +389,7 @@ onBeforeUnmount(() => {
           @click="addToQueue"
         />
         <AppButton
+          v-if="!live"
           variant="ghost"
           size="sm"
           class="audio-player__action"
@@ -478,6 +504,23 @@ a.audio-player__title:focus-visible {
 .audio-player__seek {
   flex: 1;
   min-width: 0;
+}
+
+.audio-player__live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-danger);
+}
+
+.audio-player__live-dot {
+  font-size: 0.5rem;
 }
 
 .audio-player__volume {

@@ -65,6 +65,7 @@ from .routes import (
     shares,
     stats,
     statuses,
+    streams,
     tags,
     timeline,
     tracks,
@@ -155,7 +156,11 @@ def _setup_spa_routes(app: FastAPI, static_dir: Path):
                 raise HTTPException(status_code=404)
 
             path = scope["path"].lstrip("/")
-            if path.startswith(("api/", "ws/", "stream/", "streams/", "rest/")):
+            # ``streams/`` is excluded only below a mount segment: the bare
+            # directory page is the SPA's /streams view.
+            if path.startswith(("api/", "ws/", "stream/", "rest/")) or (
+                path.startswith("streams/") and path != "streams/"
+            ):
                 raise HTTPException(status_code=404)
 
             # Federation/ActivityPub requests to disabled endpoints should 404,
@@ -299,6 +304,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     app.include_router(collection.router, prefix=api_prefix, tags=["collection"])
     app.include_router(notifications.router, prefix=api_prefix, tags=["notifications"])
     app.include_router(outputs.router, prefix=api_prefix, tags=["outputs"])
+    app.include_router(streams.router, prefix=api_prefix, tags=["streams"])
     app.include_router(playback.router, prefix=api_prefix, tags=["playback"])
     app.include_router(mentions.router, prefix=api_prefix, tags=["mentions"])
     app.include_router(history.router, prefix=api_prefix, tags=["history"])

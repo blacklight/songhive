@@ -255,6 +255,7 @@
     "tags": "Etiquetas",
     "genres": "Géneros",
     "radio": "Radio",
+    "streams": "Streams",
     "about": "Acerca de",
     "api": "API",
     "admin": "Administración",
@@ -454,6 +455,18 @@
       "emptyTracks": "No se generaron pistas para esta emisora.",
       "empty": "Aún no hay emisoras de radio.",
       "loginHint": "Inicia sesión para crear tu propia emisora."
+    },
+    "streams": {
+      "title": "Streams",
+      "empty": "No hay streams disponibles en esta instancia.",
+      "loadError": "No se pudieron cargar los streams: {message}",
+      "live": "En directo",
+      "offline": "Sin conexión",
+      "disabled": "Desactivado",
+      "private": "Privado",
+      "listeners": "Sin oyentes | {count} oyente | {count} oyentes",
+      "nowPlaying": "Sonando ahora",
+      "openStream": "Abrir la URL del stream"
     },
     "podcasts": {
       "title": "Podcasts",
@@ -2151,7 +2164,8 @@
       "addToQueue": "Añadir a la cola",
       "addedToQueue": "Añadido a la cola.",
       "playError": "No se pudo reproducir este audio.",
-      "downloadError": "No se pudo descargar este audio: {message}"
+      "downloadError": "No se pudo descargar este audio: {message}",
+      "live": "En directo"
     },
     "webmentionTypes": {
       "mention": "Webmention",

@@ -226,6 +226,7 @@ class HttpStreamDriver(IcecastDriver):
             "description": cfg.get("description") or "",
             "genre": cfg.get("genre") or "",
             "song": track.song,
+            "track_id": track.track_id,
             "title": track.title,
             "artist": track.artist,
             "album": track.album,
@@ -312,6 +313,7 @@ class HttpStreamDriver(IcecastDriver):
                         "m": json.dumps(
                             {
                                 "song": song,
+                                "track_id": metadata.track_id,
                                 "title": metadata.title,
                                 "artist": metadata.artist,
                                 "album": metadata.album,

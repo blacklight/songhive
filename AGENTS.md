@@ -711,7 +711,13 @@ async def update_library(
   `driver.listener_count()` for idle shutdown. Mount slugs must be unique
   across all `http` outputs (enforced in `services/outputs.py`), may carry an
   optional `listen_token` (`?token=`/`Bearer`), and are unreachable in the
-  uvicorn fallback like the other native Tornado routes.
+  uvicorn fallback like the other native Tornado routes. Mount visibility is
+  derived from the token — `GET /api/v1/streams/` (`api/routes/streams.py`,
+  the `/streams` SPA directory) lists tokenless mounts for everyone and
+  token-protected ones only to their owner, who gets the `?token=` URL back
+  so the page's player can connect; disabled outputs are owner-only too.
+  Live status, now-playing (including `track_id`) and the listener estimate
+  all come from the mount's Redis meta/listener keys.
 - Now-playing metadata follows playback: `SessionDriver` calls
   `driver.update_metadata(...)` after every `set_source` (play, track change,
   startup sync, paused sync). The `http` driver appends `{"m": ...}` entries

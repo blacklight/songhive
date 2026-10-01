@@ -165,6 +165,14 @@ class StreamWorker:
 class SessionDriver:
     """Drives one server output for a single playback session."""
 
+    # Control-command batching: after the first envelope is drained, keep
+    # polling until no new envelope arrives for _CONTROL_SETTLE_S (capped at
+    # _CONTROL_BURST_MAX_S total) so multi-command UI actions sync the driver
+    # once instead of restarting the decoder per envelope.
+    _CONTROL_POLL_S = 0.05
+    _CONTROL_SETTLE_S = 0.3
+    _CONTROL_BURST_MAX_S = 1.5
+
     def __init__(
         self,
         worker: StreamWorker,
@@ -299,16 +307,15 @@ class SessionDriver:
                 )
                 break
 
-            # Drain any pending control commands.
-            raw = cast(Optional[str], await self.worker.redis.lpop(self._control_key, count=None))  # type: ignore[misc]
-            if raw is not None:
-                try:
-                    envelope = json.loads(raw)
-                except json.JSONDecodeError:
-                    logger.warning("Ignoring malformed control envelope: %s", raw)
-                    envelope = None
-                if envelope:
-                    await self._handle_command(envelope)
+            # Drain any pending control commands. A single user action can
+            # land as a burst of envelopes (e.g. set_queue + play_at + play
+            # are published as separate commands), so they are collected with
+            # a short settle window and synced to the driver once — syncing
+            # per envelope would restart the decoder for each command and
+            # listeners would hear the track start over again.
+            envelopes = await self._collect_control_envelopes()
+            if envelopes:
+                await self._handle_commands(envelopes)
 
             # Drain any driver events.
             await self._drain_events()
@@ -360,12 +367,47 @@ class SessionDriver:
         except Exception:
             logger.exception("Failed to sync session %s on startup", self.session_id)
 
-    async def _handle_command(self, envelope: dict) -> None:
-        """Apply a non-index control command and sync the driver to session state."""
-        command = envelope.get("command") or ""
-        args = envelope.get("args") or {}
+    async def _drain_control_list(self) -> list[dict]:
+        """Pop every control envelope currently queued for this session."""
+        envelopes: list[dict] = []
+        while True:
+            raw = cast(Optional[str], await self.worker.redis.lpop(self._control_key, count=None))  # type: ignore[misc]
+            if raw is None:
+                return envelopes
+            try:
+                envelope = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.warning("Ignoring malformed control envelope: %s", raw)
+                continue
+            if envelope:
+                envelopes.append(envelope)
 
-        if command == "reload_output":
+    async def _collect_control_envelopes(self) -> list[dict]:
+        """Drain the control list, letting command bursts settle into one batch.
+
+        A single UI action often lands as several envelopes pushed a few
+        hundred milliseconds apart (each awaited API call publishes its own),
+        so after the first drain the collector waits out a short quiet period
+        before handing the batch to ``_handle_commands``.
+        """
+        envelopes = await self._drain_control_list()
+        if not envelopes:
+            return envelopes
+        burst_deadline = time.monotonic() + self._CONTROL_BURST_MAX_S
+        quiet_deadline = time.monotonic() + self._CONTROL_SETTLE_S
+        while time.monotonic() < quiet_deadline and time.monotonic() < burst_deadline:
+            await asyncio.sleep(self._CONTROL_POLL_S)
+            more = await self._drain_control_list()
+            if more:
+                envelopes.extend(more)
+                quiet_deadline = time.monotonic() + self._CONTROL_SETTLE_S
+        return envelopes
+
+    async def _handle_commands(self, envelopes: list[dict]) -> None:
+        """Apply a batch of control commands and sync the driver once."""
+        commands = [str(envelope.get("command") or "") for envelope in envelopes]
+
+        if "reload_output" in commands:
             await self._reload_driver()
             return
 
@@ -375,8 +417,11 @@ class SessionDriver:
                 if session is None:
                     return
 
-                connection_id = envelope.get("issued_by") or args.get("connection_id")
-                await self._apply_command(session, command, args, connection_id)
+                for envelope in envelopes:
+                    command = str(envelope.get("command") or "")
+                    args = envelope.get("args") or {}
+                    connection_id = envelope.get("issued_by") or args.get("connection_id")
+                    await self._apply_command(session, command, args, connection_id)
 
                 session.last_active_at = _now_utc()
                 await db.flush()
@@ -385,7 +430,7 @@ class SessionDriver:
 
                 source, metadata = await self._resolve_source(db, session)
         except Exception:
-            logger.exception("Command %s failed for session %s", command, self.session_id)
+            logger.exception("Commands %s failed for session %s", commands, self.session_id)
             return
 
         if self.driver is None:
@@ -393,17 +438,17 @@ class SessionDriver:
 
         track_id = _current_track_id(session)
         if source is not None and session.state == "playing":
-            # Restart the decoder only when the track changed, the command
+            # Restart the decoder only when the track changed, a command
             # explicitly repositions playback, or the driver is still paused:
             # the API commits the new session state before publishing the
-            # command, so the loaded state can't tell us whether this is a
+            # commands, so the loaded state can't tell us whether this is a
             # resume — but a paused driver feeding silence must be swapped
             # back to the real source. Control-only commands (e.g.
             # take_control, set_repeat) leave the stream untouched so
             # listeners are not interrupted.
             needs_source = (
                 track_id != self._active_track_id
-                or command in ("play_at", "next", "prev", "seek")
+                or any(command in ("play_at", "next", "prev", "seek") for command in commands)
                 or self.driver.is_paused
             )
             if needs_source:
@@ -421,14 +466,14 @@ class SessionDriver:
                     logger.exception("Failed to set driver source for %s", self.session_id)
         elif session.state in ("paused", "idle"):
             try:
-                if command == "seek" and source is not None:
+                if "seek" in commands and source is not None:
                     await self.driver.seek(session.position_seconds)
                 else:
                     await self.driver.pause()
             except Exception:
                 logger.exception("Failed to pause driver for %s", self.session_id)
 
-        if command == "set_volume":
+        if "set_volume" in commands:
             try:
                 await self.driver.set_volume(session.volume)
             except Exception:
