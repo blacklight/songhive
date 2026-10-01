@@ -1,4 +1,4 @@
-# Songhive
+<img src="https://s3.fabiomanganiello.com/fabio/img/songhive-blog-banner.png" alt="Songhive" width="60%" height="60%" style="display: block; margin-left: auto; margin-right: auto">
 
 [![Build Status](https://ci-cd.platypush.tech/api/badges/blacklight/songhive/status.svg)](https://ci-cd.platypush.tech/blacklight/songhive)
 [![Coverage Badge](https://app.codacy.com/project/badge/Coverage/f8740f0a9f7e40f0a134441bd5570690)](https://app.codacy.com/gh/blacklight/songhive/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
