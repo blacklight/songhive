@@ -119,7 +119,7 @@ function clearQueue() {
         class="queue-panel__clear"
         :aria-label="t('player.clearQueue')"
         :title="t('player.clearQueue')"
-        icon="xmark"
+        icon="trash"
         @click="clearQueue"
       >
         {{ t("common.clear") }}
